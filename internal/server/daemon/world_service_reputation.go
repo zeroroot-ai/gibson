@@ -14,7 +14,7 @@ import (
 )
 
 // GetReputation returns one technique's current track record in one scope
-// (ADR-0022, ADR-0029 §3, gibson#267): a read-only projection of the
+// (ADR-0122, ADR-0129, gibson#267): a read-only projection of the
 // technique x environment belief a settled bet updates via
 // brain.UpdateReputation. It is built the same way GetCalibration is: a
 // WorldBeliefSubstrate bound to this call's own tenant-scoped engine, read

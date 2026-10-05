@@ -28,11 +28,11 @@ const componentTokenType = "agent+jwt"
 //
 // # Why this path exists
 //
-// A sandboxed platform agent holds nothing standing (ADR-0016 decision 2). The
+// A sandboxed platform agent holds nothing standing (ADR-0116). The
 // daemon injects one per-dispatch grant and no identity at all. Since
 // gibson#1450 its callbacks go through Envoy, jwt_authn and ext-authz, so
 // without this path the only credential that passes is the component's own
-// self-signed agent+jwt — the standing identity ADR-0016 removes.
+// self-signed agent+jwt — the standing identity ADR-0116 removes.
 //
 // # Why the grant is the authorization here, and not a constraint
 //

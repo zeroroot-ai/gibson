@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// APOC Core provisioning contract for tenant Neo4j (ADR-0012, gibson#1257).
+// APOC Core provisioning contract for tenant Neo4j (ADR-0112, gibson#1257).
 //
 // The graph projector shapes nodes with `apoc.merge.node`, which takes labels
 // as runtime arguments rather than query text — so a label is data and cannot
@@ -29,7 +29,7 @@ import (
 // neo4j.conf. Verified against neo4j:5.26.27-community: a container started
 // with NEO4J_PLUGINS='["apoc"]' and nothing else reports
 // `dbms.security.procedures.unrestricted = apoc.*`. That is the one setting
-// ADR-0012 says is never set, and it cannot be reversed by an environment
+// ADR-0112 says is never set, and it cannot be reversed by an environment
 // variable — plugin installation runs BEFORE the NEO4J_-prefixed settings are
 // applied, and the entrypoint skips empty-valued env vars, so there is no way
 // to blank it back out.
@@ -66,7 +66,7 @@ const (
 	// registered with the database; calling one fails with "no procedure with
 	// the name ... registered", not with a permission error.
 	//
-	// Consequence, recorded in ADR-0012 and NOT a bug to be fixed here:
+	// Consequence, recorded in ADR-0112 and NOT a bug to be fixed here:
 	// gibson-backup needs apoc.export.* and therefore stays non-functional.
 	// It already degrades to "store skipped"; that remains true and visible.
 	// Enabling export reintroduces the pivot above and needs its own ADR.

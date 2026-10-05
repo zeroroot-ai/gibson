@@ -84,7 +84,7 @@ func TestPlanVoI_UnstakedHypothesisBecomesACandidate(t *testing.T) {
 // with a placed bet (a claim-node belief already on the substrate, the same
 // one harness.PlaceBet writes) is scored using that staked confidence, not
 // the unstaked prior — reading through the SAME substrate the market view
-// writes to, per ADR-0029 §3.
+// writes to, per ADR-0129.
 func TestPlanVoI_StakedHypothesisReadsItsClaimNodeBelief(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	ctx := context.Background()
@@ -261,7 +261,7 @@ func TestResolveReputation_EmptyKeyIsTheNeutralPrior(t *testing.T) {
 // TestResolveReputation_ReadsTechniqueEnvironmentBelief proves the seam a
 // future candidate carrying a real technique×environment key will use: a
 // recorded belief on that key's NodeKindTechniqueEnvironment node is read and
-// returned as-is (ADR-0029 §3's "P(technique works here)").
+// returned as-is (ADR-0129's "P(technique works here)").
 func TestResolveReputation_ReadsTechniqueEnvironmentBelief(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	ctx := context.Background()
@@ -280,7 +280,7 @@ func TestResolveReputation_ReadsTechniqueEnvironmentBelief(t *testing.T) {
 
 // TestResolveReputation_UnknownKeyIsTheNeutralPrior proves a technique×
 // environment key with no recorded belief yet also resolves to the neutral
-// prior — no data means "do not penalize" (ADR-0026 §6), same as an empty key.
+// prior — no data means "do not penalize" (ADR-0126), same as an empty key.
 func TestResolveReputation_UnknownKeyIsTheNeutralPrior(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	got, err := resolveReputation(context.Background(), substrate, "never-recorded")
@@ -303,7 +303,7 @@ func TestResolveReputation_PropagatesSubstrateError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PlanVoI's technique -> capability bridge (ADR-0035 decision 4, gibson#387):
+// PlanVoI's technique -> capability bridge (ADR-0135, gibson#387):
 // a hypothesis candidate's Technique is resolved against VoIPlanInput's
 // Capabilities/Hierarchy into CoveringCapabilities.
 // ---------------------------------------------------------------------------

@@ -48,7 +48,7 @@ func TestExactVoIScorer_HighEntropyBeatsLowEntropy(t *testing.T) {
 	}
 }
 
-// TestExactVoIScorer_ConnectivityAmplifiesInfoGain proves the ADR-0026 §3
+// TestExactVoIScorer_ConnectivityAmplifiesInfoGain proves the ADR-0126
 // "juiciness × connectivity" factor: a candidate touching more enablement
 // edges (a more consequential node to resolve) scores higher for the SAME
 // confidence, all else equal.
@@ -67,8 +67,8 @@ func TestExactVoIScorer_ConnectivityAmplifiesInfoGain(t *testing.T) {
 	}
 }
 
-// TestExactVoIScorer_SurpriseAddsToValue proves the anomaly channel (ADR-0005
-// §6/ADR-0006) is never curated away: a surprised candidate scores strictly
+// TestExactVoIScorer_SurpriseAddsToValue proves the anomaly channel (ADR-0129/ADR-0106)
+// is never curated away: a surprised candidate scores strictly
 // higher than an otherwise-identical one that is not.
 func TestExactVoIScorer_SurpriseAddsToValue(t *testing.T) {
 	scorer := ExactVoIScorer()
@@ -82,7 +82,7 @@ func TestExactVoIScorer_SurpriseAddsToValue(t *testing.T) {
 	}
 }
 
-// TestExactVoIScorer_UnstakedHypothesisIsNotPenalized proves ADR-0026 §6's
+// TestExactVoIScorer_UnstakedHypothesisIsNotPenalized proves ADR-0126's
 // optimism-under-uncertainty prior: a hypothesis nobody has bet on yet is
 // scored as if fully staked (neutral prior), not zeroed out — VoI is what
 // should DRIVE the first bet, not merely re-rank already-staked ones.
@@ -101,7 +101,7 @@ func TestExactVoIScorer_UnstakedHypothesisIsNotPenalized(t *testing.T) {
 
 // TestExactVoIScorer_StakedHypothesisUsesItsConfidence proves a hypothesis
 // with a placed bet is weighted by that bet's confidence, not the neutral
-// prior — "pursuing a hypothesis is placing a bet" (ADR-0029 §3).
+// prior — "pursuing a hypothesis is placing a bet" (ADR-0129).
 func TestExactVoIScorer_StakedHypothesisUsesItsConfidence(t *testing.T) {
 	scorer := ExactVoIScorer()
 	got := scorer.Score(VoIScoreInput{
@@ -113,7 +113,7 @@ func TestExactVoIScorer_StakedHypothesisUsesItsConfidence(t *testing.T) {
 }
 
 // TestExactVoIScorer_ReputationScalesValue proves reputation is a genuine
-// multiplier (ADR-0026 §3's "× reputation"), not a decorative field.
+// multiplier (ADR-0126's "× reputation"), not a decorative field.
 func TestExactVoIScorer_ReputationScalesValue(t *testing.T) {
 	scorer := ExactVoIScorer()
 	low := scorer.Score(VoIScoreInput{Kind: VoICandidateHypothesis, RefID: "h1", Confidence: 0.5, Reputation: 0.2, HasStake: true})
@@ -126,7 +126,7 @@ func TestExactVoIScorer_ReputationScalesValue(t *testing.T) {
 // TestExactVoIScorer_HypothesisCostsMoreThanEvidence proves the two candidate
 // kinds are on one scale but not identically costed: pursuing a hypothesis
 // (an active probe/bet) costs more than gathering more evidence passively —
-// ADR-0026 §2's "one scale", not "one cost".
+// ADR-0126's "one scale", not "one cost".
 func TestExactVoIScorer_HypothesisCostsMoreThanEvidence(t *testing.T) {
 	scorer := ExactVoIScorer()
 	evidence := scorer.Score(VoIScoreInput{Kind: VoICandidateEvidence, RefID: "a", Confidence: 0.5, Reputation: 1})
@@ -138,7 +138,7 @@ func TestExactVoIScorer_HypothesisCostsMoreThanEvidence(t *testing.T) {
 }
 
 // TestExactVoIScorer_DeterministicAndExact proves repeated scoring of the
-// identical input is bit-identical — ADR-0026 §4/§5's "exact, deterministic"
+// identical input is bit-identical — ADR-0126's "exact, deterministic"
 // requirement, no sampling anywhere in this one-step scorer.
 func TestExactVoIScorer_DeterministicAndExact(t *testing.T) {
 	scorer := ExactVoIScorer()
@@ -146,7 +146,7 @@ func TestExactVoIScorer_DeterministicAndExact(t *testing.T) {
 	first := scorer.Score(in)
 	for range 5 {
 		// reflect.DeepEqual, not !=: VoICandidate carries a []Capability field
-		// (CoveringCapabilities, ADR-0035/gibson#387), which is not comparable.
+		// (CoveringCapabilities, ADR-0135/gibson#387), which is not comparable.
 		if got := scorer.Score(in); !reflect.DeepEqual(got, first) {
 			t.Fatalf("repeated Score(%+v) diverged: %+v vs %+v", in, got, first)
 		}

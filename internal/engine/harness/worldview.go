@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// WorldView is the agent's only read of the tenant World (ADR-0012): the
+// WorldView is the agent's only read of the tenant World (ADR-0112): the
 // emit-only Observe write contract's read complement. It returns a
 // server-projected, mission-Scope-limited slice of the World — never the raw
 // brain. Every entity is named by an opaque, server-minted handle the agent
@@ -48,7 +48,7 @@ func (s *HarnessCallbackService) WorldView(ctx context.Context, req *harnesspb.W
 	// Resolve the mission record for tenant + scope. getHarness has already
 	// refused an empty mission tenant and any caller whose tenant differs from
 	// it; observationAttribution refuses a scope-less mission. The agent authors
-	// neither — both come from the daemon's mission record (ADR-0012).
+	// neither — both come from the daemon's mission record (ADR-0112).
 	harness, err := s.getHarness(ctx, req.GetContext())
 	if err != nil {
 		return nil, err

@@ -140,7 +140,7 @@ jobs:
           # `gibsoncheck:allow tenant-from-request` directive naming the guard
           # that re-authorizes it, so a new diagnostic is a real finding.
           ./bin/gibsoncheck -tenantfromcontext ./internal/... ./cmd/...
-          # graphwrite is a blocking gate with NO baseline (ADR-0012): the
+          # graphwrite is a blocking gate with NO baseline (ADR-0112): the
           # knowledge graph has one writer, the projector, and the tree has zero
           # violations as of gibson#1254. operators/ is in scope so the check
           # also covers gibson-backup, which it exempts by name rather than by
@@ -253,7 +253,7 @@ jobs:
           bash scripts/check-no-skipped-tests.sh
 
       # gibson#1524 / ADR-0065: the legacy connector-launcher path is removed.
-      # MCP lives only in the connector domain via ToolHive (ADR-0014); the
+      # MCP lives only in the connector domain via ToolHive (ADR-0114); the
       # plugin domain has no MCP. The guard script names the exact tokens it
       # forbids; it fails if any reappears. Self-test first so a silently-broken
       # guard cannot pass by finding nothing.
@@ -357,7 +357,7 @@ jobs:
     if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
     runs-on: ubuntu-latest
     name: tool-manifest drift gate
-    # ADR-0017: a kind:tool manifest is generated from the executor image's own
+    # ADR-0117: a kind:tool manifest is generated from the executor image's own
     # `--list-tools` output, so a manifest can never disagree with the image it
     # names. Regeneration is hermetic — it reads the committed
     # executor-catalog.json, never docker or a registry — so this runs anywhere.
@@ -389,7 +389,7 @@ jobs:
             echo ""
             echo "A kind:tool manifest has drifted from the captured executor catalog."
             echo ""
-            echo "These manifests are generated (ADR-0017). Do not hand-edit them:"
+            echo "These manifests are generated (ADR-0117). Do not hand-edit them:"
             echo "  - to change what a tool declares, change it in gibson-executor,"
             echo "    publish an image, then re-capture:"
             echo "      make tool-catalog-capture IMAGE=ghcr.io/zeroroot-ai/gibson-executor@sha256:<digest>"

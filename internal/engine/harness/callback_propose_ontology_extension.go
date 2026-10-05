@@ -4,7 +4,7 @@
 package harness
 
 // callback_propose_ontology_extension.go implements ProposeOntologyExtension
-// (ADR-0024 §2, ADR-0033 decision 2, gibson#391, epic #376): an agent
+// (ADR-0124, ADR-0133, gibson#391, epic #376): an agent
 // proposes a new Taxonomy node label or relationship type discovered at
 // runtime. The agent proposes; it never promotes. Promotion into a live
 // tenant extension is a separate, later, explicit tenant-owner decision
@@ -45,8 +45,8 @@ import (
 )
 
 // ProposeOntologyExtension implements
-// harnesspb.HarnessCallbackServiceServer.ProposeOntologyExtension (ADR-0024
-// §2, ADR-0033 decision 2, gibson#391): an agent proposes a new Taxonomy node
+// harnesspb.HarnessCallbackServiceServer.ProposeOntologyExtension (ADR-0124,
+// ADR-0133, gibson#391): an agent proposes a new Taxonomy node
 // label or relationship type discovered at runtime. The daemon checks the
 // identifier against taxonomy.ValidIdentifier (through
 // Engine.ProposeOntologyExtension) before recording it as a per-tenant

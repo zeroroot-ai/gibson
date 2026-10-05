@@ -834,7 +834,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			teamResolver = newBudgetTeamResolver(d.authorizer, d.logger.Slog())
 		}
 		// The budget enforcer consumes tenant-default ceilings through the
-		// entitlements seam (ADR-0003): explicit admin budgets win, else the
+		// entitlements seam (ADR-0089): explicit admin budgets win, else the
 		// provider supplies the tenant default. OSS = config/unlimited. A nil
 		// provider is resolved to UnlimitedProvider inside NewEnforcer.
 		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
@@ -1469,11 +1469,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// ahead of expiry for every enabled connector holding one.
 	d.registerConnectorAuth(ctx, srv)
 	// The ConnectorInstance finalizer revokes the grant on delete through the
-	// operator-scoped DaemonOperatorService.RevokeConnectorGrant (ADR-0015 §5),
+	// operator-scoped DaemonOperatorService.RevokeConnectorGrant (ADR-0061),
 	// which delegates to the same revoke the tenant-scoped RPC runs. The
 	// ConnectorInstance controller reads the credential state through
 	// GetConnectorAuthStatus on the same server, so the CR reports Degraded
-	// rather than a silent Active (ADR-0015 decision 4).
+	// rather than a silent Active (ADR-0061).
 	if d.connectorAuthSrv != nil {
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
 		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
@@ -1481,7 +1481,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
 	// list, disable) that writes ConnectorInstance CRs for the operator to
-	// reconcile onto ToolHive (ADR-0014).
+	// reconcile onto ToolHive (ADR-0114).
 	d.registerConnector(ctx, srv)
 
 	// Register IdentityService — caller-side "what can I do?" RPC.
@@ -1531,7 +1531,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	// Register BankService (gibson.bank.v1.BankService) — banks of always-on
-	// coding agents (ADR-0019, gibson#1708). It needs the per-tenant data pool
+	// coding agents (ADR-0119, gibson#1708). It needs the per-tenant data pool
 	// for its tables and the authorizer for ownership tuples; without either
 	// there is no bank surface, which is a warning rather than a boot failure
 	// so a daemon with no data plane still serves everything else.
@@ -1553,7 +1553,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 		// JobService rides on the same two sources: jobs live beside banks in
 		// the per-tenant database, and every job RPC authorizes against the
-		// bank or the job (ADR-0019, gibson#1710).
+		// bank or the job (ADR-0119, gibson#1710).
 		jobSvc, jobErr := NewJobServer(JobServerConfig{
 			Jobs:         job.NewPostgresStore(d.pool),
 			Banks:        bank.NewPostgresStore(d.pool),
@@ -1611,7 +1611,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	// IntelligenceService (cross-mission GraphRAG analytics) retired in the
-	// ECS-brain cutover (ADR-0007): the brain's belief field + attention replace it.
+	// ECS-brain cutover (ADR-0107): the brain's belief field + attention replace it.
 
 	// Register gibson.graph.v1.GraphService — the daemon-mediated knowledge-graph
 	// read API for the dashboard. Routes through pool.For(tenant).Neo4j() per-RPC.
@@ -1633,7 +1633,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Register gibson.world.v1.WorldService — the daemon-mediated read path into
 	// the ECS brain (epic ecs-brain, gibson#752). Per-tenant, tenant-isolated; the
 	// registry is created lazily here with the resolved belief provider (native
-	// Go, in-process — ADR-0034).
+	// Go, in-process — ADR-0134).
 	if d.brainRegistry == nil {
 		if d.beliefProvider == nil {
 			beliefProvider, err := resolveBeliefProvider()
@@ -1658,20 +1658,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
-	// Pack catalog + enable/disable lifecycle (ADR-0033, gibson#381). Reuses
+	// Pack catalog + enable/disable lifecycle (ADR-0133, gibson#381). Reuses
 	// d.brainRegistry (just constructed above) so an enabled pack folds into
 	// the SAME per-tenant World WorldService reads.
 	d.registerDomainPack(ctx, srv)
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
-	// owner's review of agent-proposed Taxonomy extensions (ADR-0024 §2,
-	// ADR-0033 decisions 2-3, gibson#392). Reuses d.brainRegistry (just
+	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,
+	// ADR-0133, gibson#392). Reuses d.brainRegistry (just
 	// constructed above), same as DomainPackService.
 	d.registerOntologyExtension(ctx, srv)
 
 	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
 	// — the daemon API backing the dashboard's destructive-action authorization
-	// queue (dashboard#99, gibson#336, ADR-0028). Tenant-admin-gated (see the
+	// queue (dashboard#99, gibson#336, ADR-0132). Tenant-admin-gated (see the
 	// .proto's authz options), unlike WorldService/LogsService above.
 	destructiveauthzv1.RegisterDestructiveAuthorizationServiceServer(
 		srv,
@@ -1694,7 +1694,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 	// Register gibson.daemon.agentconsole.v1.AgentConsoleService — the read-only,
 	// tenant-scoped view of running agent instances and their live structured
-	// events (ADR-0016 S11, gibson#1599). The daemon derives the tenant from the
+	// events (ADR-0116 S11, gibson#1599). The daemon derives the tenant from the
 	// authenticated identity and reads only that tenant's instances from the
 	// shared liveagents registry; a foreign run id returns NOT_FOUND. Same
 	// treatment as LogsService/WorldService — tenant-user-facing, NOT admin-gated
@@ -1735,7 +1735,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire GraphRAGFindingSubmitter when infrastructure is available.
 			// It persists findings to the per-tenant data-plane (via Pool) and
 			// routes them into the tenant World; the graph projector — the sole
-			// writer of :Finding nodes (ADR-0007) — materializes them. Falls back
+			// writer of :Finding nodes (ADR-0107) — materializes them. Falls back
 			// to nil when the brain registry is not yet ready, in which case
 			// ComponentServiceServer logs and returns a generated finding_id.
 			var findingSubmitter component.FindingSubmitter
@@ -1802,7 +1802,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			)
 
 			// Wire LLMToolCompleter for tool-calling and structured output support.
-			// A bank member heartbeats with its status (ADR-0019, gibson#1716).
+			// A bank member heartbeats with its status (ADR-0119, gibson#1716).
 			compSvc.WithMemberStatusSink(&memberEvents{daemon: d})
 			compSvc.WithEventHub(componentEventHub)
 			d.logger.Info(ctx, "WatchComponentEvents wired into ComponentService (gibson#154)")
@@ -1877,7 +1877,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			if d.pool != nil && d.embedderResolver != nil {
 				// Built ONCE and stored, because two consumers need the same
 				// querier: ComponentService here, and the agent harness via
-				// harness_init.go. sdk ADR-0001 claimed both "delegate to the
+				// harness_init.go. ADR-0161 claimed both "delegate to the
 				// same graphrag querier"; sharing this field is what makes that
 				// literally true rather than two instances that merely behave
 				// alike.
@@ -1991,7 +1991,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.logger.Info(ctx, "ComponentInstallRegistry wired into ComponentService (Postgres + Redis transient state)")
 
 			// Register PluginInvokeService on the same gRPC port. The deployment
-			// shape gates untrusted plugin invocation (ADR-0010 / gibson#997).
+			// shape gates untrusted plugin invocation (ADR-0110 / gibson#997).
 			pluginInvokeSvc := component.NewPluginInvokeService(
 				componentInstallRegistry,
 				dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
@@ -3091,7 +3091,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 	// live-ingest dashboards pick up the new Mission node immediately.
 	// Spec: dashboard-neo4j-crud-removal (Task 8).
 	//
-	// The MERGE itself lives in the graph projector (ADR-0012). This handler used
+	// The MERGE itself lives in the graph projector (ADR-0112). This handler used
 	// to open its own Neo4j write transaction here, which made the RPC layer a
 	// second writer of the knowledge graph; it now asks the sole writer instead.
 	missionIDStr := m.ID.String()

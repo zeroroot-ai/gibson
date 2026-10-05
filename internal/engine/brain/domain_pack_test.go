@@ -39,7 +39,7 @@ func TestDomainPack_EnableDisable_ReplayReproducesTheWorld(t *testing.T) {
 }
 
 // TestDomainPack_Enable_IsPerTenant proves enablement is structurally
-// per-tenant (ADR-0033 decision 1, "per-tenant, not per-install"): enabling a
+// per-tenant (ADR-0133, "per-tenant, not per-install"): enabling a
 // pack in one tenant's World never affects another's.
 func TestDomainPack_Enable_IsPerTenant(t *testing.T) {
 	acme := NewWorld("acme")
@@ -56,8 +56,8 @@ func TestDomainPack_Enable_IsPerTenant(t *testing.T) {
 }
 
 // TestDomainPack_Disable_RemovesContent proves DomainPackDisabled removes the
-// pack's bindings from the tenant's live registry entirely — ADR-0033
-// decision 4's "disabling removes them" — rather than merely marking it
+// pack's bindings from the tenant's live registry entirely — ADR-0133's
+// "disabling removes them" — rather than merely marking it
 // inactive while leaving stale content queryable.
 func TestDomainPack_Disable_RemovesContent(t *testing.T) {
 	w := NewWorld("t")
@@ -96,7 +96,7 @@ func TestDomainPack_DisableUnknownPack_IsNoOp(t *testing.T) {
 
 // TestDomainPack_ReEnable_OverwritesVersion proves enabling an
 // already-enabled pack again (e.g. a version bump) replaces its state
-// wholesale rather than merging — matching ADR-0033 decision 4's
+// wholesale rather than merging — matching ADR-0133's
 // "version-pinned for replay": only the most recently enabled version's
 // content is ever live.
 func TestDomainPack_ReEnable_OverwritesVersion(t *testing.T) {
@@ -184,7 +184,7 @@ func TestEngine_DomainPacks(t *testing.T) {
 
 // TestDomainPackEvents_CodecRoundTrip proves DomainPackEnabled/Disabled
 // survive the durable Timeline's JSON envelope round trip (EncodeEvent/
-// DecodeEvent) — required for durable persistence (ADR-0011) and for the
+// DecodeEvent) — required for durable persistence (ADR-0163) and for the
 // codec's kind registry to stay complete.
 func TestDomainPackEvents_CodecRoundTrip(t *testing.T) {
 	events := []Event{

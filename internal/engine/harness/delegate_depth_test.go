@@ -306,7 +306,7 @@ func TestDelegateToAgent_DepthBelowCap(t *testing.T) {
 
 // TestDelegateToAgent_DELEGATEDTORelationship verifies that a delegation emits a
 // run-provenance fact to the World DelegationSink (parent → child run) rather than
-// writing the graph directly — the graph projector is the sole writer (ADR-0007,
+// writing the graph directly — the graph projector is the sole writer (ADR-0107,
 // gibson#837).
 func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 	childRunID := "run-child-42"

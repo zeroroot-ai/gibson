@@ -6,8 +6,8 @@
 // availability of a sandboxed dispatch, and the daemon's deployment shape.
 //
 // It exists so that no execution path in the harness can run untrusted code
-// outside a setec sandbox in the hosted deployment. See ADR-0010
-// (docs/adr/0010-untrusted-execution-isolation-boundary.md) and gibson#994.
+// outside a setec sandbox in the hosted deployment. See ADR-0110
+// and gibson#994.
 package dispatchpolicy
 
 import (
@@ -89,7 +89,7 @@ func Decide(trust componentpb.ContentTrust, hasSandboxedDispatch bool, shape Dep
 }
 
 // IsolationAllowed reports whether a capability grant's isolation mode is
-// permitted under the deployment shape (ADR-0010 / gibson#998). It is the
+// permitted under the deployment shape (ADR-0110 / gibson#998). It is the
 // fail-closed gate for WHERE untrusted execution may be isolated:
 //
 //   - ShapeSetecOnly (hosted SaaS): only ISOLATION_MODE_HOSTED_SANDBOX is

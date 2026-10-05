@@ -19,7 +19,7 @@ import (
 )
 
 // bankMemberLookup resolves which member a callback is coming from, over the
-// bank store (ADR-0019, gibson#1711).
+// bank store (ADR-0119, gibson#1711).
 //
 // It is a daemon type rather than a harness one because the harness must not
 // import the bank store: the harness is the callback surface and the store is

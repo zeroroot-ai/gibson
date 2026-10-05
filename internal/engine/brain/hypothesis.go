@@ -10,23 +10,23 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// hypothesis.go folds an emitted Hypothesis (ADR-0021, gibson#265) into the
+// hypothesis.go folds an emitted Hypothesis (ADR-0121, gibson#265) into the
 // World as the second provenance class next to Evidence (Host, Domain, ...;
 // brain.go and friends) and Belief (belief.go). A Hypothesis is an agent's
 // proposed, unproven claim — attributed to its proposer, carrying a
 // confidence — that stays unverified until a later slice settles it
-// (ADR-0022/0023's betting/settlement path). It folds through the normal
-// Observe -> reducer path exactly like an Evidence observation (ADR-0007),
+// (ADR-0122/0123's betting/settlement path). It folds through the normal
+// Observe -> reducer path exactly like an Evidence observation (ADR-0107),
 // keeping the agent write surface emit-only, but it lands as its own
 // provenance class: Reduce never derives a Belief from a Hypothesis, and
 // nothing in belief.go reads a Hypothesis. The three provenance classes stay
 // distinct by construction — separate event types, separate ECS components,
 // separate reducer functions — not by convention alone.
 //
-// Scope: this is ADR-0007's "S1 observation vocabulary" slice (events +
+// Scope: this is ADR-0107's "S1 observation vocabulary" slice (events +
 // reducers + the ambient World projection), matching gibson#265's acceptance
 // criteria exactly. Materializing a :Hypothesis node into the per-tenant
-// Neo4j read-model is ADR-0007's separate "S3 graph projector" concern
+// Neo4j read-model is ADR-0107's separate "S3 graph projector" concern
 // (internal/server/daemon/graph_projector.go, which already projects Host,
 // Domain, Entity, ... one type at a time) — left for a later slice, the same
 // way S1 landed for every other observation kind well before its graph
@@ -34,7 +34,7 @@ import (
 
 // ReferencedEntityRef names an entity a Hypothesis is about, by Taxonomy
 // label and identity properties rather than a World/graph node id — the same
-// by-label-and-properties addressing ADR-0007 uses for a typed lifecycle
+// by-label-and-properties addressing ADR-0107 uses for a typed lifecycle
 // entity sighting (entity.go's EntitySighting), so a proposing agent never
 // has to know or guess a node id. Resolving a reference into an actual graph
 // edge to the named entity is out of scope for this fold: References is
@@ -44,7 +44,7 @@ type ReferencedEntityRef struct {
 	IDProperties map[string]string
 }
 
-// Hypothesis is an agent's proposed, unproven claim (ADR-0021) — the
+// Hypothesis is an agent's proposed, unproven claim (ADR-0121) — the
 // "Hypothesis" provenance class, distinct from Evidence (Host, Domain, ...;
 // an agent's sighting of something real) and Belief (belief.go; the PGM's
 // computed posterior). Confidence is the proposer's own calibrated estimate
@@ -60,13 +60,13 @@ type Hypothesis struct {
 	ID uint64
 	// ScopeID partitions identity the same way it does for Host: two
 	// networks proposing the identical claim text are different hypotheses
-	// (ADR-0002, scope-relative identity).
+	// (ADR-0102, scope-relative identity).
 	ScopeID string
 	// Claim states the hypothesis in a form the brain can later settle, e.g.
 	// "port 6443 on this host is unauthenticated". Together with ScopeID,
 	// this is the hypothesis's identity: a second observation of the same
 	// (ScopeID, Claim) enriches this node rather than creating a duplicate —
-	// recurrence of the same proposal is signal, not noise (ADR-0024).
+	// recurrence of the same proposal is signal, not noise (ADR-0124).
 	Claim string
 	// Proposer identifies the agent that first made the claim. A later
 	// observation of the same (ScopeID, Claim) by a different agent does
@@ -103,7 +103,7 @@ type Hypothesis struct {
 	RunID string
 	// Technique names the technique this hypothesis exercises
 	// (HypothesisObservation.technique, sdk#88). Reputation keys on
-	// technique x environment (ADR-0022, gibson#333/#284), so this must ride
+	// technique x environment (ADR-0122, gibson#333/#284), so this must ride
 	// on the Hypothesis the same way it already rides on Bet.
 	// Progressive-enrichment, same rule as HypothesisID: kept from whichever
 	// observation first supplied one, never reassigned — a later,
@@ -115,8 +115,8 @@ type Hypothesis struct {
 }
 
 // HypothesisObserved records that an agent proposed a claim about the target
-// (ADR-0021, sdk#70's HypothesisObservation). It folds through the normal
-// Observe -> reducer path exactly like an Evidence observation (ADR-0007),
+// (ADR-0121, sdk#70's HypothesisObservation). It folds through the normal
+// Observe -> reducer path exactly like an Evidence observation (ADR-0107),
 // so it is replayable like any other event, but it lands as the Hypothesis
 // provenance class — never as Evidence, and never as a Belief.
 type HypothesisObserved struct {
@@ -214,7 +214,7 @@ func unionReferences(base, add []ReferencedEntityRef) []ReferencedEntityRef {
 
 // HypothesisSnapshot is a stable, comparable view of a Hypothesis — what the
 // ambient projection (WorldView) surfaces to other agents so the fleet can
-// pick up a claim and test it (ADR-0021).
+// pick up a claim and test it (ADR-0121).
 type HypothesisSnapshot struct {
 	ID           uint64
 	ScopeID      string

@@ -4,7 +4,7 @@
 package componentcatalog
 
 // Login shapes — how an agent that drives a vendor model authenticates to that
-// vendor (ADR-0019 decision 4). The Claude Code terms name exactly these
+// vendor (ADR-0119). The Claude Code terms name exactly these
 // credential routes and forbid a host from removing any of them, so the set is
 // closed and lives next to the manifest that declares the credentials for each.
 const (

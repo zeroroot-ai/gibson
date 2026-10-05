@@ -27,8 +27,8 @@ const (
 	ProviderMistral     ProviderType = "mistral"
 	ProviderCustom      ProviderType = "custom"
 
-	// Third-party inference routes for Anthropic's models (ADR-0019
-	// decision 4). The Claude Code terms name exactly these three as the
+	// Third-party inference routes for Anthropic's models (ADR-0119).
+	// The Claude Code terms name exactly these three as the
 	// permitted 3P credentials, so they are provider types a tenant
 	// configures, not options on the anthropic provider: each carries its own
 	// credential set and the launcher injects a different variable block for

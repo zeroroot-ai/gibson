@@ -9,7 +9,7 @@ import "sort"
 // Decider's context; the anomaly channel is always included beyond it.
 const deciderHostBudget = 25
 
-// ambient.go is focus-based ambient context projection (ADR-0005, gibson#749):
+// ambient.go is focus-based ambient context projection (ADR-0129, gibson#749):
 // instead of handing an agent/Decider the whole World, curate the *relevant* slice
 // to fit a context budget. Relevance is the attention field (belief at any distance
 // + surprise) — NOT a graph neighbourhood. The anomaly channel (surprised entities)

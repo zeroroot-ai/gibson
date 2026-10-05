@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// The emit contract is append-only (ADR-0012, "Write contract"): an agent emits
+// The emit contract is append-only (ADR-0112, "Write contract"): an agent emits
 // observations, and the reducer folds while the projector materialises. It never
 // updates or deletes. Deletion is a platform operation on the Timeline, not an
 // agent capability — which removes a whole class of question (there is no update
@@ -38,7 +38,7 @@ var mutatingVerbs = []string{
 // the guard when a mutating verb is applied to one of these: the agent surface
 // legitimately mutates other kinds of state (plugin configuration, workspace
 // files, mission lifecycle), and conflating those with graph writes would make
-// the guard fire on things ADR-0012 does not govern.
+// the guard fire on things ADR-0112 does not govern.
 var graphNouns = []string{
 	"Node", "Relationship", "Edge", "Entity", "Graph", "Observation",
 	"Finding", "Host", "Port", "Domain", "Subdomain", "Account",
@@ -46,7 +46,7 @@ var graphNouns = []string{
 }
 
 // mutatesExistingGraphState reports whether an RPC name reads as a mutation of
-// graph state that already exists — the shape of call ADR-0012 says must not be
+// graph state that already exists — the shape of call ADR-0112 says must not be
 // reachable by an agent.
 func mutatesExistingGraphState(method string) bool {
 	verb := ""
@@ -74,7 +74,7 @@ func mutatesExistingGraphState(method string) bool {
 // and the names it must not.
 func TestMutatesExistingGraphStateFires(t *testing.T) {
 	mustCatch := []string{
-		// The generic graph-write RPCs ADR-0012 rejects. sdk#451 already
+		// The generic graph-write RPCs ADR-0112 rejects. sdk#451 already
 		// removed these from ComponentService; naming them here is what stops
 		// them coming back unnoticed.
 		"StoreNode",
@@ -99,7 +99,7 @@ func TestMutatesExistingGraphStateFires(t *testing.T) {
 		"QueryNodes", "GetFindings", "FindSimilarFindings", "GetRelatedFindings",
 		"ValidateGraphNode", "ValidateRelationship", "GenerateNodeID",
 		"GetTaxonomySchema", "GetAttackChains", "ListAgents",
-		// Mutations of state that is not the graph. ADR-0012 governs graph
+		// Mutations of state that is not the graph. ADR-0112 governs graph
 		// ingress; plugin configuration, workspace files and mission lifecycle
 		// are different surfaces with their own authorisation.
 		"UpdatePluginConfig", "EnablePlugin", "DisablePlugin",
@@ -144,7 +144,7 @@ func TestAgentSurfaceIsAppendOnly(t *testing.T) {
 		for _, name := range methods {
 			if mutatesExistingGraphState(name) {
 				t.Errorf("%s/%s is an agent-reachable graph mutation; the emit "+
-					"contract is append-only (ADR-0012, \"Write contract\")", service, name)
+					"contract is append-only (ADR-0112, \"Write contract\")", service, name)
 			}
 		}
 	}

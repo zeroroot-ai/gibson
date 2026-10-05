@@ -82,7 +82,7 @@ gibson mission submit \
 ```
 
 The daemon renders it from the definition compiled into its own binary
-(ADR-0018), so the graph is the checked-in one and not a copy. Never copy the
+(ADR-0118), so the graph is the checked-in one and not a copy. Never copy the
 mission's CUE out of this repository and submit the copy: a second definition of
 one mission is what ADR-0027 forbids, and it would silently stop tracking the
 checked-in one.

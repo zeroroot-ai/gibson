@@ -9,7 +9,7 @@
 // (dashboard#99, gibson#336). It is a thin read/decide surface over each
 // tenant's brain.DestructiveAuthorizationQueue (internal/engine/brain,
 // destructive_authz.go) — the concrete DestructiveProofAuthorizer that
-// enqueues a pending request and blocks only that one action (ADR-0028)
+// enqueues a pending request and blocks only that one action (ADR-0132)
 // until this service's Approve/Deny resolves it. It mirrors worldServer
 // exactly: daemon-local, tenant-scoped, backed by the per-tenant brain
 // registry.
@@ -61,7 +61,7 @@ func (s *destructiveAuthzServer) queue(ctx context.Context) (*brain.DestructiveA
 
 // toPendingDestructiveActionPB converts a brain.DestructiveActionSnapshot
 // into its wire representation. BlastRadius/Reversibility are left at their
-// zero values: ADR-0028 decision 1's Domain Pack risk-tier signal is not
+// zero values: ADR-0132's Domain Pack risk-tier signal is not
 // built yet (see the .proto's Reversibility doc comment) — every action
 // reaching this queue is already known destructive via
 // BetSettlementRequest.Destructive alone, which is why it is here at all.
@@ -97,7 +97,7 @@ func (s *destructiveAuthzServer) ListPendingDestructiveActions(
 // requireActingUser resolves the human acting on behalf of the tenant-admin
 // caller. Unlike world_service.go's SubmitLabel (where a missing acting-user
 // is provenance-only and tolerable), a destructive-action decision is
-// exactly the accountability record ADR-0028 exists for: proceeding with an
+// exactly the accountability record ADR-0132 exists for: proceeding with an
 // empty/unknown identity when resolution fails is the privileged-fallback
 // pattern (silently treating "we don't know who this is" as "proceed
 // anyway"). Refuse instead.
@@ -110,7 +110,7 @@ func requireActingUser(ctx context.Context) (string, error) {
 }
 
 // ApproveDestructiveAction authorizes the named pending action, unblocking
-// the fleet's settlement attempt for it (ADR-0028 decision 3).
+// the fleet's settlement attempt for it (ADR-0132).
 func (s *destructiveAuthzServer) ApproveDestructiveAction(
 	ctx context.Context,
 	req *destructiveauthzv1.ApproveDestructiveActionRequest,
@@ -135,8 +135,8 @@ func (s *destructiveAuthzServer) ApproveDestructiveAction(
 	return &destructiveauthzv1.ApproveDestructiveActionResponse{}, nil
 }
 
-// DenyDestructiveAction refuses the named pending action (ADR-0028 decision
-// 3). Same refusal rules as ApproveDestructiveAction.
+// DenyDestructiveAction refuses the named pending action (ADR-0132).
+// Same refusal rules as ApproveDestructiveAction.
 func (s *destructiveAuthzServer) DenyDestructiveAction(
 	ctx context.Context,
 	req *destructiveauthzv1.DenyDestructiveActionRequest,

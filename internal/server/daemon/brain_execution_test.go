@@ -185,7 +185,7 @@ func TestCatalog_MapsAllKinds(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // catalog() populates Capability.Coverage for agents from their declared
-// technique types (ADR-0035 decision 4, gibson#386), validated against the
+// technique types (ADR-0135, gibson#386), validated against the
 // taxonomy. Tools and plugins have no technique-type source today, so they
 // get empty coverage rather than a fabricated one.
 // ---------------------------------------------------------------------------

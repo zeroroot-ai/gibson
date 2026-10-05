@@ -289,7 +289,7 @@ func TestNeo4jNetworkPolicyAdmitsOnlyTheDaemonOnBolt(t *testing.T) {
 		// Bolt is the only port opened; Neo4j's HTTP/browser port is not.
 		{src: daemon, port: 7474, allow: false},
 
-		// The tenant-operator is the second admitted peer (ADR-0012,
+		// The tenant-operator is the second admitted peer (ADR-0112,
 		// gibson#1262): it dials bolt to read :_SchemaVersion for the
 		// migration-version metric. Same platform namespace, operator
 		// component.
@@ -356,7 +356,7 @@ func TestNeo4jNetworkPolicyAdmitsOnlyTheDaemonOnBolt(t *testing.T) {
 			port: neo4jBoltPort, allow: false,
 		},
 
-		// Co-tenant workloads. This is the class ADR-0012 cares about.
+		// Co-tenant workloads. This is the class ADR-0112 cares about.
 		{
 			src: podRef{
 				desc:      "an unrelated pod in the same tenant namespace",

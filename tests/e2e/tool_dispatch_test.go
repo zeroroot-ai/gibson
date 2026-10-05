@@ -5,7 +5,7 @@
 // +build e2e
 
 // Package e2e — tool_dispatch_test.go is the exit test for manifest-seeded TOOL
-// dispatch (ADR-0017, gibson#1644; slice gibson#1659).
+// dispatch (ADR-0117, gibson#1644; slice gibson#1659).
 //
 // In plain words: a tenant that switched a tool on can run it, a tenant that
 // never did cannot, and nobody can run a tool that is not in the catalog.
@@ -21,7 +21,7 @@
 //  3. A tool name that is in no catalog manifest never dispatches, whatever the
 //     tenant has enabled — there is no second, ungated path to reach one.
 //
-// WHY THIS EXISTS. Until ADR-0017 a tool could reach dispatch two ways: the
+// WHY THIS EXISTS. Until ADR-0117 a tool could reach dispatch two ways: the
 // manifest path, and a runtime catalog refresher that wrote `_system` registry
 // entries which dispatched with NO per-tenant check — any tenant could run any
 // discovered tool. That refresher is deleted (gibson#1641, ADR-0027 hard
@@ -195,7 +195,7 @@ func createToolMissionDefinition(t *testing.T, ctx context.Context, daemon daemo
 	resp, err := daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{
 		Definition: &missionpb.MissionDefinition{
 			Name:        name,
-			Description: "ADR-0017 manifest-seeded tool dispatch exit test (gibson#1659)",
+			Description: "ADR-0117 manifest-seeded tool dispatch exit test (gibson#1659)",
 			Nodes: map[string]*missionpb.MissionNode{
 				"tool-node": {
 					Id:          "tool-node",

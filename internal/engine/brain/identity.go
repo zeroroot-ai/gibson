@@ -6,8 +6,8 @@ package brain
 import "github.com/mlange-42/ark/ecs"
 
 // ServiceInfo is the service running on a port — sub-state of the port, not a
-// separately-identified entity (ADR-0002: a service has no identity independent of
-// its (host, port) coordinate). The graph projector (ADR-0007) materializes a
+// separately-identified entity (ADR-0102: a service has no identity independent of
+// its (host, port) coordinate). The graph projector (ADR-0107) materializes a
 // :Service node + RUNS_SERVICE edge from this. Zero value means "no service detail
 // observed yet" (a bare open port).
 type ServiceInfo struct {
@@ -17,7 +17,7 @@ type ServiceInfo struct {
 	Version  string // product version, e.g. "8.9p1"
 }
 
-// EndpointInfo is a path observed on a service (sub-state of a port; ADR-0007).
+// EndpointInfo is a path observed on a service (sub-state of a port; ADR-0107).
 type EndpointInfo struct {
 	Path   string
 	Status int
@@ -40,7 +40,7 @@ type CertificateInfo struct {
 
 // PortObservation is a port's state on a host. Open is volatile: a port no longer
 // observed is closed (Open=false), not deleted — the record (and thus history) is
-// kept (ADR-0002: associations are time-bounded, never deleted). Service / Endpoints
+// kept (ADR-0102: associations are time-bounded, never deleted). Service / Endpoints
 // / Technologies / Certificate are running-service sub-state, enriched progressively
 // as observations refine them.
 type PortObservation struct {
@@ -67,7 +67,7 @@ func findHostByID(w *World, id uint64) (ecs.Entity, bool) {
 
 // applyHostObserved resolves an observed host to an existing entity (or creates
 // one) and folds the observation in. This is the scope-relative identity model
-// (ADR-0002): resolution is a scope-partitioned loop-compare over strong signals,
+// (ADR-0102): resolution is a scope-partitioned loop-compare over strong signals,
 // with progressive identity enrichment and contradiction detection.
 func applyHostObserved(w *World, e HostObserved) {
 	ent, matched, contradiction := resolveHost(w, e)
@@ -101,7 +101,7 @@ func applyHostObserved(w *World, e HostObserved) {
 
 // resolveHost finds the entity for an observed host within its scope. It is
 // read-only (the query fully drains, unlocking the world) so the caller may
-// mutate afterwards. Match order (ADR-0002):
+// mutate afterwards. Match order (ADR-0102):
 //  1. a strong signal (ssh host key / cloud id) anywhere in the scope — the same
 //     host, even at a different address (progressive identity);
 //  2. else the (scope, address) coordinate, provided no strong signal contradicts;

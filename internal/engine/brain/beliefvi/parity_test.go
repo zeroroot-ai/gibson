@@ -13,8 +13,8 @@ import (
 // parityFixtureEnv names the JSON fixture gen_parity_fixture.py writes
 // (sidecar/belief/gen_parity_fixture.py) — a list of {cpds, query_var,
 // evidence, expected} cases computed by infer.query (numpy), itself
-// parity-tested against pgmpy to 1e-12 in test_parity.py. This is ADR-0034
-// decision 4's CI parity gate: pgmpy never links into this Go binary or any
+// parity-tested against pgmpy to 1e-12 in test_parity.py. This is ADR-0134's
+// CI parity gate: pgmpy never links into this Go binary or any
 // runtime image, but the belief-sidecar CI workflow generates this fixture
 // (with the numpy reference it already holds to pgmpy) and points this test
 // at it, so a Go answer that drifts from the reference fails the build.
@@ -24,7 +24,7 @@ import (
 // import-guarded-skip shape test_parity.py itself uses for pgmpy.
 const parityFixtureEnv = "GIBSON_BELIEF_PARITY_FIXTURE"
 
-// parityTolerance is ADR-0034's own stated bound (decision 1): "parity-tested
+// parityTolerance is ADR-0134's own stated bound: "parity-tested
 // against pgmpy the same way infer.py is (agreement to 1e-12 in CI)".
 const parityTolerance = 1e-12
 

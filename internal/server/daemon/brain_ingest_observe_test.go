@@ -44,7 +44,7 @@ func awaitHosts(t *testing.T, reg *brain.Registry, tenant string, want int) []br
 // TestIngestObservation_SameAddressInDifferentScopesStaysDistinct is the
 // identity property the whole server-side-scope design exists to protect.
 //
-// Host identity is the (ScopeID, Address) coordinate (ADR-0002). 10.0.0.1 on two
+// Host identity is the (ScopeID, Address) coordinate (ADR-0102). 10.0.0.1 on two
 // separately-scanned customer networks is two hosts. If scope were derivable
 // from the payload — or defaulted to "" when unresolvable — an agent could merge
 // one customer's host record into another's by naming their coordinate, and the
@@ -163,7 +163,7 @@ func TestIngestObservation_CarriesMissionAttribution(t *testing.T) {
 	}
 }
 
-// observeHypothesis builds a hypothesis observation (sdk#70, ADR-0021). Note
+// observeHypothesis builds a hypothesis observation (sdk#70, ADR-0121). Note
 // what it cannot express: no tenant, no scope, no mission id — those reach
 // the sink only through ObservationAttribution, exactly like every other
 // observation kind.
@@ -197,7 +197,7 @@ func awaitHypotheses(t *testing.T, reg *brain.Registry, tenant string, want int)
 	return nil
 }
 
-// TestIngestObservation_Hypothesis proves a HypothesisObservation (ADR-0021)
+// TestIngestObservation_Hypothesis proves a HypothesisObservation (ADR-0121)
 // folds through the same Observe -> reducer path as every Evidence kind,
 // lands as a Hypothesis (never a Host, never a Belief), and carries its
 // references through the wire-to-brain translation.
@@ -240,7 +240,7 @@ func TestIngestObservation_Hypothesis(t *testing.T) {
 	}
 
 	// The Hypothesis provenance class never creates a Host, even though its
-	// claim is about one (ADR-0021: a Hypothesis never sets Belief, and it
+	// claim is about one (ADR-0121: a Hypothesis never sets Belief, and it
 	// is folded entirely separately from Evidence).
 	if hosts := reg.For("acme").Hosts(); len(hosts) != 0 {
 		t.Fatalf("a hypothesis must never create a Host: %+v", hosts)
@@ -288,7 +288,7 @@ func TestIngestObservation_Hypothesis_HypothesisIDAndTechnique(t *testing.T) {
 
 // TestIngestObservation_Hypothesis_SameClaimInDifferentTenantsStaysDistinct
 // proves tenant isolation holds for hypotheses the same way it does for
-// hosts: each tenant has its own World (ADR-0001), so an identical claim
+// hosts: each tenant has its own World (ADR-0101), so an identical claim
 // proposed under two tenants is two hypotheses, one per World, never one
 // record leaking across the tenant boundary.
 func TestIngestObservation_Hypothesis_SameClaimInDifferentTenantsStaysDistinct(t *testing.T) {

@@ -352,7 +352,7 @@ func seedWorldHypotheses(t *testing.T, eng *brain.Engine, scope string, wantHypo
 	}
 }
 
-// TestWorldViewSource_ProjectsHypotheses proves a Hypothesis (ADR-0021) is
+// TestWorldViewSource_ProjectsHypotheses proves a Hypothesis (ADR-0121) is
 // visible in the ambient projection alongside Evidence, scoped the same way,
 // and carries what another agent needs to test and bet on it: the claim (as
 // Label, so it reads directly in an LLM-facing projection), and the

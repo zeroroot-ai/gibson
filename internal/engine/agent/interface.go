@@ -44,7 +44,7 @@ type Agent interface {
 	TargetTypes() []types.TargetType
 
 	// TechniqueTypes returns the taxonomy category ids of the techniques this
-	// agent can execute (ADR-0035: the taxonomy is the technique authority,
+	// agent can execute (ADR-0135: the taxonomy is the technique authority,
 	// not the types.TechniqueType enum — that enum now only seeds the core
 	// categories GlobalTechniques starts from).
 	TechniqueTypes() []taxonomy.CategoryID

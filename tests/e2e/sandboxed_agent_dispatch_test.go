@@ -4,7 +4,7 @@
 //go:build e2e
 // +build e2e
 
-// Package e2e — sandboxed_agent_dispatch_test.go is the exit test for ADR-0016
+// Package e2e — sandboxed_agent_dispatch_test.go is the exit test for ADR-0116
 // (sandboxed platform-agent dispatch, epic gibson#1593, slice gibson#1600).
 //
 // It proves the isolation contract on a live kind cluster running the sanctioned
@@ -190,7 +190,7 @@ func createZerocoolMissionDefinition(t *testing.T, ctx context.Context, daemon d
 	resp, err := daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{
 		Definition: &missionpb.MissionDefinition{
 			Name:        name,
-			Description: "ADR-0016 sandboxed dispatch exit test (gibson#1600)",
+			Description: "ADR-0116 sandboxed dispatch exit test (gibson#1600)",
 			Nodes: map[string]*missionpb.MissionNode{
 				"zerocool-node": {
 					Id:          "zerocool-node",

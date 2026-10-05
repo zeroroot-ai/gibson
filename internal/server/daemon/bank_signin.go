@@ -19,7 +19,7 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// The sign-in relay (ADR-0019 decision 4, gibson#1715).
+// The sign-in relay (ADR-0119, gibson#1715).
 //
 // A subscription member signs in inside its sandbox. The daemon relays two
 // strings out (the authorization URL and the paste prompt, which the driver

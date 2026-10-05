@@ -16,7 +16,7 @@ import (
 )
 
 // EvaluationCostLimit caps a single predicate evaluation's CEL cost
-// (defense-in-depth on top of ADR-0031 decision 4's inherent safety: CEL is
+// (defense-in-depth on top of ADR-0131's inherent safety: CEL is
 // non-Turing-complete and terminating on its own). It mirrors
 // internal/engine/brain/condition.go's celCostLimit, the repo's other cel-go
 // consumer.
@@ -49,7 +49,7 @@ func Compile(expr string) (*CompiledPredicate, error) {
 }
 
 // CompileWithEnv is [Compile] against an already-built environment. It
-// fails closed (ADR-0031 decision 2) on:
+// fails closed (ADR-0131) on:
 //   - an empty or whitespace-only expression ([ErrEmptyExpression]);
 //   - a syntax error;
 //   - a reference to any variable or function env does not declare —

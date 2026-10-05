@@ -75,7 +75,7 @@ func newLookupHarness(reg component.ComponentRegistry) *DefaultAgentHarness {
 // denies first and this passes without ever reaching the gate it covers.
 
 // TestCallToolProto_UntrustedWithNoSandboxedDispatch_Denied: a tool with no
-// kind:tool manifest has no sandboxed dispatch (ADR-0017). When such a tool is
+// kind:tool manifest has no sandboxed dispatch (ADR-0117). When such a tool is
 // UNTRUSTED, every remaining path runs it in-process, so under setec-only the
 // call is denied rather than continued — even though a direct gRPC endpoint is
 // registered and would otherwise have been selected.

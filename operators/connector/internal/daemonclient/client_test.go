@@ -105,7 +105,7 @@ func TestClose_IsSafeWithoutTransport(t *testing.T) {
 
 // AuthStatus carries the tenant and connector to the daemon and returns the
 // credential state the controller records as the Degraded condition
-// (ADR-0015 decision 4).
+// (ADR-0061).
 func TestAuthStatus_CarriesTenantAndConnector(t *testing.T) {
 	svc := &fakeOperatorService{statusResp: &tenantv1.GetConnectorAuthStatusResponse{
 		State:            tenantv1.ConnectorAuthState_CONNECTOR_AUTH_STATE_REFRESH_FAILING,

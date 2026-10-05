@@ -315,7 +315,7 @@ func TestMissionFrameAt_LlmCalls(t *testing.T) {
 }
 
 // TestMissionFrameAt_AgentToolCalls mirrors TestMissionFrameAt_LlmCalls for the
-// flight recorder's tool-I/O capture (ADR-0020, gibson#271): a mission-scoped
+// flight recorder's tool-I/O capture (ADR-0120, gibson#271): a mission-scoped
 // frame surfaces the tool calls that mission's agents made, one mission's tool
 // calls never bleed into another's frame, and a tenant-ambient tool call (no
 // mission context) attaches to no mission frame.

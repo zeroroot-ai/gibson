@@ -12,7 +12,7 @@ import (
 	"sort"
 )
 
-// reputation.go is gibson#267 (ADR-0022, ADR-0029 §3): reputation keyed by
+// reputation.go is gibson#267 (ADR-0122, ADR-0129): reputation keyed by
 // technique × environment, never by agent. Per the issue's own "Reframed as
 // a view" comment (grill 2026-09-27), reputation is NOT a separate store —
 // it is a VIEW of the belief substrate: belief on a technique×environment
@@ -23,7 +23,7 @@ import (
 // the fleet gives to pursuing them.
 //
 // "Environment" is ScopeID: the coordinate every other observation in this
-// package already partitions identity by (ADR-0002) — the target the
+// package already partitions identity by (ADR-0102) — the target the
 // mission ran against. This is a deliberate, documented reading; nothing
 // else in this codebase defines "environment" as its own concept.
 //
@@ -63,8 +63,8 @@ import (
 // for an unresolvable key).
 const DefaultReputationPrior = 0.5
 
-// Reputation is technique × environment's track record (ADR-0022,
-// ADR-0029 §3): how often a settled bet on this technique, in this scope,
+// Reputation is technique × environment's track record (ADR-0122,
+// ADR-0129): how often a settled bet on this technique, in this scope,
 // came back TRUE.
 type Reputation struct {
 	Technique string
@@ -97,7 +97,7 @@ func (r Reputation) PriorStrength() float64 {
 }
 
 // TechniqueEnvironmentRef addresses the technique×environment belief node
-// (ADR-0029 §3, NodeKindTechniqueEnvironment) a Reputation is a view of.
+// (ADR-0129, NodeKindTechniqueEnvironment) a Reputation is a view of.
 // tenant-prefixed the same way hypothesisClaimRef/harness.claimNodeRef scope
 // their own NodeRef, since BeliefSubstrate keys purely on (Kind, ID) with no
 // tenant dimension of its own.
@@ -131,7 +131,7 @@ func ComputeReputation(technique, scopeID string, settlements []BetSettlementSna
 
 // UpdateReputation recomputes technique's reputation in scopeID from
 // settlements and writes it to substrate as the technique×environment
-// belief (ADR-0029 §3) — the "a settled bet updates the matching
+// belief (ADR-0129) — the "a settled bet updates the matching
 // reputation" acceptance criterion (gibson#267 AC2). It is a full, exact
 // overwrite, never a blend: replaying this call with the same settlements
 // always reproduces the same write. Returns the Reputation it wrote, so a

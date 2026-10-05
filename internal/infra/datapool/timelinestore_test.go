@@ -201,7 +201,7 @@ func TestEngine_WithStore_NilSafe(t *testing.T) {
 }
 
 // TestHydrate_EquivalenceAfterRestart is the primary correctness test for
-// ADR-0011 slice #1114: a fresh Engine hydrated from the persisted Timeline must
+// ADR-0163 slice #1114: a fresh Engine hydrated from the persisted Timeline must
 // reproduce the same World state as the original engine (fold-determinism).
 //
 // Scenario:
@@ -213,7 +213,7 @@ func TestEngine_WithStore_NilSafe(t *testing.T) {
 //  3. The rehydrated World snapshots must equal the original fold over the same
 //     events.
 //
-// ADR-0009 guarantee: the subscriber installed via OnEngine must NOT fire during
+// ADR-0109 guarantee: the subscriber installed via OnEngine must NOT fire during
 // Hydrate (replay is a pure fold; no side effects).
 func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	const tenant = "tenant-hydrate"
@@ -253,7 +253,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	require.Len(t, expWork, 1, "expected: one work item")
 
 	// --- Phase 2: simulate restart via a fresh Registry ---
-	// Count subscribers fired during Hydrate (must be 0 — ADR-0009).
+	// Count subscribers fired during Hydrate (must be 0 — ADR-0109).
 	replayDispatchCount := 0
 	r := brain.NewRegistry(ctx)
 	r.WithStoreFactory(func(_ context.Context, _ string) brain.TimelineStore {
@@ -291,16 +291,16 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 		assert.Equal(t, expWork[i].State, postWork[i].State, "post: work[%d] state", i)
 	}
 
-	// ADR-0009: no subscribers may fire during Hydrate (replay is a pure fold).
+	// ADR-0109: no subscribers may fire during Hydrate (replay is a pure fold).
 	// The subscriber was installed by OnEngine before Hydrate ran, so if it had
 	// fired during the fold, replayDispatchCount would be > 0 here.
 	assert.Equal(t, 0, replayDispatchCount,
-		"no WorkDispatched subscribers may fire during Hydrate (ADR-0009: replay has no effects)")
+		"no WorkDispatched subscribers may fire during Hydrate (ADR-0109: replay has no effects)")
 }
 
 // TestHydrate_InFlightWorkFailedOnRestart verifies that work still `running`
 // in the persisted Timeline is transitioned to WorkFailed on hydration
-// (ADR-0011 decision 5: a crash IS a failure).
+// (ADR-0163: a crash IS a failure).
 func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	const tenant = "tenant-inflight"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -574,7 +574,7 @@ func TestTimelineStore_AcquireError(t *testing.T) {
 }
 
 // TestAcquirePerOp_EvictionRobustness is the regression test for gibson#1114
-// (ADR-0011): after one Timeline operation releases its connection and the
+// (ADR-0163): after one Timeline operation releases its connection and the
 // underlying *redis.Client is closed (simulating idle eviction), a subsequent
 // operation via a fresh acquire still succeeds.
 //
@@ -670,7 +670,7 @@ func TestAssertAOFEnabled_Yes(t *testing.T) {
 
 // TestAssertAOFEnabled_No verifies the fail-fast path the boot guard exists
 // for: a Redis with AOF disabled must be rejected loudly, not silently
-// degrade to a Timeline that is lost on restart (gibson#1119, ADR-0011).
+// degrade to a Timeline that is lost on restart (gibson#1119, ADR-0163).
 func TestAssertAOFEnabled_No(t *testing.T) {
 	t.Parallel()
 

@@ -79,7 +79,7 @@ type redisEnforcer struct {
 // NewEnforcer constructs an Enforcer backed by the given Redis client.
 // Pass teamResolver=nil to disable team-scope enforcement.
 //
-// Limits flow through the ADR-0003 entitlements seam: explicit admin-set
+// Limits flow through the ADR-0089 entitlements seam: explicit admin-set
 // budgets (the Redis budget:* config) always win, and when no explicit
 // tenant-scope budget exists the enforcer falls back to the entitlements
 // Provider's per-tenant default token/spend ceilings. A nil Provider (or the
@@ -218,7 +218,7 @@ func (e *redisEnforcer) resolveTeams(ctx context.Context, tenantID, userID strin
 // loadTenantBudget returns the tenant-scope budget. An explicit admin-set
 // tenant default (Redis budget:tenant:{t}:defaults) always wins; when absent,
 // the enforcer falls back to the entitlements Provider's per-tenant default
-// token/spend ceilings (ADR-0003 seam). Returns nil when neither source sets
+// token/spend ceilings (ADR-0089 seam). Returns nil when neither source sets
 // a ceiling — meaning unlimited at tenant scope.
 func (e *redisEnforcer) loadTenantBudget(ctx context.Context, tenantID string) *Budget {
 	if b, _ := e.loadBudget(ctx, configKey(tenantID, ScopeTenant, "")); b != nil {
@@ -293,7 +293,7 @@ func (e *redisEnforcer) Check(ctx context.Context, estimatedTokens int64) (*Stat
 	resetAt := PeriodResetAt(now)
 
 	// Tenant check. The tenant-scope ceiling comes from the explicit admin
-	// default if set, else the entitlements provider (ADR-0003 seam).
+	// default if set, else the entitlements provider (ADR-0089 seam).
 	tenantBudget := e.loadTenantBudget(ctx, tenantID)
 	tenantTokens, tenantCost := e.readCounter(ctx, counterKey(tenantID, ScopeTenant, "", period))
 	if err := exceedsTokens(tenantBudget, tenantTokens+estimatedTokens); err != nil {

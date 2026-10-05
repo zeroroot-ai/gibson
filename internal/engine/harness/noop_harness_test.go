@@ -22,7 +22,7 @@ import (
 // Every method returns zero values.
 //
 // It lived in compliance_middleware_test.go until the compliance-signal
-// pipeline was deleted (gibson#1299, ADR-0013); it is a generic test fake and
+// pipeline was deleted (gibson#1299, ADR-0113); it is a generic test fake and
 // has nothing to do with compliance, so it moved here rather than going with
 // that deletion.
 type noopInnerHarness struct {

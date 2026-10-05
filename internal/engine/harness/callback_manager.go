@@ -491,7 +491,7 @@ func (m *CallbackManager) SetEventBus(eventBus interface{}) {
 }
 
 // SetObservationSink sets the observation sink on the callback service, wiring
-// the Observe RPC to the brain (ADR-0007). Call after NewCallbackManager, before
+// the Observe RPC to the brain (ADR-0107). Call after NewCallbackManager, before
 // Start(). Thread-safe.
 func (m *CallbackManager) SetObservationSink(sink ObservationSink) {
 	if m.server != nil && m.server.service != nil {
@@ -503,7 +503,7 @@ func (m *CallbackManager) SetObservationSink(sink ObservationSink) {
 }
 
 // SetWorldViewSource sets the World-view source on the callback service, wiring
-// the WorldView RPC to the per-tenant brain's projection (ADR-0012 read half,
+// the WorldView RPC to the per-tenant brain's projection (ADR-0112 read half,
 // gibson#1377). Call after NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetWorldViewSource(source WorldViewSource) {
 	if m.server != nil && m.server.service != nil {
@@ -528,7 +528,7 @@ func (m *CallbackManager) SetLLMCallSink(sink LLMCallSink) {
 
 // SetToolCallSink sets the tool-call sink on the callback service, wiring
 // CallToolProto to the per-tenant World's AgentToolCall capture — the flight
-// recorder's tool-I/O half (ADR-0020, gibson#271). Call after
+// recorder's tool-I/O half (ADR-0120, gibson#271). Call after
 // NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 	if m.server != nil && m.server.service != nil {
@@ -540,7 +540,7 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 }
 
 // SetBeliefSubstrate sets the belief substrate on the callback service,
-// wiring PlaceBet to persist staked bets (ADR-0022, ADR-0029 §3,
+// wiring PlaceBet to persist staked bets (ADR-0122, ADR-0129,
 // gibson#273/#278). Call after NewCallbackManager, before Start().
 // Thread-safe.
 func (m *CallbackManager) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
@@ -572,7 +572,7 @@ func (m *CallbackManager) BeliefSubstrate() brain.BeliefSubstrate {
 
 // SetProofSettlement sets the proof-settlement engine on the callback
 // service, wiring SubmitProof to resolve pack predicates and settle bets
-// (ADR-0030, ADR-0031, gibson#389). Call after NewCallbackManager, before
+// (ADR-0131, gibson#389). Call after NewCallbackManager, before
 // Start(). Thread-safe.
 func (m *CallbackManager) SetProofSettlement(engine brain.ProofSettlementEngine) {
 	if m.server != nil && m.server.service != nil {
@@ -597,7 +597,7 @@ func (m *CallbackManager) ProofSettlement() brain.ProofSettlementEngine {
 // SetOntologyDiscovery sets the ontology-discovery engine on the callback
 // service, wiring ProposeOntologyExtension to fold an agent-proposed
 // Taxonomy node label or relationship type through the ValidIdentifier
-// safety gate and PromotionGate.Observe (ADR-0024 §2, ADR-0033 decision 2,
+// safety gate and PromotionGate.Observe (ADR-0124, ADR-0133,
 // gibson#391). Call after NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetOntologyDiscovery(engine brain.OntologyDiscoveryEngine) {
 	if m.server != nil && m.server.service != nil {

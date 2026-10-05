@@ -3,7 +3,7 @@
 
 package harness
 
-// callback_submit_proof.go implements SubmitProof (ADR-0030, ADR-0031,
+// callback_submit_proof.go implements SubmitProof (ADR-0131,
 // gibson#389, epic #376): an agent posts raw evidence and names the
 // hypothesis and (technique, predicate) it settles — never a verdict. The
 // daemon resolves the named predicate from the caller's tenant's currently
@@ -13,20 +13,20 @@ package harness
 // the deadcode baseline for SettleBetTrue / settlement.NewRegistry: before
 // this file, nothing in the live daemon ever reached either.
 //
-// Predicates are pack data, never gibson code (ADR-0031 decision 1):
+// Predicates are pack data, never gibson code (ADR-0131):
 // ontology.DomainPack.Predicates is keyed by a technique-shaped identifier,
 // and predicate_name is that identifier from the agent's perspective —
-// resolution is fail-closed (ADR-0030) for a predicate name no currently
-// enabled pack binds, mirroring ADR-0027 decision 3's anti-gaming stance
+// resolution is fail-closed (ADR-0131) for a predicate name no currently
+// enabled pack binds, mirroring ADR-0131's anti-gaming stance
 // that an unregistered predicate never evaluates to true. technique rides on
 // the request separately because it is what BetSettlement records for
-// reputation (ADR-0022's technique x environment key), not a second lookup
+// reputation (ADR-0122's technique x environment key), not a second lookup
 // key: this schema binds one CEL predicate per technique, so the common case
 // has technique == predicate_name, but a mismatch is not itself refused.
 //
 // Engine.SettleBetTrue still speaks the older
-// internal/engine/settlement.Registry/Predicate/Evaluator shapes (ADR-0027),
-// which ADR-0031 explicitly does not extend with new per-technique Go
+// internal/engine/settlement.Registry/Predicate/Evaluator shapes (ADR-0131),
+// which ADR-0131 explicitly does not extend with new per-technique Go
 // evaluators. This file bridges the two without adding one: it builds a
 // fresh, single-use Registry per call and registers one Evaluator
 // (evaluateDomainPackCEL) that itself compiles and evaluates the resolved
@@ -36,7 +36,7 @@ package harness
 // a value decided elsewhere. Nothing here alters Registry, Predicate, or
 // Engine.SettleBetTrue.
 //
-// Destructive proofs (ADR-0032, gibson#390) go through the SAME
+// Destructive proofs (ADR-0132, gibson#390) go through the SAME
 // compile/stake/evaluate path as a non-destructive proof, carrying
 // req.Destructive onto the BetSettlementRequest. Engine.SettleBetTrue's
 // authorizer (wired in by the daemon-side tenant-routing adapter,
@@ -89,7 +89,7 @@ import (
 const domainPackCELPredicateType settlement.PredicateType = "domain_pack_cel"
 
 // SubmitProof implements harnesspb.HarnessCallbackServiceServer.SubmitProof
-// (ADR-0030): an agent triggers settlement and supplies raw evidence; the
+// (ADR-0131): an agent triggers settlement and supplies raw evidence; the
 // daemon decides via a deterministic pack CEL predicate, never the agent's
 // own verdict.
 //
@@ -223,7 +223,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 }
 
 // stakedConfidence reads the confidence the fleet staked on hypothesisID via
-// PlaceBet (ADR-0022): for a NodeKindClaim node, Belief.Exploitable holds
+// PlaceBet (ADR-0122): for a NodeKindClaim node, Belief.Exploitable holds
 // P(claim valid), the same convention callback_place_bet.go established.
 // SettleBetTrue requires a PredictedProbability in [0,1] to score the
 // settlement under a proper scoring rule (bet_scoring.go) — reusing the
@@ -302,12 +302,12 @@ func submitProofEvidenceType(t typespb.EvidenceType) finding.EvidenceType {
 // submitProofEvidence converts the raw evidence the agent posted
 // (gibson.types.v1.Evidence, wire) into the celenv-evaluated shape
 // (finding.EnhancedEvidence). SubmitProofRequest's evidence is deliberately
-// unstructured raw tool output (ADR-0030) — a flat content string, never a
+// unstructured raw tool output (ADR-0131) — a flat content string, never a
 // typed, pre-parsed evidence payload — so submitProofEvidenceContent adapts
 // it to the shape celenv's evidenceText/httpStatus helpers already know how
 // to read per type (functions.go). Timestamp is the daemon's own receipt
 // time: the wire message carries none, and this is at least as trustworthy
-// as an agent-supplied one would be (ADR-0030's independent-evidence-
+// as an agent-supplied one would be (ADR-0131's independent-evidence-
 // integrity stance never trusts the agent's own account of when something
 // happened, only that it happened, via the flight recorder).
 func submitProofEvidence(items []*typespb.Evidence) []finding.EnhancedEvidence {

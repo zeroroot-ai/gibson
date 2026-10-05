@@ -12,7 +12,7 @@ import (
 )
 
 // TechniqueID identifies the technique (from the ontology / Domain Pack,
-// ADR-0024, ADR-0025) that a success predicate belongs to. A predicate
+// ADR-0124, ADR-0133) that a success predicate belongs to. A predicate
 // type is only ever meaningful scoped to the technique that defines it.
 type TechniqueID string
 
@@ -54,16 +54,16 @@ func (p PredicateType) String() string {
 }
 
 // Predicate is a typed, technique-scoped success condition: "the claim
-// holds iff this is observed" (ADR-0027, decision 1). It is plain,
+// holds iff this is observed" (ADR-0131). It is plain,
 // JSON-serializable data on purpose — it is stored on the graph next to the
 // Hypothesis it belongs to, and replay reconstructs it from that stored
 // form to re-run [Registry.Evaluate] without re-executing anything
-// (ADR-0027, decision 2). A Predicate never carries an evaluator function
+// (ADR-0131). A Predicate never carries an evaluator function
 // itself; the [Registry] resolves (Technique, Type) to an [Evaluator] at
 // evaluation time.
 type Predicate struct {
 	// Technique is the technique this predicate's type was registered
-	// under. It is never inferred or free-form (ADR-0027, decision 3).
+	// under. It is never inferred or free-form (ADR-0131).
 	Technique TechniqueID `json:"technique"`
 
 	// Type names the kind of condition, e.g. "marker_present".
@@ -98,8 +98,7 @@ func (p Predicate) Validate() error {
 // params and the same evidence slice always yield the same (bool, error)
 // result. An Evaluator must never call an LLM, never consult wall-clock
 // time or randomness, and never reach outside the evidence it is given —
-// that is what makes settlement replayable and un-gameable (ADR-0027,
-// decisions 2 and 3).
+// that is what makes settlement replayable and un-gameable (ADR-0131).
 type Evaluator func(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error)
 
 // Sentinel errors returned by this package. Callers should use errors.Is

@@ -14,7 +14,7 @@ import (
 )
 
 // TestCallbackManager_SetOntologyDiscovery proves the manager-level setter
-// reaches the underlying callback service (ADR-0024 §2, ADR-0033 decision 2,
+// reaches the underlying callback service (ADR-0124, ADR-0133,
 // gibson#391) — the same wiring contract SetBeliefSubstrate/SetProofSettlement
 // use, exercised here before Start() (construction alone is enough:
 // NewCallbackServerWithRegistry builds the service eagerly). Without this,

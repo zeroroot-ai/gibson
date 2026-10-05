@@ -10,7 +10,7 @@ import (
 )
 
 // TestCallbackManager_SetToolCallSink proves the manager-level setter reaches
-// the underlying callback service (ADR-0020, gibson#271) — the same wiring
+// the underlying callback service (ADR-0120, gibson#271) — the same wiring
 // contract as SetLLMCallSink, exercised here before Start() (construction
 // alone is enough: NewCallbackServerWithRegistry builds the service eagerly).
 func TestCallbackManager_SetToolCallSink(t *testing.T) {

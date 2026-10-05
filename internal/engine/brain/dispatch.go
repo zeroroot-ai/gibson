@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// dispatch.go is the side-effect boundary of the brain (ADR-0009). Systems and
+// dispatch.go is the side-effect boundary of the brain (ADR-0109). Systems and
 // the reducer stay pure (replayable); a DispatchHandler subscribes to **live**
 // WorkDispatched events (a tap that Replay never fires) and actuates the real
 // launch off the tick via a Dispatcher. Completion arrives later as a
@@ -88,7 +88,7 @@ func (h *DispatchHandler) Drain() int {
 }
 
 // ResumeFailInFlight returns a WorkFailed for every WorkItem still `running` —
-// the crash-resume reconciliation (ADR-0009). A crash IS a failure; the retry
+// the crash-resume reconciliation (ADR-0109). A crash IS a failure; the retry
 // System / Decider decide whether to re-run, so a side-effectful tool is never
 // silently re-fired. Call once on resume, after rebuilding the World from the
 // Timeline.

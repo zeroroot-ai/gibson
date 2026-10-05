@@ -17,7 +17,7 @@ import (
 )
 
 // verifyCatalogImages checks the release signature of every first-party image
-// the catalog names, and reports which components may be offered (ADR-0015
+// the catalog names, and reports which components may be offered (ADR-0136
 // runtime verification, gibson#1639).
 //
 // Digest pinning already guarantees everyone runs the same bytes. It says

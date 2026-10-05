@@ -328,7 +328,7 @@ func TestAgentEntry_CommandProjectsShellSplit(t *testing.T) {
 }
 
 // TestNmapManifest proves the first shared tool ships on the unified manifest
-// path (ADR-0017): LookupTool resolves it with a digest-pinned image, and Refs()
+// path (ADR-0117): LookupTool resolves it with a digest-pinned image, and Refs()
 // includes component:tool/nmap so the daemon seeds platform_enabled for it.
 func TestNmapManifest(t *testing.T) {
 	e, ok := LookupTool("nmap")
@@ -535,7 +535,7 @@ func TestLoad_CredentialShapes(t *testing.T) {
 }
 
 // TestLoad_MemberCommandAndJobCap: one image runs two shapes, so the member
-// shape is a different command on the same manifest (ADR-0019, gibson#1717).
+// shape is a different command on the same manifest (ADR-0119, gibson#1717).
 func TestLoad_MemberCommandAndJobCap(t *testing.T) {
 	const head = "id: claude\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" +
 		"  dispatchMode: sandboxed\n  command: node /app/one.js\n"

@@ -134,7 +134,7 @@ func TestSecretNames_AreDistinctAndScopedToTheConnector(t *testing.T) {
 	}
 }
 
-// A static grant (ADR-0015, an `auth: secret` connector) carries no refresh
+// A static grant (ADR-0061, an `auth: secret` connector) carries no refresh
 // material: it validates on the accountable human alone and round-trips with
 // the static marker intact.
 func TestStaticGrant_ValidatesWithoutRefreshMaterial(t *testing.T) {

@@ -412,7 +412,7 @@ func (s *postgresStore) SetState(ctx context.Context, tenantID, jobID string, st
 	}
 	if state == StateClosed {
 		// Only a scorer closes a job. Letting SetState do it would give the
-		// worker the one thing ADR-0019 takes away from it.
+		// worker the one thing ADR-0119 takes away from it.
 		return nil, fmt.Errorf("%w: a job is closed by a scorer through Close, never by a reported state", ErrInvalid)
 	}
 	c, err := s.conn(ctx, tenantID)

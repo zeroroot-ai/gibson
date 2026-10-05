@@ -5,7 +5,7 @@
 // Neo4j: it answers queries that combine vector similarity with graph
 // traversal.
 //
-// It is READ-ONLY. ADR-0012 makes the projector the single writer of the
+// It is READ-ONLY. ADR-0112 makes the projector the single writer of the
 // knowledge graph, and sdk#451 took the last write RPC off the wire, so the
 // store and provider write halves were removed in gibson#1322. Nothing here
 // builds Cypher that writes.

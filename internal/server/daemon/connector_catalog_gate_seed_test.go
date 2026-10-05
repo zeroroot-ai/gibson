@@ -30,7 +30,7 @@ func (a *gateSeedAuthorizer) Write(_ context.Context, tuples []authz.Tuple) erro
 
 // The startup seed writes one platform_enabled tuple per embedded catalog
 // entry, on its canonical component:<kind>/<id> object. The catalog is
-// multi-kind (ADR-0015): connectors AND the zerocool agent (ADR-0016), so the
+// multi-kind (ADR-0136): connectors AND the zerocool agent (ADR-0116), so the
 // seed must cover every kind, not connectors only.
 func TestSeedConnectorCatalogGate_SeedsEmbeddedCatalog(t *testing.T) {
 	a := &gateSeedAuthorizer{}

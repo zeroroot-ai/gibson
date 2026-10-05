@@ -59,7 +59,7 @@ func TestCapabilitiesForTechnique_DirectTechniqueMatch(t *testing.T) {
 // TestCapabilitiesForTechnique_CategoryRollupMatch proves a candidate's
 // technique reaches a capability that only declares the ROLLED-UP category,
 // never the fine-grained technique itself — the taxonomy hierarchy is the
-// bridge (ADR-0035 decision 2), so this needs no separate table entry.
+// bridge (ADR-0135), so this needs no separate table entry.
 func TestCapabilitiesForTechnique_CategoryRollupMatch(t *testing.T) {
 	h := dispatchTestHierarchy(t)
 	generalist := Capability{Kind: "agent", Name: "injection-hunter",

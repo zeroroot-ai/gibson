@@ -3,12 +3,12 @@
 
 package brain
 
-// bet_settlement.go is proof-of-demonstration (ADR-0027, gibson#278): a bet
+// bet_settlement.go is proof-of-demonstration (ADR-0131, gibson#278): a bet
 // settles TRUE only when a typed success predicate (internal/engine/settlement,
 // gibson#297) fires deterministically against recorded evidence — never an
 // LLM opinion, and never a bare assertion.
 //
-// Settlement is folded through the normal Timeline -> Reduce path (ADR-0007),
+// Settlement is folded through the normal Timeline -> Reduce path (ADR-0107),
 // so it is replayable like any other event. It records against the bet's own
 // HypothesisID (the same identifier PlaceBet's Bet.HypothesisId names,
 // callback_place_bet.go), NOT against a brain.Hypothesis World entity: this
@@ -23,7 +23,7 @@ package brain
 // other: PlaceBet records a stake, settlement records a verdict, both
 // addressed by the same HypothesisID.
 //
-// Settlement is terminal (ADR-0023: "open bets earn nothing" — once
+// Settlement is terminal (ADR-0123: "open bets earn nothing" — once
 // settled, nothing more happens to that bet): a second settlement event for
 // an already-settled HypothesisID is dropped, never overwriting the first
 // verdict, mirroring how a stale BeliefScored is dropped rather than
@@ -31,13 +31,13 @@ package brain
 //
 // gibson#279 adds the bounded-exhaustion FALSE path alongside the TRUE path
 // above: a bet whose declared attempt budget runs out with no demonstrated
-// proof settles FALSE, a real recorded outcome, never silence (ADR-0023).
+// proof settles FALSE, a real recorded outcome, never silence (ADR-0123).
 // Both verdicts share the one BetSettlement component and SettlementVerdict
 // type, and both are terminal by the same rule: whichever settlement lands
 // first for a HypothesisID wins.
 //
 // gibson#280 adds the third settlement path: an async human verdict
-// (ADR-0023 decision 3, ADR-0006). It never blocks a mission (ADR-0008) —
+// (ADR-0123, ADR-0106). It never blocks a mission (ADR-0108) —
 // the bet stays OPEN until the verdict arrives out of band — and it is the
 // SAME label channel braintrain and the review-and-label UI already
 // consume (label.go): settling a bet by HITL also applies the ordinary
@@ -61,17 +61,17 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 )
 
-// SettlementVerdict is how a bet resolved (ADR-0023). gibson#280 adds the
+// SettlementVerdict is how a bet resolved (ADR-0123). gibson#280 adds the
 // HITL verdict as a sibling.
 type SettlementVerdict string
 
 const (
 	// SettlementVerdictTrue means the fleet demonstrated the claim in a
 	// sandbox and a typed predicate fired against the recorded evidence
-	// (ADR-0027).
+	// (ADR-0131).
 	SettlementVerdictTrue SettlementVerdict = "true"
 	// SettlementVerdictFalse means the bet's declared attempt budget was
-	// exhausted with no demonstrated proof (ADR-0023, gibson#279) — a real,
+	// exhausted with no demonstrated proof (ADR-0123, gibson#279) — a real,
 	// recorded outcome, not silence.
 	SettlementVerdictFalse SettlementVerdict = "false"
 )
@@ -88,14 +88,14 @@ const (
 type SettlementMethod string
 
 const (
-	// SettlementMethodPredicate is proof-of-demonstration (ADR-0027,
+	// SettlementMethodPredicate is proof-of-demonstration (ADR-0131,
 	// gibson#278): a typed predicate fired against recorded evidence.
 	SettlementMethodPredicate SettlementMethod = "predicate"
-	// SettlementMethodExhaustion is bounded-exhaustion (ADR-0023,
+	// SettlementMethodExhaustion is bounded-exhaustion (ADR-0123,
 	// gibson#279): the declared attempt budget ran out with no proof.
 	SettlementMethodExhaustion SettlementMethod = "exhaustion"
-	// SettlementMethodHITL is an async human verdict (ADR-0023 decision 3,
-	// ADR-0006, gibson#280).
+	// SettlementMethodHITL is an async human verdict (ADR-0123,
+	// ADR-0106, gibson#280).
 	SettlementMethodHITL SettlementMethod = "hitl"
 )
 
@@ -134,7 +134,7 @@ type BetSettlement struct {
 	// verdict must record why, never settle in silence.
 	Reason string
 	// UserID identifies the human who applied a HITL verdict — provenance
-	// only (ADR-0006 §6: labels pool tenant-wide regardless of who applied
+	// only (ADR-0106: labels pool tenant-wide regardless of who applied
 	// them). Set only for SettlementMethodHITL (gibson#280).
 	UserID string
 	// PredictedProbability is the confidence the fleet had staked on this
@@ -144,7 +144,7 @@ type BetSettlement struct {
 	// replay story of its own — recording it directly is what makes the
 	// score below replayable.
 	PredictedProbability float64
-	// BrierScore is this one bet's proper-scoring-rule score (ADR-0022):
+	// BrierScore is this one bet's proper-scoring-rule score (ADR-0122):
 	// the squared error between PredictedProbability and the observed
 	// outcome (1.0 for TRUE, 0.0 for FALSE), computed once at settlement
 	// time by whichever of the three orchestrators settled it. It is the
@@ -158,8 +158,8 @@ type BetSettlement struct {
 }
 
 // BetSettledTrue records that a bet's hypothesis was demonstrated true: a
-// typed predicate fired against recorded evidence (ADR-0027). It folds
-// through the normal Observe-shaped reducer path (ADR-0007), so replay
+// typed predicate fired against recorded evidence (ADR-0131). It folds
+// through the normal Observe-shaped reducer path (ADR-0107), so replay
 // reproduces the settlement exactly — replay re-applies this already-decided
 // fact, it never re-evaluates the predicate (the same pattern BeliefScored
 // uses: evaluation happens once, off the single-writer path, and only the
@@ -213,7 +213,7 @@ func applyBetSettledTrue(w *World, e BetSettledTrue) {
 }
 
 // BetSettledFalse records that a bet's declared attempt budget was exhausted
-// with no demonstrated proof (ADR-0023, gibson#279): a real, recorded
+// with no demonstrated proof (ADR-0123, gibson#279): a real, recorded
 // outcome, not silence. Like BetSettledTrue, it folds through the normal
 // reducer path, so replay reproduces the settlement exactly.
 type BetSettledFalse struct {
@@ -275,8 +275,8 @@ func applyBetSettledFalse(w *World, e BetSettledFalse) {
 }
 
 // BetSettledByHITL records a human's asynchronous verdict settling a bet
-// where objective proof was not possible (ADR-0023 decision 3, ADR-0006).
-// It never blocks a mission (ADR-0008): the bet stays OPEN until the
+// where objective proof was not possible (ADR-0123, ADR-0106).
+// It never blocks a mission (ADR-0108): the bet stays OPEN until the
 // verdict arrives out of band, and settling it applies the ordinary Label
 // the review-and-label UI and braintrain already consume (label.go) via
 // Engine.SettleBetByHITL — a bet's HITL settlement and a Finding's HITL
@@ -411,7 +411,7 @@ func (e *Engine) hypothesisTechniqueScope(hypothesisID string) (technique, scope
 }
 
 // BetSettlementRequest carries everything needed to attempt settling one bet
-// TRUE by recorded proof (ADR-0027).
+// TRUE by recorded proof (ADR-0131).
 type BetSettlementRequest struct {
 	// HypothesisID names the bet being settled — the same identifier
 	// PlaceBet's Bet.HypothesisId carries.
@@ -429,7 +429,7 @@ type BetSettlementRequest struct {
 	// evaluated against exactly this slice — no LLM, no other input.
 	Evidence []finding.EnhancedEvidence
 	// Destructive marks this demonstration as destructive or irreversible
-	// (ADR-0028). Until a technique's Domain Pack carries its own risk-tier
+	// (ADR-0132). Until a technique's Domain Pack carries its own risk-tier
 	// flag, the caller declares it explicitly here. A destructive request is
 	// refused unless a DestructiveProofAuthorizer approves it — never
 	// auto-approved.
@@ -442,7 +442,7 @@ type BetSettlementRequest struct {
 }
 
 // DestructiveProofAuthorizer verifies that one specific destructive
-// demonstration was already authorized (ADR-0028, corrected by ADR-0032):
+// demonstration was already authorized (ADR-0132):
 // the gate sits BEFORE the destructive act, via the agent-facing
 // RequestDestructiveAuthorization RPC (internal/engine/harness) and the
 // dashboard's approve/deny queue (gibson#99/#336/#342) — both of which read
@@ -458,7 +458,7 @@ type BetSettlementRequest struct {
 // DestructiveAuthorizationQueue.Verify.
 type DestructiveProofAuthorizer func(ctx context.Context, tenant string, req BetSettlementRequest) (approved bool, err error)
 
-// SettleBetTrue evaluates req's predicate against req's evidence (ADR-0027)
+// SettleBetTrue evaluates req's predicate against req's evidence (ADR-0131)
 // and, if it fires, settles the named bet TRUE. It returns settled=true only
 // when this call caused a new TRUE settlement; settled=false with a nil
 // error means the predicate did not fire (the claim stays unproven, not
@@ -468,9 +468,9 @@ type DestructiveProofAuthorizer func(ctx context.Context, tenant string, req Bet
 // authorization.
 //
 // Evaluation is deterministic and synchronous — registry.Evaluate never
-// calls an LLM (ADR-0027, decision 2) — but the resulting BetSettledTrue
+// calls an LLM (ADR-0131) — but the resulting BetSettledTrue
 // event is folded asynchronously through the normal single-writer Submit
-// path (ADR-0001), so a caller that needs to observe the settled state
+// path (ADR-0101), so a caller that needs to observe the settled state
 // should read BetSettlements() afterward rather than assume it is visible
 // the instant this call returns.
 func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registry, authorize DestructiveProofAuthorizer, req BetSettlementRequest) (bool, error) {
@@ -534,7 +534,7 @@ func (e *Engine) SettleBetTrue(ctx context.Context, registry *settlement.Registr
 }
 
 // BetExhaustionRequest carries the facts needed to settle a bet FALSE on
-// bounded exhaustion (ADR-0023, gibson#279): the declared attempt budget ran
+// bounded exhaustion (ADR-0123, gibson#279): the declared attempt budget ran
 // out with no demonstrated proof.
 type BetExhaustionRequest struct {
 	// HypothesisID names the bet being settled — the same identifier
@@ -563,7 +563,7 @@ type BetExhaustionRequest struct {
 }
 
 // SettleBetFalse settles the named bet FALSE once its declared attempt
-// budget is exhausted with no demonstrated proof (ADR-0023). This is the
+// budget is exhausted with no demonstrated proof (ADR-0123). This is the
 // bounded-exhaustion counterpart to SettleBetTrue: a real, recorded outcome
 // — not silence — so the calibration signal learns from misses too.
 //
@@ -575,7 +575,7 @@ type BetExhaustionRequest struct {
 // yet actually exhausted.
 //
 // Like SettleBetTrue, the resulting BetSettledFalse event is folded
-// asynchronously through the normal single-writer Submit path (ADR-0001); a
+// asynchronously through the normal single-writer Submit path (ADR-0101); a
 // caller that needs to observe the settled state should read
 // BetSettlements() afterward.
 func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bool, error) {
@@ -630,8 +630,8 @@ func (e *Engine) SettleBetFalse(_ context.Context, req BetExhaustionRequest) (bo
 	return true, nil
 }
 
-// BetHITLRequest carries a human's asynchronous verdict on a bet (ADR-0023
-// decision 3, ADR-0006) — the backend the dashboard's HITL settlement
+// BetHITLRequest carries a human's asynchronous verdict on a bet (ADR-0123,
+// ADR-0106) — the backend the dashboard's HITL settlement
 // surface (dashboard#97) calls into.
 type BetHITLRequest struct {
 	// HypothesisID names the bet being settled — the same identifier
@@ -646,7 +646,7 @@ type BetHITLRequest struct {
 	// surprise does.
 	Verdict LabelVerdict
 	// UserID identifies the reviewer. Required: every settlement must be
-	// attributable to who decided it, the same ADR-0006 §6 provenance rule
+	// attributable to who decided it, the same ADR-0106 provenance rule
 	// Label.UserID follows (labels pool tenant-wide regardless of which
 	// user applied them; UserID is provenance, never a partition key).
 	UserID string
@@ -685,8 +685,8 @@ func betLabelTargetID(hypothesisID string) string {
 }
 
 // SettleBetByHITL settles the named bet from a human's asynchronous
-// true_positive/false_positive verdict (ADR-0023 decision 3, ADR-0006).
-// This never blocks a mission (ADR-0008): the mission proceeds regardless,
+// true_positive/false_positive verdict (ADR-0123, ADR-0106).
+// This never blocks a mission (ADR-0108): the mission proceeds regardless,
 // and the verdict is applied whenever the human gets to it. It records two
 // facts: the ordinary Label braintrain and the review UI already consume
 // (label.go) — gibson#280's "the verdict path is the same label channel"

@@ -10,7 +10,7 @@ import (
 )
 
 // AgentToolCall is a single tool invocation made by a fleet agent — the
-// tool-I/O half of the flight recorder (ADR-0020, gibson#271), alongside
+// tool-I/O half of the flight recorder (ADR-0120, gibson#271), alongside
 // LlmCall's transcript half. Capture is ALWAYS ON: the arguments an agent sent
 // a tool and the result it got back are folded in here in full, every time,
 // so `World = fold(Timeline)` reconstructs the complete agent record. Only the
@@ -21,7 +21,7 @@ import (
 // on the callback ContextInfo for provenance (it is the same id discovery
 // ingest uses to attach PRODUCED edges), so a tool call and the graph nodes it
 // produced share one key: "each attached to the event it caused"
-// (ADR-0020/#271). This is distinct from WorkItem (work.go), which models an
+// (ADR-0120/#271). This is distinct from WorkItem (work.go), which models an
 // entire CUE-projected mission node's dispatch lifecycle — a single mission
 // node can make many AgentToolCalls as an agent loops over a tool.
 type AgentToolCall struct {

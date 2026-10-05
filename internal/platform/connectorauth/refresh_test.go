@@ -321,7 +321,7 @@ func seedStaticGrant(t *testing.T, s *fakeStore, connector, credential string) {
 	_ = s.Put(context.Background(), GrantSecretName(connector), blob)
 }
 
-// A static credential is never refreshed (ADR-0015): EnsureFresh reports no
+// A static credential is never refreshed (ADR-0061): EnsureFresh reports no
 // refresh, makes no vendor call, and leaves the credential exactly as the
 // tenant admin set it, pass after pass.
 func TestEnsureFresh_StaticGrantIsNeverRefreshed(t *testing.T) {
@@ -362,7 +362,7 @@ func (failingTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("unexpected vendor call")
 }
 
-// --- ADR-0015 decision 4: write-safe rotation, fail closed
+// --- ADR-0061: write-safe rotation, fail closed
 
 // A rotated refresh token counts as consumed only once the write-back lands.
 // When the tenant store rejects that write, the refresh aborts and the STORED

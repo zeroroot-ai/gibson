@@ -3,7 +3,7 @@
 
 package brain
 
-// scheduler.go is the mechanical execution of the scripted work-graph (ADR-0001,
+// scheduler.go is the mechanical execution of the scripted work-graph (ADR-0101,
 // CONTEXT.md: "CUE declares dependencies, not a schedule"). Two Systems, both
 // quiescent so a tick settles:
 //

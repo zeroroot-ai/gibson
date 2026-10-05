@@ -6,11 +6,11 @@ package brain
 import "github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 
 // voi_dispatch.go is VoI dispatch gating's technique -> capability bridge
-// (ADR-0035 decision 4, gibson#387): it resolves a VoI candidate's technique
+// (ADR-0135, gibson#387): it resolves a VoI candidate's technique
 // to the capabilities that can address it, by rolling the technique up to its
 // taxonomy category (TechniqueHierarchy.CategoryOf, gibson#379) and matching
 // against every capability's declared Coverage (gibson#386). The rollup edge
-// IS the bridge (ADR-0035 decision 2) — there is no separate reconciliation
+// IS the bridge (ADR-0135) — there is no separate reconciliation
 // table between a candidate's fine-grained technique and a capability's
 // coarse coverage declaration.
 //
@@ -67,7 +67,7 @@ func CapabilitiesForTechnique(hierarchy *taxonomy.TechniqueHierarchy, technique 
 // declaration. VoICandidate.CoveringCapabilities stores refs rather than full
 // Capability values for a concrete reason, not stylistic preference:
 // Capability.Coverage carries unexported internal state (taxonomy.Coverage's
-// category/technique sets) that the JSON-based Timeline codec (ADR-0011,
+// category/technique sets) that the JSON-based Timeline codec (ADR-0163,
 // timeline_codec.go) silently drops on marshal — a persisted VoIPlanned event
 // would replay with every covering capability's Coverage reset to empty. Kind
 // and Name are plain exported strings, so a CapabilityRef replays exactly as
@@ -95,7 +95,7 @@ func capabilityRefs(capabilities []Capability) []CapabilityRef {
 // voiTopKCapabilities flattens candidates' resolved CoveringCapabilities
 // (each already the output of CapabilitiesForTechnique, via PlanVoI/BAMCPPlanner)
 // into the set of (Kind, Name) dispatch targets gibson#397's hard top-k gate
-// allows for this planning round — ADR-0026 decision 1: "the planner computes
+// allows for this planning round — ADR-0126: "the planner computes
 // the top-k highest-value candidate moves; the LLM Decider picks from that set
 // and cannot go outside it." candidates is expected to already be the
 // planner's top-k (VoIPlanState.Candidates/VoIPlanned.Candidates — both are

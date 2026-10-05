@@ -20,16 +20,16 @@ import (
 )
 
 // DomainPackService is the daemon API a tenant admin drives to enable and
-// disable curated Domain Packs (ADR-0033, gibson#381). It serves the catalog
+// disable curated Domain Packs (ADR-0133, gibson#381). It serves the catalog
 // + enable/disable lifecycle: ListDomainPackCatalog, ListDomainPacks,
 // EnableDomainPack, DisableDomainPack.
 //
 // EnableDomainPack submits a DomainPackEnabled event to the caller's tenant
 // brain.Engine — Timeline-durable, replayable, and folded into that tenant's
-// World only (brain.Registry structurally isolates tenants, ADR-0001), never
+// World only (brain.Registry structurally isolates tenants, ADR-0101), never
 // another tenant's. DisableDomainPack submits DomainPackDisabled. Neither RPC
 // touches pack CONTENT: the catalog is the shipped, versioned source of
-// truth (ADR-0033 decision 4) and this service never hot-reloads it —
+// truth (ADR-0133) and this service never hot-reloads it —
 // enabling/disabling is the only lever.
 type DomainPackService struct {
 	tenantv1.UnimplementedDomainPackServiceServer
@@ -37,7 +37,7 @@ type DomainPackService struct {
 	registry *brain.Registry
 	catalog  *ontology.DomainPackCatalog
 
-	// gate answers the platform catalog gate (ADR-0033 decisions 1 and 5,
+	// gate answers the platform catalog gate (ADR-0133,
 	// mirroring ConnectorService's ADR-0067 gate): a pack without its
 	// platform_enabled tuple from the system tenant is invisible to
 	// ListDomainPackCatalog and refused by EnableDomainPack. Required — the
@@ -72,7 +72,7 @@ func (s *DomainPackService) ListDomainPackCatalog(
 		return nil, err
 	}
 	packs := s.catalog.List()
-	// The platform catalog gate (ADR-0033 decisions 1 and 5): an entry is
+	// The platform catalog gate (ADR-0133): an entry is
 	// visible iff its component object carries platform_enabled from the
 	// system tenant, same mechanism ConnectorService.ListCatalog uses. Fail
 	// closed on a gate error.
@@ -145,11 +145,11 @@ func (s *DomainPackService) EnableDomainPack(
 	if !allowed {
 		return nil, status_grpc.Errorf(codes.NotFound, "EnableDomainPack: domain pack %q is not in the catalog", pack.Name)
 	}
-	// Every pack is free (ADR-0033 decision 5 withdrawn, gibson#384): the
+	// Every pack is free (ADR-0133 withdrawn, gibson#384): the
 	// catalog gate above is the only gate on enable. No entitlement check.
 	//
 	// Fail closed on the pack's CEL predicates before folding the enable event
-	// (ADR-0031 decisions 1 and 2, gibson#388/#398): DomainPack.Validate above
+	// (ADR-0131, gibson#388/#398): DomainPack.Validate above
 	// (via the catalog gate path and NewDomainPackCatalog) only checks the
 	// predicate expressions are well-formed TEXT, never that they compile and
 	// type-check as CEL against the gibson-owned environment. LoadDomainPack

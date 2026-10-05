@@ -2,9 +2,9 @@
 // Copyright 2026 Zero Root AI
 
 // Package harness — the ToolCallSink completeness guard (gibson#380, epic
-// intelligence-phase-2, ADR-0030 §3).
+// intelligence-phase-2, ADR-0131).
 //
-// ADR-0030 §3 makes "every tool invocation flows through the flight
+// ADR-0131 makes "every tool invocation flows through the flight
 // recorder" a hard invariant, not a convention: independent-evidence
 // integrity for proof settlement rests on it. This file is the completeness
 // guard the ADR requires — it fails CI if any tool-execution path in the
@@ -340,7 +340,7 @@ func toolCallSinkExemptedByComment(fset *token.FileSet, file *ast.File, stmt ast
 }
 
 // TestToolCallSinkCompleteness is the CI-enforced guard itself (gibson#380,
-// ADR-0030 §3): it fails if any real tool-execution path in the harness
+// ADR-0131): it fails if any real tool-execution path in the harness
 // callback surface returns a completed outcome without recording it. See the
 // package doc comment above for the rule, and
 // TestToolCallSinkCompleteness_CatchesUnrecordedCallToolProtoBypass et al.

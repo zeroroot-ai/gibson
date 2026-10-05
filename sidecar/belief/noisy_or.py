@@ -1,4 +1,4 @@
-"""Noisy-OR enablement CPTs (gibson#288, ADR-0029 SS6).
+"""Noisy-OR enablement CPTs (gibson#288, ADR-0129).
 
 A node with N independent enablement causes has a full CPD of 2**N columns —
 intractable the moment N is more than a handful of parents, which an
@@ -21,7 +21,7 @@ change to ``infer.py`` was needed) reproduces the noisy-OR closed form exactly.
 for small N, where building that table is still tractable to check against.
 
 Every variable here is binary (``infer.STATES``), so noisy-OR is the complete
-story; noisy-MAX (ADR-0029 SS6 names both) is noisy-OR's generalisation to
+story; noisy-MAX (ADR-0129 names both) is noisy-OR's generalisation to
 multi-valued variables, which nothing in this codebase has — STATES is fixed
 at exactly two states everywhere the sidecar looks.
 

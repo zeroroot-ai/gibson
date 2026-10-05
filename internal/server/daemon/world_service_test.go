@@ -128,7 +128,7 @@ func TestWorldService_GetLlmCall(t *testing.T) {
 }
 
 // TestWorldService_GetFrameAt: a replay frame is a server-side fold of the log to
-// a point (ADR-0001). Scrubbing to an earlier seq reproduces the World as it was;
+// a point (ADR-0101). Scrubbing to an earlier seq reproduces the World as it was;
 // seq == total reproduces the live World; isolation holds.
 func TestWorldService_GetFrameAt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -757,7 +757,7 @@ func TestWorldService_GetFrameAt_HostsAndFindings(t *testing.T) {
 	}
 }
 
-// TestWorldService_MissionViewCarriesTheBeliefModelPin is the ADR-0005 §5
+// TestWorldService_MissionViewCarriesTheBeliefModelPin is the ADR-0134
 // regression: a reviewer must be able to tell which model judged a run. The
 // mission records the pin at launch and the World carries it, but until this
 // field existed neither ListMissions nor GetFrameAt returned it, so the pin was

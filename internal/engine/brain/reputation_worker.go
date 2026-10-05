@@ -21,17 +21,17 @@ import (
 // read-locking accessor) and writes through WorldBeliefSubstrate (which Submits
 // a NodeBeliefSet event), so it MUST NOT run under the tick's write lock.
 // Recomputing imperatively right after Engine.SettleBetX would be wrong anyway:
-// a settlement Submits its event asynchronously (ADR-0001), so the recompute
+// a settlement Submits its event asynchronously (ADR-0101), so the recompute
 // would miss the very bet that triggered it. Draining OFF the tick, after the
 // settlement has folded, is what lets the recompute see it.
 //
 // A technique×environment reputation is always exactly rebuildable from the
 // settled-bet history (reputation.go), so the writes this worker Submits
 // (NodeBeliefSet) re-fold identically on replay, and the tap — like every tap —
-// never fires on replay (ADR-0009). Live and replay therefore agree.
+// never fires on replay (ADR-0109). Live and replay therefore agree.
 
 // techniqueEnv is the (technique, environment) key a settled bet's reputation
-// is addressed by (ADR-0029 §3) — environment is the bet's ScopeID, the same
+// is addressed by (ADR-0129) — environment is the bet's ScopeID, the same
 // coordinate every other observation in this package partitions identity by.
 type techniqueEnv struct {
 	technique string

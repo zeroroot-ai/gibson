@@ -180,7 +180,7 @@ func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineR
 }
 
 // GetFrameAt folds the tenant's Timeline to position seq and returns the World as
-// of that frame (ADR-0001: World == fold(Timeline)). This is the Scroller's scrub
+// of that frame (ADR-0101: World == fold(Timeline)). This is the Scroller's scrub
 // primitive — a server-side fold, not a stored snapshot. seq is clamped to
 // [0, total]; seq == total reproduces the live World.
 //
@@ -297,7 +297,7 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 }
 
 // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
-// Findings with any applied label (ADR-0006). Read-only projection; never gates
+// Findings with any applied label (ADR-0106). Read-only projection; never gates
 // a mission.
 func (s *worldServer) ListReviewQueue(ctx context.Context, _ *worldpb.ListReviewQueueRequest) (*worldpb.ListReviewQueueResponse, error) {
 	e, err := s.engine(ctx)
@@ -324,7 +324,7 @@ func (s *worldServer) ListReviewQueue(ctx context.Context, _ *worldpb.ListReview
 }
 
 // SubmitLabel records a human review judgement as a tenant-scoped LabelApplied
-// event (ADR-0006). It is async: the event is submitted to the tenant's engine
+// event (ADR-0106). It is async: the event is submitted to the tenant's engine
 // and the call returns — the mission never waits on it (no runtime gate). The
 // labelling user is taken from the caller's context server-side, so a caller can
 // never attribute a label to another user; and because the event lands in the
@@ -352,7 +352,7 @@ func (s *worldServer) SubmitLabel(ctx context.Context, req *worldpb.SubmitLabelR
 	return &worldpb.SubmitLabelResponse{}, nil
 }
 
-// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+// ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
 // training signal the offline trainer consumes alongside auto-outcomes.
 func (s *worldServer) ListLabels(ctx context.Context, _ *worldpb.ListLabelsRequest) (*worldpb.ListLabelsResponse, error) {
 	e, err := s.engine(ctx)
@@ -378,7 +378,7 @@ func labelView(l brain.LabelSnapshot) *worldpb.LabelView {
 }
 
 // GetCalibration returns the tenant's reliability/calibration report from
-// settled bets (gibson#284, ADR-0022/ADR-0006) — the source for the
+// settled bets (gibson#284, ADR-0122/ADR-0106) — the source for the
 // dashboard's reliability diagram (dashboard#98). The claim-node belief
 // substrate is constructed the same way every other brain wiring site builds
 // one (WireVoIPlanner, WireSliceBelief): a WorldBeliefSubstrate bound to this

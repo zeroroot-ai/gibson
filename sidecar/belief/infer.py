@@ -1,4 +1,4 @@
-"""Exact variable elimination over a discrete Bayesian network (gibson#750, ADR-0005).
+"""Exact variable elimination over a discrete Bayesian network (gibson#750, ADR-0134).
 
 This is the inference engine the belief sidecar runs. It replaces pgmpy's
 ``VariableElimination`` with the same algorithm over plain numpy arrays.
@@ -18,7 +18,7 @@ elimination order. The order changes the cost, never the answer. Parity against
 ``pgmpy==0.1.26`` is asserted directly in ``test_parity.py``, which is skipped
 when pgmpy is absent (it is absent from the runtime image on purpose).
 
-Determinism (ADR-0005 §replay)
+Determinism (ADR-0134)
 ------------------------------
 Factors are built, multiplied and summed in a fixed, artifact-declared order:
 variables keep the order the artifact lists them, and the elimination order is

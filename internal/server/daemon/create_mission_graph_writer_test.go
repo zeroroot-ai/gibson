@@ -73,7 +73,7 @@ func (f *fakeTargetStoreForMission) Delete(context.Context, types.ID) error {
 	panic("Delete not expected from CreateMission")
 }
 
-// TestCreateMission_MaterializesViaGraphWriter is the gibson#1254/ADR-0012
+// TestCreateMission_MaterializesViaGraphWriter is the gibson#1254/ADR-0112
 // regression test for the RPC-layer change: CreateMission must no longer open
 // its own Neo4j write transaction, but it must still ask the sole writer (the
 // graph projector, via GraphWriter.UpsertMission) to materialize the Mission

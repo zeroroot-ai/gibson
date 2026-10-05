@@ -17,7 +17,7 @@ import (
 )
 
 // TestCallToolProto_FeedsToolCallSink_OnMarshalFailure is the gibson#380 /
-// ADR-0030 §3 coverage unit for the narrower gap fixed in callback_service.go:
+// ADR-0131 coverage unit for the narrower gap fixed in callback_service.go:
 // a tool that executed successfully but whose response failed to marshal to
 // JSON used to return an error to the agent with no independent record that
 // the tool actually ran. It forces the real protojson.Marshal failure mode —

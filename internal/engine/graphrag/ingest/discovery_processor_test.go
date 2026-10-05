@@ -193,7 +193,7 @@ func TestProcessSkipsRatherThanInventsWhatTheWorldCannotHold(t *testing.T) {
 		Ports: []*graphragpb.Port{{Id: strp("p9"), HostId: "", Number: 80}},
 		// A service naming a port nobody sent.
 		Services: []*graphragpb.Service{{Id: strp("s9"), PortId: "nope", Name: "http"}},
-		// Out-of-taxonomy shapes: the ADR-0012 Observations case, not built yet.
+		// Out-of-taxonomy shapes: the ADR-0112 Observations case, not built yet.
 		CustomNodes:           []*graphragpb.CustomNode{{NodeType: "Wharrgarbl"}},
 		ExplicitRelationships: []*graphragpb.ExplicitRelationship{{FromType: "a", ToType: "b", RelationshipType: "X"}},
 		Evidence:              []*graphragpb.Evidence{{Id: strp("ev1"), FindingId: "f-none", Type: "log"}},

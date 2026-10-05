@@ -5,12 +5,12 @@ package brain
 
 import "math"
 
-// voi_score.go is the ONE-STEP-EXACT value-of-information scorer ADR-0026 §3
+// voi_score.go is the ONE-STEP-EXACT value-of-information scorer ADR-0126
 // describes: value = (goal-relative info gain + surprise) / (resource cost +
 // risk cost) × reputation × stake — for a SINGLE candidate move, computed
 // exactly (no sampling), never a multi-step lookahead.
 //
-// ADR-0026 §4 calls for full multi-step BAMCP (Bayes-Adaptive Monte Carlo
+// ADR-0126 calls for full multi-step BAMCP (Bayes-Adaptive Monte Carlo
 // Planning, Thompson-sampled, fully Bayesian, no UCB) because exact
 // enumeration of a multi-step plan tree is intractable. This package does NOT
 // implement that tree search: it computes each candidate's value exactly for
@@ -21,19 +21,19 @@ import "math"
 // scope decision, not an oversight: a genuine BAMCP implementation needs a
 // generative belief-network simulator and a consumable Dirichlet-over-CPT
 // posterior from braintrain, neither of which exists as data the Go daemon
-// can read yet. VoIScorer is the seam a future planner (or Jev, ADR-0026's own
+// can read yet. VoIScorer is the seam a future planner (or Jev, ADR-0126's own
 // "not yet" note) plugs into without disturbing the gate/worker around it.
 
 // Tunable constants. Costs and priors are simple, documented placeholders
 // pending real integration with BudgetSystem (resource cost) and a RoE/
 // blast-radius model (risk cost) — neither exists as a consumable cost
 // function in this codebase yet. Reputation and stake priors are the
-// "optimism under uncertainty" ADR-0026 §6 calls for: no data yet means
+// "optimism under uncertainty" ADR-0126 calls for: no data yet means
 // "do not penalize", not "assume the worst" — VoI must be able to DRIVE a
 // fleet's first bet on a hypothesis, not merely re-rank already-staked ones.
 const (
 	// DefaultVoITopK is the default number of top-ranked candidates VoIPlan
-	// keeps (ADR-0026 §1: "VoI gates to top-k").
+	// keeps (ADR-0126: "VoI gates to top-k").
 	DefaultVoITopK = 10
 
 	voiEvidenceMoveResourceCost   = 1.0 // an evidence move is the cheapest action
@@ -51,13 +51,13 @@ const (
 	voiUnstakedConfidence = 0.5
 )
 
-// VoICandidateKind distinguishes the two candidate shapes ADR-0026 §2 names.
+// VoICandidateKind distinguishes the two candidate shapes ADR-0126 names.
 // Both are scored on one scale; they are not costed identically.
 type VoICandidateKind string
 
 const (
 	// VoICandidateHypothesis is an open hypothesis to test. Pursuing it IS
-	// placing/raising a bet on it (ADR-0022/ADR-0029 §3).
+	// placing/raising a bet on it (ADR-0122/ADR-0129).
 	VoICandidateHypothesis VoICandidateKind = "hypothesis"
 	// VoICandidateEvidence is an evidence move on a high-uncertainty node.
 	// Places no bet.
@@ -77,7 +77,7 @@ type VoIScoreInput struct {
 	// voiUnstakedConfidence.
 	Confidence float64
 	// Connectivity is the candidate's degree in the current attack graph
-	// (DeriveAttackGraph, gibson#286) — ADR-0026 §3's "juiciness ×
+	// (DeriveAttackGraph, gibson#286) — ADR-0126's "juiciness ×
 	// connectivity". 0 is a valid, common value (today's live graph has no
 	// cross-host edges yet), not a sentinel for "unknown".
 	Connectivity int
@@ -88,14 +88,14 @@ type VoIScoreInput struct {
 	// (always false for VoICandidateEvidence, which places no bet).
 	HasStake bool
 	// Reputation is the caller-resolved technique×environment belief
-	// (ADR-0029 §3), or voiNeutralReputationPrior when no technique×
+	// (ADR-0129), or voiNeutralReputationPrior when no technique×
 	// environment key is resolvable yet.
 	Reputation float64
 }
 
 // VoICandidate is one scored candidate with its full value breakdown recorded
 // — never just the final number — so a plan is auditable and its ranking is
-// reproducible from the same recorded inputs (ADR-0026 §3/§4: "exact,
+// reproducible from the same recorded inputs (ADR-0126: "exact,
 // deterministic... recorded and replayable").
 type VoICandidate struct {
 	Kind         VoICandidateKind
@@ -118,7 +118,7 @@ type VoICandidate struct {
 	// dispatch-gating input, not a value input.
 	Technique string
 	// CoveringCapabilities is VoI dispatch gating's technique -> capability
-	// bridge resolved for this candidate (ADR-0035 decision 4, gibson#387):
+	// bridge resolved for this candidate (ADR-0135, gibson#387):
 	// the (Kind, Name) refs of every capability from the plan's Capabilities
 	// catalog whose declared Coverage includes Technique itself or the
 	// category it rolls up to (CapabilitiesForTechnique, voi_dispatch.go —
@@ -131,7 +131,7 @@ type VoICandidate struct {
 }
 
 // VoIScorer computes one candidate's VoICandidate (Value filled in) from its
-// VoIScoreInput. The seam ADR-0026's own "no Jev yet" note names for a future
+// VoIScoreInput. The seam ADR-0126's own "no Jev yet" note names for a future
 // fast typed model or in-search evaluator; ExactVoIScorer is the only
 // implementation this package ships.
 type VoIScorer interface {
@@ -142,7 +142,7 @@ type VoIScorer interface {
 type exactVoIScorer struct{}
 
 // ExactVoIScorer returns the deterministic, exact-arithmetic VoIScorer this
-// package ships (ADR-0026: "One-step-exact per node").
+// package ships (ADR-0126: "One-step-exact per node").
 func ExactVoIScorer() VoIScorer { return exactVoIScorer{} }
 
 func (exactVoIScorer) Score(in VoIScoreInput) VoICandidate {

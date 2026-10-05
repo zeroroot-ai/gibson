@@ -39,8 +39,8 @@ const (
 	memberHeartbeatEvery = 10 * time.Second
 )
 
-// memberLauncher is the mechanism half of the bank reconciler (ADR-0019
-// decision 1, gibson#1709): it makes one member exist or stop existing.
+// memberLauncher is the mechanism half of the bank reconciler (ADR-0119,
+// gibson#1709): it makes one member exist or stop existing.
 //
 // A member backs no mission of its own. The bank is its origin: the base
 // grant is scoped to the bank, the member's run id is the identity every

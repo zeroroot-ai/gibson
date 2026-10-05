@@ -126,7 +126,7 @@ func (n Names) Neo4jPVCRoot() string {
 }
 
 // Neo4jNetworkPolicy returns the K8s NetworkPolicy name restricting bolt
-// ingress to the per-tenant Neo4j pod. See ADR-0012 (single-writer graph
+// ingress to the per-tenant Neo4j pod. See ADR-0112 (single-writer graph
 // ingress) and gibson#1255.
 //
 // Format: tenant-<slug>-neo4j-bolt.

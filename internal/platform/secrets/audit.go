@@ -44,7 +44,7 @@ const (
 // operations. Fields correspond to the audit-taxonomy-foundation columns.
 //
 // These fields were once also the input to the compliance-signal projection.
-// That pipeline is gone (gibson#1299, ADR-0013) and the audit log is now the
+// That pipeline is gone (gibson#1299, ADR-0113) and the audit log is now the
 // sole compliance evidence base, so every field below is load-bearing for
 // evidence, not merely for observability.
 //

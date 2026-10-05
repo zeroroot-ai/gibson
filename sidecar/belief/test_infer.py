@@ -85,7 +85,7 @@ def test_elimination_order_does_not_change_the_answer():
 
 
 def test_repeated_queries_are_bit_identical():
-    """ADR-0005 replay: same input, same float64 bits, not merely 'close'."""
+    """ADR-0134 replay: same input, same float64 bits, not merely 'close'."""
     factors = _factors(SIMPLE["cpds"])
     first = infer.query(factors, "juicy", {"reachable": "true"})
     for _ in range(5):

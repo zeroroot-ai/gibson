@@ -12,7 +12,7 @@
 // joins them so the mission has one completion, which is what lets a rescan
 // reconcile what it did not see this time.
 //
-// Parameters (ADR-0018). The caller supplies `_params`; every field is
+// Parameters (ADR-0118). The caller supplies `_params`; every field is
 // required, and CUE refuses the render if one is missing rather than
 // substituting an empty string into a scan target:
 //

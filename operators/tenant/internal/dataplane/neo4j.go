@@ -306,7 +306,7 @@ func (n *Neo4jProvisioner) applyResources(ctx context.Context, safe, tenantID, t
 		// tenant provisioned before APOC Core was required picks the plugin
 		// and the procedure allowlist up on the next reconcile — otherwise
 		// every Host projection into that tenant fails forever, because
-		// apoc.merge.node is not registered there (ADR-0012, gibson#1257).
+		// apoc.merge.node is not registered there (ADR-0112, gibson#1257).
 		// This is the "per-tenant StatefulSet change plus a restart" the ADR
 		// records: rewriting spec.template rolls the pod.
 		//
@@ -486,7 +486,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 					// APOC Core is installed by copying the jar out of the
 					// image, never with NEO4J_PLUGINS — see neo4j_apoc.go and
 					// pkg/platform/dataplane/apoc.go for why that distinction
-					// is load-bearing (ADR-0012, gibson#1257).
+					// is load-bearing (ADR-0112, gibson#1257).
 					InitContainers: []corev1.Container{apocInitContainer()},
 					Volumes:        []corev1.Volume{apocPluginVolume()},
 					Containers: []corev1.Container{
@@ -564,7 +564,7 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 	}
 
 	// NetworkPolicy: bolt ingress from the daemon only, egress DNS-only.
-	// Defence in depth behind the single-writer projector (ADR-0012,
+	// Defence in depth behind the single-writer projector (ADR-0112,
 	// gibson#1255); INERT until the CNI enforces NetworkPolicy.
 	np = buildNeo4jNetworkPolicy(names, tenantID, tenantNS, n.cfg.PlatformNamespace)
 
@@ -630,7 +630,7 @@ func (n *Neo4jProvisioner) deriveNeo4jPassword(ctx context.Context, tenantID, te
 		}
 	}
 
-	// 2) The store. A restore (hosted, ADR-0014) brings the OpenBao volume
+	// 2) The store. A restore (hosted, ADR-0083) brings the OpenBao volume
 	// and the Neo4j data volume back and NO Secret, so the password the
 	// data directory was initialised with lives at infra/neo4j in the
 	// tenant namespace and nowhere else. Generating a fresh one here wrote

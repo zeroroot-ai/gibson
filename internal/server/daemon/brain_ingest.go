@@ -4,7 +4,7 @@
 // Package daemon — brain_ingest.go
 //
 // ingestToBrain bridges the daemon's mission event stream into the ECS brain
-// (epic ecs-brain). It is the "capture path" from ADR-0001: the brain is fed by
+// (epic ecs-brain). It is the "capture path" from ADR-0101: the brain is fed by
 // the existing event bus, not by a parallel execution path. The orchestrator
 // event-bus adapter calls this for every published event with the tenant in
 // hand, so each tenant's brain World fills from its real mission execution and
@@ -32,7 +32,7 @@ import (
 )
 
 // ingestComponentFinding returns the component finding submitter's World sink
-// (ADR-0007): a finding submitted over the component path is folded into the
+// (ADR-0107): a finding submitted over the component path is folded into the
 // tenant World as a Finding so the graph projector — the sole writer of finding
 // nodes — materializes it. Replaces the old direct StoreAsync graph write.
 func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
@@ -60,7 +60,7 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 }
 
 // ingestDiscovery returns the World sink for the DiscoveryResult ingest path
-// (ADR-0012 step 8, gibson#1266). A tool that reports discovered entities in
+// (ADR-0112, gibson#1266). A tool that reports discovered entities in
 // proto field 100 reaches the knowledge graph the same way every other producer
 // does: Timeline event → World → graph projector. The path used to run through
 // `graphrag/loader`, which built Cypher out of the payload's own labels and
@@ -132,7 +132,7 @@ var (
 	_ component.ResultDiscoveryProcessor = (*discoveryProcessorAdapter)(nil)
 )
 
-// ingestDelegation returns the harness DelegationSink (ADR-0007): an agent
+// ingestDelegation returns the harness DelegationSink (ADR-0107): an agent
 // delegation is folded into the tenant World as AgentRunObserved events for both
 // the parent and child run, so the graph projector — the sole writer — materializes
 // the :AgentRun nodes and the DELEGATED_TO edge. Replaces the old direct
@@ -157,12 +157,12 @@ func ingestDelegation(reg *brain.Registry) harness.DelegationSink {
 	}
 }
 
-// ingestObservation returns the callback service's observation sink (ADR-0007):
+// ingestObservation returns the callback service's observation sink (ADR-0107):
 // it translates a typed agent observation into a brain Timeline event and submits
 // it to the tenant's World engine. The reducer + scope-relative identity
-// (ADR-0002) resolve the entity and its topology — the agent authors neither.
+// (ADR-0102) resolve the entity and its topology — the agent authors neither.
 //
-// Tenant and scope arrive already resolved in attr (ADR-0012). The callback
+// Tenant and scope arrive already resolved in attr (ADR-0112). The callback
 // service read both off the daemon's mission record, so this sink neither takes
 // a tenant at construction — it used to close over one process-wide value, which
 // put every tenant's observations in one World — nor reads either from req. The
@@ -250,7 +250,7 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 				ScopeID: scope, FQDN: s.Fqdn, Domain: s.Domain, Addresses: s.Addresses,
 			})
 		case *harnesspb.ObserveRequest_Hypothesis:
-			// An agent's proposed, unproven claim (ADR-0021, sdk#70). It folds
+			// An agent's proposed, unproven claim (ADR-0121, sdk#70). It folds
 			// as its own provenance class (hypothesis.go) — never as Evidence,
 			// never as a Belief — so it needs no Taxonomy admission the way an
 			// EntitySighting does: References are stored as reported, not
@@ -313,7 +313,7 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 				reg.For(tenant).Submit(obs)
 			}
 		default:
-			// The Taxonomy gate (ADR-0012). A shape no typed case claimed is
+			// The Taxonomy gate (ADR-0112). A shape no typed case claimed is
 			// out of the Taxonomy, so it lands as an Observation rather than
 			// falling out of the bottom of this switch and being lost.
 			if obs, ok := gateObservation(req, scope, missionID, time.Now()); ok {
@@ -427,7 +427,7 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 }
 
 // harnessLLMCallToAPI maps a harness.LLMCallRecord (the callback-path capture
-// shape) onto the daemon's api.LLMCallRecord (ADR-0020, gibson#271) — the
+// shape) onto the daemon's api.LLMCallRecord (ADR-0120, gibson#271) — the
 // bridge daemon.go's callback→api LLM-call wiring uses. Extracted as a pure
 // function so the mapping is unit-testable without a live daemon/gRPC server.
 func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
@@ -456,7 +456,7 @@ func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
 }
 
 // toAPIToolCalls converts harness.LLMCallToolCall values to the daemon api
-// package's LLMToolCall shape (ADR-0020, gibson#271) — the bridge daemon.go's
+// package's LLMToolCall shape (ADR-0120, gibson#271) — the bridge daemon.go's
 // callback→api LLM-call mapping uses.
 func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
 	if len(calls) == 0 {
@@ -470,7 +470,7 @@ func toAPIToolCalls(calls []harness.LLMCallToolCall) []api.LLMToolCall {
 }
 
 // toBrainToolCalls converts api.LLMToolCall values to the brain package's
-// LlmToolCall shape (ADR-0020, gibson#271).
+// LlmToolCall shape (ADR-0120, gibson#271).
 func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 	if len(calls) == 0 {
 		return nil
@@ -482,7 +482,7 @@ func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 	return out
 }
 
-// ingestToolCall returns the daemon's tool-call capture sink (ADR-0020,
+// ingestToolCall returns the daemon's tool-call capture sink (ADR-0120,
 // gibson#271): it folds a completed CallToolProto invocation into the calling
 // tenant's brain World as an AgentToolCall entity — the flight recorder's
 // tool-I/O half, alongside ingestLLMCall's transcript half. Routes by the

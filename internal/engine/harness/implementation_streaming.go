@@ -265,7 +265,7 @@ func (h *DefaultAgentHarness) resolveToolForStreaming(ctx context.Context, name 
 		if tenant != "" {
 			instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
 			if discErr == nil && len(instances) > 0 {
-				// Dispatch-policy gate (ADR-0010 / gibson#995). A streaming
+				// Dispatch-policy gate (ADR-0110 / gibson#995). A streaming
 				// tool is dispatched over its own gRPC connection — a bypass
 				// of the setec sandbox. An untrusted component must not take
 				// that path under setec-only; deny before resolving it.

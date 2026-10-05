@@ -22,7 +22,7 @@
 // depend on the tools, because a job that opens before anything has been found
 // has nothing to work on.
 //
-// Parameters (ADR-0018). Every field is required, and CUE refuses the render if
+// Parameters (ADR-0118). Every field is required, and CUE refuses the render if
 // one is missing rather than substituting an empty string:
 //
 //   kubeconfigSecret  the tenant secret holding the cluster's kubeconfig

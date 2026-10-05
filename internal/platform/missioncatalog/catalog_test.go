@@ -28,7 +28,7 @@ var updateGolden = flag.Bool("update", false, "rewrite testdata/<mission>-render
 // each mission's own CUE declares.
 //
 // Per mission, not one flat map. Every mission in the catalog declares its own
-// closed set (ADR-0018), and a second mission was impossible while Render
+// closed set (ADR-0118), and a second mission was impossible while Render
 // demanded one caller's seven fields for any name — a cluster assessment has no
 // pipeline id and no image digest. A shared map would also have made the
 // cross-mission tests below pass for the wrong reason: they would have rendered

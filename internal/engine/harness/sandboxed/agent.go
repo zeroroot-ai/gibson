@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package sandboxed — ephemeral agent dispatch (gibson#1596, ADR-0016).
+// Package sandboxed — ephemeral agent dispatch (gibson#1596, ADR-0116).
 //
 // The per-call path in executor.go launches a microVM, runs one command, and
 // destroys it. That is request/response, correct for a tool call. An AGENT is
 // different: it is a long-running process that runs a whole mission run (many
 // internal steps), emits structured output over its run, and returns a terminal
-// result. ADR-0016 dispatches such an agent as an ephemeral, per-mission-run
+// result. ADR-0116 dispatches such an agent as an ephemeral, per-mission-run
 // Setec sandbox instead of a long-lived shared worker, so one compromised run
 // reaches only one tenant's one run.
 //
@@ -42,7 +42,7 @@ import (
 
 // Environment variables injected into every agent sandbox launch. The agent
 // image reads these to reach the daemon back and to scope itself to the one
-// dispatch it was launched for (ADR-0016 decision 2 — nothing standing).
+// dispatch it was launched for (ADR-0116 — nothing standing).
 const (
 	// envAgentGrant carries the per-dispatch capability-grant JWT. It is
 	// tenant+run-scoped with a short TTL; the agent presents it on harness
@@ -65,13 +65,13 @@ const (
 	envAgentMissionRunID = "GIBSON_MISSION_RUN_ID"
 	envAgentAgentRunID   = "GIBSON_AGENT_RUN_ID"
 	// envAgentModel is the model resolved for the tenant at dispatch time
-	// (ADR-0016 decision 7 — the signed manifest does not pin a model).
+	// (ADR-0116 — the signed manifest does not pin a model).
 	envAgentModel = "GIBSON_MODEL"
 	// envAgentTaskB64 carries the base64 protojson of the agent.Task the run
 	// must execute. The agent decodes it on start.
 	envAgentTaskB64 = "GIBSON_AGENT_TASK_B64"
 	// envInstanceMode tells the process which of the two shapes it is running
-	// as (ADR-0019): "oneshot" serves one dispatch and ends, "member" serves
+	// as (ADR-0119): "oneshot" serves one dispatch and ends, "member" serves
 	// many over its life. One image carries both, so the process reads this
 	// rather than inferring it from what it was given.
 	envInstanceMode = "GIBSON_INSTANCE_MODE"
@@ -92,7 +92,7 @@ const (
 const defaultAgentRunTimeout = 30 * time.Minute
 
 // AgentLaunchSpec is the per-agent launch shape sourced from the signed catalog
-// manifest (ADR-0015 / ADR-0016). It is the typed seam for gibson#1597 (S5):
+// manifest (ADR-0136 / ADR-0116). It is the typed seam for gibson#1597 (S5):
 // this slice accepts it as a parameter and drives it in tests; S5 feeds the
 // real manifest values (image, sandbox class, egress ceiling, resolved model).
 // Nothing here is agent-specific in code — no zerocool constants live in this
@@ -110,10 +110,10 @@ type AgentLaunchSpec struct {
 	VCPU   int32
 	Memory string
 	// SandboxClass names the setec SandboxClass this agent runs under
-	// (ADR-0016 decision 4 — gVisor by default in production). Empty defers to
+	// (ADR-0116 — gVisor by default in production). Empty defers to
 	// the launcher's deployment-default class.
 	SandboxClass string
-	// Egress is the tenant egress envelope (ADR-0016 decision 2/5). Empty keeps
+	// Egress is the tenant egress envelope (ADR-0116). Empty keeps
 	// setec's default network mode; a non-empty list confines the sandbox to
 	// exactly these targets. Build it from a manifest egressAllow ceiling with
 	// EgressRulesFromAllow.
@@ -133,8 +133,7 @@ type AgentLaunchSpec struct {
 // AgentDispatch is the per-dispatch runtime scope injected into the sandbox:
 // the tenant+run-scoped capability grant and the endpoints and ids the agent
 // needs to reach the daemon back and return its result. It holds only that
-// run's scope — no standing identity and no cross-tenant membership (ADR-0016
-// decision 2).
+// run's scope — no standing identity and no cross-tenant membership (ADR-0116).
 type AgentDispatch struct {
 	// Grant is the per-dispatch CG-JWT (short TTL, tenant+run scoped).
 	Grant string
@@ -149,14 +148,14 @@ type AgentDispatch struct {
 	// Tenant is the CUSTOMER tenant that owns this mission run, derived from the
 	// caller's authenticated context. It is NOT the setec infra tenant on the
 	// launcher; the live-console registry keys instances by this value so a
-	// subscriber only ever sees its own tenant's runs (ADR-0016 S11).
+	// subscriber only ever sees its own tenant's runs (ADR-0116 S11).
 	Tenant string
 	// AgentName is the dispatched agent's name, shown in the running-instance
 	// enumeration.
 	AgentName string
 	// Env is per-dispatch environment that is neither the manifest's static
 	// env nor one of the injected runtime keys: a member's ids and its bank's
-	// policy (ADR-0019). It is applied after the manifest env and before the
+	// policy (ADR-0119). It is applied after the manifest env and before the
 	// runtime keys, so it can never shadow the injected scope either.
 	Env map[string]string
 	// RunTimeout is this dispatch's own bound, taken from the mission node's
@@ -172,7 +171,7 @@ type AgentDispatch struct {
 // EventPublisher registers a running agent instance and returns a live sink for
 // its structured events. The launcher taps its sandbox log stream into publish
 // while the run is live and calls finish at the run's terminal state. It is the
-// seam to the daemon's live-console registry (ADR-0016 S11); the launcher never
+// seam to the daemon's live-console registry (ADR-0116 S11); the launcher never
 // imports that registry, only this interface. A nil publisher disables the live
 // console — the launcher still streams to the ring buffer and the logger.
 type EventPublisher interface {
@@ -244,7 +243,7 @@ type AgentLauncherConfig struct {
 	SandboxClass string
 	RunTimeout   time.Duration
 	// Events is the live-console sink for running-agent structured events
-	// (ADR-0016 S11). Nil disables the live console; the launcher still tees the
+	// (ADR-0116 S11). Nil disables the live console; the launcher still tees the
 	// sandbox log to the ring buffer and the daemon logger.
 	Events EventPublisher
 	// PlatformCAPEM is the platform edge CA, as PEM, handed to every launch
@@ -344,7 +343,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	}
 	span.SetAttributes(attribute.String("setec.sandbox_id", launchResp.SandboxID))
 
-	// Isolation gate (ADR-0052 / ADR-0016 decision 4). The sandbox exists but
+	// Isolation gate (ADR-0052 / ADR-0116). The sandbox exists but
 	// the agent has not run yet — this is the last point at which we can refuse
 	// it. An agent runs untrusted code by construction, so a sandbox whose
 	// isolation we could not confirm is killed, not used.
@@ -358,7 +357,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	span.SetAttributes(attribute.String("setec.sandbox_class", class))
 
 	// Register this run as a live instance so a read-only subscriber can follow
-	// its structured events (ADR-0016 S11). The instance is keyed by the CUSTOMER
+	// its structured events (ADR-0116 S11). The instance is keyed by the CUSTOMER
 	// tenant on the dispatch, not the setec infra tenant. finish deregisters and
 	// closes every subscriber stream at the terminal state below. A nil publisher
 	// (live console disabled) yields no-op publish/finish.
@@ -540,7 +539,7 @@ func (l *AgentLauncher) teeAgentLogs(ctx context.Context, sandboxID string, rb *
 			publish(chunk)
 		}
 		// The chunk itself is never logged: an agent's stdout can carry a
-		// sign-in URL or a credential prompt (ADR-0019 decision 4), and a
+		// sign-in URL or a credential prompt (ADR-0119), and a
 		// debug log is not a place a secret may land. The size is enough to
 		// see the feed move.
 		l.logger.Debug("agent sandbox log",

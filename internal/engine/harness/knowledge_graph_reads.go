@@ -18,7 +18,7 @@ import (
 // to ComponentService — one querier, one implementation, reached two ways.
 // Before this, ComponentService could serve these and nothing on the harness
 // path could, which is why a dispatched agent could not read the tenant graph
-// (zerocool-plugins ADR-0006, sdk docs/adr/0001-callback-knowledge-reads.md).
+// (ADR-0156, ADR-0161).
 //
 // Every read derives its tenant from the call context. No method takes a tenant,
 // so reaching another tenant's graph is unrepresentable rather than refused.

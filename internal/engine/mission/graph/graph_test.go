@@ -97,7 +97,7 @@ func TestProject_AllNodeKinds(t *testing.T) {
 		Id: "join", Type: missionv1.NodeType_NODE_TYPE_JOIN,
 		Config: &missionv1.MissionNode_JoinConfig{JoinConfig: &missionv1.JoinNodeConfig{WaitFor: []string{"a"}}},
 	}
-	// A JOB node drives work on a bank of always-on coding agents (ADR-0019).
+	// A JOB node drives work on a bank of always-on coding agents (ADR-0119).
 	// The bank is what the projection summarises, because it is what a reader
 	// needs to see: which pool this node feeds.
 	jobNode := &missionv1.MissionNode{

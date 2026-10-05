@@ -1,7 +1,7 @@
 # E2E mission fixture — single JOB node.
 #
 # Spec: mission-verb-noun-registry Requirement 1 (extension contract).
-# Design: ADR-0019, docs/architecture/banks.md, epic gibson#1706.
+# Design: ADR-0119, docs/architecture/banks.md, epic gibson#1706.
 #
 # A JOB node drives one unit of work on a bank of always-on coding agents.
 # The executor opens the job on the bank, then runs the verify loop inside

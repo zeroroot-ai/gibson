@@ -17,8 +17,8 @@
 //     subject and tenant, and cover the requested method, or the request is
 //     denied. It can only narrow what FGA already permits.
 //  4. Accepts a daemon-minted task grant presented as the SOLE credential of
-//     a dispatched component, which holds nothing standing (ADR-0016
-//     decision 2). The grant's own claims are the authority there, because the
+//     a dispatched component, which holds nothing standing (ADR-0116).
+//     The grant's own claims are the authority there, because the
 //     daemon already made the FGA decision at dispatch and ext-authz cannot
 //     re-ask it. See tryTaskGrantAuth for the full reasoning (gibson#1605).
 //  5. On allow, emits the canonical x-gibson-identity-* header set
@@ -194,7 +194,7 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 		// component token → hard fail) return its response. Otherwise fall
 		// through to the unauthenticated deny.
 		// A dispatched component holds ONLY its per-dispatch task grant
-		// (ADR-0016 decision 2, gibson#1605). That path is tried first: the
+		// (ADR-0116, gibson#1605). That path is tried first: the
 		// two credentials share the header and are told apart by the token's
 		// typ, so neither can be mistaken for the other.
 		if resp, handled := s.tryTaskGrantAuth(ctx, method, httpHeaders); handled {

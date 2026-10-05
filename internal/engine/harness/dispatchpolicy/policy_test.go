@@ -73,7 +73,7 @@ func TestDecide(t *testing.T) {
 }
 
 // TestIsolationAllowed is the (deployment-shape × isolation-mode) matrix from
-// ADR-0010 / gibson#998: under setec-only only HOSTED_SANDBOX (and UNSPECIFIED,
+// ADR-0110 / gibson#998: under setec-only only HOSTED_SANDBOX (and UNSPECIFIED,
 // treated as HOSTED_SANDBOX) is permitted; under customer-isolation every mode
 // is permitted.
 func TestIsolationAllowed(t *testing.T) {

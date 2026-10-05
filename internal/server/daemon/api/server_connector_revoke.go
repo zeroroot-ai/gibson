@@ -5,7 +5,7 @@
 //
 // DaemonOperatorService.RevokeConnectorGrant: the connector-operator's
 // ConnectorInstance finalizer asks the daemon to revoke a tenant's connector
-// grant on delete (ADR-0015 §5, gibson#1566). The operator has no secret-store
+// grant on delete (ADR-0061, gibson#1566). The operator has no secret-store
 // client by design; the daemon owns the grant and the access pair, so the
 // revoke runs here and the operator only carries the (tenant, connector) pair
 // over the SPIFFE direct-dial path (ADR-0002).

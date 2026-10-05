@@ -84,7 +84,7 @@ func TestTaskGrantRPCsNotInDescriptor_CatchesARetiredName(t *testing.T) {
 }
 
 // TestTaskGrantAllowedRPCs_CoversTheCallbackSurface: the list is derived from
-// the service descriptor, so the ADR-0012 write path and the knowledge reads
+// the service descriptor, so the ADR-0112 write path and the knowledge reads
 // are on it (gibson#1603), secret resolution is not, and renewal is.
 func TestTaskGrantAllowedRPCs_CoversTheCallbackSurface(t *testing.T) {
 	got := map[string]bool{}

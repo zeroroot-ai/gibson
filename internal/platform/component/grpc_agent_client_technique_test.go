@@ -13,7 +13,7 @@ import (
 )
 
 // TestGRPCAgentClientTechniqueTypesFromMetadata covers the no-descriptor path
-// (ADR-0035, gibson#385): technique types parsed from the registry's
+// (ADR-0135, gibson#385): technique types parsed from the registry's
 // comma-separated metadata are taxonomy category ids, not the retired
 // types.TechniqueType enum.
 func TestGRPCAgentClientTechniqueTypesFromMetadata(t *testing.T) {
@@ -59,7 +59,7 @@ func TestGRPCAgentClientTechniqueTypesFromCachedDescriptor(t *testing.T) {
 }
 
 // TestConvertTechniqueTypes covers the proto-response conversion path
-// (fetchDescriptor), which the same ADR-0035 migration retargeted from
+// (fetchDescriptor), which the same ADR-0135 migration retargeted from
 // TechniqueType to taxonomy.CategoryID.
 func TestConvertTechniqueTypes(t *testing.T) {
 	got := convertTechniqueTypes([]string{"prompt_injection", "dos"})

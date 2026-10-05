@@ -11,7 +11,7 @@
 // curator logic as pure Go so the handler file can stay thin.
 //
 // This survived the deletion of the compliance-signal pipeline (gibson#1299,
-// ADR-0013) deliberately. That pipeline stamped control IDs automatically from
+// ADR-0113) deliberately. That pipeline stamped control IDs automatically from
 // rules, which makes it redundant with deriving the same mapping from retained
 // audit events at query time. A curator's judgement — "this finding evidences
 // this control" — is derivable from no rule, so query-time derivation cannot

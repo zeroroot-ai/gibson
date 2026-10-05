@@ -15,10 +15,10 @@ import (
 // keeps a vendor access token warm for, because the tenant has the connector
 // enabled. It also carries the identity of the backing ConnectorInstance CR, so
 // the materializer can write the connector-cred Secret with an ownerReference
-// the Kubernetes garbage collector follows on connector delete (ADR-0015).
+// the Kubernetes garbage collector follows on connector delete (ADR-0061).
 //
 // The name is historical: connectors now run on ToolHive behind a
-// ConnectorInstance CR (ADR-0014), not as per-tenant setec sandboxes.
+// ConnectorInstance CR (ADR-0114), not as per-tenant setec sandboxes.
 type ConnectorSandbox struct {
 	Tenant    auth.TenantID
 	Connector string // bare component name, e.g. "connector-gitlab"
@@ -53,7 +53,7 @@ type ConnectorCredentialRef struct {
 // CatalogSource enumerates the connectors each tenant has enabled — the
 // desired set the connector-token freshener walks. The production source is
 // ConnectorInstanceCatalogSource, which derives the set from ConnectorInstance
-// CRs (the ToolHive path, ADR-0014).
+// CRs (the ToolHive path, ADR-0114).
 type CatalogSource interface {
 	DesiredConnectors(ctx context.Context) ([]ConnectorSandbox, error)
 }

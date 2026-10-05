@@ -231,7 +231,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		}
 		s.logger.WarnContext(ctx, "meta-tool invoke failed", "id", in.ID, "tenant", caller.Tenant, "err", err)
 
-		// Flight recorder completeness (ADR-0030 §3): invoke_tool dispatches a
+		// Flight recorder completeness (ADR-0131): invoke_tool dispatches a
 		// real catalog tool through the same trust boundary as a native
 		// CallToolProto call, so a failed invocation must be recorded too —
 		// exactly like captureToolCall's contract for the native path.
@@ -249,7 +249,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		resultJSON = nil
 	}
 
-	// Flight recorder completeness (ADR-0030 §3): invoke_tool is the
+	// Flight recorder completeness (ADR-0131): invoke_tool is the
 	// metatool dispatch path the completeness guard requires — the agent
 	// never gets a real tool's result without an independent record of it.
 	s.captureToolCall(ctx, contextInfo, canon, string(argsJSON), string(resultJSON), "")

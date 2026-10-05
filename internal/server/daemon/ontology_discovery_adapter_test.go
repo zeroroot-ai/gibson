@@ -19,7 +19,7 @@ import (
 // awaitOntologyProposal polls e's OntologyProposals until it contains kind,
 // label with the given recurrence, or fails the test —
 // Engine.ProposeOntologyExtension folds OntologyExtensionProposed
-// asynchronously through the normal single-writer Submit path (ADR-0001),
+// asynchronously through the normal single-writer Submit path (ADR-0101),
 // the same Submit/tick pattern awaitProofSettlements already polls for.
 func awaitOntologyProposal(t *testing.T, e *brain.Engine, kind taxonomy.ProposalKind, label string, wantRecurrence int) brain.OntologyProposalSnapshot {
 	t.Helper()

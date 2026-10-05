@@ -12,7 +12,7 @@ import (
 )
 
 // Observation is the open-world escape hatch: a shape an agent perceived that
-// the global Taxonomy does not admit (ADR-0012). It is what makes "an agent can
+// the global Taxonomy does not admit (ADR-0112). It is what makes "an agent can
 // always write, and can never invent schema" true — an out-of-taxonomy shape is
 // never rejected and never lost, it just lands here instead of becoming a typed
 // node. Sensing later promotes a recurring Observation shape into the Taxonomy;
@@ -27,7 +27,7 @@ type Observation struct {
 	// of the graph node it projects to.
 	EventID string
 
-	// ScopeID and MissionID are resolved server-side (ADR-0012); an agent has
+	// ScopeID and MissionID are resolved server-side (ADR-0112); an agent has
 	// no field with which to state either.
 	ScopeID   string
 	MissionID string
@@ -48,7 +48,7 @@ type Observation struct {
 }
 
 // ObservationRecorded records an out-of-taxonomy shape. It is append-only: there
-// is no event that updates or deletes an Observation (ADR-0012, "Write
+// is no event that updates or deletes an Observation (ADR-0112, "Write
 // contract").
 type ObservationRecorded struct {
 	// EventID is the Timeline event id and therefore the Observation's

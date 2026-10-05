@@ -3,9 +3,9 @@
 
 package ontology
 
-// belief_schema_seed.go is the SEED belief-PRM schema (ADR-0029 §2, §7): it
+// belief_schema_seed.go is the SEED belief-PRM schema (ADR-0129): it
 // replaces the hardcoded {reachable, exploitable, juicy} per-Host belief
-// field (ADR-0005, internal/engine/brain/belief.go) with the same three
+// field (ADR-0129, internal/engine/brain/belief.go) with the same three
 // variables, expressed as declarative schema instead of Go structs, so the
 // belief engine (gibson#275/#276) can generalise beyond Host without a code
 // change to this package.
@@ -16,14 +16,14 @@ const coreBeliefSchemaExtensionName = "core/belief-schema"
 
 // SeedBeliefSchemaExtension returns the seed belief-PRM schema:
 //
-//   - Host is belief-bearing with the three seed variables from ADR-0005,
+//   - Host is belief-bearing with the three seed variables from ADR-0129,
 //     wired as a small dependency chain (reachable -> exploitable -> juicy)
 //     matching the funnel the pre-PRM belief field already encodes: a target
 //     cannot be exploitable if it is not reachable, and cannot be juicy if it
 //     is not exploitable.
-//   - The core enablement edges belief propagates along (ADR-0029 §7), each
-//     naming the belief variable it feeds on its destination node (ADR-0037
-//     decision 1 — structure only; the noisy-OR strength each contributes is
+//   - The core enablement edges belief propagates along (ADR-0129), each
+//     naming the belief variable it feeds on its destination node (ADR-0137
+//     — structure only; the noisy-OR strength each contributes is
 //     a learned Beta posterior, cold-started at the uninformative prior,
 //     never authored here):
 //   - RESOLVES_TO feeds "reachable" (reachability — a subdomain resolving to

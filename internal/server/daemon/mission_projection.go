@@ -543,7 +543,7 @@ func nodeKindTargetInput(n *missionpb.MissionNode) (kind, target, input string, 
 	case missionpb.NodeType_NODE_TYPE_JOB:
 		// The bank is the target and the whole node config is the input, as
 		// protojson, so the job node executor reads the spec and the bounds
-		// without a second lookup (ADR-0019, gibson#1713).
+		// without a second lookup (ADR-0119, gibson#1713).
 		cfg := n.GetJobConfig()
 		if cfg.GetBankRef() == "" {
 			return "", "", "", fmt.Errorf("job node %s names no bank", n.GetId())

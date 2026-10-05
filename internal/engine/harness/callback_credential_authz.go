@@ -112,7 +112,7 @@ func (s *HarnessCallbackService) authorizeCredentialResolve(ctx context.Context,
 	}
 
 	// A bank member is bounded a second time, by the job it is working on
-	// (ADR-0019, gibson#1711). The daemon's grant minter already refuses to put
+	// (ADR-0119, gibson#1711). The daemon's grant minter already refuses to put
 	// secret resolution on a non-plugin grant, so a member should never reach
 	// here at all — this is the layer that holds if that one ever moves, and it
 	// answers the question the grant cannot: not "may this component read a

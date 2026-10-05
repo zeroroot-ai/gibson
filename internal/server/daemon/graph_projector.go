@@ -4,7 +4,7 @@
 // Package daemon — graph_projector.go
 //
 // The graph projector makes the per-tenant Neo4j knowledge graph a read-model of
-// the ECS brain's World (ADR-0007): the World (a fold of the Timeline) is the
+// the ECS brain's World (ADR-0107): the World (a fold of the Timeline) is the
 // single source of truth, and this is the ONLY writer of the projected graph.
 // It runs asynchronously on a ticker — never inside the brain's tick — so Neo4j
 // I/O never blocks the single-writer reducer. Writes are idempotent (keyed by the
@@ -23,7 +23,7 @@ import (
 // the whole node, because a Mission node is written three times — when a mission
 // is created, when a run bootstraps its graph, and on every projection tick for
 // as long as the mission is in the World — and the projector is the only code
-// allowed to write it (ADR-0012).
+// allowed to write it (ADR-0112).
 //
 // An empty string field means "the caller does not know this yet", not "set it
 // to empty", and a blank must never erase a known value: the create-time write
@@ -88,7 +88,7 @@ type GraphWriter interface {
 	UpsertHost(ctx context.Context, tenant string, h brain.HostSnapshot) error
 	// UpsertMission materializes a :Mission node. It is the ONLY writer of one:
 	// the CreateMission RPC and the per-run graph bootstrap both used to MERGE
-	// their own, which is what ADR-0012 step 2 forbids. Both now call this, and
+	// their own, which is what ADR-0112 forbids. Both now call this, and
 	// so does the projection tick, which is what keeps a mission's status
 	// current for its whole life.
 	UpsertMission(ctx context.Context, tenant string, m MissionProjection) error
@@ -104,7 +104,7 @@ type GraphWriter interface {
 	UpsertAgentRun(ctx context.Context, tenant string, r brain.AgentRunSnapshot) error
 	UpsertLlmCall(ctx context.Context, tenant string, c brain.LlmCallSnapshot) error
 	// UpsertObservation materializes an :Observation — the node an
-	// out-of-taxonomy shape lands on (ADR-0012). Keyed by the Timeline event
+	// out-of-taxonomy shape lands on (ADR-0112). Keyed by the Timeline event
 	// id, so projection is replayable and two sightings of the same fact stay
 	// distinct nodes.
 	UpsertObservation(ctx context.Context, tenant string, o brain.ObservationSnapshot) error

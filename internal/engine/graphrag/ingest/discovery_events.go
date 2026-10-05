@@ -21,7 +21,7 @@ import (
 // The translation is total in one direction only: every entity the global
 // Taxonomy covers becomes an event, and everything else is counted as skipped
 // rather than invented into the World. Out-of-taxonomy shapes are meant to land
-// as Observations (ADR-0012), which does not exist yet — gibson#1258 builds it.
+// as Observations (ADR-0112), which does not exist yet — gibson#1258 builds it.
 // Counting is the honest interim: the caller logs a non-zero skip count, so
 // dropped shapes are visible instead of silent.
 //
@@ -61,7 +61,7 @@ func discoveryEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult) (events
 	events = append(events, entityEvents...)
 
 	// Evidence has no World vocabulary yet. It is the Observations case
-	// (ADR-0012) that gibson#1258 builds.
+	// (ADR-0112) that gibson#1258 builds.
 	skipped += len(d.Evidence)
 
 	return events, skipped
@@ -412,7 +412,7 @@ func hostObservedEvents(
 	addressByHostID = make(map[string]string, len(d.Hosts))
 	for _, h := range d.Hosts {
 		if h == nil || h.Ip == "" {
-			// Address is half the host's identity coordinate (ADR-0002); without
+			// Address is half the host's identity coordinate (ADR-0102); without
 			// it the sighting cannot be resolved to an entity.
 			skipped++
 			continue

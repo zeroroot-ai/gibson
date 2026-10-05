@@ -4,7 +4,7 @@
 package brain
 
 // bet_scoring.go is gibson#277: score a settled bet under a proper scoring
-// rule (ADR-0022) — the CALIBRATION/reliability signal ("does 0.8 mean 80%?"),
+// rule (ADR-0122) — the CALIBRATION/reliability signal ("does 0.8 mean 80%?"),
 // the same rule B's read-side reliability metric reports in aggregate
 // (calibration.go, gibson#284, TechniqueCalibration.BrierScore is the mean of
 // exactly the per-bet values this file computes).
@@ -40,13 +40,13 @@ package brain
 // the log score's -ln(0) at a certain-and-wrong forecast, which would make
 // an occasional settlement unscoreable (or need a floor hack) for no
 // benefit here, since both are proper scoring rules and the issue names
-// either as acceptable (ADR-0022). Brier is also the rule gibson#284's
+// either as acceptable (ADR-0122). Brier is also the rule gibson#284's
 // aggregate already uses, so per-bet and aggregate values share one
 // vocabulary rather than reporting two different statistics under the same
 // name.
 
 // brierScore is the squared error between a predicted probability and the
-// observed binary outcome (ADR-0022): 0 for a perfectly confident and
+// observed binary outcome (ADR-0122): 0 for a perfectly confident and
 // correct forecast, 1 for a perfectly confident and wrong one. It is the
 // proper scoring rule for exactly one settled bet; the mean of many is
 // gibson#284's TechniqueCalibration.BrierScore.

@@ -286,7 +286,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 
 			s.logger.Error("error receiving from tool stream", "error", err, "tool", req.Name)
 
-			// Flight recorder completeness (ADR-0030 §3): the tool stream was
+			// Flight recorder completeness (ADR-0131): the tool stream was
 			// started (Send(startReq) already succeeded above), so this is a
 			// post-dispatch failure, not a pre-execution rejection — it must
 			// still reach the sink.
@@ -415,7 +415,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 			})
 
 		case *toolpb.StreamExecuteResponse_Complete:
-			// Flight recorder completeness (ADR-0030 §3): the streaming
+			// Flight recorder completeness (ADR-0131): the streaming
 			// dispatch path had no recording at all before this — a
 			// streamed tool call could complete and hand the agent a real
 			// result with zero independent corroborating record. Capture
@@ -462,7 +462,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 				}
 			}
 
-			// Flight recorder completeness (ADR-0030 §3): a streamed tool's
+			// Flight recorder completeness (ADR-0131): a streamed tool's
 			// own reported terminal error is a post-dispatch outcome, not a
 			// pre-execution rejection, so it must be captured too.
 			s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", payload.Error.Error.Message)

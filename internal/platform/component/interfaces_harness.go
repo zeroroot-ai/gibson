@@ -35,7 +35,7 @@ type OntologyReasoner interface {
 }
 
 // GraphRAGQuerier reads the knowledge graph for remote agents. It is read-only:
-// ADR-0012 makes the projector the sole writer, and sdk#451 took the write RPC
+// ADR-0112 makes the projector the sole writer, and sdk#451 took the write RPC
 // off the wire, so there is no StoreNode here (gibson#1322).
 // May be nil on ComponentServiceServer; GraphRAG RPCs return Unimplemented when nil.
 type GraphRAGQuerier interface {

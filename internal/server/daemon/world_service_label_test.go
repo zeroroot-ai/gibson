@@ -17,7 +17,7 @@ import (
 
 // SubmitLabel appends a tenant-scoped label, stamping the caller's user id from
 // context; ListLabels reads it back. The label is visible only in the caller's
-// tenant (ADR-0006: pooled within tenant, never cross-tenant).
+// tenant (ADR-0106: pooled within tenant, never cross-tenant).
 func TestWorldService_SubmitAndListLabels_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

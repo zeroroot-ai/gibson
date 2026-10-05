@@ -167,7 +167,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		tuples = append(tuples, capabilitygrant.ClientCapabilityGrants(principalID, fgaType)...)
 
 		// The enrolling admin turned this component on for their tenant
-		// (ADR-0015, decision 2: tenant_enabled means a tenant admin turned it
+		// (ADR-0136: tenant_enabled means a tenant admin turned it
 		// on). Without it every user-facing can_* on component:<kind>/<name>
 		// is false (in_tenant_catalog), the dashboard shows the agent denied,
 		// and the dispatch gate refuses missions to it (gibson#1609). The

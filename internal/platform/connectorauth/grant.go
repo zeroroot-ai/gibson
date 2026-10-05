@@ -4,7 +4,7 @@
 // Package connectorauth owns a connector's OAuth token lifecycle.
 //
 // A connector fronts a third-party MCP server that ToolHive runs in the
-// customer's tenant namespace (ADR-0014, ADR-0065). When that vendor requires
+// customer's tenant namespace (ADR-0114, ADR-0065). When that vendor requires
 // OAuth — GitLab's first-party MCP server does, with no personal-access-token
 // path — something has to acquire and refresh a token. ADR-0061 decides that
 // something is the platform, never the connector's ToolHive proxy, and the
@@ -16,7 +16,7 @@
 //
 // So the ToolHive proxy presents a credential it reads, and this package
 // produces it. The daemon materializes that credential into the Secret the
-// proxy mounts (ADR-0015).
+// proxy mounts (ADR-0061).
 //
 // TWO SECRETS, NOT ONE. The Grant — refresh token, client id, token endpoint,
 // scope, expiry — is platform-code-only and bound to no component. That names
@@ -29,7 +29,7 @@
 // secret, a compromise would mean standing access to the customer's system
 // rather than a credential that expires.
 //
-// FAIL CLOSED, AND NO FALLBACK CACHE (ADR-0015 decision 4). A refresh the
+// FAIL CLOSED, AND NO FALLBACK CACHE (ADR-0061). A refresh the
 // vendor refuses, or a tenant store the daemon cannot read, ends with the
 // connector Degraded and its credential withdrawn — never a silent Active on a
 // token nobody can renew. Two rules make that hold:
@@ -100,7 +100,7 @@ type Grant struct {
 	AuthorizedAt time.Time `json:"authorized_at"`
 
 	// Static marks a grant that backs a customer-supplied static credential
-	// (an `auth: secret` connector, ADR-0015): a personal access token the
+	// (an `auth: secret` connector, ADR-0061): a personal access token the
 	// tenant admin handed the platform through SetConnectorSecret. The
 	// credential itself lives in the access secret, exactly where an OAuth
 	// access token lives, so the materializer treats both modes alike. A

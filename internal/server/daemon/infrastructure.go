@@ -131,11 +131,11 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	}
 	d.reasoner = reasoner
 
-	// Initialize the Domain Pack catalog (ADR-0033 decision 1, gibson#381):
+	// Initialize the Domain Pack catalog (ADR-0133, gibson#381):
 	// the curated, shipped set of packs DomainPackService.ListCatalog reads
 	// and EnableDomainPack resolves a name against. Seeded with the platform's
 	// skeleton "main" pack (gibson#382) — registering it here only makes it
-	// visible and enable-able; it ships default-off (ADR-0033 decision 4), so
+	// visible and enable-able; it ships default-off (ADR-0133), so
 	// a fresh tenant's World carries none of its bindings until that tenant's
 	// admin calls EnableDomainPack.
 	d.domainPackCatalog = ontology.NewDomainPackCatalog(ontology.MainDomainPack())

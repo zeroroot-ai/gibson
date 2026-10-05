@@ -3,7 +3,7 @@
 
 // Package daemon — observation_gate.go
 //
-// The Taxonomy gate on the emit path (ADR-0012). A shape the global Taxonomy
+// The Taxonomy gate on the emit path (ADR-0112). A shape the global Taxonomy
 // admits materialises as a typed node; a shape it does not admit is never
 // rejected and never lost — it lands as an Observation, immediately queryable,
 // with the residue preserved.

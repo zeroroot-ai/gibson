@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package v1alpha1 contains the ConnectorInstance API (ADR-0014).
+// Package v1alpha1 contains the ConnectorInstance API (ADR-0114).
 // +kubebuilder:object:generate=true
 // +groupName=gibson.zeroroot.ai
 package v1alpha1

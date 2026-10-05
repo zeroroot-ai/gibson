@@ -11,8 +11,8 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// NewCoverage validates every declared id against the hierarchy (ADR-0035
-// decision 4, gibson#386 acceptance criterion 3: "validated against the
+// NewCoverage validates every declared id against the hierarchy (ADR-0135,
+// gibson#386 acceptance criterion 3: "validated against the
 // taxonomy").
 // ---------------------------------------------------------------------------
 

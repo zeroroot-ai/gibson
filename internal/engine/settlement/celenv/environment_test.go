@@ -46,7 +46,7 @@ func TestNewEnv_DeclaresHelperCatalog(t *testing.T) {
 // TestNewEnv_IsMinimal locks down that the environment declares nothing
 // beyond EvidenceVariable and the curated helper catalog: no stdlib
 // extension (strings, lists, …) sneaks in additional functions that would
-// widen ADR-0031's environment surface without a deliberate decision.
+// widen ADR-0131's environment surface without a deliberate decision.
 func TestNewEnv_IsMinimal(t *testing.T) {
 	env, err := NewEnv()
 	require.NoError(t, err)

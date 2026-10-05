@@ -12,7 +12,7 @@ import (
 )
 
 // QueryVars are the three belief-field components every model artifact MUST
-// expose (ADR-0005), mirroring model.QUERY_VARS.
+// expose (ADR-0129), mirroring model.QUERY_VARS.
 var QueryVars = [3]string{"juicy", "exploitable", "reachable"}
 
 // CPDSpec is one artifact-declared conditional probability table, in
@@ -94,7 +94,7 @@ type Evidence struct {
 // EvidenceToObservations maps host evidence onto observed network variables,
 // mirroring model.evidence_to_observations exactly: obs maps a known network
 // variable to its observed state ("true"/"false"); novel lists evidence
-// tokens the network has no variable for (ADR-0005 SS6: the caller's LLM
+// tokens the network has no variable for (ADR-0129: the caller's LLM
 // fills these, the math does not guess). Deterministic: identical evidence
 // yields identical observations (ports/services are sorted before mapping),
 // so exact inference stays replay-reproducible.
@@ -167,7 +167,7 @@ func PosteriorsFromMarginals(marginals map[string]float64) map[string]float64 {
 	return out
 }
 
-// NodePrior is an LLM-estimated prior for a novel node (ADR-0005 SS6), each
+// NodePrior is an LLM-estimated prior for a novel node (ADR-0129), each
 // value in [0,1] — mirrors brain.NodePrior one layer down.
 type NodePrior struct {
 	Juicy       float64
@@ -292,13 +292,13 @@ type ScoreResult struct {
 // novel vars, mirroring model.BeliefModel.score exactly.
 //
 // priors (optional) supplies caller-estimated priors for novel nodes
-// (ADR-0005 SS6). Mirroring the Python reference's own
+// (ADR-0129). Mirroring the Python reference's own
 // `next(iter(priors.values()))` — a single prior blob is applied regardless
 // of how many novel nodes priors names — this picks the lexicographically
 // smallest key deterministically (Python dict iteration is insertion-order,
 // which this package has no equivalent of and does not need: at most one
 // prior blob is ever actually consulted either way, and determinism is what
-// ADR-0005 replay requires).
+// ADR-0134 replay requires).
 func (m *BeliefModel) Score(ev Evidence, priors map[string]NodePrior) (ScoreResult, error) {
 	knownVars := m.artifact.KnownVars()
 	obs, novelVars := EvidenceToObservations(ev, knownVars)

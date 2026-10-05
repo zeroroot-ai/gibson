@@ -9,7 +9,7 @@ package config
 import "testing"
 
 // TestSandboxConfig_DefaultsAgentSandboxClass pins the AgentSandboxClass
-// defaulting in Validate (ADR-0016 / gibson#1596). The class default is applied
+// defaulting in Validate (ADR-0116 / gibson#1596). The class default is applied
 // before the later mTLS/cert checks, so this asserts the side-effect directly
 // and does not depend on a fully valid mTLS config — an empty class must never
 // reach the launcher (it would defer to the cluster-default posture, ADR-0052).

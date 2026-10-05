@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // server_connector_revoke_test.go — the operator-scoped RevokeConnectorGrant
-// (ADR-0015 §5): it delegates to the shared revoker with the tenant carried
+// (ADR-0061): it delegates to the shared revoker with the tenant carried
 // explicitly, and answers Unavailable when no revoker is wired.
 package api
 

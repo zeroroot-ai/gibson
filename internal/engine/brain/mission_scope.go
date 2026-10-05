@@ -5,7 +5,7 @@ package brain
 
 // mission_scope.go scopes a fold to a single mission run (gibson#1060, PRD #1059).
 //
-// The World is a fold of the tenant Timeline (ADR-0001: World == fold(Timeline)).
+// The World is a fold of the tenant Timeline (ADR-0101: World == fold(Timeline)).
 // To replay one mission run in isolation we fold not the whole Timeline but the
 // mission's *slice* of it — the sub-sequence of events attributable to that
 // mission, in Timeline order. Folding a slice is still a pure events→world fold;
@@ -135,7 +135,7 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		// run_id-based cross-mission bleed (gibson#1063).
 		return e.MissionID != "" && e.MissionID == missionID
 	case AgentToolCallObserved:
-		// Flight recorder (ADR-0020, gibson#271): same mission-evidence edge as
+		// Flight recorder (ADR-0120, gibson#271): same mission-evidence edge as
 		// LlmCallObserved, so a mission-scoped frame's Timeline shows the tool
 		// calls that mission's agents made, attached to the mission they served.
 		// Empty MissionID = tenant-ambient, same as an ExecuteLLM call.

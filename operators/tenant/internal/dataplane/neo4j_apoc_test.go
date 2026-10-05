@@ -118,7 +118,7 @@ func neo4jContainer(t *testing.T, sts *appsv1.StatefulSet) corev1.Container {
 // TestTenantNeo4jLoadsOnlyTheMergeProcedures is the allowlist's reason for
 // existing: the projector needs apoc.merge.*, and every APOC procedure that
 // touches the filesystem or the network must be absent from the database
-// entirely (ADR-0012).
+// entirely (ADR-0112).
 //
 // It fails if the allowlist is widened — `apoc.*`, `apoc.export.*`, an added
 // `apoc.load.json`, or the Neo4j default `*` all flip one of the "must not be
@@ -161,7 +161,7 @@ func TestTenantNeo4jLoadsOnlyTheMergeProcedures(t *testing.T) {
 	}
 }
 
-// TestTenantNeo4jNeverSetsProceduresUnrestricted guards the setting ADR-0012
+// TestTenantNeo4jNeverSetsProceduresUnrestricted guards the setting ADR-0112
 // singles out. Neo4j Community has no in-database RBAC, so `unrestricted`
 // applies to every connection holding the bolt credential — the same
 // credential the projector uses — and converts a graph-write bug into a
@@ -178,7 +178,7 @@ func TestTenantNeo4jNeverSetsProceduresUnrestricted(t *testing.T) {
 	sts, _ := buildTestNeo4j(t)
 
 	if v, ok := neo4jSettings(t, sts)["dbms.security.procedures.unrestricted"]; ok {
-		t.Errorf("dbms.security.procedures.unrestricted is set to %q; ADR-0012 says it is never set — "+
+		t.Errorf("dbms.security.procedures.unrestricted is set to %q; ADR-0112 says it is never set — "+
 			"on Community it grants filesystem and network reach to every holder of the bolt credential", v)
 	}
 

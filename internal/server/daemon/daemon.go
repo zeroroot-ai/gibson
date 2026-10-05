@@ -122,13 +122,13 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
-	// beliefProvider scores the belief field (ADR-0005), in-process via the
-	// native Go belief runtime (ADR-0034). Held here so the mission launch path
-	// can pin its model version (ADR-0005 §5).
+	// beliefProvider scores the belief field (ADR-0134), in-process via the
+	// native Go belief runtime (ADR-0134). Held here so the mission launch path
+	// can pin its model version (ADR-0134).
 	beliefProvider brain.BeliefProvider
 
 	// liveAgents is the in-memory registry of running agent instances and their
-	// live structured-event feeds (ADR-0016 S11). The sandboxed agent launcher
+	// live structured-event feeds (ADR-0116 S11). The sandboxed agent launcher
 	// tees each run's events into it; AgentConsoleService reads them back,
 	// tenant-scoped. Shared by both wiring points, so it is created once here.
 	liveAgents *liveagents.Registry
@@ -242,7 +242,7 @@ type daemonImpl struct {
 	connectorTokenReconciler *reconciler.ConnectorTokenReconciler
 
 	// The sandboxed agent launcher and what a member launch needs beside it
-	// (ADR-0019, gibson#1709). Captured when newHarnessFactory wires them so
+	// (ADR-0119, gibson#1709). Captured when newHarnessFactory wires them so
 	// the bank reconciler can launch a member outside any mission harness.
 	// Nil when setec dispatch is not built or not enabled.
 	agentLauncher           *sandboxed.AgentLauncher
@@ -253,8 +253,8 @@ type daemonImpl struct {
 	// enqueues on and the callback service delivers from (gibson#1715).
 	memberControl *harness.MemberControl
 
-	// bankRunner keeps every bank at its desired member count (ADR-0019
-	// decision 1). Built and started by Start; nil when the data-plane pool,
+	// bankRunner keeps every bank at its desired member count (ADR-0119).
+	// Built and started by Start; nil when the data-plane pool,
 	// the launcher or the signing key is unavailable.
 	bankRunner *bankengine.Runner
 
@@ -273,7 +273,7 @@ type daemonImpl struct {
 	// connectorAuthSrv is the ConnectorAuthService handler. Hoisted onto the
 	// daemon (built in registerConnectorAuth) so the pre-auth native-login
 	// listener can mount the OAuth callback route against the SAME server: the
-	// callback and the RPC share one pending-authorization store (ADR-0014).
+	// callback and the RPC share one pending-authorization store (ADR-0114).
 	// Nil when the secrets stack is unavailable.
 	connectorAuthSrv *admin.ConnectorAuthAdminServer
 
@@ -378,7 +378,7 @@ type daemonImpl struct {
 	// enforcement is a no-op while nil.
 	quotaManager *component.QuotaManager
 
-	// entitlementsProvider is the ADR-0003 seam: it answers "what are this
+	// entitlementsProvider is the ADR-0089 seam: it answers "what are this
 	// tenant's limits?" for the OSS enforcers (QuotaManager, budget). The OSS
 	// build wires the config-driven default; the commercial layer swaps in a
 	// plan/subscription provider behind the same interface (gibson#798).
@@ -449,7 +449,7 @@ type daemonImpl struct {
 	graphBus *graph.Bus
 
 	// graphWriter is the sole writer of the per-tenant knowledge graph
-	// (ADR-0007, ADR-0012). RPC handlers that need a node materialized call
+	// (ADR-0107, ADR-0112). RPC handlers that need a node materialized call
 	// through it instead of opening their own Neo4j write transaction; the
 	// `graphwrite` gibsoncheck analyzer keeps it that way. Nil until Start()
 	// wires it, so callers must nil-check.
@@ -488,11 +488,11 @@ type daemonImpl struct {
 	reasoner *ontology.Reasoner
 
 	// domainPackCatalog is the curated, shipped set of catalog Domain Packs
-	// (ADR-0033 decision 1, gibson#381). Constructed during newInfrastructure
+	// (ADR-0133, gibson#381). Constructed during newInfrastructure
 	// alongside reasoner and shared by DomainPackService (ListCatalog /
 	// EnableDomainPack) and the startup catalog-gate seed. Seeded with the
 	// skeleton "main" pack (gibson#382, see ontology.MainDomainPack) — every
-	// pack it carries ships default-off (ADR-0033 decision 4); a fresh
+	// pack it carries ships default-off (ADR-0133); a fresh
 	// tenant's World carries none of a listed pack's bindings until that
 	// tenant's admin calls EnableDomainPack.
 	domainPackCatalog *ontology.DomainPackCatalog
@@ -566,7 +566,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	logCfg.Component = "daemon"
 	d.logger = observability.NewLoggerFromSlog(slogLogger, logCfg)
 
-	// Live-agent registry (ADR-0016 S11): the shared in-memory index of running
+	// Live-agent registry (ADR-0116 S11): the shared in-memory index of running
 	// agent instances and their event feeds. Created unconditionally so
 	// AgentConsoleService always registers; it stays empty until the sandboxed
 	// launcher (setec_integration build) tees a run into it.
@@ -600,7 +600,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// during Start, after these options are assembled, so a getter is the only
 	// way to reach it. Until it exists a presented grant is refused, not
 	// trusted.
-	// The member-facing job surface (ADR-0019, gibson#1711). Each seam is read
+	// The member-facing job surface (ADR-0119, gibson#1711). Each seam is read
 	// lazily for the same reason the task-grant verifier is: the data-plane
 	// pool and the signing key are built during Start, after these options are
 	// assembled. A member callback on a daemon that has neither says so rather
@@ -1022,7 +1022,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
-	// tenant's World from its live mission event stream (ADR-0001 capture path).
+	// tenant's World from its live mission event stream (ADR-0101 capture path).
 	beliefProvider, err := resolveBeliefProvider()
 	if err != nil {
 		d.stopServices(ctx)
@@ -1044,11 +1044,11 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	// Belief inference runs in-process (ADR-0034) but still off the tick, since
+	// Belief inference runs in-process (ADR-0134) but still off the tick, since
 	// exact variable elimination is not free: BeliefSystem asks for a score when
 	// a host's evidence changes, and the worker WireBelief installs answers with
 	// a BeliefScored event (gibson#25), so inference never blocks the ~50ms tick.
-	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0029), the
+	// wireBrainRegistry ALSO installs WireSliceBelief (gibson#275, ADR-0129), the
 	// graph-coupled pipeline, the same way, off its own ticker: it derives the
 	// current attack graph from the engine's live hosts (gibson#286), extracts
 	// each host's bounded slice (gibson#287), and refines/propagates belief
@@ -1059,7 +1059,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
 		"slice_belief_model", sliceBeliefProvider.Version())
 
-	// Project each tenant's World into its Neo4j knowledge graph (ADR-0007): the
+	// Project each tenant's World into its Neo4j knowledge graph (ADR-0107): the
 	// graph is a read-model of the World, written only by this projector. Runs
 	// async (never in the brain tick) so Neo4j I/O never blocks the reducer; the
 	// pool is resolved lazily since it is initialized after this point.
@@ -1148,7 +1148,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "ECS brain executor wired (brain is the mission engine)")
 
 		// Install the Timeline→lifecycle projector on every per-tenant engine
-		// (ADR-0011 decision 4, gibson#1116). The projector converts brain.Events
+		// (ADR-0163, gibson#1116). The projector converts brain.Events
 		// to the coarse dashboard vocabulary (status + node.*) and publishes them
 		// to the in-process EventBus and the tenant's Redis stream. This replaces
 		// the scattered emitEvent calls that previously emitted these events from
@@ -1196,7 +1196,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// platformDB is guaranteed non-nil here: initPlatformPostgres ran
 		// earlier in Start() and is fatal on failure (gibson#246).
 		//
-		// Limits flow through the entitlements seam (ADR-0003): entitlements.New
+		// Limits flow through the entitlements seam (ADR-0089): entitlements.New
 		// returns the commercial Stripe-backed provider when the closed billing
 		// module registered one (gibson#798/#800), else the OSS config-driven
 		// default that derives per-tenant limits from admin-set quota config.
@@ -1265,7 +1265,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// projected the signing-key Secret. Announced below.
 				KeyProvider: keyProvider,
 				KeyID:       cgJWTKeyID(),
-				// ADR-0010 / gibson#998: the Minter rejects non-hosted isolation
+				// ADR-0110 / gibson#998: the Minter rejects non-hosted isolation
 				// modes at issuance under the hosted setec-only shape.
 				Shape: dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
 			}); mErr != nil {
@@ -1418,7 +1418,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.pool = p
 				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
 
-				// Wire the durable Timeline store into the brain registry (ADR-0011,
+				// Wire the durable Timeline store into the brain registry (ADR-0163,
 				// gibson#1114). Now that the data-plane pool is available we can resolve
 				// a per-tenant Redis client for each new engine. The factory is
 				// invoked lazily inside Registry.For on first tenant touch — not at
@@ -1433,7 +1433,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						return aofErr
 					}
 					d.brainRegistry.WithStoreFactory(timelineStoreFactory(d.pool, d.logger.Slog()))
-					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
+					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0163, #1114)")
 				}
 			}
 
@@ -1492,19 +1492,19 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with event bus")
 	}
 
-	// Wire the Observe RPC to the per-tenant brain (ADR-0007): typed agent
+	// Wire the Observe RPC to the per-tenant brain (ADR-0107): typed agent
 	// observations become Timeline events the reducer folds into the World, where
-	// scope-relative identity (ADR-0002) resolves entities + topology.
+	// scope-relative identity (ADR-0102) resolves entities + topology.
 	//
 	// The sink is no longer given a tenant here. It used to close over
 	// d.registryTenant — one process-wide value, so every tenant's observations
 	// landed in one World. Tenant and scope are now resolved per call from the
-	// mission record the daemon created (ADR-0012, gibson#1256).
+	// mission record the daemon created (ADR-0112, gibson#1256).
 	if d.brainRegistry != nil {
 		d.callback.SetObservationSink(ingestObservation(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback Observe RPC to the ECS brain")
 
-		// Wire the WorldView RPC to the per-tenant brain (ADR-0012 read half,
+		// Wire the WorldView RPC to the per-tenant brain (ADR-0112 read half,
 		// gibson#1377): the read complement of Observe. Projects a
 		// mission-Scope-limited, handle-named slice of the tenant World back to
 		// the agent — the agent authors neither tenant nor scope (both resolved
@@ -1534,14 +1534,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "wired callback LLM completion RPCs to the ECS brain World")
 
 		// Wire CallToolProto to the per-tenant World's AgentToolCall capture —
-		// the flight recorder's tool-I/O half (ADR-0020, gibson#271). Before
+		// the flight recorder's tool-I/O half (ADR-0120, gibson#271). Before
 		// this, a fleet agent's tool calls reached the daemon only as bare
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
-		// Wire PlaceBet's belief substrate (ADR-0022, ADR-0029 §3,
+		// Wire PlaceBet's belief substrate (ADR-0122, ADR-0129,
 		// gibson#273/#278): before this, PlaceBet always answered Unavailable
 		// — no daemon ever gave it a substrate to persist a staked bet to.
 		// tenantRoutedBeliefSubstrate resolves each call's tenant from ctx
@@ -1553,7 +1553,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		wirePlaceBetBeliefSubstrate(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback PlaceBet RPC to the ECS brain belief substrate")
 
-		// Wire SubmitProof's proof-settlement engine (ADR-0030, ADR-0031,
+		// Wire SubmitProof's proof-settlement engine (ADR-0131,
 		// gibson#389): before this, SubmitProof always answered Unavailable —
 		// no daemon ever gave it an engine to resolve Domain Pack CEL
 		// predicates and settle bets against. tenantRoutedProofSettlement
@@ -1563,8 +1563,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		wireProofSettlement(d.callback, d.brainRegistry)
 		d.logger.Info(ctx, "wired callback SubmitProof RPC to the ECS brain settlement engine")
 
-		// Wire ProposeOntologyExtension's ontology-discovery engine (ADR-0024
-		// §2, ADR-0033 decision 2, gibson#391): before this,
+		// Wire ProposeOntologyExtension's ontology-discovery engine (ADR-0124,
+		// ADR-0133, gibson#391): before this,
 		// ProposeOntologyExtension always answered Unavailable — no daemon
 		// ever gave it an engine to fold the proposal through ValidIdentifier
 		// and PromotionGate.Observe. tenantRoutedOntologyDiscovery resolves
@@ -2047,7 +2047,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// an operator has to mount (gibson#1744).
 		d.registerComponentCatalogReadiness(ctx, catalogGate)
 
-		// Seed the Domain Pack platform catalog gate (ADR-0033, gibson#381):
+		// Seed the Domain Pack platform catalog gate (ADR-0133, gibson#381):
 		// every catalog pack gets its platform_enabled tuple, so
 		// DomainPackService's gate checks pass for listed entries and fail
 		// for anything else. Startup converge, add-only, best-effort — a
@@ -2084,7 +2084,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "connector token refresher started (5m interval)")
 	}
 
-	// Start the bank reconciler (ADR-0019 decision 1, gibson#1709): every
+	// Start the bank reconciler (ADR-0119, gibson#1709): every
 	// bank is brought to its desired member count on each pass.
 	d.startBankRunner(ctx)
 

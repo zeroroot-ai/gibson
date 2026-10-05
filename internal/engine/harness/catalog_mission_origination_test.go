@@ -51,7 +51,7 @@ func catalogReq(name string, params map[string]string) *harnesspb.CreateMissionR
 }
 
 // A caller naming a checked-in mission gets the checked-in graph. This is the
-// whole point of ADR-0018: before it, nothing could reference the definition,
+// whole point of ADR-0118: before it, nothing could reference the definition,
 // so the agent kept a second copy.
 func TestResolveMissionDefinitionJSON_CatalogMissionRendersTheCheckedInGraph(t *testing.T) {
 	t.Parallel()

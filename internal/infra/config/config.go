@@ -117,7 +117,7 @@ type Config struct {
 	// untrustedExec controls the untrusted-execution isolation policy
 	// ("setec-only" | "customer-isolation"), sourced from GIBSON_UNTRUSTED_EXEC.
 	// Read via UntrustedExecMode(). Not sourced from YAML — env-var only.
-	// Empty (unwired) reads as "setec-only" (fail-closed). See ADR-0010.
+	// Empty (unwired) reads as "setec-only" (fail-closed). See ADR-0110.
 	untrustedExec string
 }
 
@@ -130,7 +130,7 @@ func (c *Config) StrictTenant() bool {
 // UntrustedExecMode returns the untrusted-execution isolation policy
 // ("setec-only" or "customer-isolation"), from GIBSON_UNTRUSTED_EXEC.
 // Fail-closed: an unset value reads as "setec-only". The harness translates
-// this to a dispatchpolicy.DeploymentShape. See ADR-0010.
+// this to a dispatchpolicy.DeploymentShape. See ADR-0110.
 func (c *Config) UntrustedExecMode() string {
 	if c.untrustedExec == "" {
 		return "setec-only"

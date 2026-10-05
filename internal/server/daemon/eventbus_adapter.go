@@ -77,7 +77,7 @@ func (a *OrchestratorEventBusAdapter) Publish(event events.Event) {
 		}
 	}
 
-	// ECS-brain ingest (optional) — the capture path (ADR-0001): feed the
+	// ECS-brain ingest (optional) — the capture path (ADR-0101): feed the
 	// tenant's brain World from the live mission event stream.
 	ingestToBrain(a.brainReg, a.tenant, eventData)
 }

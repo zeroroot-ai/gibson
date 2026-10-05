@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package brain — flight_recorder.go: per-tenant retention/redaction policy
-// for the always-on transcript + tool-I/O capture (ADR-0020, gibson#271).
+// for the always-on transcript + tool-I/O capture (ADR-0120, gibson#271).
 //
 // Capture itself is never optional: every LlmCall (llm_call.go) and every
 // AgentToolCall (tool_call.go) always records its full text at fold time. This
@@ -23,7 +23,7 @@ import (
 
 // FlightRecorderPolicy is the per-tenant retention/redaction configuration.
 // There is exactly one policy per tenant World (a World is already
-// tenant-scoped, ADR-0001), applied at fold time to every LlmCall/AgentToolCall
+// tenant-scoped, ADR-0101), applied at fold time to every LlmCall/AgentToolCall
 // text field folded after it takes effect.
 type FlightRecorderPolicy struct {
 	// Redact, when true, scrubs common secret-shaped substrings (bearer
@@ -44,7 +44,7 @@ type FlightRecorderPolicy struct {
 var DefaultFlightRecorderPolicy = FlightRecorderPolicy{}
 
 // FlightRecorderPolicySet configures a tenant's retention/redaction policy
-// (ADR-0020 acceptance criterion: "retention and redaction are configurable
+// (ADR-0120 acceptance criterion: "retention and redaction are configurable
 // per tenant"). It is a domain event like any other, so a policy change is
 // itself part of the deterministic Timeline: replay reproduces the exact
 // policy in force at the time each transcript/tool-I/O event was folded,

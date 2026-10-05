@@ -36,7 +36,7 @@ type MarkerPresentParams struct {
 // RegisterMarkerPresent registers the MarkerPresent evaluator for technique.
 // MarkerPresent evaluates true iff at least one piece of captured evidence
 // contains the configured marker string — the deterministic check behind
-// "prove control, not damage" (ADR-0027, decision 4): a demonstration
+// "prove control, not damage" (ADR-0131): a demonstration
 // captures a benign marker as its proof, and this predicate confirms the
 // marker actually shows up in what was captured.
 func RegisterMarkerPresent(r *settlement.Registry, technique settlement.TechniqueID) error {

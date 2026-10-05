@@ -3,9 +3,9 @@
 
 // Package daemonclient is the connector-operator's client to the daemon's
 // DaemonOperatorService. The ConnectorInstance finalizer revokes a connector's
-// grant on delete (ADR-0015 §5, gibson#1566), and the ConnectorInstance
+// grant on delete (ADR-0061, gibson#1566), and the ConnectorInstance
 // controller reads the connector's credential state so the CR reports Degraded
-// instead of a silent Active (ADR-0015 decision 4).
+// instead of a silent Active (ADR-0061).
 //
 // The operator has no secret-store client by design: the daemon owns the
 // Grant and the access pair, so the operator only carries the (tenant,

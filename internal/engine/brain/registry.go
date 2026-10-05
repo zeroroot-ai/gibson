@@ -16,7 +16,7 @@ import (
 type StoreFactory func(ctx context.Context, tenant string) TimelineStore
 
 // Registry holds one brain Engine per tenant and runs each engine's tick loop.
-// It is the daemon's entry point to the brain: live, per-tenant Worlds (ADR-0001:
+// It is the daemon's entry point to the brain: live, per-tenant Worlds (ADR-0101:
 // one World per tenant, never shared — no cross-tenant anything). The read path
 // (WorldService / TimelineService) and event ingest both go through here.
 type Registry struct {
@@ -25,7 +25,7 @@ type Registry struct {
 	engines      map[string]*Engine
 	systems      []System        // installed on every per-tenant engine (e.g. belief, orchestrator)
 	hooks        []func(*Engine) // run once per engine at creation (e.g. WireExecutor)
-	storeFactory StoreFactory    // optional: creates a per-tenant TimelineStore (ADR-0011)
+	storeFactory StoreFactory    // optional: creates a per-tenant TimelineStore (ADR-0163)
 }
 
 // NewRegistry returns a Registry. The systems are installed on each engine as it
@@ -46,7 +46,7 @@ func (r *Registry) OnEngine(fn func(*Engine)) {
 }
 
 // WithStoreFactory installs a StoreFactory that is called once per new Engine to
-// produce the per-tenant durable TimelineStore (ADR-0011). The factory is called
+// produce the per-tenant durable TimelineStore (ADR-0163). The factory is called
 // under the registry mutex so it must not block indefinitely or call For(). Set
 // this before the first For() call (i.e. before any engine is created).
 //
@@ -59,7 +59,7 @@ func (r *Registry) WithStoreFactory(f StoreFactory) {
 
 // For returns the tenant's Engine, creating and starting its tick loop on first
 // use. On first creation the store factory (if set) is invoked to wire durable
-// persistence and hydrate the World from the persisted Timeline (ADR-0011).
+// persistence and hydrate the World from the persisted Timeline (ADR-0163).
 // Tenant isolation is structural: each tenant gets its own Engine + World.
 func (r *Registry) For(tenant string) *Engine {
 	r.mu.Lock()

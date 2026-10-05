@@ -423,7 +423,7 @@ func (s *CallbackServer) SetSessionContextStore(store SessionContextStore) {
 }
 
 // SetBeliefSubstrate wires the belief substrate PlaceBet persists staked bets
-// to (ADR-0022, ADR-0029 §3, gibson#273/#278). When not set, PlaceBet returns
+// to (ADR-0122, ADR-0129, gibson#273/#278). When not set, PlaceBet returns
 // Unavailable. Must be called before Start().
 func (s *CallbackServer) SetBeliefSubstrate(substrate brain.BeliefSubstrate) {
 	s.service.beliefSubstrate = substrate

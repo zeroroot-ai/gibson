@@ -131,7 +131,7 @@ _Avoid_: attributes, properties, metadata
 **Taxonomy**:
 The **global**, platform-versioned allow-list of node labels and relationship types the
 Knowledge graph may materialise — the same for every tenant. `Sensing` promotes a recurring
-`Observation` shape into the Taxonomy. Since [ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md)
+`Observation` shape into the Taxonomy. Since ADR-0124
 promotion happens **at runtime through a safety-gated settlement** — a proposed label must pass
 `ValidIdentifier` and settle (recurrence plus HITL) before it reaches query structure — and is
 no longer a reviewed code change. A shape outside the Taxonomy is never rejected — it
@@ -285,87 +285,87 @@ out-of-band** — a batch job (`braintrain`) fits CPTs from event-log outcomes (
 outcome` pairs are auto-labeled by mission results) and ships a **versioned model**; each
 mission **pins the model version** it ran under so replay reproduces exactly. The LLM supplies
 priors only for **novel** nodes the model has no table for. Inference runs **in-process, in Go**
-(ADR-0034, `internal/engine/brain/beliefvi`) — no sidecar, no round-trip; **pgmpy** is kept only
+(ADR-0134, `internal/engine/brain/beliefvi`) — no sidecar, no round-trip; **pgmpy** is kept only
 as the offline training / parity oracle (`sidecar/belief`, never a deployed dependency), asserted
 to agree with the Go engine to 1e-12. Sources: a **commercial** curated **base model** (vendor
 red-team + public CVE/ATT&CK only — never tenant data) + per-tenant refinement. Labels never
 leave the tenant; **within** a tenant they pool across all its users.
 _Avoid_: LLM scoring, online learning (breaks replay), sampling/approximate inference
 
-### Hypotheses, bets and Domain Packs (decided 2026-09-27, ADR-0021 – ADR-0025)
+### Hypotheses, bets and Domain Packs (decided 2026-09-27, ADR-0121 to ADR-0124, ADR-0133)
 
 **Hypothesis**:
 A proposed, unproven claim an agent writes to the graph — its own reasoning, not a sighting.
 Attributed to the proposing agent and carries a confidence. It stays unverified until it
 settles. Modeled as a `HypothesisObservation`, so the agent write surface stays emit-only
-([ADR-0021](docs/adr/0021-agents-emit-hypotheses.md)).
+(ADR-0121).
 _Avoid_: finding (a settled result), guess, belief (the system computes that, agents do not assert it)
 
 **Bet**:
 An agent's calibrated stake on a Hypothesis. Being wrong costs standing. A stake that settles,
-not a bare confidence number ([ADR-0022](docs/adr/0022-betting-prediction-market.md)).
+not a bare confidence number (ADR-0122).
 _Avoid_: score, confidence (a Bet is staked and settled)
 
 **Settlement**:
 How a Bet resolves: demonstrated proof in a sandbox (TRUE), a bounded attempt budget exhausted
 (FALSE), or a human verdict for a judgment call. Never an LLM judge. The human verdict is
 asynchronous labeling, never a runtime approval gate
-([ADR-0023](docs/adr/0023-bet-settlement.md), consistent with [ADR-0008](docs/adr/0008-autonomous-execution-no-hitl.md)).
+(ADR-0123, consistent with ADR-0108).
 _Avoid_: LLM-as-judge, approval gate
 
 **Reputation**:
 The durable track record of a *technique × environment*, never of an agent (members are
 interchangeable). Persists per tenant. Feeds the prior strength on new Hypotheses of that
-technique and the priority of pursuing them ([ADR-0022](docs/adr/0022-betting-prediction-market.md)).
+technique and the priority of pursuing them (ADR-0122).
 _Avoid_: agent reputation, per-run score
 
 **Domain Pack**:
 The discovered Taxonomy and ontology for one vertical or target type (k8s, web, a LAN, defense,
 healthcare). Accumulates from usage, seeded minimally, portable. The unit sold per vertical. It
 carries structure, never a tenant's secrets
-([ADR-0024](docs/adr/0024-discoverable-taxonomy-and-ontology.md), [ADR-0025](docs/adr/0025-domain-packs.md)).
+(ADR-0124, ADR-0133).
 _Avoid_: template, ruleset
 
-### Packs, proposals, and contribution (decided 2026-09-29, ADR-0030 – ADR-0037)
+### Packs, proposals, and contribution (decided 2026-09-29, ADR-0131 to ADR-0135, ADR-0137)
 
 **Proposal**:
 A candidate extension (a node label, relationship type, ontology triple, or predicate) that a
 tenant's agent captured at runtime. Not yet live anywhere; it sits in the tenant's queue for the
 owner to see, through the ValidIdentifier safety gate, with PromotionGate de-duping recurrences
-([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+(ADR-0133).
 _Avoid_: discovery (the act), extension (the approved result)
 
 **Tenant extension**:
 A Proposal the tenant owner has explicitly approved. Live in that one tenant only, as
 event-sourced, mission-pinned state — never shared, never sold. This is a tenant's private
-self-construction ([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+self-construction (ADR-0133).
 _Avoid_: Catalog pack (that is the shared, curated tier)
 
 **Catalog pack**:
 A versioned Domain Pack the platform owner curates and distributes to all tenants — SDK source of
 truth, shipped via release/rollout, entitlement-gated (free or paid). Pure data (taxonomy /
 ontology + CEL predicates), never code
-([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+(ADR-0133).
 _Avoid_: Tenant extension (that is the private tier), template
 
 **Contribution**:
 A Tenant extension a tenant nominates upstream — realized as a PR into the SDK (which anyone may
 open), reviewed and merged by the platform owner to become a Catalog pack
-([ADR-0033](docs/adr/0033-domain-packs-two-tier-catalog-and-tenant-extensions.md)).
+(ADR-0133).
 _Avoid_: submit (the action), merge (the platform-owner gate)
 
 **CEL evidence-environment**:
 The gibson-owned surface a settlement predicate's CEL expression may reference — the evidence
 schema plus a curated helper catalog. A pack predicate that stays within it is read in and just
 works; extending it is the only thing that needs a gibson change
-([ADR-0031](docs/adr/0031-settlement-predicates-are-cel-over-a-gibson-environment.md)).
+(ADR-0131).
 _Avoid_: evaluator (the old per-technique Go function this replaces)
 
 **Enablement-edge schema**:
 Per enablement-edge-type: the declared **target variable** it feeds on the destination node
 (structure, in the pack) and the **noisy-OR strength** it contributes (a learned Beta posterior
 from braintrain, uninformative prior at cold-start — never hand-authored)
-([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)). Braintrain
+(ADR-0137). Braintrain
 (gibson#395, `internal/engine/braintrain/edge_posterior.go`) now fits that posterior: a
 Beta-Bernoulli update per edge type from recorded (cause-active -> effect-observed?) outcomes,
 versioned per tenant (`tenant-<id>-edges-v<n>`, independent of the belief-CPT model's own
@@ -375,7 +375,7 @@ samples the same artifact. No posterior pinned still means the documented cold s
 may have no recorded outcomes yet.
 _Avoid_: influence weight, hand-tuned strength
 
-### Belief substrate (decided 2026-09-27, ADR-0029, amends ADR-0005)
+### Belief substrate (decided 2026-09-27, ADR-0129)
 
 **Belief substrate (PRM)**:
 The one relational probabilistic model over the graph. Any node type — asset, finding,
@@ -383,28 +383,28 @@ technique, mission — declares its belief variables and dependencies in the ont
 `{reachable, exploitable, juicy}` on assets is seed content, not structure. The Bet market
 and Reputation are **views** of it: belief on a claim-node (`P(claim valid)`) and belief on
 a technique × environment node (`P(technique works here)`)
-([ADR-0029](docs/adr/0029-belief-is-a-relational-prm-over-the-graph.md)).
+(ADR-0129).
 _Avoid_: belief field (the older per-host framing), separate reputation store, per-host net
 
 **Bayesian attack graph**:
 The directed-acyclic graph belief propagates over, derived from the infra graph because
 enablement is directional. Belief on a node is computed by **exact inference on a bounded,
 deterministically-extracted acyclic slice** toward that node — the bound is in the slice's
-scope, never in the inference (ADR-0029, keeps ADR-0005's "exact only").
+scope, never in the inference (ADR-0129, keeps ADR-0134's "exact only").
 _Avoid_: infra graph (the raw, cyclic one), loopy propagation (rejected)
 
-### Planning and proof (decided 2026-09-27, ADR-0026 – ADR-0028)
+### Planning and proof (decided 2026-09-27, ADR-0126, ADR-0131, ADR-0132)
 
 **Value-of-Information (VoI)**:
 How the fleet chooses what to do next: it plans several steps ahead over the belief field
 and pursues the move that most reduces uncertainty about the goal, net of cost. It narrows
 the options to the highest-value few; the LLM picks within them. Not a new model — it queries
 the belief network with hypothetical outcomes. The planner is BAMCP (fully Bayesian)
-([ADR-0026](docs/adr/0026-bayesian-sequential-planner.md)).
+(ADR-0126).
 The native Go BAMCP planner (`internal/engine/brain/bamcp.go`, gibson#396) is now live: it
 grounds the mission's belief network the same way exact inference does, then runs seeded
 Monte Carlo rollouts that Thompson-sample each enablement edge's Beta posterior
-([ADR-0037](docs/adr/0037-enablement-edge-strengths-are-learned-not-authored.md)) instead of
+(ADR-0137) instead of
 using its fixed prior mean. A fixed seed always replays the same rollouts. It refines
 `PlanVoI`'s one-step ranking. The Decider is now hard-gated to it (gibson#397,
 `internal/engine/brain/decider.go`'s `voiGatedDispatch`): a dispatch's target capability must
@@ -417,26 +417,26 @@ _Avoid_: prioritization score (VoI is forward-looking planning, not a static sco
 **Proof-of-demonstration**:
 The evidence that settles a Bet TRUE: the fleet demonstrated the claim and a typed success
 predicate fired against the captured evidence. Never an LLM opinion
-([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+(ADR-0131).
 _Avoid_: proof (unqualified), report
 
 **Success predicate**:
 A machine-checkable condition, typed and drawn from the technique (not free-form), that
 defines what would prove a Hypothesis. A Bet settles TRUE iff its predicate evaluates true
-against captured evidence ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+against captured evidence (ADR-0131).
 _Avoid_: assertion, check
 
 **Proof-of-control**:
 A demonstration that proves a capability exists without causing harm — a benign marker that
 the fleet could reach, read, or act, never destruction or real-data exfiltration. The
-default, non-gated proof ([ADR-0027](docs/adr/0027-proof-of-demonstration.md)).
+default, non-gated proof (ADR-0131).
 _Avoid_: proof-of-damage (that is the gated, destructive case)
 
 **Destructive-proof authorization**:
 A per-action human approval, in the dashboard, before an irreversible or state-changing
 demonstration runs. The fleet keeps working while that one action waits
-([ADR-0028](docs/adr/0028-destructive-proof-authorization-gate.md), amends
-[ADR-0008](docs/adr/0008-autonomous-execution-no-hitl.md)).
+(ADR-0132, amends
+ADR-0108).
 _Avoid_: approval gate (unqualified — the gate is per-action, not per-mission)
 
 **Runtime engine (clock-tick game loop)**:
@@ -489,14 +489,14 @@ _Avoid_: discovered tools as `component` objects, per-tool deny rows
 A connector is an FGA **object only** — it is called, it never calls. There is no
 `connector_principal`, and `secret.can_resolve` stays `[plugin_principal]` (the
 isolation test is untouched). Credentials reach the ToolHive proxy via a
-daemon-materialized k8s Secret (ADR-0015); no runtime principal resolves them.
+daemon-materialized k8s Secret (ADR-0061); no runtime principal resolves them.
 "Works like plugins" holds for the object side only, and this asymmetry is
 deliberate (decided 2026-08-24).
 _Avoid_: adding `connector_principal` to "complete the pattern", connector secret resolution
 
 **Connector credential**:
 The vendor credential a ToolHive proxy forwards to the third-party MCP server.
-Two secrets, one visible to the connector (ADR-0015): the **Grant** (OAuth refresh
+Two secrets, one visible to the connector (ADR-0061): the **Grant** (OAuth refresh
 token, client id, token endpoint, scope) is platform-*code*-only — the connector
 never reads it — while the **access token** is short-lived and the only thing the
 connector is shown, as `Bearer <token>` in a k8s Secret `<connector>-connector-cred`.
@@ -509,7 +509,7 @@ loud `Degraded`, never a silent fallback.
 _Avoid_: ESO for connector creds, the operator holding the token, a grant in a gibson platform location
 
 **Connector catalog gate**:
-In scope (decided 2026-08-24, closes the ADR-0014 TODO). One
+In scope (decided 2026-08-24, closes the ADR-0114 TODO). One
 `component:connector/<catalog-id>` object per catalog entry, shared across
 tenants; `tenant_enabled` marks a tenant's enabled instance. The catalog-source
 reconciler converges `platform_enabled` tuples from the embedded catalog table.
@@ -565,7 +565,7 @@ live `platform_operator`-gated publish endpoint
 **Component isolation & egress (all four kinds)**:
 Generalizes the connector isolation envelope (decided 2026-08-27; agent model corrected
 2026-08-28). **Agents are external gRPC components, hosted exactly like plugins — ONE workload
-code path** (ADR-0027). The "trusted in-image agent" idea was WRONG (a misreading of ADR-0010,
+code path** (ADR-0027). The "trusted in-image agent" idea was WRONG (a misreading of ADR-0110,
 which governs untrusted *tool* execution, not the agent process): the registry discovers an
 agent by name and returns a gRPC client (`ComponentDiscovery.DiscoverAgent`), same as a plugin.
 So agent, plugin, and hosted tool/connector are ALL workloads — they run in the tenant's
@@ -581,7 +581,7 @@ First-party agents (e.g. zerocool) live in `zerocool-plugins`, enrolled as exter
 no separate in-image agent runtime.
 
 **Sandbox-isolation and egress-breadth are separate knobs.** Tool execution is *always*
-sandboxed (ADR-0010); a sandbox's egress breadth is independent. External egress is
+sandboxed (ADR-0110); a sandbox's egress breadth is independent. External egress is
 **per-component**, declared by `egressAllow`, the **ceiling**. For a workload (plugin, **agent**,
 connector) it maps to the L7 permission profile + the L3 NetworkPolicy, as connectors do
 (generalized from `ConnectorInstance.spec.EgressAllow`). An agent — itself a workload — ALSO has
@@ -605,11 +605,11 @@ _Avoid_: a tenant widening egress past the manifest ceiling, hostname allow-list
 (use the L7 profile), disabling the default-deny baseline, a per-agent pod/SVID/NetworkPolicy,
 four parallel per-kind catalog loaders
 
-### Banks, members and jobs (decided 2026-09-01, ADR-0019)
+### Banks, members and jobs (decided 2026-09-01, ADR-0119)
 
 Long-lived Claude Code instances fed structured jobs. The wording is copied from
 `zerocool-plugins/CONTEXT.md` § Glossary so both repos name one thing one way.
-The decisions are [ADR-0019](docs/adr/0019-banks-of-always-on-agents.md); how
+The decisions are ADR-0119; how
 the parts move is [`docs/architecture/banks.md`](docs/architecture/banks.md).
 
 **Bank**:
@@ -655,8 +655,8 @@ The identity rule for a long-lived member. One sandbox serves many dispatches ov
 life, so every input message carries the task grant of its own dispatch and every tool call
 in that turn uses it. The driver runs the Gibson MCP server over streamable HTTP on
 localhost inside the sandbox, holds the inbox subscription, and swaps the grant per turn. A
-stdio server Claude Code spawns cannot do this. Recorded in ADR-0019: long-lived
-single-user sandbox, per-turn task grants, MCP over localhost HTTP (amends ADR-0016's
+stdio server Claude Code spawns cannot do this. Recorded in ADR-0119: long-lived
+single-user sandbox, per-turn task grants, MCP over localhost HTTP (amends ADR-0116's
 one-run-one-sandbox rule).
 _Avoid_: session grant, member grant (the member base grant covers lifetime RPCs only)
 
@@ -734,9 +734,9 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
 - **Contributor-doc home** — resolved 2026-08-24: the docs site
   (`zeroroot-ai/docs-site`) is canonical for every contributor-facing procedure
   (Contributing section: add a component kind, change the FGA model, add an RPC).
-  The gibson how-tos migrate there; `gibson/docs/` keeps ADRs (internal), a pointer
-  file, and machine-facing material (`rules.yaml`, `forbidden-patterns.md`, regen
-  commands). No sync pipeline — one prose copy.
+  The gibson how-tos migrate there; `gibson/docs/` keeps a pointer
+  file and machine-facing material (`rules.yaml`, `forbidden-patterns.md`, regen
+  commands). The ADRs live in the `docs` repo. No sync pipeline — one prose copy.
 
 ## Relationships
 
@@ -787,7 +787,7 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
   without changing the Decider contract. **Sibling-mission context is out for v1** — cross-
   mission reuse arrives properly via the belief field at any distance, not an ad-hoc prompt
   dump.
-- **The Decider runs async, never inside a tick** (ADR-0004 forbids slow work in the
+- **The Decider runs async, never inside a tick** (ADR-0104 forbids slow work in the
   ~50 ms tick). A mechanical **gate System** emits a `DecisionRequested` execution entity
   when a goal-mission has new evidence and **no decision already in flight** (quiescent);
   an async Decider worker (between ticks, like the tool dispatcher) serializes the World
@@ -808,10 +808,10 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
   `spawn_cycle_guard`. *Removed entirely:* **HITL approval + escalation** — the brain runs
   **fully autonomously**; bounds come from declared **Rules of Engagement** (CUE
   `MissionConstraints`) + **FGA authz** + the budget System, never a runtime human gate (fits
-  "no polling on human replies"). This is distinct from the **labeling HITL** (ADR-0006,
+  "no polling on human replies"). This is distinct from the **labeling HITL** (ADR-0106,
   belief-model training labels — untouched). *Dropped/subsumed:* **data-policy
   reuse + scoping** (`data_policy`/`policy_checker`) — reuse is implicit (the Decider sees the
-  World), scoping is superseded by scope-relative identity (ADR-0002) + ambient projection;
+  World), scoping is superseded by scope-relative identity (ADR-0102) + ambient projection;
   the CUE `DataPolicy` fields are deprecated. *Already handled:* checkpoint/crash-resume →
   Timeline replay; recall/reflect/embedding/graph-intelligence → ambient projection + belief.
 - **Mission completion.** *No-goal mission* completes **mechanically**: when the scheduler

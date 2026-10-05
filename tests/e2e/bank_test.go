@@ -4,7 +4,7 @@
 //go:build e2e
 // +build e2e
 
-// Package e2e: the bank exit test (ADR-0019, gibson#1718).
+// Package e2e: the bank exit test (ADR-0119, gibson#1718).
 //
 // In plain words: a bank of two members comes up on a real key, both report
 // idle, one job opens and reaches a member, the job closes with a verdict,

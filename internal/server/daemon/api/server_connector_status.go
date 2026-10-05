@@ -6,7 +6,7 @@
 // DaemonOperatorService.GetConnectorAuthStatus: the connector-operator's
 // ConnectorInstance controller asks the daemon why a connector's credential is
 // dead, so the CR carries a Degraded condition instead of a silent Active
-// (ADR-0015 decision 4).
+// (ADR-0061).
 //
 // Only the daemon holds a secret-store client, so only the daemon knows
 // whether a grant still refreshes. The operator owns the CR status and cannot

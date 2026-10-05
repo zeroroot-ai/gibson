@@ -385,7 +385,7 @@ func TestIntegration_GraphRAGStoreEndToEnd(t *testing.T) {
 	}
 
 	// The graph the query reads. The projector is the only thing that writes
-	// nodes (ADR-0012), so the test states the resulting graph directly rather
+	// nodes (ADR-0112), so the test states the resulting graph directly rather
 	// than going through a store-side write API (gibson#1322).
 	missionID := types.NewID()
 

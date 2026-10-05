@@ -15,7 +15,7 @@ import (
 )
 
 // assertTimelineDurability is the daemon boot guard for the durable Timeline
-// (gibson#1119, ADR-0011, PRD gibson#1112): a Timeline is only durable if the
+// (gibson#1119, ADR-0163, PRD gibson#1112): a Timeline is only durable if the
 // data-plane Redis persists an append-only file, so before the Timeline store
 // factory is wired the daemon asserts CONFIG GET appendonly == "yes" once
 // against the data-plane Redis server (AOF is server-level, so one check
@@ -41,7 +41,7 @@ func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword stri
 		return nil
 	}
 	if err := check(ctx, redisAddr, redisPassword); err != nil {
-		log.ErrorContext(ctx, "timeline durability boot guard FAILED: cannot confirm Redis AOF persistence; refusing to start rather than serve a Timeline that would be lost on Redis restart (gibson#1119, ADR-0011)",
+		log.ErrorContext(ctx, "timeline durability boot guard FAILED: cannot confirm Redis AOF persistence; refusing to start rather than serve a Timeline that would be lost on Redis restart (gibson#1119, ADR-0163)",
 			"redis_addr", redisAddr,
 			"err", err,
 		)
@@ -70,7 +70,7 @@ type timelinePoolForer interface {
 //   - pool.For probe fails → logs a warning, returns nil (same fallback).
 //   - Probe succeeds → builds a per-op acquire closure and returns a
 //     *datapool.RedisTimelineStore so the idle evictor can never close the
-//     client underneath a long-lived reference (gibson#1114, ADR-0011).
+//     client underneath a long-lived reference (gibson#1114, ADR-0163).
 //
 // Extraction rationale: moving the closure body here makes it directly
 // testable without launching a full daemon (the factory only needs a
@@ -103,7 +103,7 @@ func timelineStoreFactory(pool timelinePoolForer, log *slog.Logger) func(ctx con
 		// (Append, LoadForReplay, WriteSnapshot, LoadSnapshot, TrimTo)
 		// calls this closure to obtain a fresh Conn and releases it when
 		// the operation completes. This ensures the idle evictor can never
-		// close the client underneath a long-lived reference (gibson#1114, ADR-0011).
+		// close the client underneath a long-lived reference (gibson#1114, ADR-0163).
 		acquire := func(opCtx context.Context) (*goredis.Client, func(), error) {
 			conn, err := pool.For(opCtx, tenantID)
 			if err != nil {

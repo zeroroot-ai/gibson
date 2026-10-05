@@ -25,7 +25,7 @@ func voiEngine(substrate BeliefSubstrate, registry *ontology.BeliefSchemaRegistr
 
 // voiEngineWithCatalog is voiEngine plus an explicit capability catalog and
 // technique hierarchy, for tests proving VoI dispatch gating's
-// CoveringCapabilities resolution (ADR-0035 decision 4, gibson#387).
+// CoveringCapabilities resolution (ADR-0135, gibson#387).
 func voiEngineWithCatalog(
 	substrate BeliefSubstrate,
 	registry *ontology.BeliefSchemaRegistry,
@@ -236,8 +236,8 @@ func TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic(t *testing.T) {
 }
 
 // TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog proves the
-// worker's own catalog/hierarchy (NewVoIWorker's trailing params, ADR-0035
-// decision 4/gibson#387) reach PlanVoI end-to-end through a live tick/drain
+// worker's own catalog/hierarchy (NewVoIWorker's trailing params, ADR-0135/gibson#387)
+// reach PlanVoI end-to-end through a live tick/drain
 // cycle, not just through a directly-constructed VoIPlanInput: a hypothesis
 // candidate's technique resolves against the mission id the gate/worker
 // actually dispatched with.
@@ -274,7 +274,7 @@ func TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog(t *testing.T) 
 }
 
 // TestVoIWorker_BoundsToTopK proves the recorded plan is bounded, not the
-// full candidate set — "VoI gates to top-k" (ADR-0026 §1).
+// full candidate set — "VoI gates to top-k" (ADR-0126).
 func TestVoIWorker_BoundsToTopK(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
 	registry := liveBeliefRegistry(t)
@@ -312,7 +312,7 @@ func TestVoIWorker_ReplayReproducesThePlan(t *testing.T) {
 // TestVoIWorker_SlowPlanningDoesNotStallTheTick proves VoI planning runs off
 // the tick, exactly like the Decider and the belief workers — a slow
 // substrate (standing in for what will eventually be an off-tick sidecar or
-// simulator call) never blocks the ~50ms tick budget (ADR-0026 §4).
+// simulator call) never blocks the ~50ms tick budget (ADR-0126).
 func TestVoIWorker_SlowPlanningDoesNotStallTheTick(t *testing.T) {
 	release := make(chan struct{})
 	substrate := &slowBeliefSubstrate{fakeBeliefSubstrate: newFakeBeliefSubstrate(), release: release}
@@ -373,7 +373,7 @@ func (s *slowBeliefSubstrate) calls() int {
 // (TestVoIWorker_ReplayReproducesThePlan above, via Replay()->Reduce
 // directly) was never affected — the gap is specifically the DURABLE store
 // path (EncodeEvent/DecodeEvent, used by a TimelineStore) and the
-// snapshot-and-trim path (ADR-0011's SnapshotWorld/RestoreWorld), both of
+// snapshot-and-trim path (ADR-0163's SnapshotWorld/RestoreWorld), both of
 // which a live daemon actually uses and neither of which Replay exercises.
 // -----------------------------------------------------------------------
 
@@ -400,8 +400,8 @@ func TestTimelineCodec_EncodeDecode_VoIPlanRequested(t *testing.T) {
 // TestTimelineCodec_EncodeDecode_VoIPlanned proves a VoIPlanned event
 // survives the same round trip, including its nested Candidates slice —
 // proving the payload, not just the envelope's kind string, decodes
-// correctly. The first candidate's Technique/CoveringCapabilities (ADR-0035
-// decision 4, gibson#387) exercise the exact reason CoveringCapabilities is
+// correctly. The first candidate's Technique/CoveringCapabilities (ADR-0135,
+// gibson#387) exercise the exact reason CoveringCapabilities is
 // []CapabilityRef and not []Capability: a Capability's Coverage carries
 // unexported internal state the JSON codec would silently drop, so a ref
 // (plain exported strings) is what must survive this round trip intact.
@@ -433,7 +433,7 @@ func TestTimelineCodec_EncodeDecode_VoIPlanned(t *testing.T) {
 
 // TestSnapshotRestore_RoundTripsVoIPlanState_InFlight proves an in-flight
 // VoI plan (requested, not yet completed) survives a snapshot-and-restore
-// cycle (ADR-0011) — the exact scenario a snapshot-and-trim right after a
+// cycle (ADR-0163) — the exact scenario a snapshot-and-trim right after a
 // VoIGateSystem request, before VoIWorker completes it, would hit. Before
 // this fix, VoIPlanState had no entry in worldSnapshotData at all, so
 // RestoreWorld silently produced a World with no memory of it ever having
@@ -456,10 +456,10 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_InFlight(t *testing.T) {
 
 // TestSnapshotRestore_RoundTripsVoIPlanState_Completed proves a completed VoI
 // plan (with its ranked candidates) survives the same round trip, including a
-// candidate's Technique/CoveringCapabilities (ADR-0035 decision 4,
+// candidate's Technique/CoveringCapabilities (ADR-0135,
 // gibson#387) — the same JSON-safety property
 // TestTimelineCodec_EncodeDecode_VoIPlanned proves for the durable Timeline
-// path, proven here for the snapshot-and-trim path (ADR-0011), which
+// path, proven here for the snapshot-and-trim path (ADR-0163), which
 // round-trips through the same encoding/json marshal (world_snapshot.go).
 func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 	w := NewWorld("t")

@@ -62,7 +62,7 @@ type missionBinding struct {
 type brainExecutor struct {
 	registry component.ComponentDiscovery
 	logger   *slog.Logger
-	// jobs is where a job node's jobs live (ADR-0019, gibson#1713). Read per
+	// jobs is where a job node's jobs live (ADR-0119, gibson#1713). Read per
 	// dispatch because the data-plane pool is built after the executor.
 	jobs func() (job.Store, error)
 	// jobClosed links a closed job's deliverables into the graph
@@ -159,7 +159,7 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
 
 		case "job":
-			// A job node drives a bank (ADR-0019 decisions 10, 12 and 15): open
+			// A job node drives a bank (ADR-0119): open
 			// a job, let the verifier judge each turn, close with a verdict.
 			out, err := b.dispatchJob(bind, req)
 			if err != nil {
@@ -278,7 +278,7 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 // the serialized own-mission World slice + capability catalog.
 //
 // The Decider's own reasoning turn is captured onto the mission's Timeline as
-// an LlmCallObserved (ADR-0020 flight recorder, gibson#271): before this fix,
+// an LlmCallObserved (ADR-0120 flight recorder, gibson#271): before this fix,
 // the Decider called the harness in-process (CompleteStructuredAny), bypassing
 // the callback-RPC path captureLLMCall instruments, so the brain's own
 // decision-loop prompt + raw response never became part of the recorded
@@ -379,7 +379,7 @@ func (b *brainExecutor) catalog(missionID string) []brain.Capability {
 
 // agentCoverage converts an enrolled agent's declared technique types
 // (component.AgentInfo.TechniqueTypes — raw, unvalidated registry-metadata
-// strings) into a validated taxonomy.Coverage (ADR-0035 decision 4,
+// strings) into a validated taxonomy.Coverage (ADR-0135,
 // gibson#386). An agent that declares no technique types, or one whose
 // declared category is not in GlobalTechniques, gets empty coverage rather
 // than breaking the whole catalog listing — the same "an agent can always
@@ -437,7 +437,7 @@ func parseDecision(raw any) brain.DeciderOutput {
 
 // buildDeciderPrompt renders the own-mission slice + catalog into the Decider's
 // messages. The Decider reasons over structured World state, not a transcript
-// (CONTEXT.md / ADR-0001).
+// (CONTEXT.md / ADR-0101).
 func buildDeciderPrompt(mc brain.MissionContext) []llm.Message {
 	system := "You are the orchestration Decider for an autonomous offensive-security mission. " +
 		"Reason over the current world state and choose the single next action that best advances the goal. " +

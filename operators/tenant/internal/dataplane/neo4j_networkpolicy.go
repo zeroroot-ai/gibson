@@ -54,7 +54,7 @@ const (
 	// the tenant-operator Deployment's pod template. Verified against
 	// deploy/helm/gibson-operators/templates/tenant-operator/deployment.yaml.
 	//
-	// The operator is admitted as a second bolt peer (ADR-0012, gibson#1262)
+	// The operator is admitted as a second bolt peer (ADR-0112, gibson#1262)
 	// because ProductionVersionReader.Neo4j dials each tenant's bolt endpoint
 	// from the operator to read the :_SchemaVersion node for the
 	// gibson_tenant_migration_pending metric. This does not widen the trust
@@ -93,7 +93,7 @@ func neo4jLabels(tenantID, tenantNS string) map[string]string {
 // Neo4j pod: bolt ingress from the gibson daemon only, egress denied
 // except DNS.
 //
-// Why this exists (ADR-0012, gibson#1255). This is defence in depth, NOT
+// Why this exists (ADR-0112, gibson#1255). This is defence in depth, NOT
 // the primary control. The primary control is that the graph projector is
 // the sole writer. The policy earns its place because Neo4j Community
 // edition has no in-database RBAC — whoever holds the bolt credential is
@@ -114,7 +114,7 @@ func neo4jLabels(tenantID, tenantNS string) map[string]string {
 // entries, which would OR them instead and admit every pod in the
 // platform namespace plus every so-labelled pod cluster-wide.
 //
-// Two peers, not one (ADR-0012, gibson#1262): the daemon is the single
+// Two peers, not one (ADR-0112, gibson#1262): the daemon is the single
 // writer, and the tenant-operator is admitted as a read-only second peer
 // so its migration-version probe (ProductionVersionReader.Neo4j) can reach
 // bolt under an enforcing CNI. See the ComponentTenantOperator note for why
@@ -173,7 +173,7 @@ func buildNeo4jNetworkPolicy(names gtenant.Names, tenantID, tenantNS, platformNS
 					},
 					{
 						// AND — the tenant-operator: read-only migration-version
-						// probe (ADR-0012, gibson#1262). Same platform namespace,
+						// probe (ADR-0112, gibson#1262). Same platform namespace,
 						// operator component. Do not split into two From entries.
 						NamespaceSelector: &metav1.LabelSelector{
 							MatchLabels: map[string]string{labelKeyNamespaceName: platformNS},

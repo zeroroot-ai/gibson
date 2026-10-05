@@ -27,7 +27,7 @@ const (
 )
 
 // WorkItem is a unit of work tracked as an entity — a tool call, agent run, or
-// plugin invocation (ADR-0004: capability vs. execution; this is the execution
+// plugin invocation (ADR-0104: capability vs. execution; this is the execution
 // side, e.g. a ToolExecution). Modeling work as an entity is what lets
 // long-running operations be async: the engine never blocks on them; their
 // completion arrives as an event whenever it lands (decided-by-observation — no
@@ -85,7 +85,7 @@ type WorkItem struct {
 
 // WorkDispatched records that a unit of work was launched. It does not block;
 // the work runs out-of-process and reports back via WorkCompleted. It carries the
-// MissionID + Input so the live dispatch effect-handler (ADR-0009) can actuate the
+// MissionID + Input so the live dispatch effect-handler (ADR-0109) can actuate the
 // launch without reading the World back inside the locked tick.
 type WorkDispatched struct {
 	ID        string
@@ -198,7 +198,7 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	// Idempotent: a late WorkCompleted arriving for work that is already in a
 	// terminal state (failed, done, skipped — including one already failed by
 	// ResumeFailInFlight) is a no-op. This prevents a worker that outlived the
-	// daemon from corrupting the World after a restart (ADR-0011 decision 5).
+	// daemon from corrupting the World after a restart (ADR-0163).
 	switch wi.State {
 	case WorkFailed, WorkDone, WorkSkipped:
 		return

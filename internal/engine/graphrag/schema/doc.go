@@ -17,7 +17,7 @@
 //
 // A :Mission node is NOT written through this package. The graph projector
 // (internal/server/daemon, GraphWriter.UpsertMission) is its sole writer
-// (ADR-0012, gibson#551); schema.Mission is the shape a read decodes into.
+// (ADR-0112, gibson#551); schema.Mission is the shape a read decodes into.
 //
 // # MissionNode Node
 //

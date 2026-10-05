@@ -196,7 +196,7 @@ func TestGroundAttackGraph_MultipleTerminalsEachBecomeAnIndependentCause(t *test
 // -----------------------------------------------------------------------
 
 func TestNativeSliceBelief_ColdStartLoneNodeIsExactlyOneHalf(t *testing.T) {
-	// ADR-0037 decision 3's acceptance criterion, direct: a node with no
+	// ADR-0137's acceptance criterion, direct: a node with no
 	// causes at all (no intra-node parents, no incoming enablement edge)
 	// grounds to a bare leak prior at UninformativePriorStrength — mean
 	// exactly 0.5, never a hand-authored number.
@@ -331,7 +331,7 @@ func TestGroundAttackGraph_PinnedPosteriorFallsBackForAnUnfittedEdgeType(t *test
 }
 
 func TestGroundAttackGraph_PinnedPosteriorNeverChangesIntraNodeStrength(t *testing.T) {
-	// ADR-0037 scopes the learned posterior to ENABLEMENT edges only; an
+	// ADR-0137 scopes the learned posterior to ENABLEMENT edges only; an
 	// intra-node DependsOn cause keeps UninformativePriorStrength even when a
 	// posterior is pinned.
 	reg := ontology.NewBeliefSchemaRegistry()

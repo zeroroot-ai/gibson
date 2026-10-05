@@ -4,13 +4,13 @@
 // Use of this source code is governed by the Elastic License 2.0
 // that can be found in the LICENSE file in the repo root.
 
-// Package v1alpha1 defines the ConnectorInstance API (ADR-0014).
+// Package v1alpha1 defines the ConnectorInstance API (ADR-0114).
 //
 // A ConnectorInstance is gibson's own connector abstraction. The connector-
 // operator reconciles it into ToolHive resources (an MCPServer for a hosted
 // container connector, or an MCPRemoteProxy for a vendor-hosted one). The
 // daemon writes the connector's credential Secret from the tenant's secret
-// store (ADR-0015). ToolHive is never exposed to a product surface; the
+// store (ADR-0061). ToolHive is never exposed to a product surface; the
 // wrapper lets gibson replace or upgrade ToolHive without touching the
 // catalog, the RPC, or the CLI.
 package v1alpha1
@@ -37,7 +37,7 @@ const (
 )
 
 // ConnectorRuntime is where a Hosted connector runs. The default is a pod in
-// the tenant namespace. setec is an opt-in hardening upgrade (ADR-0014).
+// the tenant namespace. setec is an opt-in hardening upgrade (ADR-0114).
 type ConnectorRuntime string
 
 const (
@@ -67,7 +67,7 @@ const (
 // is the hosted OpenBao namespace or the customer's BYO Vault, resolved from
 // the tenant's configured secret backend — the same backend the rest of the
 // platform reads (ADR-0009). Only the daemon reads that store; the operator
-// has no secret-store client (ADR-0015).
+// has no secret-store client (ADR-0061).
 type CredentialRef struct {
 	// Key is the path/name of the secret in the customer's store.
 	// +kubebuilder:validation:Required
@@ -125,19 +125,19 @@ const (
 	// ConnectorAuthSecret presents a static credential the tenant admin
 	// supplied (for example a personal access token). The daemon stores it in
 	// the tenant's secret store (ConnectorAuthService.SetConnectorSecret) and
-	// writes the connector's credential Secret from it (ADR-0015).
+	// writes the connector's credential Secret from it (ADR-0061).
 	ConnectorAuthSecret ConnectorAuthKind = "secret"
 	// ConnectorAuthOAuth uses the platform OAuth grant. The daemon's
 	// ConnectorAuthService mints and rotates a short-lived access token in
 	// the tenant's secret store and writes the connector's credential Secret
-	// from it (ADR-0015). The human authorizes once (ADR-0014,
+	// from it (ADR-0061). The human authorizes once (ADR-0114,
 	// StartConnectorAuthorization).
 	ConnectorAuthOAuth ConnectorAuthKind = "oauth"
 )
 
 // ConnectorInstanceSpec is the desired state of one connector for one tenant.
 //
-// The daemon writes the instance from the catalog entry on enable (ADR-0014:
+// The daemon writes the instance from the catalog entry on enable (ADR-0114:
 // "http = catalog + button, not YAML"): the image or endpoint, the transport,
 // the egress allow-list and the auth kind come from the entry. The inline
 // fields are also the escape hatch for a custom connector authored by hand.
@@ -179,7 +179,7 @@ type ConnectorInstanceSpec struct {
 	// EgressAllow is the list of vendor hosts the connector may reach (for
 	// example "*.slack.com:443"). The operator renders it into a ToolHive
 	// custom permission profile. Enforcement needs a NetworkPolicy-capable CNI
-	// (ADR-0014, Spike 1 finding).
+	// (ADR-0114, Spike 1 finding).
 	// +optional
 	EgressAllow []string `json:"egressAllow,omitempty"`
 
@@ -193,7 +193,7 @@ type ConnectorInstanceSpec struct {
 	// connector as environment variables, each resolved from the tenant's
 	// secret store. The bearer credential a connector presents (Auth "secret"
 	// or "oauth") is NOT listed here: the daemon stores it under the
-	// connector's own name and writes the credential Secret (ADR-0015).
+	// connector's own name and writes the credential Secret (ADR-0061).
 	// Environment injection from this list is not wired yet.
 	// +optional
 	Credentials []CredentialRef `json:"credentials,omitempty"`
@@ -210,7 +210,7 @@ const (
 	ConnectorInstancePhaseProvisioning ConnectorInstancePhase = "Provisioning"
 	// ConnectorInstancePhaseAuthorizationRequired is set for an oauth connector
 	// whose grant is not yet authorized. The connector runs but its tools fail
-	// until a human authorizes it (ADR-0014).
+	// until a human authorizes it (ADR-0114).
 	ConnectorInstancePhaseAuthorizationRequired ConnectorInstancePhase = "AuthorizationRequired"
 	// ConnectorInstancePhaseReady is set once the server runs and its tools are
 	// registered in the connector catalog.
@@ -234,7 +234,7 @@ type ConnectorInstanceStatus struct {
 
 	// Conditions carry the detailed reconcile state, one condition per concern
 	// (Provisioned, Authorized, ToolsDiscovered, Healthy). Every failure mode
-	// is observable here (ADR-0014, the error slice).
+	// is observable here (ADR-0114, the error slice).
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
@@ -280,7 +280,7 @@ type ConnectorInstanceStatus struct {
 
 // ConnectorInstance is one connector enabled for one tenant. The connector-
 // operator reconciles it into ToolHive resources in the tenant namespace
-// (ADR-0014); the daemon writes its credential Secret (ADR-0015).
+// (ADR-0114); the daemon writes its credential Secret (ADR-0061).
 type ConnectorInstance struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

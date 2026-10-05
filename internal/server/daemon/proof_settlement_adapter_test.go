@@ -18,7 +18,7 @@ import (
 )
 
 // awaitAdapterDestructivePending polls e's DestructiveActionSnapshot until
-// hypothesisID's request has folded (the async Submit->tick fold, ADR-0001),
+// hypothesisID's request has folded (the async Submit->tick fold, ADR-0101),
 // or fails the test.
 func awaitAdapterDestructivePending(t *testing.T, e *brain.Engine, hypothesisID string) {
 	t.Helper()
@@ -80,7 +80,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_NoTenant_Pe
 
 // TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnTenantEngine
 // proves the adapter resolves ctx's tenant and enqueues onto THAT tenant's
-// own DestructiveAuthorizationQueue (ADR-0032 decision 1) — the same
+// own DestructiveAuthorizationQueue (ADR-0132) — the same
 // per-tenant routing DomainPackPredicate/SettleBetTrue already prove
 // (belief_substrate_adapter_test.go's sibling pattern).
 func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnTenantEngine(t *testing.T) {
@@ -110,7 +110,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnT
 }
 
 // TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructive
-// proves the ADR-0032 decision 3/4 wiring this adapter exists for: when the
+// proves the ADR-0132 wiring this adapter exists for: when the
 // caller (the SubmitProof handler) leaves authorize nil on a destructive
 // request, SettleBetTrue's authorizer becomes that tenant's own
 // DestructiveAuthorizationQueue.Verify — refusing settlement with no

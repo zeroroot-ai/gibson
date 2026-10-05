@@ -31,13 +31,13 @@ var EvidenceMapType = cel.MapType(cel.StringType, cel.DynType)
 var EvidenceListType = cel.ListType(EvidenceMapType)
 
 // NewEnv builds the gibson-owned CEL environment a settlement predicate
-// compiles and evaluates against (ADR-0031 decision 2). It declares exactly
+// compiles and evaluates against (ADR-0131). It declares exactly
 // one variable, [EvidenceVariable], and the curated helper-function catalog
 // in functions.go — nothing else. Nothing here enables cel-go's optional
 // extension libraries (strings, lists, encoders, …): the environment is
 // deliberately the smallest surface that can express the evidence schema
 // and its curated helpers, because every addition to it is a permanent,
-// version-controlled commitment (ADR-0031 decision 3) that a shipped pack
+// version-controlled commitment (ADR-0131) that a shipped pack
 // may come to depend on.
 //
 // NewEnv builds a fresh *cel.Env on every call. A caller compiling more than

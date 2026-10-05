@@ -20,7 +20,7 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-// The DelegateToAgent target selector (ADR-0019 decision 15, gibson#1713).
+// The DelegateToAgent target selector (ADR-0119, gibson#1713).
 //
 // A caller may aim a delegation at three places: an ephemeral sandbox (the
 // path that existed before banks), a bank (open a job on it and wait for the

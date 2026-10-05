@@ -17,7 +17,7 @@ import (
 )
 
 // tenantRoutedProofSettlement implements brain.ProofSettlementEngine for
-// HarnessCallbackService.SubmitProof (ADR-0030, ADR-0031, gibson#389),
+// HarnessCallbackService.SubmitProof (ADR-0131, gibson#389),
 // mirroring tenantRoutedBeliefSubstrate (belief_substrate_adapter.go)
 // exactly and for the same reason: SubmitProof wires ONE ProofSettlementEngine
 // value shared across every tenant's calls, but *brain.Engine (and the
@@ -74,7 +74,7 @@ func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, p
 // direct route to a tenant's DestructiveAuthorizationQueue, only this
 // tenant-routing adapter does. So when req.Destructive is set and the caller
 // left authorize nil, this wires in the tenant's own queue's Verify method
-// (ADR-0032 decision 3/4): SettleBetTrue's authorizer becomes a verification
+// (ADR-0132): SettleBetTrue's authorizer becomes a verification
 // of the recorded DestructiveActionDecided fact, never a live ask.
 func (s *tenantRoutedProofSettlement) SettleBetTrue(
 	ctx context.Context, registry *settlement.Registry, authorize brain.DestructiveProofAuthorizer, req brain.BetSettlementRequest,
@@ -94,7 +94,7 @@ func (s *tenantRoutedProofSettlement) SettleBetTrue(
 }
 
 // RequestDestructiveAuthorization implements brain.ProofSettlementEngine
-// (ADR-0032 decision 1, gibson#390): it resolves ctx's tenant's own Engine
+// (ADR-0132, gibson#390): it resolves ctx's tenant's own Engine
 // and enqueues req against that tenant's DestructiveAuthorizationQueue,
 // mirroring SettleBetTrue's and DomainPackPredicate's tenant-routing
 // exactly. Returns immediately — the fleet keeps working while the human
@@ -115,7 +115,7 @@ func (s *tenantRoutedProofSettlement) RequestDestructiveAuthorization(
 }
 
 // wireProofSettlement wires SubmitProof's proof-settlement engine onto
-// callback (ADR-0030, ADR-0031, gibson#389): before this, SubmitProof always
+// callback (ADR-0131, gibson#389): before this, SubmitProof always
 // answered Unavailable — no daemon ever gave it an engine to resolve pack
 // predicates and settle bets against. Extracted from daemon.go's Start()
 // into its own function for the same reason wirePlaceBetBeliefSubstrate

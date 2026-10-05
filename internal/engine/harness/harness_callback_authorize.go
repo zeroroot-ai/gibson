@@ -144,7 +144,7 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 	fgaObject, deriveErr := s.deriveFGAObject(ctx, runState.TenantID, resource)
 	if deriveErr != nil {
 		// A kind-less component resource cannot be resolved to an FGA object
-		// (ADR-0015): the object id carries the kind. Fail closed — never guess
+		// (ADR-0136): the object id carries the kind. Fail closed — never guess
 		// a kind. Components must send a kind-qualified resource ("tool:nmap").
 		s.logger.Warn("authorize: component resource is not kind-qualified",
 			slog.String("run_id", runID),
@@ -205,7 +205,7 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 }
 
 // deriveFGAObject maps a component resource string to the canonical FGA object
-// "component:<kind>/<name>" (ADR-0015).
+// "component:<kind>/<name>" (ADR-0136).
 //
 // A kind-qualified resource ("tool:nmap") or an already-canonical object
 // ("component:tool/nmap") canonicalizes directly. A bare, kind-less resource

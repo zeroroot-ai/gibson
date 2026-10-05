@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestModel_BankAndJob exercises the bank and job types (ADR-0019,
+// TestModel_BankAndJob exercises the bank and job types (ADR-0119,
 // gibson#1708) against a real OpenFGA loaded from model.fga.
 //
 // The properties it pins are the ones the design turns on:

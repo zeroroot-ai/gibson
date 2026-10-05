@@ -15,7 +15,7 @@ import (
 )
 
 // TestEnableDomainPack_MainCatalogPack_BindingsGoLive is the acceptance test
-// for gibson#382 (epic #376, ADR-0033): the real, seeded "main" catalog pack
+// for gibson#382 (epic #376, ADR-0133): the real, seeded "main" catalog pack
 // (ontology.MainDomainPack — the same value the daemon wires into its
 // DomainPackCatalog at startup, see internal/server/daemon/infrastructure.go)
 // is default-off for a fresh tenant, and EnableDomainPack makes its CEL
@@ -26,7 +26,7 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 	catalog := ontology.NewDomainPackCatalog(ontology.MainDomainPack())
 	s, registry := newDomainPackService(t, catalog)
 
-	// Default-off (ADR-0033 decision 4): a fresh tenant starts with no
+	// Default-off (ADR-0133): a fresh tenant starts with no
 	// enabled packs, so none of the catalog pack's predicates are bound to
 	// anything yet — no bet could settle TRUE against them.
 	before, err := s.ListDomainPacks(tenantCtx("acme"), &tenantv1.ListDomainPacksRequest{})
@@ -56,7 +56,7 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, compiled, len(snap[0].Predicates))
 
-	// ADR-0033 decision 1: "per-tenant, not per-install" — another tenant
+	// ADR-0133: "per-tenant, not per-install" — another tenant
 	// must never see acme's enabled pack.
 	other, err := s.ListDomainPacks(tenantCtx("other"), &tenantv1.ListDomainPacksRequest{})
 	require.NoError(t, err)

@@ -14,7 +14,7 @@ import (
 // interface.
 //
 // Group names are shared with the SDK's agent.Harness deliberately; see
-// sdk docs/adr/0002-harness-capability-groups.md.
+// ADR-0162.
 var (
 	_ LLMCaller       = AgentHarness(nil)
 	_ ToolCaller      = AgentHarness(nil)

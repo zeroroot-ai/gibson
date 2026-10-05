@@ -2,7 +2,7 @@
 # check-no-mcp-bridge.sh — build guard for ADR-0065 (mcp-bridge removed).
 #
 # MCP now lives ONLY in the connector domain, served via ToolHive behind the
-# ConnectorInstance wrapper (ADR-0014). The legacy ADR-0048 mcp-bridge path —
+# ConnectorInstance wrapper (ADR-0114). The legacy ADR-0048 mcp-bridge path —
 # internal/engine/connector (ConnectorLauncher), the sdk/mcpbridge package, the
 # `runtime: mcp-bridge` plugin runtime, and the manifest `mcp_bridge:` block —
 # was removed by a hard cutover (ADR-0027, gibson#1524). The `plugin` domain has
@@ -10,10 +10,9 @@
 #
 # This guard fails if any of that dead path reappears in gibson source. It scans
 # Go and YAML for the tokens that uniquely identify the removed subsystem. The
-# workspace ADRs under docs/ (0047/0048/0049 superseded, 0014/0065 explanatory)
-# and CHANGELOG.md history intentionally name the removed path, so they are out
-# of scope; this guard is a comment cannot be worked around by moving a mention
-# there because the removal scrubbed every in-tree source mention.
+# pages under docs/ and CHANGELOG.md history intentionally name the removed
+# path, so they are out of scope; this guard is a comment cannot be worked
+# around by moving a mention there because the removal scrubbed every in-tree source mention.
 #
 # Exit codes:
 #   0  No violations found.
@@ -81,7 +80,7 @@ if [[ -n "${HITS}" ]]; then
     echo "${HITS}" | while IFS= read -r line; do echo "  ${line}"; done
     log_error ""
     log_error "MCP lives ONLY in the connector domain, served via ToolHive behind"
-    log_error "the ConnectorInstance wrapper (ADR-0014). The plugin domain has NO"
+    log_error "the ConnectorInstance wrapper (ADR-0114). The plugin domain has NO"
     log_error "MCP: plugins are vendor-SDK, Go-first, JSON dispatch. Do NOT reintroduce"
     log_error "internal/engine/connector, sdk/mcpbridge, RuntimeMCPBridge, or an"
     log_error "mcp-bridge runtime. See ADR-0065."

@@ -19,7 +19,7 @@ type CatalogRef struct {
 }
 
 // SeedComponentCatalogGate converges the platform catalog gate for every kind
-// (ADR-0015, generalizing ADR-0067): every embedded catalog entry gets a
+// (ADR-0136, generalizing ADR-0067): every embedded catalog entry gets a
 // `platform_enabled` tuple from the system tenant on its canonical
 // `component:<kind>/<id>` object. ConnectorService checks this tuple in
 // ListCatalog and EnableConnector.

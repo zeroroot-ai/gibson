@@ -11,7 +11,7 @@ import (
 )
 
 // surpriseBoost is added to an entity's attention when it carries a Surprise, so
-// the off-path/anomalous thing is surfaced even when its belief is low (ADR-0005/
+// the off-path/anomalous thing is surfaced even when its belief is low (ADR-0129/
 // 0006: attention has two inputs — the goal-directed belief field AND surprise).
 const surpriseBoost = 1.0
 
@@ -30,7 +30,7 @@ func attentionScore(juicy, exploitable float64, surprised bool) float64 {
 	return a
 }
 
-// Finding is a confirmed, reportable security result (ADR-0006). A surprise that
+// Finding is a confirmed, reportable security result (ADR-0106). A surprise that
 // is investigated and confirmed is promoted to a Finding; an unconfirmed surprise
 // is just an attention boost. Findings are the output; "anomaly" is not a separate
 // entity.
@@ -240,7 +240,7 @@ func surpriseFindingID(hostID uint64) string {
 }
 
 // SurpriseFindingSystem promotes a host's Surprise — an identity-contradiction
-// anomaly from scope-relative resolution (ADR-0002/0006) — into a Finding. This is
+// anomaly from scope-relative resolution (ADR-0102/0106) — into a Finding. This is
 // the surprise→Finding pipeline: a strong-signal contradiction (an address reused
 // by a different host) is a real security signal, so it surfaces as a reportable
 // Finding, not just an attention boost. Idempotent + quiescent: one finding per

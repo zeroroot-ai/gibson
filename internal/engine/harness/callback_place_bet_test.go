@@ -99,7 +99,7 @@ func placeBetRequest(missionID, agentName, hypothesisID, stakingAgent string, co
 }
 
 // TestPlaceBet_Success proves a well-formed bet is persisted as belief on its
-// hypothesis's tenant-scoped claim-node (ADR-0022, ADR-0029 §3), and that
+// hypothesis's tenant-scoped claim-node (ADR-0122, ADR-0129), and that
 // placing the identical bet twice writes the identical belief both times
 // (SetBelief's exact-overwrite contract, and PlaceBet's own determinism).
 func TestPlaceBet_Success(t *testing.T) {

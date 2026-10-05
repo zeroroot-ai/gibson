@@ -81,7 +81,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.graphWriter,       // sole writer of the knowledge graph (ADR-0012, gibson#551)
 		)
 		// Pin the active belief-model version so each mission records the model it
-		// ran under (ADR-0005 §5, gibson#750). Resolved here (after the provider is
+		// ran under (ADR-0134, gibson#750). Resolved here (after the provider is
 		// chosen at brain-registry init) rather than threaded through the ctor.
 		if d.beliefProvider != nil {
 			missionManagerInstance.mgr.beliefVersion = d.beliefProvider.Version()

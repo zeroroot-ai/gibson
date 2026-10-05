@@ -1,4 +1,4 @@
-"""Unit tests for the noisy-OR enablement CPT decomposition (gibson#288, ADR-0029 SS6).
+"""Unit tests for the noisy-OR enablement CPT decomposition (gibson#288, ADR-0129).
 
 The claim under test is precise and structural, not a timing guess: a node with
 N enablement causes must be representable in O(N) factor SPACE (never the full

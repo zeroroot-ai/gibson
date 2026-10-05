@@ -114,7 +114,7 @@ func TestRegistry_NewPredicate(t *testing.T) {
 	t.Run("fails closed for an unregistered type (anti-gaming)", func(t *testing.T) {
 		// A technique with no registered predicate type cannot have one
 		// fabricated for it at construction time either — this is what
-		// ADR-0027 decision 3 means by "cannot invent a trivially-true
+		// ADR-0131 means by "cannot invent a trivially-true
 		// predicate to game its own bet."
 		r := NewRegistry()
 		_, err := r.NewPredicate(testTechnique, "never_registered", nil)
@@ -203,7 +203,7 @@ func TestRegistry_Evaluate(t *testing.T) {
 }
 
 // TestRegistry_Evaluate_Deterministic proves the core settlement property
-// from ADR-0027 decision 2: replay re-evaluates the predicate against the
+// from ADR-0131: replay re-evaluates the predicate against the
 // same recorded evidence and gets the same result, every time, with no
 // hidden state (wall clock, randomness, map iteration order) leaking into
 // the verdict.

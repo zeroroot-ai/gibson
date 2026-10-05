@@ -39,7 +39,7 @@ type MissionOperator interface {
 // Lineage metadata keys written on a mission an agent originated from inside
 // its own (ADR-0063, gibson#1657). They are plain Metadata entries for the same
 // reason internal/engine/mission's origination lineage is: the durable home is
-// the Timeline (ADR-0011), whose Append is callable only from the World
+// the Timeline (ADR-0163), whose Append is callable only from the World
 // engine's single tick goroutine, so a concurrent gRPC handler cannot write it
 // today. The daemon fills these from the RESOLVED parent mission, never from
 // the request payload, and overwrites any payload entry of the same name.

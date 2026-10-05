@@ -15,30 +15,30 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
-// domain_pack.go implements Domain Packs (ADR-0025, gibson#282): a portable,
+// domain_pack.go implements Domain Packs (ADR-0133, gibson#282): a portable,
 // versioned bundle of ONE vertical's discovered taxonomy (promoted node
 // labels / relationship types, gibson#281) and ontology (registered
 // extensions: hierarchies, equivalences, IFPs, gibson#274).
 //
-// A Pack is structure, never a tenant's secrets or run data (ADR-0025 §1,
+// A Pack is structure, never a tenant's secrets or run data (ADR-0133,
 // "consequences"): its fields are strictly bounded, ValidIdentifier-shaped
 // taxonomy names and prefix:localname ontology triples, and Validate
 // enforces that shape on every Pack this package hands out or accepts,
 // whichever install produced it.
 //
 // Phase 2 (gibson#378, epic #376) grows a Pack with two more kinds of
-// content, per ADR-0031 and ADR-0033:
+// content, per ADR-0131 and ADR-0133:
 //
-//   - Predicates: technique -> CEL-expression bindings. ADR-0031 decision 1
+//   - Predicates: technique -> CEL-expression bindings. ADR-0131
 //     makes a Pack the SOLE binding source for a technique's settlement
 //     predicate — no Go evaluator is ever registered per technique. This
 //     package carries the expression as opaque, validated TEXT; it never
 //     compiles or type-checks it against the gibson-owned CEL environment
-//     (ADR-0031 decision 2) — that is gibson#388, which runs strictly after
+//     (ADR-0131) — that is gibson#388, which runs strictly after
 //     a Pack has already passed Validate here.
 //   - Catalog metadata (Author, Visibility): a catalog pack carries who
 //     curates it and whether it is shared or tenant-private. Every pack is
-//     free — the owner withdrew the entitlement gate ADR-0033 decision 5
+//     free — the owner withdrew the entitlement gate ADR-0133
 //     once planned, so a pack carries no billing key and enabling it runs no
 //     entitlement check.
 
@@ -51,7 +51,7 @@ const MaxPredicateExpressionBytes = 4096
 // MaxAuthorBytes bounds the free-text Author field.
 const MaxAuthorBytes = 256
 
-// PackVisibility is a Pack's sharing scope (ADR-0033 decision 1): "public"
+// PackVisibility is a Pack's sharing scope (ADR-0133): "public"
 // names a curated catalog pack shared across tenants; "private" names a
 // tenant extension, visible only to the tenant that owns it. The zero value
 // means "not yet classified" and Validate accepts it, so a Pack captured
@@ -59,11 +59,11 @@ const MaxAuthorBytes = 256
 type PackVisibility string
 
 const (
-	// PackVisibilityPublic marks a curated catalog pack (ADR-0033 decision
-	// 1), shared across tenants. Every catalog pack is free.
+	// PackVisibilityPublic marks a curated catalog pack (ADR-0133),
+	// shared across tenants. Every catalog pack is free.
 	PackVisibilityPublic PackVisibility = "public"
 
-	// PackVisibilityPrivate marks a tenant extension (ADR-0033 decision 1),
+	// PackVisibilityPrivate marks a tenant extension (ADR-0133),
 	// live in one tenant only.
 	PackVisibilityPrivate PackVisibility = "private"
 )
@@ -82,7 +82,7 @@ func (v PackVisibility) Validate() error {
 }
 
 // DomainPack is the discovered taxonomy and ontology for one vertical or
-// target type (k8s, web, a LAN, defense, healthcare — ADR-0025), captured at
+// target type (k8s, web, a LAN, defense, healthcare — ADR-0133), captured at
 // a point in time.
 type DomainPack struct {
 	// Name identifies the vertical, e.g. "k8s", "healthcare".
@@ -124,8 +124,8 @@ type DomainPack struct {
 	Ontology map[string]sdkgraphrag.OntologyExtension `json:"ontology,omitempty"`
 
 	// Predicates is this pack's technique -> CEL-expression bindings
-	// (ADR-0031 decision 1), keyed by the technique's ValidIdentifier-shaped
-	// name (ADR-0035's technique hierarchy). The value is a CEL expression,
+	// (ADR-0131), keyed by the technique's ValidIdentifier-shaped
+	// name (ADR-0135's technique hierarchy). The value is a CEL expression,
 	// evaluated at settlement time over the gibson-owned evidence
 	// environment (gibson#388) — carried here as opaque text: Validate
 	// checks only that it is well-formed TEXT (non-empty, valid UTF-8,
@@ -133,13 +133,13 @@ type DomainPack struct {
 	// type-checks as CEL.
 	Predicates map[string]string `json:"predicates,omitempty"`
 
-	// Author identifies who curates this pack (ADR-0033 decision 5): the
+	// Author identifies who curates this pack (ADR-0133): the
 	// platform owner for a catalog pack, or the tenant that proposed a
 	// tenant extension. Free text, never a secret — Validate only bounds
 	// its length and encoding.
 	Author string `json:"author,omitempty"`
 
-	// Visibility is this pack's sharing scope (ADR-0033 decision 1). See
+	// Visibility is this pack's sharing scope (ADR-0133). See
 	// [PackVisibility].
 	Visibility PackVisibility `json:"visibility,omitempty"`
 }
@@ -201,7 +201,7 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 }
 
 // Validate reports whether p carries only structure — never a tenant's
-// secrets or unvalidated payload (ADR-0025 §1, gibson#282 acceptance
+// secrets or unvalidated payload (ADR-0133, gibson#282 acceptance
 // criterion 3):
 //   - every taxonomy label/relationship type is a plain, bounded
 //     ValidIdentifier (structurally incapable of holding an API key, a
@@ -212,7 +212,7 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //     OntologyExtension field that is never subject to prefix/cycle
 //     validation, so a Pack never ships that unvalidated a payload;
 //   - every Predicates key is a plain ValidIdentifier technique name, and
-//     every value is well-formed CEL-expression TEXT (ADR-0031 decision 1)
+//     every value is well-formed CEL-expression TEXT (ADR-0131)
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
 //   - Author is valid UTF-8 within MaxAuthorBytes, and Visibility is one of
@@ -309,11 +309,11 @@ func (p *DomainPack) requireNodeIdentityAccounted() error {
 }
 
 // validPredicateExpressionText reports whether expr is well-formed TEXT for
-// a Predicates CEL expression (ADR-0031 decision 1): non-empty after
+// a Predicates CEL expression (ADR-0131): non-empty after
 // trimming, valid UTF-8, and within MaxPredicateExpressionBytes. It never
 // parses or compiles expr as CEL — that is gibson#388's job, run strictly
 // after a Pack has already passed this check, against the gibson-owned CEL
-// environment (ADR-0031 decision 2). A Pack that fails only this check is
+// environment (ADR-0131). A Pack that fails only this check is
 // malformed data; a Pack that passes it but references a field or helper
 // outside the environment is merely out-of-environment, and gibson#388
 // rejects that separately at load time.

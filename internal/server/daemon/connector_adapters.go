@@ -23,7 +23,7 @@ import (
 
 // registerConnector registers gibson.tenant.v1.ConnectorService on srv. The
 // service writes ConnectorInstance CRs into tenant namespaces with a narrow
-// controller-runtime client; the connector-operator reconciles them (ADR-0014).
+// controller-runtime client; the connector-operator reconciles them (ADR-0114).
 //
 // The client uses the in-cluster (or KUBECONFIG) config and a scheme carrying
 // the ConnectorInstance types. When no cluster config is reachable — a unit
@@ -44,7 +44,7 @@ func (d *daemonImpl) registerConnector(ctx context.Context, srv *grpc.Server) {
 		return
 	}
 	tenantv1.RegisterConnectorServiceServer(srv, api.NewConnectorService(kube, d.authorizer))
-	d.logger.Info(ctx, "ConnectorService registered (ADR-0014)")
+	d.logger.Info(ctx, "ConnectorService registered (ADR-0114)")
 }
 
 // connectorInstanceLister adapts the narrow ConnectorInstance kube client to

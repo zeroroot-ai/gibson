@@ -6,7 +6,7 @@
 // worldViewSource is the read complement of ingestObservation: where the
 // Observe RPC folds an agent's writes into the tenant World, the WorldView RPC
 // projects a mission-Scope-limited slice of that World back to the agent
-// (ADR-0012, the emit-only contract's read half; gibson#1377).
+// (ADR-0112, the emit-only contract's read half; gibson#1377).
 //
 // The projection is server-authored end to end. The agent never names a brain
 // id: every entity is issued an opaque, server-minted handle it cannot
@@ -155,7 +155,7 @@ func worldViewSource(reg *brain.Registry, minter *handleMinter) harness.WorldVie
 				continue
 			}
 			// WorldEntityKind has no dedicated HYPOTHESIS value yet (SDK
-			// v0.180.0): a Hypothesis is a new provenance class (ADR-0021),
+			// v0.180.0): a Hypothesis is a new provenance class (ADR-0121),
 			// not a new Evidence kind, and adding one is an SDK-side change
 			// out of this slice's control. UNSPECIFIED + an explicit "kind"
 			// attribute keeps a consuming agent from mistaking it for an
@@ -307,7 +307,7 @@ func findingAttributes(f brain.FindingSnapshot, full bool) map[string]string {
 	return attrs
 }
 
-// hypothesisAttributes projects a Hypothesis (ADR-0021, gibson#265). "kind"
+// hypothesisAttributes projects a Hypothesis (ADR-0121, gibson#265). "kind"
 // stands in for the WorldEntityKind enum value the SDK does not have yet
 // (see the emit call site). hypothesis_id is the identifier a later PlaceBet
 // call names as bet.hypothesis_id — without it in the unfocused slice, an

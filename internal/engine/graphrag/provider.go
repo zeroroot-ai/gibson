@@ -16,7 +16,7 @@ import (
 // 2026-04-28 (spec internal-package-restructure / Phase B); they proxied to a
 // non-existent Gibson Cloud GraphRAG API.
 //
-// It is read-only: ADR-0012 makes the projector the graph's sole writer, so
+// It is read-only: ADR-0112 makes the projector the graph's sole writer, so
 // StoreNode / StoreRelationship were removed in gibson#1322.
 //
 // Thread-safety: All implementations must be safe for concurrent access.

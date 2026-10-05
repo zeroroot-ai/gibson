@@ -102,7 +102,7 @@ type StructuredCompletionResult struct {
 // ── AgentHarness capability groups ──────────────────────────────────────────
 //
 // The daemon-side harness is composed of these, using the SAME group names as
-// the SDK's agent.Harness (sdk docs/adr/0002-harness-capability-groups.md).
+// the SDK's agent.Harness (ADR-0162).
 //
 // Two interfaces describe one concept and sit at opposite ends of one wire:
 // an SDK agent talks to agent.Harness, which reaches this over the callback
@@ -539,7 +539,7 @@ type WorldEmitter interface {
 // carries eight reads including the five graphrag ones. This side has four and
 // no graph reads at all. That difference is the point of sharing the name: it is
 // now a diff of two named types rather than an eyeball comparison of 57 method
-// signatures. See sdk docs/adr/0002-harness-capability-groups.md.
+// signatures. See ADR-0162.
 type KnowledgeReader interface {
 
 	// GetFindings retrieves findings for the current mission, optionally filtered.

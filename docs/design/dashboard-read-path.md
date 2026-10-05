@@ -34,13 +34,13 @@ thin viewer.
 - The **`TracesService` + Langfuse** mission-observability read path is **retired**.
   `LlmCall` / `ToolExecution` / `AgentRun` are now first-class World entities, so the
   trace/cost/generation data the dashboard used to pull from Langfuse comes from the
-  World/Timeline. (Langfuse + ClickHouse leave the stack — [ADR-0001](../adr/0001-ecs-native-mission-brain.md).)
+  World/Timeline. (Langfuse + ClickHouse leave the stack — ADR-0101.)
 
 ## Rendering (dashboard, mostly existing pieces)
 - **World graph view** — reuse the `react-force-graph` GraphCanvas from the graph-explorer
   rebuild; nodes/edges = World entities/relationships.
 - **Scroller** — a new native timeline-scrubber (shadcn): frame slider + step + live tail,
-  backed by `TimelineService`. The HITL **review/label queue** ([ADR-0006](../adr/0006-closed-loop-learning.md))
+  backed by `TimelineService`. The HITL **review/label queue** (ADR-0106)
   sits beside it (native shadcn, not Label Studio — see that ADR's note).
 
 ## Decision baked in

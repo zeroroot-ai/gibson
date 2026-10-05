@@ -196,7 +196,7 @@ func TestObservationsPerTaskBoundary(t *testing.T) {
 // TestOverLimitIsRejectedNotTruncated is the load-bearing test: an over-limit
 // payload must produce an error and must not come back shortened, trimmed or
 // otherwise partially accepted. Silent truncation corrupts data in a system
-// whose whole output is evidence (ADR-0012).
+// whose whole output is evidence (ADR-0112).
 func TestOverLimitIsRejectedNotTruncated(t *testing.T) {
 	t.Run("over-size payload is not shortened", func(t *testing.T) {
 		payload := jsonOfSize(t, MaxPayloadBytes+1024)

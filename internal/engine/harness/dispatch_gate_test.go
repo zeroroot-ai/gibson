@@ -104,7 +104,7 @@ func TestDispatchGate_UntrustedSetecOnly_Denied(t *testing.T) {
 
 // The tool name here must NOT be a kind:tool catalog manifest. These tests are
 // about registry-driven dispatch policy; a manifest tool takes the earlier
-// manifest path in CallToolProto (ADR-0017) and never reaches the code under
+// manifest path in CallToolProto (ADR-0117) and never reaches the code under
 // test. "httpx" used to be safely fictional until it became a real catalog
 // tool in gibson#1640.
 

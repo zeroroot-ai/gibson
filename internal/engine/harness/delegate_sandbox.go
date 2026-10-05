@@ -20,7 +20,7 @@ import (
 
 // AgentSandboxLauncher launches an untrusted/sandboxed agent as an ephemeral
 // Setec sandbox for one mission run and waits for its terminal outcome
-// (ADR-0016 / gibson#1596). *sandboxed.AgentLauncher satisfies it. The harness
+// (ADR-0116 / gibson#1596). *sandboxed.AgentLauncher satisfies it. The harness
 // depends on this interface rather than the concrete launcher so a build
 // without setec_integration wires nil and tests can supply a stub.
 //
@@ -34,7 +34,7 @@ type AgentSandboxLauncher interface {
 // class, egress envelope and resolved model — for a sandboxed agent. This slice
 // (gibson#1596) treats it as a typed seam: tests supply a resolver and S5
 // (gibson#1597) wires the real signed-catalog-manifest resolver that also
-// resolves the newest tenant model at dispatch (ADR-0016 decision 7).
+// resolves the newest tenant model at dispatch (ADR-0116).
 //
 // Nil means no spec source, so a sandboxed dispatch cannot proceed and the
 // harness denies fail-closed rather than launching with an empty image.
@@ -54,10 +54,10 @@ type AgentLaunchRequest struct {
 	// AgentName is the catalog id of the agent to launch. Required.
 	AgentName string
 	// LoginShape is how the agent authenticates to its model vendor
-	// (ADR-0019 decision 4). Empty means the API-key shape: a one-shot
+	// (ADR-0119). Empty means the API-key shape: a one-shot
 	// dispatch has no person present to sign in.
 	LoginShape string
-	// Mode is which of the two shapes one image runs as (ADR-0019): a one-shot
+	// Mode is which of the two shapes one image runs as (ADR-0119): a one-shot
 	// process that serves one dispatch and ends, or a member that serves many
 	// over its life. Empty means one-shot, which is what a mission dispatch is.
 	Mode string
@@ -82,7 +82,7 @@ func IsInstanceMode(m string) bool {
 // delegateToAgentViaSandbox launches an untrusted/sandboxed agent as an
 // ephemeral Setec sandbox for one mission run, injecting the per-dispatch grant
 // and the tenant egress envelope, and waits for the terminal outcome
-// (ADR-0016). The tenant-enablement gate has already run in DelegateToAgent, so
+// (ADR-0116). The tenant-enablement gate has already run in DelegateToAgent, so
 // this is authorized before the sandbox starts.
 //
 // It returns a terminal Result on a clean exit. The agent's STRUCTURED mission
@@ -113,7 +113,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	}
 
 	// Per-dispatch grant: a tenant+run-scoped CG-JWT with a short TTL, nothing
-	// standing (ADR-0016 decision 2). Reuses the work-item minter with recipient
+	// standing (ADR-0116). Reuses the work-item minter with recipient
 	// class "agent", so the sandboxed agent's callback subject matches the
 	// in-process delegation subject exactly.
 	grant := h.mintCGForWork(name, "agent")
@@ -131,7 +131,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		MissionRunID:     h.missionCtx.MissionRunID,
 		AgentRunID:       h.missionCtx.AgentRunID,
 		TaskB64:          base64.StdEncoding.EncodeToString(taskPayload),
-		// Live-console scope (ADR-0016 S11): the customer tenant that owns this
+		// Live-console scope (ADR-0116 S11): the customer tenant that owns this
 		// mission run and the agent name, so the running instance is enumerable
 		// and keyed to the caller's tenant, never the setec infra tenant.
 		Tenant:    tenant,

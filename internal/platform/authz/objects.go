@@ -46,7 +46,7 @@ import (
 
 // Component kinds. The single FGA `component` object type carries all four
 // kinds (ADR-0046/0067); the kind is part of the object id, never a separate
-// FGA type. These are the canonical kind qualifiers (ADR-0015).
+// FGA type. These are the canonical kind qualifiers (ADR-0136).
 const (
 	KindAgent      = "agent"
 	KindTool       = "tool"
@@ -56,7 +56,7 @@ const (
 )
 
 // ComponentObject returns the canonical FGA object reference for a component:
-// "component:<kind>/<name>" (ADR-0015). The kind is one of KindAgent/Tool/
+// "component:<kind>/<name>" (ADR-0136). The kind is one of KindAgent/Tool/
 // Plugin/Connector/DomainPack; the name is the bare component name, never
 // tenant-qualified.
 // Kind-prefixing keeps an agent and a tool of the same name distinct objects.
@@ -78,7 +78,7 @@ func ConnectorComponentObject(catalogID string) string {
 }
 
 // DomainPackComponentObject returns the canonical FGA object reference for a
-// Domain Pack catalog entry: "component:domainpack/<name>" (ADR-0033). One
+// Domain Pack catalog entry: "component:domainpack/<name>" (ADR-0133). One
 // object per catalog entry, shared across tenants; DomainPackService checks
 // this object's platform_enabled tuple in ListCatalog and EnableDomainPack,
 // the same platform-catalog-gate pattern ConnectorComponentObject serves for
@@ -435,7 +435,7 @@ func RevokedSessionUserTuple(userID, revokedAt string) ConditionalTuple {
 
 // componentKinds are the component-kind qualifiers on the single FGA
 // `component` object type. CanonicalComponentResource prefixes them onto the
-// object id: the FGA object is "component:<kind>/<name>" (ADR-0015).
+// object id: the FGA object is "component:<kind>/<name>" (ADR-0136).
 var componentKinds = map[string]bool{
 	KindAgent:      true,
 	KindTool:       true,
@@ -450,7 +450,7 @@ var componentKinds = map[string]bool{
 func IsComponentKind(kind string) bool { return componentKinds[kind] }
 
 // CanonicalComponentResource maps a caller-provided component resource string
-// to the canonical FGA object reference "component:<kind>/<name>" (ADR-0015).
+// to the canonical FGA object reference "component:<kind>/<name>" (ADR-0136).
 // Accepted inputs and their mappings:
 //
 //	"tool:nmap"                → "component:tool/nmap"   (kind-qualified)
@@ -461,7 +461,7 @@ func IsComponentKind(kind string) bool { return componentKinds[kind] }
 //
 // A kind-LESS component reference — bare "nmap" or the legacy "component:nmap" —
 // can no longer be resolved to an object, because the object id carries the
-// kind. It returns an error and the caller must fail closed (ADR-0015): a
+// kind. It returns an error and the caller must fail closed (ADR-0136): a
 // kind-less string is never silently assigned a kind.
 func CanonicalComponentResource(resource string) (string, error) {
 	parts := strings.SplitN(resource, ":", 3)

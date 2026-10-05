@@ -9,7 +9,7 @@ description: >-
   Fast port scanner (ProjectDiscovery naabu). Emits Host/Port nodes for each
   open port.
 # A scanner reaches the mission's targets. The effective egress of a tool
-# launch is bounded by the dispatching agent's ceiling (ADR-0016), so this
+# launch is bounded by the dispatching agent's ceiling (ADR-0116), so this
 # is a ceiling, not a grant.
 egressAllow:
   - "*"

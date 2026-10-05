@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package job is the daemon's store for jobs: the unit of work a bank member
-// holds (ADR-0019, gibson#1706).
+// holds (ADR-0119, gibson#1706).
 //
 // A job is one persistent Claude Code session with its own worktrees. It is
 // opened by a structured input, stays open across turns, and is closed by a

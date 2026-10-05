@@ -4,11 +4,11 @@ A **bank** is a pool of always-on Claude Code instances the daemon keeps
 running. A **member** is one instance in that pool. A **job** is one unit of
 work a member holds, with its own conversation and its own worktrees.
 
-The decisions behind this page are [ADR-0019](../adr/0019-banks-of-always-on-agents.md).
+The decisions behind this page are ADR-0119.
 The terms are defined in [`CONTEXT.md`](../../CONTEXT.md), section
 "Banks, members and jobs". This page shows how the parts move.
 
-It amends [ADR-0016](../adr/0016-sandboxed-agent-dispatch.md), which says one
+It amends ADR-0116, which says one
 mission run takes one sandbox and the sandbox is torn down after. That still
 holds for a one-shot dispatch. A member is the second shape: one sandbox that
 serves many dispatches over its life.
@@ -195,7 +195,7 @@ loop edge in the graph.
 ## What bounds a member
 
 - **Isolation.** A member runs in a gVisor sandbox, in the tenant's namespace,
-  under the namespace default-deny NetworkPolicy (ADR-0016 decisions 4 and 5).
+  under the namespace default-deny NetworkPolicy (ADR-0116).
 - **Authorization.** The base grant reaches lifetime RPCs only. Every other
   call carries the grant of the dispatch that asked for it.
 - **Ownership.** A member serves one owner. A subscription sign-in belongs to

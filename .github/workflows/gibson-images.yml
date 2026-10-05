@@ -65,7 +65,7 @@ concurrency:
 jobs:
   # ---- the eight interchangeable images: one matrix, one reusable call site ----
   #
-  # First-party component images (ADR-0015 decision 9): a plugin / hosted
+  # First-party component images (ADR-0136): a plugin / hosted
   # tool / hosted connector that gibson ships is added here as another matrix
   # entry with its own build/<name>.Dockerfile. The reusable workflow builds it
   # FROM SOURCE and cosign-signs it (keyless OIDC + SLSA attestation, the
@@ -174,7 +174,7 @@ jobs:
       tag_pattern: gibson-bootstrap-runner-v(.*)
       build_args: ""
 
-  # ---- gibson-belief-sidecar: RETIRED (ADR-0034, gibson#377) ----
+  # ---- gibson-belief-sidecar: RETIRED (ADR-0134, gibson#377) ----
   # The Python belief sidecar and its image are gone: belief inference runs
   # in-process in the `gibson` daemon image via internal/engine/brain/beliefvi,
   # a native Go port of sidecar/belief's exact-inference algorithm. There is

@@ -15,7 +15,7 @@ import (
 )
 
 // An agent names a brand-new entity by the coordinate it observed, and it never
-// names an entity by a raw brain id (ADR-0012, "Entity references are
+// names an entity by a raw brain id (ADR-0112, "Entity references are
 // generational handles; new entities are named by coordinate"; gibson#1259).
 // Brain ids are replay-deterministic and enumerable, so accepting one from the
 // payload would let a compromised tool choose the identity its emit lands
@@ -43,7 +43,7 @@ import (
 // path), and `handle` is in brainEntityNouns precisely so no emit field may
 // smuggle one back in. Reading a slice (WorldView) and writing an emit
 // (Observe/SubmitFinding) are different directions; the read introduced no emit
-// field, so nothing here changed. See ADR-0012's WorldView section.
+// field, so nothing here changed. See ADR-0112's WorldView section.
 
 // brainEntityNouns are the things the tenant World is made of. A field only
 // trips the guard when it names an id OF one of these: the emit envelope
@@ -58,7 +58,7 @@ var brainEntityNouns = []string{
 }
 
 // namesABrainEntityID reports whether a proto field name reads as a reference
-// to an entity the brain already holds — the shape of field ADR-0012 says an
+// to an entity the brain already holds — the shape of field ADR-0112 says an
 // emit must not carry.
 func namesABrainEntityID(field string) bool {
 	if field == "id" {
@@ -142,7 +142,7 @@ func TestObservationsNameEntitiesByCoordinate(t *testing.T) {
 			f := md.Fields().Get(i)
 			if namesABrainEntityID(string(f.Name())) {
 				t.Errorf("%s.%s references a brain entity by id; an agent names a new "+
-					"entity by the coordinate it observed, never by a brain id (ADR-0012)",
+					"entity by the coordinate it observed, never by a brain id (ADR-0112)",
 					path, f.Name())
 			}
 			if f.Kind() == protoreflect.MessageKind || f.Kind() == protoreflect.GroupKind {
@@ -182,7 +182,7 @@ func TestSubmittedFindingIdentityIsServerAssigned(t *testing.T) {
 		if got.ID.String() == claimed {
 			t.Fatalf("the finding kept the identity its payload claimed (%s); a remote "+
 				"emitter that can choose a brain id can attach fabricated evidence to a "+
-				"name another mission's finding owns (ADR-0012)", claimed)
+				"name another mission's finding owns (ADR-0112)", claimed)
 		}
 	})
 

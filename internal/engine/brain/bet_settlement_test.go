@@ -98,7 +98,7 @@ func TestBetSettledTrue_EmptyHypothesisIDIsIgnored(t *testing.T) {
 
 // TestBetSettledTrue_IsTerminal proves a second settlement event for an
 // already-settled hypothesis is dropped, never overwriting the first
-// verdict (ADR-0023: "open bets earn nothing" once settled).
+// verdict (ADR-0123: "open bets earn nothing" once settled).
 func TestBetSettledTrue_IsTerminal(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, BetSettledTrue{HypothesisID: "hyp-1", Technique: "T1190", EvidenceDigest: "first"})
@@ -178,7 +178,7 @@ func awaitBetSettlements(t *testing.T, e *Engine, want int) []BetSettlementSnaps
 
 // TestSettleBetTrue_PredicateFires_Settles proves the default, non-destructive
 // proof-of-control path: a fired predicate against captured evidence settles
-// the bet TRUE, deterministically, with no LLM in the loop (ADR-0027).
+// the bet TRUE, deterministically, with no LLM in the loop (ADR-0131).
 func TestSettleBetTrue_PredicateFires_Settles(t *testing.T) {
 	e := newSettlementTestEngine(t)
 	registry := newMarkerRegistry(t)
@@ -291,7 +291,7 @@ func TestSettleBetTrue_AlreadySettled_IsIdempotentNoOp(t *testing.T) {
 
 // TestSettleBetTrue_Destructive_RequiresAuthorizer proves a destructive
 // demonstration is refused when no authorizer is wired — fail closed, never
-// auto-approved (ADR-0028).
+// auto-approved (ADR-0132).
 func TestSettleBetTrue_Destructive_RequiresAuthorizer(t *testing.T) {
 	e := newSettlementTestEngine(t)
 	registry := newMarkerRegistry(t)
@@ -338,7 +338,7 @@ func TestSettleBetTrue_Destructive_AuthorizerDenies_Refused(t *testing.T) {
 // TestSettleBetTrue_Destructive_AuthorizerApproves_Settles proves an
 // approved, fired destructive predicate settles — the per-action
 // authorization gate is scoped to this one action, not a mission-wide
-// pause (ADR-0028).
+// pause (ADR-0132).
 func TestSettleBetTrue_Destructive_AuthorizerApproves_Settles(t *testing.T) {
 	e := newSettlementTestEngine(t)
 	registry := newMarkerRegistry(t)

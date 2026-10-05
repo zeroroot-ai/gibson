@@ -12,13 +12,13 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// GraphWriteAnalyzer enforces ADR-0012: the per-tenant Neo4j knowledge graph
+// GraphWriteAnalyzer enforces ADR-0112: the per-tenant Neo4j knowledge graph
 // has exactly ONE writer — the graph projector — and no other code may open a
 // Neo4j write transaction.
 //
-// ADR-0007 established the graph as a projection of the ECS World rather than a
+// ADR-0107 established the graph as a projection of the ECS World rather than a
 // store, but that was a convention no build step checked, and the code drifted:
-// by the time ADR-0012 was written four separate paths could write. The inline
+// by the time ADR-0112 was written four separate paths could write. The inline
 // `MERGE (m:Mission …)` in the CreateMission RPC handler is the illustrative
 // case — it was added for a dashboard feature, reviewed, and merged, because
 // nothing said no. This analyzer is what says no.
@@ -54,7 +54,7 @@ import (
 //   - cmd/gibson-migrate — schema DDL (constraints and indexes), run as its own
 //     Job. Schema and data have different lifecycles, and folding schema
 //     authority into the daemon would put more privilege in the request path,
-//     not less (ADR-0012).
+//     not less (ADR-0112).
 //
 //   - operators/tenant/cmd/gibson-backup — APOC export. Operational tooling,
 //     outside the data plane.
@@ -75,11 +75,11 @@ import (
 // plane, and the invariant this protects is about production write paths. The
 // analyzer's own testdata fixtures are exempt for the same reason.
 //
-// Spec: ADR-0012 (single-writer graph ingress), ADR-0007 (world-sourced graph
+// Spec: ADR-0112 (single-writer graph ingress), ADR-0107 (world-sourced graph
 // projection), gibson#1254.
 var GraphWriteAnalyzer = &analysis.Analyzer{
 	Name: "graphwrite",
-	Doc:  "fail on any Neo4j write transaction opened outside the graph projector (ADR-0012)",
+	Doc:  "fail on any Neo4j write transaction opened outside the graph projector (ADR-0112)",
 	Run:  runGraphWrite,
 }
 
@@ -180,7 +180,7 @@ func runGraphWrite(pass *analysis.Pass) (any, error) {
 				"%s.%s %s: the Neo4j knowledge graph has one writer, the graph projector "+
 					"(internal/server/daemon/graph_projector*.go), and %q is not it. Emit an "+
 					"observation and let the projector materialize it, or extend the projector — "+
-					"do not open a write transaction here (ADR-0012).",
+					"do not open a write transaction here (ADR-0112).",
 				exprString(sel.X), sel.Sel.Name, why, pkgPath)
 			return true
 		})

@@ -10,7 +10,7 @@ import (
 )
 
 // LlmCall is a single LLM completion made during a mission — a unit of
-// run-provenance (ADR-0007, gibson#755) and, since ADR-0020's flight recorder
+// run-provenance (ADR-0107, gibson#755) and, since ADR-0120's flight recorder
 // (gibson#271), the full-fidelity transcript record for that completion.
 // Capture is ALWAYS ON: every fleet agent turn's prompt messages and completion
 // (including any tool calls the model made) are folded in here, never only the
@@ -20,7 +20,7 @@ import (
 // the projected graph); it is empty for a mission-level call (e.g. the
 // Decider) with no owning agent run. Only the metadata (model, token counts,
 // provenance ids) projects to the graph; the full transcript text stays here
-// on the Timeline/component (ADR-0020).
+// on the Timeline/component (ADR-0120).
 type LlmCall struct {
 	CallID           string // identity + stable projection key
 	RunID            string // the AgentRun that issued this call ("" for a mission-level call)
@@ -29,7 +29,7 @@ type LlmCall struct {
 	PromptTokens     int
 	CompletionTokens int
 	// Transcript: the prompt messages + the assistant completion, captured in
-	// full every time (ADR-0020) — never optional. Set once on first
+	// full every time (ADR-0120) — never optional. Set once on first
 	// observation and never re-folded (a call's transcript is immutable, and a
 	// later report can only enrich token/model metadata, never the text). Lets
 	// the dashboard conversation view and the flight recorder replace Langfuse
@@ -55,7 +55,7 @@ type LlmCall struct {
 // the prompt history made, and ToolCallID/Name identify a tool-result message
 // (role "tool") replaying that call's result back to the model. Capturing
 // these keeps a tool-calling conversation's replayed history full-fidelity
-// instead of silently dropping to bare text (ADR-0020, gibson#271).
+// instead of silently dropping to bare text (ADR-0120, gibson#271).
 type LlmMessage struct {
 	Role       string
 	Content    string

@@ -32,8 +32,8 @@ THREE RULES THAT KEEP IT OFF CORRECT COMMENTS
    only against it.
 
 3. A comment BLOCK that names another repository, or an upstream dependency, is
-   that tree's business. "sdk docs/adr/0001-...md", "charts
-   helm/gibson/values.yaml" and "Zitadel v4.18.0's cmd/defaults.yaml" are correct
+   that tree's business. "charts helm/gibson/values.yaml" and
+   "Zitadel v4.18.0's cmd/defaults.yaml" are correct
    comments about trees that are not here. The whole contiguous block is checked,
    not one line, because a block names its subject once and then refers to paths
    inside it.

@@ -14,8 +14,8 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
-// resolveBeliefProvider selects the brain's belief-field provider (ADR-0005,
-// ADR-0034). Inference runs IN-PROCESS via internal/engine/brain/beliefvi — the
+// resolveBeliefProvider selects the brain's belief-field provider (ADR-0134,
+// ADR-0134). Inference runs IN-PROCESS via internal/engine/brain/beliefvi — the
 // native Go port of the (now-retired) Python belief sidecar's exact
 // variable-elimination engine — never over HTTP.
 //
@@ -60,28 +60,28 @@ func loadBeliefModelArtifact() (beliefvi.ModelArtifact, error) {
 }
 
 // resolveSliceBeliefProvider selects the graph-coupled SliceBeliefProvider
-// (ADR-0029, gibson#275): the belief engine consulted for a whole bounded
+// (ADR-0129, gibson#275): the belief engine consulted for a whole bounded
 // slice (gibson#287) at once, instead of one host in isolation.
 //
-// This is now brain.NativeSliceBeliefProvider (gibson#394, ADR-0037):
+// This is now brain.NativeSliceBeliefProvider (gibson#394, ADR-0137):
 // registry supplies both the schema data ground.py's cross-node enablement
 // edges used to have no source for (which of a target node's OWN declared
-// variables an incoming enablement edge feeds — ADR-0037 decision 1's
+// variables an incoming enablement edge feeds — ADR-0137's
 // EnablementEdgeSpec.TargetVariable) and the exact VE + noisy-OR engine
 // (internal/engine/brain/beliefvi's GroundSlice/SolveSlice, #401,
 // parity-tested) that grounds it, entirely in-process; there is no sidecar
 // HTTP path left anywhere in this seam to cut over to. posteriors is the
 // per-edge-type Beta posterior resolveEdgePosteriorProvider resolved
-// (gibson#395, ADR-0037 decision 2); nil means no posterior is pinned, so
+// (gibson#395, ADR-0137); nil means no posterior is pinned, so
 // every cause grounds at the uninformative-prior cold start
-// (brain.UninformativePriorStrength, ADR-0037 decision 3) — never a
+// (brain.UninformativePriorStrength, ADR-0137) — never a
 // hand-authored number.
 func resolveSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry, posteriors brain.PinnedEdgeStrengthPosteriorProvider) brain.SliceBeliefProvider {
 	return brain.NativeSliceBeliefProvider(registry, posteriors)
 }
 
 // resolveEdgePosteriorProvider selects braintrain's fitted per-edge-type Beta
-// posterior (gibson#395, ADR-0037 decisions 2 and 5), the learned strength
+// posterior (gibson#395, ADR-0137), the learned strength
 // that replaces the uninformative-prior cold start (#394) once braintrain has
 // fitted one.
 //
@@ -123,7 +123,7 @@ func newBeliefSchemaRegistry() (*ontology.BeliefSchemaRegistry, error) {
 
 // wireBrainRegistry registers the belief-engine OnEngine hooks — the per-host
 // WireBelief pipeline, the graph-coupled WireSliceBelief pipeline
-// (gibson#275), and value-of-information planning (WireVoIPlanner, ADR-0026,
+// (gibson#275), and value-of-information planning (WireVoIPlanner, ADR-0126,
 // gibson#283) — onto registry, using the default bounded schedule
 // (brain.DefaultSliceSchedule). Shared by daemon.go's Start() and grpc.go's
 // lazy buildGRPCServer() fallback, which used to duplicate this wiring
@@ -150,7 +150,7 @@ func wireBrainRegistry(
 ) {
 	sliceOpts, propagateOpts := brain.DefaultSliceSchedule()
 	// bamcp Thompson-samples edgePosteriorProvider's SAME fitted posterior
-	// (ADR-0037 decision 4's "one output, two uses" — sliceBeliefProvider
+	// (ADR-0137's "one output, two uses" — sliceBeliefProvider
 	// above, if built via resolveSliceBeliefProvider, already consumes its
 	// MEAN). NewBAMCPPlanner defaults a nil provider to
 	// UninformativeEdgePosteriors itself, so passing edgePosteriorProvider
@@ -170,8 +170,8 @@ func wireBrainRegistry(
 		// generative-simulator/Thompson-sampling item is this repo's
 		// gibson#396 (brain.BAMCPPlanner, wired below).
 		//
-		// catalog is nil here (no covering-capability resolution yet, ADR-0035
-		// decision 4/gibson#387): the live per-mission capability catalog
+		// catalog is nil here (no covering-capability resolution yet, ADR-0135/gibson#387):
+		// the live per-mission capability catalog
 		// (brainExecutor.catalog) is built later in Start(), after this
 		// per-tenant-engine wiring runs, the same way ExecutorDeps.Catalog is
 		// wired onto DeciderWorker in a SEPARATE, later OnEngine registration

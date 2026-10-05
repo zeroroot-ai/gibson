@@ -143,7 +143,7 @@ func TestPromotionGate_PlantedUnsafeLabelIsNeverPromoted(t *testing.T) {
 
 	// The planted label recurs past the settlement threshold freely —
 	// Observe never rejects anything, because recording a sighting is data,
-	// never Cypher structure (ADR-0024 §2).
+	// never Cypher structure (ADR-0124).
 	for range MinRecurrenceForSettlement {
 		gate.Observe(ProposedNodeLabel, unsafeLabel)
 	}

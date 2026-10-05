@@ -98,7 +98,7 @@ func TestComputeCalibration_UnscoredWhenNoPredictionWasEverStaked(t *testing.T) 
 // Technique for a TRUE verdict (bet_settlement.go, gibson#279's FALSE path
 // has no Technique field at all). A FALSE-settled, staked bet still counts
 // toward the tenant-wide Overall calibration (a miss is real, recorded
-// evidence — ADR-0023, never silence) but cannot be attributed to any
+// evidence — ADR-0123, never silence) but cannot be attributed to any
 // technique bucket, since none is known.
 func TestComputeCalibration_FalseVerdictsHaveNoTechniqueAndAreOverallOnly(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()

@@ -112,7 +112,7 @@ const reasonUnimplementedJobSurface = "job callback declared by the sdk bump; no
 // — and each is additionally bounded by the handler, which refuses a job the
 // calling member does not hold.
 const reasonMemberJobSurface = "bank member callback: the member acts as itself under its base grant, " +
-	"and the handler refuses a job it does not hold (ADR-0019)"
+	"and the handler refuses a job it does not hold (ADR-0119)"
 
 // callbackMethodPolicy is the SINGLE SOURCE OF TRUTH classifying EVERY
 // HarnessCallbackService method as agent-surface XOR denied.
@@ -167,14 +167,14 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	harnesspb.HarnessCallbackService_SubmitFinding_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_Observe_FullMethodName:       {agentSurface: true, reason: reasonAgentCallbackSurface},
 
-	// --- Betting (ADR-0022, gibson#278) ---
+	// --- Betting (ADR-0122, gibson#278) ---
 	harnesspb.HarnessCallbackService_PlaceBet_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
-	// --- Proof settlement (ADR-0030, ADR-0031, gibson#389; ADR-0032, gibson#390) ---
+	// --- Proof settlement (ADR-0131, gibson#389; ADR-0132, gibson#390) ---
 	harnesspb.HarnessCallbackService_SubmitProof_FullMethodName:                     {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_RequestDestructiveAuthorization_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
 
-	// --- Ontology/taxonomy proposal (ADR-0024 §2, ADR-0033 decision 2,
+	// --- Ontology/taxonomy proposal (ADR-0124, ADR-0133,
 	// gibson#391) ---
 	// ProposeOntologyExtension is agent surface: served here
 	// (callback_propose_ontology_extension.go) and dialed by an agent (or
@@ -262,7 +262,7 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	harnesspb.HarnessCallbackService_SendInput_FullMethodName: {agentSurface: false, reason: reasonUnimplementedJobSurface},
 	harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  {agentSurface: false, reason: reasonUnimplementedJobSurface},
 
-	// WorldView is the agent's only World read (ADR-0012 read half); the daemon
+	// WorldView is the agent's only World read (ADR-0112 read half); the daemon
 	// handler landed in gibson#1377 (worldview.go), projecting a mission-Scope-
 	// limited, handle-named slice. It is part of the in-mission agent surface.
 	harnesspb.HarnessCallbackService_WorldView_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
@@ -272,7 +272,7 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	// graph, previously submitted findings, and mission run history.
 	//
 	// Agent-callable, and read-only by construction — the projector remains the
-	// sole graph writer (ADR-0012), so there is no write counterpart here to
+	// sole graph writer (ADR-0112), so there is no write counterpart here to
 	// classify. Every one derives its tenant from the caller's identity and the
 	// resolved mission record; none takes a tenant argument, so a caller cannot
 	// name another tenant's graph.

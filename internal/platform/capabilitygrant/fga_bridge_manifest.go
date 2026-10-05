@@ -45,7 +45,7 @@ type ComponentRef struct {
 	Kind string // "agent" | "tool" | "plugin"
 }
 
-// FGARef returns "component:<kind>/<name>" for this reference (ADR-0015).
+// FGARef returns "component:<kind>/<name>" for this reference (ADR-0136).
 // An empty name or a kind that is not one of the four canonical kinds yields
 // "" so the ref is skipped rather than forming an invalid object.
 func (c ComponentRef) FGARef() string {

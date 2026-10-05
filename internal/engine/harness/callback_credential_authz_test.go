@@ -338,7 +338,7 @@ func TestGetCredential_AMemberWithNoJobIsRefused(t *testing.T) {
 
 // TestGetCredential_ANonMemberWithAGrantFallsToFGA asserts that a dispatched
 // one-shot agent, which also presents a task grant, is not bounded by a job it
-// does not have: its boundary is the FGA check, as before ADR-0019.
+// does not have: its boundary is the FGA check, as before ADR-0119.
 func TestGetCredential_ANonMemberWithAGrantFallsToFGA(t *testing.T) {
 	fga := &recordingAuthorizer{allow: true}
 	store := &stubCredentialStore{}

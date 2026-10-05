@@ -13,7 +13,7 @@ import (
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
 	// 12: 009 is session_context (component session-context store,
-	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0019,
+	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0119,
 	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
 	// provider_config_meta, the default-provider pointer that shadowed
 	// provider_configs.is_default (gibson#505).
@@ -95,7 +95,7 @@ func TestEmbed_UpDownPairing(t *testing.T) {
 //	007 — (prior tenant baseline)
 //	008 — provider_embedding_capability (BYO-embedder columns, gibson#937)
 //	009 — session_context (component session-context store, gibson#1184)
-//	010 — banks (banks of always-on coding agents, ADR-0019, gibson#1708)
+//	010 — banks (banks of always-on coding agents, ADR-0119, gibson#1708)
 func TestTenantMaxVersion(t *testing.T) {
 	t.Parallel()
 	v, err := TenantMaxVersion()
@@ -123,7 +123,7 @@ func TestTenantMaxVersion(t *testing.T) {
 //	016 — pending_tenant_provisioning (operator-pull provisioning, gibson#948)
 //	017 — tenant_status
 //	018 — tenant_admin_ops
-//	019 — component_install_content_trust (ADR-0010 / gibson#997)
+//	019 — component_install_content_trust (ADR-0110 / gibson#997)
 //	020 — bootstrap_token_consumption (one-time enrollment credential, ADR-0045)
 //	021 — signup_verification (require a verified email before provisioning, gibson#1228)
 //	022 — audit_log_hash_chain (audit_log DDL + per-tenant hash chain)

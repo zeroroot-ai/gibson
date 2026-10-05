@@ -65,7 +65,7 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			// The live console assertions (tenant-scoped visibility).
 			"/gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents": true,
 			"/gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents": true,
-			// The bank exit test (ADR-0019): the tenant's provider key goes in
+			// The bank exit test (ADR-0119): the tenant's provider key goes in
 			// through the RPC, a bank of two comes up, one job opens and closes
 			// with a verdict, a stranger tenant reads NotFound, and the bank
 			// scales to zero.

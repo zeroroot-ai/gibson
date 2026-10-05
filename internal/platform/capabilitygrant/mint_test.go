@@ -376,7 +376,7 @@ func (f staticFetcher) Fetch(_ context.Context, kid string) (any, error) {
 	return nil, errors.New("not found")
 }
 
-// TestMinter_IsolationGating covers the ADR-0010 / gibson#998 mint-time gate:
+// TestMinter_IsolationGating covers the ADR-0110 / gibson#998 mint-time gate:
 // under the hosted setec-only shape only HOSTED_SANDBOX (and UNSPECIFIED) may be
 // minted; every customer mode is rejected with the typed
 // CGMintDeniedByIsolationError. Under customer-isolation every mode mints.

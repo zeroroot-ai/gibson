@@ -160,11 +160,11 @@ type missionManager struct {
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
 	// graphWriter is the graph projector — the sole writer of the per-tenant
-	// knowledge graph (ADR-0012). The per-run graph bootstrap needs it to ensure
+	// knowledge graph (ADR-0112). The per-run graph bootstrap needs it to ensure
 	// the run's :Mission node; it used to MERGE its own (gibson#551).
 	graphWriter GraphWriter
 	// beliefVersion is the belief-model version the brain currently scores against
-	// (ADR-0005 §5). Stamped onto each mission at projection so the mission records
+	// (ADR-0134). Stamped onto each mission at projection so the mission records
 	// the model it ran under and replay reproduces. Empty → no pinned model.
 	beliefVersion string
 
@@ -665,7 +665,7 @@ func (m *missionManager) startRun(
 
 	// Launch mission executor in goroutine - pass mission ID (stable).
 	// Every lifecycle event the caller can observe flows brain → lifecycle
-	// projector → EventBus + Redis stream (ADR-0011 decision 4, gibson#1116;
+	// projector → EventBus + Redis stream (ADR-0163, gibson#1116;
 	// the per-run event channel was retired in gibson#1112 PR 3). Callers
 	// stream via Subscribe filtered on the returned mission ID.
 	go m.executeMission(missionCtx, missionRecord.ID.String(), def)
@@ -922,7 +922,7 @@ func (m *missionManager) releaseChildReservation(ctx context.Context, poolConn *
 // the Observe → Think → Act loop, and cleanup.
 // failBeforeStart records a pre-flight failure in the brain Timeline so the
 // World — and every Subscribe stream, via the lifecycle projector — sees the
-// run start and immediately fail (gibson#1112 PR 3, ADR-0011: the World is
+// run start and immediately fail (gibson#1112 PR 3, ADR-0163: the World is
 // the single source of mission state, including runs that never got off the
 // ground). These failures occur before the mission is projected into the
 // engine, so MissionDone alone would be a silent no-op: applyMissionDone
@@ -980,7 +980,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Set StartedAt timestamp now that execution is beginning
 	active.mission.StartedAt = mission.NewUnixTimePtrNow()
 
-	// Status is now World-derived (ADR-0011/gibson#1118): the brain's MissionStarted
+	// Status is now World-derived (ADR-0163/gibson#1118): the brain's MissionStarted
 	// event sets status=running in the World. No store write here.
 
 	// Increment the concurrent_missions counter on dispatch (queued → running).
@@ -1085,7 +1085,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// The brain is the engine: project the CUE mission into the tenant's World and
 	// let the scheduler (scripted graph) + Decider (goal-directed) drive it. Agents
 	// are dispatched via the mission harness; observations/findings flow back through
-	// the harness callback path into the same World (ADR-0001/0007).
+	// the harness callback path into the same World (ADR-0101/0107).
 	var finalStatus mission.MissionStatus
 	var errorMsg string
 	var missionDuration time.Duration
@@ -1103,11 +1103,11 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	})
 	defer m.brainExecutor.unregister(missionID)
 
-	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
+	// Pin the belief-model version onto the mission (ADR-0134): the mission
 	// records the model it ran under so replay re-loads the exact artifact.
 	proj.BeliefModel = m.beliefVersion
 	// Carry display metadata so the World is the single source of truth for
-	// mission status + identity (ADR-0011/gibson#1118).
+	// mission status + identity (ADR-0163/gibson#1118).
 	proj.Name = active.mission.Name
 	proj.Description = active.mission.Description
 	proj.TargetID = active.mission.TargetID.String()
@@ -1122,7 +1122,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	eng.Submit(proj)
 
 	// Emit MissionStarted into the brain Timeline so the lifecycle projector
-	// derives "status:running" on the Subscribe stream (ADR-0011 decision 4,
+	// derives "status:running" on the Subscribe stream (ADR-0163,
 	// gibson#1116). Carry display metadata so that even the minimal-launch
 	// path has the full mission identity in the World (gibson#1118).
 	eng.Submit(brain.MissionStarted{
@@ -1137,7 +1137,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	// Block until the brain reaches a terminal mission state (or ctx is cancelled).
 	// The projector derives status:completed/failed from brain.MissionDone —
-	// no emitEvent calls here (ADR-0011 decision 4, gibson#1116).
+	// no emitEvent calls here (ADR-0163, gibson#1116).
 	finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
 	missionDuration = time.Since(active.startTime)
 
@@ -1171,7 +1171,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		}
 	}
 
-	// Status is World-derived (ADR-0011/gibson#1118): the brain's MissionDone event
+	// Status is World-derived (ADR-0163/gibson#1118): the brain's MissionDone event
 	// already set the terminal status in the World via Reduce. No store write.
 	active.mission.Error = errorMsg
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
@@ -1202,7 +1202,7 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 	}
 
 	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionPauseRequested{ID: missionID})
-	// Status is World-derived (ADR-0011/gibson#1118): MissionPauseRequested sets
+	// Status is World-derived (ADR-0163/gibson#1118): MissionPauseRequested sets
 	// status=paused in the World via Reduce. No store write.
 
 	// mission.paused reaches the bus + Redis stream via the lifecycle
@@ -1225,7 +1225,7 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) error {
 	if !exists {
 		return fmt.Errorf("mission %s is not active (resume requires a paused, in-memory mission)", missionID)
 	}
-	// Read mission status from the folded World (ADR-0011/gibson#1118).
+	// Read mission status from the folded World (ADR-0163/gibson#1118).
 	eng := m.brainRegistry.For(active.tenantID.String())
 	worldStatus := worldMissionStatus(eng, missionID)
 	if worldStatus != string(brain.MissionPaused) {
@@ -1233,7 +1233,7 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) error {
 	}
 
 	eng.Submit(brain.MissionResumed{ID: missionID})
-	// Status is World-derived (ADR-0011/gibson#1118): MissionResumed sets
+	// Status is World-derived (ADR-0163/gibson#1118): MissionResumed sets
 	// status=running in the World via Reduce. No store write.
 
 	// mission.resumed reaches the bus + Redis stream via the lifecycle
@@ -1269,7 +1269,7 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 	// "mission.stopped" wire event had no consumer outside the retired
 	// per-run channel (gibson#1112 PR 3).
 
-	// Status is World-derived (ADR-0011/gibson#1118): MissionDone above set
+	// Status is World-derived (ADR-0163/gibson#1118): MissionDone above set
 	// status=failed in the World via Reduce. No store write.
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
@@ -1278,7 +1278,7 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 }
 
 // List returns a list of missions with optional filtering.
-// Status and progress are World-derived (ADR-0011/gibson#1118): the brain's
+// Status and progress are World-derived (ADR-0163/gibson#1118): the brain's
 // folded World is the authoritative source — no Redis store reads for status.
 func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offset int) ([]api.MissionData, int, error) {
 	m.logger.Debug("listing missions", "active_only", activeOnly, "limit", limit, "offset", offset)
@@ -1321,7 +1321,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 }
 
 // Get returns a specific mission by ID, scoped to the calling tenant.
-// Status is World-derived (ADR-0011/gibson#1118).
+// Status is World-derived (ADR-0163/gibson#1118).
 func (m *missionManager) Get(ctx context.Context, missionID string) (*api.MissionData, error) {
 	m.logger.Debug("getting mission", "mission_id", missionID)
 
@@ -1344,7 +1344,7 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 	return nil, fmt.Errorf("mission %s not found", missionID)
 }
 
-// missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0011)
+// missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0163)
 // to api.MissionData. Status and progress are authoritative — they come from the
 // folded World, not a secondary store.
 func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
@@ -1362,7 +1362,7 @@ func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
 }
 
 // worldMissionStatus returns the current status string for missionID from the
-// brain's folded World (ADR-0011/gibson#1118). Returns "" if the mission is not
+// brain's folded World (ADR-0163/gibson#1118). Returns "" if the mission is not
 // in the World yet (it may still be initialising on the intake queue).
 func worldMissionStatus(eng *brain.Engine, missionID string) string {
 	for _, ms := range eng.Missions() {

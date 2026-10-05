@@ -26,12 +26,12 @@ const (
 	// brain-native pause). The executor Systems stop dispatching/deciding for it
 	// until it is resumed; its World state is untouched, so resume continues
 	// exactly where it left off (the Timeline is the durable record — no separate
-	// checkpoint store, ADR-0001).
+	// checkpoint store, ADR-0101).
 	MissionPaused MissionStatus = "paused"
 )
 
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
-// (ADR-0004). It is recorded here at projection; the budget/limit System that
+// (ADR-0104). It is recorded here at projection; the budget/limit System that
 // enforces it (forcing MissionDone{budget_exceeded}) is gibson#849. Zero in any
 // field means "unlimited" for that dimension.
 type Budget struct {
@@ -39,7 +39,7 @@ type Budget struct {
 	MaxTokens     int64 // cumulative LLM token budget
 }
 
-// Mission is the root work-graph for a launched mission (ADR-0001): the unit of
+// Mission is the root work-graph for a launched mission (ADR-0101): the unit of
 // identity/goal/accounting. A CUE mission projects into this at launch
 // (MissionProjected); a bare MissionStarted seeds the minimal form. A mission
 // with an empty Goal is a **no-goal** mission: it runs its scripted graph to
@@ -63,14 +63,14 @@ type Mission struct {
 	// DeciderSlot is the mission-level LLM the Decider runs on (gibson#850); empty
 	// → tenant dashboard default.
 	DeciderSlot DeciderSlot
-	// BeliefModel pins the belief-model version this mission ran under (ADR-0005
-	// §5). Recorded at launch from the provider's current artifact so replay
+	// BeliefModel pins the belief-model version this mission ran under (ADR-0134).
+	// Recorded at launch from the provider's current artifact so replay
 	// re-loads the exact model and reproduces the field; empty → no pinned model
 	// (placeholder / OSS-without-base-model). Read-only after launch.
 	BeliefModel string
 
 	// Metadata carried at launch so the World is the single source of truth for
-	// mission status + display data (ADR-0011/ADR-0027, gibson#1118).
+	// mission status + display data (ADR-0163/ADR-0027, gibson#1118).
 	// These fields are populated by MissionStarted and never mutated.
 	Name        string              // human-readable mission name (from the definition)
 	Description string              // mission description (from the definition)
@@ -90,16 +90,16 @@ type Mission struct {
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
 // the minimal launch event.)
-// As of ADR-0011 (gibson#1118) this event also carries display metadata
+// As of ADR-0163 (gibson#1118) this event also carries display metadata
 // (Name/Description/TargetID/TenantID) so the World is the single source of
 // truth for mission status and identity — no parallel Redis store needed.
 type MissionStarted struct {
 	ID   string
 	Goal string
-	// BeliefModel pins the belief-model version (ADR-0005 §5); empty → unpinned.
+	// BeliefModel pins the belief-model version (ADR-0134); empty → unpinned.
 	BeliefModel string
 
-	// Display metadata (ADR-0011/gibson#1118): carried from the CUE definition and
+	// Display metadata (ADR-0163/gibson#1118): carried from the CUE definition and
 	// target at launch so ListMissions can fold the World without a secondary store.
 	Name        string
 	Description string
@@ -273,7 +273,7 @@ const (
 	DecideComplete DecisionAction = "complete"
 )
 
-// Decision is a single orchestration choice (ADR-0001). The Decider produces
+// Decision is a single orchestration choice (ADR-0101). The Decider produces
 // these from the World; the Orchestrator translates them into events. There are
 // **no hand-authored decision rules** — a Decider is the policy (the LLM plugs in
 // here later); the Orchestrator is the mechanism.
@@ -293,7 +293,7 @@ type Decider interface {
 	Decide(w *World) []Decision
 }
 
-// Orchestrator is the thin per-mission Decider role (ADR-0001): single-shot
+// Orchestrator is the thin per-mission Decider role (ADR-0101): single-shot
 // decisions over the World, dispatching work and completing missions. It is a
 // System on the engine.
 type Orchestrator struct {
@@ -328,9 +328,9 @@ type MissionSnapshot struct {
 	DecisionCursor   int
 	TokensUsed       int64
 	DeciderSlot      DeciderSlot
-	BeliefModel      string // pinned belief-model version (ADR-0005 §5)
+	BeliefModel      string // pinned belief-model version (ADR-0134)
 
-	// Display metadata (ADR-0011/gibson#1118): folded from MissionStarted so
+	// Display metadata (ADR-0163/gibson#1118): folded from MissionStarted so
 	// ListMissions can serve all mission data from the World without a secondary store.
 	Name        string
 	Description string
@@ -343,7 +343,7 @@ type MissionSnapshot struct {
 
 	// Progress is the ratio of completed work nodes to total work nodes for the
 	// mission (0.0–1.0), derived from the World's WorkItem entities at snapshot time
-	// (ADR-0011/gibson#1118). Zero when no work nodes are projected yet.
+	// (ADR-0163/gibson#1118). Zero when no work nodes are projected yet.
 	Progress float64
 	// FindingsCount is the number of Finding entities in the World attributed to
 	// this mission, derived at snapshot time.

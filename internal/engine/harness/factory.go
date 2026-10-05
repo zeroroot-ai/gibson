@@ -19,7 +19,7 @@ import (
 // agentDispatchModeOrDefault returns the injected agent-dispatch-mode seam when
 // one is configured, otherwise a closure over componentcatalog.LookupAgent. The
 // closure keeps the package-global catalog lookup out of the DelegateToAgent hot
-// path so a test can inject a stub (gibson#1598 / ADR-0016).
+// path so a test can inject a stub (gibson#1598 / ADR-0116).
 func agentDispatchModeOrDefault(seam func(name string) (string, bool)) func(name string) (string, bool) {
 	if seam != nil {
 		return seam

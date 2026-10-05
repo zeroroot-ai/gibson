@@ -9,7 +9,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 )
 
-// belief_findings_test.go is the belief-evidence seam (ADR-0005, gibson#478):
+// belief_findings_test.go is the belief-evidence seam (ADR-0129, gibson#478):
 // findings and demonstrated exploits reach the belief network, and exploitable
 // steers the Decider's host ordering.
 

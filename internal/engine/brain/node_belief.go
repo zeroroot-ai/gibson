@@ -11,8 +11,8 @@ import (
 
 // node_belief.go backs BeliefSubstrate (belief_substrate.go, gibson#272) for
 // every node kind that is NOT its own ECS entity: NodeKindClaim (the market
-// view, ADR-0022/ADR-0029 §3 — P(claim valid)) and NodeKindTechniqueEnvironment
-// (the reputation view, ADR-0029 §3 — P(technique works here)), and any
+// view, ADR-0122/ADR-0129 — P(claim valid)) and NodeKindTechniqueEnvironment
+// (the reputation view, ADR-0129 — P(technique works here)), and any
 // further kind the ontology declares (belief_substrate.go's own doc comment:
 // "this list is not meant to stay closed").
 //
@@ -33,7 +33,7 @@ import (
 // same as SetBelief's doc comment already requires.
 //
 // Same single-writer discipline as everywhere else in this package: NodeBeliefSet
-// folds through the normal Reduce path (ADR-0001), so replay reproduces it
+// folds through the normal Reduce path (ADR-0101), so replay reproduces it
 // exactly and WorldBeliefSubstrate.SetBelief (belief_world_substrate.go) never
 // mutates the World directly — it only Submits.
 

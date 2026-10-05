@@ -3,7 +3,7 @@
 
 //go:build !embedder_tests
 
-// Package brain — event codec for durable Timeline serialisation (ADR-0011).
+// Package brain — event codec for durable Timeline serialisation (ADR-0163).
 package brain
 
 import (
@@ -81,7 +81,7 @@ func init() {
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
 
-	// belief_slice_gate.go (ADR-0029, gibson#275): registered for codec
+	// belief_slice_gate.go (ADR-0129, gibson#275): registered for codec
 	// completeness like every other Event, though the live graph-coupled
 	// pipeline (WireSliceBelief/SliceBeliefWorker) drives SliceGate.Apply
 	// directly rather than through Engine.Submit/Reduce today — the belief

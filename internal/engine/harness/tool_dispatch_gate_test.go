@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
-// These cover the tenant-enablement gate on TOOL dispatch (ADR-0017 /
+// These cover the tenant-enablement gate on TOOL dispatch (ADR-0117 /
 // gibson#1638), the analogue of the agent gate: a mission may execute
 // component:tool/<name> only when the calling tenant has that tool enabled. The
 // gate is what gives tools per-tenant control, replacing the ungated _system
@@ -79,7 +79,7 @@ func TestToolGate_NilAuthorizer_FailsClosed(t *testing.T) {
 }
 
 // TestSandboxedToolSpecFromManifest resolves nmap's launch spec straight from
-// the embedded kind:tool manifest (ADR-0017): the shared executor image, the
+// the embedded kind:tool manifest (ADR-0117): the shared executor image, the
 // launch command, and GIBSON_TOOL_NAME selecting the tool inside it.
 func TestSandboxedToolSpecFromManifest(t *testing.T) {
 	h := &DefaultAgentHarness{} // zero missionCtx is fine: agentEgressCeiling("") is nil

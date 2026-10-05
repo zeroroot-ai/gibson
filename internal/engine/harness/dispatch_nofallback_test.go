@@ -64,7 +64,7 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 }
 
 // The tool name must NOT be a kind:tool catalog manifest. A manifest tool takes
-// the earlier manifest path in CallToolProto (ADR-0017) and never reaches the
+// the earlier manifest path in CallToolProto (ADR-0117) and never reaches the
 // registry dispatch these tests cover — which would make the deny assertion
 // below pass for the wrong reason and the control test fail outright.
 

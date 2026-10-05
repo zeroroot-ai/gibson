@@ -43,7 +43,7 @@ func instanceLister(t *testing.T, objs ...ctrlclient.Object) ctrlclient.Client {
 }
 
 // An oauth connector carries a vendor token and a secret connector carries a
-// customer-supplied static credential (ADR-0015); both are published by the
+// customer-supplied static credential (ADR-0061); both are published by the
 // materializer, so the source returns both as (tenant, connector) pairs. A
 // none-auth connector has nothing to publish and is dropped.
 func TestConnectorInstanceCatalogSource_ReturnsCredentialBearingConnectors(t *testing.T) {

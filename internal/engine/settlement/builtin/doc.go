@@ -10,11 +10,11 @@
 // the technique it belongs to (e.g. RegisterMarkerPresent(registry,
 // technique)). That call is expected to happen where a technique's other
 // Domain Pack data loads, never at agent/bet-construction time — this
-// package does not weaken the anti-gaming property from ADR-0027 decision
-// 3, it just saves every technique from reimplementing the same few
+// package does not weaken the anti-gaming property from ADR-0131,
+// it just saves every technique from reimplementing the same few
 // well-tested checks.
 //
-// MarkerPresent backs "proof of control by default" (ADR-0027, decision 4):
+// MarkerPresent backs "proof of control by default" (ADR-0131):
 // a demonstration proves it could reach, read, or act by capturing a
 // benign, out-of-band marker, and MarkerPresent is the deterministic check
 // that the marker actually shows up in the captured evidence.

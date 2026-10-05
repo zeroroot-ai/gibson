@@ -5,7 +5,7 @@
 // per-tenant ECS brain World.
 //
 // It does not touch Neo4j. The World is the source of truth and the graph
-// projector is the graph's only writer (ADR-0007, ADR-0012); an ingest path that
+// projector is the graph's only writer (ADR-0107, ADR-0112); an ingest path that
 // wrote nodes itself would be a second writer, which is the thing the
 // `graphwrite` analyzer exists to prevent. So the shape here is: proto in,
 // Timeline events out, projector materializes.
@@ -56,7 +56,7 @@ type ProcessResult struct {
 	// evidence, custom nodes, explicit relationships, and children whose parent
 	// id names nothing in the payload. Non-zero is worth logging: it is data the
 	// agent sent that nothing will store until the Observations fallback exists
-	// (ADR-0012, gibson#1258).
+	// (ADR-0112, gibson#1258).
 	Skipped int
 
 	// Errors holds non-fatal problems encountered while processing.

@@ -76,7 +76,7 @@ type PluginInvokeService struct {
 	// logger is the structured logger for handler operations.
 	logger *slog.Logger
 
-	// deploymentShape is the untrusted-execution isolation policy (ADR-0010 /
+	// deploymentShape is the untrusted-execution isolation policy (ADR-0110 /
 	// gibson#997), from GIBSON_UNTRUSTED_EXEC. The zero value (ShapeSetecOnly)
 	// fail-closes: an unwired service denies untrusted plugin invocation.
 	deploymentShape dispatchpolicy.DeploymentShape
@@ -217,7 +217,7 @@ func (s *PluginInvokeService) PluginInvoke(
 		), nil
 	}
 
-	// 5b. Dispatch-policy gate (ADR-0010 / gibson#997). PluginInvoke dispatches
+	// 5b. Dispatch-policy gate (ADR-0110 / gibson#997). PluginInvoke dispatches
 	//     in-process via the work queue; there is no sandboxed plugin dispatch.
 	//     An UNTRUSTED plugin therefore must not execute under the hosted
 	//     setec-only shape — deny before dispatch, no in-process fallback. All

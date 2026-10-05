@@ -4,7 +4,7 @@
 // Package emitbounds declares the payload limits every agent emit is held to,
 // and the checks that enforce them.
 //
-// The emitter is remote and untrusted (ADR-0012, "Write contract"), so the emit
+// The emitter is remote and untrusted (ADR-0112, "Write contract"), so the emit
 // contract carries explicit caps rather than trusting the producer: maximum
 // payload bytes, maximum properties per observation, maximum property-key
 // length, and maximum observations per task.

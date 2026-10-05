@@ -99,12 +99,12 @@ type DaemonServer struct {
 	quotaManager MissionQuotaChecker
 
 	// connectorGrantRevoker backs the operator-scoped RevokeConnectorGrant
-	// (ADR-0015 §5). Wired via WithConnectorGrantRevoker; nil answers
+	// (ADR-0061). Wired via WithConnectorGrantRevoker; nil answers
 	// Unavailable.
 	connectorGrantRevoker ConnectorGrantRevoker
 
 	// connectorAuthStatusReader backs the operator-scoped
-	// GetConnectorAuthStatus (ADR-0015 decision 4). Wired via
+	// GetConnectorAuthStatus (ADR-0061). Wired via
 	// WithConnectorAuthStatusReader; nil answers Unavailable.
 	connectorAuthStatusReader ConnectorAuthStatusReader
 
@@ -1022,7 +1022,7 @@ type LLMCallRecord struct {
 	PromptTokens     int
 	CompletionTokens int
 	// Transcript: prompt messages + the assistant completion, captured in full
-	// every time (ADR-0020 flight recorder, gibson#271 — never optional), so
+	// every time (ADR-0120 flight recorder, gibson#271 — never optional), so
 	// the World can back the dashboard conversation view without a separate
 	// trace store.
 	Messages   []LLMMessage
@@ -1388,7 +1388,7 @@ func missionEventWireData(me *MissionEventData) *commonpb.TypedMap {
 
 // isTerminalMissionEvent reports whether a projector lifecycle event marks
 // the run's end: a "status" event carrying completed or failed. The lifecycle
-// projector is the single producer of these (ADR-0011 decision 4), which is
+// projector is the single producer of these (ADR-0163), which is
 // what lets the streaming RPCs below end their streams deterministically now
 // that the per-run event channel (whose close used to signal completion) is
 // retired (gibson#1112 PR 3).
@@ -2442,7 +2442,7 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 
 // The checkpoint-browser RPCs (ListCheckpoints, GetCheckpoint,
 // DiffCheckpoints, GetMissionCheckpoints) were retired: sdk#426 removed
-// them from gibson/daemon/v1 after gibson#1117 (ADR-0011) collapsed
+// them from gibson/daemon/v1 after gibson#1117 (ADR-0163) collapsed
 // snapshotting onto World snapshots and left the handlers rendering an
 // always-empty store. Until the SDK pin advances past the removal, the
 // embedded UnimplementedDaemonServiceServer answers them with

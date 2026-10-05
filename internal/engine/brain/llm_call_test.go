@@ -116,7 +116,7 @@ func TestLlmCall_DeterministicOrderAndReplay(t *testing.T) {
 	if a[0].CallID != "c1" || a[1].CallID != "c2" || a[2].CallID != "c3" {
 		t.Fatalf("not CallID-sorted: %+v", a)
 	}
-	// Two independent folds of the same Timeline must be identical (ADR-0001).
+	// Two independent folds of the same Timeline must be identical (ADR-0101).
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("replay mismatch: %+v vs %+v", a, b)
 	}

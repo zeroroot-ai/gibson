@@ -39,7 +39,7 @@ func loadStrictTenant() (bool, error) {
 //
 // Default (unset / empty) is "setec-only" — fail-closed: in the hosted
 // deployment untrusted execution must go through setec or be denied
-// (ADR-0010). On-prem / self-hosted operators that own their own isolation set
+// (ADR-0110). On-prem / self-hosted operators that own their own isolation set
 // "customer-isolation" explicitly. Any other value is a config load error.
 func loadUntrustedExec() (string, error) {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("GIBSON_UNTRUSTED_EXEC")))

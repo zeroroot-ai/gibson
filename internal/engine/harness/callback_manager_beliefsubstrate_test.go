@@ -12,7 +12,7 @@ import (
 )
 
 // TestCallbackManager_SetBeliefSubstrate proves the manager-level setter
-// reaches the underlying callback service (ADR-0022, gibson#273/#278) — the
+// reaches the underlying callback service (ADR-0122, gibson#273/#278) — the
 // same wiring contract as SetToolCallSink, exercised here before Start()
 // (construction alone is enough: NewCallbackServerWithRegistry builds the
 // service eagerly). Without this, PlaceBet has no substrate on any daemon

@@ -138,7 +138,7 @@ type HarnessConfig struct {
 	Metrics MetricsRecorder
 
 	// DelegationSink folds agent-delegation run-provenance into the World so the
-	// graph projector materializes :AgentRun + DELEGATED_TO (ADR-0007). Optional;
+	// graph projector materializes :AgentRun + DELEGATED_TO (ADR-0107). Optional;
 	// when nil, delegation provenance is not recorded.
 	DelegationSink DelegationSink
 
@@ -252,11 +252,11 @@ type HarnessConfig struct {
 	// enforces in CallToolProto (and the other execution paths). Sourced from
 	// the daemon's GIBSON_UNTRUSTED_EXEC config. The zero value
 	// (ShapeSetecOnly) is fail-closed: an unwired harness denies untrusted
-	// in-process execution. See ADR-0010 / gibson#994.
+	// in-process execution. See ADR-0110 / gibson#994.
 	DeploymentShape dispatchpolicy.DeploymentShape
 
 	// AgentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
-	// sandbox for one mission run (ADR-0016 / gibson#1596). When set,
+	// sandbox for one mission run (ADR-0116 / gibson#1596). When set,
 	// DelegateToAgent routes an untrusted agent to it instead of denying. When
 	// nil, an untrusted agent is denied fail-closed under setec-only (no
 	// behavior change for deployments without setec sandbox dispatch).
@@ -278,7 +278,7 @@ type HarnessConfig struct {
 
 	// AgentDispatchMode reports the catalog dispatch mode for an agent name and
 	// whether that agent is listed in the component catalog. It is the injectable
-	// seam over componentcatalog.LookupAgent (gibson#1598 / ADR-0016) that lets
+	// seam over componentcatalog.LookupAgent (gibson#1598 / ADR-0116) that lets
 	// DelegateToAgent force a manifest-declared sandboxed agent to the sandbox
 	// launch regardless of registry trust. Nil defaults, in the factory, to a
 	// closure over componentcatalog.LookupAgent.

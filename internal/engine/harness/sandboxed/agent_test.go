@@ -271,7 +271,7 @@ func okLaunchClient(wait func(context.Context, string) (WaitResponse, error), la
 }
 
 // TestLaunchAgent_VerifyIsolationFail: a sandbox whose bound class does not
-// match what was requested is refused and killed (ADR-0016 decision 4).
+// match what was requested is refused and killed (ADR-0116).
 func TestLaunchAgent_VerifyIsolationFail(t *testing.T) {
 	killed := false
 	c := okLaunchClient(
@@ -318,7 +318,7 @@ func TestLaunchAgent_WaitError(t *testing.T) {
 
 // TestLaunchAgent_MemberModeReachesTheSandbox: a member launch runs the member
 // command and tells the process it is a member. One image, two shapes
-// (ADR-0019).
+// (ADR-0119).
 func TestLaunchAgent_MemberModeReachesTheSandbox(t *testing.T) {
 	var gotReq LaunchRequest
 	client := &mockClient{

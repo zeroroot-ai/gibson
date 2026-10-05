@@ -42,7 +42,7 @@ func TestSubmitOntologyExtensionUpstream_InvalidIdentifierIsRejectedFailClosed(t
 }
 
 // TestSubmitOntologyExtensionUpstream_PendingProposalIsRefused proves
-// ADR-0033 decision 3's "submit-upstream is available only from a live
+// ADR-0133's "submit-upstream is available only from a live
 // tenant extension": a proposal that has never even been approved is
 // refused, distinct from OntologyProposalNotFoundError.
 func TestSubmitOntologyExtensionUpstream_PendingProposalIsRefused(t *testing.T) {

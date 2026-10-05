@@ -5,7 +5,7 @@
 // and DaemonService.RenderCatalogMission.
 //
 // gibson ships first-party mission definitions compiled into its own binary
-// (ADR-0018). Until these two RPCs, the catalog had exactly ONE reader: the
+// (ADR-0118). Until these two RPCs, the catalog had exactly ONE reader: the
 // agent-facing harness callback, which takes catalog_mission + catalog_params.
 // A person could neither list what the platform ships nor run one of those
 // missions, so the only way to run a first-party mission by hand was to copy

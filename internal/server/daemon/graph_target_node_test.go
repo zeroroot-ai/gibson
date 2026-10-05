@@ -67,7 +67,7 @@ func TestBootstrap_WritesATargetNodePerResolvedTarget(t *testing.T) {
 	}
 
 	// The bootstrap must not write a :Target itself — the projector is the sole
-	// writer of a graph node (ADR-0012), same rule as :Mission in gibson#551.
+	// writer of a graph node (ADR-0112), same rule as :Mission in gibson#551.
 	for _, w := range client.writes {
 		if targetNodeWritePattern.MatchString(w.cypher) {
 			t.Errorf("the bootstrap wrote a :Target node itself:\n%s", w.cypher)

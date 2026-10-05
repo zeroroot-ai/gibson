@@ -14,12 +14,12 @@ import (
 )
 
 // seedDomainPackCatalogGate feeds the Domain Pack catalog to the platform
-// catalog-gate converge (ADR-0033, gibson#381), the same generalized
+// catalog-gate converge (ADR-0133, gibson#381), the same generalized
 // reconciler.SeedComponentCatalogGate the connector/agent/tool/plugin
 // catalogs use. Unlike seedComponentCatalogGate, no supply-chain image
 // verification runs first: a Domain Pack is data (taxonomy/ontology/CEL
 // predicate text), never an executable image, so there is no image signature
-// to verify (ADR-0033 decision 1's "safe by construction" — a Pack's blast
+// to verify (ADR-0133's "safe by construction" — a Pack's blast
 // radius is bounded by DomainPack.Validate, not by an image digest).
 //
 // Split from Start so the ref collection and the converge call are directly

@@ -6,7 +6,7 @@ package brain
 import "sort"
 
 // tool_execution.go is the capability-vs-execution view of async tool/plugin work
-// (ADR-0004, gibson#747). A dispatched tool/plugin call is tracked as a WorkItem —
+// (ADR-0104, gibson#747). A dispatched tool/plugin call is tracked as a WorkItem —
 // the *execution* (born on dispatch, has a lifecycle, carries its result). This
 // view surfaces those executions as ToolExecution entities distinct from the
 // static capability catalog the Decider chooses from.

@@ -285,7 +285,7 @@ func TestResolveCapabilities_ComponentNotInRegistry_StillEmitsCapability(t *test
 
 func TestResolveCapabilities_KindlessObject_Skipped(t *testing.T) {
 	// A kind-less ("component:ghost") or unknown-kind object cannot form a valid
-	// component:<kind>/<name> ref, so no capability is emitted for it (ADR-0015:
+	// component:<kind>/<name> ref, so no capability is emitted for it (ADR-0136:
 	// never authorize against an object whose kind is unknown).
 	auth := &mockAuthorizer{
 		listObjectsFunc: func(_, relation, _ string) ([]string, error) {
