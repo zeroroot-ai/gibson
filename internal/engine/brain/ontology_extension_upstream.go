@@ -41,7 +41,7 @@ import (
 // pack — distinct from, and never derived from, the tenant's own
 // taxonomy.Registry version (OntologyProposalState.PromotedVersion) — so it
 // always starts at 1, mirroring how a freshly authored catalog pack (e.g.
-// MainDomainPack) starts its own versioning at 1.
+// ontology/packs/main.json) starts its own versioning at 1.
 const upstreamContributionPackVersion = 1
 
 // OntologyProposalNotPromotedError is returned by SubmitOntologyExtensionUpstream
