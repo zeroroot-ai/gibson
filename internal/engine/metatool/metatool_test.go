@@ -58,7 +58,7 @@ func allowAll(ids ...string) fakeAuthz {
 // dispatches to the plugin method, forwarding the LLM args and returning result.
 func TestInvoke_AuthorizedDecodesAndDispatches(t *testing.T) {
 	q := &fakeQuerier{ret: map[string]any{"issue": 42}}
-	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q, nil)
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q)
 
 	args := map[string]any{"title": "broken pipeline"}
 	got, err := h.Invoke(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "mcp:gitlab:create_issue", args)
@@ -80,7 +80,7 @@ func TestInvoke_AuthorizedDecodesAndDispatches(t *testing.T) {
 // though the id is well-formed (the agent may pass an id it never searched).
 func TestInvoke_UnauthorizedDeniedNotDispatched(t *testing.T) {
 	q := &fakeQuerier{}
-	h := NewHandler(nil, allowAll( /* nothing allowed */ ), q, nil)
+	h := NewHandler(nil, allowAll( /* nothing allowed */ ), q)
 
 	_, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:github:create_issue", nil)
 	if !errors.Is(err, ErrUnauthorized) {
@@ -94,7 +94,7 @@ func TestInvoke_UnauthorizedDeniedNotDispatched(t *testing.T) {
 func TestInvoke_AuthzErrorSurfacesNotDispatched(t *testing.T) {
 	q := &fakeQuerier{}
 	boom := errors.New("fga down")
-	h := NewHandler(nil, fakeAuthz{err: boom}, q, nil)
+	h := NewHandler(nil, fakeAuthz{err: boom}, q)
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, boom) {
 		t.Fatalf("want authz error surfaced, got %v", err)
 	}
@@ -107,7 +107,7 @@ func TestInvoke_AuthzErrorSurfacesNotDispatched(t *testing.T) {
 // same way.
 func TestInvoke_ToleratesFlattenedForm(t *testing.T) {
 	q := &fakeQuerier{}
-	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q, nil)
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q)
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp__gitlab__create_issue", nil); err != nil {
 		t.Fatalf("Invoke flattened: %v", err)
 	}
@@ -116,82 +116,45 @@ func TestInvoke_ToleratesFlattenedForm(t *testing.T) {
 	}
 }
 
-type fakeNative struct {
-	gotTool string
-	gotArgs map[string]any
-	ret     any
-	err     error
-}
-
-func (f *fakeNative) CallNativeTool(_ context.Context, tool string, args map[string]any) (any, error) {
-	f.gotTool, f.gotArgs = tool, args
-	return f.ret, f.err
-}
-
-// A native:<tool> id passes the can_execute gate and goes to the native tool
-// dispatch, never to the plugin path.
-func TestInvoke_NativeToolDispatches(t *testing.T) {
+// Authorize decodes a native id and checks can_execute on the tool object.
+// Dispatch refuses it: the harness sends a native id to its tool call handler.
+func TestAuthorize_NativeToolThenDispatchRefusesIt(t *testing.T) {
 	q := &fakeQuerier{}
-	n := &fakeNative{ret: map[string]any{"open_ports": 3}}
-	h := NewHandler(nil, allowAll("native:nmap"), q, n)
+	h := NewHandler(nil, allowAll("native:nmap"), q)
 
-	got, err := h.Invoke(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "native:nmap", map[string]any{"target": "10.0.0.1"})
+	tid, err := h.Authorize(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "native:nmap")
 	if err != nil {
-		t.Fatalf("Invoke: %v", err)
+		t.Fatalf("Authorize: %v", err)
 	}
-	if n.gotTool != "nmap" || n.gotArgs["target"] != "10.0.0.1" {
-		t.Fatalf("native dispatch got tool=%q args=%+v, want nmap with the args", n.gotTool, n.gotArgs)
+	if tid.Source != toolid.SourceNative || tid.Tool != "nmap" {
+		t.Fatalf("tid = %+v; want native nmap", tid)
 	}
-	if m, ok := got.(map[string]any); !ok || m["open_ports"] != 3 {
-		t.Fatalf("result not returned: %+v", got)
+	if _, err := h.Dispatch(context.Background(), tid, nil); !errors.Is(err, ErrNativeID) {
+		t.Fatalf("Dispatch err = %v; want ErrNativeID", err)
 	}
 	if q.gotName != "" {
 		t.Fatalf("querier should not be called for native tool, got %s.%s", q.gotName, q.gotMethod)
 	}
 }
 
-// A native tool that the tenant did not enable is refused and never
-// dispatched.
-func TestInvoke_NativeToolNotEnabledIsRefused(t *testing.T) {
-	n := &fakeNative{}
-	h := NewHandler(nil, allowAll( /* nothing allowed */ ), &fakeQuerier{}, n)
-
-	_, err := h.Invoke(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "native:nmap", nil)
-	if !errors.Is(err, ErrUnauthorized) {
+// A native tool that the tenant did not enable is refused.
+func TestAuthorize_NativeToolNotEnabledIsRefused(t *testing.T) {
+	h := NewHandler(nil, allowAll( /* nothing allowed */ ), &fakeQuerier{})
+	if _, err := h.Authorize(context.Background(), catalog.Caller{Subject: "user:alice"}, "native:nmap"); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
-	}
-	if n.gotTool != "" {
-		t.Fatalf("a refused native tool was dispatched: %q", n.gotTool)
-	}
-}
-
-// With no native dispatch wired, a native id fails closed.
-func TestInvoke_NativeToolWithNoDispatchFailsClosed(t *testing.T) {
-	h := NewHandler(nil, allowAll("native:nmap"), &fakeQuerier{}, nil)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "native:nmap", nil); err == nil {
-		t.Fatal("want a configuration error, got nil")
 	}
 }
 
 // With no connector dispatch wired, an mcp id fails closed.
 func TestInvoke_ConnectorToolWithNoDispatchFailsClosed(t *testing.T) {
-	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), nil, &fakeNative{})
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), nil)
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
 		t.Fatal("want a configuration error, got nil")
 	}
 }
 
-// The error of a native tool reaches the caller.
-func TestInvoke_PropagatesNativeError(t *testing.T) {
-	wantErr := errors.New("tool boom")
-	h := NewHandler(nil, allowAll("native:nmap"), nil, &fakeNative{err: wantErr})
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "native:nmap", nil); !errors.Is(err, wantErr) {
-		t.Fatalf("want the native error propagated, got %v", err)
-	}
-}
-
 func TestInvoke_RejectsMalformedId(t *testing.T) {
-	h := NewHandler(nil, allowAll(), &fakeQuerier{}, nil)
+	h := NewHandler(nil, allowAll(), &fakeQuerier{})
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "not-a-real-id", nil); err == nil {
 		t.Fatal("want error for malformed id, got nil")
 	}
@@ -199,14 +162,14 @@ func TestInvoke_RejectsMalformedId(t *testing.T) {
 
 func TestInvoke_PropagatesQuerierError(t *testing.T) {
 	wantErr := errors.New("plugin boom")
-	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), &fakeQuerier{err: wantErr}, nil)
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), &fakeQuerier{err: wantErr})
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, wantErr) {
 		t.Fatalf("want querier error propagated, got %v", err)
 	}
 }
 
 func TestInvoke_NilConfigFailsClosed(t *testing.T) {
-	h := NewHandler(&fakeSearcher{}, nil, nil, nil)
+	h := NewHandler(&fakeSearcher{}, nil, nil)
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
 		t.Fatal("want configuration error with nil querier/authz, got nil")
 	}
@@ -215,7 +178,7 @@ func TestInvoke_NilConfigFailsClosed(t *testing.T) {
 // search_tools delegates to the catalog engine, forwarding caller and query.
 func TestSearch_DelegatesToCatalog(t *testing.T) {
 	s := &fakeSearcher{ret: []catalog.Candidate{{ID: "mcp:gitlab:create_issue"}}}
-	h := NewHandler(s, allowAll(), nil, nil)
+	h := NewHandler(s, allowAll(), nil)
 
 	caller := catalog.Caller{Subject: "user:alice", Tenant: "acme"}
 	got, err := h.Search(context.Background(), caller, catalog.Query{Text: "open an issue", Limit: 5})
@@ -231,7 +194,7 @@ func TestSearch_DelegatesToCatalog(t *testing.T) {
 }
 
 func TestSearch_NilSearcherFailsClosed(t *testing.T) {
-	h := NewHandler(nil, allowAll(), &fakeQuerier{}, nil)
+	h := NewHandler(nil, allowAll(), &fakeQuerier{})
 	if _, err := h.Search(context.Background(), catalog.Caller{}, catalog.Query{}); err == nil {
 		t.Fatal("want configuration error with nil searcher, got nil")
 	}
