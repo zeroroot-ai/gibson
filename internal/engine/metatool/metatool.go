@@ -110,14 +110,22 @@ func (h *Handler) Invoke(ctx context.Context, caller catalog.Caller, id string, 
 	}
 	if name, method, ok := tid.PluginRef(); ok {
 		if h.querier == nil {
-			return nil, fmt.Errorf("metatool: the connector dispatch is not configured")
+			return nil, errors.New("metatool: the connector dispatch is not configured")
 		}
-		return h.querier.QueryPlugin(ctx, name, method, args)
+		result, qErr := h.querier.QueryPlugin(ctx, name, method, args)
+		if qErr != nil {
+			return nil, fmt.Errorf("metatool: invoke %q: %w", id, qErr)
+		}
+		return result, nil
 	}
 	if h.native == nil {
-		return nil, fmt.Errorf("metatool: the native tool dispatch is not configured")
+		return nil, errors.New("metatool: the native tool dispatch is not configured")
 	}
-	return h.native.CallNativeTool(ctx, tid.Tool, args)
+	result, nErr := h.native.CallNativeTool(ctx, tid.Tool, args)
+	if nErr != nil {
+		return nil, fmt.Errorf("metatool: invoke %q: %w", id, nErr)
+	}
+	return result, nil
 }
 
 // decodeID accepts the canonical colon form (mcp:<connector>:<tool>) that
