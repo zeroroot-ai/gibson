@@ -235,3 +235,64 @@ func TestJobDriver_NoJobServiceFailsClosed(t *testing.T) {
 		t.Errorf("CloseJob err = %v; want FailedPrecondition", err)
 	}
 }
+
+// The checks of refuseWorkerClose that need no member: a job id, a tenant,
+// and a run.
+func TestCloseJob_RefusalsBeforeTheMemberLookup(t *testing.T) {
+	jobs := newFakeJobs()
+	jobs.jobs["job-1"] = openJob("job-1")
+
+	t.Run("no job id", func(t *testing.T) {
+		s := driverService(t, &fakeJobDriver{}, jobs, notAMember())
+		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{Context: scorerInfo()})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("err = %v; want InvalidArgument", err)
+		}
+	})
+
+	t.Run("no tenant", func(t *testing.T) {
+		s := driverService(t, &fakeJobDriver{}, jobs, notAMember())
+		_, err := s.CloseJob(context.Background(), &harnesspb.CloseJobRequest{Context: scorerInfo(), JobId: "job-1"})
+		if status.Code(err) != codes.PermissionDenied {
+			t.Fatalf("err = %v; want PermissionDenied", err)
+		}
+	})
+
+	t.Run("a caller with no run backs no member", func(t *testing.T) {
+		driver := &fakeJobDriver{}
+		s := driverService(t, driver, jobs, liveMembers())
+		if _, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{Context: &harnesspb.ContextInfo{}, JobId: "job-1"}); err != nil {
+			t.Fatalf("CloseJob: %v", err)
+		}
+		if len(driver.closed) != 1 {
+			t.Fatal("the close did not reach JobService")
+		}
+	})
+
+	t.Run("the run of a member under the name task_id", func(t *testing.T) {
+		driver := &fakeJobDriver{}
+		s := driverService(t, driver, jobs, liveMembers())
+		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{
+			Context: &harnesspb.ContextInfo{TaskId: "run-1"}, JobId: "job-1",
+		})
+		if status.Code(err) != codes.PermissionDenied || len(driver.closed) != 0 {
+			t.Fatalf("err = %v, closes = %d; want PermissionDenied and no close", err, len(driver.closed))
+		}
+	})
+
+	t.Run("a daemon with no banks", func(t *testing.T) {
+		s := NewHarnessCallbackService(nil, WithJobDriver(&fakeJobDriver{}))
+		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{Context: scorerInfo(), JobId: "job-1"})
+		if status.Code(err) != codes.FailedPrecondition {
+			t.Fatalf("err = %v; want FailedPrecondition", err)
+		}
+	})
+
+	t.Run("a member closes a job that does not exist", func(t *testing.T) {
+		s := driverService(t, &fakeJobDriver{}, newFakeJobs(), liveMembers())
+		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{Context: memberInfo("run-1"), JobId: "job-9"})
+		if status.Code(err) != codes.NotFound {
+			t.Fatalf("err = %v; want NotFound", err)
+		}
+	})
+}

@@ -1584,6 +1584,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.logger.Warn(ctx, "JobService not registered", slog.String("error", jobErr.Error()))
 		} else {
 			jobpb.RegisterJobServiceServer(srv, jobSvc)
+			d.jobService = jobSvc
 			d.logger.Info(ctx, "registered gibson.job.v1.JobService gRPC endpoint")
 		}
 	} else {

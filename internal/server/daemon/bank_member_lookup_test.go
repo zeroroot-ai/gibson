@@ -150,3 +150,52 @@ func TestLazyJobSurface_OpenSendEventsReachTheStore(t *testing.T) {
 		t.Error("no store must be reported on Events")
 	}
 }
+
+// stubJobDriver answers each job call and counts the calls.
+type stubJobDriver struct{ calls int }
+
+func (s *stubJobDriver) OpenJob(context.Context, *jobpb.OpenJobRequest) (*jobpb.OpenJobResponse, error) {
+	s.calls++
+	return &jobpb.OpenJobResponse{}, nil
+}
+
+func (s *stubJobDriver) SendInput(context.Context, *jobpb.SendInputRequest) (*jobpb.SendInputResponse, error) {
+	s.calls++
+	return &jobpb.SendInputResponse{}, nil
+}
+
+func (s *stubJobDriver) CloseJob(context.Context, *jobpb.CloseJobRequest) (*jobpb.CloseJobResponse, error) {
+	s.calls++
+	return &jobpb.CloseJobResponse{}, nil
+}
+
+// TestLazyJobDriver_RefusesUntilTheJobServiceIsUp asserts that the callback
+// job calls of a dispatched agent answer Unavailable before the job service
+// is registered, and reach the job service after that.
+func TestLazyJobDriver_RefusesUntilTheJobServiceIsUp(t *testing.T) {
+	d := &daemonImpl{}
+	driver := &lazyJobDriver{daemon: d}
+	ctx := context.Background()
+
+	calls := map[string]func() error{
+		"OpenJob":   func() error { _, err := driver.OpenJob(ctx, &jobpb.OpenJobRequest{}); return err },
+		"SendInput": func() error { _, err := driver.SendInput(ctx, &jobpb.SendInputRequest{}); return err },
+		"CloseJob":  func() error { _, err := driver.CloseJob(ctx, &jobpb.CloseJobRequest{}); return err },
+	}
+	for name, call := range calls {
+		if err := call(); status.Code(err) != codes.Unavailable {
+			t.Errorf("%s with no job service: err = %v, want Unavailable", name, err)
+		}
+	}
+
+	stub := &stubJobDriver{}
+	d.jobService = stub
+	for name, call := range calls {
+		if err := call(); err != nil {
+			t.Errorf("%s with a job service: %v", name, err)
+		}
+	}
+	if stub.calls != 3 {
+		t.Errorf("job service calls = %d, want 3", stub.calls)
+	}
+}
