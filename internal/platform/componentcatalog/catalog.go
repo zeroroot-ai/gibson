@@ -90,14 +90,14 @@ type ConnectorSpec struct {
 }
 
 // WorkloadSpec is the shared hosting shape for an external gRPC component
-// workload (ADR-0136, ADR-0066): a runtime, a digest-pinned image,
-// and a SVID enrollment. Agents and plugins BOTH embed it — one workload code
+// workload (ADR-0136, ADR-0066): a runtime and a digest-pinned image. The
+// SPIFFE ID of a workload is not in the catalog: the platform builds it from
+// the trust domain of the install (ADR-0164). Agents and plugins BOTH embed it — one workload code
 // path (ADR-0027), because an agent is an external gRPC component hosted exactly
 // like a plugin, not trusted in-image code.
 type WorkloadSpec struct {
 	Runtime string `yaml:"runtime"` // process | pod | setec
 	Image   string `yaml:"image"`   // must be a signed digest (…@sha256:…)
-	SVID    string `yaml:"svid"`
 	// ContentTrust is "trusted" or "untrusted" (ADR-0110). Every entry that
 	// runs code in the cluster states it, and the loader refuses an entry
 	// that does not. See validateContentTrust.

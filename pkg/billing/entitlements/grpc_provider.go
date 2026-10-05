@@ -31,7 +31,7 @@ type GRPCProviderOptions struct {
 	// empty, the TLS config uses tlsconfig.AuthorizeAny() (permissive;
 	// suitable for tests / loopback environments). In production this MUST
 	// be set to the billing service's SPIFFE ID
-	// (e.g. "spiffe://zeroroot.ai/platform/billing").
+	// (e.g. "spiffe://example.org/platform/billing").
 	BillingServiceSVID string
 
 	// WorkloadAPISocket overrides the SPIRE agent socket path. When empty,

@@ -18,17 +18,22 @@ package daemon
 import (
 	"log/slog"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/zeroroot-ai/sdk/auth"
 	grpcmetadata "google.golang.org/grpc/metadata"
 )
 
 // e2ePeerMethodPolicies returns nothing in a production build.
-func e2ePeerMethodPolicies() map[string]map[string]bool { return nil }
+func e2ePeerMethodPolicies(spiffeid.TrustDomain) map[string]map[string]bool { return nil }
 
 // e2ePeerTenant never yields a tenant in a production build: no SPIFFE peer
 // may assert a tenant through a header on a direct dial.
-func e2ePeerTenant(string, grpcmetadata.MD) auth.TenantID { return auth.TenantID{} }
+func e2ePeerTenant(string, grpcmetadata.MD, spiffeid.TrustDomain) auth.TenantID {
+	return auth.TenantID{}
+}
 
 // e2eRunnerTenancy names no membership in a production build: there is no
 // runner identity to make a member of anything.
-func e2eRunnerTenancy(*slog.Logger) (user, tenant string, ok bool) { return "", "", false }
+func e2eRunnerTenancy(*slog.Logger, spiffeid.TrustDomain) (user, tenant string, ok bool) {
+	return "", "", false
+}

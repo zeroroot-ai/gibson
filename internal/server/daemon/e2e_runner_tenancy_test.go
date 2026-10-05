@@ -21,7 +21,7 @@ import (
 
 func TestEnsureTenantMember(t *testing.T) {
 	ctx := context.Background()
-	want := authz.Tuple{User: "user:zeroroot.ai/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
+	want := authz.Tuple{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
 
 	t.Run("absent tuple is written", func(t *testing.T) {
 		fa := &fakeAuthorizer{deny: true}
@@ -61,11 +61,11 @@ func TestSeedE2ERunnerTenancy_ProductionBuildWritesNothing(t *testing.T) {
 	}
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "true")
 	t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
-	if _, _, ok := e2eRunnerTenancy(slog.Default()); ok {
+	if _, _, ok := e2eRunnerTenancy(slog.Default(), testTD); ok {
 		t.Fatal("a production build must name no runner tenancy")
 	}
 	fa := &fakeAuthorizer{deny: true}
-	seedE2ERunnerTenancy(context.Background(), fa, slog.Default())
+	seedE2ERunnerTenancy(context.Background(), fa, slog.Default(), testTD)
 	if len(fa.written) != 0 || len(fa.checks) != 0 {
 		t.Fatalf("a production build must not touch FGA for a test identity: wrote %v, checked %v", fa.written, fa.checks)
 	}
@@ -88,7 +88,7 @@ func TestSeedTenantMembership_LogsAFailedWrite(t *testing.T) {
 func TestSeedE2ERunnerTenancy_NilAuthorizerSeedsNothing(t *testing.T) {
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "true")
 	t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
-	seedE2ERunnerTenancy(context.Background(), nil, slog.Default()) // must not panic
+	seedE2ERunnerTenancy(context.Background(), nil, slog.Default(), testTD) // must not panic
 }
 
 func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMember(t *testing.T) {
@@ -98,8 +98,8 @@ func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMember(t *testing.T) {
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "true")
 	t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
 	fa := &fakeAuthorizer{deny: true} // the tuple is absent
-	seedE2ERunnerTenancy(context.Background(), fa, slog.Default())
-	want := authz.Tuple{User: "user:zeroroot.ai/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
+	seedE2ERunnerTenancy(context.Background(), fa, slog.Default(), testTD)
+	want := authz.Tuple{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
 	if len(fa.written) != 1 || fa.written[0] != want {
 		t.Fatalf("wrote %v, want exactly %v: the gate's caller shape is user:<svid without scheme> (callbackFGAUser)", fa.written, want)
 	}
@@ -113,7 +113,7 @@ func TestSeedE2ERunnerTenancy_FixtureBuildGates(t *testing.T) {
 		t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "false")
 		t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
 		fa := &fakeAuthorizer{deny: true}
-		seedE2ERunnerTenancy(context.Background(), fa, slog.Default())
+		seedE2ERunnerTenancy(context.Background(), fa, slog.Default(), testTD)
 		if len(fa.written) != 0 || len(fa.checks) != 0 {
 			t.Fatalf("GIBSON_TEST_FIXTURES_ENABLED=false must seed nothing: wrote %v, checked %v", fa.written, fa.checks)
 		}
@@ -123,7 +123,7 @@ func TestSeedE2ERunnerTenancy_FixtureBuildGates(t *testing.T) {
 		t.Setenv("GIBSON_PLATFORM_TENANT", "")
 		var buf bytes.Buffer
 		fa := &fakeAuthorizer{deny: true}
-		seedE2ERunnerTenancy(context.Background(), fa, slog.New(slog.NewTextHandler(&buf, nil)))
+		seedE2ERunnerTenancy(context.Background(), fa, slog.New(slog.NewTextHandler(&buf, nil)), testTD)
 		if len(fa.written) != 0 {
 			t.Fatalf("an empty tenant must seed nothing: wrote %v", fa.written)
 		}
@@ -136,7 +136,7 @@ func TestSeedE2ERunnerTenancy_FixtureBuildGates(t *testing.T) {
 		t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
 		var buf bytes.Buffer
 		fa := &fakeAuthorizer{deny: true, writeErr: context.DeadlineExceeded}
-		seedE2ERunnerTenancy(context.Background(), fa, slog.New(slog.NewTextHandler(&buf, nil)))
+		seedE2ERunnerTenancy(context.Background(), fa, slog.New(slog.NewTextHandler(&buf, nil)), testTD)
 		if !strings.Contains(buf.String(), "seed failed") {
 			t.Fatalf("a failed seed must be logged, or the runner silently stops at the gate; got: %s", buf.String())
 		}

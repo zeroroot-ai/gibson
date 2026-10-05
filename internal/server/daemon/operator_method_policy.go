@@ -19,18 +19,28 @@ import (
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
+// platformSVID is the SPIFFE ID of a platform component in the trust domain
+// of the install: spiffe://<td>/platform/<name>. No code holds the trust
+// domain as a literal (ADR-0164); the daemon reads it from
+// auth.spiffe.trust_domain.
+func platformSVID(td spiffeid.TrustDomain, name string) string {
+	return "spiffe://" + td.Name() + "/platform/" + name
+}
+
 // tenantOperatorSVID is the tenant-operator's SPIFFE workload identity, the
 // primary consumer of the daemon's control-plane direct-dial bypass
 // (ADR-0002). Every browser-path peer must transit Envoy + ext-authz and carry
 // the ext-authz-shaped headers.
-const tenantOperatorSVID = "spiffe://zeroroot.ai/platform/tenant-operator"
+func tenantOperatorSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "tenant-operator") }
 
 // connectorOperatorSVID is the connector-operator's SPIFFE workload identity.
 // It is the second direct-dial peer (ADR-0061, gibson#1566): it calls
 // RevokeConnectorGrant from the ConnectorInstance finalizer and
 // GetConnectorAuthStatus from the ConnectorInstance controller, so its policy
 // is exactly those two methods (least privilege).
-const connectorOperatorSVID = "spiffe://zeroroot.ai/platform/connector-operator"
+func connectorOperatorSVID(td spiffeid.TrustDomain) string {
+	return platformSVID(td, "connector-operator")
+}
 
 // operatorMethodDecision classifies a single DaemonOperatorService method for
 // the tenant-operator's SPIFFE direct-dial bypass. Exactly one of the two
@@ -261,10 +271,10 @@ func allowedMethodsOf(policy map[string]operatorMethodDecision) map[string]bool 
 // ext-authz and never uses this bypass, so it must never appear here or in
 // AllowedPeerIDs. A new direct-dial peer must be given an explicit method
 // policy here before it can be added to AllowedPeerIDs.
-func spiffePeerMethodPolicies(callers api.ConnectionPointCallers) map[string]map[string]bool {
+func spiffePeerMethodPolicies(td spiffeid.TrustDomain, callers api.ConnectionPointCallers) map[string]map[string]bool {
 	policies := map[string]map[string]bool{
-		tenantOperatorSVID:    operatorAllowedMethods(),
-		connectorOperatorSVID: connectorOperatorAllowedMethods(),
+		tenantOperatorSVID(td):    operatorAllowedMethods(),
+		connectorOperatorSVID(td): connectorOperatorAllowedMethods(),
 	}
 	policies = mergePeerPolicies(policies, connectionPointPeerPolicies(callers))
 	// The exit-test runner is a direct-dial peer that exists ONLY in binaries
@@ -272,7 +282,7 @@ func spiffePeerMethodPolicies(callers api.ConnectionPointCallers) map[string]map
 	// is the no-op stub and this loop adds nothing, so the broad method access
 	// an e2e suite needs can never reach a production daemon — not by config,
 	// not by an operator mistake, because the identity is not in the binary.
-	return mergePeerPolicies(policies, e2ePeerMethodPolicies())
+	return mergePeerPolicies(policies, e2ePeerMethodPolicies(td))
 }
 
 // connectionPointPeerPolicies gives each configured caller of the neutral

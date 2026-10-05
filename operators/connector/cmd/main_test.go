@@ -24,23 +24,23 @@ func TestSchemeRegistersConnectorInstance(t *testing.T) {
 	}
 }
 
-// TestDaemonSettings pins the finalizer's daemon dial contract: the address is
-// required, the SVID defaults to the platform daemon and an explicit one wins.
+// TestDaemonSettings pins the finalizer's daemon dial contract: the address
+// and the daemon SVID are both required, because the SVID holds the trust
+// domain of the install and no code holds it as a literal (ADR-0164).
 func TestDaemonSettings(t *testing.T) {
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
-	if _, _, err := daemonSettings(env(map[string]string{})); err == nil {
+	if _, _, err := daemonSettings(env(map[string]string{"GIBSON_DAEMON_SPIFFE_ID": "spiffe://example.org/platform/daemon"})); err == nil {
 		t.Error("a missing GIBSON_DAEMON_GRPC_ADDRESS must be refused")
 	}
-	addr, svid, err := daemonSettings(env(map[string]string{"GIBSON_DAEMON_GRPC_ADDRESS": "gibson-workloads:50051"}))
-	if err != nil || addr != "gibson-workloads:50051" || svid != defaultDaemonSVID {
-		t.Errorf("got (%q, %q, %v), want the address and the default SVID", addr, svid, err)
+	if _, _, err := daemonSettings(env(map[string]string{"GIBSON_DAEMON_GRPC_ADDRESS": "gibson-workloads:50051"})); err == nil {
+		t.Error("a missing GIBSON_DAEMON_SPIFFE_ID must be refused")
 	}
-	_, svid, _ = daemonSettings(env(map[string]string{
-		"GIBSON_DAEMON_GRPC_ADDRESS": "x:1", "GIBSON_DAEMON_SPIFFE_ID": "spiffe://example.org/daemon",
+	addr, svid, err := daemonSettings(env(map[string]string{
+		"GIBSON_DAEMON_GRPC_ADDRESS": "x:1", "GIBSON_DAEMON_SPIFFE_ID": "spiffe://example.org/platform/daemon",
 	}))
-	if svid != "spiffe://example.org/daemon" {
-		t.Errorf("explicit SVID must win, got %q", svid)
+	if err != nil || addr != "x:1" || svid != "spiffe://example.org/platform/daemon" {
+		t.Errorf("got (%q, %q, %v), want the address and the SVID", addr, svid, err)
 	}
 }
 

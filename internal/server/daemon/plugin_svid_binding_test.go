@@ -66,10 +66,11 @@ func TestResolvePluginSVIDBinding(t *testing.T) {
 		}
 	})
 
-	t.Run("empty trust domain defaults to zeroroot.ai", func(t *testing.T) {
-		b, _, ok := resolvePluginSVIDBinding("primary", "", socket, true)
-		if !ok || b.trustDomain.Name() != "zeroroot.ai" {
-			t.Errorf("ok=%v td=%q, want zeroroot.ai default", ok, b.trustDomain.Name())
+	t.Run("an empty trust domain disables with a reason", func(t *testing.T) {
+		// No code holds a trust domain as a literal (ADR-0164), so an empty
+		// value has no default.
+		if _, reason, ok := resolvePluginSVIDBinding("primary", "", socket, true); ok || reason == "" {
+			t.Errorf("ok=%v reason=%q, want disabled with a reason", ok, reason)
 		}
 	})
 }

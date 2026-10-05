@@ -22,6 +22,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,7 +43,7 @@ type Options struct {
 	// DaemonSVID is the SPIFFE ID the operator expects to see in the
 	// daemon's leaf certificate during the mTLS handshake. The TLS config
 	// rejects any connection whose server cert presents a different SVID.
-	// Typically spiffe://zeroroot.ai/platform/daemon. Required.
+	// For example spiffe://example.org/platform/daemon. Required.
 	DaemonSVID string
 
 	// WorkloadAPISocket overrides the SPIRE agent socket path. When empty,
@@ -77,7 +78,7 @@ func NewClient(ctx context.Context, opts Options) (*Client, error) {
 		return nil, fmt.Errorf("daemon-transport: Addr is required")
 	}
 	if strings.TrimSpace(opts.DaemonSVID) == "" {
-		return nil, fmt.Errorf("daemon-transport: DaemonSVID is required (typically spiffe://zeroroot.ai/platform/daemon)")
+		return nil, errors.New("daemon-transport: DaemonSVID is required (for example spiffe://example.org/platform/daemon)")
 	}
 	daemonID, err := spiffeid.FromString(opts.DaemonSVID)
 	if err != nil {

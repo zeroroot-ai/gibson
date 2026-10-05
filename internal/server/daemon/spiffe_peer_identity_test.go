@@ -18,14 +18,14 @@ import (
 func TestSpiffePeerIdentity(t *testing.T) {
 	const svid = "spiffe://zeroroot.ai/platform/tenant-operator"
 	ctx := grpcmetadata.NewIncomingContext(context.Background(), grpcmetadata.Pairs(auth.HeaderTenant, "acme"))
-	id := spiffePeerIdentity(ctx, svid)
+	id := spiffePeerIdentity(ctx, svid, testTD)
 	if id.Subject != svid || id.Issuer != auth.Issuer("spiffe") || id.CredentialType != auth.CredentialType("spiffe") {
 		t.Fatalf("identity = %+v", id)
 	}
 	if id.Tenant != (auth.TenantID{}) {
 		t.Fatalf("a platform peer must not take a tenant from a header: %v", id.Tenant)
 	}
-	if id := spiffePeerIdentity(context.Background(), svid); id.Tenant != (auth.TenantID{}) || id.Subject != svid {
+	if id := spiffePeerIdentity(context.Background(), svid, testTD); id.Tenant != (auth.TenantID{}) || id.Subject != svid {
 		t.Fatalf("no metadata: %+v", id)
 	}
 }
