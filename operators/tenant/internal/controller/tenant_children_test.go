@@ -69,6 +69,8 @@ func newChildOrchestrationReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant
 		Runner:               runner,
 		Recorder:             events.NewFakeRecorder(100),
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		// Production always injects a reporter (cmd/main.go).
+		StatusReporter: NoopTenantStatusReporter{},
 	}
 	return r, fakeClient
 }

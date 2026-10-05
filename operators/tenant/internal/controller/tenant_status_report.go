@@ -99,11 +99,6 @@ func (r *TenantReconciler) reportStatusToDaemon(ctx context.Context, tenant *gib
 // daemon blip on one pass is repaired by the next. It never stamps the
 // billing annotation: a tenant in deletion gets no new annotation.
 func (r *TenantReconciler) reportTeardownToDaemon(ctx context.Context, tenant *gibsonv1alpha1.Tenant, phase gibsonv1alpha1.TenantPhase) {
-	// Production always injects a reporter. The guard matches the one on
-	// the provisioning path, for unit tests that omit it.
-	if r.StatusReporter == nil {
-		return
-	}
 	logger := log.FromContext(ctx).WithName("tenant-status-report")
 	_, err := r.StatusReporter.ReportTenantStatus(ctx, provision.TenantStatusReport{
 		TenantID:         tenant.Name,
