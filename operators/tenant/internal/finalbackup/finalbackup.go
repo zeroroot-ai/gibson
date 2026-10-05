@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -179,7 +180,7 @@ func Build(name, veleroNamespace string, tenant *gibsonv1alpha1.Tenant) *unstruc
 	u.SetLabels(map[string]string{
 		LabelTenant:        tenant.Name,
 		LabelBackupType:    BackupTypeFinal,
-		LabelRetentionDays: fmt.Sprintf("%d", RetentionDays),
+		LabelRetentionDays: strconv.Itoa(RetentionDays),
 	})
 	u.SetAnnotations(map[string]string{
 		AnnotationTenantUID: string(tenant.UID),

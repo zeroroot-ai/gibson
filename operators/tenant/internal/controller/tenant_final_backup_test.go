@@ -104,7 +104,7 @@ func TestReconcileDelete_FailedBackupRemovesNothing(t *testing.T) {
 	gate := &stubFinalBackup{err: backupErr}
 	r, c := provisionedTenantInDeletion(t, gate)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "acme"}})
 		if !errors.Is(err, backupErr) {
 			t.Fatalf("pass %d: err = %v, want the backup error", i, err)

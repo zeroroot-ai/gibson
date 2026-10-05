@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -71,12 +72,20 @@ func newTaker(t *testing.T, c client.Client) *Taker {
 	return taker
 }
 
-func getBackup(t *testing.T, c client.Client) (*unstructured.Unstructured, error) {
+// getBackup returns the last backup of the test tenant, or false when it does
+// not exist.
+func getBackup(t *testing.T, c client.Client) (*unstructured.Unstructured, bool) {
 	t.Helper()
 	b := &unstructured.Unstructured{}
 	b.SetGroupVersionKind(backupGVK)
 	err := c.Get(context.Background(), client.ObjectKey{Namespace: testVeleroNS, Name: BackupName(tenantFixture())}, b)
-	return b, err
+	if apierrors.IsNotFound(err) {
+		return nil, false
+	}
+	if err != nil {
+		t.Fatalf("get the Backup: %v", err)
+	}
+	return b, true
 }
 
 func TestNew_RequiresBothArguments(t *testing.T) {
@@ -99,9 +108,9 @@ func TestEnsure_CreatesTheBackupAndWaits(t *testing.T) {
 	if done {
 		t.Fatal("Ensure reported done before a backup completed")
 	}
-	b, err := getBackup(t, c)
-	if err != nil {
-		t.Fatalf("the Backup was not created: %v", err)
+	b, found := getBackup(t, c)
+	if !found {
+		t.Fatal("the Backup was not created")
 	}
 	if got := b.GetLabels()[LabelTenant]; got != testTenant {
 		t.Errorf("label %s = %q, want %q", LabelTenant, got, testTenant)
@@ -134,7 +143,7 @@ func TestEnsure_CreatesTheBackupAndWaits(t *testing.T) {
 func TestEnsure_OneBackupForEachDelete(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
 	taker := newTaker(t, c)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if done, err := taker.Ensure(context.Background(), tenantFixture()); err != nil || done {
 			t.Fatalf("pass %d: done=%v err=%v, want waiting", i, done, err)
 		}
@@ -248,7 +257,7 @@ func TestEnsure_NothingToBackUp(t *testing.T) {
 			if err != nil || !done {
 				t.Fatalf("done=%v err=%v, want done", done, err)
 			}
-			if _, gErr := getBackup(t, c); gErr == nil {
+			if _, found := getBackup(t, c); found {
 				t.Error("a backup was created although no data exists")
 			}
 		})
