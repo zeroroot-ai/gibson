@@ -434,38 +434,7 @@ func (s *RedisComponentAccessStore) UpdateConfig(ctx context.Context, tenant, co
 
 // ListTenantAccess implements ComponentAccessStore.
 func (s *RedisComponentAccessStore) ListTenantAccess(ctx context.Context, tenant string) ([]ComponentAccess, error) {
-	var results []ComponentAccess
-	var cursor uint64
-
-	for {
-		keys, next, err := s.client.Scan(ctx, cursor, accessPattern(tenant), 100).Result()
-		if err != nil {
-			return nil, fmt.Errorf("scan tenant access records: %w", err)
-		}
-
-		for _, key := range keys {
-			data, err := s.client.Get(ctx, key).Bytes()
-			if err != nil {
-				if errors.Is(err, redis.Nil) {
-					continue
-				}
-				return nil, fmt.Errorf("get access record %s: %w", key, err)
-			}
-
-			var access ComponentAccess
-			if err := json.Unmarshal(data, &access); err != nil {
-				continue
-			}
-			results = append(results, access)
-		}
-
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return results, nil
+	return scanJSONRecords[ComponentAccess](ctx, s.client, accessPattern(tenant), "access record")
 }
 
 // ListAvailablePlugins implements ComponentAccessStore.
