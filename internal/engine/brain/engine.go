@@ -89,6 +89,11 @@ type Engine struct {
 	stopOnce sync.Once
 	stopErr  error
 	onStop   func(*Engine)
+
+	// capabilityCatalog returns the capabilities enrolled for a mission. The
+	// Decider and the VoI planner both read it through Capabilities, so the
+	// two cannot use two different catalogs (ADR-0126). WireExecutor sets it.
+	capabilityCatalog func(missionID string) []Capability
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
@@ -145,6 +150,29 @@ func (e *Engine) WithSnapshotCadence(n int) *Engine {
 func (e *Engine) WithStore(s TimelineStore) *Engine {
 	e.store = s
 	return e
+}
+
+// SetCapabilityCatalog sets the source of the capabilities enrolled for a
+// mission. It takes the mission id because the catalog is per-tenant and a
+// worker runs off the tick with no ambient identity. WireExecutor calls it.
+func (e *Engine) SetCapabilityCatalog(catalog func(missionID string) []Capability) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.capabilityCatalog = catalog
+}
+
+// Capabilities returns the capabilities enrolled for the mission: the set that
+// the Decider can dispatch and that the VoI planner resolves a candidate
+// against (ADR-0126, ADR-0135). It returns nil while no catalog is set. The
+// catalog runs outside the engine lock, so it can read the engine.
+func (e *Engine) Capabilities(missionID string) []Capability {
+	e.mu.RLock()
+	catalog := e.capabilityCatalog
+	e.mu.RUnlock()
+	if catalog == nil {
+		return nil
+	}
+	return catalog(missionID)
 }
 
 // AddSystem registers a system to run every tick (e.g., the Orchestrator).

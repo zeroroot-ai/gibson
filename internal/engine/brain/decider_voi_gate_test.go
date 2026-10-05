@@ -204,3 +204,44 @@ func TestDecider_ColdMissionWithNoVoIPlanDispatchesNothing(t *testing.T) {
 		t.Fatalf("a mission with no VoI plan yet must dispatch nothing; work=%+v", e.Work())
 	}
 }
+
+// A decision request waits while the VoI plan of the mission is in flight, and
+// the Decider decides after the plan folds (gibson#693). Without the wait, the
+// gate refuses the dispatch against the missing plan, and the quiescent mission
+// ends with no work done.
+func TestDeciderDrain_WaitsForTheVoIPlanInFlight(t *testing.T) {
+	exploit := Capability{Kind: "agent", Name: "exploit"}
+	llm := &scriptedLLM{outputs: []DeciderOutput{
+		{Dispatches: []DeciderDispatch{{Kind: "agent", Target: "exploit", Input: "go"}}},
+	}}
+	e, dw := voiGateEngine(llm, func(string) []Capability { return []Capability{exploit} })
+	e.AddSystem(VoIGateSystem)
+
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Tick() // both gates fire: a decision request and a plan request
+
+	if n := dw.Drain(t.Context()); n != 0 || llm.calls != 0 {
+		t.Fatalf("the Decider decided while the plan was in flight (processed %d, LLM calls %d)", n, llm.calls)
+	}
+	e.Tick()
+	if ms := e.Missions(); len(ms) != 1 || ms[0].Status != MissionRunning {
+		t.Fatalf("the mission must still run while it waits for the plan: %+v", ms)
+	}
+
+	approveViaVoI(e, "m1", exploit) // the plan lands
+	e.Tick()
+	if n := dw.Drain(t.Context()); n != 1 || llm.calls != 1 {
+		t.Fatalf("the Decider did not decide after the plan landed (processed %d, LLM calls %d)", n, llm.calls)
+	}
+	e.Tick()
+
+	var dispatched bool
+	for _, wi := range e.Work() {
+		if wi.MissionID == "m1" && wi.Target == "exploit" {
+			dispatched = true
+		}
+	}
+	if !dispatched {
+		t.Fatalf("the dispatch for the covering capability did not pass the gate: %+v", e.Work())
+	}
+}

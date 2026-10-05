@@ -324,18 +324,50 @@ func (dw *DeciderWorker) Tap(ev Event) {
 	}
 }
 
-// Drain processes all buffered decision requests off the tick. Returns the count
-// processed.
+// Drain processes the buffered decision requests off the tick. Returns the
+// count processed.
+//
+// A mission whose VoI plan is in flight stays buffered for the next Drain. The
+// two gates fire on the same evidence signal in the same tick, so a decision
+// request always has a plan request beside it. A decision made before that plan
+// lands would meet the old top-k, or none: the gate would refuse each dispatch,
+// and a quiescent mission would then end with no work done (gibson#693).
 func (dw *DeciderWorker) Drain(ctx context.Context) int {
 	dw.mu.Lock()
 	ids := dw.pending
 	dw.pending = nil
 	dw.mu.Unlock()
 
+	planning := dw.voiPlansInFlight()
+	var deferred []string
+	done := 0
 	for _, missionID := range ids {
+		if planning[missionID] {
+			deferred = append(deferred, missionID)
+			continue
+		}
 		dw.decide(ctx, missionID)
+		done++
 	}
-	return len(ids)
+	if len(deferred) > 0 {
+		dw.mu.Lock()
+		dw.pending = append(deferred, dw.pending...)
+		dw.mu.Unlock()
+	}
+	return done
+}
+
+// voiPlansInFlight returns the missions whose VoI plan is requested and not yet
+// folded. A mission with no plan state is not in the set: no planner is wired
+// for it, and the gate then refuses each dispatch (voiGatedDispatch).
+func (dw *DeciderWorker) voiPlansInFlight() map[string]bool {
+	out := map[string]bool{}
+	for _, st := range dw.eng.VoIPlanSnapshot() {
+		if st.InFlight {
+			out[st.MissionID] = true
+		}
+	}
+	return out
 }
 
 func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {

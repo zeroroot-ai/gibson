@@ -50,6 +50,9 @@ type ExecutorDeps struct {
 	DrainInterval time.Duration // how often to actuate buffered dispatch/decision work
 }
 
+// WireExecutor sets the capability catalog of eng, which the Decider and the VoI
+// planner both read (Engine.Capabilities). A nil deps.Catalog is a panic.
+//
 // WireExecutor subscribes the dispatch + decider taps to eng and starts a single
 // drain goroutine (bound to ctx) that actuates buffered work off the tick. The
 // taps run in-tick and only buffer; Drain does the I/O (LLM calls, agent
@@ -59,8 +62,15 @@ func WireExecutor(ctx context.Context, eng *Engine, deps ExecutorDeps) {
 	if interval <= 0 {
 		interval = TickInterval
 	}
+	if deps.Catalog == nil {
+		// A nil catalog offers no capability, so the VoI gate refuses each
+		// Decider dispatch and no goal mission can act (gibson#693). That is a
+		// wiring defect, and it must stop the start, not degrade the engine.
+		panic("brain: WireExecutor needs a capability catalog (ExecutorDeps.Catalog is nil)")
+	}
+	eng.SetCapabilityCatalog(deps.Catalog)
 	dh := NewDispatchHandler(deps.Dispatcher)
-	dw := NewDeciderWorker(eng, deps.Decider, deps.Catalog)
+	dw := NewDeciderWorker(eng, deps.Decider, eng.Capabilities)
 	eng.Subscribe(dh.Tap)
 	eng.Subscribe(dw.Tap)
 
