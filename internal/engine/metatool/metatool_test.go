@@ -173,6 +173,23 @@ func TestInvoke_NativeToolWithNoDispatchFailsClosed(t *testing.T) {
 	}
 }
 
+// With no connector dispatch wired, an mcp id fails closed.
+func TestInvoke_ConnectorToolWithNoDispatchFailsClosed(t *testing.T) {
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), nil, &fakeNative{})
+	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
+		t.Fatal("want a configuration error, got nil")
+	}
+}
+
+// The error of a native tool reaches the caller.
+func TestInvoke_PropagatesNativeError(t *testing.T) {
+	wantErr := errors.New("tool boom")
+	h := NewHandler(nil, allowAll("native:nmap"), nil, &fakeNative{err: wantErr})
+	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "native:nmap", nil); !errors.Is(err, wantErr) {
+		t.Fatalf("want the native error propagated, got %v", err)
+	}
+}
+
 func TestInvoke_RejectsMalformedId(t *testing.T) {
 	h := NewHandler(nil, allowAll(), &fakeQuerier{}, nil)
 	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "not-a-real-id", nil); err == nil {

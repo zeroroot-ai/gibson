@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
 type mtSearcher struct {
@@ -440,4 +441,123 @@ func TestMetaInvoke_NativeToolFailureIsRecordedOnce(t *testing.T) {
 	if len(captured) != 1 || captured[0].call.Err == "" {
 		t.Fatalf("captured = %+v, want exactly one failure record", captured)
 	}
+}
+
+// invokeNativeThroughCallToolProto sends one invoke_tool call for the native
+// test tool through the public handler, with the catalog wired. allow is the
+// answer of the can_execute check on the tool object.
+func invokeNativeThroughCallToolProto(t *testing.T, captured *[]capturedTool, allow bool) (*harnesspb.CallToolProtoResponse, *fakeSearchAuthz) {
+	t.Helper()
+	svc, _, contextInfo := newNativeMetaSvc(t, captured, nil)
+	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:tool/test-external-tool": allow}}
+	svc.componentAuthorizer = authzer
+	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{{Kind: "tool", Name: "test-external-tool"}}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"native:test-external-tool","args":{"query":"q"}}`),
+	})
+	if err != nil {
+		t.Fatalf("CallToolProto: %v", err)
+	}
+	return resp, authzer
+}
+
+// TestInvokeTool_CallsOneNativeTool is the end-to-end case of gibson#725: an
+// agent calls one native tool through invoke_tool. The can_execute check is on
+// the tool object, for the user of the run.
+func TestInvokeTool_CallsOneNativeTool(t *testing.T) {
+	var captured []capturedTool
+	resp, authzer := invokeNativeThroughCallToolProto(t, &captured, true)
+
+	if resp.GetError() != nil {
+		t.Fatalf("unexpected error response: %v", resp.GetError())
+	}
+	var out struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(resp.GetOutputJson(), &out); err != nil || out.Result["result"] != "success" {
+		t.Fatalf("result = %s (%v); want the output of the tool", resp.GetOutputJson(), err)
+	}
+	if authzer.lastUser != "user:alice" {
+		t.Errorf("can_execute subject = %q; want user:alice", authzer.lastUser)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured %d tool calls; want exactly 1", len(captured))
+	}
+}
+
+// TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable is the second
+// case of gibson#725: no can_execute on the tool object, so the tool does not
+// run.
+func TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable(t *testing.T) {
+	var captured []capturedTool
+	resp, _ := invokeNativeThroughCallToolProto(t, &captured, false)
+
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("error = %v; want PERMISSION_DENIED", resp.GetError())
+	}
+	if len(captured) != 1 || captured[0].call.Result != "" || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v; want one refusal record and no result", captured)
+	}
+}
+
+// blockedToolHarness is a harness whose mission deny list names the test tool.
+type blockedToolHarness struct{ *mockHarnessWithResolver }
+
+func (h blockedToolHarness) Mission() MissionContext {
+	return MissionContext{TenantID: "test-tenant", BlockedTools: []string{"test-external-tool"}}
+}
+
+// TestCallNativeTool_Refusals covers the refusals of the native caller before
+// and after the hand-off to the direct handler.
+func TestCallNativeTool_Refusals(t *testing.T) {
+	var captured []capturedTool
+
+	t.Run("a tool with no descriptor is not found", func(t *testing.T) {
+		_, native, _ := newNativeMetaSvc(t, &captured, nil)
+		if _, err := native.CallNativeTool(testCtxWithTenant(), "no-such-tool", nil); err == nil || native.dispatched {
+			t.Fatalf("err = %v, dispatched = %v; want an error before dispatch", err, native.dispatched)
+		}
+	})
+
+	t.Run("a tool with no message types is refused", func(t *testing.T) {
+		_, native, _ := newNativeMetaSvc(t, &captured, nil)
+		mock, _ := native.harness.(*mockHarnessWithResolver)
+		mock.toolDescriptors["untyped"] = &ToolDescriptor{Name: "untyped"}
+		if _, err := native.CallNativeTool(testCtxWithTenant(), "untyped", nil); err == nil || native.dispatched {
+			t.Fatalf("err = %v, dispatched = %v; want an error before dispatch", err, native.dispatched)
+		}
+	})
+
+	t.Run("nil arguments are an empty object", func(t *testing.T) {
+		_, native, _ := newNativeMetaSvc(t, &captured, nil)
+		if _, err := native.CallNativeTool(testCtxWithTenant(), "test-external-tool", nil); err != nil {
+			t.Fatalf("CallNativeTool: %v", err)
+		}
+	})
+
+	t.Run("a call with no run context fails", func(t *testing.T) {
+		_, native, _ := newNativeMetaSvc(t, &captured, nil)
+		native.contextInfo = nil
+		if _, err := native.CallNativeTool(testCtxWithTenant(), "test-external-tool", nil); err == nil {
+			t.Fatal("want an error for a call with no run context")
+		}
+	})
+
+	t.Run("a tool on the mission deny list is unauthorized", func(t *testing.T) {
+		svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
+		mock, _ := native.harness.(*mockHarnessWithResolver)
+		blocked := blockedToolHarness{mock}
+		registry := NewCallbackHarnessRegistry()
+		registry.Register(contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
+		svc.registry = registry
+		native.harness = blocked
+		_, err := native.CallNativeTool(testCtxWithTenant(), "test-external-tool", nil)
+		if !errors.Is(err, metatool.ErrUnauthorized) {
+			t.Fatalf("err = %v; want ErrUnauthorized", err)
+		}
+	})
 }
