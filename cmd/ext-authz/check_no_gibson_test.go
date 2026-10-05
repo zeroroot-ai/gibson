@@ -4,6 +4,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -11,51 +13,91 @@ import (
 	astchecks "github.com/zeroroot-ai/ast-checks"
 )
 
-// TestNoGibsonImport asserts that the ext-authz subtree — now folded into the
-// gibson monorepo (ADR-0056) — never links the gibson DAEMON.
-//
-// The historical boundary ("ext-authz must not import
-// github.com/zeroroot-ai/gibson") inverted when ext-authz moved inside the
-// module: it now legitimately shares internal/infra. The invariant we keep is
-// that ext-authz remains an independent authorization service that never
-// depends on the daemon, so it must not import internal/daemon. This is the
-// intra-module replacement for the old separate-repo no-gibson gate
-// (gibson#782).
-func TestNoGibsonImport(t *testing.T) {
+// daemonImportPath is the import that ext-authz must never have.
+const daemonImportPath = "github.com/zeroroot-ai/gibson/internal/server/daemon"
+
+// extAuthzDir returns cmd/ext-authz, the directory of this file.
+func extAuthzDir() string {
 	_, thisFile, _, _ := runtime.Caller(0)
-	cmdDir := filepath.Dir(thisFile)              // cmd/ext-authz
-	repoRoot := filepath.Join(cmdDir, "..", "..") // gibson module root
-	extauthzPkgs := filepath.Join(repoRoot, "internal", "extauthz")
+	return filepath.Dir(thisFile)
+}
 
-	matchers := []astchecks.Matcher{
-		astchecks.NewImportBoundary(
-			"ext-authz must not import the gibson daemon (internal/daemon) — it is an independent authorization service (ADR-0056, gibson#782)",
-			"github.com/zeroroot-ai/gibson/internal/server/daemon",
-		),
+// daemonImportFindings scans each scope directory, with all its
+// sub-packages, for an import of the daemon. A scope directory that does not
+// exist is an error. The walker skips such a directory with no message, and a
+// guard that scans nothing can never fail.
+func daemonImportFindings(repoRoot string, scopeDirs ...string) ([]astchecks.Finding, error) {
+	for _, dir := range scopeDirs {
+		info, err := os.Stat(dir)
+		if err != nil {
+			return nil, fmt.Errorf("scope directory %s: %w", dir, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("scope path %s is not a directory", dir)
+		}
 	}
-
-	// Walk only the ext-authz subtree (cmd/ext-authz + internal/extauthz).
-	// ast-checks recurses; vendor/, testdata/, .worktrees/ are skipped;
-	// generated bindings excluded via SkipGenerated.
-	opts := astchecks.WalkOpts{
-		ScopeDirs:     []string{cmdDir, extauthzPkgs},
-		RepoRoot:      repoRoot,
-		Matchers:      matchers,
-		SkipTestFiles: false, // boundary applies to test files too
+	findings, err := astchecks.Walk(astchecks.WalkOpts{
+		ScopeDirs: scopeDirs,
+		RepoRoot:  repoRoot,
+		Matchers: []astchecks.Matcher{
+			astchecks.NewImportBoundary(
+				"ext-authz must not import the gibson daemon (internal/server/daemon). "+
+					"It is an independent authorization service (ADR-0056)",
+				daemonImportPath,
+			),
+		},
+		SkipTestFiles: false, // the boundary applies to test files too
 		SkipGenerated: true,
-	}
-
-	findings, err := astchecks.Walk(opts)
+	})
 	if err != nil {
-		t.Fatalf("Walk: %v", err)
+		return nil, fmt.Errorf("walk: %w", err)
 	}
+	return findings, nil
+}
 
+// TestNoDaemonImport asserts that ext-authz never links the gibson daemon.
+//
+// ext-authz lives in the gibson module (ADR-0056) and shares internal/infra.
+// It stays an independent authorization service, so cmd/ext-authz and
+// internal/server/extauthz, with all sub-packages, must not import
+// internal/server/daemon. A type that both need belongs in the SDK. ext-authz
+// gets the authz registry from the daemon at run time over mTLS.
+func TestNoDaemonImport(t *testing.T) {
+	cmdDir := extAuthzDir()
+	repoRoot := filepath.Join(cmdDir, "..", "..")
+	findings, err := daemonImportFindings(repoRoot,
+		cmdDir,
+		filepath.Join(repoRoot, "internal", "server", "extauthz"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(findings) > 0 {
-		t.Errorf("ext-authz imports the gibson daemon (forbidden — keep ext-authz daemon-independent):\n%s\n\n"+
-			"ext-authz is the standalone authorization-decision point. It may share\n"+
-			"internal/infra primitives, but it must NOT link internal/daemon. Required\n"+
-			"types belong in the SDK; the authz registry is fetched from the daemon at\n"+
-			"runtime over mTLS, never imported at link-time.\n",
+		t.Errorf("ext-authz imports the gibson daemon. Remove the import:\n%s",
 			astchecks.RenderFindings(findings))
+	}
+}
+
+// TestNoDaemonImport_FlagsTheFixture proves that the guard can fail: the
+// fixture imports the daemon, and the guard reports it.
+func TestNoDaemonImport_FlagsTheFixture(t *testing.T) {
+	fixture := filepath.Join(extAuthzDir(), "testdata", "daemon_import")
+	findings, err := daemonImportFindings(fixture, fixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("the guard found %d daemon imports in the fixture, want 1:\n%s",
+			len(findings), astchecks.RenderFindings(findings))
+	}
+}
+
+// TestNoDaemonImport_RefusesMissingScope proves that a scope directory that
+// does not exist fails the guard. The guard scanned internal/extauthz, which
+// did not exist, and passed for that reason.
+func TestNoDaemonImport_RefusesMissingScope(t *testing.T) {
+	missing := filepath.Join(extAuthzDir(), "..", "..", "internal", "extauthz")
+	if _, err := daemonImportFindings(extAuthzDir(), missing); err == nil {
+		t.Fatal("a scope directory that does not exist must fail the guard")
 	}
 }
