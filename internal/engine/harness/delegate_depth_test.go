@@ -199,3 +199,15 @@ func TestDelegateToAgent_PlatformAgentWithNoLauncherIsDenied(t *testing.T) {
 	assert.Equal(t, types.SANDBOX_POLICY_DENIED, gibsonCode(t, err))
 	assert.Empty(t, q.gotName, "a platform agent must not get work from the work queue")
 }
+
+// TestDelegateToAgent_RegisteredAgentWithNoWorkQueueIsNotFound proves that a
+// registered agent on a daemon with no work queue gets the typed error. The
+// daemon has no other way to reach the agent.
+func TestDelegateToAgent_RegisteredAgentWithNoWorkQueueIsNotFound(t *testing.T) {
+	h := newRemoteAgentHarness(t, nil, remoteAgentInstances())
+
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+
+	require.Error(t, err)
+	assert.Equal(t, ErrHarnessAgentNotFound, gibsonCode(t, err))
+}
