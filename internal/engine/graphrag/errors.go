@@ -81,52 +81,7 @@ func (e *GraphRAGError) WithQuery(query string) *GraphRAGError {
 	return e
 }
 
-// NewGraphRAGError creates a new non-retryable GraphRAGError with the given code and message.
-func NewGraphRAGError(code GraphRAGErrorCode, message string) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      code,
-		Message:   message,
-		Context:   make(map[string]any),
-		Retryable: false,
-	}
-}
-
-// NewRetryableGraphRAGError creates a new retryable GraphRAGError with the given code and message.
-// Use this for transient errors that may succeed on retry (e.g., network timeouts, rate limits).
-func NewRetryableGraphRAGError(code GraphRAGErrorCode, message string) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      code,
-		Message:   message,
-		Context:   make(map[string]any),
-		Retryable: true,
-	}
-}
-
-// WrapGraphRAGError creates a new GraphRAGError that wraps an existing error.
-// The wrapped error is accessible via Unwrap() for error chain inspection.
-func WrapGraphRAGError(code GraphRAGErrorCode, message string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      code,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: false,
-	}
-}
-
 // Helper constructors for common error scenarios
-
-// NewConnectionError creates a connection failure error.
-// This is typically retryable as network issues may be transient.
-func NewConnectionError(message string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeConnectionFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: true,
-	}
-}
 
 // NewQueryError creates a query execution error.
 // This is typically non-retryable as the query itself may be invalid.
@@ -153,18 +108,6 @@ func NewNodeNotFoundError(nodeID string) *GraphRAGError {
 	}
 }
 
-// NewRelationshipError creates a relationship operation error.
-// This is typically non-retryable as it indicates a structural issue.
-func NewRelationshipError(message string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeRelationshipFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: false,
-	}
-}
-
 // NewEmbeddingError creates an embedding generation error.
 // This may be retryable depending on the cause (e.g., rate limits vs invalid input).
 func NewEmbeddingError(message string, cause error, retryable bool) *GraphRAGError {
@@ -177,43 +120,6 @@ func NewEmbeddingError(message string, cause error, retryable bool) *GraphRAGErr
 	}
 }
 
-// NewAuthenticationError creates an authentication failure error.
-// This is typically non-retryable as credentials need to be fixed.
-func NewAuthenticationError(message string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeAuthenticationFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: false,
-	}
-}
-
-// NewRateLimitError creates a rate limit error.
-// This is retryable with backoff.
-func NewRateLimitError(message string) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeRateLimited,
-		Message:   message,
-		Context:   make(map[string]any),
-		Retryable: true,
-	}
-}
-
-// NewProviderUnavailableError creates a provider unavailable error.
-// This is typically retryable as the service may come back online.
-func NewProviderUnavailableError(provider string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:    ErrCodeProviderUnavailable,
-		Message: fmt.Sprintf("provider %s is unavailable", provider),
-		Cause:   cause,
-		Context: map[string]any{
-			"provider": provider,
-		},
-		Retryable: true,
-	}
-}
-
 // NewInvalidQueryError creates an invalid query error.
 // This is non-retryable as the query needs to be fixed.
 func NewInvalidQueryError(message string) *GraphRAGError {
@@ -222,18 +128,6 @@ func NewInvalidQueryError(message string) *GraphRAGError {
 		Message:   message,
 		Context:   make(map[string]any),
 		Retryable: false,
-	}
-}
-
-// NewTransactionError creates a transaction failure error.
-// This is typically retryable as transactions may fail due to conflicts.
-func NewTransactionError(message string, cause error) *GraphRAGError {
-	return &GraphRAGError{
-		Code:      ErrCodeTransactionFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: true,
 	}
 }
 

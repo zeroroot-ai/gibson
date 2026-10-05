@@ -56,9 +56,6 @@ const (
 	ProviderTypeLocal ProviderType = "local"
 )
 
-// String returns the string representation of ProviderType.
-func (pt ProviderType) String() string { return string(pt) }
-
 // RelQuery represents a query for relationships.
 // Used to filter relationships by type, node connections, and properties.
 type RelQuery struct {

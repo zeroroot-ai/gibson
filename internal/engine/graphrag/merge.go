@@ -258,28 +258,3 @@ type MergeOptions struct {
 	// Multiplier applied to final score if node appears in both sources.
 	BoostBothSources float64
 }
-
-// Validate checks if the MergeOptions are valid.
-func (mo *MergeOptions) Validate() error {
-	if mo.VectorWeight < 0.0 || mo.VectorWeight > 1.0 {
-		return NewInvalidQueryError("vector_weight must be between 0.0 and 1.0")
-	}
-	if mo.GraphWeight < 0.0 || mo.GraphWeight > 1.0 {
-		return NewInvalidQueryError("graph_weight must be between 0.0 and 1.0")
-	}
-	if mo.TopK <= 0 {
-		return NewInvalidQueryError("top_k must be greater than 0")
-	}
-	if mo.BoostBothSources < 1.0 {
-		return NewInvalidQueryError("boost_both_sources must be >= 1.0")
-	}
-
-	// Warn if weights don't sum to ~1.0 (not an error, but potentially unexpected)
-	weightSum := mo.VectorWeight + mo.GraphWeight
-	if weightSum < 0.99 || weightSum > 1.01 {
-		// Note: In production, this could log a warning instead of returning an error
-		// For now, we allow it but it's worth noting
-	}
-
-	return nil
-}

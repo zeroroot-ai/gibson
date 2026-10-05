@@ -46,21 +46,6 @@ type DefaultQueryPipeline struct {
 	logger   *slog.Logger      // For logging warnings and debug info
 }
 
-// NewDefaultQueryPipeline creates a new query processor.
-// The embedder is used to generate embeddings from query text.
-// The reranker combines vector and graph results with configured weights.
-// The logger is used for warnings and debug info (pass slog.Default() if needed).
-func NewDefaultQueryPipeline(emb embedder.Embedder, reranker MergeReranker, logger *slog.Logger) *DefaultQueryPipeline {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &DefaultQueryPipeline{
-		embedder: emb,
-		reranker: reranker,
-		logger:   logger,
-	}
-}
-
 // NewQueryPipelineFromConfig creates a QueryPipeline from GraphRAG configuration.
 // Automatically configures the reranker weights from config.Query settings.
 // The logger is used for warnings and debug info (pass slog.Default() if needed).
@@ -372,22 +357,6 @@ func (p *DefaultQueryPipeline) WithOptions(opts QueryPipelineOptions) *DefaultQu
 	// For now, return the same processor
 	// In a production implementation, we might create a wrapper that applies options
 	return p
-}
-
-// ValidateProvider checks if the provider is properly configured for queries.
-// Should be called before processing queries to ensure provider is ready.
-func ValidateProvider(ctx context.Context, provider GraphRAGProvider) error {
-	if provider == nil {
-		return NewProviderUnavailableError("unknown", fmt.Errorf("provider cannot be nil"))
-	}
-
-	// Check provider health
-	health := provider.Health(ctx)
-	if health.IsUnhealthy() {
-		return NewProviderUnavailableError("unknown", fmt.Errorf("provider is unhealthy: %s", health.Message))
-	}
-
-	return nil
 }
 
 // EnsureEmbedderHealth checks if the embedder is operational.

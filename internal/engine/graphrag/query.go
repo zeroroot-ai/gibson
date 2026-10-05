@@ -41,32 +41,6 @@ type GraphRAGQuery struct {
 	ForceStructuredOnly bool `json:"force_structured_only,omitempty"` // Skip vector search entirely
 }
 
-// NewGraphRAGQuery creates a new query from text.
-func NewGraphRAGQuery(text string) *GraphRAGQuery {
-	return &GraphRAGQuery{
-		Text:         text,
-		TopK:         10,
-		MaxHops:      3,
-		MinScore:     0.7,
-		VectorWeight: 0.6,
-		GraphWeight:  0.4,
-		Filters:      TraversalFilters{},
-	}
-}
-
-// NewGraphRAGQueryFromEmbedding creates a new query from a pre-computed embedding.
-func NewGraphRAGQueryFromEmbedding(embedding []float64) *GraphRAGQuery {
-	return &GraphRAGQuery{
-		Embedding:    embedding,
-		TopK:         10,
-		MaxHops:      3,
-		MinScore:     0.7,
-		VectorWeight: 0.6,
-		GraphWeight:  0.4,
-		Filters:      TraversalFilters{},
-	}
-}
-
 // WithTopK sets the number of results to return.
 func (q *GraphRAGQuery) WithTopK(topK int) *GraphRAGQuery {
 	q.TopK = topK
