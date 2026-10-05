@@ -126,7 +126,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@5d38e1f714d47b502cf18709a7d5e63430155f62 # v0.16.0
+    uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@7d18e3bc122eb86c6b3b36e33bed9c744aacd808 # v0.17.0
     with:
       languages: '["go"]'
       scan: ${{ github.event_name != 'pull_request' || needs.changes.outputs.security_paths == 'true' }}
