@@ -169,6 +169,16 @@ func (f *fakeJobStore) ReleaseMember(_ context.Context, _, memberID string) (int
 	return n, nil
 }
 
+func (f *fakeJobStore) Unassigned(_ context.Context, _, bankID string) (int64, error) {
+	var n int64
+	for _, j := range f.jobs {
+		if j.BankID == bankID && j.MemberID == "" && j.State != job.StateClosed {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (f *fakeJobStore) AddDeliverable(context.Context, string, string, *jobpb.Deliverable) (*job.Job, error) {
 	return nil, nil
 }

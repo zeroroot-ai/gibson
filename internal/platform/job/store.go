@@ -65,6 +65,11 @@ type Store interface {
 	// Stale returns open jobs of one bank whose last input is older than
 	// staleSeconds. The reconciler closes them as abandoned.
 	Stale(ctx context.Context, tenantID, bankID string, staleSeconds int64, limit int32) ([]*Job, error)
+
+	// Unassigned counts the jobs of one bank that are not closed and that no
+	// member holds: the jobs that wait in the bank queue. The reconciler
+	// reads it to apply the spill policy of the bank.
+	Unassigned(ctx context.Context, tenantID, bankID string) (int64, error)
 }
 
 // ValidateSpec checks that a JobSpec could describe work a member can do, and

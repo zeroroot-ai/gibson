@@ -172,6 +172,18 @@ type fakeJobs struct {
 	closeErr        map[string]error
 	gotStaleSeconds []int64
 	closed          []job.CloseInput
+
+	// unassigned is the queue length of each bank, and unassignedErr makes
+	// the count fail.
+	unassigned    map[string]int64
+	unassignedErr error
+}
+
+func (f *fakeJobs) Unassigned(_ context.Context, _, bankID string) (int64, error) {
+	if f.unassignedErr != nil {
+		return 0, f.unassignedErr
+	}
+	return f.unassigned[bankID], nil
 }
 
 func (f *fakeJobs) Stale(_ context.Context, _, bankID string, staleSeconds int64, _ int32) ([]*job.Job, error) {
@@ -839,5 +851,136 @@ func TestReconcileBank_StaleListError(t *testing.T) {
 	r := newReconcilerWithJobs(t, newFakeStore(), &fakeLauncher{}, &fakeJobs{staleErr: boom}, nil)
 	if err := r.ReconcileBank(context.Background(), "acme", b); !errors.Is(err, boom) {
 		t.Fatalf("err = %v, want the list error", err)
+	}
+}
+
+func TestSpillMembers(t *testing.T) {
+	cases := []struct {
+		waiting       int64
+		jobCap, limit int32
+		want          int32
+	}{
+		{0, 1, 3, 0},
+		{1, 1, 3, 1},
+		{2, 1, 3, 2},
+		{9, 1, 3, 3},  // at most the limit
+		{3, 2, 3, 2},  // rounded up
+		{4, 2, 3, 2},  // exact
+		{5, 0, 3, 3},  // a cap below one counts as one
+		{5, 1, 0, 1},  // a bank with no desired count spills one member at most
+		{-1, 1, 3, 0}, // a negative count is no queue
+	}
+	for _, c := range cases {
+		if got := spillMembers(c.waiting, c.jobCap, c.limit); got != c.want {
+			t.Errorf("spillMembers(%d, %d, %d) = %d, want %d", c.waiting, c.jobCap, c.limit, got, c.want)
+		}
+	}
+}
+
+// beatAll marks each member of the bank as alive at testNow, so the next pass
+// does not judge a member dead that the fake store created with no time.
+func beatAll(store *fakeStore, bankID string) {
+	for _, m := range store.members[bankID] {
+		m.LastHeartbeat = testNow
+		if m.State == bankstore.MemberLaunching {
+			m.State = bankstore.MemberIdle
+		}
+	}
+}
+
+func liveMembers(t *testing.T, store *fakeStore, bankID string) int {
+	t.Helper()
+	n := 0
+	for _, m := range store.members[bankID] {
+		if m.State != bankstore.MemberDraining && m.State != bankstore.MemberDead {
+			n++
+		}
+	}
+	return n
+}
+
+// The queue policy keeps the desired count when jobs wait.
+func TestReconcileBank_QueuePolicyDoesNotSpill(t *testing.T) {
+	store := newFakeStore()
+	b := testBank(1)
+	b.SpillPolicy = bankstore.SpillQueue
+	jobs := &fakeJobs{unassigned: map[string]int64{b.ID: 5}}
+	l := &fakeLauncher{}
+	r := newReconcilerWithJobs(t, store, l, jobs, nil)
+
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if got := liveMembers(t, store, b.ID); got != 1 {
+		t.Fatalf("live members = %d, want the desired count 1", got)
+	}
+}
+
+// The ephemeral policy starts extra members for waiting jobs, and the drain
+// removes them when the queue is empty and they are idle.
+func TestReconcileBank_EphemeralPolicySpillsAndShrinks(t *testing.T) {
+	store := newFakeStore()
+	b := testBank(2)
+	b.SpillPolicy = bankstore.SpillEphemeral
+	jobs := &fakeJobs{unassigned: map[string]int64{b.ID: 1}}
+	r := newReconcilerWithJobs(t, store, &fakeLauncher{}, jobs, nil)
+
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if got := liveMembers(t, store, b.ID); got != 3 {
+		t.Fatalf("live members with one waiting job = %d, want 3", got)
+	}
+
+	beatAll(store, b.ID)
+	jobs.unassigned[b.ID] = 0
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if got := liveMembers(t, store, b.ID); got != 2 {
+		t.Fatalf("live members with an empty queue = %d, want the desired count 2", got)
+	}
+}
+
+// A bank on a person's subscription never spills.
+func TestReconcileBank_SubscriptionBankDoesNotSpill(t *testing.T) {
+	store := newFakeStore()
+	b := testBank(1)
+	b.SpillPolicy = bankstore.SpillEphemeral
+	b.LoginShape = bankstore.LoginShapeSubscription
+	jobs := &fakeJobs{unassigned: map[string]int64{b.ID: 4}}
+	r := newReconcilerWithJobs(t, store, &fakeLauncher{}, jobs, nil)
+
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if got := liveMembers(t, store, b.ID); got != 1 {
+		t.Fatalf("live members = %d, want 1", got)
+	}
+}
+
+// A failed queue count is an error of the pass, and it drains no member.
+func TestReconcileBank_SpillCountError(t *testing.T) {
+	store := newFakeStore()
+	b := testBank(1)
+	b.SpillPolicy = bankstore.SpillEphemeral
+	jobs := &fakeJobs{unassigned: map[string]int64{b.ID: 2}}
+	r := newReconcilerWithJobs(t, store, &fakeLauncher{}, jobs, nil)
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	before := liveMembers(t, store, b.ID)
+	if before != 2 {
+		t.Fatalf("live members = %d, want 2 (the spill is at most the desired count) before the failed count", before)
+	}
+
+	beatAll(store, b.ID)
+	boom := errors.New("postgres down")
+	jobs.unassignedErr = boom
+	if err := r.ReconcileBank(context.Background(), "acme", b); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the count error", err)
+	}
+	if got := liveMembers(t, store, b.ID); got != before {
+		t.Fatalf("live members after a failed count = %d, want %d", got, before)
 	}
 }
