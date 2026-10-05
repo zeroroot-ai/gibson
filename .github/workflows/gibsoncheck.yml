@@ -242,6 +242,13 @@ jobs:
           bash scripts/check-no-tracked-binaries.sh --selftest
           bash scripts/check-no-tracked-binaries.sh
 
+      # gibson#713: billing is a private component (ADR-0060). No non-test Go
+      # code names a payment vendor host, import or variable.
+      - name: Check no payment vendor
+        run: |
+          bash scripts/check-no-payment-vendor.sh --selftest
+          bash scripts/check-no-payment-vendor.sh
+
       # gibson#1294: this guard spent the whole post-monorepo period scanning
       # two directories that do not exist, and it only ever ran inside `make
       # check` locally. Run it in CI, self-test first.

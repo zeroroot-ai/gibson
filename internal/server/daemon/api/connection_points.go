@@ -109,7 +109,7 @@ func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1
 	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	switch err := completeSignupStep(ctx, db, req.GetStepToken(), done, time.Now()); {
+	switch err := completeSignupStep(ctx, db, req.GetStepToken(), done, s.signupNow()); {
 	case errors.Is(err, errSignupStepNotFound):
 		return nil, status.Error(codes.NotFound, "unknown or expired step token")
 	case err != nil:
@@ -185,7 +185,7 @@ func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.List
 		tokens, cost, _ := usage.TenantPeriodUsage(ctx, t)
 		resp.Tenants = append(resp.Tenants, &connectionv1.TenantUsage{TenantId: t, Tokens: tokens, CostUsdCents: cost})
 	}
-	now := time.Now()
+	now := s.signupNow()
 	end := budget.PeriodResetAt(now)
 	start := time.Date(end.Year(), end.Month()-1, 1, 0, 0, 0, 0, time.UTC)
 	resp.PeriodStartUnix, resp.PeriodEndUnix = start.Unix(), end.Unix()

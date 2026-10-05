@@ -42,35 +42,20 @@ func (s *stubDaemon) AckTenantProvisioned(_ context.Context, tenantID string) er
 	return nil
 }
 
-// fakeVerifier is a StripeCustomerVerifier that returns a fixed error and
-// records call arguments.
-type fakeVerifier struct {
-	err   error
-	calls [][2]string // (customerID, tenantID)
-}
-
-func (f *fakeVerifier) VerifyStripeCustomer(_ context.Context, customerID, tenantID string) error {
-	f.calls = append(f.calls, [2]string{customerID, tenantID})
-	return f.err
-}
-
 func newRunnable(t *testing.T, c client.Client, d PendingProvisioningClient) *PendingProvisioningRunnable {
 	t.Helper()
-	// The no-op verifier is the OSS default main.go injects; adoption must be
-	// unaffected on this path (gibson#1099).
-	return &PendingProvisioningRunnable{Client: c, Daemon: d, Verifier: NoopStripeCustomerVerifier{}}
+	return &PendingProvisioningRunnable{Client: c, Daemon: d}
 }
 
 func TestDrain_CreatesTenantCRAndAcks(t *testing.T) {
 	scheme := setupScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID:         "acme",
-		OwnerUserID:      "u-1",
-		OwnerEmail:       "owner@acme.test",
-		WorkspaceName:    "Acme Inc",
-		Tier:             "team",
-		StripeCustomerID: "cus_123",
+		TenantID:      "acme",
+		OwnerUserID:   "u-1",
+		OwnerEmail:    "owner@acme.test",
+		WorkspaceName: "Acme Inc",
+		Tier:          "team",
 	}}}
 
 	r := newRunnable(t, c, d)
@@ -91,128 +76,8 @@ func TestDrain_CreatesTenantCRAndAcks(t *testing.T) {
 	if string(got.Spec.Tier) != "team" {
 		t.Errorf("tier: got %q", got.Spec.Tier)
 	}
-	if got.Annotations[AnnotationStripeCustomerID] != "cus_123" {
-		t.Errorf("stripe annotation: got %q", got.Annotations[AnnotationStripeCustomerID])
-	}
 	if len(d.acked) != 1 || d.acked[0] != "acme" {
 		t.Errorf("expected acme acked, got %v", d.acked)
-	}
-}
-
-// TestDrain_VerifierOK_AdoptsStripeCustomer: adoption proceeds when the
-// ownership verifier passes, and the verifier is consulted with exactly the
-// recorded customer id + tenant id (gibson#1099 adopt-ok path).
-func TestDrain_VerifierOK_AdoptsStripeCustomer(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID:         "acme",
-		OwnerEmail:       "owner@acme.test",
-		WorkspaceName:    "Acme Inc",
-		Tier:             "team",
-		StripeCustomerID: "cus_123",
-	}}}
-	v := &fakeVerifier{}
-	r := &PendingProvisioningRunnable{Client: c, Daemon: d, Verifier: v}
-
-	if err := r.drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("expected Tenant CR created: %v", err)
-	}
-	if got.Annotations[AnnotationStripeCustomerID] != "cus_123" {
-		t.Errorf("stripe annotation: got %q", got.Annotations[AnnotationStripeCustomerID])
-	}
-	if len(v.calls) != 1 || v.calls[0] != [2]string{"cus_123", "acme"} {
-		t.Errorf("verifier calls: got %v, want [[cus_123 acme]]", v.calls)
-	}
-	if len(d.acked) != 1 || d.acked[0] != "acme" {
-		t.Errorf("expected acme acked, got %v", d.acked)
-	}
-}
-
-// TestDrain_VerifierMismatch_RefusesAdoption: an ownership mismatch must NOT
-// be adopted — no Tenant CR, no ack, record stays pending, and the failure is
-// surfaced per the runnable's bad-record error pattern (gibson#1099
-// adopt-mismatch path).
-func TestDrain_VerifierMismatch_RefusesAdoption(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID:         "acme",
-		OwnerEmail:       "owner@acme.test",
-		WorkspaceName:    "Acme Inc",
-		Tier:             "team",
-		StripeCustomerID: "cus_forged",
-	}}}
-	v := &fakeVerifier{err: ErrStripeCustomerMismatch}
-	r := &PendingProvisioningRunnable{Client: c, Daemon: d, Verifier: v}
-
-	// drain itself succeeds (one bad record must not abort the pass) …
-	if err := r.drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	// … but the forged record was refused: no CR, no ack.
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err == nil {
-		t.Fatalf("expected NO Tenant CR for mismatched stripe customer, found one")
-	}
-	if d.ackCalls != 0 {
-		t.Errorf("expected no ack for refused record, got %d", d.ackCalls)
-	}
-	// reconcileOne surfaces the mismatch so it is visible in logs each drain.
-	err := r.reconcileOne(context.Background(), d.pending[0])
-	if !errors.Is(err, ErrStripeCustomerMismatch) {
-		t.Errorf("reconcileOne error = %v, want ErrStripeCustomerMismatch", err)
-	}
-}
-
-// TestDrain_VerifierNotConsultedWithoutStripeCustomer: records without a
-// recorded stripe_customer_id never hit the verifier.
-func TestDrain_VerifierNotConsultedWithoutStripeCustomer(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID:      "globex",
-		OwnerEmail:    "ceo@globex.test",
-		WorkspaceName: "Globex",
-		Tier:          "org",
-	}}}
-	v := &fakeVerifier{err: ErrStripeCustomerMismatch} // would fail if consulted
-	r := &PendingProvisioningRunnable{Client: c, Daemon: d, Verifier: v}
-	if err := r.drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-	if len(v.calls) != 0 {
-		t.Errorf("verifier consulted for record without stripe_customer_id: %v", v.calls)
-	}
-	if len(d.acked) != 1 || d.acked[0] != "globex" {
-		t.Errorf("expected globex acked, got %v", d.acked)
-	}
-}
-
-func TestDrain_NoStripeCustomer_NoAnnotation(t *testing.T) {
-	scheme := setupScheme(t)
-	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	d := &stubDaemon{pending: []provision.PendingTenant{{
-		TenantID:      "globex",
-		OwnerEmail:    "ceo@globex.test",
-		WorkspaceName: "Globex",
-		Tier:          "org",
-	}}}
-
-	if err := newRunnable(t, c, d).drain(context.Background()); err != nil {
-		t.Fatalf("drain: %v", err)
-	}
-
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "globex"}, &got); err != nil {
-		t.Fatalf("expected Tenant CR: %v", err)
-	}
-	if _, ok := got.Annotations[AnnotationStripeCustomerID]; ok {
-		t.Errorf("expected no stripe annotation when stripe_customer_id empty")
 	}
 }
 
@@ -288,26 +153,6 @@ func TestReconcileOne_AckFails_RecordStaysPending(t *testing.T) {
 	var got gibsonv1alpha1.Tenant
 	if getErr := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); getErr != nil {
 		t.Errorf("expected CR created even though ack failed: %v", getErr)
-	}
-}
-
-// TestApplyVerifierDefault_NilReturnsNoop verifies that a nil Verifier is
-// replaced by the no-op (the SetupWithManager nil-guard path, extracted to
-// applyVerifierDefault for testability — gibson#1099).
-func TestApplyVerifierDefault_NilReturnsNoop(t *testing.T) {
-	v := applyVerifierDefault(nil)
-	if _, ok := v.(NoopStripeCustomerVerifier); !ok {
-		t.Errorf("expected NoopStripeCustomerVerifier for nil input, got %T", v)
-	}
-}
-
-// TestApplyVerifierDefault_NonNilPassthrough verifies that a non-nil Verifier
-// is returned unchanged.
-func TestApplyVerifierDefault_NonNilPassthrough(t *testing.T) {
-	concrete := &fakeVerifier{}
-	got := applyVerifierDefault(concrete)
-	if got != concrete {
-		t.Errorf("expected the same verifier back, got %T", got)
 	}
 }
 

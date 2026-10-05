@@ -7,8 +7,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"net/url"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
@@ -296,5 +298,101 @@ func TestSetTenantActivation_UnknownTenantIsNotFound(t *testing.T) {
 	})
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+// usageEnforcer is a budget enforcer that also reads the usage of a tenant.
+type usageEnforcer struct {
+	budgetEnforcerIface
+	usage map[string][2]int64
+}
+
+func (u usageEnforcer) TenantPeriodUsage(_ context.Context, tenantID string) (tokens, cost int64, resetAt time.Time) {
+	v := u.usage[tenantID]
+	return v[0], v[1], time.Time{}
+}
+
+// The usage report gives one row for each known tenant and the bounds of the
+// budget period. Only the activation identity may read it.
+func TestListTenantUsage(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	srv := connectionServer()
+	srv.platformDB = db
+	srv.budgetEnforcer = usageEnforcer{usage: map[string][2]int64{"acme": {1200, 34}}}
+	srv.signupClock = func() time.Time { return time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC) }
+
+	if _, err := srv.ListTenantUsage(peerCtx(t, testCompleterSVID), &connectionv1.ListTenantUsageRequest{}); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("another caller: code = %v, want PermissionDenied", status.Code(err))
+	}
+
+	expectEnsureTenantStatusTable(mock)
+	mock.ExpectQuery("SELECT tenant_id FROM tenant_status").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow("acme").AddRow("globex"))
+	resp, err := srv.ListTenantUsage(peerCtx(t, testActivationSVID), &connectionv1.ListTenantUsageRequest{})
+	if err != nil {
+		t.Fatalf("ListTenantUsage: %v", err)
+	}
+	rows := resp.GetTenants()
+	if len(rows) != 2 || rows[0].GetTenantId() != "acme" || rows[0].GetTokens() != 1200 || rows[0].GetCostUsdCents() != 34 ||
+		rows[1].GetTenantId() != "globex" || rows[1].GetTokens() != 0 {
+		t.Fatalf("tenants = %v", rows)
+	}
+	if resp.GetPeriodStartUnix() >= resp.GetPeriodEndUnix() {
+		t.Errorf("period %d..%d is empty", resp.GetPeriodStartUnix(), resp.GetPeriodEndUnix())
+	}
+
+	expectEnsureTenantStatusTable(mock)
+	mock.ExpectQuery("SELECT tenant_id FROM tenant_status").WillReturnError(errors.New("db down"))
+	if _, err := srv.ListTenantUsage(peerCtx(t, testActivationSVID), &connectionv1.ListTenantUsageRequest{}); status.Code(err) != codes.Unavailable {
+		t.Fatalf("db error: code = %v, want Unavailable", status.Code(err))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The dashboard reads the state of the step of an attempt. An unknown attempt
+// reads as NONE, and a database error is Unavailable.
+func TestGetSignupStep(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	srv := connectionServer()
+	srv.platformDB = db
+	const attempt = "8f14e45f-ceea-467f-a8f5-9b2c1d2e3f40"
+
+	if _, err := srv.GetSignupStep(context.Background(), &tenantv1.GetSignupStepRequest{AttemptId: "nope"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("bad attempt id: code = %v, want InvalidArgument", status.Code(err))
+	}
+
+	cases := []struct {
+		rows *sqlmock.Rows
+		want tenantv1.SignupStepState
+	}{
+		{sqlmock.NewRows([]string{"status", "step_token_hash"}).AddRow("waiting_step", "h"), tenantv1.SignupStepState_SIGNUP_STEP_STATE_WAITING},
+		{sqlmock.NewRows([]string{"status", "step_token_hash"}), tenantv1.SignupStepState_SIGNUP_STEP_STATE_NONE},
+	}
+	for _, c := range cases {
+		expectEnsureTable(mock)
+		mock.ExpectQuery("SELECT status, step_token_hash FROM pending_tenant_provisioning").WithArgs(attempt).WillReturnRows(c.rows)
+		resp, err := srv.GetSignupStep(context.Background(), &tenantv1.GetSignupStepRequest{AttemptId: attempt})
+		if err != nil || resp.GetState() != c.want {
+			t.Fatalf("GetSignupStep = %v, %v, want %v", resp.GetState(), err, c.want)
+		}
+	}
+
+	expectEnsureTable(mock)
+	mock.ExpectQuery("SELECT status, step_token_hash FROM pending_tenant_provisioning").WillReturnError(errors.New("db down"))
+	if _, err := srv.GetSignupStep(context.Background(), &tenantv1.GetSignupStepRequest{AttemptId: attempt}); status.Code(err) != codes.Unavailable {
+		t.Fatalf("db error: code = %v, want Unavailable", status.Code(err))
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

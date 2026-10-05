@@ -122,7 +122,7 @@ func (s *DaemonServer) requireActiveTenant(ctx context.Context, tenantID string)
 	if tenantID == "" {
 		return nil
 	}
-	now := time.Now()
+	now := s.signupNow()
 	suspended, ok := s.tenantActivation.get(tenantID, now)
 	if !ok {
 		db := s.entitlementsDB()

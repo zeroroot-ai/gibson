@@ -105,8 +105,7 @@ type TenantReconciler struct {
 
 	// StatusReporter pushes observed Tenant status to the daemon so the
 	// dashboard can read provisioning status without Kubernetes access
-	// (gibson#948, dashboard#813), and echoes back the dashboard-recorded
-	// billing-active flag the operator stamps onto the CR. Always non-nil on the
+	// (gibson#948, dashboard#813). Always non-nil on the
 	// reconcile path: main.go injects NoopTenantStatusReporter when the operator
 	// boots without GIBSON_DAEMON_GRPC_ADDRESS (report-back disabled).
 	StatusReporter TenantStatusReporter
@@ -293,8 +292,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Report the observed status to the daemon so the dashboard can read it
-	// without Kubernetes access (gibson#948, dashboard#813), and stamp the
-	// billing-active annotation from the daemon-recorded flag. Best-effort: a
+	// without Kubernetes access (gibson#948, dashboard#813). Best-effort: a
 	// daemon blip logs and never fails the reconcile. Production always injects a
 	// reporter (NoopTenantStatusReporter when report-back is disabled); the
 	// positive guard keeps unit tests that omit it from dereferencing nil,

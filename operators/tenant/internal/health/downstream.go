@@ -63,4 +63,3 @@ func PingNeo4j(ctx context.Context, c Neo4jPinger) error {
 	defer cancel()
 	return c.Ping(ctx)
 }
-

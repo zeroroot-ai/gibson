@@ -105,36 +105,24 @@ var allowedUnauthenticated = map[string]bool{
 	//   - RedeemEmailVerification's capability is the raw token, which the
 	//     daemon mailed to the address itself. The handler enforces
 	//     single-use (an atomic compare-and-set) and expiry.
-	//   - AttachSignupCustomer's capability is the short-lived session token
-	//     that redemption returned.
+	//   - GetSignupStep's capability is the attempt id, as for
+	//     GetSignupProgress. It returns only the state of the external step
+	//     (D54): none, waiting, done or failed.
 	//
 	// Provisioning is unreachable without passing this chain, which is the
 	// property the whole flow exists to guarantee.
 	"/gibson.tenant.v1.SignupService/RequestEmailVerification": true,
 	"/gibson.tenant.v1.SignupService/RedeemEmailVerification":  true,
-	"/gibson.tenant.v1.SignupService/AttachSignupCustomer":     true,
+	"/gibson.tenant.v1.SignupService/GetSignupStep":            true,
 
-	// TenantProvisioningService is the dashboard-facing read side of
-	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Both
-	// RPCs are unauthenticated in the registry because neither has a principal
-	// to FGA-check: signup-status polling runs pre-membership and the Stripe
-	// webhook carries no tenant JWT. Neither is unGUARDED — each handler
-	// enforces its own gate (gibson#1230), because ext-authz letting a request
-	// through is reachability, not authorization:
-	//   - GetTenantProvisioningStatus serves only existence + coarse progress
-	//     (phase, data_plane_ready, stores, zitadel_org_ready) to every caller;
-	//     the cross-tenant identifiers and billing state are NOT disclosed here.
-	//     They moved to the rule-mode RPCs TenantService.GetTenantBilling (own
-	//     tenant) and AdminTenantService.AdminGetTenantBilling (cross-tenant),
-	//     because an identity gate is unenforceable on an unauthenticated-mode
-	//     RPC (gibson#1339).
-	//   - SetTenantBillingActive requires a fresh HMAC assertion bound to the
-	//     request's tenant_id and active value, signed with the deployment's
-	//     billing-webhook secret; a daemon with no secret refuses every caller.
-	//     See api/billing_webhook_auth.go.
+	// TenantProvisioningService.GetTenantProvisioningStatus is the
+	// dashboard-facing read side of operator-pull tenant provisioning (E9,
+	// gibson#948, dashboard#813). Signup-status polling runs pre-membership, so
+	// it has no principal to FGA-check. It serves only existence and coarse
+	// progress (phase, data_plane_ready, stores, zitadel_org_ready) to every
+	// caller (gibson#1230, gibson#1339).
 	// Spec: E9 dashboard-zero-kubeconfig (dashboard#813); gibson#1230.
 	"/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus": true,
-	"/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive":      true,
 }
 
 // TestOnlyConnectAndPingAreUnauthenticated walks the generated Registry map

@@ -74,23 +74,22 @@ func TestSetTenantZitadelOrg_SendsMapping(t *testing.T) {
 }
 
 // captureReportStatusServer records the ReportTenantStatusRequest it received
-// and echoes a fixed billing_active flag back.
+// and answers that the row was updated.
 type captureReportStatusServer struct {
 	operatorv1.UnimplementedDaemonOperatorServiceServer
-	got           *operatorv1.ReportTenantStatusRequest
-	billingActive bool
+	got *operatorv1.ReportTenantStatusRequest
 }
 
 func (s *captureReportStatusServer) ReportTenantStatus(_ context.Context, req *operatorv1.ReportTenantStatusRequest) (*operatorv1.ReportTenantStatusResponse, error) {
 	s.got = req
-	return &operatorv1.ReportTenantStatusResponse{Updated: true, BillingActive: s.billingActive}, nil
+	return &operatorv1.ReportTenantStatusResponse{Updated: true}, nil
 }
 
-// TestReportTenantStatus_SendsFieldsAndEchoesBilling guards the operator → daemon
+// TestReportTenantStatus_SendsFields guards the operator → daemon
 // status report (gibson#948, dashboard#813): the client maps every status field
-// onto the wire request and returns the daemon-echoed billing-active flag.
-func TestReportTenantStatus_SendsFieldsAndEchoesBilling(t *testing.T) {
-	srv := &captureReportStatusServer{billingActive: true}
+// onto the wire request.
+func TestReportTenantStatus_SendsFields(t *testing.T) {
+	srv := &captureReportStatusServer{}
 
 	lis := bufconn.Listen(1 << 20)
 	gs := grpc.NewServer()
@@ -115,21 +114,17 @@ func TestReportTenantStatus_SendsFieldsAndEchoesBilling(t *testing.T) {
 		audience: "gibson-daemon",
 	}
 
-	billingActive, err := c.ReportTenantStatus(context.Background(), TenantStatusReport{
-		TenantID:         "tenant-team",
-		Phase:            "Ready",
-		DataPlaneReady:   true,
-		StorePostgres:    "ready",
-		StoreRedis:       "ready",
-		StoreNeo4j:       "provisioning",
-		ZitadelOrgSlug:   "team-org",
-		StripeCustomerID: "cus_42",
+	err = c.ReportTenantStatus(context.Background(), TenantStatusReport{
+		TenantID:       "tenant-team",
+		Phase:          "Ready",
+		DataPlaneReady: true,
+		StorePostgres:  "ready",
+		StoreRedis:     "ready",
+		StoreNeo4j:     "provisioning",
+		ZitadelOrgSlug: "team-org",
 	})
 	if err != nil {
 		t.Fatalf("ReportTenantStatus: %v", err)
-	}
-	if !billingActive {
-		t.Errorf("expected echoed billing_active=true")
 	}
 	if srv.got == nil {
 		t.Fatal("server received no ReportTenantStatus request")
@@ -140,8 +135,8 @@ func TestReportTenantStatus_SendsFieldsAndEchoesBilling(t *testing.T) {
 	if srv.got.GetStorePostgres() != "ready" || srv.got.GetStoreNeo4J() != "provisioning" {
 		t.Errorf("unexpected store fields: %+v", srv.got)
 	}
-	if srv.got.GetZitadelOrgSlug() != "team-org" || srv.got.GetStripeCustomerId() != "cus_42" {
-		t.Errorf("unexpected org/stripe fields: %+v", srv.got)
+	if srv.got.GetZitadelOrgSlug() != "team-org" {
+		t.Errorf("unexpected org fields: %+v", srv.got)
 	}
 }
 
@@ -180,7 +175,7 @@ func TestReportTenantStatus_RPCError_Translated(t *testing.T) {
 		client:   operatorv1.NewDaemonOperatorServiceClient(conn),
 		audience: "gibson-daemon",
 	}
-	if _, err := c.ReportTenantStatus(context.Background(), TenantStatusReport{TenantID: "acme"}); err == nil {
+	if err := c.ReportTenantStatus(context.Background(), TenantStatusReport{TenantID: "acme"}); err == nil {
 		t.Fatal("expected error to be surfaced from a failing daemon")
 	}
 }

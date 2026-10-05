@@ -16,18 +16,17 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
 
-// stubReporter records the report it received and returns a fixed billing flag.
+// stubReporter records the report it received.
 type stubReporter struct {
-	billingActive bool
-	err           error
-	got           provision.TenantStatusReport
-	calls         int
+	err   error
+	got   provision.TenantStatusReport
+	calls int
 }
 
-func (s *stubReporter) ReportTenantStatus(_ context.Context, r provision.TenantStatusReport) (bool, error) {
+func (s *stubReporter) ReportTenantStatus(_ context.Context, r provision.TenantStatusReport) error {
 	s.calls++
 	s.got = r
-	return s.billingActive, s.err
+	return s.err
 }
 
 func tenantWithStatus() *gibsonv1alpha1.Tenant {
@@ -37,34 +36,38 @@ func tenantWithStatus() *gibsonv1alpha1.Tenant {
 	t.Status.DataPlane.Stores.Postgres.State = "ready"
 	t.Status.DataPlane.Stores.Redis.State = "provisioning"
 	t.Status.ZitadelOrgSlug = "acme-org"
-	t.Status.StripeCustomerID = "cus_9"
 	return t
 }
 
-func TestReportStatusToDaemon_NoopReporter_NoStamp(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	// NoopTenantStatusReporter is what main.go injects when report-back is
-	// disabled (no daemon address). It must no-op: never stamp the annotation,
-	// never panic.
-	r := &TenantReconciler{Client: c, StatusReporter: NoopTenantStatusReporter{}}
-	r.reportStatusToDaemon(context.Background(), tenant)
-
+// The report changes nothing on the Tenant CR. The platform holds no billing
+// state (D54).
+func assertNoAnnotations(t *testing.T, c client.Client) {
+	t.Helper()
 	var got gibsonv1alpha1.Tenant
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
 		t.Fatalf("get tenant: %v", err)
 	}
-	if _, ok := got.Annotations[AnnotationBillingActive]; ok {
-		t.Errorf("noop reporter must not stamp billing-active")
+	if len(got.Annotations) != 0 {
+		t.Errorf("the report stamped annotations: %v", got.Annotations)
 	}
+}
+
+func TestReportStatusToDaemon_NoopReporter(t *testing.T) {
+	scheme := setupScheme(t)
+	tenant := tenantWithStatus()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
+	// NoopTenantStatusReporter is what main.go injects when report-back is
+	// disabled (no daemon address). It must no-op and never panic.
+	r := &TenantReconciler{Client: c, StatusReporter: NoopTenantStatusReporter{}}
+	r.reportStatusToDaemon(context.Background(), tenant)
+	assertNoAnnotations(t, c)
 }
 
 func TestReportStatusToDaemon_MapsStatusFields(t *testing.T) {
 	scheme := setupScheme(t)
 	tenant := tenantWithStatus()
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	rep := &stubReporter{billingActive: false}
+	rep := &stubReporter{}
 	r := &TenantReconciler{Client: c, StatusReporter: rep}
 
 	r.reportStatusToDaemon(context.Background(), tenant)
@@ -79,90 +82,21 @@ func TestReportStatusToDaemon_MapsStatusFields(t *testing.T) {
 	if g.StorePostgres != "ready" || g.StoreRedis != "provisioning" {
 		t.Errorf("unexpected store states: %+v", g)
 	}
-	if g.ZitadelOrgSlug != "acme-org" || g.StripeCustomerID != "cus_9" {
-		t.Errorf("unexpected org/stripe: %+v", g)
+	if g.ZitadelOrgSlug != "acme-org" {
+		t.Errorf("unexpected org: %+v", g)
 	}
+	assertNoAnnotations(t, c)
 }
 
-func TestReportStatusToDaemon_StripeCustomerIDFallback(t *testing.T) {
+func TestReportStatusToDaemon_ReportError_NoPanic(t *testing.T) {
 	scheme := setupScheme(t)
 	tenant := tenantWithStatus()
-	// status.stripeCustomerId is the one source the reporter reads (gibson#566).
-	tenant.Status.StripeCustomerID = "cus_fallback"
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	rep := &stubReporter{}
-	r := &TenantReconciler{Client: c, StatusReporter: rep}
+	r := &TenantReconciler{Client: c, StatusReporter: &stubReporter{err: errors.New("daemon down")}}
 
+	// Best-effort: a report error must not panic.
 	r.reportStatusToDaemon(context.Background(), tenant)
-
-	if rep.got.StripeCustomerID != "cus_fallback" {
-		t.Errorf("expected fallback to Status.StripeCustomerID, got %q", rep.got.StripeCustomerID)
-	}
-}
-
-func TestReportStatusToDaemon_BillingActive_StampsAnnotation(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	r := &TenantReconciler{Client: c, StatusReporter: &stubReporter{billingActive: true}}
-
-	r.reportStatusToDaemon(context.Background(), tenant)
-
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if got.Annotations[AnnotationBillingActive] != "true" {
-		t.Errorf("expected billing-active annotation stamped, got %q", got.Annotations[AnnotationBillingActive])
-	}
-}
-
-func TestReportStatusToDaemon_BillingInactive_NoAnnotation(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	r := &TenantReconciler{Client: c, StatusReporter: &stubReporter{billingActive: false}}
-
-	r.reportStatusToDaemon(context.Background(), tenant)
-
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if _, ok := got.Annotations[AnnotationBillingActive]; ok {
-		t.Errorf("did not expect billing-active annotation when billing inactive")
-	}
-}
-
-func TestReportStatusToDaemon_ReportError_NoStamp_NoPanic(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	r := &TenantReconciler{Client: c, StatusReporter: &stubReporter{billingActive: true, err: errors.New("daemon down")}}
-
-	// Best-effort: a report error must not panic and must not stamp the annotation.
-	r.reportStatusToDaemon(context.Background(), tenant)
-
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if _, ok := got.Annotations[AnnotationBillingActive]; ok {
-		t.Errorf("did not expect annotation when report errored")
-	}
-}
-
-func TestEnsureBillingActiveAnnotation_Idempotent(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	tenant.Annotations = map[string]string{AnnotationBillingActive: "true"}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	r := &TenantReconciler{Client: c}
-
-	// Already set → no-op, returns nil without a patch.
-	if err := r.ensureBillingActiveAnnotation(context.Background(), tenant); err != nil {
-		t.Fatalf("expected no-op nil, got %v", err)
-	}
+	assertNoAnnotations(t, c)
 }
 
 // recordingReporter keeps every report, in order.
@@ -171,9 +105,9 @@ type recordingReporter struct {
 	err     error
 }
 
-func (s *recordingReporter) ReportTenantStatus(_ context.Context, r provision.TenantStatusReport) (bool, error) {
+func (s *recordingReporter) ReportTenantStatus(_ context.Context, r provision.TenantStatusReport) error {
 	s.reports = append(s.reports, r)
-	return true, s.err
+	return s.err
 }
 
 // TestReconcileDelete_ReportsTeardownToTheDaemon proves a tenant in deletion
@@ -218,8 +152,8 @@ func TestReconcileDelete_ReportsTeardownToTheDaemon(t *testing.T) {
 }
 
 // TestReportTeardownToDaemon_IsBestEffortAndStampsNothing proves a daemon
-// error does not fail the deletion, and that a teardown report never stamps
-// the billing annotation, even when the daemon says billing is active.
+// error does not fail the deletion, and that a teardown report stamps
+// nothing on the Tenant CR.
 func TestReportTeardownToDaemon_IsBestEffortAndStampsNothing(t *testing.T) {
 	scheme := setupScheme(t)
 	tenant := tenantWithStatus()
@@ -232,14 +166,8 @@ func TestReportTeardownToDaemon_IsBestEffortAndStampsNothing(t *testing.T) {
 	if len(rep.reports) != 1 || rep.reports[0].Phase != string(gibsonv1alpha1.TenantPhaseTerminated) || rep.reports[0].DataPlaneReady {
 		t.Fatalf("reports = %+v, want one Terminated report with the data plane not ready", rep.reports)
 	}
-	if rep.reports[0].ZitadelOrgSlug != "acme-org" || rep.reports[0].StripeCustomerID != "cus_9" {
+	if rep.reports[0].ZitadelOrgSlug != "acme-org" {
 		t.Errorf("the teardown report dropped identity fields: %+v", rep.reports[0])
 	}
-	var got gibsonv1alpha1.Tenant
-	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
-		t.Fatalf("get tenant: %v", err)
-	}
-	if _, ok := got.Annotations[AnnotationBillingActive]; ok {
-		t.Error("a teardown report must not stamp billing-active")
-	}
+	assertNoAnnotations(t, c)
 }

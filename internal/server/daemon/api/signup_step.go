@@ -89,7 +89,7 @@ func (s *DaemonServer) holdForSignupStep(attemptID string) (*signupStepHold, str
 	return &signupStepHold{
 		attemptID: attemptID,
 		tokenHash: hash,
-		expiresAt: time.Now().Add(signupStepTTL),
+		expiresAt: s.signupNow().Add(signupStepTTL),
 	}, token, nil
 }
 
