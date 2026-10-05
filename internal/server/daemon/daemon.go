@@ -25,7 +25,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
@@ -1265,9 +1264,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// projected the signing-key Secret. Announced below.
 				KeyProvider: keyProvider,
 				KeyID:       cgJWTKeyID(),
-				// ADR-0110 / gibson#998: the Minter rejects non-hosted isolation
-				// modes at issuance under the hosted setec-only shape.
-				Shape: dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
 			}); mErr != nil {
 				d.logger.Warn(ctx, "CG Minter init failed; capability-grant registration disabled", "error", mErr)
 			} else {

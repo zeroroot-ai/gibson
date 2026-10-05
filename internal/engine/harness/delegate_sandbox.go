@@ -25,7 +25,7 @@ import (
 // without setec_integration wires nil and tests can supply a stub.
 //
 // Nil means no sandboxed agent dispatch: DelegateToAgent denies an untrusted
-// agent fail-closed under setec-only.
+// agent fail-closed.
 type AgentSandboxLauncher interface {
 	LaunchAgent(ctx context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
 }

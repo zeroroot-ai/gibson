@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/events"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -248,17 +247,10 @@ type HarnessConfig struct {
 	// Optional.
 	SandboxedExecutor *sandboxed.Executor
 
-	// DeploymentShape is the untrusted-execution isolation policy the harness
-	// enforces in CallToolProto (and the other execution paths). Sourced from
-	// the daemon's GIBSON_UNTRUSTED_EXEC config. The zero value
-	// (ShapeSetecOnly) is fail-closed: an unwired harness denies untrusted
-	// in-process execution. See ADR-0110 / gibson#994.
-	DeploymentShape dispatchpolicy.DeploymentShape
-
 	// AgentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
 	// sandbox for one mission run (ADR-0116 / gibson#1596). When set,
 	// DelegateToAgent routes an untrusted agent to it instead of denying. When
-	// nil, an untrusted agent is denied fail-closed under setec-only (no
+	// nil, an untrusted agent is denied fail-closed (no
 	// behavior change for deployments without setec sandbox dispatch).
 	// Optional.
 	AgentLauncher AgentSandboxLauncher

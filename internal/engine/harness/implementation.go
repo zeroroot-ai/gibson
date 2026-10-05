@@ -194,16 +194,11 @@ type DefaultAgentHarness struct {
 	// CallToolProto; nil disables sandboxed dispatch entirely.
 	sandboxedExecutor *sandboxed.Executor
 
-	// deploymentShape is the untrusted-execution isolation policy enforced by
-	// the dispatch-policy gate. Zero value (ShapeSetecOnly) is fail-closed.
-	// See ADR-0110 / gibson#994.
-	deploymentShape dispatchpolicy.DeploymentShape
-
 	// agentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
 	// sandbox for one mission run (ADR-0116 / gibson#1596). When wired,
 	// DelegateToAgent routes an untrusted agent to it instead of denying.
 	// Nil means no sandboxed agent dispatch, so an untrusted agent is denied
-	// fail-closed under setec-only. See delegate_sandbox.go.
+	// fail-closed. See delegate_sandbox.go.
 	agentLauncher AgentSandboxLauncher
 
 	// agentLaunchSpecResolver resolves the launch spec (image, sandbox class,
@@ -852,9 +847,9 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				// platform's cluster, the trust the catalog states. What the
 				// instance reported about itself is not an input.
 				placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
-				if dispatchpolicy.Decide(placement, trust, false, h.deploymentShape) == dispatchpolicy.Deny {
+				if dispatchpolicy.Decide(placement, trust, false) == dispatchpolicy.Deny {
 					return types.WrapError(types.SANDBOX_POLICY_DENIED,
-						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", name), nil)
+						fmt.Sprintf("tool %q runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", name), nil)
 				}
 
 				// Determine routing: does this instance expose a direct gRPC endpoint?
@@ -1236,31 +1231,23 @@ func (h *DefaultAgentHarness) workQueueWaitTimeout() time.Duration {
 //   - The component has no grpc_endpoint metadata (pull-based remote component), AND
 //   - A WorkQueue is configured on the harness.
 //
-// remoteAgentInstance resolves a live kind=agent component for this tenant that
-// should be driven over the work queue.
-//
-// Mirrors the tool path's ordering: an instance advertising a direct gRPC
-// endpoint is left to the registry-adapter path, which dials it; only a
-// component with no reachable endpoint of its own — the off-cluster case — is
-// dispatched by queue.
+// remoteAgentInstance resolves a live kind=agent component for this tenant.
+// The work queue drives it. The daemon dials no address that an instance
+// reports, so the metadata of the instance selects nothing.
 func (h *DefaultAgentHarness) remoteAgentInstance(ctx context.Context, tenant, name string) (component.ComponentInfo, bool) {
 	if h.componentRegistry == nil || h.workQueue == nil || tenant == "" {
 		return component.ComponentInfo{}, false
 	}
 	instances, err := h.componentRegistry.Discover(ctx, tenant, "agent", name)
 	if err != nil {
-		h.logger.Warn("component registry agent discovery failed, falling back to registry adapter",
+		h.logger.Warn("component registry agent discovery failed",
 			"agent", name, "tenant", tenant, "error", err)
 		return component.ComponentInfo{}, false
 	}
 	if len(instances) == 0 {
 		return component.ComponentInfo{}, false
 	}
-	info := instances[0] // First live instance; load-balancing is a future concern.
-	if info.Metadata["grpc_endpoint"] != "" {
-		return component.ComponentInfo{}, false
-	}
-	return info, true
+	return instances[0], true // First live instance; load-balancing is a future concern.
 }
 
 // delegateToAgentViaWorkQueue runs a mission node's agent on a remote component
@@ -1299,9 +1286,8 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 
 	// The remote agent calls back over HarnessCallbackService with
 	// (mission, agent) in its context; those calls resolve through the
-	// callback registry to a harness. The direct-gRPC path registers the
-	// child harness for the agent (RegistryAdapter.DelegateToAgent); the
-	// queue path must do the same or every Observe/SubmitFinding from an
+	// callback registry to a harness. The queue path registers the child
+	// harness for the agent, or every Observe/SubmitFinding from an
 	// off-cluster agent answers "no active harness" (gibson#1633).
 	if h.callbackManager != nil && h.factory != nil {
 		childMissionCtx := h.missionCtx
@@ -1318,6 +1304,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		if key != "" {
 			defer h.callbackManager.UnregisterHarness(key)
 		}
+		h.observeDelegation(ctx, name, childHarness)
 	}
 	// An agent node is the one dispatch that may legitimately outlive any clock
 	// the harness would pick: a live coding-agent session runs for hours. Its
@@ -1359,10 +1346,31 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	return result, nil
 }
 
+// observeDelegation records that this run delegated to a child run. It does
+// NOT write the graph: the fact is folded into the tenant World through the
+// DelegationSink, and the graph projector, the sole writer (ADR-0107),
+// materializes the :AgentRun nodes and the DELEGATED_TO edge.
+func (h *DefaultAgentHarness) observeDelegation(ctx context.Context, name string, childHarness AgentHarness) {
+	parentRunID := h.missionCtx.AgentRunID
+	var childRunID string
+	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
+		childRunID = dah.missionCtx.AgentRunID
+	}
+	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
+		h.delegationSink(ctx, DelegationObserved{
+			Tenant:      h.missionCtx.TenantID,
+			Scope:       h.missionCtx.ID.String(),
+			ParentRunID: parentRunID,
+			ParentAgent: h.missionCtx.CurrentAgent,
+			ChildRunID:  childRunID,
+			ChildAgent:  name,
+		})
+	}
+}
+
 // trackInFlightAgent does the concurrent_agents quota bookkeeping for one
-// delegation and returns the release function. Shared by the in-process and
-// work-queue paths so a remote agent counts against the tenant's quota exactly
-// like a local one.
+// delegation and returns the release function. Shared by the sandbox and
+// work-queue paths so each agent counts against the tenant's quota.
 func (h *DefaultAgentHarness) trackInFlightAgent(ctx context.Context, name string) func() {
 	if h.quotaCounter == nil {
 		return func() {}
@@ -2287,66 +2295,61 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		)
 	}
 
-	// ── Dispatch-policy gate (ADR-0110 / ADR-0116 / gibson#996 / gibson#1596) ─
-	// Sub-agent delegation runs the delegated agent's own code. An untrusted
-	// agent must not run in-process under setec-only. Two outcomes now, not
-	// one:
-	//   - a sandboxed agent launcher is wired → launch the agent as an
-	//     ephemeral Setec sandbox for this one mission run (ADR-0116);
-	//   - no launcher is wired → deny, fail-closed, exactly as before.
-	// The gate inputs come from where the agent runs and from the catalog,
-	// never from what an instance reported (resolveAgentStanding). (Every
-	// tool the delegated agent calls is independently gated by CallToolProto.)
-	agentPlacement, agentTrust, trustErr := h.resolveAgentStanding(ctx, name)
+	// ── Dispatch gate (ADR-0110 / ADR-0116) ──────────────────────────────────
+	// An agent has two dispatch paths and no third one:
+	//   - the platform starts the agent, and it starts it in a setec sandbox;
+	//   - a developer or a customer started the agent, and it pulls its work
+	//     from the work queue.
+	// The daemon runs no agent code in its own process, and it dials no
+	// address that an agent reports. The gate inputs come from where the
+	// agent runs and from the catalog, never from what an instance reported
+	// (resolveAgentStanding). Each tool that the agent calls passes its own
+	// gate in CallToolProto.
+	agentPlacement, agentTrust, registered, trustErr := h.resolveAgentStanding(ctx, name)
 	if trustErr != nil {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
-			fmt.Sprintf("agent %q: content trust could not be established; refusing in-process delegation", name), trustErr)
+			fmt.Sprintf("agent %q: the placement could not be established; refusing the delegation", name), trustErr)
 	}
 	// A catalog agent whose signed manifest declares dispatchMode==sandboxed
-	// must run sandboxed whatever the registry says its content trust is. A
-	// platform agent is launched-on-dispatch, not a registered polling worker,
-	// so its trust comes from the manifest, not the registry (ADR-0116 /
-	// gibson#1598). Force UNTRUSTED here so the gate below routes it to the
-	// sandbox launch. The seam is nil-safe: a nil seam or an unlisted agent
-	// leaves agentTrust as the registry established it.
+	// is an agent that the platform starts. It is launched on dispatch and is
+	// not a registered worker, so its standing comes from the manifest and
+	// not from the registry (ADR-0116). The seam is nil-safe: a nil seam or
+	// an unlisted agent leaves the standing as the registry established it.
+	platformStarts := false
 	if h.agentDispatchMode != nil {
 		if mode, listed := h.agentDispatchMode(name); listed && mode == componentcatalog.DispatchModeSandboxed {
+			platformStarts = true
 			agentPlacement = dispatchpolicy.PlacementCluster
 			agentTrust = componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 		}
 	}
-	// sandboxAgent is true when this agent must run sandboxed rather than
-	// in-process. That is "untrusted content" OR a catalog manifest that
-	// declares dispatchMode==sandboxed (forced UNTRUSTED just above), so a
-	// trusted first-party agent still routes to the sandbox launch.
+	if !platformStarts && !registered {
+		return agent.Result{}, types.NewError(ErrHarnessAgentNotFound,
+			fmt.Sprintf("agent %q has no sandbox manifest and no work queue instance", name))
+	}
+	// The platform starts an agent that runs in the cluster and that the
+	// catalog does not state as trusted. With no launcher, the gate denies.
 	sandboxAgent := agentPlacement == dispatchpolicy.PlacementCluster &&
 		agentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 	hasSandboxedAgentDispatch := sandboxAgent && h.agentLauncher != nil
-	switch dispatchpolicy.Decide(agentPlacement, agentTrust, hasSandboxedAgentDispatch, h.deploymentShape) {
-	case dispatchpolicy.Deny:
+	decision := dispatchpolicy.Decide(agentPlacement, agentTrust, hasSandboxedAgentDispatch)
+	if decision == dispatchpolicy.Deny {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
-			fmt.Sprintf("agent %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process delegation", name), nil)
-	case dispatchpolicy.RequireSetec:
-		// Tenant-enablement gate runs here too (same choke point as the
-		// in-process path below), so a sandboxed launch is authorized exactly
-		// like an in-process delegation before any sandbox starts.
-		if err := h.authorizeAgentDispatch(ctx, name); err != nil {
-			return agent.Result{}, err
-		}
-		defer h.trackInFlightAgent(ctx, name)()
-		return h.delegateToAgentViaSandbox(ctx, name, task, agentTrust)
-	case dispatchpolicy.AllowInProcess:
-		// Fall through to the existing remote / in-process delegation path.
+			fmt.Sprintf("agent %q has no sandboxed dispatch and no work queue instance that may take the work", name), nil)
 	}
 
 	// ── Tenant-enablement gate (gibson#1595) ─────────────────────────────────
 	// A mission may dispatch to an agent only when the calling tenant has that
 	// agent enabled. This is the single choke point for BOTH mission→agent and
-	// agent→sub-agent dispatch (remote work-queue and in-process child-harness
-	// paths both flow through here), so the check runs before any work item is
-	// enqueued or any child harness is built. Fail-closed on every axis.
+	// agent→sub-agent dispatch, so the check runs before a sandbox starts and
+	// before a work item is enqueued. Fail-closed on every axis.
 	if err := h.authorizeAgentDispatch(ctx, name); err != nil {
 		return agent.Result{}, err
+	}
+
+	if decision == dispatchpolicy.RequireSetec {
+		defer h.trackInFlightAgent(ctx, name)()
+		return h.delegateToAgentViaSandbox(ctx, name, task, agentTrust)
 	}
 
 	// ── Parent-chain push ────────────────────────────────────────────────────
@@ -2383,154 +2386,22 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		"delegation_depth", currentDepth+1,
 		"caller_chain_len", len(newChain))
 
-	// ── Remote component dispatch (gibson#1197) ──────────────────────────────
-	// An agent registered through ComponentService lives outside this process,
-	// so there is no child harness to build and no in-process registry entry to
-	// find. It runs over the same work queue tools and plugins already use, and
-	// calls harness operations back over HarnessCallbackService.
-	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-		if info, found := h.remoteAgentInstance(ctx, tenant, name); found {
-			defer h.trackInFlightAgent(ctx, name)()
-			return h.delegateToAgentViaWorkQueue(ctx, tenant, name, task, info)
-		}
-	}
-
-	// ── Child mission context ────────────────────────────────────────────────
-	// Copy the parent mission context, then update the fields that are
-	// child-specific. CurrentAgent is updated (existing behaviour preserved).
-	childMissionCtx := h.missionCtx
-	childMissionCtx.CurrentAgent = name
-	childMissionCtx.DelegationDepth = currentDepth + 1
-	// Per-node slot overrides are node-specific — do NOT inherit the parent's
-	// overrides. Instead, apply the overrides carried by this task (set by the
-	// orchestrator for the executing agent node). Nil means no override for this
-	// execution, which preserves pre-#539 fall-through behavior.
-	// Spec: per-node-slot-override (gibson#539).
-	childMissionCtx.NodeSlotOverrides = task.SlotOverrides
-
-	// Create child harness for the sub-agent
-	childHarness, err := h.factory(ctx, childMissionCtx, h.targetInfo)
-	if err != nil {
-		h.logger.Error("failed to create child harness",
-			"agent", name,
-			"error", err)
-		return agent.Result{}, types.WrapError(
-			ErrHarnessDelegationFailed,
-			"failed to create child harness",
-			err,
-		)
-	}
-
-	// Convert harness.AgentHarness to agent.AgentHarness
-	// DefaultAgentHarness implements both interfaces, so this is a type assertion
-	agentHarness, ok := childHarness.(agent.AgentHarness)
-	if !ok {
-		h.logger.Error("child harness does not implement agent.AgentHarness",
-			"agent", name)
-		return agent.Result{}, types.NewError(
-			ErrHarnessDelegationFailed,
-			"child harness does not implement agent.AgentHarness",
-		)
-	}
-
-	// Use registry adapter for delegation
-	if h.registryAdapter == nil {
-		h.logger.Error("no registry adapter available for delegation", "agent", name)
-		return agent.Result{}, types.NewError(
-			ErrHarnessDelegationFailed,
-			"registry adapter not configured for agent delegation",
-		)
-	}
-
-	h.logger.Debug("using registry adapter for delegation", "agent", name)
-
-	// Concurrent_agents quota: per-agent inFlightTasks bookkeeping.
-	// 0 → 1 transition fires INCR; the deferred 1 → 0 transition fires
-	// DECR. nil quotaCounter disables the path entirely. Spec
-	// plans-and-quotas-simplification.
-	defer h.trackInFlightAgent(ctx, name)()
-
-	result, err := h.registryAdapter.DelegateToAgent(ctx, name, task, agentHarness)
-
-	if err != nil {
-		h.logger.Error("agent execution failed",
-			"agent", name,
-			"task_id", task.ID.String(),
-			"error", err)
-
-		// Record failure metrics
+	// ── Work queue dispatch (gibson#1197) ────────────────────────────────────
+	// An agent registered through ComponentService lives outside this process.
+	// It pulls its work from the same work queue that tools and plugins use,
+	// and it calls harness operations back over HarnessCallbackService.
+	tenant := auth.TenantStringFromContext(ctx)
+	info, found := h.remoteAgentInstance(ctx, tenant, name)
+	if !found {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent":  name,
 			"status": "failed",
 		})
-
-		return result, types.WrapError(
-			ErrHarnessDelegationFailed,
-			fmt.Sprintf("agent execution failed: %s", name),
-			err,
-		)
+		return agent.Result{}, types.NewError(ErrHarnessAgentNotFound,
+			fmt.Sprintf("agent %q has no sandbox manifest and no work queue instance", name))
 	}
-
-	// ── DELEGATED_TO run-provenance ──────────────────────────────────────────
-	// Record that this run delegated to a child run. We do NOT write the graph
-	// directly: the fact is folded into the tenant World (as AgentRunObserved
-	// events for both parent and child) via the DelegationSink, and the graph
-	// projector — the sole writer (ADR-0107, #837) — materializes the :AgentRun
-	// nodes and the DELEGATED_TO edge.
-	//
-	// The child run ID is read from the child harness's mission context (not
-	// childMissionCtx, which is a value copy). The factory may assign a new
-	// AgentRunID inside the child; we retrieve it via a type assertion.
-	var childRunID string
-	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
-		childRunID = dah.missionCtx.AgentRunID
-	} else {
-		// If childHarness is wrapped by middleware, fall back to the ID that
-		// was in childMissionCtx before the factory ran.
-		childRunID = childMissionCtx.AgentRunID
-	}
-	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
-		h.delegationSink(ctx, DelegationObserved{
-			Tenant:      h.missionCtx.TenantID,
-			Scope:       h.missionCtx.ID.String(),
-			ParentRunID: parentRunID,
-			ParentAgent: h.missionCtx.CurrentAgent,
-			ChildRunID:  childRunID,
-			ChildAgent:  name,
-		})
-	} else if parentRunID != "" && childRunID == "" {
-		h.logger.Debug("skipping DELEGATED_TO edge: child agent_run_id not set on mission context",
-			"parent_run_id", parentRunID,
-			"agent", name)
-	}
-
-	// Submit findings from sub-agent to our finding store
-	for _, finding := range result.Findings {
-		err := h.SubmitFinding(ctx, finding)
-		if err != nil {
-			h.logger.Warn("failed to submit sub-agent finding",
-				"agent", name,
-				"finding", finding.Title,
-				"error", err)
-		}
-	}
-
-	// Record success metrics
-	h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
-		"agent":  name,
-		"status": "success",
-	})
-	h.metrics.RecordCounter("agents.findings_from_delegation", int64(len(result.Findings)), map[string]string{
-		"agent": name,
-	})
-
-	h.logger.Info("agent execution completed",
-		"agent", name,
-		"task_id", task.ID.String(),
-		"status", result.Status,
-		"findings_count", len(result.Findings))
-
-	return result, nil
+	defer h.trackInFlightAgent(ctx, name)()
+	return h.delegateToAgentViaWorkQueue(ctx, tenant, name, task, info)
 }
 
 // ListAgents returns descriptors for all registered agents.
@@ -3111,8 +2982,9 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 }
 
 // resolveAgentStanding returns the dispatch gate inputs for delegating to the
-// named agent (ADR-0110 / gibson#996): where its code runs and how far the
-// platform trusts it. Neither comes from what a registered instance reported.
+// named agent (ADR-0110): where its code runs and how far the platform trusts
+// it. Neither comes from what a registered instance reported. The third
+// result reports whether a live instance is registered for the tenant.
 //
 //   - An instance whose principal enrolled with an attested identity runs in
 //     the platform's cluster. If any live instance is attested, the agent
@@ -3120,32 +2992,28 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 //     means untrusted to the gate.
 //   - If instances exist and none is attested, the agent runs on the tenant's
 //     own machine and gets its work through the queue.
-//   - With no registered instance the delegation can only reach an agent
-//     built into the daemon, which is the platform's own code: trusted.
+//   - With no registered instance, or with no component registry, the agent
+//     has no standing here. Only a catalog manifest can then give it a
+//     sandbox launch.
 //
 // It returns an error — meaning DENY the delegation — whenever the standing
 // could not be established: a request carrying no tenant, or a registry
 // lookup that failed. "We could not tell" has to deny.
-//
-// A harness with no component registry at all is a different case: no agent
-// is registered either way, and only built-in agents can run.
-func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name string) (dispatchpolicy.Placement, componentpb.ContentTrust, error) {
-	const builtInTrust = componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
+func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name string) (dispatchpolicy.Placement, componentpb.ContentTrust, bool, error) {
+	const noTrust = componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 	if h.componentRegistry == nil {
-		return dispatchpolicy.PlacementCluster, builtInTrust, nil
+		return dispatchpolicy.PlacementCluster, noTrust, false, nil
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
-			fmt.Errorf("no tenant in context")
+		return dispatchpolicy.PlacementCluster, noTrust, false, errors.New("no tenant in context")
 	}
 	instances, err := h.componentRegistry.Discover(ctx, tenant, authz.KindAgent, name)
 	if err != nil {
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
-			fmt.Errorf("component registry discover: %w", err)
+		return dispatchpolicy.PlacementCluster, noTrust, false, fmt.Errorf("component registry discover: %w", err)
 	}
 	if len(instances) == 0 {
-		return dispatchpolicy.PlacementCluster, builtInTrust, nil
+		return dispatchpolicy.PlacementCluster, noTrust, false, nil
 	}
 	attested := false
 	for _, info := range instances {
@@ -3155,7 +3023,7 @@ func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name str
 		}
 	}
 	placement, trust := component.DispatchStanding(attested, authz.KindAgent, name)
-	return placement, trust, nil
+	return placement, trust, true, nil
 }
 
 // taskGrantAllowedRPCs is the callback surface a dispatched component's task

@@ -73,7 +73,6 @@ func newRemoteAgentHarness(t *testing.T, q component.WorkQueue, instances []comp
 }
 
 func remoteAgentInstances() []component.ComponentInfo {
-	// No grpc_endpoint: the off-cluster case, reachable only by work queue.
 	return []component.ComponentInfo{{Kind: "agent", Name: "zerocool", InstanceID: "i1"}}
 }
 
@@ -155,16 +154,16 @@ func TestDelegateToAgent_QueueFailureIsReported(t *testing.T) {
 	}
 }
 
-func TestRemoteAgentInstance_LeavesDirectGRPCAgentsToTheAdapter(t *testing.T) {
-	// An agent that advertises its own endpoint is dialled directly; queueing it
-	// would put a second, slower path in front of a reachable component.
+func TestRemoteAgentInstance_ReportedEndpointSelectsNothing(t *testing.T) {
+	// The daemon dials no address that an instance reports. An agent that
+	// advertises an endpoint gets its work from the work queue like any other.
 	q := &queueFake{}
 	h := newRemoteAgentHarness(t, q, []component.ComponentInfo{{
 		Kind: "agent", Name: "zerocool", InstanceID: "i1",
 		Metadata: map[string]string{"grpc_endpoint": "zerocool:50052"},
 	}})
-	if _, found := h.remoteAgentInstance(context.Background(), "zerocool-lab", "zerocool"); found {
-		t.Fatal("a gRPC-reachable agent must not be routed over the work queue")
+	if _, found := h.remoteAgentInstance(context.Background(), "zerocool-lab", "zerocool"); !found {
+		t.Fatal("an agent that reports an endpoint must still take the work queue")
 	}
 }
 
@@ -181,8 +180,7 @@ func TestRemoteAgentInstance_RequiresATenantAndAQueue(t *testing.T) {
 }
 
 func TestRemoteAgentInstance_NoRegisteredComponentFallsThrough(t *testing.T) {
-	// Nothing registered is the in-process case: the caller must keep going to
-	// the registry-adapter path rather than fail.
+	// Nothing registered: the caller reports that the agent was not found.
 	h := newRemoteAgentHarness(t, &queueFake{}, nil)
 	if _, found := h.remoteAgentInstance(context.Background(), "zerocool-lab", "local-agent"); found {
 		t.Fatal("expected no remote instance")
@@ -308,7 +306,7 @@ func TestDelegateToAgent_MalformedResultIsReported(t *testing.T) {
 
 func TestRemoteAgentInstance_DiscoveryErrorFallsThrough(t *testing.T) {
 	// A registry that cannot answer must not fail the delegation outright — the
-	// in-process registry adapter is still a valid way to resolve the agent.
+	// caller then reports that the agent was not found.
 	h := newRemoteAgentHarness(t, &queueFake{}, nil)
 	h.componentRegistry = &erroringRegistry{}
 	if _, found := h.remoteAgentInstance(context.Background(), "acme", "zerocool"); found {

@@ -7,7 +7,7 @@
 //
 // This is the hardware-gated proof that an UNTRUSTED tool completes ONLY via a
 // real setec microVM round-trip and is DENIED (typed error, no in-process
-// fallback) when no sandboxed dispatch is available under setec-only.
+// fallback) when no sandboxed dispatch is available.
 //
 // It is excluded from the default build by the `setec_integration` tag and
 // further self-skips unless SETEC_ROUNDTRIP_ADDR (+ mTLS cert paths) is set, so
@@ -40,7 +40,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -174,7 +173,7 @@ func TestSetecRoundTrip_UntrustedToolExecutesViaSandbox(t *testing.T) {
 
 // TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed is the AC-2 deny path
 // against the live wiring: the same UNTRUSTED tool, registered WITHOUT a
-// SANDBOXED entry (DispatchMode ≠ SANDBOXED) under setec-only, is denied with
+// SANDBOXED entry (DispatchMode ≠ SANDBOXED), is denied with
 // the typed SANDBOX_POLICY_DENIED code and never dispatched — even though a
 // real sandboxed executor is wired and the frontend is reachable.
 func TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed(t *testing.T) {
@@ -192,7 +191,7 @@ func TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed(t *testing.T) {
 	// A tool with NO kind:tool manifest is not a sandboxed dispatch. It only
 	// appears as an UNTRUSTED tenant instance with a direct gRPC endpoint (the
 	// in-process bypass the gate must forbid) — dispatch falls through to the
-	// Path-2 trust gate, which denies under setec-only.
+	// Path-2 trust gate, which denies.
 	const deniedTool = "acme-untrusted-scan" // deliberately not a manifest tool
 	h := newSandboxedHarness(t, exec, &sandboxedFakeRegistry{
 		tenantInstances: []component.ComponentInfo{{
@@ -214,7 +213,7 @@ func TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed(t *testing.T) {
 }
 
 // newSandboxedHarness builds a white-box harness on the sandboxed-dispatch path
-// with deploymentShape pinned to setec-only.
+// with a sandboxed executor.
 func newSandboxedHarness(t *testing.T, exec *sandboxed.Executor, reg component.ComponentRegistry, authorizer authz.Authorizer) *DefaultAgentHarness {
 	t.Helper()
 	return &DefaultAgentHarness{
@@ -223,7 +222,6 @@ func newSandboxedHarness(t *testing.T, exec *sandboxed.Executor, reg component.C
 		componentRegistry:   reg,
 		componentAuthorizer: authorizer,
 		sandboxedExecutor:   exec,
-		deploymentShape:     dispatchpolicy.ShapeSetecOnly,
 	}
 }
 
