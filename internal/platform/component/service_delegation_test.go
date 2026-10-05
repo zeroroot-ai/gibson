@@ -349,7 +349,7 @@ func standInAgent(t *testing.T, queue WorkQueue, wantGoal string, respond func(e
 			if item == nil {
 				continue
 			}
-			if item.WorkType != agentDelegateWorkType {
+			if item.WorkType != WorkTypeAgentExecute {
 				delivered <- errors.New("work item did not carry the agent_execute work type")
 				return
 			}

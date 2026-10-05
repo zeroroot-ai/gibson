@@ -1322,7 +1322,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// the harness would pick: a live coding-agent session runs for hours. Its
 	// own declared timeout bounds it, and when it declares none the worker's
 	// heartbeat does (gibson#1602).
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, "agent_execute", payload, nil, info,
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil, info,
 		waitPolicy{bound: task.Timeout, livenessBounded: true})
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
