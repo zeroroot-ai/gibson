@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -138,6 +139,70 @@ func TestSnapshotRestore_RoundTripsPendingDestructiveActions(t *testing.T) {
 	}
 }
 
+// TestDestructiveAction_BlastRadiusAndReversibilitySurviveARestart proves that
+// the two fields that the agent reported are part of the durable record
+// (gibson#706). A restart reads the World from a snapshot and replays the
+// Timeline events after it, so both paths must keep the fields.
+func TestDestructiveAction_BlastRadiusAndReversibilitySurviveARestart(t *testing.T) {
+	requested := DestructiveActionRequested{
+		HypothesisID: "hyp-1", Tenant: "acme", ScopeID: "s1", MissionID: "m1",
+		Technique: "T1490", PredicateType: "marker_present", RequestedAtUnixMS: 1000,
+		BlastRadius: "one host: db-01", Reversibility: ReversibilityIrreversible,
+	}
+	want := DestructiveActionSnapshot{
+		HypothesisID: "hyp-1", Tenant: "acme", ScopeID: "s1", MissionID: "m1",
+		Technique: "T1490", PredicateType: "marker_present", RequestedAtUnixMS: 1000,
+		BlastRadius: "one host: db-01", Reversibility: ReversibilityIrreversible,
+	}
+
+	// The replay path: the event goes through the Timeline codec, and a new
+	// World folds the decoded event.
+	encoded, err := EncodeEvent(requested)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := DecodeEvent(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	replayed := NewWorld("t")
+	Reduce(replayed, decoded)
+	if got := replayed.DestructiveActionSnapshot(); len(got) != 1 || got[0] != want {
+		t.Fatalf("after a replay:\n got %+v\nwant %+v", got, want)
+	}
+
+	// The snapshot path: the World is written and read back.
+	restored, err := RestoreWorld(SnapshotWorld(replayed, "seq-1"), "t")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if got := restored.DestructiveActionSnapshot(); len(got) != 1 || got[0] != want {
+		t.Fatalf("after a snapshot restore:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// An event that was stored before the two fields existed still decodes, and
+// it folds with no signal.
+func TestDestructiveActionRequested_AnOlderEventDecodesWithNoSignal(t *testing.T) {
+	older, err := EncodeEvent(DestructiveActionRequested{HypothesisID: "hyp-1", RequestedAtUnixMS: 1000})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if bytes.Contains(older, []byte("BlastRadius")) || bytes.Contains(older, []byte("Reversibility")) {
+		t.Fatalf("an event with no signal must not write the two keys: %s", older)
+	}
+	decoded, err := DecodeEvent(older)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	w := NewWorld("t")
+	Reduce(w, decoded)
+	got := w.DestructiveActionSnapshot()
+	if len(got) != 1 || got[0].BlastRadius != "" || got[0].Reversibility != ReversibilityUnspecified {
+		t.Fatalf("got %+v; want one action with no signal", got)
+	}
+}
+
 func TestSnapshotRestore_RoundTripsDecidedDestructiveActions(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, DestructiveActionRequested{HypothesisID: "hyp-1", RequestedAtUnixMS: 1000})
@@ -221,6 +286,8 @@ func TestDestructiveAuthorizationQueue_Request_EnqueuesAndReturnsImmediately(t *
 		MissionID:     "m1",
 		Technique:     "T1490",
 		PredicateType: "T1490",
+		BlastRadius:   "one tenant bucket",
+		Reversibility: ReversibilityReversible,
 	})
 	if err != nil {
 		t.Fatalf("Request: %v", err)
@@ -237,6 +304,8 @@ func TestDestructiveAuthorizationQueue_Request_EnqueuesAndReturnsImmediately(t *
 		MissionID:     "m1",
 		Technique:     "T1490",
 		PredicateType: "T1490",
+		BlastRadius:   "one tenant bucket",
+		Reversibility: ReversibilityReversible,
 	}}
 	// RequestedAtUnixMS is real wall-clock time here (q.now defaults to
 	// time.Now) — compare everything else and only assert it is non-zero.
