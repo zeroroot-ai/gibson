@@ -45,9 +45,29 @@ separately.
 - **Isolation for untrusted code.** Kata/Firecracker microVMs via [setec](https://github.com/zeroroot-ai/setec), which is Apache-2.0 and useful on its own.
 - **A replayable record.** Per-tenant world state and timeline, so "what did it do" has an answer that is not a log grep.
 
-**There is no cross-tenant anything.** World, timeline, reducer and knowledge
-graph are per-tenant and fully isolated — separate arenas, separate logs,
-separate Neo4j databases. No query spans tenants.
+## Tenant isolation
+
+Each tenant has its own stores: a Postgres database, a Neo4j instance, a Redis
+logical database and a vector collection. The world state, the timeline and the
+knowledge graph of a tenant live in those stores. A request from a tenant
+reaches the stores of that tenant only. [`docs/data-plane.md`](docs/data-plane.md)
+describes the mechanism.
+
+Some data is shared by design. The platform Postgres database holds platform
+records, for example the quota of each tenant. OpenFGA holds the access tuples of all
+tenants in one store.
+
+Two RPC groups read or change more than one tenant by design. Each one needs a
+role on the object `system_tenant:_system`, and no tenant role gives it.
+
+| RPC group | Role | Who holds the role | What it does |
+|---|---|---|---|
+| `gibson.daemon.operator.v1.DaemonOperatorService` | `platform_operator` | Platform service accounts, for example the tenant operator | Tenant provisioning, tenant status, quotas, access tuples, connector grants, audit events |
+| `gibson.tenant.v1.AdminTenantService` | `platform_owner` | The one Platform owner of the install, a person | Approve or reject a registration. Provision, update or delete a tenant. Read the billing state of a tenant |
+
+This list comes from the authz registry. The full list is each row with the
+object type `system_tenant` in
+[`internal/platform/authz/registry/audit.csv`](internal/platform/authz/registry/audit.csv).
 
 ## Running it
 
