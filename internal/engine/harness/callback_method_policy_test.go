@@ -91,13 +91,10 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 		// callback_request_destructive_authorization.go serves it, and
 		// SubmitProof's SettleBetTrue now verifies the recorded decision — no
 		// longer absent here, and carries agentSurface: true.
-		// The three job callbacks a DISPATCHED AGENT calls to drive a bank.
-		// They mirror JobService and land with the job node executor,
-		// gibson#1713. The four a MEMBER calls landed in gibson#1711 and are
-		// deliberately absent here.
-		harnesspb.HarnessCallbackService_OpenJob_FullMethodName:   true,
-		harnesspb.HarnessCallbackService_SendInput_FullMethodName: true,
-		harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  true,
+		// The three job callbacks a DISPATCHED AGENT calls to drive a bank
+		// landed in gibson#690 (callback_job_driver.go), and the four a
+		// MEMBER calls landed in gibson#1711. All are deliberately absent
+		// here.
 		// WorldView handler landed in gibson#1377 — no longer unimplemented.
 		// Session-context store handlers landed (gibson#1184,
 		// callback_session_context.go) — no longer unimplemented.
