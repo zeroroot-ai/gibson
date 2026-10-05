@@ -84,7 +84,10 @@ func (e *testProofSettlementEngine) RecordedToolCalls(_ context.Context, mission
 }
 
 func (e *testProofSettlementEngine) SubmitProofForReview(ctx context.Context, req brain.ProofReviewRequest) error {
-	return e.engine.SubmitProofForReview(ctx, req)
+	if err := e.engine.SubmitProofForReview(ctx, req); err != nil {
+		return fmt.Errorf("submit proof for review: %w", err)
+	}
+	return nil
 }
 
 // recordToolCall puts one tool call on the tenant's flight recorder, the way
