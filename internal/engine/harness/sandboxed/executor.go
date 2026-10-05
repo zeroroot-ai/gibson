@@ -103,10 +103,11 @@ type LaunchRequest struct {
 	// does not exist, so the request is server-validated.
 	SandboxClass string
 
-	// Egress, when non-empty, switches the sandbox network policy from the
-	// setec default (mode=full) to an egress-allow-list containing exactly
-	// these targets. Used by connector launches (gibson#684) so the vendor
-	// MCP server can reach only its declared hosts.
+	// Egress, when non-empty, makes the launch send the network mode
+	// egress-allow-list with exactly these targets. When it is empty the
+	// launch sends no network message, and the sandbox takes the
+	// defaultNetworkMode of its SandboxClass. setec has three modes:
+	// external-only, egress-allow-list and none. It has no mode "full".
 	Egress []EgressRule
 }
 
@@ -544,9 +545,10 @@ func (r *ring) tail(nLines int) string {
 }
 
 // EgressRulesFromAllow converts a manifest egressAllow ceiling into setec egress
-// rules. An empty list, or any entry equal to "*", means unrestricted egress and
-// returns nil so the sandbox keeps setec's default mode=full. Every other entry
-// is "host[:port]"; a missing port defaults to 443.
+// rules. An empty list, or any entry equal to "*", returns nil: the launch then
+// sends no network message and the sandbox takes the defaultNetworkMode of its
+// SandboxClass. Every other entry is "host[:port]"; a missing port defaults to
+// 443.
 func EgressRulesFromAllow(allow []string) []EgressRule {
 	if len(allow) == 0 {
 		return nil
