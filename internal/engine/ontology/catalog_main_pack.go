@@ -79,6 +79,32 @@ func MainDomainPack() DomainPack {
 			"prompt_injection_marker_present": `markerPresent(evidence, "SYSTEM_PROMPT_LEAKED")`,
 		},
 
+		// The fine-grained techniques of this pack, each with the core
+		// category that it rolls up to (ADR-0135). Each predicate above is
+		// bound to one of them.
+		Techniques: map[string]string{
+			"unauthenticated_endpoint_exposed": "reconnaissance",
+			"credential_disclosure_detected":   "extraction",
+			"prompt_injection_marker_present":  "prompt_injection",
+		},
+
+		// The pack makes a web endpoint bear belief (ADR-0129): an endpoint
+		// that answers is reachable, and a reachable endpoint can be
+		// exploitable. EXPOSES is the edge of this pack from a host to its
+		// endpoint, and it feeds "reachable".
+		BeliefSchema: &BeliefSchemaExtension{
+			Nodes: []NodeBeliefSchema{{
+				NodeType: "WebEndpoint",
+				Variables: []BeliefVariable{
+					{Name: "reachable"},
+					{Name: "exploitable", DependsOn: []string{"reachable"}},
+				},
+			}},
+			EnablementEdges: []EnablementEdgeSpec{
+				{RelType: "EXPOSES", TargetVariable: "reachable"},
+			},
+		},
+
 		// Each predicate above reads evidence of a request the target already
 		// answers. None of them needs a change on the target, so the pack
 		// states all three as non-destructive (ADR-0132).

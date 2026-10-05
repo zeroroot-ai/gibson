@@ -140,6 +140,21 @@ type DomainPack struct {
 	// requires every entry to name a Predicates key, once.
 	NonDestructivePredicates []string `json:"non_destructive_predicates,omitempty"`
 
+	// Techniques is the fine-grained techniques that this pack adds to the
+	// technique hierarchy (ADR-0135): technique id -> the category that it
+	// rolls up to. The core hierarchy holds the categories only, so a pack is
+	// the one source of a technique. Validate requires each category to be
+	// one that the core hierarchy admits. ExtendTechniques adds the entries
+	// to a hierarchy through TechniqueHierarchy.WithTechnique.
+	Techniques map[string]string `json:"techniques,omitempty"`
+
+	// BeliefSchema is the belief schema extension of this pack (ADR-0129):
+	// more node types that bear belief, more variables, more enablement
+	// edges. nil means that the pack adds none. Validate requires it to
+	// register on top of the core seed. RegisterBeliefSchema registers it
+	// with a registry.
+	BeliefSchema *BeliefSchemaExtension `json:"belief_schema,omitempty"`
+
 	// Author identifies who curates this pack (ADR-0133): the
 	// platform owner for a catalog pack, or the tenant that proposed a
 	// tenant extension. Free text, never a secret — Validate only bounds
@@ -222,6 +237,10 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //     every value is well-formed CEL-expression TEXT (ADR-0131)
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
+//   - every Techniques entry is a plain identifier that rolls up to a
+//     category of the core technique hierarchy (ADR-0135);
+//   - BeliefSchema, when present, registers on top of the core belief
+//     schema seed (ADR-0129);
 //   - every NonDestructivePredicates entry names a Predicates key, once;
 //   - Author is valid UTF-8 within MaxAuthorBytes, and Visibility is one of
 //     the recognized [PackVisibility] values;
@@ -260,6 +279,12 @@ func (p *DomainPack) Validate() error {
 			return fmt.Errorf("domain pack %q: predicate for technique %q: %w", p.Name, technique, err)
 		}
 	}
+	if _, err := p.ExtendTechniques(taxonomy.GlobalTechniques); err != nil {
+		return err
+	}
+	if err := p.validateBeliefSchema(); err != nil {
+		return err
+	}
 	seen := make(map[string]struct{}, len(p.NonDestructivePredicates))
 	for _, technique := range p.NonDestructivePredicates {
 		if _, ok := p.Predicates[technique]; !ok {
@@ -280,6 +305,66 @@ func (p *DomainPack) Validate() error {
 		return fmt.Errorf("domain pack %q: %w", p.Name, err)
 	}
 	return nil
+}
+
+// beliefSchemaExtensionName is the name under which the belief schema of a
+// pack is registered. One name for each pack, so two packs do not collide.
+func (p *DomainPack) beliefSchemaExtensionName() string {
+	return "pack/" + p.Name + "/belief-schema"
+}
+
+// ExtendTechniques returns base with each technique of this pack added,
+// each one through TechniqueHierarchy.WithTechnique. base is not changed. A
+// pack with no technique returns base.
+//
+// It fails when a technique id or a category id is not a plain identifier,
+// when base does not admit the category, or when base already holds the
+// technique. The techniques are added in sorted order, so the first error
+// is the same on each run.
+func (p *DomainPack) ExtendTechniques(base *taxonomy.TechniqueHierarchy) (*taxonomy.TechniqueHierarchy, error) {
+	techniques := make([]string, 0, len(p.Techniques))
+	for technique := range p.Techniques {
+		techniques = append(techniques, technique)
+	}
+	slices.Sort(techniques)
+
+	out := base
+	for _, technique := range techniques {
+		next, err := out.WithTechnique(taxonomy.TechniqueID(technique), taxonomy.CategoryID(p.Techniques[technique]))
+		if err != nil {
+			return nil, fmt.Errorf("domain pack %q: technique: %w", p.Name, err)
+		}
+		out = next
+	}
+	return out, nil
+}
+
+// RegisterBeliefSchema registers the belief schema extension of this pack
+// with reg, under a name of its own. A pack with no extension registers
+// nothing. The registry runs its own checks: a duplicate variable, an
+// unknown dependency, a cycle, or an enablement edge that conflicts with
+// one that reg already holds fails the call and leaves reg unchanged.
+func (p *DomainPack) RegisterBeliefSchema(reg *BeliefSchemaRegistry) error {
+	if p.BeliefSchema == nil {
+		return nil
+	}
+	if err := reg.RegisterExtension(p.beliefSchemaExtensionName(), *p.BeliefSchema); err != nil {
+		return fmt.Errorf("domain pack %q: belief schema: %w", p.Name, err)
+	}
+	return nil
+}
+
+// validateBeliefSchema proves that the belief schema extension of the pack
+// registers on top of the core seed, which each install has.
+func (p *DomainPack) validateBeliefSchema() error {
+	if p.BeliefSchema == nil {
+		return nil
+	}
+	reg := NewBeliefSchemaRegistry()
+	if err := RegisterCoreBeliefSchemaSeed(reg); err != nil {
+		return fmt.Errorf("domain pack %q: core belief schema seed: %w", p.Name, err)
+	}
+	return p.RegisterBeliefSchema(reg)
 }
 
 // validateNodeIdentity checks the written key forms a pack carries
