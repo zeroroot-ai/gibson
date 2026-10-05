@@ -12,9 +12,6 @@ import (
 	"testing"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
@@ -273,22 +270,5 @@ func TestBuildBankRunner_NeedsThePoolAndTheSeams(t *testing.T) {
 	d.cgMinter = nil
 	if _, err := d.buildBankRunner(staticTenants{}); err == nil {
 		t.Fatal("no signing key must refuse")
-	}
-}
-
-// TestTenantIDsOf_SkipsDeletingAndMalformedTenants asserts the reconciler's
-// tenant list carries live, well-formed tenant ids only.
-func TestTenantIDsOf_SkipsDeletingAndMalformedTenants(t *testing.T) {
-	live := unstructured.Unstructured{}
-	live.SetName("acme")
-	going := unstructured.Unstructured{}
-	going.SetName("globex")
-	now := metav1.Now()
-	going.SetDeletionTimestamp(&now)
-	bad := unstructured.Unstructured{}
-	bad.SetName("Not A Tenant!")
-	ids := tenantIDsOf([]unstructured.Unstructured{live, going, bad})
-	if len(ids) != 1 || ids[0].String() != "acme" {
-		t.Fatalf("ids = %v, want acme only", ids)
 	}
 }

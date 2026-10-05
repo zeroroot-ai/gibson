@@ -321,6 +321,12 @@ func (r *TenantReconciler) reconcileDelete(ctx context.Context, tenant *gibsonv1
 	log := logf.FromContext(ctx).WithValues("tenant", tenant.Name, "phase", "delete")
 
 	tenant.Status.Phase = gibsonv1alpha1.TenantPhaseTerminating
+	// The daemon reads tenant_status to decide which tenants it serves
+	// (the dashboard status page, the bank reconciler). The provisioning
+	// path is the only other reporter, and it never runs for a tenant in
+	// deletion, so without this report the row keeps its last "ready" state
+	// for a tenant that no longer exists (gibson#661).
+	r.reportTeardownToDaemon(ctx, tenant, gibsonv1alpha1.TenantPhaseTerminating)
 
 	// Dependency-ordered child teardown (E8/gibson#805). Delete the owned
 	// sub-CRDs in REVERSE dependency order, waiting for each child's own
@@ -390,6 +396,10 @@ func (r *TenantReconciler) reconcileDelete(ctx context.Context, tenant *gibsonv1
 		log.Info("teardown saga blocked; removing finalizer anyway to avoid stranding the CR (#157)",
 			"err", outcome.Err)
 	}
+
+	// The last report: after the finalizer is gone the tenant is gone, and
+	// nothing reports for it again.
+	r.reportTeardownToDaemon(ctx, tenant, gibsonv1alpha1.TenantPhaseTerminated)
 
 	// Remove finalizer via Patch so we do not hit a stale-object
 	// conflict on the resourceVersion bumped by the Status().Patch above.

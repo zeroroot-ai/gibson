@@ -164,3 +164,82 @@ func TestEnsureBillingActiveAnnotation_Idempotent(t *testing.T) {
 		t.Fatalf("expected no-op nil, got %v", err)
 	}
 }
+
+// recordingReporter keeps every report, in order.
+type recordingReporter struct {
+	reports []provision.TenantStatusReport
+	err     error
+}
+
+func (s *recordingReporter) ReportTenantStatus(_ context.Context, r provision.TenantStatusReport) (bool, error) {
+	s.reports = append(s.reports, r)
+	return true, s.err
+}
+
+// TestReconcileDelete_ReportsTeardownToTheDaemon proves a tenant in deletion
+// is reported (gibson#661). Before this, only the provisioning path reported,
+// so tenant_status kept the last "Ready, data plane ready" row of a deleted
+// tenant, and every reader of that table went on serving it.
+func TestReconcileDelete_ReportsTeardownToTheDaemon(t *testing.T) {
+	now := metav1.Now()
+	tenant := &gibsonv1alpha1.Tenant{
+		ObjectMeta: metav1.ObjectMeta{Name: "leaving", Finalizers: []string{gibsonv1alpha1.TenantFinalizer}, DeletionTimestamp: &now},
+		Spec:       gibsonv1alpha1.TenantSpec{DisplayName: "Leaving", Owner: "owner@leaving.com", Tier: gibsonv1alpha1.TenantPlanTeam},
+	}
+	// The state the last provisioning report left behind.
+	tenant.Status.Phase = gibsonv1alpha1.TenantPhaseReady
+	tenant.Status.DataPlane.Ready = true
+	tenant.Status.Namespace = "tenant-leaving"
+
+	r, c := newFakeReconciler(t, tenant)
+	rep := &recordingReporter{}
+	r.StatusReporter = rep
+
+	if _, err := r.reconcileDelete(context.Background(), tenant); err != nil {
+		t.Fatalf("reconcileDelete: %v", err)
+	}
+	_ = c
+
+	if len(rep.reports) == 0 {
+		t.Fatal("the deletion path reported nothing to the daemon")
+	}
+	first := rep.reports[0]
+	if first.TenantID != "leaving" || first.Phase != string(gibsonv1alpha1.TenantPhaseTerminating) || first.DataPlaneReady {
+		t.Errorf("first report = %+v, want leaving, Terminating, data plane not ready", first)
+	}
+	for i, got := range rep.reports {
+		if got.DataPlaneReady {
+			t.Errorf("report %d says the data plane is ready during teardown: %+v", i, got)
+		}
+		if got.Phase != string(gibsonv1alpha1.TenantPhaseTerminating) && got.Phase != string(gibsonv1alpha1.TenantPhaseTerminated) {
+			t.Errorf("report %d has phase %q, want a teardown phase", i, got.Phase)
+		}
+	}
+}
+
+// TestReportTeardownToDaemon_IsBestEffortAndStampsNothing proves a daemon
+// error does not fail the deletion, and that a teardown report never stamps
+// the billing annotation, even when the daemon says billing is active.
+func TestReportTeardownToDaemon_IsBestEffortAndStampsNothing(t *testing.T) {
+	scheme := setupScheme(t)
+	tenant := tenantWithStatus()
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
+	rep := &recordingReporter{err: errors.New("daemon down")}
+	r := &TenantReconciler{Client: c, StatusReporter: rep}
+
+	r.reportTeardownToDaemon(context.Background(), tenant, gibsonv1alpha1.TenantPhaseTerminated)
+
+	if len(rep.reports) != 1 || rep.reports[0].Phase != string(gibsonv1alpha1.TenantPhaseTerminated) || rep.reports[0].DataPlaneReady {
+		t.Fatalf("reports = %+v, want one Terminated report with the data plane not ready", rep.reports)
+	}
+	if rep.reports[0].ZitadelOrgSlug != "acme-org" || rep.reports[0].StripeCustomerID != "cus_9" {
+		t.Errorf("the teardown report dropped identity fields: %+v", rep.reports[0])
+	}
+	var got gibsonv1alpha1.Tenant
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "acme"}, &got); err != nil {
+		t.Fatalf("get tenant: %v", err)
+	}
+	if _, ok := got.Annotations[AnnotationBillingActive]; ok {
+		t.Error("a teardown report must not stamp billing-active")
+	}
+}
