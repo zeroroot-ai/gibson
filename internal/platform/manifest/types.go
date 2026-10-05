@@ -5,8 +5,6 @@ package manifest
 
 import (
 	"time"
-
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 // SubjectType enumerates the principals a manifest may be issued to.
@@ -83,15 +81,6 @@ type ManifestSubject struct {
 	Actor Actor
 }
 
-// resolveActor returns the acting caller for this subject, defaulting to the
-// subject itself for self-issuance.
-func (s ManifestSubject) resolveActor() Actor {
-	if s.Actor.ID != "" && s.Actor.Type != "" {
-		return s.Actor
-	}
-	return Actor{Type: s.Type, ID: s.ID}
-}
-
 // FGARef formats the subject into the FGA "<type>:<id>" reference the
 // Authorizer expects. Returns empty string for a zero-value subject so
 // call sites can guard on `if s.FGARef() == "" { ... }`.
@@ -122,20 +111,6 @@ type BuilderConfig struct {
 	CrossComponentBatchCheckThreshold int
 }
 
-// defaults returns a BuilderConfig with zero fields populated.
-func (c BuilderConfig) defaults() BuilderConfig {
-	if c.TTL <= 0 {
-		c.TTL = 5 * time.Minute
-	}
-	if c.CrossComponentRuleHardCap == 0 {
-		c.CrossComponentRuleHardCap = 50000
-	}
-	if c.CrossComponentBatchCheckThreshold == 0 {
-		c.CrossComponentBatchCheckThreshold = 10000
-	}
-	return c
-}
-
 // SigningKeyJWK is the public half of a manifest signing key, shaped for
 // the /.well-known/agent-configuration response. Consumers (SDK, ADK) use
 // it to verify manifest signatures without a separate key-fetch round-trip.
@@ -164,14 +139,4 @@ type SigningKeyJWK struct {
 type ComponentRef struct {
 	Name string
 	Kind string
-}
-
-// FGARef returns the "component:<kind>/<name>" reference used in FGA tuples
-// (ADR-0015). A ref with no kind cannot address an object; it fails closed
-// (returns ""), never a kind-less phantom object.
-func (c ComponentRef) FGARef() string {
-	if c.Name == "" || c.Kind == "" {
-		return ""
-	}
-	return authz.ComponentObject(c.Kind, c.Name)
 }

@@ -109,10 +109,6 @@ type Issuance struct {
 	ImpersonatedAgentPrincipalID string
 }
 
-// Impersonated reports whether this issuance was an admin previewing another
-// principal's manifest.
-func (i Issuance) Impersonated() bool { return i.ImpersonatedAgentPrincipalID != "" }
-
 // AuditWriter records manifest issuances for the 7-day audit retention
 // window. Failures are logged but do not fail the Build.
 type AuditWriter interface {
