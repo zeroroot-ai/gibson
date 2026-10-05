@@ -38,7 +38,7 @@ func TestGibsonModelSubjectTypes(t *testing.T) {
 		{"component", "team_write_disabled", "user", true, "[team#member] → team.member → [user, …]"},
 		// Reached only through a tuple-to-userset hop.
 		{"component", "can_read", "user", true, "direct_read → [user, …]"},
-		{"mission_definition", "writer", "user", true, "admin from parent → tenant.admin → [user]"},
+		{"mission", "can_rewind", "user", true, "admin → [user] or admin from belongs_to → tenant.admin → [user]"},
 
 		// --- must NOT admit user ---
 		{"team", "parent", "user", false, "[tenant] — the CreateTeam squat guard"},
@@ -156,8 +156,7 @@ func TestParseFGAModel_CoversEveryType(t *testing.T) {
 	m := gibsonFGAModel()
 	for _, typ := range []string{
 		"user", "tenant", "agent_principal", "tool_principal", "plugin_principal",
-		"component", "system_tenant", "team", "mission_definition", "mission",
-		"run", "target", "finding", "tenant_component", "provider", "model",
+		"component", "system_tenant", "team", "mission", "provider", "model",
 		"secret", "plugin",
 	} {
 		rels, ok := m[typ]
