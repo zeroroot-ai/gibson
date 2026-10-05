@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 )
 
 // fakeGraphWriter records UpsertHost calls per tenant for assertion.
@@ -28,6 +29,9 @@ type fakeGraphWriter struct {
 	observations map[string][]brain.ObservationSnapshot
 	entities     map[string][]brain.EntitySnapshot
 	hypotheses   map[string][]brain.HypothesisSnapshot
+	missionRuns  map[string][]MissionRunProjection
+	missionNodes map[string][]map[string]any // the upsert params of each :MissionNode
+	dependencies map[string][][2]string      // (from, to) of each DEPENDS_ON
 }
 
 func newFakeGraphWriter() *fakeGraphWriter {
@@ -45,6 +49,9 @@ func newFakeGraphWriter() *fakeGraphWriter {
 		observations: map[string][]brain.ObservationSnapshot{},
 		entities:     map[string][]brain.EntitySnapshot{},
 		hypotheses:   map[string][]brain.HypothesisSnapshot{},
+		missionRuns:  map[string][]MissionRunProjection{},
+		missionNodes: map[string][]map[string]any{},
+		dependencies: map[string][][2]string{},
 	}
 }
 
@@ -123,6 +130,55 @@ func (f *fakeGraphWriter) UpsertAgentRun(_ context.Context, tenant string, r bra
 	defer f.mu.Unlock()
 	f.agentRuns[tenant] = append(f.agentRuns[tenant], r)
 	return nil
+}
+
+// UpsertMissionRun records the :MissionRun writes of the per-run bootstrap.
+func (f *fakeGraphWriter) UpsertMissionRun(_ context.Context, tenant string, r MissionRunProjection) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.missionRuns[tenant] = append(f.missionRuns[tenant], r)
+	return nil
+}
+
+// UpsertMissionNode records each :MissionNode write as the parameter set that
+// the Neo4j writer would send, so a test asserts on the real node shape.
+func (f *fakeGraphWriter) UpsertMissionNode(_ context.Context, tenant string, node *schema.MissionNode) error {
+	params, err := missionNodeUpsertParams(node)
+	if err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.missionNodes[tenant] = append(f.missionNodes[tenant], params)
+	return nil
+}
+
+// LinkMissionNodes records each DEPENDS_ON write.
+func (f *fakeGraphWriter) LinkMissionNodes(_ context.Context, tenant, fromID, toID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dependencies[tenant] = append(f.dependencies[tenant], [2]string{fromID, toID})
+	return nil
+}
+
+// missionNodeWrites returns the params of each :MissionNode write of the
+// tenant, keyed by the node name.
+func (f *fakeGraphWriter) missionNodeWrites(tenant string) map[string]map[string]any {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string]map[string]any{}
+	for _, params := range f.missionNodes[tenant] {
+		name, _ := params["name"].(string)
+		out[name] = params
+	}
+	return out
+}
+
+// dependencyWriteCount counts the DEPENDS_ON writes of the tenant.
+func (f *fakeGraphWriter) dependencyWriteCount(tenant string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.dependencies[tenant])
 }
 
 // UpsertTarget records the :Target nodes the per-run graph bootstrap writes.
