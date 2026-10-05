@@ -116,7 +116,7 @@ func TestEngine_FailedAppendDoesNotFold(t *testing.T) {
 	require.Equal(t, 1, store.remaining())
 
 	// A stopped engine stays stopped: it applies nothing and Submit does not block.
-	for i := 0; i < intakeBuffer+10; i++ {
+	for range intakeBuffer + 10 {
 		e.Submit(host("10.0.0.9"))
 	}
 	require.Equal(t, 0, e.Tick())
