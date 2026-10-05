@@ -364,23 +364,31 @@ type mission
 # LLM provider / model access gating — spec `llm-user-attribution-governance`
 # ----------------------------------------------------------------------
 #
-# provider and model types enable per-user / per-team / per-tenant gating
-# of slot resolution. A user with no can_use tuple on a model, directly or
-# through its provider, is denied that model (internal/engine/llm/modelgate).
-# No tuple is written at provisioning: GrantAccess and RevokeAccess are the
-# only writers.
+# provider and model types gate slot resolution per user, per team and per
+# tenant (internal/engine/llm/modelgate, hosted#358).
 #
-# Tuple examples:
-#   tenant:acme               | owner   | provider:anthropic
-#   user:alice                | can_use | provider:anthropic
-#   team:engineering#member   | can_use | provider:openai
-#   tenant:acme#member        | can_use | provider:anthropic   (grant to all members)
-#   provider:anthropic        | provider | model:claude-opus-4
-#   role:senior               | can_use | model:claude-opus-4     (not yet wired)
+# Both objects are tenant-qualified: provider:<tenant>/<name> and
+# model:<tenant>/<name> (authz.ProviderObject, authz.ModelObject). A grant in
+# one tenant's namespace says nothing about another tenant.
 #
-# can_use on model is a computed-union: direct tuple OR inherited from
-# the provider, so granting provider:anthropic:can_use to a user grants
-# them every model on that provider automatically.
+# The rule: a member of a tenant may use each provider of the tenant by
+# default, and an administrator turns that off explicitly.
+#
+#   tenant:acme               | owner   | provider:acme/anthropic
+#   tenant:acme#member        | can_use | provider:acme/anthropic
+#
+# The daemon writes that pair once, before the tenant's first slot
+# resolution on the provider (modelgate.EnsureDefaultGrant). The owner tuple
+# is the record that the default was written. An administrator revokes the
+# member grant to restrict the provider, and then grants it, or single
+# models, to the subjects that keep access:
+#
+#   user:alice                | can_use | provider:acme/anthropic
+#   team:acme/eng#member      | can_use | model:acme/claude-opus-4
+#
+# The gate checks can_use on the model AND on the provider, and passes on
+# either. The model type therefore holds no link to its provider: a grant on
+# the provider covers its models because the gate asks about the provider.
 
 type provider
   relations
@@ -389,9 +397,7 @@ type provider
 
 type model
   relations
-    define provider: [provider]
-    define owner: [tenant]
-    define can_use: [user, team#member, tenant#member] or can_use from provider
+    define can_use: [user, team#member, tenant#member]
 
 # ----------------------------------------------------------------------
 # Secret resource type — spec `secrets-broker` Phase 8

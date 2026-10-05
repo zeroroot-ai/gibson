@@ -855,25 +855,21 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	}
 
 	// Model-access gate on the slot resolver + audit emission on every
-	// slot resolution. Both degrade gracefully when their dependencies
-	// are absent (nil authorizer = permit-all, nil auditWriter = no
-	// events emitted).
+	// slot resolution. The gate is always installed: with no authorizer it
+	// denies every model (hosted#358). The audit emission needs an
+	// auditWriter and is skipped without one.
 	// Spec: llm-user-attribution-governance (Requirement 4).
 	if d.infrastructure != nil {
 		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {
-			if d.authorizer != nil {
-				filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
-				dsm.WithModelFilter(filter)
-				// Expose the filter's cache-invalidation hook so
-				// grant/revoke take effect within milliseconds rather
-				// than the filter's 30s TTL. The Filter interface
-				// requires InvalidateCache so this is always safe.
-				daemonSvc.WithModelGateInvalidator(filter)
-				d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
-			}
-			// Emit model_resolved events even when no filter is wired —
-			// the audit trail captures every resolution regardless of
-			// gating status.
+			filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
+			dsm.WithModelFilter(filter)
+			// Expose the filter's cache-invalidation hook so
+			// grant/revoke take effect within milliseconds rather
+			// than the filter's 30s TTL.
+			daemonSvc.WithModelGateInvalidator(filter)
+			d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
+			// Emit a model_resolved event for every resolution, allowed or
+			// denied.
 			if d.auditWriter != nil {
 				emitter := d.auditWriter
 				logger := d.logger.Slog()

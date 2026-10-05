@@ -10,6 +10,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 )
@@ -103,22 +104,23 @@ func TestNewSlotManagerForTenant_IndependentInstances(t *testing.T) {
 // buildSlotManagerForSet is the resolve-success tail of newSlotManagerForTenant,
 // split out so it is testable with a hand-built provider Set instead of a live
 // broker + Postgres. These tests pin its behaviour: it wraps the set's registry,
-// carries the set's default provider into the slot manager, and installs the FGA
-// model filter exactly when an authorizer is present.
+// carries the set's default provider into the slot manager, always installs the
+// FGA model filter, and writes the default model grant once per provider.
 func TestBuildSlotManagerForSet_EmptySet(t *testing.T) {
 	d := &daemonImpl{logger: testObsLogger()}
 	set := &tenantprovider.Set{Registry: llm.NewLLMRegistry()}
 
-	sm := d.buildSlotManagerForSet(set)
-	if sm == nil {
-		t.Fatal("buildSlotManagerForSet returned nil")
+	sm, err := d.buildSlotManagerForSet(context.Background(), "acme", set)
+	if err != nil || sm == nil {
+		t.Fatalf("buildSlotManagerForSet = %v, %v; want a slot manager", sm, err)
 	}
 	if sm.defaultProvider != "" {
 		t.Fatalf("defaultProvider = %q, want empty for a set with no default", sm.defaultProvider)
 	}
-	// No authorizer on the daemon => no model filter installed.
-	if sm.modelFilter != nil {
-		t.Fatal("modelFilter installed without an authorizer")
+	// The gate is installed even with no authorizer. It then denies every
+	// model: a slot manager with no gate would permit every model (hosted#358).
+	if sm.modelFilter == nil {
+		t.Fatal("modelFilter must always be installed")
 	}
 }
 
@@ -126,18 +128,79 @@ func TestBuildSlotManagerForSet_CarriesDefaultProvider(t *testing.T) {
 	d := &daemonImpl{logger: testObsLogger()}
 	set := &tenantprovider.Set{Registry: llm.NewLLMRegistry(), DefaultName: "anthropic"}
 
-	sm := d.buildSlotManagerForSet(set)
+	sm, err := d.buildSlotManagerForSet(context.Background(), "acme", set)
+	if err != nil {
+		t.Fatalf("buildSlotManagerForSet: %v", err)
+	}
 	if sm.defaultProvider != "anthropic" {
 		t.Fatalf("defaultProvider = %q, want %q", sm.defaultProvider, "anthropic")
 	}
 }
 
-func TestBuildSlotManagerForSet_InstallsModelFilterWhenAuthorized(t *testing.T) {
-	d := &daemonImpl{logger: testObsLogger(), authorizer: wiringAuthorizer{}}
-	set := &tenantprovider.Set{Registry: llm.NewLLMRegistry()}
+// grantRecorder is an authorizer that holds the tuples it is given.
+type grantRecorder struct {
+	authz.Authorizer
+	tuples   map[authz.Tuple]bool
+	checks   int
+	checkErr error
+}
 
-	sm := d.buildSlotManagerForSet(set)
-	if sm.modelFilter == nil {
-		t.Fatal("modelFilter must be installed when the daemon has an authorizer (gibson#527)")
+func (g *grantRecorder) Check(_ context.Context, user, relation, object string) (bool, error) {
+	g.checks++
+	if g.checkErr != nil {
+		return false, g.checkErr
+	}
+	return g.tuples[authz.Tuple{User: user, Relation: relation, Object: object}], nil
+}
+
+func (g *grantRecorder) Write(_ context.Context, tuples []authz.Tuple) error {
+	for _, t := range tuples {
+		g.tuples[t] = true
+	}
+	return nil
+}
+
+// TestEnsureDefaultModelGrants_OncePerProvider: the members of a tenant get
+// the default grant on each provider of the tenant's set, and a provider that
+// this process already handled costs no call to FGA (hosted#358).
+func TestEnsureDefaultModelGrants_OncePerProvider(t *testing.T) {
+	g := &grantRecorder{tuples: map[authz.Tuple]bool{}}
+	d := &daemonImpl{logger: testObsLogger(), authorizer: g}
+
+	if err := d.ensureDefaultModelGrants(context.Background(), "acme", []string{"anthropic", "openai"}); err != nil {
+		t.Fatalf("ensureDefaultModelGrants: %v", err)
+	}
+	for _, want := range []authz.Tuple{
+		{User: "tenant:acme", Relation: "owner", Object: "provider:acme/anthropic"},
+		{User: "tenant:acme#member", Relation: "can_use", Object: "provider:acme/anthropic"},
+		{User: "tenant:acme#member", Relation: "can_use", Object: "provider:acme/openai"},
+	} {
+		if !g.tuples[want] {
+			t.Errorf("missing tuple %+v", want)
+		}
+	}
+	asked := g.checks
+	if err := d.ensureDefaultModelGrants(context.Background(), "acme", []string{"anthropic", "openai"}); err != nil {
+		t.Fatalf("second ensureDefaultModelGrants: %v", err)
+	}
+	if g.checks != asked {
+		t.Errorf("the second call asked FGA %d more time(s); a handled provider must be skipped", g.checks-asked)
+	}
+}
+
+// TestEnsureDefaultModelGrants_StopsTheBuild: with providers to grant, a
+// missing authorizer or an FGA error is an error. A build that went on would
+// produce a gate that denies the tenant's members with no visible cause.
+func TestEnsureDefaultModelGrants_StopsTheBuild(t *testing.T) {
+	noAuthz := &daemonImpl{logger: testObsLogger()}
+	if err := noAuthz.ensureDefaultModelGrants(context.Background(), "acme", []string{"anthropic"}); err == nil {
+		t.Error("no authorizer: want an error")
+	}
+	down := &daemonImpl{logger: testObsLogger(), authorizer: &grantRecorder{tuples: map[authz.Tuple]bool{}, checkErr: errors.New("fga is down")}}
+	if err := down.ensureDefaultModelGrants(context.Background(), "acme", []string{"anthropic"}); err == nil {
+		t.Error("an FGA error: want it returned")
+	}
+	if err := down.ensureDefaultModelGrants(context.Background(), "acme", []string{"anthropic"}); err == nil {
+		t.Error("a failed provider must be tried again, and fail again while FGA is down")
 	}
 }

@@ -1,38 +1,51 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package modelgate filters LLM slot candidates by FGA-granted model /
-// provider access for the calling user.
+// Package modelgate decides which LLM providers and models a caller may use.
 //
-// Spec: llm-user-attribution-governance (Requirement 4). Slot resolver
-// calls Permitted() after shape-matching; if the result is empty, the
-// resolver returns codes.PermissionDenied.
+// Spec: llm-user-attribution-governance (Requirement 4). The daemon's slot
+// manager calls Permitted after it picks a (provider, model). An empty result
+// makes the resolver return a model_access_denied error.
 //
-// The filter is wired on the daemon's slot manager (DaemonSlotManager) at two
-// sites, when the daemon has an authorizer: buildSlotManagerForSet
-// (internal/server/daemon/harness_init.go) for each per-tenant slot manager,
-// and internal/server/daemon/grpc.go for the infrastructure slot manager.
-// DefaultSlotManager.WithModelFilter in internal/engine/llm has no caller.
+// # The rule (hosted#358, owner decision 2026-10-05)
 //
-// With an acting user, the gate fails closed: a user with no can_use grant on
-// a candidate's model, directly or through its provider, gets no candidate.
-// There is no "no grant exists, so permit all" default. Nothing seeds a grant
-// at provisioning. The only writers of can_use tuples are GrantAccess and
-// RevokeAccess (internal/server/daemon/api/server_model_access.go).
+// A member of a tenant may use each provider of that tenant by default. An
+// administrator turns that off explicitly.
 //
-// Three cases permit every candidate, and each one is a recorded gap
-// (hosted#358): a nil Authorizer at construction, a request with no acting
-// user and no initiator user, and an error from the FGA BatchCheck.
+//   - Default allow. When a tenant gets a provider, EnsureDefaultGrant writes
+//     tenant:<id>#member can_use provider:<name>. Every member, human or
+//     component, then passes the check for that provider and its models.
+//   - Explicit off. An administrator revokes that tenant-wide grant
+//     (ModelAccessService.RevokeAccess) and grants the provider, or single
+//     models, to the users and teams that keep access. EnsureDefaultGrant
+//     never writes the grant a second time: the tenant:<id> owner
+//     provider:<name> tuple records that the default was written once.
+//   - A candidate passes when the subject has can_use on the model OR on the
+//     provider.
 //
-// The second case is every request today. No production code calls
-// auth.ContextWithActingUser or auth.ContextWithInitiatorUser, in this repo or
-// in the SDK, so Permitted finds no user and returns every candidate. The gate
-// is installed and has never denied a model. Do not read "wired" as
-// "enforced" until a dispatch carries the user (hosted#358).
+// # The subject
+//
+// Permitted asks FGA about one subject, the first of these that the request
+// carries:
+//
+//  1. The acting user (a platform service acts for a signed-in person).
+//  2. The mission initiator (the person who created the mission; the harness
+//     factory puts it on the context for every slot resolution of the run).
+//  3. The calling identity: a person, or a component's typed principal.
+//  4. The tenant's members as a set (tenant:<id>#member), for work that no
+//     person and no component started, such as a mission that a service
+//     scheduled. That subject passes only while the tenant-wide grant stands.
+//
+// # Fail closed
+//
+// A request with no subject and no tenant is denied. An error from FGA is
+// returned to the caller, and the slot manager denies on it. A filter built
+// with no Authorizer denies every candidate. There is no permit-all branch.
 package modelgate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -90,7 +103,7 @@ type fgaFilter struct {
 	az       authz.Authorizer
 	logger   *slog.Logger
 	cacheTTL time.Duration
-	cache    sync.Map // key = "tenant|user|model" → cacheEntry
+	cache    sync.Map // key = cacheKey(tenant, subject, candidate) → cacheEntry
 }
 
 type cacheEntry struct {
@@ -98,96 +111,91 @@ type cacheEntry struct {
 	expires time.Time
 }
 
-// Permitted implements Filter. Returns the subset of candidates in the
-// same rank order that the calling user has `can_use` on via FGA.
-//
-// Fail-open: any authz error (Authorizer returns error, cache miss then
-// retry fails) returns the full candidate slice and logs a warning.
-// Budget and model-gate enforcement share this philosophy — platform
-// flakiness should not block LLM dispatch.
+// Permitted implements Filter. It returns, in rank order, the candidates the
+// request's subject may use: those where the subject has can_use on the model
+// or on the provider. See the package doc for the subject and for the
+// fail-closed cases.
 func (f *fgaFilter) Permitted(ctx context.Context, candidates []Candidate) ([]Candidate, error) {
 	if len(candidates) == 0 {
 		return candidates, nil
 	}
 	if f.az == nil {
-		return candidates, nil
+		return nil, errors.New("modelgate: no authorizer is configured, so no model can be permitted")
 	}
 
-	userID, ok := auth.ActingUserFromContext(ctx)
-	if !ok || userID == "" {
-		if v, ok2 := auth.InitiatorUserFromContext(ctx); ok2 && v != "" {
-			userID = v
-		}
-	}
-	if userID == "" {
-		// No user — permit-all so tenant-service calls (scheduled missions
-		// with empty identity context) don't break.
-		return candidates, nil
-	}
+	// The tenant names the objects: a provider and a model are checked as
+	// that tenant's own (authz.ProviderObject). A request with no tenant has
+	// no object to check, so it is denied.
 	tenantID := auth.TenantStringFromContext(ctx)
+	subject := Subject(ctx)
+	if tenantID == "" || subject == "" {
+		f.logger.WarnContext(ctx, "modelgate: the request names no tenant, or no user, component or tenant member set; denying",
+			slog.Int("candidates", len(candidates)))
+		return nil, nil
+	}
 
-	subject := fmt.Sprintf("user:%s", userID)
-	reqs := make([]authz.CheckRequest, 0, len(candidates))
+	// One decision per candidate, cached per (tenant, subject, provider,
+	// model). Each uncached candidate costs two checks: the model, then the
+	// provider.
+	decided := make([]bool, len(candidates))
+	known := make([]bool, len(candidates))
+	reqs := make([]authz.CheckRequest, 0, 2*len(candidates))
 	reqIdx := make([]int, 0, len(candidates))
-	cachedPermit := make(map[int]bool)
 
 	now := time.Now()
 	for i, c := range candidates {
-		cacheKey := fmt.Sprintf("%s|%s|model:%s", tenantID, userID, c.Model)
-		if v, ok := f.cache.Load(cacheKey); ok {
-			entry := v.(cacheEntry)
-			if now.Before(entry.expires) {
-				cachedPermit[i] = entry.allowed
+		if v, ok := f.cache.Load(cacheKey(tenantID, subject, c)); ok {
+			if entry := v.(cacheEntry); now.Before(entry.expires) {
+				decided[i], known[i] = entry.allowed, true
 				continue
 			}
 		}
-		reqs = append(reqs, authz.CheckRequest{
-			User:     subject,
-			Relation: "can_use",
-			Object:   "model:" + c.Model,
-		})
+		model, merr := authz.ModelObject(tenantID, c.Model)
+		provider, perr := authz.ProviderObject(tenantID, c.Provider)
+		if merr != nil || perr != nil {
+			// A name that cannot form an object cannot hold a grant.
+			f.logger.WarnContext(ctx, "modelgate: the candidate cannot be named in FGA; denying",
+				slog.String("provider", c.Provider), slog.String("model", c.Model))
+			known[i] = true
+			continue
+		}
+		reqs = append(reqs,
+			authz.CheckRequest{User: subject, Relation: relationCanUse, Object: model},
+			authz.CheckRequest{User: subject, Relation: relationCanUse, Object: provider},
+		)
 		reqIdx = append(reqIdx, i)
 	}
 
-	var results []bool
 	if len(reqs) > 0 {
-		var err error
-		results, err = f.az.BatchCheck(ctx, reqs)
+		results, err := f.az.BatchCheck(ctx, reqs)
 		if err != nil {
-			f.logger.WarnContext(ctx, "modelgate: BatchCheck failed; failing open",
-				slog.String("error", err.Error()),
-				slog.String("user_id", userID),
-				slog.Int("candidates", len(reqs)),
-			)
-			return candidates, nil
+			return nil, fmt.Errorf("modelgate: authorization check failed: %w", err)
+		}
+		if len(results) != len(reqs) {
+			return nil, fmt.Errorf("modelgate: authorizer answered %d of %d checks", len(results), len(reqs))
+		}
+		expires := now.Add(f.cacheTTL)
+		for n, i := range reqIdx {
+			allowed := results[2*n] || results[2*n+1]
+			decided[i], known[i] = allowed, true
+			f.cache.Store(cacheKey(tenantID, subject, candidates[i]), cacheEntry{allowed: allowed, expires: expires})
 		}
 	}
 
 	out := make([]Candidate, 0, len(candidates))
-	expires := now.Add(f.cacheTTL)
-	resIdx := 0
 	for i, c := range candidates {
-		if permit, ok := cachedPermit[i]; ok {
-			if permit {
-				out = append(out, c)
-			}
-			continue
-		}
-		permitted := false
-		if resIdx < len(results) {
-			permitted = results[resIdx]
-		}
-		resIdx++
-		cacheKey := fmt.Sprintf("%s|%s|model:%s", tenantID, userID, c.Model)
-		f.cache.Store(cacheKey, cacheEntry{allowed: permitted, expires: expires})
-		if permitted {
+		if known[i] && decided[i] {
 			out = append(out, c)
 		}
 	}
 	return out, nil
 }
 
-// InvalidateCache clears the per-(user, model) cache. Dashboard mutations
+func cacheKey(tenantID, subject string, c Candidate) string {
+	return tenantID + "|" + subject + "|" + c.Provider + "|" + c.Model
+}
+
+// InvalidateCache clears the decision cache. Dashboard mutations
 // on the grant matrix call this after a grant/revoke so the next call
 // picks up the change within the advertised 30s window rather than at
 // TTL expiry.

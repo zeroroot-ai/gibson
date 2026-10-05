@@ -1456,5 +1456,6 @@ func newRunMissionContext(
 		WithMissionRunID(missionRunID).
 		WithRunNumber(run.RunNumber).
 		WithTenant(m.TenantID).
+		WithCreatedBy(m.CreatedBy).
 		WithSecrets(harness.MissionSecretScopesFromProto(def.GetSecrets()))
 }

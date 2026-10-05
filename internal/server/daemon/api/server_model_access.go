@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -52,32 +53,52 @@ func subjectKindToFGA(callerTenant string, k tenantv1.GrantSubjectKind, id strin
 		}
 		return obj + "#member", nil
 	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT:
-		return fmt.Sprintf("tenant:%s#member", id), nil
+		// The tenant subject is always the caller's own tenant. The id in the
+		// request may repeat it or be empty. Any other value is refused: it
+		// would name another tenant's members (hosted#358).
+		if id != "" && id != callerTenant {
+			return "", status_grpc.Error(codes.InvalidArgument, "subject_id: a tenant grant names the caller's own tenant")
+		}
+		return modelgate.TenantMembers(callerTenant), nil
 	}
 	return "", status_grpc.Error(codes.InvalidArgument, "subject_kind must be user, team, or tenant")
 }
 
-// targetKindToFGA maps the proto enum + id to the FGA object reference.
-func targetKindToFGA(k tenantv1.GrantTargetKind, id string) (string, error) {
+// targetKindToFGA maps the proto enum + id to the FGA object reference in the
+// caller's tenant namespace (authz.ProviderObject, authz.ModelObject). The
+// tenant comes from the authenticated context, so a grant can name only the
+// caller's own providers and models.
+func targetKindToFGA(callerTenant string, k tenantv1.GrantTargetKind, id string) (string, error) {
+	var (
+		obj string
+		err error
+	)
 	switch k {
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
-		return fmt.Sprintf("provider:%s", id), nil
+		obj, err = authz.ProviderObject(callerTenant, id)
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL:
-		return fmt.Sprintf("model:%s", id), nil
+		obj, err = authz.ModelObject(callerTenant, id)
+	default:
+		return "", status_grpc.Error(codes.InvalidArgument, "target_kind must be provider or model")
 	}
-	return "", status_grpc.Error(codes.InvalidArgument, "target_kind must be provider or model")
+	if err != nil {
+		return "", status_grpc.Errorf(codes.InvalidArgument, "target_id: %v", err)
+	}
+	return obj, nil
 }
 
-// fgaTargetToProto converts an FGA object reference (e.g. "provider:anthropic")
-// back to (kind, id) pair for the AccessGrant response.
-func fgaTargetToProto(obj string) (tenantv1.GrantTargetKind, string) {
-	if len(obj) > 9 && obj[:9] == "provider:" {
-		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER, obj[9:]
+// fgaTargetToProto converts an FGA object reference in the caller's tenant
+// namespace back to the (kind, id) pair of the AccessGrant response. It
+// reports false for an object outside that namespace, which the caller skips.
+func fgaTargetToProto(callerTenant, obj string) (tenantv1.GrantTargetKind, string, bool) {
+	typ, name, ok := authz.ModelAccessNameFromObject(callerTenant, obj)
+	if !ok {
+		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED, "", false
 	}
-	if len(obj) > 6 && obj[:6] == "model:" {
-		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL, obj[6:]
+	if typ == "provider" {
+		return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER, name, true
 	}
-	return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED, obj
+	return tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL, name, true
 }
 
 // GrantAccess persists a tenant#admin → FGA tuple writing the grant.
@@ -104,7 +125,7 @@ func (s *DaemonServer) GrantAccess(ctx context.Context, req *tenantv1.GrantAcces
 	if err != nil {
 		return nil, err
 	}
-	target, err := targetKindToFGA(g.GetTargetKind(), g.GetTargetId())
+	target, err := targetKindToFGA(tenantID, g.GetTargetKind(), g.GetTargetId())
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +168,7 @@ func (s *DaemonServer) RevokeAccess(ctx context.Context, req *tenantv1.RevokeAcc
 	if err != nil {
 		return nil, err
 	}
-	target, err := targetKindToFGA(req.GetTargetKind(), req.GetTargetId())
+	target, err := targetKindToFGA(tenantID, req.GetTargetKind(), req.GetTargetId())
 	if err != nil {
 		return nil, err
 	}
@@ -186,8 +207,10 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *tenantv1.ListAccessR
 
 	// We list objects of each target type (provider, model) for the
 	// given subject (or a wildcard probe when subject is not provided).
+	// A tenant subject needs no id: it is the caller's own tenant, and its
+	// grants include the default grant of each provider (hosted#358).
 	var subject string
-	if req.GetSubjectId() != "" {
+	if req.GetSubjectId() != "" || req.GetSubjectKind() == tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT {
 		s, err := subjectKindToFGA(tenantID, req.GetSubjectKind(), req.GetSubjectId())
 		if err != nil {
 			return nil, err
@@ -211,7 +234,12 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *tenantv1.ListAccessR
 			continue
 		}
 		for _, obj := range objects {
-			kind, id := fgaTargetToProto(obj)
+			kind, id, ok := fgaTargetToProto(tenantID, obj)
+			if !ok {
+				// A subject can hold grants in another tenant's namespace, or
+				// a legacy global grant. Neither is this tenant's to list.
+				continue
+			}
 			grants = append(grants, &tenantv1.AccessGrant{
 				TenantId:    tenantID,
 				SubjectKind: req.GetSubjectKind(),
