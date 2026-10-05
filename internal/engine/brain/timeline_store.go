@@ -49,7 +49,14 @@ type TimelineStore interface {
 	// stream and returns the stream sequence ID assigned by the store (e.g.
 	// "1751234567890-0" for Redis Streams). Thread-safe; called from the
 	// single tick goroutine under Engine.mu.
-	Append(ctx context.Context, tenant string, ev Event) (seq string, err error)
+	//
+	// key is the idempotency key of this event. The engine sends the same key
+	// when it tries an append again. When key equals the key of the most
+	// recent append of the tenant, the store writes nothing and returns the
+	// seq of that append. The engine is the only writer and it tries one
+	// event at a time, so the most recent append is the only one that a retry
+	// can repeat. An empty key is an error.
+	Append(ctx context.Context, tenant string, key string, ev Event) (seq string, err error)
 
 	// LoadForReplay returns the ordered slice of events from the tenant's
 	// durable Timeline, starting after afterSeq (pass "" to load from the

@@ -175,7 +175,7 @@ type memEvent struct {
 	ev  Event
 }
 
-func (s *memTimelineStore) Append(_ context.Context, _ string, ev Event) (string, error) {
+func (s *memTimelineStore) Append(_ context.Context, _, _ string, ev Event) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.next++
@@ -258,7 +258,7 @@ func TestEdgeOutcomes_SurviveWriteSnapshotTrimToLoadSnapshot(t *testing.T) {
 	require.Equal(t, 0, store.remaining(), "a cadence of one trims every event behind the snapshot")
 
 	fresh := NewEngine("acme").WithStore(store)
-	fresh.Hydrate(context.Background())
+	require.NoError(t, fresh.Hydrate(context.Background()))
 	if got := fresh.EdgeOutcomeCounts(); !reflect.DeepEqual(got, wantTwoBetCounts) {
 		t.Fatalf("hydrated counts:\n got %+v\nwant %+v", got, wantTwoBetCounts)
 	}
