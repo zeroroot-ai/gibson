@@ -43,50 +43,64 @@ func restrictedViolations(pod corev1.PodSpec) []string {
 		if sc == nil {
 			sc = &corev1.SecurityContext{}
 		}
-		if sc.Privileged != nil && *sc.Privileged {
-			out = append(out, c.Name+": privileged")
+		out = append(out, privilegeViolations(c.Name, sc)...)
+		out = append(out, identityViolations(c.Name, psc, sc)...)
+	}
+	return out
+}
+
+// privilegeViolations checks the rules about privilege and capabilities for
+// one container.
+func privilegeViolations(name string, sc *corev1.SecurityContext) []string {
+	var out []string
+	if sc.Privileged != nil && *sc.Privileged {
+		out = append(out, name+": privileged")
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		out = append(out, name+": allowPrivilegeEscalation is not false")
+	}
+	dropsAll := false
+	if sc.Capabilities != nil {
+		for _, d := range sc.Capabilities.Drop {
+			dropsAll = dropsAll || d == "ALL"
 		}
-		if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
-			out = append(out, c.Name+": allowPrivilegeEscalation is not false")
-		}
-		dropsAll := false
-		if sc.Capabilities != nil {
-			for _, d := range sc.Capabilities.Drop {
-				if d == "ALL" {
-					dropsAll = true
-				}
+		for _, a := range sc.Capabilities.Add {
+			if a != "NET_BIND_SERVICE" {
+				out = append(out, name+": adds capability "+string(a))
 			}
-			for _, a := range sc.Capabilities.Add {
-				if a != "NET_BIND_SERVICE" {
-					out = append(out, c.Name+": adds capability "+string(a))
-				}
-			}
 		}
-		if !dropsAll {
-			out = append(out, c.Name+": does not drop ALL capabilities")
-		}
-		nonRoot := psc.RunAsNonRoot
-		if sc.RunAsNonRoot != nil {
-			nonRoot = sc.RunAsNonRoot
-		}
-		if nonRoot == nil || !*nonRoot {
-			out = append(out, c.Name+": runAsNonRoot is not true")
-		}
-		uid := psc.RunAsUser
-		if sc.RunAsUser != nil {
-			uid = sc.RunAsUser
-		}
-		if uid != nil && *uid == 0 {
-			out = append(out, c.Name+": runAsUser is 0")
-		}
-		seccomp := psc.SeccompProfile
-		if sc.SeccompProfile != nil {
-			seccomp = sc.SeccompProfile
-		}
-		if seccomp == nil ||
-			(seccomp.Type != corev1.SeccompProfileTypeRuntimeDefault && seccomp.Type != corev1.SeccompProfileTypeLocalhost) {
-			out = append(out, c.Name+": seccomp profile is not RuntimeDefault or Localhost")
-		}
+	}
+	if !dropsAll {
+		out = append(out, name+": does not drop ALL capabilities")
+	}
+	return out
+}
+
+// identityViolations checks the rules about the user and the seccomp profile
+// for one container. A container value wins over the pod value.
+func identityViolations(name string, psc *corev1.PodSecurityContext, sc *corev1.SecurityContext) []string {
+	var out []string
+	nonRoot := psc.RunAsNonRoot
+	if sc.RunAsNonRoot != nil {
+		nonRoot = sc.RunAsNonRoot
+	}
+	if nonRoot == nil || !*nonRoot {
+		out = append(out, name+": runAsNonRoot is not true")
+	}
+	uid := psc.RunAsUser
+	if sc.RunAsUser != nil {
+		uid = sc.RunAsUser
+	}
+	if uid != nil && *uid == 0 {
+		out = append(out, name+": runAsUser is 0")
+	}
+	seccomp := psc.SeccompProfile
+	if sc.SeccompProfile != nil {
+		seccomp = sc.SeccompProfile
+	}
+	if seccomp == nil ||
+		(seccomp.Type != corev1.SeccompProfileTypeRuntimeDefault && seccomp.Type != corev1.SeccompProfileTypeLocalhost) {
+		out = append(out, name+": seccomp profile is not RuntimeDefault or Localhost")
 	}
 	return out
 }
