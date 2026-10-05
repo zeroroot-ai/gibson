@@ -22,8 +22,13 @@
 //
 // Three cases permit every candidate, and each one is a recorded gap
 // (hosted#358): a nil Authorizer at construction, a request with no acting
-// user and no initiator user (a scheduled mission with an empty identity
-// context), and an error from the FGA BatchCheck.
+// user and no initiator user, and an error from the FGA BatchCheck.
+//
+// The second case is every request today. No production code calls
+// auth.ContextWithActingUser or auth.ContextWithInitiatorUser, in this repo or
+// in the SDK, so Permitted finds no user and returns every candidate. The gate
+// is installed and has never denied a model. Do not read "wired" as
+// "enforced" until a dispatch carries the user (hosted#358).
 package modelgate
 
 import (
