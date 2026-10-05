@@ -27,6 +27,7 @@ syntax = "proto3";
 package gibson.daemon.discovery.v1;
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1;discoverypb";
@@ -210,13 +211,13 @@ message ListLLMSlotsRequest { ListQuery query = 1; }
 message ListReportSurfacesRequest { ListQuery query = 1; }
 
 message DescribePluginRequest {
-  string name = 1;                  // fully-qualified, e.g. "gitlab"
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }]; // fully-qualified, e.g. "gitlab"
 }
 message DescribeToolRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 message DescribeAgentRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // DescribePluginResponse returns the plugin's method set with per-method
@@ -271,10 +272,10 @@ message PermissionRequest {
   // Removed in gibson#502: served and never read by any consumer.
   reserved 1;
   reserved "target_name";
-  string target_kind = 2;           // "plugin" | "tool" | "agent"
-  string action = 3;                // "read" | "write" | "execute"
+  string target_kind = 2 [(buf.validate.field).string = { max_len: 1024 }]; // "plugin" | "tool" | "agent"
+  string action = 3 [(buf.validate.field).string = { max_len: 4096 }]; // "read" | "write" | "execute"
   bool required = 4;
-  string justification = 5;
+  string justification = 5 [(buf.validate.field).string = { max_len: 1048576 }];
 }
 
 message SlotInfo {
@@ -307,7 +308,7 @@ message SuggestMissingCapabilityRequest {
   // Removed in gibson#502: served and never read by any consumer.
   reserved 1;
   reserved "needed_target";
-  string action = 2;                // "read" | "write" | "execute"
+  string action = 2 [(buf.validate.field).string = { max_len: 4096 }]; // "read" | "write" | "execute"
 }
 
 message SuggestMissingCapabilityResponse {

@@ -37,6 +37,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // OntologyProposalKind distinguishes a proposed Taxonomy node label from a
 // proposed relationship type — mirrors internal/engine/taxonomy.ProposalKind.
@@ -78,8 +79,8 @@ message ListOntologyExtensionProposalsResponse {
 }
 
 message ApproveOntologyExtensionProposalRequest {
-  OntologyProposalKind kind = 1;
-  string label = 2;
+  OntologyProposalKind kind = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string label = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // ApproveOntologyExtensionProposalResponse is intentionally empty: whether
@@ -94,17 +95,17 @@ message ApproveOntologyExtensionProposalRequest {
 message ApproveOntologyExtensionProposalResponse {}
 
 message RejectOntologyExtensionProposalRequest {
-  OntologyProposalKind kind = 1;
-  string label = 2;
+  OntologyProposalKind kind = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string label = 2 [(buf.validate.field).string = { max_len: 4096 }];
   // reason is an optional free-text rationale, carried through for audit.
-  string reason = 3;
+  string reason = 3 [(buf.validate.field).string = { max_len: 1048576 }];
 }
 
 message RejectOntologyExtensionProposalResponse {}
 
 message SubmitOntologyExtensionUpstreamRequest {
-  OntologyProposalKind kind = 1;
-  string label = 2;
+  OntologyProposalKind kind = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string label = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // SubmitOntologyExtensionUpstreamResponse carries the rendered SDK Domain

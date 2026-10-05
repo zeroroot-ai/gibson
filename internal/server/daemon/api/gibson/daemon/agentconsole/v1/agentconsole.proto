@@ -6,6 +6,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "gibson/bank/v1/bank.proto";
+import "buf/validate/validate.proto";
 
 // AgentConsoleService is the daemon's read-only, tenant-scoped view of the
 // agents running RIGHT NOW and their live structured events (ADR-0116 S11,
@@ -99,7 +100,7 @@ message ListRunningAgentsResponse {
 // StreamAgentEventsRequest names the running instance to follow.
 message StreamAgentEventsRequest {
   // run_id is the running instance's id, from ListRunningAgents. Required.
-  string run_id = 1;
+  string run_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // since_seq is the last event sequence the client saw. The stream starts
   // with the backlog after it (what the daemon still holds), then follows
   // live. Zero means the whole backlog.
@@ -108,7 +109,7 @@ message StreamAgentEventsRequest {
   // daemon emits for that job pass (job_opened, job_input, job_state,
   // job_deliverable, job_closed). The agent's own output lines carry no job
   // id and are held back. Empty means everything.
-  string job_id = 3;
+  string job_id = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // AgentEvent is one chunk of a running agent's structured output, streamed

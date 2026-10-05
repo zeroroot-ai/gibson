@@ -36,6 +36,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // AdminTenantService is the dashboard-facing write side of admin tenant CRUD.
 // Each RPC records a tenant_admin_ops row (the admin's intent) and returns the
@@ -179,7 +180,7 @@ message AdminListPendingRegistrationsResponse {
 message AdminApproveRegistrationRequest {
   // registration_id is the id AdminListPendingRegistrations returned.
   // Required.
-  string registration_id = 1;
+  string registration_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // AdminApproveRegistrationResponse reports what the approval provisioned.
@@ -197,12 +198,12 @@ message AdminApproveRegistrationResponse {
 message AdminRejectRegistrationRequest {
   // registration_id is the id AdminListPendingRegistrations returned.
   // Required.
-  string registration_id = 1;
+  string registration_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // reason is the administrator's own note, recorded on the audit event. It is
   // never shown to the registrant, who is told nothing: an anonymous
   // registration surface that explained its refusals would explain them to
   // whoever probed it.
-  string reason = 2;
+  string reason = 2 [(buf.validate.field).string = { max_len: 1048576 }];
 }
 
 // AdminRejectRegistrationResponse confirms the refusal.
@@ -214,14 +215,14 @@ message AdminRejectRegistrationResponse {}
 message AdminProvisionTenantRequest {
   // tenant_id is the Tenant CR name. The dashboard derives it by slugifying the
   // display name (the same slug applyTenant used as metadata.name). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // display_name becomes Tenant.spec.displayName. Required.
-  string display_name = 2;
+  string display_name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // owner_email becomes Tenant.spec.owner. Required.
-  string owner_email = 3;
+  string owner_email = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
   // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise"/...). Empty
   // defaults to "team" (matching provisionTenantAction's `?? 'team'`).
-  string tier = 4;
+  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // AdminProvisionTenantResponse confirms the op was recorded.
@@ -236,15 +237,15 @@ message AdminProvisionTenantResponse {
 // {tier?, displayName?}.
 message AdminUpdateTenantRequest {
   // tenant_id is the Tenant CR name to patch. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // tier is the new Tenant.spec.tier; applied only when tier_set is true.
-  string tier = 2;
+  string tier = 2 [(buf.validate.field).string = { max_len: 4096 }];
   // tier_set marks tier for application (distinguishes "set tier" from "leave
   // tier untouched").
   bool tier_set = 3;
   // display_name is the new Tenant.spec.displayName; applied only when
   // display_name_set is true.
-  string display_name = 4;
+  string display_name = 4 [(buf.validate.field).string = { max_len: 1024 }];
   // display_name_set marks display_name for application.
   bool display_name_set = 5;
 }
@@ -260,7 +261,7 @@ message AdminUpdateTenantResponse {
 // here).
 message AdminDeleteTenantRequest {
   // tenant_id is the Tenant CR name to delete. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // AdminDeleteTenantResponse confirms the op was recorded.

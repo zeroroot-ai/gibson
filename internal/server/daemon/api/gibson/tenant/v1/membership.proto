@@ -21,6 +21,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "google/protobuf/timestamp.proto";
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // MembershipService manages tenant members, teams, roles, and component access
 // controls.
@@ -339,15 +340,15 @@ message TenantMember {
 message ListMembersRequest {
   // tenant_id scopes the query to a specific tenant. Must match the
   // authenticated caller's tenant.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // page_token is the pagination cursor returned by a previous
   // ListMembersResponse.next_page_token. Empty for the first page.
-  string page_token = 2;
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1048576 }];
   // page_size is the maximum number of members to return. 0 means server default.
   int32 page_size = 3;
   // name_filter is an optional case-insensitive substring applied to
   // display_name and email. Empty means no filter.
-  string name_filter = 4;
+  string name_filter = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message ListMembersResponse {
@@ -361,13 +362,13 @@ message ListMembersResponse {
 
 message SetTenantRoleRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // user_id is the FGA user id without the type prefix.
-  string user_id = 2;
+  string user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // role is the FGA relation to grant. Must be one of "admin", "member", or
   // "writer" — "owner" is refused; see TransferOwnership. Use remove = true
   // to remove the user's role entirely.
-  string role = 3;
+  string role = 3 [(buf.validate.field).string = { max_len: 4096 }];
   // remove: when true, all role tuples for the user on this tenant are
   // deleted and role is ignored. When false, the specified role is written.
   bool remove = 4;
@@ -377,9 +378,9 @@ message SetTenantRoleResponse {}
 
 message TransferOwnershipRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // new_owner_user_id is the FGA user id (without type prefix) of the new owner.
-  string new_owner_user_id = 2;
+  string new_owner_user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message TransferOwnershipResponse {}
@@ -390,10 +391,10 @@ message TransferOwnershipResponse {}
 
 message RemoveMemberRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme").
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // user_id is the FGA user id (without type prefix) of the tenant user to
   // remove. Required.
-  string user_id = 2;
+  string user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message RemoveMemberResponse {}
@@ -401,7 +402,7 @@ message RemoveMemberResponse {}
 message LeaveTenantRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme"). Must match
   // the authenticated caller's tenant.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message LeaveTenantResponse {}
@@ -413,12 +414,12 @@ message LeaveTenantResponse {}
 message InviteMemberRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme"). When empty the
   // daemon derives it from the caller's identity.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // email is the invitee's email address. Required.
-  string email = 2;
+  string email = 2 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
   // role is the tenant role to grant on acceptance: "admin", "member", or
   // "writer". Defaults to "member" when empty.
-  string role = 3;
+  string role = 3 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message InviteMemberResponse {
@@ -431,7 +432,7 @@ message InviteMemberResponse {
 message AcceptInvitationRequest {
   // token is the raw invitation token from the accept link. Required; it is
   // the sole capability for this unauthenticated RPC.
-  string token = 1;
+  string token = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1048576 }];
 }
 
 message AcceptInvitationResponse {
@@ -447,19 +448,19 @@ message AcceptInvitationResponse {
 }
 
 message ResendInvitationRequest {
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // invitation_id identifies the pending invitation to resend. Either this or
   // email must be set.
-  string invitation_id = 2;
-  string email = 3;
+  string invitation_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string email = 3 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message ResendInvitationResponse {}
 
 message CancelInvitationRequest {
-  string tenant_id = 1;
-  string invitation_id = 2;
-  string email = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string invitation_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string email = 3 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message CancelInvitationResponse {}
@@ -492,8 +493,8 @@ message TeamMember {
 
 message ListTeamsRequest {
   // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
-  string tenant_id = 1;
-  string page_token = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1048576 }];
   // page_size caps the response. 0 → server default (50). Maximum 200.
   int32 page_size = 3;
 }
@@ -505,12 +506,12 @@ message ListTeamsResponse {
 
 message CreateTeamRequest {
   // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // team_id is the desired FGA team id (without the type prefix). Must be
   // unique within the tenant.
-  string team_id = 2;
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   // display_name is the human-readable label for the team.
-  string display_name = 3;
+  string display_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message CreateTeamResponse {
@@ -519,16 +520,16 @@ message CreateTeamResponse {
 }
 
 message DeleteTeamRequest {
-  string tenant_id = 1;
-  string team_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message DeleteTeamResponse {}
 
 message ListTeamMembersRequest {
-  string tenant_id = 1;
-  string team_id = 2;
-  string page_token = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1048576 }];
   int32 page_size = 4;
 }
 
@@ -538,26 +539,26 @@ message ListTeamMembersResponse {
 }
 
 message AddTeamMemberRequest {
-  string tenant_id = 1;
-  string team_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   // user_id is the FGA user id without the type prefix (the Zitadel numeric sub).
-  string user_id = 3;
+  string user_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message AddTeamMemberResponse {}
 
 message RemoveTeamMemberRequest {
-  string tenant_id = 1;
-  string team_id = 2;
-  string user_id = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message RemoveTeamMemberResponse {}
 
 message SetTeamAdminRequest {
-  string tenant_id = 1;
-  string team_id = 2;
-  string user_id = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // is_admin: when true, the admin relation is added; when false, it is removed.
   bool is_admin = 4;
 }
@@ -582,9 +583,9 @@ message ComponentAccessEntry {
 }
 
 message SetComponentAccessRequest {
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // component is the FGA component reference (e.g. "component:plugin/gitlab").
-  string component = 2;
+  string component = 2 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
   repeated ComponentAccessEntry entries = 3;
 }
 
@@ -602,7 +603,7 @@ message SetCatalogEnabledRequest {
   // component_ref is the component identifier without the "component:" type
   // prefix, kind-qualified as "<kind>:<name>" or "<kind>/<name>" — e.g. "tool:nmap" or "agent/zerocool". The daemon normalizes it
   // before writing to FGA.
-  string component_ref = 1;
+  string component_ref = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // enabled: true writes the tenant_enabled tuple (adds to catalog); false
   // deletes it (removes from catalog). Idempotent in both directions.
   bool enabled = 2;
@@ -618,7 +619,7 @@ message SetCatalogEnabledResponse {
 message SetCatalogPublishedRequest {
   // component_ref is the component identifier without the "component:" type
   // prefix, kind-qualified — e.g. "connector:gitlab" or "connector/gitlab". The daemon normalizes it before writing.
-  string component_ref = 1;
+  string component_ref = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // published: true writes the tenant_published tuple (offers the BYO
   // component in the tenant's private registry); false deletes it. Idempotent
   // in both directions.

@@ -53,6 +53,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // SignupService owns the self-serve signup flow: prove the address, then
 // provision.
@@ -172,24 +173,24 @@ service SignupService {
 message RegisterRequest {
   // attempt_id correlates with the signup-progress stream. Required, must be a
   // UUID.
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 
   // owner_email is the address that will own the workspace. Normalized
   // (trimmed, lowercased) server-side. Required.
-  string owner_email = 2;
+  string owner_email = 2 [(buf.validate.field).string = { max_len: 4096 }];
 
   // workspace_name is the human-readable workspace name. Required; it must
   // yield a valid tenant slug.
-  string workspace_name = 3;
+  string workspace_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
 
   // tier is the canonical plan id. Required, and resolved against the same
   // server-side plan gate the open rung uses.
-  string tier = 4;
+  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 
   // owner_first_name / owner_last_name populate the human-user profile.
   // Optional.
-  string owner_first_name = 5;
-  string owner_last_name = 6;
+  string owner_first_name = 5 [(buf.validate.field).string = { max_len: 1024 }];
+  string owner_last_name = 6 [(buf.validate.field).string = { max_len: 1024 }];
 
   // password is the owner's chosen password.
   //
@@ -197,10 +198,10 @@ message RegisterRequest {
   // nothing else — never logged, never persisted by the daemon, never
   // returned. The account it lands on is created deactivated, so the password
   // cannot be used until an administrator approves the registration.
-  string password = 7;
+  string password = 7 [(buf.validate.field).string = { max_len: 1048576 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
-  string client_ip = 8;
+  string client_ip = 8 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // RegisterResponse tells the registrant what happens next, and nothing else.
@@ -224,24 +225,24 @@ message RegisterResponse {
 message RequestEmailVerificationRequest {
   // attempt_id is the opaque signup-attempt UUID; it correlates this request
   // with the UserService signup-progress stream. Required, must be a UUID.
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 
   // owner_email is the address to verify. Normalized (trimmed, lowercased)
   // server-side; the normalized value is what the completion path later reads
   // back. Required.
-  string owner_email = 2;
+  string owner_email = 2 [(buf.validate.field).string = { max_len: 4096 }];
 
   // workspace_name is the human-readable workspace name. Parked on the
   // verification row and read back at completion. Required.
-  string workspace_name = 3;
+  string workspace_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
 
   // tier is the canonical plan id ("team", "org", "enterprise"). Required.
-  string tier = 4;
+  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 
   // owner_first_name / owner_last_name populate the eventual human-user
   // profile. Optional.
-  string owner_first_name = 5;
-  string owner_last_name = 6;
+  string owner_first_name = 5 [(buf.validate.field).string = { max_len: 1024 }];
+  string owner_last_name = 6 [(buf.validate.field).string = { max_len: 1024 }];
 
   // client_ip is the requester's IP as the edge resolved it, used for
   // abuse limits.
@@ -256,7 +257,7 @@ message RequestEmailVerificationRequest {
   // May be empty when the edge could not attribute the request; empty is NOT
   // folded into the normal per-IP budget, it draws on a much smaller
   // unattributed bucket.
-  string client_ip = 7;
+  string client_ip = 7 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // RequestEmailVerificationResponse is intentionally EMPTY.
@@ -270,10 +271,10 @@ message RequestEmailVerificationResponse {}
 message RedeemEmailVerificationRequest {
   // token is the raw value from the link. The daemon stores only its hash, so
   // this value cannot be recovered from the database.
-  string token = 1;
+  string token = 1 [(buf.validate.field).string = { max_len: 1048576 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
-  string client_ip = 2;
+  string client_ip = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // RedeemEmailVerificationResponse hands back the completion session.
@@ -315,7 +316,7 @@ message SignupRequest {
 
   // attempt_id correlates with the signup-progress stream. Required, must be a
   // UUID, and must match the attempt the verification was issued under.
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 
   // password is the founding owner's chosen password.
   //
@@ -323,14 +324,14 @@ message SignupRequest {
   // never logged, never persisted by the daemon, never returned. It is only
   // ever applied to a user this call creates; if the address already has an
   // account, the RPC fails and the password is discarded.
-  string password = 8;
+  string password = 8 [(buf.validate.field).string = { min_len: 1, max_len: 1048576 }];
 
   // verified_session_token is the value RedeemEmailVerification returned. It
   // is the capability for this call: no session, no provisioning.
-  string verified_session_token = 9;
+  string verified_session_token = 9 [(buf.validate.field).string = { max_len: 1048576 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
-  string client_ip = 10;
+  string client_ip = 10 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // SignupResponse reports the outcome of a completed signup.
