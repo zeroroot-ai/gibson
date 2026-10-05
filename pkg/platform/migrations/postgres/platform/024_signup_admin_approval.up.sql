@@ -1,8 +1,8 @@
 -- 024_signup_admin_approval.up.sql
 --
--- The admin-approval registration rung (ADR-0006, gibson#22).
+-- The admin-approval registration rung (ADR-0074, gibson#22).
 --
--- ADR-0006 defines three registration rungs: open (verification on, mail
+-- ADR-0074 defines three registration rungs: open (verification on, mail
 -- required), approval (an administrator approves, no mail), and closed (admin
 -- provisioning only). This migration gives the approval rung the state it
 -- needs, on the table the open rung already uses.
@@ -27,7 +27,7 @@ ALTER TABLE signup_verification
     ADD COLUMN IF NOT EXISTS owner_user_id TEXT NOT NULL DEFAULT '';
 
 -- decided_by / decided_at record WHICH administrator approved or rejected the
--- registration and when. ADR-0006 requires the decision to be attributable;
+-- registration and when. ADR-0074 requires the decision to be attributable;
 -- the audit log carries the event and this row carries the same fact next to
 -- the registration it decided.
 ALTER TABLE signup_verification

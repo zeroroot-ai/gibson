@@ -438,6 +438,10 @@ jobs:
           make check-comment-paths
           make check-operator-rbac-scope
           make check-rules-enforced
+      - name: Guard the public ADR index
+        # gibson#740: docs/adr-index.md is the one list that each citation
+        # guard reads. A malformed or short file fails each repo that copies it.
+        run: make check-adr-index
 
   # ---- container-backed integration suite (both lanes) ----
   # gibson#1236: moved onto pull_request. It was the other merge_group-only

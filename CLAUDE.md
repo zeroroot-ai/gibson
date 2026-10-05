@@ -221,10 +221,10 @@ Do NOT re-introduce a deployment-mode env var. Per-feature gates that genuinely 
 
 ## MCP bridge (removed — ADR-0065)
 
-The legacy ADR-0048 **mcp-bridge** connector path is gone (hard cutover, ADR-0027). Do NOT reintroduce it.
+The legacy **mcp-bridge** connector path is gone (hard cutover, ADR-0027). Do NOT reintroduce it.
 
 - **MCP lives ONLY in the connector domain**, served via **ToolHive** behind the `ConnectorInstance` wrapper (ADR-0114). A connector is enabled by writing a `ConnectorInstance` CR (`ConnectorService` — catalog / enable / list / disable), which the connector-operator reconciles onto a ToolHive MCPServer / MCPRemoteProxy. Connector OAuth is `ConnectorAuthService` + the token freshener, whose desired set comes from `ConnectorInstance` CRs (`ConnectorInstanceCatalogSource`), not from any manifest table.
 - **The `plugin` domain has NO MCP.** Plugins are vendor-SDK, Go-first, JSON dispatch. `spec.runtime` is `process | pod | setec` — there is no `mcp-bridge` runtime and no `spec.mcp_bridge` block.
 - **Removed for good:** `internal/engine/connector` (the `ConnectorLauncher` / setec-sandbox bridge), the `sdk/mcpbridge` package, `manifest.RuntimeMCPBridge` / `manifest.TransportStdio` / the `MCPBridge` spec type, the per-tenant connector-sandbox reconciler, and `sandbox.connector` config. The `scripts/check-no-mcp-bridge.sh` guard (wired into `gibsoncheck.yml` and `make check`) fails CI if any of it reappears.
 
-See docs ADR-0065 (supersedes ADR-0047/0048/0049).
+See ADR-0065.

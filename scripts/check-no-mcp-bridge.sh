@@ -2,7 +2,7 @@
 # check-no-mcp-bridge.sh — build guard for ADR-0065 (mcp-bridge removed).
 #
 # MCP now lives ONLY in the connector domain, served via ToolHive behind the
-# ConnectorInstance wrapper (ADR-0114). The legacy ADR-0048 mcp-bridge path —
+# ConnectorInstance wrapper (ADR-0114). The legacy mcp-bridge path —
 # internal/engine/connector (ConnectorLauncher), the sdk/mcpbridge package, the
 # `runtime: mcp-bridge` plugin runtime, and the manifest `mcp_bridge:` block —
 # was removed by a hard cutover (ADR-0027, gibson#1524). The `plugin` domain has
