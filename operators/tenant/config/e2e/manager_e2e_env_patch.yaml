@@ -69,8 +69,6 @@ spec:
           value: "e2e-client-id"
         - name: ZITADEL_TENANT_OPERATOR_CLIENT_SECRET
           value: "e2e-client-secret"
-        - name: ZITADEL_ISSUER
-          value: "https://e2e-zitadel.invalid"
         # --- Zitadel API (required: ZITADEL_URL + ZITADEL_EXTERNAL_DOMAIN; the
         # client_credentials token is fetched on the first call, not at startup) ---
         - name: ZITADEL_URL
