@@ -50,6 +50,13 @@ func chainDefinition() *missionpb.MissionDefinition {
 // runChain projects the chain for missionID into the engine and ends the
 // first two nodes. The third node stays pending.
 func runChain(eng *brain.Engine, missionID string) {
+	submitChain(eng, missionID)
+	eng.Tick()
+}
+
+// submitChain submits the events of runChain and does not tick, for an engine
+// whose own loop ticks.
+func submitChain(eng *brain.Engine, missionID string) {
 	eng.Submit(brain.MissionProjected{ID: missionID, Nodes: []brain.WorkNode{
 		{ID: "one"},
 		{ID: "two", DependsOn: []string{"one"}},
@@ -60,7 +67,6 @@ func runChain(eng *brain.Engine, missionID string) {
 		eng.Submit(brain.WorkDispatched{ID: id, MissionID: missionID, ItemKind: "agent"})
 		eng.Submit(brain.WorkCompleted{ID: id, Result: "ok"})
 	}
-	eng.Tick()
 }
 
 // memStore is an in-memory mission store for the rewind.
