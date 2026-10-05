@@ -40,14 +40,14 @@ import (
 // type carries.
 type BeliefVariable struct {
 	// Name identifies the variable within its node type (e.g. "reachable").
-	Name string
+	Name string `json:"name"`
 
 	// DependsOn lists the names of other variables on the SAME node type that
 	// this variable's CPT is conditioned on. Cross-node dependencies are never
 	// expressed here — they are wired by the belief engine along enablement
 	// edges (see EnablementEdges) when it grounds the per-node template into
 	// the attack graph.
-	DependsOn []string
+	DependsOn []string `json:"depends_on,omitempty"`
 }
 
 // NodeBeliefSchema is the belief-PRM schema for one node type: its declared
@@ -57,12 +57,12 @@ type NodeBeliefSchema struct {
 	// It must be a member of, or at least a well-formed identifier compatible
 	// with, the taxonomy vocabulary this package's sibling (internal/engine/taxonomy)
 	// governs — see ValidIdentifier.
-	NodeType string
+	NodeType string `json:"node_type"`
 
 	// Variables is the node type's declared belief variables. Must be
 	// non-empty: a NodeBeliefSchema with no variables is not belief-bearing
 	// and should simply be omitted.
-	Variables []BeliefVariable
+	Variables []BeliefVariable `json:"variables"`
 }
 
 // EnablementEdgeSpec declares one relationship type that propagates belief
@@ -83,14 +83,14 @@ type NodeBeliefSchema struct {
 type EnablementEdgeSpec struct {
 	// RelType is the relationship type this spec flags as belief-propagating
 	// (e.g. "RESOLVES_TO").
-	RelType string
+	RelType string `json:"rel_type"`
 
 	// TargetVariable names the belief variable this edge type feeds on its
 	// destination node — a BeliefVariable.Name the destination node's OWN
 	// NodeBeliefSchema declares, though that is validated at grounding time
 	// (which concrete node types an edge type ever points at is graph data,
 	// not schema), not at registration time.
-	TargetVariable string
+	TargetVariable string `json:"target_variable"`
 }
 
 // BeliefSchemaExtension is a named, Pack-contributed bundle of belief-bearing
@@ -100,7 +100,7 @@ type EnablementEdgeSpec struct {
 type BeliefSchemaExtension struct {
 	// Nodes lists the belief-bearing node type declarations this extension
 	// contributes.
-	Nodes []NodeBeliefSchema
+	Nodes []NodeBeliefSchema `json:"nodes,omitempty"`
 
 	// EnablementEdges lists relationship types that propagate belief along
 	// them, and which target variable each feeds (ADR-0129, ADR-0137).
@@ -108,7 +108,7 @@ type BeliefSchemaExtension struct {
 	// twice) declaring the SAME RelType with the SAME TargetVariable is
 	// benign and unioned; declaring it with a DIFFERENT TargetVariable is a
 	// hard conflict (see BeliefSchemaRegistry.RegisterExtension).
-	EnablementEdges []EnablementEdgeSpec
+	EnablementEdges []EnablementEdgeSpec `json:"enablement_edges,omitempty"`
 }
 
 // DuplicateVariableError is returned by RegisterExtension when two
@@ -188,6 +188,11 @@ type BeliefSchemaRegistry struct {
 	// enablementEdges is the merged, live view: relationship type -> the
 	// target variable it feeds (ADR-0137).
 	enablementEdges map[string]string
+}
+
+// empty reports whether the extension declares no node type and no edge.
+func (e BeliefSchemaExtension) empty() bool {
+	return len(e.Nodes) == 0 && len(e.EnablementEdges) == 0
 }
 
 // NewBeliefSchemaRegistry constructs an empty registry. Register the core
