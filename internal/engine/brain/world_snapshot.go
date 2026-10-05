@@ -74,6 +74,11 @@ type worldSnapshotData struct {
 	// vanish across a snapshot and trim cycle.
 	ProofReviews []ProofReviewSnapshot `json:"proof_reviews"`
 
+	// MissionRewinds is the parent of each mission that a rewind started
+	// (ADR-0170). Without it the link from a rewound mission to its earlier
+	// run would vanish across a snapshot and trim cycle.
+	MissionRewinds []MissionRewind `json:"mission_rewinds"`
+
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
 	NextDomainID      uint64 `json:"next_domain_id"`
@@ -115,6 +120,7 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		FlightRecorderPolicy: w.flightRecorderPolicy,
 		DomainPacks:          w.DomainPackSnapshot(),
 		ProofReviews:         w.ProofReviewSnapshot(),
+		MissionRewinds:       w.MissionRewindSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -412,6 +418,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Evidence:            append([]ProofReviewEvidence(nil), r.Evidence...),
 			SubmittedAtUnixNano: r.SubmittedAtUnixNano,
 		})
+	}
+
+	// Replay the parent of each rewound mission (ADR-0170).
+	for _, r := range data.MissionRewinds {
+		Reduce(w, MissionRewound(r))
 	}
 
 	// Replay enabled Domain Packs (ADR-0133, gibson#381). Order does not

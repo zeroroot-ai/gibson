@@ -77,6 +77,9 @@ func init() {
 	registerEvent("mission.resume", func() Event { return &MissionResumed{} })
 	registerEvent("mission.done", func() Event { return &MissionDone{} })
 
+	// mission_rewind.go
+	registerEvent("mission.rewound", func() Event { return &MissionRewound{} })
+
 	// belief.go
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
@@ -235,6 +238,8 @@ func dereferenceEvent(ev Event) Event {
 	case *MissionResumed:
 		return *v
 	case *MissionDone:
+		return *v
+	case *MissionRewound:
 		return *v
 	case *BeliefScoreRequested:
 		return *v
