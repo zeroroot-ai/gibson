@@ -1,0 +1,51 @@
+# Weekly report of the open issues of the organization (gibson#806, D44).
+#
+# The report is one issue in this repo. Each run replaces its body. The run
+# opens no issue for a finding. scripts/ci/issue-report.py states the format,
+# the source of a tier and the two tokens.
+#
+# The read token GH_PAT_PLATFORM_RO has read access only. It lets the run read
+# the private repos. The write goes through GITHUB_TOKEN, to this repo only.
+name: weekly-issue-report
+
+on:
+  schedule:
+    # Mondays 07:23 UTC. Off the hour, away from the peak of the scheduler.
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+  # A change of the script or of this file runs the self-test only. The write
+  # step does not run on a pull request.
+  pull_request:
+    paths:
+      - scripts/ci/issue-report.py
+      - .github/workflows/weekly-issue-report.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-issue-report-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: weekly-issue-report
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The self-test runs first. It holds two fixtures that must fail: a run
+      # that read no issue, and a report above the size limit of an issue.
+      - name: Prove that the report can fail
+        run: python3 scripts/ci/issue-report.py --selftest
+
+      - name: Write the report issue
+        if: github.event_name != 'pull_request'
+        env:
+          READ_TOKEN: ${{ secrets.GH_PAT_PLATFORM_RO }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/issue-report.py
