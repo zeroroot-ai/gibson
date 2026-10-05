@@ -126,6 +126,86 @@ func TestDrift_NamesEachDifference(t *testing.T) {
 	}
 }
 
+// command runs the whole command on dir with floors of one.
+func command(dir string, mode ...string) (code int, stdout, stderr string) {
+	var out, errOut bytes.Buffer
+	code = runWithFloors(append([]string{"-dir", dir}, mode...), &out, &errOut, 1, 1)
+	return code, out.String(), errOut.String()
+}
+
+func gitAdd(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "add", "-A") //nolint:gosec // G204: fixed argv on a temp dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+}
+
+// TestCommand_WriteThenCheckThenDrift runs the command the way make does:
+// write gives a file that check accepts, a new reader makes check fail and
+// name it, and a dropped reader makes check fail and name it.
+func TestCommand_WriteThenCheckThenDrift(t *testing.T) {
+	dir := repo(t, 0, map[string]string{"cmd/svc/main.go": "package main\nvar _ = \"FIRST_NAME\"\n"})
+
+	if code, _, stderr := command(dir, "-check"); code != 1 || !strings.Contains(stderr, Artifact+" is missing") {
+		t.Fatalf("check with no file: exit %d, stderr %q", code, stderr)
+	}
+	if code, stdout, stderr := command(dir, "-write"); code != 0 || !strings.Contains(stdout, "(1 names)") {
+		t.Fatalf("write: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+	if code, stdout, stderr := command(dir, "-check"); code != 0 || !strings.Contains(stdout, "matches the source") {
+		t.Fatalf("check after write: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+
+	added := filepath.Join(dir, "cmd", "svc", "more.go")
+	if err := os.WriteFile(added, []byte("package main\nvar _ = \"SECOND_NAME\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitAdd(t, dir)
+	code, _, stderr := command(dir, "-check")
+	if code != 1 || !strings.Contains(stderr, "the source reads SECOND_NAME") || !strings.Contains(stderr, "is stale") {
+		t.Fatalf("check after a new reader: exit %d, stderr %q", code, stderr)
+	}
+
+	if code, _, stderr := command(dir, "-write"); code != 0 {
+		t.Fatalf("second write: exit %d, stderr %q", code, stderr)
+	}
+	if err := os.Remove(added); err != nil {
+		t.Fatal(err)
+	}
+	gitAdd(t, dir)
+	code, _, stderr = command(dir, "-check")
+	if code != 1 || !strings.Contains(stderr, "lists SECOND_NAME and the source no longer reads it") {
+		t.Fatalf("check after a dropped reader: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// TestCommand_RefusesBadUse proves the command exits 2, and writes nothing,
+// when the mode is unclear, a flag is unknown, the directory is not a git
+// tree, or the scan is under a floor.
+func TestCommand_RefusesBadUse(t *testing.T) {
+	dir := repo(t, 0, map[string]string{"main.go": "package main\nvar _ = \"ONE_NAME\"\n"})
+	for name, mode := range map[string][]string{
+		"no mode":      nil,
+		"both modes":   {"-write", "-check"},
+		"unknown flag": {"-nope"},
+	} {
+		if code, _, _ := command(dir, mode...); code != 2 {
+			t.Errorf("%s: exit %d, want 2", name, code)
+		}
+	}
+	if code, _, stderr := command(t.TempDir(), "-check"); code != 2 || !strings.Contains(stderr, "git ls-files") {
+		t.Errorf("not a git tree: exit %d, stderr %q", code, stderr)
+	}
+	var out, errOut bytes.Buffer
+	if code := runWithFloors([]string{"-dir", dir, "-write"}, &out, &errOut, 200, 1); code != 2 || !strings.Contains(errOut.String(), "the floor is 200") {
+		t.Errorf("under the floor: exit %d, stderr %q", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, Artifact)); err == nil {
+		t.Error("a refused run wrote the artifact")
+	}
+}
+
 // TestCommittedArtifactMatchesTheSource is the drift gate. It runs in the
 // unit lane, so a change that adds or drops an env reader fails the merge
 // gate until configs/env-readers.txt is refreshed.

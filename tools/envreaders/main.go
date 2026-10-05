@@ -206,6 +206,12 @@ func say(w io.Writer, format string, args ...any) {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	return runWithFloors(args, stdout, stderr, MinFiles, MinNames)
+}
+
+// runWithFloors is run with the two floors as arguments, so a test can run
+// the whole command on a small tree.
+func runWithFloors(args []string, stdout, stderr io.Writer, minFiles, minNames int) int {
 	fs := flag.NewFlagSet("envreaders", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", ".", "repository root")
@@ -218,7 +224,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		say(stderr, "envreaders: give exactly one of -write and -check\n")
 		return 2
 	}
-	names, err := Scan(*dir, MinFiles, MinNames)
+	names, err := Scan(*dir, minFiles, minNames)
 	if err != nil {
 		say(stderr, "envreaders: %v\n", err)
 		return 2
