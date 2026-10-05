@@ -6,6 +6,7 @@ package admin
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -208,14 +209,86 @@ func TestWriteAgentGrants_HappyPath(t *testing.T) {
 	if resp.GetWritten() != 2 || resp.GetAlreadyPresent() != 0 {
 		t.Errorf("counts = (%d, %d), want (2, 0)", resp.GetWritten(), resp.GetAlreadyPresent())
 	}
-	if len(az.wrote) != 2 {
-		t.Errorf("wrote %d tuples, want 2", len(az.wrote))
+	// The action can_read is a computed relation in the FGA model. The tuple
+	// goes on the direct_ relation (gibson#703).
+	want := []authz.Tuple{
+		{User: "agent_principal:abc", Relation: "direct_read", Object: "component:gitlab"},
+		{User: "agent_principal:abc", Relation: "direct_configure", Object: "component:gitlab"},
+	}
+	if !reflect.DeepEqual(az.wrote, want) {
+		t.Errorf("wrote %+v, want %+v", az.wrote, want)
+	}
+}
+
+// TestWriteAndDeleteAgentGrants_EachActionUsesItsTupleRelation: each allowed
+// action writes, and then deletes, the tuple on the relation that the FGA
+// model accepts a tuple on. The caller check uses the action itself.
+func TestWriteAndDeleteAgentGrants_EachActionUsesItsTupleRelation(t *testing.T) {
+	cases := []struct {
+		action   string
+		relation string
+		object   string
+		target   string
+		kind     identitypb.PrincipalKind
+	}{
+		{"can_read", "direct_read", "component:gitlab", "agent_principal:abc", identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT},
+		{"can_configure", "direct_configure", "component:gitlab", "agent_principal:abc", identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT},
+		{"can_execute", "direct_execute", "component:gitlab", "agent_principal:abc", identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT},
+		{"can_invoke", "can_invoke", "plugin:gitlab", "tool_principal:abc", identitypb.PrincipalKind_PRINCIPAL_KIND_TOOL},
+	}
+	for _, tc := range cases {
+		t.Run(tc.action, func(t *testing.T) {
+			// The caller holds the action. The target holds nothing.
+			az := &stubAuthorizer{present: map[string]bool{
+				"user:" + adminCallerSubject + "|" + tc.action + "|" + tc.object: true,
+			}}
+			lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
+				tc.target: {PrincipalID: tc.target, TenantID: "zeroroot-ai", Kind: tc.kind},
+			}}
+			srv := newWriteServer(t, az, lookup)
+			grants := []*tenantv1.GrantTuple{{Object: tc.object, Relation: tc.action}}
+			want := []authz.Tuple{{User: tc.target, Relation: tc.relation, Object: tc.object}}
+
+			wresp, err := srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &tenantv1.WriteAgentGrantsRequest{
+				TargetPrincipalId: tc.target, Grants: grants,
+			})
+			if err != nil {
+				t.Fatalf("WriteAgentGrants: %v", err)
+			}
+			if wresp.GetWritten() != 1 || !reflect.DeepEqual(az.wrote, want) {
+				t.Fatalf("written = %d, wrote %+v, want %+v", wresp.GetWritten(), az.wrote, want)
+			}
+
+			// The tuple is now in the store. A second write finds it.
+			az.present[tupleKey(want[0])] = true
+			wresp, err = srv.WriteAgentGrants(adminCtx(t, "zeroroot-ai"), &tenantv1.WriteAgentGrantsRequest{
+				TargetPrincipalId: tc.target, Grants: grants,
+			})
+			if err != nil {
+				t.Fatalf("second WriteAgentGrants: %v", err)
+			}
+			if wresp.GetAlreadyPresent() != 1 || len(az.wrote) != 1 {
+				t.Fatalf("second write: already_present = %d, wrote %d tuples in all, want 1 and 1",
+					wresp.GetAlreadyPresent(), len(az.wrote))
+			}
+
+			// The delete removes the same tuple.
+			dresp, err := srv.DeleteAgentGrants(adminCtx(t, "zeroroot-ai"), &tenantv1.DeleteAgentGrantsRequest{
+				TargetPrincipalId: tc.target, Grants: grants,
+			})
+			if err != nil {
+				t.Fatalf("DeleteAgentGrants: %v", err)
+			}
+			if dresp.GetDeleted() != 1 || !reflect.DeepEqual(az.deleted, want) {
+				t.Fatalf("deleted = %d, deleted %+v, want %+v", dresp.GetDeleted(), az.deleted, want)
+			}
+		})
 	}
 }
 
 func TestWriteAgentGrants_IdempotentAlreadyPresent(t *testing.T) {
 	az := &stubAuthorizer{present: map[string]bool{
-		"agent_principal:abc|can_read|component:gitlab": true,
+		"agent_principal:abc|direct_read|component:gitlab": true,
 		// Caller-access intersection (identity-assertion-gaps finding 4).
 		"user:" + adminCallerSubject + "|can_read|component:gitlab":    true,
 		"user:" + adminCallerSubject + "|can_execute|component:gitlab": true,
@@ -495,7 +568,7 @@ func TestWriteAgentGrants_InvalidRelation(t *testing.T) {
 
 func TestDeleteAgentGrants_HappyPath(t *testing.T) {
 	az := &stubAuthorizer{present: map[string]bool{
-		"agent_principal:abc|can_read|component:gitlab": true,
+		"agent_principal:abc|direct_read|component:gitlab": true,
 	}}
 	lookup := &stubLookup{records: map[string]identity.PrincipalRecord{
 		"agent_principal:abc": {

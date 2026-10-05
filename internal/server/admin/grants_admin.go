@@ -262,14 +262,24 @@ func containsString(xs []string, s string) bool {
 	return false
 }
 
-// allowedRelations is the set of FGA relations Write/DeleteAgentGrants
-// will accept. Anything else is InvalidArgument before any tuple is
-// touched.
-var allowedRelations = map[string]struct{}{
-	"can_read":      {},
-	"can_configure": {},
-	"can_execute":   {},
-	"can_invoke":    {},
+// grantTuples builds the FGA tuple of each grant for the target principal.
+//
+// A request names the action: can_read, can_configure, can_execute or
+// can_invoke. The first three are computed relations in the FGA model, and a
+// computed relation takes no tuple. The tuple goes on the relation that
+// authz.GrantTupleRelation gives, which is the matching direct_ relation.
+// validateGrantTuples runs first, so each action here has a tuple relation.
+func grantTuples(target string, grants []*tenantv1.GrantTuple) []authz.Tuple {
+	tuples := make([]authz.Tuple, 0, len(grants))
+	for _, g := range grants {
+		relation, _ := authz.GrantTupleRelation(g.GetRelation())
+		tuples = append(tuples, authz.Tuple{
+			User:     target,
+			Relation: relation,
+			Object:   g.GetObject(),
+		})
+	}
+	return tuples
 }
 
 // WriteAgentGrants additively writes per-action FGA tuples for a target
@@ -297,12 +307,12 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 	}
 	callerRef := "user:" + callerIdentity.Subject
 
-	// Caller-access intersection check: a caller may only forward a relation
-	// on an object that the caller already holds themselves. component.can_
-	// read/can_configure/can_execute and plugin.can_invoke are relations the
-	// FGA model grants to BOTH user and agent/tool principal types on the
-	// same object (see model.fga), so the caller side of the check uses the
-	// identical relation name as the one being written for the recipient.
+	// Caller-access intersection check: a caller may only forward an action
+	// on an object that the caller already holds themselves. The check uses
+	// the action that the request names (can_read, can_configure,
+	// can_execute, can_invoke). For a component that is the computed
+	// relation, so the tenant catalog and the deny relations apply to the
+	// caller. The tuple for the recipient goes on the direct_ relation.
 	//
 	// validateTargetAndTenant above only binds the RECIPIENT to the caller's
 	// tenant — it says nothing about whether the caller can reach the
@@ -339,14 +349,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 
 	// Two-pass idempotency: build the FGA tuples first, dedupe against
 	// already-present via Check, then Write only the missing ones.
-	tuples := make([]authz.Tuple, 0, len(req.GetGrants()))
-	for _, g := range req.GetGrants() {
-		tuples = append(tuples, authz.Tuple{
-			User:     target.PrincipalID,
-			Relation: g.GetRelation(),
-			Object:   g.GetObject(),
-		})
-	}
+	tuples := grantTuples(target.PrincipalID, req.GetGrants())
 
 	checks := make([]authz.CheckRequest, len(tuples))
 	for i, t := range tuples {
@@ -408,14 +411,9 @@ func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *tenantv1
 		return nil, err
 	}
 
-	tuples := make([]authz.Tuple, 0, len(req.GetGrants()))
-	for _, g := range req.GetGrants() {
-		tuples = append(tuples, authz.Tuple{
-			User:     target.PrincipalID,
-			Relation: g.GetRelation(),
-			Object:   g.GetObject(),
-		})
-	}
+	// The same tuples that WriteAgentGrants writes: on the direct_ relation
+	// for a component action.
+	tuples := grantTuples(target.PrincipalID, req.GetGrants())
 
 	checks := make([]authz.CheckRequest, len(tuples))
 	for i, t := range tuples {
@@ -517,10 +515,10 @@ func validateGrantTuples(grants []*tenantv1.GrantTuple, targetKind identitypb.Pr
 		if strings.TrimSpace(g.GetObject()) == "" {
 			return status.Errorf(codes.InvalidArgument, "grants[%d].object is required", i)
 		}
-		if _, ok := allowedRelations[g.GetRelation()]; !ok {
+		if _, ok := authz.GrantTupleRelation(g.GetRelation()); !ok {
 			return status.Errorf(codes.InvalidArgument,
-				"grants[%d].relation %q not allowed; must be one of can_read, can_configure, can_execute, can_invoke",
-				i, g.GetRelation())
+				"grants[%d].relation %q not allowed; must be one of %s",
+				i, g.GetRelation(), strings.Join(authz.GrantActions(), ", "))
 		}
 		if g.GetRelation() == "can_invoke" && targetKind != identitypb.PrincipalKind_PRINCIPAL_KIND_TOOL {
 			return status.Errorf(codes.InvalidArgument,
