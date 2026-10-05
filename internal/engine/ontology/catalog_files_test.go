@@ -74,6 +74,21 @@ func TestLoadCatalog_Refusals(t *testing.T) {
 	}
 }
 
+// TestLoadCatalog_RefusesAFileItCannotRead: a pack path that is a
+// directory cannot be read, and LoadCatalog names the path.
+func TestLoadCatalog_RefusesAFileItCannotRead(t *testing.T) {
+	fsys := fstest.MapFS{"packs/a.json/inner": {Data: []byte(`{}`)}}
+	_, err := LoadCatalog(fsys)
+	require.ErrorContains(t, err, "read catalog pack file packs/a.json")
+}
+
+// TestNewCheckedCatalog_RefusesADuplicateName: two packs with one name
+// are an error, not a panic.
+func TestNewCheckedCatalog_RefusesADuplicateName(t *testing.T) {
+	_, err := newCheckedCatalog([]DomainPack{{Name: "a"}, {Name: "a"}})
+	require.ErrorContains(t, err, "duplicate name")
+}
+
 // TestEmbeddedCatalog_EveryFileLoads: each embedded pack file loads and
 // validates. This is the check that keeps the start-time panic of
 // EmbeddedCatalog out of a release.
