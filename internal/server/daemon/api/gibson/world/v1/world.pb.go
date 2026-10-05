@@ -32,7 +32,7 @@ type MissionView struct {
 	Status string `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
 	Reason string `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`
 	// belief_model is the belief-model version the mission was pinned to at
-	// launch (ADR-0005 §5). The daemon stamps the provider's current artifact
+	// launch (ADR-0134 §5). The daemon stamps the provider's current artifact
 	// onto the mission when it starts, and the World carries it from there, so a
 	// reviewer can tell which model judged a run. Empty means the mission ran
 	// unpinned: an OSS install with no base model, or a placeholder provider.
@@ -1562,7 +1562,7 @@ func (x *GetFrameAtResponse) GetLlmCalls() []*LlmCallView {
 
 // LabelView is one applied review label (a gibson.world.v1 view of a brain
 // Label): the verdict, optional corrected severity/category, and the user who
-// applied it (provenance only — labels pool tenant-wide; ADR-0006).
+// applied it (provenance only — labels pool tenant-wide; ADR-0106).
 type LabelView struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -2577,7 +2577,7 @@ func (x *ListOpenBetsResponse) GetBets() []*OpenBet {
 
 // SettleBetByHITLRequest names the bet and the reviewer's verdict.
 // The reviewing user is resolved server-side from the caller's identity
-// (ADR-0006 §6 provenance rule), never taken from the request — the same
+// (ADR-0106 §6 provenance rule), never taken from the request — the same
 // rule SubmitLabel already follows, so a caller can never attribute a
 // settlement to another user.
 type SettleBetByHITLRequest struct {
@@ -2689,7 +2689,7 @@ func (x *SettleBetByHITLResponse) GetSettled() bool {
 	return false
 }
 
-// GetReputationRequest names the technique x environment key (ADR-0029 §3):
+// GetReputationRequest names the technique x environment key (ADR-0129 §3):
 // technique is the settlement.TechniqueID a Bet/Hypothesis names (e.g.
 // "T1190"); scope_id is the "environment" — the same ScopeID coordinate
 // every other observation in this brain partitions identity by.

@@ -227,7 +227,7 @@ type UpsertTenantQuotaRequest struct {
 	// Written to the tenant_quotas.plan_id column.
 	PlanId string `protobuf:"bytes,8,opt,name=plan_id,json=planId,proto3" json:"plan_id,omitempty"`
 	// concurrent_connectors is the cap on hosted MCP connector instances a
-	// tenant may have running at any moment. 0 = unlimited. Per ADR-0047
+	// tenant may have running at any moment. 0 = unlimited. Per ADR-0065
 	// facet 3 (plan-tier connector-instance budget).
 	ConcurrentConnectors int32 `protobuf:"varint,9,opt,name=concurrent_connectors,json=concurrentConnectors,proto3" json:"concurrent_connectors,omitempty"`
 }

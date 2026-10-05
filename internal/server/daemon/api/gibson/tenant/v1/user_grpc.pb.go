@@ -7,7 +7,7 @@
 // Package gibson.tenant.v1 — UserService: customer-callable user self-service
 // operations. Moved from gibson.user.v1.UserService (platform-sdk) into the
 // OSS SDK under the gibson.tenant.v1 package as part of the
-// admin-surface-recategorization (ADR-0039 implementation).
+// admin-surface-recategorization (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 

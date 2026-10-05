@@ -9,7 +9,7 @@
 // findings export, and mission drafts.
 //
 // The following surfaces have been extracted into focused services in this
-// same package as part of ADR-0039 (admin-surface-recategorization):
+// same package in the admin-surface-recategorization (ADR-0058 keeps them in gibson):
 //   - Agent identity → AgentIdentityService (agent_identity.proto)
 //   - LLM providers + execution → ProviderService (provider.proto)
 //   - Membership, teams, roles → MembershipService (membership.proto)

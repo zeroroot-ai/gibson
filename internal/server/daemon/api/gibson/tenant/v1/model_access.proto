@@ -4,7 +4,7 @@ syntax = "proto3";
 // provider/model access-grant management surface. Moved from
 // gibson.authz.v1.ModelAccessService (platform-sdk) into the OSS SDK under the
 // gibson.tenant.v1 package as part of the admin-surface-recategorization
-// (ADR-0039 implementation).
+// (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 package gibson.tenant.v1;

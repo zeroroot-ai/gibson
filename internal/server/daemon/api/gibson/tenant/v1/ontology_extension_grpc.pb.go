@@ -2,7 +2,7 @@
 // that can be found in the LICENSE file in the repo root.
 
 // OntologyExtensionService is the tenant-OWNER-facing approval surface for
-// agent-proposed Taxonomy extensions (ADR-0024 §2, ADR-0033 decisions 2-3,
+// agent-proposed Taxonomy extensions (ADR-0124 §2, ADR-0133 decisions 2-3,
 // gibson#392).
 //
 // An agent proposes a new Taxonomy node label or relationship type it
@@ -10,7 +10,7 @@
 // agent-facing HarnessCallbackService RPC in the OSS SDK). That proposal is
 // folded into the caller's tenant World as a pending sighting and counted
 // for recurrence by taxonomy.PromotionGate — it is NEVER auto-promoted
-// (ADR-0033 decision 3).
+// (ADR-0133 decision 3).
 //
 // This service is the other end of that pipeline: the tenant owner reviews
 // every pending proposal (ListOntologyExtensionProposals) and explicitly
@@ -22,7 +22,7 @@
 // to every mission in that tenant from then on. Rejection is a terminal
 // decision recorded for audit; it never mutates the Taxonomy.
 //
-// Gated strictly to the tenant's OWNER relation (not "admin"): ADR-0033
+// Gated strictly to the tenant's OWNER relation (not "admin"): ADR-0133
 // decision 3 calls for "explicit tenant-owner approval" specifically — one
 // step stronger than the "tenant admin" gate DomainPackService's
 // EnableDomainPack uses for already-curated catalog content. A proposal
@@ -65,16 +65,16 @@ type OntologyExtensionServiceClient interface {
 	// ListOntologyExtensionProposals returns every ontology/taxonomy extension
 	// proposal this tenant's agents have made, pending and decided alike, so
 	// the tenant owner (or an admin assisting them) has full visibility into
-	// what agents are proposing (ADR-0033's "the tenant owner seeing every
+	// what agents are proposing (ADR-0133's "the tenant owner seeing every
 	// proposal").
 	ListOntologyExtensionProposals(ctx context.Context, in *ListOntologyExtensionProposalsRequest, opts ...grpc.CallOption) (*ListOntologyExtensionProposalsResponse, error)
 	// ApproveOntologyExtensionProposal is the tenant owner's explicit approval
-	// of a pending proposal (ADR-0033 decision 3). Refused (NOT_FOUND) if
+	// of a pending proposal (ADR-0133 decision 3). Refused (NOT_FOUND) if
 	// (kind, label) names no proposal ever observed in this tenant, and
 	// (FAILED_PRECONDITION) if it already carries a terminal decision.
 	//
 	// Gated to "owner", not "admin": this is the stronger, singular
-	// tenant-owner sign-off ADR-0033 decision 3 requires — not a routine
+	// tenant-owner sign-off ADR-0133 decision 3 requires — not a routine
 	// admin action any delegated admin may take.
 	ApproveOntologyExtensionProposal(ctx context.Context, in *ApproveOntologyExtensionProposalRequest, opts ...grpc.CallOption) (*ApproveOntologyExtensionProposalResponse, error)
 	// RejectOntologyExtensionProposal is the tenant owner's explicit rejection
@@ -84,7 +84,7 @@ type OntologyExtensionServiceClient interface {
 	// SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
 	// promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
 	// observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
-	// Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+	// Domain Pack contribution artifact (ADR-0133 decision 2's "submit
 	// upstream -> contribution"). Gated to "owner", mirroring
 	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
 	// own live extension nominates it for the shared catalog.
@@ -149,16 +149,16 @@ type OntologyExtensionServiceServer interface {
 	// ListOntologyExtensionProposals returns every ontology/taxonomy extension
 	// proposal this tenant's agents have made, pending and decided alike, so
 	// the tenant owner (or an admin assisting them) has full visibility into
-	// what agents are proposing (ADR-0033's "the tenant owner seeing every
+	// what agents are proposing (ADR-0133's "the tenant owner seeing every
 	// proposal").
 	ListOntologyExtensionProposals(context.Context, *ListOntologyExtensionProposalsRequest) (*ListOntologyExtensionProposalsResponse, error)
 	// ApproveOntologyExtensionProposal is the tenant owner's explicit approval
-	// of a pending proposal (ADR-0033 decision 3). Refused (NOT_FOUND) if
+	// of a pending proposal (ADR-0133 decision 3). Refused (NOT_FOUND) if
 	// (kind, label) names no proposal ever observed in this tenant, and
 	// (FAILED_PRECONDITION) if it already carries a terminal decision.
 	//
 	// Gated to "owner", not "admin": this is the stronger, singular
-	// tenant-owner sign-off ADR-0033 decision 3 requires — not a routine
+	// tenant-owner sign-off ADR-0133 decision 3 requires — not a routine
 	// admin action any delegated admin may take.
 	ApproveOntologyExtensionProposal(context.Context, *ApproveOntologyExtensionProposalRequest) (*ApproveOntologyExtensionProposalResponse, error)
 	// RejectOntologyExtensionProposal is the tenant owner's explicit rejection
@@ -168,7 +168,7 @@ type OntologyExtensionServiceServer interface {
 	// SubmitOntologyExtensionUpstream renders a LIVE tenant extension (a
 	// promoted proposal — NOT_FOUND if (kind, label) names no proposal ever
 	// observed, FAILED_PRECONDITION if it has not yet been promoted) as an SDK
-	// Domain Pack contribution artifact (ADR-0033 decision 2's "submit
+	// Domain Pack contribution artifact (ADR-0133 decision 2's "submit
 	// upstream -> contribution"). Gated to "owner", mirroring
 	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
 	// own live extension nominates it for the shared catalog.

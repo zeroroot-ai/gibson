@@ -2,18 +2,18 @@
 // that can be found in the LICENSE file in the repo root.
 
 // DomainPackService is the tenant-facing Domain Pack catalog + per-tenant
-// enable/disable lifecycle (ADR-0033). A Domain Pack is curated, versioned
+// enable/disable lifecycle (ADR-0133). A Domain Pack is curated, versioned
 // structure — taxonomy labels, ontology extensions, and technique -> CEL
-// predicate bindings — never code (ADR-0033 decision 1), shipped by the
-// platform through the standard SDK release/rollout pipeline (ADR-0033
+// predicate bindings — never code (ADR-0133 decision 1), shipped by the
+// platform through the standard SDK release/rollout pipeline (ADR-0133
 // decision 4).
 //
 // Enabling a pack for a tenant folds a DomainPackEnabled brain event
 // (Timeline-durable, replayable, mission-pinned) that loads its content into
-// that tenant's live World ONLY (ADR-0033: "per-tenant, not per-install").
+// that tenant's live World ONLY (ADR-0133: "per-tenant, not per-install").
 // Disabling folds DomainPackDisabled and removes it. This service is the
 // enablement LEVER ONLY — it never hot-reloads pack content; content ships
-// once, via a gibson release, and stays fixed until the next one (ADR-0033
+// once, via a gibson release, and stays fixed until the next one (ADR-0133
 // decision 4).
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
@@ -49,10 +49,10 @@ type DomainPackCatalogEntry struct {
 
 	Name    string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Version int32  `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
-	// author identifies who curates this pack (ADR-0033 decision 1): the
+	// author identifies who curates this pack (ADR-0133 decision 1): the
 	// platform owner for a catalog pack.
 	Author string `protobuf:"bytes,3,opt,name=author,proto3" json:"author,omitempty"`
-	// visibility is "public" or "private" (ADR-0033 decision 1). A catalog
+	// visibility is "public" or "private" (ADR-0133 decision 1). A catalog
 	// entry is always "public" in practice — a "private" pack is a tenant
 	// extension, which this service does not list.
 	Visibility                string   `protobuf:"bytes,4,opt,name=visibility,proto3" json:"visibility,omitempty"`

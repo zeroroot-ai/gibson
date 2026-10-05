@@ -4,7 +4,7 @@ syntax = "proto3";
 // management surface. Consolidated from the existing TenantService provider
 // RPCs and ProbeProvider from gibson.admin.v1.TenantAdminService (platform-sdk).
 //
-// Part of the admin-surface-recategorization (ADR-0039 implementation).
+// Part of the admin-surface-recategorization (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // Deduplication notes:
 //   - GetSupportedProviders, ListProviderModels already existed in TenantService;

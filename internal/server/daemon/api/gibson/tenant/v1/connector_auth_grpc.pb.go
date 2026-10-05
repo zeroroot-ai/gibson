@@ -5,7 +5,7 @@
 // source: gibson/tenant/v1/connector_auth.proto
 
 // Package gibson.tenant.v1 — ConnectorAuthService: the dashboard-facing
-// surface for a connector's OAuth grant lifecycle (ADR-0064).
+// surface for a connector's OAuth grant lifecycle (ADR-0061).
 //
 // The human authorization round trip runs in the operator's browser against
 // the customer's own vendor instance; what reaches this service is the
@@ -58,7 +58,7 @@ type ConnectorAuthServiceClient interface {
 	// a random state, holds them in a short-TTL server-side store keyed by
 	// state, and returns the authorize URL the operator opens. The browser round
 	// trip returns to the daemon callback, so no human pastes a URL and no local
-	// listener runs by hand (ADR-0014).
+	// listener runs by hand (ADR-0114).
 	StartConnectorAuthorization(ctx context.Context, in *StartConnectorAuthorizationRequest, opts ...grpc.CallOption) (*StartConnectorAuthorizationResponse, error)
 	// CompleteConnectorAuthorization finishes the authorization the daemon
 	// started: it takes the authorization code and the state that binds it, does
@@ -80,7 +80,7 @@ type ConnectorAuthServiceClient interface {
 	RevokeConnectorGrant(ctx context.Context, in *RevokeConnectorGrantRequest, opts ...grpc.CallOption) (*RevokeConnectorGrantResponse, error)
 	// SetConnectorSecret stores a customer-supplied static credential (for
 	// example a personal access token) for an `auth: secret` connector
-	// (ADR-0015). The daemon writes it to the tenant's configured secret store
+	// (ADR-0061). The daemon writes it to the tenant's configured secret store
 	// (the hosted OpenBao namespace or the customer's BYO Vault) as the
 	// connector's access secret, and records a static grant that names the
 	// human who supplied it. The materializer then publishes it to the
@@ -170,7 +170,7 @@ type ConnectorAuthServiceServer interface {
 	// a random state, holds them in a short-TTL server-side store keyed by
 	// state, and returns the authorize URL the operator opens. The browser round
 	// trip returns to the daemon callback, so no human pastes a URL and no local
-	// listener runs by hand (ADR-0014).
+	// listener runs by hand (ADR-0114).
 	StartConnectorAuthorization(context.Context, *StartConnectorAuthorizationRequest) (*StartConnectorAuthorizationResponse, error)
 	// CompleteConnectorAuthorization finishes the authorization the daemon
 	// started: it takes the authorization code and the state that binds it, does
@@ -192,7 +192,7 @@ type ConnectorAuthServiceServer interface {
 	RevokeConnectorGrant(context.Context, *RevokeConnectorGrantRequest) (*RevokeConnectorGrantResponse, error)
 	// SetConnectorSecret stores a customer-supplied static credential (for
 	// example a personal access token) for an `auth: secret` connector
-	// (ADR-0015). The daemon writes it to the tenant's configured secret store
+	// (ADR-0061). The daemon writes it to the tenant's configured secret store
 	// (the hosted OpenBao namespace or the customer's BYO Vault) as the
 	// connector's access secret, and records a static grant that names the
 	// human who supplied it. The materializer then publishes it to the

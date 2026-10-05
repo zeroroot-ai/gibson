@@ -42,7 +42,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // DaemonOperatorService provides strictly ZD-internal operator operations on
-// the Gibson daemon. It is the post-ADR-0037 successor to the deleted
+// the Gibson daemon. It is the post-ADR-0058 successor to the deleted
 // PlatformOperatorService, carrying only the operator-only RPCs that have no
 // customer surface. Customer-callable RPCs from the former admin services were
 // promoted to DaemonService / TenantService in the OSS SDK (sdk#205).
@@ -75,8 +75,8 @@ type DaemonOperatorServiceClient interface {
 	// persists it so that gibson.tenant.v1.MembershipService can write the
 	// Zitadel half of human membership (add/remove org member) for granular
 	// member operations, without a K8s read or a token-claim dependency
-	// (ADR-0043: FGA is the principal tree; Zitadel is the per-org human-auth +
-	// tenant boundary).
+	// (ADR-0093: Zitadel owns users and tenant roles, one tenant for each
+	// person).
 	//
 	// Idempotent: re-seeding the same (tenant_id, zitadel_org_id) is a no-op;
 	// a changed org id overwrites the prior mapping.
@@ -160,7 +160,7 @@ type DaemonOperatorServiceClient interface {
 	// GetConnectorAuthStatus reports one tenant connector's grant and token
 	// state to the connector-operator, so the ConnectorInstance carries a
 	// Degraded condition instead of a silent Active when the credential is
-	// dead (ADR-0015 decision 4).
+	// dead (ADR-0061 decision 4).
 	//
 	// Only the daemon holds a secret-store client, so only the daemon knows
 	// whether a grant still refreshes. The operator owns the CR status and
@@ -335,7 +335,7 @@ func (c *daemonOperatorServiceClient) GetConnectorAuthStatus(ctx context.Context
 // for forward compatibility.
 //
 // DaemonOperatorService provides strictly ZD-internal operator operations on
-// the Gibson daemon. It is the post-ADR-0037 successor to the deleted
+// the Gibson daemon. It is the post-ADR-0058 successor to the deleted
 // PlatformOperatorService, carrying only the operator-only RPCs that have no
 // customer surface. Customer-callable RPCs from the former admin services were
 // promoted to DaemonService / TenantService in the OSS SDK (sdk#205).
@@ -368,8 +368,8 @@ type DaemonOperatorServiceServer interface {
 	// persists it so that gibson.tenant.v1.MembershipService can write the
 	// Zitadel half of human membership (add/remove org member) for granular
 	// member operations, without a K8s read or a token-claim dependency
-	// (ADR-0043: FGA is the principal tree; Zitadel is the per-org human-auth +
-	// tenant boundary).
+	// (ADR-0093: Zitadel owns users and tenant roles, one tenant for each
+	// person).
 	//
 	// Idempotent: re-seeding the same (tenant_id, zitadel_org_id) is a no-op;
 	// a changed org id overwrites the prior mapping.
@@ -453,7 +453,7 @@ type DaemonOperatorServiceServer interface {
 	// GetConnectorAuthStatus reports one tenant connector's grant and token
 	// state to the connector-operator, so the ConnectorInstance carries a
 	// Degraded condition instead of a silent Active when the credential is
-	// dead (ADR-0015 decision 4).
+	// dead (ADR-0061 decision 4).
 	//
 	// Only the daemon holds a secret-store client, so only the daemon knows
 	// whether a grant still refreshes. The operator owns the CR status and

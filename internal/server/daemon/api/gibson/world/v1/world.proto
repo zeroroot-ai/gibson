@@ -9,7 +9,7 @@ import "gibson/auth/v1/options.proto";
 // WorldService is the daemon-mediated read path into the ECS brain (epic
 // ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
 // and reads only that tenant's live brain World + Timeline (one World per tenant,
-// no cross-tenant anything — ADR-0001). The dashboard never touches the brain
+// no cross-tenant anything — ADR-0101). The dashboard never touches the brain
 // directly; it reads through here over Envoy + ext-authz, like TracesService.
 //
 // Every RPC is ext-authz-gated via the tenant member relation.
@@ -80,7 +80,7 @@ service WorldService {
   }
 
   // GetFrameAt returns the World as of folding the first `seq` Timeline events —
-  // a replay frame (ADR-0001: World == fold(Timeline)). This is what the Scroller
+  // a replay frame (ADR-0101: World == fold(Timeline)). This is what the Scroller
   // scrubs to: a server-side fold of the log to a point, not a stored snapshot.
   // `seq` is clamped to [0, total]; seq == total is the live World.
   rpc GetFrameAt(GetFrameAtRequest) returns (GetFrameAtResponse) {
@@ -93,7 +93,7 @@ service WorldService {
   }
 
   // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
-  // Findings, each with any label already applied (ADR-0006). The async labelling
+  // Findings, each with any label already applied (ADR-0106). The async labelling
   // UI reads this; it is a read-only projection and NEVER gates a mission.
   rpc ListReviewQueue(ListReviewQueueRequest) returns (ListReviewQueueResponse) {
     option (gibson.auth.v1.authz) = {
@@ -106,7 +106,7 @@ service WorldService {
 
   // SubmitLabel records a human review judgement (true/false-positive, severity,
   // category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
-  // (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+  // (ADR-0106). Labels POOL across the tenant's users and NEVER cross tenants. It
   // is async: the call appends the event and returns; the mission never waits on
   // it. Any tenant member may label (the pool is shared), so the relation is
   // member, not admin.
@@ -119,7 +119,7 @@ service WorldService {
     };
   }
 
-  // ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+  // ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
   // training signal the offline trainer consumes alongside auto-outcomes.
   rpc ListLabels(ListLabelsRequest) returns (ListLabelsResponse) {
     option (gibson.auth.v1.authz) = {
@@ -131,7 +131,7 @@ service WorldService {
   }
 
   // GetCalibration returns the tenant's reliability/calibration report from
-  // settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+  // settled bets (gibson#284, ADR-0122/ADR-0106): does a predicted 0.8 mean
   // 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
   // with a Brier score and a binned reliability-diagram curve — the source for
   // the dashboard's reliability diagram (dashboard#98).
@@ -145,7 +145,7 @@ service WorldService {
   }
 
   // GetReputation returns one technique's current track record in one scope
-  // (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+  // (ADR-0122, ADR-0129 §3, gibson#267): does this technique tend to work
   // here? Read-only projection of the technique x environment belief a
   // settled bet updates (brain.UpdateReputation) — a caller that only needs
   // one key's current value, not the full tenant-wide breakdown
@@ -160,7 +160,7 @@ service WorldService {
   }
 
   // ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
-  // a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+  // a Hypothesis that carries a bettable HypothesisID (ADR-0121/ADR-0122,
   // sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
   // HITL-settle review queue. Read-only, so relation is member like every
   // other WorldService read.
@@ -174,7 +174,7 @@ service WorldService {
   }
 
   // SettleBetByHITL records a human review verdict on a bet (gibson#280,
-  // ADR-0023 decision 3): true_positive/false_positive settle the bet
+  // ADR-0123 decision 3): true_positive/false_positive settle the bet
   // (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
   // backend's own refusal semantics (a bet's binary settlement has no "not
   // actionable" outcome the way a surfaced surprise does). A settlement is a
@@ -198,7 +198,7 @@ message MissionView {
   string status = 3;
   string reason = 4;
   // belief_model is the belief-model version the mission was pinned to at
-  // launch (ADR-0005 §5). The daemon stamps the provider's current artifact
+  // launch (ADR-0134 §5). The daemon stamps the provider's current artifact
   // onto the mission when it starts, and the World carries it from there, so a
   // reviewer can tell which model judged a run. Empty means the mission ran
   // unpinned: an OSS install with no base model, or a placeholder provider.
@@ -370,7 +370,7 @@ message GetFrameAtResponse {
 
 // LabelView is one applied review label (a gibson.world.v1 view of a brain
 // Label): the verdict, optional corrected severity/category, and the user who
-// applied it (provenance only — labels pool tenant-wide; ADR-0006).
+// applied it (provenance only — labels pool tenant-wide; ADR-0106).
 message LabelView {
   string target_id = 1; // the labelled item (a finding id or surprise host id)
   string verdict = 2;   // "true_positive" | "false_positive" | "dismiss"
@@ -494,7 +494,7 @@ message ListOpenBetsResponse {
 
 // SettleBetByHITLRequest names the bet and the reviewer's verdict.
 // The reviewing user is resolved server-side from the caller's identity
-// (ADR-0006 §6 provenance rule), never taken from the request — the same
+// (ADR-0106 §6 provenance rule), never taken from the request — the same
 // rule SubmitLabel already follows, so a caller can never attribute a
 // settlement to another user.
 message SettleBetByHITLRequest {
@@ -513,7 +513,7 @@ message SettleBetByHITLResponse {
   bool settled = 1;
 }
 
-// GetReputationRequest names the technique x environment key (ADR-0029 §3):
+// GetReputationRequest names the technique x environment key (ADR-0129 §3):
 // technique is the settlement.TechniqueID a Bet/Hypothesis names (e.g.
 // "T1190"); scope_id is the "environment" — the same ScopeID coordinate
 // every other observation in this brain partitions identity by.

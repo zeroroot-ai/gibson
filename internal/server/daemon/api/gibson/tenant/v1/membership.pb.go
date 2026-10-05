@@ -7,7 +7,7 @@
 // Package gibson.tenant.v1 — MembershipService: customer-callable tenant
 // membership and team management surface. Moved from the PRIVATE
 // gibson.admin.v1.TenantAdminService (platform-sdk) into the OSS SDK
-// as part of the admin-surface-recategorization (ADR-0039 implementation).
+// as part of the admin-surface-recategorization (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // These RPCs are customer-callable because tenant owners and admins
 // regularly manage their team memberships and access controls via the

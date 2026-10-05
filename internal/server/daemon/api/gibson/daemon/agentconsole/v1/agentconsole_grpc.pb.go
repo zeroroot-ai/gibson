@@ -28,7 +28,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // AgentConsoleService is the daemon's read-only, tenant-scoped view of the
-// agents running RIGHT NOW and their live structured events (ADR-0016 S11,
+// agents running RIGHT NOW and their live structured events (ADR-0116 S11,
 // gibson#1599). While a sandboxed agent runs, the launcher tees the agent's
 // opencode NDJSON output into the daemon's in-memory registry; this service
 // exposes it. It backs the dashboard's live agent console (S12).
@@ -98,7 +98,7 @@ type AgentConsoleService_StreamAgentEventsClient = grpc.ServerStreamingClient[Ag
 // for forward compatibility.
 //
 // AgentConsoleService is the daemon's read-only, tenant-scoped view of the
-// agents running RIGHT NOW and their live structured events (ADR-0016 S11,
+// agents running RIGHT NOW and their live structured events (ADR-0116 S11,
 // gibson#1599). While a sandboxed agent runs, the launcher tees the agent's
 // opencode NDJSON output into the daemon's in-memory registry; this service
 // exposes it. It backs the dashboard's live agent console (S12).

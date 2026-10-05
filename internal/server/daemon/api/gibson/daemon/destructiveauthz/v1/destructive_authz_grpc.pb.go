@@ -30,10 +30,10 @@ const (
 //
 // DestructiveAuthorizationService is the daemon API backing the dashboard's
 // destructive-action authorization queue (dashboard#99, gibson#336). Per
-// ADR-0028, a destructive or irreversible proof-of-demonstration
-// (ADR-0027) runs only after a human authorizes that one specific action
+// ADR-0132, a destructive or irreversible proof-of-demonstration
+// (ADR-0131) runs only after a human authorizes that one specific action
 // here: the bet stays OPEN and the rest of the fleet keeps working while
-// exactly one action awaits a decision (ADR-0028 decision 2 — the gate is
+// exactly one action awaits a decision (ADR-0132 decision 2 — the gate is
 // per-action, never per-mission).
 //
 // Backed by internal/engine/brain.DestructiveAuthorizationQueue
@@ -47,11 +47,11 @@ type DestructiveAuthorizationServiceClient interface {
 	// (hypothesis id) order.
 	ListPendingDestructiveActions(ctx context.Context, in *ListPendingDestructiveActionsRequest, opts ...grpc.CallOption) (*ListPendingDestructiveActionsResponse, error)
 	// ApproveDestructiveAction authorizes the named pending action
-	// (ADR-0028 decision 3), unblocking the fleet's settlement attempt for
+	// (ADR-0132 decision 3), unblocking the fleet's settlement attempt for
 	// it. Refused if action_id names no pending action for the caller's
 	// tenant, or one already decided (terminal: the first decision wins).
 	ApproveDestructiveAction(ctx context.Context, in *ApproveDestructiveActionRequest, opts ...grpc.CallOption) (*ApproveDestructiveActionResponse, error)
-	// DenyDestructiveAction refuses the named pending action (ADR-0028
+	// DenyDestructiveAction refuses the named pending action (ADR-0132
 	// decision 3). Same refusal rules as ApproveDestructiveAction.
 	DenyDestructiveAction(ctx context.Context, in *DenyDestructiveActionRequest, opts ...grpc.CallOption) (*DenyDestructiveActionResponse, error)
 }
@@ -100,10 +100,10 @@ func (c *destructiveAuthorizationServiceClient) DenyDestructiveAction(ctx contex
 //
 // DestructiveAuthorizationService is the daemon API backing the dashboard's
 // destructive-action authorization queue (dashboard#99, gibson#336). Per
-// ADR-0028, a destructive or irreversible proof-of-demonstration
-// (ADR-0027) runs only after a human authorizes that one specific action
+// ADR-0132, a destructive or irreversible proof-of-demonstration
+// (ADR-0131) runs only after a human authorizes that one specific action
 // here: the bet stays OPEN and the rest of the fleet keeps working while
-// exactly one action awaits a decision (ADR-0028 decision 2 — the gate is
+// exactly one action awaits a decision (ADR-0132 decision 2 — the gate is
 // per-action, never per-mission).
 //
 // Backed by internal/engine/brain.DestructiveAuthorizationQueue
@@ -117,11 +117,11 @@ type DestructiveAuthorizationServiceServer interface {
 	// (hypothesis id) order.
 	ListPendingDestructiveActions(context.Context, *ListPendingDestructiveActionsRequest) (*ListPendingDestructiveActionsResponse, error)
 	// ApproveDestructiveAction authorizes the named pending action
-	// (ADR-0028 decision 3), unblocking the fleet's settlement attempt for
+	// (ADR-0132 decision 3), unblocking the fleet's settlement attempt for
 	// it. Refused if action_id names no pending action for the caller's
 	// tenant, or one already decided (terminal: the first decision wins).
 	ApproveDestructiveAction(context.Context, *ApproveDestructiveActionRequest) (*ApproveDestructiveActionResponse, error)
-	// DenyDestructiveAction refuses the named pending action (ADR-0028
+	// DenyDestructiveAction refuses the named pending action (ADR-0132
 	// decision 3). Same refusal rules as ApproveDestructiveAction.
 	DenyDestructiveAction(context.Context, *DenyDestructiveActionRequest) (*DenyDestructiveActionResponse, error)
 	mustEmbedUnimplementedDestructiveAuthorizationServiceServer()

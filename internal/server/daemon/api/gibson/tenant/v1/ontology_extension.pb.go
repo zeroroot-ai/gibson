@@ -2,7 +2,7 @@
 // that can be found in the LICENSE file in the repo root.
 
 // OntologyExtensionService is the tenant-OWNER-facing approval surface for
-// agent-proposed Taxonomy extensions (ADR-0024 §2, ADR-0033 decisions 2-3,
+// agent-proposed Taxonomy extensions (ADR-0124 §2, ADR-0133 decisions 2-3,
 // gibson#392).
 //
 // An agent proposes a new Taxonomy node label or relationship type it
@@ -10,7 +10,7 @@
 // agent-facing HarnessCallbackService RPC in the OSS SDK). That proposal is
 // folded into the caller's tenant World as a pending sighting and counted
 // for recurrence by taxonomy.PromotionGate — it is NEVER auto-promoted
-// (ADR-0033 decision 3).
+// (ADR-0133 decision 3).
 //
 // This service is the other end of that pipeline: the tenant owner reviews
 // every pending proposal (ListOntologyExtensionProposals) and explicitly
@@ -22,7 +22,7 @@
 // to every mission in that tenant from then on. Rejection is a terminal
 // decision recorded for audit; it never mutates the Taxonomy.
 //
-// Gated strictly to the tenant's OWNER relation (not "admin"): ADR-0033
+// Gated strictly to the tenant's OWNER relation (not "admin"): ADR-0133
 // decision 3 calls for "explicit tenant-owner approval" specifically — one
 // step stronger than the "tenant admin" gate DomainPackService's
 // EnableDomainPack uses for already-curated catalog content. A proposal
@@ -368,7 +368,7 @@ func (x *ApproveOntologyExtensionProposalRequest) GetLabel() string {
 // ApproveOntologyExtensionProposalResponse is intentionally empty: whether
 // this approval ALSO completed settlement (the proposal had already recurred
 // enough times, so it is live now) is decided by the tenant's brain.Engine
-// single-writer fold, which runs asynchronously off this RPC (ADR-0001,
+// single-writer fold, which runs asynchronously off this RPC (ADR-0101,
 // mirroring ProposeOntologyExtension's own documented contract). A caller
 // that needs the resulting promoted/live state calls
 // ListOntologyExtensionProposals afterward rather than assume it is visible
@@ -570,12 +570,12 @@ func (x *SubmitOntologyExtensionUpstreamRequest) GetLabel() string {
 }
 
 // SubmitOntologyExtensionUpstreamResponse carries the rendered SDK Domain
-// Pack contribution artifact (ADR-0033 decision 2's final arrow: "owner
+// Pack contribution artifact (ADR-0133 decision 2's final arrow: "owner
 // 'submit upstream' -> contribution", gibson#393) — the exact file content a
 // human or CI commits into the SDK's pack source tree to open the review PR.
 //
 // This daemon does NOT open that PR itself: gibson holds no GitHub credential
-// or bot identity scoped to the `sdk` repository, and ADR-0033 names the
+// or bot identity scoped to the `sdk` repository, and ADR-0133 names the
 // contribution as "a PR into the SDK, which anyone may open" — a step the
 // design deliberately leaves to a person, the same way other owner-only
 // actions in this org (DNS, Stripe keys, required reviewers) are hand-offs
