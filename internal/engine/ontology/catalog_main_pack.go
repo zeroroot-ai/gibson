@@ -92,7 +92,7 @@ func MainDomainPack() DomainPack {
 		// that answers is reachable, and a reachable endpoint can be
 		// exploitable. EXPOSES is the edge of this pack from a host to its
 		// endpoint, and it feeds "reachable".
-		BeliefSchema: &BeliefSchemaExtension{
+		BeliefSchema: BeliefSchemaExtension{
 			Nodes: []NodeBeliefSchema{{
 				NodeType: "WebEndpoint",
 				Variables: []BeliefVariable{

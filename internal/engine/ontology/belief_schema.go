@@ -190,6 +190,11 @@ type BeliefSchemaRegistry struct {
 	enablementEdges map[string]string
 }
 
+// empty reports whether the extension declares no node type and no edge.
+func (e BeliefSchemaExtension) empty() bool {
+	return len(e.Nodes) == 0 && len(e.EnablementEdges) == 0
+}
+
 // NewBeliefSchemaRegistry constructs an empty registry. Register the core
 // seed with RegisterCoreBeliefSchemaSeed, then let Domain Packs extend it via
 // RegisterExtension.

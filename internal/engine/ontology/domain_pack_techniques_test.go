@@ -85,7 +85,7 @@ func TestMainDomainPack_BeliefSchemaRegistersOnTheCoreSeed(t *testing.T) {
 	require.False(t, reg.IsEnablementEdge("EXPOSES"))
 
 	pack := MainDomainPack()
-	require.NotNil(t, pack.BeliefSchema)
+	require.False(t, pack.BeliefSchema.empty())
 	require.NoError(t, pack.RegisterBeliefSchema(reg))
 
 	assert.True(t, reg.IsBeliefBearing("WebEndpoint"))
@@ -109,7 +109,7 @@ func TestDomainPack_BeliefSchema(t *testing.T) {
 		require.NoError(t, pack.Validate())
 	})
 	t.Run("an extension with an unknown dependency fails Validate", func(t *testing.T) {
-		pack := DomainPack{Name: "bad", BeliefSchema: &BeliefSchemaExtension{
+		pack := DomainPack{Name: "bad", BeliefSchema: BeliefSchemaExtension{
 			Nodes: []NodeBeliefSchema{{NodeType: "Thing", Variables: []BeliefVariable{
 				{Name: "a", DependsOn: []string{"missing"}},
 			}}},
@@ -118,17 +118,17 @@ func TestDomainPack_BeliefSchema(t *testing.T) {
 	})
 	t.Run("an edge that conflicts with the core seed fails Validate", func(t *testing.T) {
 		// The core seed says that RESOLVES_TO feeds "reachable".
-		pack := DomainPack{Name: "bad", BeliefSchema: &BeliefSchemaExtension{
+		pack := DomainPack{Name: "bad", BeliefSchema: BeliefSchemaExtension{
 			EnablementEdges: []EnablementEdgeSpec{{RelType: "RESOLVES_TO", TargetVariable: "juicy"}},
 		}}
 		require.ErrorContains(t, pack.Validate(), "belief schema")
 	})
 	t.Run("two packs register under two names", func(t *testing.T) {
 		reg := NewBeliefSchemaRegistry()
-		a := DomainPack{Name: "a", BeliefSchema: &BeliefSchemaExtension{
+		a := DomainPack{Name: "a", BeliefSchema: BeliefSchemaExtension{
 			Nodes: []NodeBeliefSchema{{NodeType: "A", Variables: []BeliefVariable{{Name: "x"}}}},
 		}}
-		b := DomainPack{Name: "b", BeliefSchema: &BeliefSchemaExtension{
+		b := DomainPack{Name: "b", BeliefSchema: BeliefSchemaExtension{
 			Nodes: []NodeBeliefSchema{{NodeType: "B", Variables: []BeliefVariable{{Name: "y"}}}},
 		}}
 		require.NoError(t, a.RegisterBeliefSchema(reg))

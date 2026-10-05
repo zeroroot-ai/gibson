@@ -150,10 +150,10 @@ type DomainPack struct {
 
 	// BeliefSchema is the belief schema extension of this pack (ADR-0129):
 	// more node types that bear belief, more variables, more enablement
-	// edges. nil means that the pack adds none. Validate requires it to
+	// edges. An empty extension means that the pack adds none. Validate requires it to
 	// register on top of the core seed. RegisterBeliefSchema registers it
 	// with a registry.
-	BeliefSchema *BeliefSchemaExtension `json:"belief_schema,omitempty"`
+	BeliefSchema BeliefSchemaExtension `json:"belief_schema,omitzero"`
 
 	// Author identifies who curates this pack (ADR-0133): the
 	// platform owner for a catalog pack, or the tenant that proposed a
@@ -345,10 +345,10 @@ func (p *DomainPack) ExtendTechniques(base *taxonomy.TechniqueHierarchy) (*taxon
 // unknown dependency, a cycle, or an enablement edge that conflicts with
 // one that reg already holds fails the call and leaves reg unchanged.
 func (p *DomainPack) RegisterBeliefSchema(reg *BeliefSchemaRegistry) error {
-	if p.BeliefSchema == nil {
+	if p.BeliefSchema.empty() {
 		return nil
 	}
-	if err := reg.RegisterExtension(p.beliefSchemaExtensionName(), *p.BeliefSchema); err != nil {
+	if err := reg.RegisterExtension(p.beliefSchemaExtensionName(), p.BeliefSchema); err != nil {
 		return fmt.Errorf("domain pack %q: belief schema: %w", p.Name, err)
 	}
 	return nil
@@ -357,7 +357,7 @@ func (p *DomainPack) RegisterBeliefSchema(reg *BeliefSchemaRegistry) error {
 // validateBeliefSchema proves that the belief schema extension of the pack
 // registers on top of the core seed, which each install has.
 func (p *DomainPack) validateBeliefSchema() error {
-	if p.BeliefSchema == nil {
+	if p.BeliefSchema.empty() {
 		return nil
 	}
 	reg := NewBeliefSchemaRegistry()
