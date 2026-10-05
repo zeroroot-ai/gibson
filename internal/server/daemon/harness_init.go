@@ -319,14 +319,14 @@ func (d *daemonImpl) buildSlotManagerForSet(ctx context.Context, tenantID string
 // FGA. An error stops the build: without the default, the gate would deny the
 // tenant's members, and the cause would read as a denial and not as an FGA
 // failure.
-func (d *daemonImpl) ensureDefaultModelGrants(ctx context.Context, tenantID string, providers []string) error {
-	if len(providers) == 0 {
+func (d *daemonImpl) ensureDefaultModelGrants(ctx context.Context, tenantID string, names []string) error {
+	if len(names) == 0 {
 		return nil
 	}
 	if d.authorizer == nil {
 		return errors.New("model access: no authorizer is configured, so the default grant cannot be written")
 	}
-	for _, name := range providers {
+	for _, name := range names {
 		key := tenantID + "|" + name
 		if _, done := d.defaultModelGrants.Load(key); done {
 			continue

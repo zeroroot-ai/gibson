@@ -38,9 +38,11 @@ func withMissionInitiator(next llm.SlotManager, createdBy principal.Principal) l
 }
 
 func (m *initiatorSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
+	//nolint:wrapcheck // a decorator returns the slot manager's own error, which callers match by code
 	return m.next.ResolveSlot(auth.ContextWithInitiatorUser(ctx, m.userID), slot, override)
 }
 
 func (m *initiatorSlotManager) ValidateSlot(ctx context.Context, slot agent.SlotDefinition) error {
+	//nolint:wrapcheck // a decorator returns the slot manager's own error, which callers match by code
 	return m.next.ValidateSlot(auth.ContextWithInitiatorUser(ctx, m.userID), slot)
 }

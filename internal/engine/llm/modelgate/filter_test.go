@@ -87,7 +87,7 @@ func initiatorCtx(t *testing.T, user string) context.Context {
 	return auth.ContextWithInitiatorUser(tenantCtx(t), user)
 }
 
-func permitted(t *testing.T, f Filter, ctx context.Context) bool {
+func permitted(ctx context.Context, t *testing.T, f Filter) bool {
 	t.Helper()
 	got, err := f.Permitted(ctx, []Candidate{opus})
 	if err != nil {
@@ -106,17 +106,17 @@ func TestDefaultAllow(t *testing.T) {
 	}
 	f := NewFGAFilter(fga, nil, 0)
 
-	if !permitted(t, f, initiatorCtx(t, "alice")) {
+	if !permitted(initiatorCtx(t, "alice"), t, f) {
 		t.Error("a member who started the mission is denied; the default must allow her")
 	}
 	component := auth.WithIdentity(tenantCtx(t), auth.Identity{Subject: "agent_principal:scanner", Tenant: auth.MustNewTenantID(testTenant)})
-	if !permitted(t, f, component) {
+	if !permitted(component, t, f) {
 		t.Error("a member component is denied; the default must allow it")
 	}
-	if !permitted(t, f, tenantCtx(t)) {
+	if !permitted(tenantCtx(t), t, f) {
 		t.Error("work that no person started is denied while the tenant-wide grant stands")
 	}
-	if permitted(t, f, initiatorCtx(t, "mallory")) {
+	if permitted(initiatorCtx(t, "mallory"), t, f) {
 		t.Error("a person who is not a member of the tenant is permitted")
 	}
 }
@@ -137,13 +137,13 @@ func TestExplicitOff(t *testing.T) {
 		t.Fatalf("EnsureDefaultGrant after a revoke = %v, %v; it must not write the default again", wrote, err)
 	}
 	f := NewFGAFilter(fga, nil, 0)
-	if permitted(t, f, initiatorCtx(t, "alice")) {
+	if permitted(initiatorCtx(t, "alice"), t, f) {
 		t.Error("a member is permitted after the administrator revoked the tenant-wide grant")
 	}
-	if permitted(t, f, tenantCtx(t)) {
+	if permitted(tenantCtx(t), t, f) {
 		t.Error("work that no person started is permitted after the revoke")
 	}
-	if !permitted(t, f, initiatorCtx(t, "bob")) {
+	if !permitted(initiatorCtx(t, "bob"), t, f) {
 		t.Error("a person with a grant on the model is denied")
 	}
 }
@@ -155,7 +155,7 @@ func TestFailClosed(t *testing.T) {
 		if _, err := EnsureDefaultGrant(context.Background(), fga, testTenant, "anthropic"); err != nil {
 			t.Fatalf("EnsureDefaultGrant: %v", err)
 		}
-		if permitted(t, NewFGAFilter(fga, nil, 0), context.Background()) {
+		if permitted(context.Background(), t, NewFGAFilter(fga, nil, 0)) {
 			t.Error("a request that names nobody is permitted")
 		}
 	})
@@ -207,19 +207,19 @@ func TestCache(t *testing.T) {
 	}
 	f := NewFGAFilter(fga, nil, 0)
 	ctx := initiatorCtx(t, "alice")
-	if !permitted(t, f, ctx) {
+	if !permitted(ctx, t, f) {
 		t.Fatal("first call denied")
 	}
 	asked := fga.checks
-	if !permitted(t, f, ctx) || fga.checks != asked {
+	if !permitted(ctx, t, f) || fga.checks != asked {
 		t.Errorf("second call asked FGA again (%d → %d checks); the decision must be cached", asked, fga.checks)
 	}
 	delete(fga.tuples, authz.Tuple{User: TenantMembers(testTenant), Relation: "can_use", Object: "provider:acme/anthropic"})
-	if !permitted(t, f, ctx) {
+	if !permitted(ctx, t, f) {
 		t.Error("the cached decision changed without an invalidation")
 	}
 	f.InvalidateCache()
-	if permitted(t, f, ctx) {
+	if permitted(ctx, t, f) {
 		t.Error("after InvalidateCache the revoke must deny")
 	}
 	if got, err := f.Permitted(ctx, nil); err != nil || len(got) != 0 {
@@ -260,7 +260,7 @@ func TestTenantScope(t *testing.T) {
 	// A legacy global grant from before the namespace.
 	fga.tuples[authz.Tuple{User: "user:alice", Relation: "can_use", Object: "provider:anthropic"}] = true
 
-	if permitted(t, NewFGAFilter(fga, nil, 0), initiatorCtx(t, "alice")) {
+	if permitted(initiatorCtx(t, "alice"), t, NewFGAFilter(fga, nil, 0)) {
 		t.Error("a grant outside the tenant's namespace permitted a model in tenant acme")
 	}
 }
