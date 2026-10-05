@@ -34,6 +34,8 @@ func expectChainPreamble(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
+	mock.ExpectQuery("audit_chain_anchor").
+		WillReturnRows(sqlmock.NewRows([]string{"first_seq", "prev_hash"}))
 }
 
 // testEvent returns a minimal valid Event. Mirrors the helper of the same

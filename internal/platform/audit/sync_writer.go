@@ -3,33 +3,13 @@
 
 // Package audit — sync_writer.go
 //
-// WriteSync is a strict, blocking variant of Log() for callers that MUST
-// know an audit event was persisted before they take a security-relevant
-// action.
+// WriteSync is the write for a caller that changes state. The caller must
+// know that Postgres has the audit record before the action takes effect.
 //
-// Background:
-//
-//   - The default Writer.Log() is best-effort: it enqueues the event into
-//     a 1000-slot buffer and returns immediately. If the buffer is full,
-//     the event is dropped and `gibson_audit_dropped_total` increments.
-//     This is the right tradeoff for the daemon's general audit pipeline
-//     (high volume, callers cannot afford to block on Postgres I/O).
-//
-//   - The dispatch policy gate (R3.5) and the OverrideDispatchPolicy RPC
-//     (R3.4) need a stronger guarantee: the audit row MUST hit Postgres
-//     before the gate's allow/deny decision, or before the RPC's success
-//     reply, is observable. Otherwise an attacker who races the audit
-//     pipeline could see a deny silently dropped and replay the request.
-//
-// WriteSync writes the single event in its own bulk-INSERT (using the
-// same `flush` path as the batched writer) and surfaces backend errors to
-// the caller — the dispatch path is responsible for translating an error
-// into an outright deny rather than a quiet best-effort emit.
-//
-// The existing Writer.Log() signature is unchanged; non-dispatch paths
-// keep best-effort semantics.
-//
-// Spec: setec-sandbox-prod-default §"Audit pipeline" (R3.5).
+// Writer.Log queues the event and returns. It drops nothing, but it cannot
+// tell the caller that a write failed. WriteSync writes the single event in
+// its own transaction (the same flush path as the batching writer) and
+// returns the backend error. The caller then fails its action.
 
 package audit
 
@@ -44,16 +24,10 @@ import (
 //
 // Behaviour contract:
 //   - On success, the event is durably stored before WriteSync returns.
-//   - On backend error, the error is returned (NOT swallowed). Callers
-//     in security-relevant paths (dispatch gate) MUST treat a non-nil
-//     error as audit pipeline failure and refuse the dispatch.
-//   - WriteSync does NOT increment `gibson_audit_dropped_total` (it
-//     never drops; either it succeeds or it errors). It does increment
-//     `gibson_audit_events_total` on success so dashboards reflect the
-//     synchronous events alongside the asynchronous ones.
-//
-// This method shares the underlying flush implementation with the
-// batching writer's run loop — see flush() in writer.go.
+//   - On backend error, the error is returned (NOT swallowed), and
+//     gibson_audit_write_errors_total increments. The caller MUST fail its
+//     action.
+//   - On success it increments gibson_audit_events_total.
 func (w *Writer) WriteSync(ctx context.Context, event Event) error {
 	if w == nil {
 		return fmt.Errorf("audit: WriteSync called on nil Writer")
@@ -62,6 +36,7 @@ func (w *Writer) WriteSync(ctx context.Context, event Event) error {
 		return fmt.Errorf("audit: WriteSync: writer has nil db")
 	}
 	if err := w.flush(ctx, []Event{event}); err != nil {
+		w.writeError([]Event{event}, err, "the caller gets the error and fails its action")
 		return err
 	}
 	auditEventsTotal.WithLabelValues(event.Action).Inc()

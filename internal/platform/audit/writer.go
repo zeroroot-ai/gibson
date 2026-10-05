@@ -3,7 +3,8 @@
 
 // Package audit — writer.go
 //
-// Writer is an asynchronous, batching writer for Postgres-backed audit events.
+// Writer is the batching writer for the Postgres audit_log table. Postgres is
+// the durable copy of each audit record.
 //
 // Background flush goroutine:
 //   - Accumulates events into a batch.
@@ -12,25 +13,24 @@
 //   - Flush extends each tenant's hash chain (chain.go) and issues a single
 //     parameterised bulk INSERT inside one transaction.
 //
-// # Enqueue behaviour under load
+// # An audit write never drops
 //
-// Log applies bounded backpressure: it tries a non-blocking send first, and
-// only if the buffer is full does it wait up to enqueueTimeout for space.
-// That absorbs bursts — the flush loop drains 100 rows at a time — without
-// letting an audit-backend outage block a request path indefinitely, which
-// would turn a degraded audit pipeline into a full daemon outage.
+// Log puts the event into a bounded queue. When the queue is full, Log
+// blocks until there is room: a full queue slows the caller and drops
+// nothing. When a flush fails, the writer keeps the batch and tries again
+// with a backoff. During that time the queue fills and callers wait.
 //
-// If the wait expires the event is dropped, and the drop is made loud rather
-// than quiet: gibson_audit_dropped_total increments, the event identity is
-// logged at ERROR, gibson_audit_last_drop_timestamp_seconds is stamped, and
-// any registered DropObserver is invoked. Callers that cannot tolerate a
-// drop at all must use WriteSync (sync_writer.go), which either persists or
-// returns an error.
+// A caller that changes state must not use Log. It uses WriteSync
+// (sync_writer.go), which returns after Postgres has the record or returns
+// an error, so the caller can fail its action.
 //
-// Alert on drops — they mean audit records were lost:
+// One loss remains. The queue is in memory, so a process that exits while
+// Postgres does not answer loses the events that are still in the queue.
+// The writer logs that loss at ERROR with the number of events.
 //
-//	increase(gibson_audit_dropped_total[5m]) > 0
-//	increase(gibson_audit_write_drops_total[5m]) > 0
+// Each failed write increments gibson_audit_write_errors_total. Alert on it:
+//
+//	increase(gibson_audit_write_errors_total[5m]) > 0
 //
 // Lifecycle:
 //
@@ -40,9 +40,8 @@
 //
 // Prometheus metrics:
 //
-//	gibson_audit_events_total{action}              — events successfully enqueued
-//	gibson_audit_dropped_total                     — events dropped after backpressure expired
-//	gibson_audit_last_drop_timestamp_seconds       — unix time of the most recent drop
+//	gibson_audit_events_total{action}   — events accepted for writing
+//	gibson_audit_write_errors_total     — failed writes to audit_log
 package audit
 
 import (
@@ -54,7 +53,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -72,11 +70,14 @@ const (
 	// not yet full.
 	flushInterval = time.Second
 
-	// enqueueTimeout bounds how long Log will wait for buffer space before
-	// giving up and dropping. Long enough for the flush loop to turn over a
-	// full batch, short enough that a wedged Postgres cannot stall a request
-	// path for a noticeable time.
-	enqueueTimeout = 250 * time.Millisecond
+	// retryBackoffMin and retryBackoffMax bound the wait between two tries
+	// of a batch that Postgres did not accept.
+	retryBackoffMin = 500 * time.Millisecond
+	retryBackoffMax = 15 * time.Second
+
+	// shutdownFlushTimeout bounds one write that the writer makes after it
+	// was told to stop.
+	shutdownFlushTimeout = 10 * time.Second
 )
 
 // ---------------------------------------------------------------------------
@@ -84,10 +85,9 @@ const (
 // ---------------------------------------------------------------------------
 
 var (
-	metricsOnce        sync.Once
-	auditEventsTotal   *prometheus.CounterVec
-	auditDroppedTotal  prometheus.Counter
-	auditLastDropStamp prometheus.Gauge
+	metricsOnce           sync.Once
+	auditEventsTotal      *prometheus.CounterVec
+	auditWriteErrorsTotal prometheus.Counter
 )
 
 // initMetrics registers the Prometheus counters once per process lifetime
@@ -99,20 +99,14 @@ func initMetrics() {
 		auditEventsTotal = promauto.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "gibson_audit_events_total",
-				Help: "Total number of audit events enqueued for writing, by action.",
+				Help: "Total number of audit events accepted for writing, by action.",
 			},
 			[]string{"action"},
 		)
-		auditDroppedTotal = promauto.NewCounter(
+		auditWriteErrorsTotal = promauto.NewCounter(
 			prometheus.CounterOpts{
-				Name: "gibson_audit_dropped_total",
-				Help: "Total number of audit events LOST because the write buffer stayed full past the backpressure deadline. Any non-zero increase is an alertable audit-integrity event.",
-			},
-		)
-		auditLastDropStamp = promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Name: "gibson_audit_last_drop_timestamp_seconds",
-				Help: "Unix timestamp of the most recent dropped audit event. Zero when no event has ever been dropped.",
+				Name: "gibson_audit_write_errors_total",
+				Help: "Total number of failed writes to the Postgres audit_log table. Alert on any increase.",
 			},
 		)
 	})
@@ -150,22 +144,11 @@ type Event struct {
 // Writer
 // ---------------------------------------------------------------------------
 
-// DropObserver is notified once per audit event that the Writer could not
-// enqueue. It runs on the calling goroutine, so implementations must return
-// promptly and must not call back into the Writer.
+// Writer batches audit events and flushes them to Postgres, extending a
+// per-tenant hash chain as it goes (chain.go).
 //
-// The point of the hook is that a lost audit record should be able to reach
-// something louder than a log line — a pager, a health signal, a refusal to
-// serve. Wiring one is the deployment's decision; the Writer only guarantees
-// it will be told.
-type DropObserver func(event Event)
-
-// Writer batches audit events and flushes them asynchronously to Postgres,
-// extending a per-tenant hash chain as it goes (chain.go).
-//
-// Writer is safe for concurrent use. Log applies bounded backpressure and
-// then drops loudly — see the package comment for the tradeoff and for the
-// alert expression.
+// Writer is safe for concurrent use. Log blocks when the queue is full and
+// drops nothing. See the package comment.
 type Writer struct {
 	db       *sql.DB
 	buffer   chan Event
@@ -173,15 +156,17 @@ type Writer struct {
 	done     chan struct{}
 	stopping chan struct{}
 	stopOnce sync.Once
-	dropped  atomic.Int64
-	onDrop   DropObserver
+
+	// retryMin and retryMax bound the backoff between two tries of a
+	// failed batch. Tests set shorter values.
+	retryMin time.Duration
+	retryMax time.Duration
 }
 
 // NewWriter constructs a Writer. Both db and logger must be non-nil.
 //
-// The Writer must be started via Start() before Log() calls will be
-// persisted. Events buffered before Start() (up to writerBufferSize) will be
-// flushed once the background goroutine starts.
+// Start the Writer before the first Log call. Log blocks on a full queue,
+// and only the goroutine that Start launches makes room.
 func NewWriter(db *sql.DB, logger *slog.Logger) *Writer {
 	if db == nil {
 		panic("audit.NewWriter: db must not be nil")
@@ -196,101 +181,84 @@ func NewWriter(db *sql.DB, logger *slog.Logger) *Writer {
 		logger:   logger.With("component", "audit.writer"),
 		done:     make(chan struct{}),
 		stopping: make(chan struct{}),
+		retryMin: retryBackoffMin,
+		retryMax: retryBackoffMax,
 	}
 }
 
-// WithDropObserver registers the observer invoked for every dropped event
-// and returns the Writer for chaining. Call before Start; the field is not
-// guarded for concurrent mutation.
-func (w *Writer) WithDropObserver(obs DropObserver) *Writer {
-	w.onDrop = obs
-	return w
-}
-
-// Dropped returns the number of audit events this Writer has lost. Non-zero
-// means the audit record has gaps: treat it as an integrity incident, not as
-// a capacity statistic.
-func (w *Writer) Dropped() int64 { return w.dropped.Load() }
-
-// Log enqueues an audit event for asynchronous persistence.
+// Log queues an audit event for the next flush.
 //
-// Log tries a non-blocking send first. If the buffer is full it waits up to
-// enqueueTimeout for space — bounded backpressure, so a burst is absorbed
-// rather than discarded — and only then gives up. Giving up is reported via
-// dropEvent: counter, ERROR log, timestamp gauge, and DropObserver.
+// When the queue is full, Log blocks until there is room. It drops nothing.
+// Use Log for an event of a read. A caller that changes state uses WriteSync
+// and fails its action on an error.
 //
-// Log never blocks longer than enqueueTimeout, and never blocks at all once
-// Stop has been called.
+// After Stop, the flush goroutine is gone. Log then writes the event to
+// Postgres itself before it returns.
 func (w *Writer) Log(event Event) {
 	// Checked in its own select first: a select with both a ready send and a
-	// closed channel picks between them at random, which would make
-	// post-Stop behaviour a coin flip. After Stop the drain has already run,
-	// so anything enqueued now would vanish uncounted — drop it loudly
-	// instead.
+	// closed channel picks between them at random.
+	auditEventsTotal.WithLabelValues(event.Action).Inc()
 	select {
 	case <-w.stopping:
-		w.dropEvent(event, "writer stopped")
+		w.writeDirect([]Event{event})
 		return
 	default:
 	}
 
 	select {
 	case w.buffer <- event:
-		auditEventsTotal.WithLabelValues(event.Action).Inc()
+	case <-w.stopping:
+		w.writeDirect([]Event{event})
 		return
+	}
+
+	// Stop can close the channel between the check and the send. The flush
+	// goroutine may then have left before it saw this event. Take what is
+	// still in the queue and write it here. Each queued event has exactly
+	// one reader, so no event is written twice.
+	select {
+	case <-w.stopping:
+		w.writeDirect(w.takeQueued())
 	default:
 	}
+}
 
-	timer := time.NewTimer(enqueueTimeout)
-	defer timer.Stop()
-
-	select {
-	case w.buffer <- event:
-		auditEventsTotal.WithLabelValues(event.Action).Inc()
-	case <-w.stopping:
-		w.dropEvent(event, "writer stopped")
-	case <-timer.C:
-		w.dropEvent(event, "buffer full past the backpressure deadline")
+// takeQueued removes the events that are in the queue now and returns them.
+func (w *Writer) takeQueued() []Event {
+	var out []Event
+	for {
+		select {
+		case ev := <-w.buffer:
+			out = append(out, ev)
+		default:
+			return out
+		}
 	}
 }
 
-// dropEvent records the loss of an audit event as loudly as this layer can:
-// a counter an alert can fire on, a wall-clock stamp, an ERROR log carrying
-// enough identity to reconstruct what was lost, and the observer hook.
-func (w *Writer) dropEvent(event Event, reason string) {
-	w.dropped.Add(1)
-	auditDroppedTotal.Inc()
-	auditLastDropStamp.SetToCurrentTime()
-
-	w.logger.Error("audit: EVENT LOST — audit record was not persisted",
-		slog.String("reason", reason),
-		slog.String("tenant_id", event.TenantID),
-		slog.String("actor_id", event.ActorID),
-		slog.String("action", event.Action),
-		slog.String("target_type", event.TargetType),
-		slog.String("target_id", event.TargetID),
-		slog.String("decision", event.Decision),
-		slog.Int64("dropped_total", w.dropped.Load()),
-	)
-
-	if w.onDrop != nil {
-		w.onDrop(event)
+// writeDirect writes events to Postgres on the calling goroutine. The
+// writer uses it after Stop, when no flush goroutine can retry. A failure
+// here loses the events, and the log says so.
+func (w *Writer) writeDirect(events []Event) {
+	for start := 0; start < len(events); start += batchSize {
+		batch := events[start:min(start+batchSize, len(events))]
+		ctx, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
+		err := w.flush(ctx, batch)
+		cancel()
+		if err != nil {
+			w.writeError(batch, err, "the writer is stopped, these audit records are LOST")
+		}
 	}
 }
 
-// dropBatch records the loss of a whole batch. It emits one ERROR rather
-// than one per event — a wedged backend would otherwise flood the log at
-// exactly the moment the log is what an operator is reading — but every
-// event still counts towards gibson_audit_dropped_total and still reaches
-// the DropObserver, so nothing is lost silently.
-func (w *Writer) dropBatch(batch []Event, reason string) {
+// writeError records one failed write: the counter that the alert reads,
+// and one ERROR log for the batch. One line for a batch keeps the log
+// readable when Postgres is down.
+func (w *Writer) writeError(batch []Event, err error, consequence string) {
+	auditWriteErrorsTotal.Inc()
 	if len(batch) == 0 {
 		return
 	}
-	w.dropped.Add(int64(len(batch)))
-	auditDroppedTotal.Add(float64(len(batch)))
-	auditLastDropStamp.SetToCurrentTime()
-
 	actions := make([]string, 0, len(batch))
 	seen := make(map[string]struct{}, len(batch))
 	for _, ev := range batch {
@@ -300,19 +268,47 @@ func (w *Writer) dropBatch(batch []Event, reason string) {
 		seen[ev.Action] = struct{}{}
 		actions = append(actions, ev.Action)
 	}
-
-	w.logger.Error("audit: BATCH LOST — audit records were not persisted",
-		slog.String("reason", reason),
+	w.logger.Error("audit: write to audit_log failed",
+		slog.String("consequence", consequence),
 		slog.Int("batch_size", len(batch)),
 		slog.String("actions", strings.Join(actions, ",")),
 		slog.String("tenant_id", batch[0].TenantID),
-		slog.Int64("dropped_total", w.dropped.Load()),
+		slog.String("error", err.Error()),
 	)
+}
 
-	if w.onDrop != nil {
-		for _, ev := range batch {
-			w.onDrop(ev)
+// flushDurable writes batch to Postgres and returns after Postgres has it.
+// When a write fails, it waits and tries again. The caller does not read the
+// queue during that time, so the queue fills and Log callers wait.
+//
+// It gives up only when the writer stops. It then makes one last try and
+// reports a loss if that try fails.
+func (w *Writer) flushDurable(ctx context.Context, batch []Event) {
+	backoff := w.retryMin
+	for {
+		err := w.flush(ctx, batch)
+		if err == nil {
+			return
 		}
+		if ctx.Err() != nil {
+			w.writeDirect(batch)
+			return
+		}
+		w.writeError(batch, err, "the writer keeps the batch and tries again")
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-w.stopping:
+			timer.Stop()
+			w.writeDirect(batch)
+			return
+		case <-ctx.Done():
+			timer.Stop()
+			w.writeDirect(batch)
+			return
+		}
+		backoff = min(backoff*2, w.retryMax)
 	}
 }
 
@@ -327,7 +323,7 @@ func (w *Writer) Start(ctx context.Context) {
 }
 
 // Stop signals the background goroutine to stop, waits for remaining buffered
-// events to be flushed, then returns.
+// events to be written, then returns.
 //
 // The provided context controls the deadline for the final flush. Stop blocks
 // until the goroutine exits or ctx is cancelled. Stop is idempotent.
@@ -361,33 +357,18 @@ func (w *Writer) run(ctx context.Context) {
 		if len(batch) == 0 {
 			return
 		}
-		if err := w.flush(ctx, batch); err != nil {
-			// The batch is gone. That is a lost audit record just as much as
-			// a full buffer is, so it goes through the same loud path rather
-			// than ending its life as one log line.
-			w.dropBatch(batch, "flush failed: "+err.Error())
-		}
+		w.flushDurable(ctx, batch)
 		// Reset without reallocating.
 		batch = batch[:0]
 	}
 
-	// drainAndExit empties whatever is already buffered, flushing as it goes.
-	// Nothing new can be enqueued once stopping is closed, and a cancelled
-	// ctx means the caller has already given up on us, so a non-blocking
-	// drain terminates.
+	// drainAndExit writes the batch in hand and what is in the queue. The
+	// lifecycle context can be cancelled here, so each write gets a context
+	// of its own. A Log call that races the stop writes its own event (see
+	// Log), so a drain that does not block terminates.
 	drainAndExit := func() {
-		for {
-			select {
-			case event := <-w.buffer:
-				batch = append(batch, event)
-				if len(batch) >= batchSize {
-					flush()
-				}
-			default:
-				flush()
-				return
-			}
-		}
+		w.writeDirect(batch)
+		w.writeDirect(w.takeQueued())
 	}
 
 	for {
