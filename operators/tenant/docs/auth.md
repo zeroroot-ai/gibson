@@ -37,12 +37,13 @@ No static tokens, no PATs, no `gsk_` keys.
 ## Service identity
 
 The operator pod has its own Zitadel service account, distinct from the
-dashboard's. Two env vars are required:
+dashboard's. Four env vars are required:
 
 ```
 ZITADEL_TENANT_OPERATOR_CLIENT_ID
 ZITADEL_TENANT_OPERATOR_CLIENT_SECRET
-ZITADEL_ISSUER         # e.g. https://auth.zeroroot.ai
+ZITADEL_URL             # the in-cluster Zitadel Service, e.g. http://gibson-zitadel:8080
+ZITADEL_EXTERNAL_DOMAIN # the public host the operator claims, e.g. app.zeroroot.ai
 ```
 
 The Helm Secret `gibson-zitadel-tenant-operator` mounts these

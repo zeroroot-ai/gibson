@@ -14,6 +14,8 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -34,7 +36,7 @@ func newTestServer(t *testing.T, routes map[string]http.HandlerFunc) Client {
 		handler(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return New(srv.URL, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token"}), "")
+	return mustNew(t, srv.URL, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "test-token"}))
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -43,13 +45,70 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// TestNew_InvalidURL verifies that an unparseable URL returns an errClient
-// that surfaces the error on every call.
-func TestNew_InvalidURL(t *testing.T) {
-	c := New("://bad-url", oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "")
-	_, err := c.CreateOrganization(context.Background(), "test", "test")
-	if err == nil {
-		t.Fatal("expected error from errClient, got nil")
+// testDomain is the public host the test clients claim.
+const testDomain = "app.example.test"
+
+// mustNew builds a client that connects to connectURL and claims testDomain.
+func mustNew(t *testing.T, connectURL string, tokens oauth2.TokenSource) Client {
+	t.Helper()
+	ep, err := zitadelconn.New(connectURL, testDomain)
+	if err != nil {
+		t.Fatalf("endpoint: %v", err)
+	}
+	c, err := New(ep, tokens)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return c
+}
+
+// TestNew_RefusesAZeroEndpoint: an Endpoint that zitadelconn never validated
+// names no Service and no host, so New refuses it at construction time.
+func TestNew_RefusesAZeroEndpoint(t *testing.T) {
+	c, err := New(zitadelconn.Endpoint{}, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}))
+	if err == nil || c != nil {
+		t.Fatalf("New(zero endpoint) = %v, %v; want a refusal", c, err)
+	}
+}
+
+// TestManagementCalls_SelectTheInstanceByHeader proves the Management client
+// reaches a Zitadel that selects its instance from x-zitadel-instance-host
+// (ADR-0092, gibson#222). The fake answers 404 to a request without the
+// header, which is how the real Zitadel answers a call by Service name.
+func TestManagementCalls_SelectTheInstanceByHeader(t *testing.T) {
+	fake := zitadelconntest.New(t, "", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{"result": []any{}})
+	}))
+	ep := fake.Endpoint(t)
+	tokens, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", APIScopes())
+	if err != nil {
+		t.Fatalf("TokenSource: %v", err)
+	}
+	c, err := New(ep, tokens)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if _, err := c.GetOrganization(context.Background(), "org-1"); !errors.Is(err, clients.ErrNotFound) {
+		t.Fatalf("GetOrganization: %v, want ErrNotFound from the empty search", err)
+	}
+	if n := fake.Refused(); n != 0 {
+		t.Errorf("the fake refused %d request(s); every request must carry the instance header", n)
+	}
+	if !fake.HasPath(http.MethodPost, "/oauth/v2/token") {
+		t.Error("the token request did not reach the Service")
+	}
+	var api int
+	for _, r := range fake.Requests() {
+		if r.Path == "/oauth/v2/token" {
+			continue
+		}
+		api++
+		if r.Auth != "Bearer "+zitadelconntest.AccessToken {
+			t.Errorf("%s %s Authorization = %q, want the token the Service issued", r.Method, r.Path, r.Auth)
+		}
+	}
+	if api == 0 {
+		t.Error("no Management request reached the Service")
 	}
 }
 
@@ -254,16 +313,6 @@ func TestEnsureHumanUser_ConflictLookupFailureSurfaces(t *testing.T) {
 	})
 	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
 		t.Fatal("expected an error when the conflict-lookup itself fails")
-	}
-}
-
-// TestEnsureHumanUser_ErrClient covers the errClient stand-in New returns
-// for an unparseable apiURL — every Client method must surface that
-// construction error, not panic or silently no-op.
-func TestEnsureHumanUser_ErrClient(t *testing.T) {
-	c := New("://bad-url", oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}), "")
-	if _, err := c.EnsureHumanUser(context.Background(), "org-abc", "alice@example.com"); err == nil {
-		t.Fatal("expected the errClient's construction error")
 	}
 }
 

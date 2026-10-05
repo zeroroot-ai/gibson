@@ -48,6 +48,12 @@ func TestTokenSource_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
 			_, _ = w.Write([]byte(`{"access_token":"op-token","token_type":"Bearer","expires_in":3600}`))
 		case "/v2/organizations/_search":
 			gotAuth = r.Header.Get("Authorization")
+			if got := r.Header.Get(zitadelconn.InstanceHostHeader); got != testDomain {
+				t.Errorf("API request instance header = %q, want %s", got, testDomain)
+			}
+			if r.Host == testDomain {
+				t.Errorf("API request Host = %q: the client must not forge the Host header (ADR-0092)", r.Host)
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"result": []any{}})
 		default:
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -56,11 +62,15 @@ func TestTokenSource_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	ts, err := TokenSource(context.Background(), srv.URL, "app.example.test", "tenant-operator", "s3cret")
+	ep, err := zitadelconn.New(srv.URL, testDomain)
+	if err != nil {
+		t.Fatalf("endpoint: %v", err)
+	}
+	ts, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", APIScopes())
 	if err != nil {
 		t.Fatalf("TokenSource: %v", err)
 	}
-	c := New(srv.URL, ts, "")
+	c := mustNew(t, srv.URL, ts)
 	for range 2 {
 		if _, err := c.GetOrganization(context.Background(), "org-1"); !errors.Is(err, clients.ErrNotFound) {
 			t.Fatalf("GetOrganization: %v, want ErrNotFound from the empty search", err)
@@ -74,17 +84,69 @@ func TestTokenSource_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
 	}
 }
 
+func testEndpoint(t *testing.T) zitadelconn.Endpoint {
+	t.Helper()
+	ep, err := zitadelconn.New("http://zitadel:8080", testDomain)
+	if err != nil {
+		t.Fatalf("endpoint: %v", err)
+	}
+	return ep
+}
+
 func TestTokenSource_RefusesMissingCredentials(t *testing.T) {
 	for _, tc := range []struct{ id, secret string }{{"", "s"}, {"id", ""}} {
-		if _, err := TokenSource(context.Background(), "http://zitadel:8080", "app.example.test", tc.id, tc.secret); err == nil {
+		if _, err := TokenSource(context.Background(), testEndpoint(t), tc.id, tc.secret, APIScopes()); err == nil {
 			t.Errorf("TokenSource(%q, %q) = nil error, want refusal", tc.id, tc.secret)
 		}
 	}
 }
 
-func TestTokenSource_RefusesAPortedHost(t *testing.T) {
-	if _, err := TokenSource(context.Background(), "http://zitadel:8080", "app.example.test:30443", "id", "s"); err == nil {
-		t.Error("TokenSource with a ported external domain = nil error, want refusal (ADR-0092)")
+// TestTokenSource_RefusesAZeroEndpoint: a token request with no validated
+// endpoint has nowhere to go and no host to claim.
+func TestTokenSource_RefusesAZeroEndpoint(t *testing.T) {
+	if _, err := TokenSource(context.Background(), zitadelconn.Endpoint{}, "id", "s", APIScopes()); err == nil {
+		t.Error("TokenSource with a zero endpoint = nil error, want refusal")
+	}
+}
+
+// TestTokenSource_RefusesNoScopes: a token with no scope has no audience, and
+// every API then answers 401 far from the cause.
+func TestTokenSource_RefusesNoScopes(t *testing.T) {
+	if _, err := TokenSource(context.Background(), testEndpoint(t), "id", "s", nil); err == nil {
+		t.Error("TokenSource with no scopes = nil error, want refusal")
+	}
+}
+
+// TestPlatformScopes_NameThePlatformAudience pins the audience scope of the
+// token the operator sends to the dashboard. Envoy jwt_authn rejects a token
+// without gibson-platform in its audience.
+func TestPlatformScopes_NameThePlatformAudience(t *testing.T) {
+	var gotScope string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Fatalf("parse form: %v", err)
+		}
+		gotScope = r.PostForm.Get("scope")
+		if got := r.Header.Get(zitadelconn.InstanceHostHeader); got != testDomain {
+			t.Errorf("token request instance header = %q, want %s", got, testDomain)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"p","token_type":"Bearer","expires_in":3600}`))
+	}))
+	t.Cleanup(srv.Close)
+	ep, err := zitadelconn.New(srv.URL, testDomain)
+	if err != nil {
+		t.Fatalf("endpoint: %v", err)
+	}
+	ts, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", PlatformScopes())
+	if err != nil {
+		t.Fatalf("TokenSource: %v", err)
+	}
+	if _, err := ts.Token(); err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if !strings.Contains(gotScope, "urn:zitadel:iam:org:project:id:gibson-platform:aud") {
+		t.Errorf("scope = %q, want the gibson-platform audience scope", gotScope)
 	}
 }
 
@@ -100,7 +162,7 @@ func TestRequest_TokenFailureIsTransient(t *testing.T) {
 		t.Errorf("no API request may go out without a token, got %s %s", r.Method, r.URL.Path)
 	}))
 	t.Cleanup(srv.Close)
-	c := New(srv.URL, failingTokens{}, "")
+	c := mustNew(t, srv.URL, failingTokens{})
 	_, err := c.CreateOrganization(context.Background(), "t", "t")
 	if !errors.Is(err, clients.ErrUnreachable) {
 		t.Fatalf("CreateOrganization with a failing token source: %v, want ErrUnreachable", err)

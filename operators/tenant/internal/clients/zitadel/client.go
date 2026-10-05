@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -84,36 +86,34 @@ type Organization struct {
 }
 
 // httpClient implements Client against the Zitadel Management REST API v1.
+//
+// It connects to the in-cluster Zitadel Service and claims the public host
+// with the instance header, both through the shared zitadelconn package
+// (ADR-0092). It builds no URL from an issuer and sets no Host header.
 type httpClient struct {
 	baseURL *url.URL
 	tokens  oauth2.TokenSource
-	// externalDomain is forged onto the HTTP Host header on every request.
-	// Zitadel routes to the correct instance by matching Host against its
-	// registered ExternalDomain — when the operator calls via the cluster
-	// Service (e.g. gibson-zitadel:8080) the default Host would be the
-	// service name and fail instance lookup with a 404. Empty = don't forge.
-	externalDomain string
-	http           *http.Client
+	http    *http.Client
 }
 
-// New constructs a Zitadel Management API client.
-// apiURL must be the Zitadel base URL (e.g. "https://zitadel.example.com").
+// requestTimeout bounds one Management API request.
+const requestTimeout = 30 * time.Second
+
+// New constructs a Zitadel Management API client for ep.
 // tokens supplies the Bearer token for every request (see TokenSource).
-// externalDomain is the configured Zitadel ExternalDomain — forged on every
-// request's Host header so in-cluster callers (reaching Zitadel via its
-// Service name) still route to the right Zitadel instance. Pass empty to
-// skip forgery when the caller already uses the external hostname.
-func New(apiURL string, tokens oauth2.TokenSource, externalDomain string) Client {
-	u, err := url.Parse(apiURL)
+func New(ep zitadelconn.Endpoint, tokens oauth2.TokenSource) (Client, error) {
+	if ep.IsZero() {
+		return nil, errors.New("zitadel: the endpoint is not set; build it with zitadelconn.New or zitadelconn.FromEnv")
+	}
+	u, err := url.Parse(ep.BaseURL())
 	if err != nil {
-		return &errClient{err: fmt.Errorf("zitadel: invalid apiURL %q: %w", apiURL, err)}
+		return nil, fmt.Errorf("zitadel: endpoint base URL %q: %w", ep.BaseURL(), err)
 	}
 	return &httpClient{
-		baseURL:        u,
-		tokens:         tokens,
-		externalDomain: externalDomain,
-		http:           &http.Client{Timeout: 30 * time.Second},
-	}
+		baseURL: u,
+		tokens:  tokens,
+		http:    ep.HTTPClient(requestTimeout),
+	}, nil
 }
 
 // CreateOrganization implements Client.
@@ -501,12 +501,6 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 	if err != nil {
 		return fmt.Errorf("zitadel: build request: %w", err)
 	}
-	// Forge Host so Zitadel routes this to the configured ExternalDomain
-	// instance even when the TCP target is the cluster Service name. Go's
-	// stdlib sends req.Host as the HTTP Host header when it is non-empty.
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
-	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -585,30 +579,6 @@ func isClientError(err, target error) bool {
 		err = u.Unwrap()
 	}
 	return false
-}
-
-// errClient is a no-op Client that always returns a construction error.
-// Returned by New when the apiURL is unparseable.
-type errClient struct {
-	err error
-}
-
-func (e *errClient) CreateOrganization(_ context.Context, _, _ string) (string, error) {
-	return "", e.err
-}
-func (e *errClient) GetOrganization(_ context.Context, _ string) (*Organization, error) {
-	return nil, e.err
-}
-func (e *errClient) DeleteOrganization(_ context.Context, _ string) error { return e.err }
-func (e *errClient) EnsureHumanUser(_ context.Context, _, _ string) (string, error) {
-	return "", e.err
-}
-func (e *errClient) CreateServiceAccount(_ context.Context, _, _ string) (string, string, string, error) {
-	return "", "", "", e.err
-}
-func (e *errClient) DeleteServiceAccount(_ context.Context, _, _ string) error { return e.err }
-func (e *errClient) EnsureProjectGrant(_ context.Context, _, _ string, _ []string) error {
-	return e.err
 }
 
 // NoopClient was a Client implementation that silently succeeded on every
