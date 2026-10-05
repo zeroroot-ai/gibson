@@ -6,6 +6,7 @@ package missioncatalog
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -56,7 +57,7 @@ func publishedParams() ([]byte, error) {
 		return nil, err
 	}
 	if len(entries) == 0 {
-		return nil, fmt.Errorf("missioncatalog: no checked-in mission to publish")
+		return nil, errors.New("missioncatalog: no checked-in mission to publish")
 	}
 	out := published{Comment: publishedComment, Missions: make(map[string]publishedMission, len(entries))}
 	for _, e := range entries {
