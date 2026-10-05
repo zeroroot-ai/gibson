@@ -12,6 +12,7 @@ import (
 	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
+	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,7 +122,7 @@ func TestRedisTimelineStore_AppendLoad(t *testing.T) {
 	}
 
 	for _, ev := range evs {
-		_, err := store.Append(ctx, tenant, ev)
+		_, err := store.Append(ctx, tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 	}
 
@@ -149,9 +150,9 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 	evA := brain.HostObserved{ScopeID: "scope-a", Address: "10.0.0.1"}
 	evB := brain.HostObserved{ScopeID: "scope-b", Address: "192.168.0.1"}
 
-	_, err := storeA.Append(ctx, tenant, evA)
+	_, err := storeA.Append(ctx, tenant, uuid.NewString(), evA)
 	require.NoError(t, err)
-	_, err = storeB.Append(ctx, tenant, evB)
+	_, err = storeB.Append(ctx, tenant, uuid.NewString(), evB)
 	require.NoError(t, err)
 
 	loadedA, err := storeA.LoadForReplay(ctx, tenant, "")
@@ -234,7 +235,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 		brain.WorkCompleted{ID: "work-a", Result: `{"open":[22,443]}`},
 	}
 	for _, ev := range events {
-		_, err := store.Append(context.Background(), tenant, ev)
+		_, err := store.Append(context.Background(), tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 	}
 
@@ -317,7 +318,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 		// No WorkCompleted — simulates daemon crash mid-flight.
 	}
 	for _, ev := range events {
-		_, err := store.Append(context.Background(), tenant, ev)
+		_, err := store.Append(context.Background(), tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 	}
 
@@ -375,7 +376,7 @@ func TestSnapshot_RoundTrip(t *testing.T) {
 	tenant := "tenant-snap-rt"
 
 	// Append one event to get a real seq id.
-	seq, err := store.Append(ctx, tenant, brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+	seq, err := store.Append(ctx, tenant, uuid.NewString(), brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
 	require.NoError(t, err)
 
 	snap := brain.WorldSnapshot{AtSeq: seq, Data: []byte(`{"test":true}`)}
@@ -403,7 +404,7 @@ func TestTrimTo_BoundsStream(t *testing.T) {
 	var seqs []string
 	for i := 0; i < 5; i++ {
 		ev.Address = "10.0.0." + string(rune('1'+i))
-		seq, err := store.Append(ctx, tenant, ev)
+		seq, err := store.Append(ctx, tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 		seqs = append(seqs, seq)
 	}
@@ -439,12 +440,12 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 
 	var snapSeq string
 	for _, ev := range prefix {
-		seq, err := store.Append(ctx, tenant, ev)
+		seq, err := store.Append(ctx, tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 		snapSeq = seq
 	}
 	for _, ev := range tail {
-		_, err := store.Append(ctx, tenant, ev)
+		_, err := store.Append(ctx, tenant, uuid.NewString(), ev)
 		require.NoError(t, err)
 	}
 
@@ -512,7 +513,7 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	// Hydrate a fresh engine from the same store (snapshot + tail).
 	fresh := brain.NewEngine(tenant)
 	fresh.WithStore(store)
-	fresh.Hydrate(context.Background())
+	require.NoError(t, fresh.Hydrate(context.Background()))
 
 	// The rehydrated World must equal the live World — no event lost at the
 	// snapshot boundary.
@@ -542,7 +543,7 @@ func TestTimelineStore_AcquireError(t *testing.T) {
 	tenant := "tenant-err"
 
 	t.Run("Append", func(t *testing.T) {
-		_, err := store.Append(ctx, tenant, brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+		_, err := store.Append(ctx, tenant, uuid.NewString(), brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
 		require.Error(t, err, "Append must return an error when acquire fails")
 		require.ErrorIs(t, err, sentinel, "Append must wrap the acquire error")
 	})
@@ -618,7 +619,7 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 
 	// Operation 1: Append via rdbA.
 	ev1 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
-	seq1, err := store.Append(ctx, tenant, ev1)
+	seq1, err := store.Append(ctx, tenant, uuid.NewString(), ev1)
 	require.NoError(t, err, "first Append (via rdbA) must succeed")
 	require.NotEmpty(t, seq1)
 
@@ -630,7 +631,7 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 	// Operation 2: Append via rdbB (fresh acquire after eviction).
 	// This must NOT fail — the per-op acquire pattern guarantees a live client.
 	ev2 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.2"}
-	seq2, err := store.Append(ctx, tenant, ev2)
+	seq2, err := store.Append(ctx, tenant, uuid.NewString(), ev2)
 	require.NoError(t, err, "second Append must succeed after eviction (per-op acquire, not stale client)")
 	require.NotEmpty(t, seq2)
 
@@ -714,4 +715,38 @@ func TestAssertTimelineAOF_FailsClosedWithoutConfigSupport(t *testing.T) {
 	gErr := AssertTimelineAOF(context.Background(), mr.Addr(), "")
 	require.Error(t, gErr, "miniredis has no CONFIG support; the guard must fail closed")
 	assert.Contains(t, gErr.Error(), "cannot verify AOF persistence")
+}
+
+// TestRedisTimelineStore_AppendIsIdempotent proves the idempotency key of an
+// append (ADR-0163, gibson#724): a second Append with the same key writes
+// nothing and returns the seq of the first, and an Append with no key fails.
+func TestRedisTimelineStore_AppendIsIdempotent(t *testing.T) {
+	_, client := newTestRedis(t)
+	store := NewRedisTimelineStore(staticAcquire(client))
+	ctx := context.Background()
+	const tenant = "tenant-idem"
+
+	ev := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
+	first, err := store.Append(ctx, tenant, "key-1", ev)
+	require.NoError(t, err)
+
+	// The retry after a lost reply: same key, same event.
+	again, err := store.Append(ctx, tenant, "key-1", ev)
+	require.NoError(t, err)
+	require.Equal(t, first, again, "a retry must return the seq of the first append")
+
+	evs, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, evs, 1, "a retry with the same key must write nothing")
+
+	// A new key writes a new entry.
+	second, err := store.Append(ctx, tenant, "key-2", ev)
+	require.NoError(t, err)
+	require.NotEqual(t, first, second)
+	evs, err = store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, evs, 2)
+
+	_, err = store.Append(ctx, tenant, "", ev)
+	require.Error(t, err, "an append with no idempotency key must fail")
 }

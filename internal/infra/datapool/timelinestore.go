@@ -103,9 +103,36 @@ func AssertTimelineAOF(ctx context.Context, addr, password string) error {
 	return assertAOFEnabled(ctx, client)
 }
 
-// Append durably persists ev to the tenant's Redis Stream. MaxLen 0 means no
-// cap — the stream grows unbounded until TrimTo prunes it (ADR-0163).
-func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain.Event) (string, error) {
+// appendOnceScript appends one event unless the idempotency key equals the key
+// of the most recent append. In that case it writes nothing and returns the id
+// of that append. The check and the write are one atomic step.
+//
+// KEYS[1] is the stream. KEYS[2] is the hash that holds the last key and id.
+// ARGV[1] is the encoded event. ARGV[2] is the idempotency key.
+var appendOnceScript = redis.NewScript(`
+local last = redis.call('HMGET', KEYS[2], 'key', 'seq')
+if last[1] == ARGV[2] then
+  return last[2]
+end
+local id = redis.call('XADD', KEYS[1], '*', 'ev', ARGV[1])
+redis.call('HSET', KEYS[2], 'key', ARGV[2], 'seq', id)
+return id
+`)
+
+func (s *RedisTimelineStore) lastAppendKey(tenant string) string {
+	return "gibson:timeline-last-append:" + tenant
+}
+
+// Append durably persists ev to the tenant's Redis Stream. The stream has no
+// length cap: it grows until TrimTo prunes it (ADR-0163).
+//
+// key is the idempotency key. A second Append with the key of the most recent
+// append writes nothing and returns the seq of that append, so a retry after a
+// lost reply does not write the event twice.
+func (s *RedisTimelineStore) Append(ctx context.Context, tenant, key string, ev brain.Event) (string, error) {
+	if key == "" {
+		return "", fmt.Errorf("datapool/redis-timeline: append for tenant %q kind %q has no idempotency key", tenant, ev.Kind())
+	}
 	client, release, err := s.acquire(ctx)
 	if err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: acquire conn for XADD tenant %q: %w", tenant, err)
@@ -116,12 +143,10 @@ func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain
 	if err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: encode event kind %q: %w", ev.Kind(), err)
 	}
-	seq, err := client.XAdd(ctx, &redis.XAddArgs{
-		Stream: s.streamKey(tenant),
-		MaxLen: 0, // no cap — ADR-0163 no blind trim
-		ID:     "*",
-		Values: map[string]any{"ev": string(encoded)},
-	}).Result()
+	seq, err := appendOnceScript.Run(ctx, client,
+		[]string{s.streamKey(tenant), s.lastAppendKey(tenant)},
+		string(encoded), key,
+	).Text()
 	if err != nil {
 		return "", fmt.Errorf("datapool/redis-timeline: XADD for tenant %q kind %q: %w", tenant, ev.Kind(), err)
 	}

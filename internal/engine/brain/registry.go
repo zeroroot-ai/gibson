@@ -61,6 +61,12 @@ func (r *Registry) WithStoreFactory(f StoreFactory) {
 // use. On first creation the store factory (if set) is invoked to wire durable
 // persistence and hydrate the World from the persisted Timeline (ADR-0163).
 // Tenant isolation is structural: each tenant gets its own Engine + World.
+//
+// When the hydrate fails, For returns a stopped engine whose Err is the cause.
+// For does not keep that engine, so the next call tries the hydrate again. An
+// engine that stops later (a durable append failed) also leaves the Registry,
+// and the next call builds a new engine from the durable store. A caller that
+// serves data to a user must check Err first.
 func (r *Registry) For(tenant string) *Engine {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -68,24 +74,40 @@ func (r *Registry) For(tenant string) *Engine {
 		return e
 	}
 	e := NewEngine(tenant)
+	// Wire the durable store and hydrate the World first. Hydrate is a pure fold
+	// (no effects); it submits ResumeFailInFlight events to the intake queue so
+	// the first tick fails dangling in-flight work. A failed hydrate installs no
+	// system and no hook, so nothing runs for an engine that does not serve.
+	if r.storeFactory != nil {
+		if store := r.storeFactory(r.ctx, tenant); store != nil {
+			e.WithStore(store)
+			if err := e.Hydrate(r.ctx); err != nil {
+				e.stop(err)
+				return e
+			}
+		}
+	}
 	for _, s := range r.systems {
 		e.AddSystem(s)
 	}
 	for _, h := range r.hooks {
 		h(e)
 	}
-	// Wire the durable store and hydrate the World before the tick loop starts.
-	// Hydrate is a pure fold (no effects); it submits ResumeFailInFlight events
-	// to the intake queue so the first tick fails dangling in-flight work.
-	if r.storeFactory != nil {
-		if store := r.storeFactory(r.ctx, tenant); store != nil {
-			e.WithStore(store)
-			e.Hydrate(r.ctx)
-		}
-	}
+	e.onStop = r.drop
 	r.engines[tenant] = e
 	go e.Run(r.ctx)
 	return e
+}
+
+// drop removes a stopped engine, so the next For builds a new one. The tick
+// goroutine of the engine calls it. It removes only that engine, never a newer
+// engine of the same tenant.
+func (r *Registry) drop(e *Engine) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.engines[e.World.Tenant] == e {
+		delete(r.engines, e.World.Tenant)
+	}
 }
 
 // Tenants returns the ids of currently-live tenant engines, sorted.

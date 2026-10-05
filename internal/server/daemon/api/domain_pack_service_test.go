@@ -222,3 +222,46 @@ func TestListDomainPacks_EmptyByDefault(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, resp.GetPacks())
 }
+
+// TestEnableDomainPack_BadMappingRuleRefusesThePack: a compliance mapping
+// rule that does not compile against the audit event environment refuses
+// the whole pack, and the pack does not become live (gibson#765).
+func TestEnableDomainPack_BadMappingRuleRefusesThePack(t *testing.T) {
+	pack := mainPack()
+	pack.MappingRules = []ontology.MappingRule{
+		{ControlID: "ac-2", Expression: `event.action == "grant_created"`},
+		{ControlID: "au-2", Expression: `evidence.size() > 0`},
+	}
+	s, _ := newDomainPackService(t, ontology.NewDomainPackCatalog(pack))
+
+	_, err := s.EnableDomainPack(tenantCtx("acme"), &tenantv1.EnableDomainPackRequest{Name: "main"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+	require.ErrorContains(t, err, `control "au-2"`)
+
+	got, err := s.ListDomainPacks(tenantCtx("acme"), &tenantv1.ListDomainPacksRequest{})
+	require.NoError(t, err)
+	assert.Empty(t, got.GetPacks(), "a pack with a bad mapping rule must not become live")
+}
+
+// TestEnableDomainPack_GoodMappingRulesEnable: a pack whose rules compile
+// enables.
+func TestEnableDomainPack_GoodMappingRulesEnable(t *testing.T) {
+	pack := mainPack()
+	pack.MappingRules = []ontology.MappingRule{{ControlID: "ac-2", Expression: `event.action == "grant_created"`}}
+	s, _ := newDomainPackService(t, ontology.NewDomainPackCatalog(pack))
+
+	_, err := s.EnableDomainPack(tenantCtx("acme"), &tenantv1.EnableDomainPackRequest{Name: "main"})
+	require.NoError(t, err)
+}
+
+// TestEnableDomainPackRequest_CarriesNoRule: a tenant cannot change a
+// first-party mapping rule, because the enable request names a catalog pack
+// and has no other field. The rules come from the catalog only.
+func TestEnableDomainPackRequest_CarriesNoRule(t *testing.T) {
+	fields := (&tenantv1.EnableDomainPackRequest{}).ProtoReflect().Descriptor().Fields()
+	names := make([]string, 0, fields.Len())
+	for i := range fields.Len() {
+		names = append(names, string(fields.Get(i).Name()))
+	}
+	assert.Equal(t, []string{"name"}, names)
+}
