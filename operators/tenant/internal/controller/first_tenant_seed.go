@@ -67,8 +67,7 @@ func (r *FirstTenantSeedRunnable) SetupWithManager(mgr manager.Manager) error {
 }
 
 // FirstTenantSeedFromEnv builds the seed from the operator's FIRST_TENANT_*
-// environment, injected as getenv for testability (mirrors
-// selectStripeCustomerVerifier, same package). It returns enabled=false when
+// environment, injected as getenv for testability. It returns enabled=false when
 // FIRST_TENANT_ENABLED is not "true" so main.go can skip registration, and an
 // error when the seed is switched on but its required identity is missing —
 // which main.go turns into a fail-fast exit, so a misconfigured chart is caught

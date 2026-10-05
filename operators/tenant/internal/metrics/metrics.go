@@ -69,18 +69,6 @@ var (
 		[]string{"step", "kind", "outcome"},
 	)
 
-	// StripeDriftTotal counts billing state mismatches detected by the nightly
-	// drift reconciler. The `field` label indicates which field drifted
-	// (status, priceId, currentPeriodEnd). No auto-correction for the first
-	// 30 days per spec stripe-billing-integration R10.2.
-	StripeDriftTotal = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "gibson_stripe_drift_total",
-			Help: "Number of billing state mismatches detected by the nightly drift reconciler, labeled by field.",
-		},
-		[]string{"field"},
-	)
-
 	// MigrationPending tracks, per-tenant per-subsystem, whether the tenant's
 	// data-plane schema version is behind the latest embedded migration files.
 	// Value is 1 when behind, 0 when current. Subsystem label values are
@@ -106,7 +94,6 @@ func Register() {
 		SubsystemCallDuration,
 		SubsystemCallErrors,
 		SagaStepDuration,
-		StripeDriftTotal,
 		MigrationPending,
 	)
 }

@@ -93,10 +93,6 @@ var (
 	signupRedeemPerIPHour   = ratelimit.Window{Max: 30, Period: hour}
 	signupCompletePerIPHour = ratelimit.Window{Max: 10, Period: hour}
 
-	// Attaching a billing customer to a live verified session. Loose, because a
-	// legitimate card retry re-attaches, but bounded.
-	signupAttachPerIPHour = ratelimit.Window{Max: 30, Period: hour}
-
 	// Peer-independent budgets for the three RPCs that follow
 	// RequestEmailVerification. These key on nothing the caller supplies, so
 	// they are the only budget on this surface that forging client_ip cannot
@@ -108,7 +104,6 @@ var (
 	// verification is capped at the same 300/hour. Legitimate traffic that
 	// this refuses would have been refused one step earlier.
 	signupRedeemGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
-	signupAttachGlobalHour   = ratelimit.Window{Max: 300, Period: hour}
 	signupCompleteGlobalHour = ratelimit.Window{Max: 300, Period: hour}
 
 	// Registration on the approval rung (ADR-0074, gibson#22). One call does
@@ -299,18 +294,5 @@ func registerLimits(email, clientIP string) []signupLimit {
 		ipLimitFor("rg", clientIP, signupRegisterPerIPHour),
 		{signupIPKey("rg", clientIP) + ":d", signupRegisterPerIPDay},
 		{signupGlobalKey("rg"), signupRegisterGlobalHour},
-	}
-}
-
-// attachCustomerLimits is the budget set for AttachSignupCustomer.
-//
-// It exists because that RPC used to be the one unauthenticated signup door
-// with no budget at all, while still writing to Postgres on every call. A
-// session-scoped write is cheap, so the allowance is loose; the point is that
-// there is one.
-func attachCustomerLimits(clientIP string) []signupLimit {
-	return []signupLimit{
-		ipLimitFor("sa", clientIP, signupAttachPerIPHour),
-		{signupGlobalKey("sa"), signupAttachGlobalHour},
 	}
 }

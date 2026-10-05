@@ -47,6 +47,7 @@ import (
 	discoverysvc "github.com/zeroroot-ai/gibson/internal/server/api/discovery"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	agentconsolepb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/agentconsole/v1"
+	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	destructiveauthzv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	discoverypb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
@@ -465,7 +466,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// RPC surface (the recurring gibson#621/#949/#1043 omission bug). A
 	// reconciliation test pins the allowed set to exactly the operator's actual
 	// call set (least privilege).
-	spiffeMethodAllowlist := spiffePeerMethodPolicies()
+	spiffeMethodAllowlist := spiffePeerMethodPolicies(connectionPointCallersFromEnv())
 	// Fail loud at startup (gibson#1052): every configured direct-dial peer in
 	// AllowedPeerIDs MUST have an explicit method policy. An allow-listed peer
 	// with no policy previously fell through to UNRESTRICTED method access
@@ -1242,24 +1243,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Register TenantProvisioningService — the dashboard-facing read side of
 	// operator-pull tenant provisioning (E9, gibson#948, dashboard#813). Serves
 	// the operator-reported tenant_status snapshot back to the dashboard
-	// (GetTenantProvisioningStatus) and records billing-active from the Stripe
-	// webhook (SetTenantBillingActive), replacing the dashboard's direct
-	// Tenant-CR reads + billing-annotation patch. Both RPCs are annotated
-	// unauthenticated in the registry (pre-membership / Stripe-webhook paths),
-	// so ext-authz lets them through; Envoy gates the daemon to the dashboard.
-	//
-	// SetTenantBillingActive additionally requires an in-handler HMAC assertion
-	// signed with GIBSON_BILLING_WEBHOOK_SECRET (gibson#1230): the registry
-	// annotation keeps the RPC reachable without a tenant JWT, but reachability
-	// is no longer authorization. An unset secret leaves the write refusing
-	// every caller — see api/billing_webhook_auth.go.
-	daemonSvc.WithBillingWebhookSecret(os.Getenv("GIBSON_BILLING_WEBHOOK_SECRET"))
-	if os.Getenv("GIBSON_BILLING_WEBHOOK_SECRET") == "" {
-		d.logger.Warn(ctx, "GIBSON_BILLING_WEBHOOK_SECRET is unset; "+
-			"TenantProvisioningService.SetTenantBillingActive will refuse every caller. "+
-			"Set it on the daemon and on the billing-webhook caller to enable billing-active writes.")
-	}
+	// (GetTenantProvisioningStatus), replacing the dashboard's direct
+	// Tenant-CR reads. The RPC is annotated unauthenticated in the registry
+	// (pre-membership signup polling), so ext-authz lets it through.
 	tenantv1.RegisterTenantProvisioningServiceServer(srv, daemonSvc)
+
+	// The neutral connection points (ADR-0060, D41, D54, gibson#713): the
+	// external signup step, the tenant activation signal and the usage report.
+	// Each RPC accepts one SPIFFE identity from config, checked against the TLS
+	// peer in the handler. With no identity configured, no caller is accepted.
+	daemonSvc.WithSignupStepURL(os.Getenv(api.EnvSignupStepURL))
+	daemonSvc.WithConnectionPointCallers(connectionPointCallersFromEnv())
+	connectionv1.RegisterConnectionPointServiceServer(srv, daemonSvc)
 
 	// Register AdminTenantService — the dashboard-facing write side of
 	// operator-pull admin tenant CRUD (gibson#964, enables dashboard#855).

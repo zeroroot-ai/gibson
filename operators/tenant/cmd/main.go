@@ -694,22 +694,9 @@ func main() {
 		// dashboard#813): drain the daemon's pending-provisioning queue and
 		// create Tenant CRs. Reuses the same SPIFFE-mTLS daemon client; the
 		// daemon never touches Kubernetes (ADR-0023).
-		//
-		// stripe_customer_id adoption defense-in-depth (gibson#1099): when the
-		// pod carries a real Stripe key (hosted deployments; the chart projects
-		// gibson-stripe-credentials as STRIPE_API_KEY), re-verify a recorded
-		// customer's tenant-linkage metadata before adopting it onto the CR.
-		// OSS/self-hosted (no key) and dev stripe-mock redirects
-		// (STRIPE_API_BASE_URL set — the mock serves canned fixtures with no
-		// real metadata) bind the no-op: adoption is unaffected, matching the
-		// pkg/billing no-op bypass posture.
-		// Env-decision logic extracted to selectStripeCustomerVerifier for
-		// testability (mirrors loadSystemTenantKEK, same package).
-		stripeVerifier := selectStripeCustomerVerifier(os.Getenv, setupLog)
 		if err := (&controller.PendingProvisioningRunnable{
-			Client:   mgr.GetClient(),
-			Daemon:   grpcClient,
-			Verifier: stripeVerifier,
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to register pending-provisioning runnable")
 			os.Exit(1)
@@ -1487,8 +1474,8 @@ func buildWriteTenantBrokerConfigDeps(log logr.Logger) flows.WriteTenantBrokerCo
 	// on plugin JWTs (ADR-0009 / tenant-operator#147). The per-tenant
 	// Vault JWT role written by writeJWTRole carries this value in its
 	// `bound_audiences`; daemon-side JWT-bearer logins must present the
-	// same audience. Empty → operator exits 1 (mirrors STRIPE_API_KEY /
-	// SMTP_HOST / PLATFORM_PG_DSN fail-loud). The value is operator-
+	// same audience. Empty → operator exits 1 (mirrors SMTP_HOST /
+	// PLATFORM_PG_DSN fail-loud). The value is operator-
 	// internal: it surfaces on the Vault role, NOT on the broker config
 	// JSON the daemon reads.
 	jwtBoundAudience := os.Getenv("GIBSON_VAULT_JWT_BOUND_AUDIENCE")

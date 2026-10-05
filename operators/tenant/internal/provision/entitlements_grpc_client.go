@@ -193,12 +193,11 @@ func (c *EntitlementsGRPCClient) SeedCatalogTenantEnabled(ctx context.Context, t
 // vocabulary so the pending-provisioning reconciler does not depend on the
 // generated proto type directly. Carries exactly the Tenant-CR spec inputs.
 type PendingTenant struct {
-	TenantID         string
-	OwnerUserID      string
-	OwnerEmail       string
-	WorkspaceName    string
-	Tier             string
-	StripeCustomerID string
+	TenantID      string
+	OwnerUserID   string
+	OwnerEmail    string
+	WorkspaceName string
+	Tier          string
 }
 
 // ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
@@ -217,12 +216,11 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 	out := make([]PendingTenant, 0, len(resp.GetPending()))
 	for _, p := range resp.GetPending() {
 		out = append(out, PendingTenant{
-			TenantID:         p.GetTenantId(),
-			OwnerUserID:      p.GetOwnerUserId(),
-			OwnerEmail:       p.GetOwnerEmail(),
-			WorkspaceName:    p.GetWorkspaceName(),
-			Tier:             p.GetTier(),
-			StripeCustomerID: p.GetStripeCustomerId(),
+			TenantID:      p.GetTenantId(),
+			OwnerUserID:   p.GetOwnerUserId(),
+			OwnerEmail:    p.GetOwnerEmail(),
+			WorkspaceName: p.GetWorkspaceName(),
+			Tier:          p.GetTier(),
 		})
 	}
 	return out, nil
@@ -270,40 +268,33 @@ func (c *EntitlementsGRPCClient) EnqueueTenantProvisioning(ctx context.Context, 
 // it reports back to the daemon so the dashboard can read provisioning status
 // without Kubernetes access (gibson#948, dashboard#813).
 type TenantStatusReport struct {
-	TenantID         string
-	Phase            string
-	DataPlaneReady   bool
-	StorePostgres    string
-	StoreRedis       string
-	StoreNeo4j       string
-	ZitadelOrgSlug   string
-	StripeCustomerID string
+	TenantID       string
+	Phase          string
+	DataPlaneReady bool
+	StorePostgres  string
+	StoreRedis     string
+	StoreNeo4j     string
+	ZitadelOrgSlug string
 }
 
 // ReportTenantStatus upserts the operator-observed Tenant CR status into the
-// daemon's tenant_status table and returns the dashboard-recorded
-// billing-active flag so the operator can stamp the billing-active CR
-// annotation the saga waits on. Best-effort: callers log failures and never
+// daemon's tenant_status table. Best-effort: callers log failures and never
 // fail the reconcile on a daemon blip.
-func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) (bool, error) {
+func (c *EntitlementsGRPCClient) ReportTenantStatus(ctx context.Context, r TenantStatusReport) error {
 	authedCtx, err := c.authCtx(ctx)
 	if err != nil {
-		return false, err
+		return err
 	}
-	resp, err := c.client.ReportTenantStatus(authedCtx, &operatorv1.ReportTenantStatusRequest{
-		TenantId:         r.TenantID,
-		Phase:            r.Phase,
-		DataPlaneReady:   r.DataPlaneReady,
-		StorePostgres:    r.StorePostgres,
-		StoreRedis:       r.StoreRedis,
-		StoreNeo4J:       r.StoreNeo4j,
-		ZitadelOrgSlug:   r.ZitadelOrgSlug,
-		StripeCustomerId: r.StripeCustomerID,
+	_, err = c.client.ReportTenantStatus(authedCtx, &operatorv1.ReportTenantStatusRequest{
+		TenantId:       r.TenantID,
+		Phase:          r.Phase,
+		DataPlaneReady: r.DataPlaneReady,
+		StorePostgres:  r.StorePostgres,
+		StoreRedis:     r.StoreRedis,
+		StoreNeo4J:     r.StoreNeo4j,
+		ZitadelOrgSlug: r.ZitadelOrgSlug,
 	})
-	if err := translateGRPCError("report-tenant-status", err); err != nil {
-		return false, err
-	}
-	return resp.GetBillingActive(), nil
+	return translateGRPCError("report-tenant-status", err)
 }
 
 // TenantAdminOp is the operator's view of one admin tenant CRUD op the daemon

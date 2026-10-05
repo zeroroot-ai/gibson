@@ -90,11 +90,6 @@ func TestSignupSeamGate_AppliesToEveryRPC(t *testing.T) {
 	if _, err := s.RedeemEmailVerification(context.Background(), &tenantv1.RedeemEmailVerificationRequest{Token: "t"}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("RedeemEmailVerification = %v, want PermissionDenied", err)
 	}
-	if _, err := s.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-		VerifiedSessionToken: "s", StripeCustomerId: "cus_1",
-	}); status.Code(err) != codes.PermissionDenied {
-		t.Errorf("AttachSignupCustomer = %v, want PermissionDenied", err)
-	}
 }
 
 // TestSignup_SeamGate_ErrorMessageMentionsAdminProvision verifies that the

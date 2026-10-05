@@ -76,9 +76,9 @@ func TestRedeemToken_IsACompareAndSet(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "email", "workspace_name", "tier",
 			"owner_first_name", "owner_last_name", "expires_at",
-			"stripe_customer_id", "completion_attempts",
+			"completion_attempts",
 		}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
-			"Ada", "Lovelace", now.Add(time.Hour), "", 0))
+			"Ada", "Lovelace", now.Add(time.Hour), 0))
 
 	row, session, err := s.RedeemToken(context.Background(), raw)
 	if err != nil {
@@ -363,15 +363,15 @@ func TestGetByVerifiedSession(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{
 				"id", "attempt_id", "email", "workspace_name", "tier",
 				"owner_first_name", "owner_last_name", "expires_at",
-				"stripe_customer_id", "completion_attempts",
+				"completion_attempts",
 			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
-				"Ada", "Lovelace", now.Add(time.Hour), "cus_123", 1))
+				"Ada", "Lovelace", now.Add(time.Hour), 1))
 
 		row, err := s.GetByVerifiedSession(context.Background(), "sess-raw")
 		if err != nil {
 			t.Fatalf("GetByVerifiedSession: %v", err)
 		}
-		if row.Email != "owner@example.com" || row.StripeCustomerID != "cus_123" {
+		if row.Email != "owner@example.com" {
 			t.Errorf("row = %+v", row)
 		}
 		if row.Status != signupStatusVerified {
@@ -413,56 +413,6 @@ func TestGetByVerifiedSession(t *testing.T) {
 	})
 }
 
-// TestAttachStripeCustomer covers recording the billing customer against a
-// live session: success, a session that does not match, missing arguments,
-// and a broken database.
-func TestAttachStripeCustomer(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		s, mock, now := newMockStore(t)
-		mock.ExpectExec("UPDATE signup_verification").
-			WithArgs(platformtoken.Hash("sess-raw"), "cus_123", now).
-			WillReturnResult(sqlmock.NewResult(0, 1))
-
-		if err := s.AttachStripeCustomer(context.Background(), "sess-raw", "cus_123"); err != nil {
-			t.Fatalf("AttachStripeCustomer: %v", err)
-		}
-	})
-
-	t.Run("no matching row is not redeemable", func(t *testing.T) {
-		s, mock, now := newMockStore(t)
-		mock.ExpectExec("UPDATE signup_verification").
-			WithArgs(platformtoken.Hash("sess-raw"), "cus_123", now).
-			WillReturnResult(sqlmock.NewResult(0, 0))
-
-		if err := s.AttachStripeCustomer(context.Background(), "sess-raw", "cus_123"); !errors.Is(err, ErrSignupVerificationNotFound) {
-			t.Errorf("error = %v, want ErrSignupVerificationNotFound", err)
-		}
-	})
-
-	t.Run("missing arguments short-circuit", func(t *testing.T) {
-		s, mock, _ := newMockStore(t)
-		if err := s.AttachStripeCustomer(context.Background(), "", "cus_123"); !errors.Is(err, ErrSignupVerificationNotFound) {
-			t.Errorf("empty session: error = %v, want ErrSignupVerificationNotFound", err)
-		}
-		if err := s.AttachStripeCustomer(context.Background(), "sess-raw", ""); !errors.Is(err, ErrSignupVerificationNotFound) {
-			t.Errorf("empty customer id: error = %v, want ErrSignupVerificationNotFound", err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("missing arguments reached the database: %v", err)
-		}
-	})
-
-	t.Run("database unavailable", func(t *testing.T) {
-		s, mock, _ := newMockStore(t)
-		dbErr := errors.New("connection reset")
-		mock.ExpectExec("UPDATE signup_verification").WillReturnError(dbErr)
-
-		if err := s.AttachStripeCustomer(context.Background(), "sess-raw", "cus_123"); !errors.Is(err, dbErr) {
-			t.Errorf("error = %v, want it to wrap %v", err, dbErr)
-		}
-	})
-}
-
 // TestClaimCompletion covers reserving one bounded completion attempt: a
 // session under its cap, one that does not match (spent, expired, capped, or
 // unknown — all one answer), an empty session, and a broken database.
@@ -476,9 +426,9 @@ func TestClaimCompletion(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{
 				"id", "attempt_id", "email", "workspace_name", "tier",
 				"owner_first_name", "owner_last_name", "expires_at",
-				"stripe_customer_id", "completion_attempts",
+				"completion_attempts",
 			}).AddRow("row-1", "attempt-1", "owner@example.com", "Acme", "team",
-				"Ada", "Lovelace", now.Add(time.Hour), "", 1))
+				"Ada", "Lovelace", now.Add(time.Hour), 1))
 
 		row, err := s.ClaimCompletion(context.Background(), "sess-raw")
 		if err != nil {
@@ -679,50 +629,6 @@ func assertStatementContains(t *testing.T, stmt string, needles ...string) {
 	}
 }
 
-// TestAttachStripeCustomer_BindsTheCustomerToTheSession pins the two
-// predicates that turn "record whatever the caller sent" into an ownership
-// rule. The handler tests run against an in-memory model of this store, so the
-// model is only trustworthy while the real statement carries them.
-//
-// The expectation is a regex over the statement itself: drop either predicate
-// and the query no longer matches, so this fails rather than silently passing
-// against a weaker UPDATE.
-func TestAttachStripeCustomer_BindsTheCustomerToTheSession(t *testing.T) {
-	s, mock, now := newMockStore(t)
-	mock.ExpectExec(`(?s)UPDATE signup_verification.*`+
-		// One customer per session: only an unset column, or the same id
-		// again, may be written.
-		`stripe_customer_id IN \('', \$2\).*`+
-		// One session per customer: an id already recorded against a
-		// different signup cannot be claimed.
-		`NOT EXISTS.*other\.stripe_customer_id = \$2.*`+
-		`other\.verified_session_hash IS DISTINCT FROM \$1`).
-		WithArgs(platformtoken.Hash("sess-raw"), "cus_123", now).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-
-	if err := s.AttachStripeCustomer(context.Background(), "sess-raw", "cus_123"); err != nil {
-		t.Fatalf("AttachStripeCustomer: %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("statement did not carry the binding predicates: %v", err)
-	}
-}
-
-// TestAttachStripeCustomer_RefusalIsIndistinguishable — a refused binding must
-// look exactly like a dead session. Any other answer tells a caller which
-// customer ids are already in use.
-func TestAttachStripeCustomer_RefusalIsIndistinguishable(t *testing.T) {
-	s, mock, now := newMockStore(t)
-	mock.ExpectExec("UPDATE signup_verification").
-		WithArgs(platformtoken.Hash("sess-raw"), "cus_taken", now).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	err := s.AttachStripeCustomer(context.Background(), "sess-raw", "cus_taken")
-	if !errors.Is(err, ErrSignupVerificationNotFound) {
-		t.Fatalf("error = %v, want ErrSignupVerificationNotFound", err)
-	}
-}
-
 // TestRegistrationDecisionsAreOneShot pins the predicate that makes an
 // approval a decision rather than a race. Drop `status = 'pending_approval'`
 // from either statement and two administrators can both believe they decided
@@ -901,9 +807,9 @@ func TestClaimApproval_ReturnsTheDecidedRegistration(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "email", "workspace_name", "tier",
 			"owner_first_name", "owner_last_name", "expires_at",
-			"stripe_customer_id", "completion_attempts", "owner_user_id",
+			"completion_attempts", "owner_user_id",
 		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
-			"Ada", "Lovelace", now.Add(time.Hour), "", 0, "user-1"))
+			"Ada", "Lovelace", now.Add(time.Hour), 0, "user-1"))
 
 	row, err := s.ClaimApproval(context.Background(), id, "admin-1")
 	if err != nil {
@@ -952,9 +858,9 @@ func TestRejectRegistration_ReturnsTheRefusedRegistration(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "email", "workspace_name", "tier",
 			"owner_first_name", "owner_last_name", "expires_at",
-			"stripe_customer_id", "completion_attempts", "owner_user_id",
+			"completion_attempts", "owner_user_id",
 		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
-			"Ada", "Lovelace", now.Add(time.Hour), "", 0, "user-1"))
+			"Ada", "Lovelace", now.Add(time.Hour), 0, "user-1"))
 
 	row, err := s.RejectRegistration(context.Background(), id, "admin-1")
 	if err != nil {

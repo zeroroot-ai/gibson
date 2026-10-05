@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -780,6 +781,29 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 			}
 			d.config.Auth.SPIFFE.AllowedPeerIDs = append(d.config.Auth.SPIFFE.AllowedPeerIDs, raw)
 		}
+	}
+
+	// The callers of the neutral connection points (ADR-0060, gibson#713) dial
+	// the daemon directly over mTLS. Each one is allowed at the TLS layer here,
+	// and spiffePeerMethodPolicies gives it only its own methods.
+	for _, raw := range []string{
+		os.Getenv(api.EnvSignupStepCompleterSVID),
+		os.Getenv(api.EnvTenantActivationSVID),
+	} {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || slices.Contains(d.config.Auth.SPIFFE.AllowedPeerIDs, raw) {
+			continue
+		}
+		id, err := spiffeid.FromString(raw)
+		if err != nil {
+			_ = source.Close()
+			return fmt.Errorf("connection point caller %q is not a parseable SPIFFE ID: %w", raw, err)
+		}
+		if td, tdErr := spiffeid.TrustDomainFromString(configuredTD); tdErr == nil && configuredTD != "" && !id.MemberOf(td) {
+			_ = source.Close()
+			return fmt.Errorf("connection point caller %q is not in the configured trust domain %q", raw, configuredTD)
+		}
+		d.config.Auth.SPIFFE.AllowedPeerIDs = append(d.config.Auth.SPIFFE.AllowedPeerIDs, raw)
 	}
 
 	// Parse and validate the callback listener peer-SVID allowlist.

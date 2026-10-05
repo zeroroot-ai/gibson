@@ -52,10 +52,6 @@ const (
 	// per-tenant collections.
 	CapabilityQdrantAdmin ClientCapability = "qdrant-admin"
 
-	// CapabilityStripe: Stripe API client used to create customers and
-	// process billing webhooks. Optional for free-tier tenants.
-	CapabilityStripe ClientCapability = "stripe"
-
 	// CapabilityDaemonGRPC: Connect-RPC client to the gibson daemon's
 	// PlatformOperatorService. Used by the entitlements steps to write
 	// tenant_quotas / FGA tuples / catalog seed via daemon gRPC, with
@@ -78,7 +74,6 @@ func AllCapabilities() []ClientCapability {
 		CapabilityFGA,
 		CapabilityRedisAdmin,
 		CapabilityQdrantAdmin,
-		CapabilityStripe,
 		CapabilityDaemonGRPC,
 		CapabilitySMTP,
 	}

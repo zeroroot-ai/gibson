@@ -73,47 +73,6 @@ func TestRedeemEmailVerification_StoreFailureIsUnavailable(t *testing.T) {
 	}
 }
 
-// TestAttachSignupCustomer_Validation covers the handler's own guards: no
-// store wired, and a missing customer id.
-func TestAttachSignupCustomer_Validation(t *testing.T) {
-	t.Run("no store wired", func(t *testing.T) {
-		h := newSignupHarness(t)
-		h.srv.signupVerifications = nil
-		_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-			VerifiedSessionToken: "sess-1", StripeCustomerId: "cus_123",
-		})
-		if status.Code(err) != codes.Unavailable {
-			t.Fatalf("status = %v, want Unavailable with no store wired", err)
-		}
-	})
-
-	t.Run("missing customer id", func(t *testing.T) {
-		h := newSignupHarness(t)
-		session := h.requestAndRedeem(t)
-		_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-			VerifiedSessionToken: session,
-		})
-		if status.Code(err) != codes.InvalidArgument {
-			t.Fatalf("status = %v, want InvalidArgument with no stripe_customer_id", err)
-		}
-	})
-}
-
-// TestAttachSignupCustomer_StoreFailureIsUnavailable mirrors the redemption
-// case: a store error that is not ErrSignupVerificationNotFound must not read
-// as "no such session".
-func TestAttachSignupCustomer_StoreFailureIsUnavailable(t *testing.T) {
-	h := newSignupHarness(t)
-	h.store.attachErr = errors.New("connection reset")
-
-	_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-		VerifiedSessionToken: "sess-whatever", StripeCustomerId: "cus_123",
-	})
-	if status.Code(err) != codes.Unavailable {
-		t.Fatalf("status = %v, want Unavailable on a store failure", err)
-	}
-}
-
 // TestSignup_NoIdPClientIsUnavailable — provisioning an owner identity is
 // unreachable without a directory to write it to.
 func TestSignup_NoIdPClientIsUnavailable(t *testing.T) {

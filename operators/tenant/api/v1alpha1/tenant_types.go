@@ -182,14 +182,6 @@ type TenantStatus struct {
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
-	// StripeCustomerID is the Stripe customer created for this tenant by the
-	// CreateStripeCustomer saga step. Lives in status (controller-populated,
-	// persisted by the reconciler's Status().Patch) — it was previously a
-	// spec field whose mid-saga write was silently discarded, so every
-	// reconcile created a fresh Stripe customer (tenant-operator#354).
-	// +optional
-	StripeCustomerID string `json:"stripeCustomerId,omitempty"`
-
 	// ObservedGeneration reflects the generation most recently reconciled.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -255,22 +247,8 @@ const TenantFinalizer = "gibson.zeroroot.ai/tenant-cleanup"
 const (
 	ConditionReady                = "Ready"
 	ConditionNamespaceProvisioned = "NamespaceProvisioned"
-	ConditionStripeReady          = "StripeReady"
 	ConditionRedisReady           = "RedisReady"
 	ConditionTerminating          = "Terminating"
-
-	// ConditionBillingPending is set True when a paid-tier Tenant is waiting
-	// for the dashboard webhook to confirm that the Stripe checkout session
-	// completed successfully. The provisioning saga's WaitForBillingConfirmation
-	// step waits for the gibson.zeroroot.ai/billing-active=true annotation before
-	// advancing the saga to Ready.
-	ConditionBillingPending = "BillingPending"
-
-	// ConditionBillingAbandoned is set True when a paid-tier Tenant's billing
-	// window expired (no webhook confirmation received within 1 hour of
-	// Tenant creation). The saga runner initiates teardown when this
-	// condition is True and the CR is still not billing-confirmed.
-	ConditionBillingAbandoned = "BillingAbandoned"
 
 	// ConditionZitadelOrgReady is set True after the EnsureZitadelOrg saga
 	// step has provisioned (or verified) the Zitadel organization for this

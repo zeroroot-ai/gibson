@@ -244,30 +244,6 @@ func (m *memVerificationStore) GetByVerifiedSession(_ context.Context, raw strin
 	return r.SignupVerification, nil
 }
 
-func (m *memVerificationStore) AttachStripeCustomer(_ context.Context, raw, customerID string) error {
-	if m.attachErr != nil {
-		return m.attachErr
-	}
-	r, ok := m.liveSession(raw)
-	if !ok {
-		return ErrSignupVerificationNotFound
-	}
-	// Mirrors the two binding predicates the real UPDATE carries (pinned by
-	// TestAttachStripeCustomer_BindsTheCustomerToTheSession): one customer per
-	// session, and one session per customer. The model is only worth testing
-	// handlers against while it agrees with the statement.
-	if r.StripeCustomerID != "" && r.StripeCustomerID != customerID {
-		return ErrSignupVerificationNotFound
-	}
-	for _, other := range m.rows {
-		if other != r && other.StripeCustomerID == customerID {
-			return ErrSignupVerificationNotFound
-		}
-	}
-	r.StripeCustomerID = customerID
-	return nil
-}
-
 func (m *memVerificationStore) ClaimCompletion(_ context.Context, raw string) (SignupVerification, error) {
 	if m.claimErr != nil {
 		return SignupVerification{}, m.claimErr
@@ -1091,33 +1067,6 @@ func TestSignup_AttemptIDMustMatchTheVerifiedSession(t *testing.T) {
 	}
 	if len(h.idp.createHumanReqs) != 0 {
 		t.Errorf("the mismatched attempt reached identity creation")
-	}
-}
-
-// TestAttachSignupCustomer_RequiresLiveSession keeps billing objects behind the
-// same proof everything else is behind.
-func TestAttachSignupCustomer_RequiresLiveSession(t *testing.T) {
-	h := newSignupHarness(t)
-	if _, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-		VerifiedSessionToken: "sess-fabricated",
-		StripeCustomerId:     "cus_123",
-	}); status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("status = %v, want PermissionDenied without a live session", err)
-	}
-
-	session := h.requestAndRedeem(t)
-	if _, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-		VerifiedSessionToken: session,
-		StripeCustomerId:     "cus_123",
-	}); err != nil {
-		t.Fatalf("AttachSignupCustomer: %v", err)
-	}
-	row, err := h.store.GetByVerifiedSession(context.Background(), session)
-	if err != nil {
-		t.Fatalf("GetByVerifiedSession: %v", err)
-	}
-	if row.StripeCustomerID != "cus_123" {
-		t.Errorf("StripeCustomerID = %q, want cus_123", row.StripeCustomerID)
 	}
 }
 

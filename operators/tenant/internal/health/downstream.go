@@ -33,11 +33,6 @@ type Neo4jPinger interface {
 	Ping(ctx context.Context) error
 }
 
-// StripePinger is the subset of stripe.Client used by PingStripe.
-type StripePinger interface {
-	Ping(ctx context.Context) error
-}
-
 // PingDashboard verifies the dashboard admin API is reachable. Uses a 1s per-call timeout.
 func PingDashboard(ctx context.Context, c DashboardPinger) error {
 	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
@@ -69,15 +64,3 @@ func PingNeo4j(ctx context.Context, c Neo4jPinger) error {
 	return c.Ping(ctx)
 }
 
-// PingStripe verifies the Stripe API key by calling balance.Get. If the client
-// is nil (STRIPE_API_KEY unset), this is a no-op and returns nil; the caller
-// is responsible for marking the check as "skipped" in the summary.
-// Uses a 1s per-call timeout.
-func PingStripe(ctx context.Context, c StripePinger) error {
-	if c == nil {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
-	defer cancel()
-	return c.Ping(ctx)
-}

@@ -42,13 +42,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
 
-// AnnotationStripeCustomerID is stamped on the Tenant CR when the pending
-// record carries a pre-created Stripe customer, so the billing reconciler
-// adopts the existing customer rather than creating a new one. Byte-identical
-// to the dashboard's ANNOTATION_STRIPE_CUSTOMER_ID (src/lib/k8s/tenants.ts) so
-// the operator-created CR is indistinguishable from the dashboard-created one.
-const AnnotationStripeCustomerID = "gibson.zeroroot.ai/stripe-customer-id"
-
 // defaultPendingProvisioningInterval is how often the runnable drains the
 // daemon's pending-provisioning queue.
 const defaultPendingProvisioningInterval = 15 * time.Second
@@ -66,12 +59,6 @@ type PendingProvisioningClient interface {
 type PendingProvisioningRunnable struct {
 	Client client.Client
 	Daemon PendingProvisioningClient
-	// Verifier re-checks stripe_customer_id ownership before the recorded id
-	// is adopted onto the Tenant CR (gibson#1099 defense-in-depth; see
-	// stripe_customer_verifier.go). Always non-nil on the drain path:
-	// cmd/main.go injects NoopStripeCustomerVerifier when the operator has no
-	// Stripe credentials, and SetupWithManager defaults nil to the no-op.
-	Verifier StripeCustomerVerifier
 	// Interval between queue drains. Zero uses defaultPendingProvisioningInterval.
 	Interval time.Duration
 }
@@ -256,16 +243,8 @@ func tenantNamespace(slug string) string {
 // createTenant builds and creates the Tenant CR from a pending record. The spec
 // shape mirrors exactly what the dashboard's applyTenant wrote
 // (src/lib/k8s/tenants.ts): cluster-scoped, metadata.name=slug, spec
-// displayName/owner/tier, and the stripe-customer-id annotation when present.
-// AlreadyExists is treated as success (a concurrent create won the race).
-//
-// Before the recorded stripe_customer_id is adopted onto the CR the Verifier
-// re-checks the customer actually belongs to this tenant (gibson#1099
-// defense-in-depth; primary control is the dashboard's verifySignupCustomer
-// gate). A failure surfaces per this file's existing bad-record pattern: the
-// error propagates to reconcileOne, no CR is created, no ack — the record
-// stays pending and is re-listed each drain, so a transient Stripe blip
-// converges while a genuine mismatch stays visibly refused in the logs.
+// displayName/owner/tier. AlreadyExists is treated as success (a concurrent
+// create won the race).
 func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provision.PendingTenant) error {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
@@ -277,15 +256,6 @@ func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provis
 			Tier:        gibsonv1alpha1.TenantTier(p.Tier),
 		},
 	}
-	if p.StripeCustomerID != "" {
-		if err := r.Verifier.VerifyStripeCustomer(ctx, p.StripeCustomerID, p.TenantID); err != nil {
-			return fmt.Errorf("refusing to adopt stripe customer %q for tenant %q: %w",
-				p.StripeCustomerID, p.TenantID, err)
-		}
-		tenant.ObjectMeta.Annotations = map[string]string{
-			AnnotationStripeCustomerID: p.StripeCustomerID,
-		}
-	}
 	if err := r.Client.Create(ctx, tenant); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return nil
@@ -293,15 +263,6 @@ func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provis
 		return err
 	}
 	return nil
-}
-
-// applyVerifierDefault fills in the no-op StripeCustomerVerifier when none is
-// set, so the drain path never needs a nil-guard. Extracted for testability.
-func applyVerifierDefault(v StripeCustomerVerifier) StripeCustomerVerifier {
-	if v != nil {
-		return v
-	}
-	return NoopStripeCustomerVerifier{}
 }
 
 // SetupWithManager registers the runnable with the manager. The daemon client

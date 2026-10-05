@@ -35,6 +35,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
+	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -75,6 +76,7 @@ type DaemonServer struct {
 	tenantv1.UnimplementedUserServiceServer
 	tenantv1.UnimplementedSignupServiceServer
 	tenantv1.UnimplementedTenantProvisioningServiceServer
+	connectionv1.UnimplementedConnectionPointServiceServer
 	tenantv1.UnimplementedAdminTenantServiceServer
 	sessionv1.UnimplementedSessionServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
@@ -314,12 +316,18 @@ type DaemonServer struct {
 	// Spec: seam-signup-saas-only (gibson#1088, ADR-0074).
 	signupPolicy signup.Policy
 
-	// billingWebhookSecret is the shared secret the billing-webhook caller
-	// signs SetTenantBillingActive assertions with. Wired via
-	// WithBillingWebhookSecret from GIBSON_BILLING_WEBHOOK_SECRET. Empty means
-	// the RPC cannot authenticate anyone and therefore refuses everyone — see
-	// billing_webhook_auth.go for the mechanism and the fail-closed rationale.
-	billingWebhookSecret []byte
+	// connectionCallers are the SPIFFE IDs that may call the neutral
+	// connection points (connection_points.go).
+	connectionCallers ConnectionPointCallers
+
+	// tenantActivation caches reads of the tenant activation signal
+	// (tenant_activation.go).
+	tenantActivation activationCache
+
+	// signupStepURL is the URL of the external signup step (ADR-0060, D54).
+	// Wired via WithSignupStepURL from GIBSON_SIGNUP_STEP_URL. Empty means
+	// signup never waits. See signup_step.go.
+	signupStepURL string
 
 	// signupVerifications holds proof of mailbox control for in-flight
 	// self-serve signups (platform Postgres, migration 021). Wired via
@@ -412,9 +420,8 @@ type MissionQuotaChecker interface {
 	IncrementMissionCount(ctx context.Context) error
 
 	// InvalidateCache drops any in-process cached limits for tenant so the
-	// next Limits call fetches a fresh value. Called by SetTenantBillingActive
-	// when a subscription-status change is recorded, allowing the 60 s TTL to
-	// be bypassed without waiting for natural expiry.
+	// next Limits call fetches a fresh value, allowing the 60 s TTL to be
+	// bypassed without waiting for natural expiry.
 	// Implementations must be safe to call concurrently and must be a no-op
 	// when the underlying provider has no cache (OSS configProvider path:
 	// delete(cache, tenant) on an empty map is always harmless).
@@ -1189,23 +1196,6 @@ func (s *DaemonServer) WithSignupPolicy(p signup.Policy) *DaemonServer {
 	return s
 }
 
-// WithBillingWebhookSecret wires the shared secret that authenticates
-// TenantProvisioningService.SetTenantBillingActive. An empty or
-// whitespace-only secret leaves the server unconfigured, which makes that RPC
-// refuse every caller (fail-closed — see billing_webhook_auth.go).
-//
-// The secret is deploy-time configuration read once at startup; no request can
-// change it.
-func (s *DaemonServer) WithBillingWebhookSecret(secret string) *DaemonServer {
-	trimmed := strings.TrimSpace(secret)
-	if trimmed == "" {
-		s.billingWebhookSecret = nil
-		return s
-	}
-	s.billingWebhookSecret = []byte(trimmed)
-	return s
-}
-
 // containsString reports whether needle is present in the haystack slice.
 // Used for capability-based scope filtering on agent lists.
 func containsString(haystack []string, needle string) bool {
@@ -1351,6 +1341,11 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 	}
 
 	// Enforce per-tenant quotas before any resource allocation.
+	// A suspended tenant starts no new mission (ADR-0060, D41).
+	if err := s.requireActiveTenant(stream.Context(), auth.TenantStringFromContext(stream.Context())); err != nil {
+		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
+		return err
+	}
 	if s.quotaManager != nil {
 		if err := s.quotaManager.CheckMissionQuota(stream.Context()); err != nil {
 			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)

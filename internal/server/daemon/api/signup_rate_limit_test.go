@@ -315,19 +315,6 @@ func TestCompleteLimits_UnattributedTrafficGetsItsOwnBucket(t *testing.T) {
 	}
 }
 
-func TestAttachCustomerLimits_UnattributedTrafficGetsItsOwnBucket(t *testing.T) {
-	limits := attachCustomerLimits("")
-	if len(limits) != 2 {
-		t.Fatalf("attachCustomerLimits(\"\") = %d limits, want the IP bucket plus the peer-independent one", len(limits))
-	}
-	if limits[0].window != signupRequestUnattributedHour {
-		t.Errorf("attachCustomerLimits(\"\") window = %+v, want the shared unattributed budget", limits[0].window)
-	}
-	if attributed := attachCustomerLimits("203.0.113.7"); attributed[0].key == limits[0].key {
-		t.Errorf("attributed and unattributed traffic share an attach budget: %q", limits[0].key)
-	}
-}
-
 // TestSignupLimits_AnAdmittedRequestSpendsEveryBudget — the counterpart: when
 // nothing refuses, every budget in the set is charged exactly once, and the
 // shared global bucket is charged LAST so a mid-flight refusal by a narrower
