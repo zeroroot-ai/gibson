@@ -12,8 +12,9 @@ import (
 )
 
 func names(src string) []string {
-	var out []string
-	for n := range NamesInSource("x.go", []byte(src)) {
+	found := NamesInSource("x.go", []byte(src))
+	out := make([]string, 0, len(found))
+	for n := range found {
 		out = append(out, n)
 	}
 	sort.Strings(out)
