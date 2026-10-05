@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.153.0](https://github.com/zeroroot-ai/gibson/compare/v0.152.0...v0.153.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **modelgate:** FGA model-access tuples written before this change name global objects (provider:<name>, model:<name>) and no longer grant anything. The model type loses its provider and owner relations.
+* **platform-operator:** every zitadel call uses zitadelconn, under ZITADEL_URL ([#653](https://github.com/zeroroot-ai/gibson/issues/653))
+
+### Bug Fixes
+
+* **authz:** delete the fga relations nothing checks, and check rewind by its permission ([#657](https://github.com/zeroroot-ai/gibson/issues/657)) ([574f16c](https://github.com/zeroroot-ai/gibson/commit/574f16cf69b7cdaf5feb936d9456ccb5633322d4))
+* **manifest:** delete the 67 functions of the manifest package nothing reaches ([#737](https://github.com/zeroroot-ai/gibson/issues/737)) ([be4429e](https://github.com/zeroroot-ai/gibson/commit/be4429ea093d1dd210d23ebb6f88ea42d80b4520)), closes [#508](https://github.com/zeroroot-ai/gibson/issues/508)
+* **modelgate:** the model gate decides for every request, and a member is allowed by default ([#669](https://github.com/zeroroot-ai/gibson/issues/669)) ([9ec20bd](https://github.com/zeroroot-ai/gibson/commit/9ec20bda89ff38371d0e77f0e22fea2b91286ee0))
+* **observability:** delete the 71 functions of the observability package nothing reaches ([#655](https://github.com/zeroroot-ai/gibson/issues/655)) ([2e03271](https://github.com/zeroroot-ai/gibson/commit/2e0327161c3eca30528d08e3b8a74d01c7b89366))
+* **platform-operator:** every zitadel call uses zitadelconn, under ZITADEL_URL ([#653](https://github.com/zeroroot-ai/gibson/issues/653)) ([e2e6e02](https://github.com/zeroroot-ai/gibson/commit/e2e6e020b24fd8f28b5502c8e871555872b273b5))
+
 ## [0.152.0](https://github.com/zeroroot-ai/gibson/compare/v0.151.0...v0.152.0) (2026-10-05)
 
 
