@@ -101,11 +101,18 @@ func TestExecuteGate_FailsClosedOnEveryPath(t *testing.T) {
 		ctx  func(t *testing.T) context.Context
 		az   authz.Authorizer
 	}{
-		{"no authorizer wired", func(t *testing.T) context.Context { return callerCtx(t, "user-42", "acme") }, nil},
-		{"no caller identity", func(*testing.T) context.Context {
+		{"no authorizer wired", func(t *testing.T) context.Context {
+			t.Helper()
+			return callerCtx(t, "user-42", "acme")
+		}, nil},
+		{"no caller identity", func(t *testing.T) context.Context {
+			t.Helper()
 			return auth.ContextWithTenantString(context.Background(), "acme")
 		}, &recordingAuthorizer{allow: true}},
-		{"no tenant", func(*testing.T) context.Context { return context.Background() }, &recordingAuthorizer{allow: true}},
+		{"no tenant", func(t *testing.T) context.Context {
+			t.Helper()
+			return context.Background()
+		}, &recordingAuthorizer{allow: true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
