@@ -112,9 +112,3 @@ func EmbeddedCatalog() *DomainPackCatalog {
 	}
 	return c
 }
-
-// EmbeddedPack returns one pack of the embedded catalog, and whether it
-// exists.
-func EmbeddedPack(name string) (DomainPack, bool) {
-	return EmbeddedCatalog().Get(name)
-}

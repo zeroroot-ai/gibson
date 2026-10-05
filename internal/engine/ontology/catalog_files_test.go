@@ -14,7 +14,7 @@ import (
 // mainPack returns the main pack from the embedded catalog.
 func mainPack(t *testing.T) DomainPack {
 	t.Helper()
-	p, ok := EmbeddedPack(MainDomainPackName)
+	p, ok := EmbeddedCatalog().Get(MainDomainPackName)
 	require.True(t, ok, "the embedded catalog must hold the main pack")
 	return p
 }
