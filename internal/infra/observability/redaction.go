@@ -97,58 +97,6 @@ func Redact(args []any) []any {
 	return result
 }
 
-// TruncateString truncates a string to maxLen characters, adding "..." if truncated.
-// If the string is already shorter than or equal to maxLen, it's returned unchanged.
-// For maxLen < 4, truncation happens without ellipsis to avoid overflow.
-//
-// Example:
-//
-//	TruncateString("very long string here", 10)  // Returns: "very lo..."
-//	TruncateString("short", 10)                   // Returns: "short"
-//	TruncateString("test", 2)                     // Returns: "te"
-//	TruncateString("", 10)                        // Returns: ""
-func TruncateString(s string, maxLen int) string {
-	if s == "" {
-		return ""
-	}
-
-	if len(s) <= maxLen {
-		return s
-	}
-
-	// For very short maxLen, just truncate without ellipsis
-	if maxLen < 4 {
-		return s[:maxLen]
-	}
-
-	// Truncate and add ellipsis
-	return s[:maxLen-3] + "..."
-}
-
-// RedactToken partially redacts a token by showing only the first and last 4 characters.
-// This allows for token identification while keeping the sensitive parts hidden.
-//
-// Example:
-//
-//	RedactToken("token_abc123def456ghijkl789")  // Returns: "toke***l789"
-//	RedactToken("short")                           // Returns: "[REDACTED]"
-//	RedactToken("")                                // Returns: "[REDACTED]"
-//
-// Tokens shorter than 10 characters are completely redacted to avoid exposing
-// too much of the original value.
-func RedactToken(token string) string {
-	if token == "" {
-		return "[REDACTED]"
-	}
-
-	if len(token) < 10 {
-		return "[REDACTED]"
-	}
-
-	// Show first 4 and last 4 characters
-	return token[:4] + "***" + token[len(token)-4:]
-}
-
 // normalizeFieldName converts a field name to lowercase and removes underscores
 // for case-insensitive comparison with sensitive field names.
 func normalizeFieldName(field string) string {

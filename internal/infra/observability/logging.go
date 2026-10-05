@@ -5,7 +5,6 @@ package observability
 
 import (
 	"context"
-	"io"
 	"log/slog"
 
 	"go.opentelemetry.io/otel/trace"
@@ -327,34 +326,4 @@ func (l *Logger) withContextFields(ctx context.Context) *slog.Logger {
 	}
 
 	return logger
-}
-
-// NewJSONHandler creates a new JSON log handler with the specified output and level.
-// JSON format is ideal for structured logging in production environments.
-//
-// Parameters:
-//   - w: The writer to output logs to (e.g., os.Stdout, file)
-//   - level: The minimum log level to output
-//
-// Returns:
-//   - slog.Handler: A configured JSON handler
-func NewJSONHandler(w io.Writer, level slog.Level) slog.Handler {
-	return slog.NewJSONHandler(w, &slog.HandlerOptions{
-		Level: level,
-	})
-}
-
-// NewTextHandler creates a new text log handler with the specified output and level.
-// Text format is human-readable and useful for development and debugging.
-//
-// Parameters:
-//   - w: The writer to output logs to (e.g., os.Stdout, file)
-//   - level: The minimum log level to output
-//
-// Returns:
-//   - slog.Handler: A configured text handler
-func NewTextHandler(w io.Writer, level slog.Level) slog.Handler {
-	return slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level: level,
-	})
 }

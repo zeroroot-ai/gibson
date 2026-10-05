@@ -6,7 +6,6 @@ package observability
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"log/slog"
 	"testing"
 
@@ -181,44 +180,6 @@ func TestTracedLogger_WithContext_NoTrace(t *testing.T) {
 	// Trace fields should not be present
 	assert.NotContains(t, output, "trace_id")
 	assert.NotContains(t, output, "span_id")
-}
-
-func TestNewJSONHandler(t *testing.T) {
-	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-
-	require.NotNil(t, handler)
-
-	logger := slog.New(handler)
-	logger.Info("test message", "key", "value")
-
-	output := buf.String()
-
-	// Verify JSON format
-	var logEntry map[string]interface{}
-	err := json.Unmarshal([]byte(output), &logEntry)
-	require.NoError(t, err)
-
-	assert.Equal(t, "INFO", logEntry["level"])
-	assert.Equal(t, "test message", logEntry["msg"])
-	assert.Equal(t, "value", logEntry["key"])
-}
-
-func TestNewTextHandler(t *testing.T) {
-	buf := &bytes.Buffer{}
-	handler := NewTextHandler(buf, slog.LevelInfo)
-
-	require.NotNil(t, handler)
-
-	logger := slog.New(handler)
-	logger.Info("test message", "key", "value")
-
-	output := buf.String()
-
-	// Verify text format contains expected components
-	assert.Contains(t, output, "INFO")
-	assert.Contains(t, output, "test message")
-	assert.Contains(t, output, "key=value")
 }
 
 func TestRedactSensitiveData_Prompt(t *testing.T) {
@@ -473,47 +434,6 @@ func TestTracedLogger_AllLevelsWithTraceContext(t *testing.T) {
 			assert.Contains(t, output, "trace-agent")
 		})
 	}
-}
-
-func TestJSONHandler_OutputFormat(t *testing.T) {
-	buf := &bytes.Buffer{}
-	handler := NewJSONHandler(buf, slog.LevelInfo)
-	logger := slog.New(handler)
-
-	logger.Info("structured log",
-		slog.String("string_field", "value"),
-		slog.Int("int_field", 42),
-		slog.Bool("bool_field", true),
-	)
-
-	output := buf.String()
-
-	var logEntry map[string]interface{}
-	err := json.Unmarshal([]byte(output), &logEntry)
-	require.NoError(t, err, "Output should be valid JSON")
-
-	assert.Equal(t, "INFO", logEntry["level"])
-	assert.Equal(t, "structured log", logEntry["msg"])
-	assert.Equal(t, "value", logEntry["string_field"])
-	assert.Equal(t, float64(42), logEntry["int_field"])
-	assert.Equal(t, true, logEntry["bool_field"])
-	assert.NotEmpty(t, logEntry["time"])
-}
-
-func TestTextHandler_OutputFormat(t *testing.T) {
-	buf := &bytes.Buffer{}
-	handler := NewTextHandler(buf, slog.LevelInfo)
-	logger := slog.New(handler)
-
-	logger.Info("text log", "key1", "value1", "key2", 123)
-
-	output := buf.String()
-
-	// Text format should contain key=value pairs
-	assert.Contains(t, output, "INFO")
-	assert.Contains(t, output, "text log")
-	assert.Contains(t, output, "key1=value1")
-	assert.Contains(t, output, "key2=123")
 }
 
 func TestRedactSensitiveData_UnderscoreVariations(t *testing.T) {

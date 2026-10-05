@@ -27,46 +27,6 @@ type TracingConfig struct {
 	InsecureMode bool    `yaml:"insecure_mode" mapstructure:"insecure_mode"` // Disable TLS verification (unsafe)
 }
 
-// Validate validates the TracingConfig fields.
-// Returns an error if Provider is invalid (must be otlp, zipkin, or noop),
-// or if SampleRate is out of range (must be between 0.0 and 1.0).
-func (c *TracingConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-
-	// Validate provider
-	validProviders := []string{"otlp", "zipkin", "noop"}
-	provider := strings.ToLower(c.Provider)
-	isValid := false
-	for _, valid := range validProviders {
-		if provider == valid {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		return fmt.Errorf("invalid tracing provider: %s (must be one of: %s)", c.Provider, strings.Join(validProviders, ", "))
-	}
-
-	// Validate sample rate
-	if c.SampleRate < 0.0 || c.SampleRate > 1.0 {
-		return fmt.Errorf("invalid sample rate: %f (must be between 0.0 and 1.0)", c.SampleRate)
-	}
-
-	// Validate endpoint is not empty (except for noop provider)
-	if provider != "noop" && c.Endpoint == "" {
-		return fmt.Errorf("endpoint is required when tracing is enabled")
-	}
-
-	// Validate service name is not empty (except for noop provider)
-	if provider != "noop" && c.ServiceName == "" {
-		return fmt.Errorf("service name is required when tracing is enabled")
-	}
-
-	return nil
-}
-
 // MetricsConfig contains metrics export configuration.
 // Supports multiple metrics providers with configurable ports.
 type MetricsConfig struct {
@@ -75,87 +35,12 @@ type MetricsConfig struct {
 	Port     int    `yaml:"port" mapstructure:"port"`
 }
 
-// Validate validates the MetricsConfig fields.
-// Returns an error if Provider is invalid (must be prometheus or otlp),
-// or if Port is out of valid range (1-65535).
-func (c *MetricsConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
-
-	// Validate provider
-	validProviders := []string{"prometheus", "otlp"}
-	provider := strings.ToLower(c.Provider)
-	isValid := false
-	for _, valid := range validProviders {
-		if provider == valid {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		return fmt.Errorf("invalid metrics provider: %s (must be one of: %s)", c.Provider, strings.Join(validProviders, ", "))
-	}
-
-	// Validate port range
-	if c.Port < 1 || c.Port > 65535 {
-		return fmt.Errorf("invalid port: %d (must be between 1 and 65535)", c.Port)
-	}
-
-	return nil
-}
-
 // LoggingConfig contains structured logging configuration.
 // Supports multiple log levels, formats, and output destinations.
 type LoggingConfig struct {
 	Level  string `yaml:"level" mapstructure:"level"`
 	Format string `yaml:"format" mapstructure:"format"`
 	Output string `yaml:"output" mapstructure:"output"`
-}
-
-// Validate validates the LoggingConfig fields.
-// Returns an error if Level is invalid (must be debug, info, warn, error, or fatal),
-// or if Format is invalid (must be json or text),
-// or if Output is invalid (must be stdout, stderr, or a file path).
-func (c *LoggingConfig) Validate() error {
-	// Validate level
-	validLevels := []string{"debug", "info", "warn", "error", "fatal"}
-	level := strings.ToLower(c.Level)
-	isValid := false
-	for _, valid := range validLevels {
-		if level == valid {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		return fmt.Errorf("invalid log level: %s (must be one of: %s)", c.Level, strings.Join(validLevels, ", "))
-	}
-
-	// Validate format
-	validFormats := []string{"json", "text"}
-	format := strings.ToLower(c.Format)
-	isValid = false
-	for _, valid := range validFormats {
-		if format == valid {
-			isValid = true
-			break
-		}
-	}
-	if !isValid {
-		return fmt.Errorf("invalid log format: %s (must be one of: %s)", c.Format, strings.Join(validFormats, ", "))
-	}
-
-	// Validate output (stdout, stderr, or file path)
-	if c.Output == "" {
-		return fmt.Errorf("output is required")
-	}
-	output := strings.ToLower(c.Output)
-	if output != "stdout" && output != "stderr" && !strings.HasPrefix(c.Output, "/") {
-		return fmt.Errorf("invalid log output: %s (must be 'stdout', 'stderr', or an absolute file path)", c.Output)
-	}
-
-	return nil
 }
 
 // Config configures the unified logger.
@@ -443,77 +328,4 @@ type OTLPConfig struct {
 	// RetryMaxElapsedTime is the maximum total time to spend retrying.
 	// Default is 5 minutes. After this time, the export is abandoned.
 	RetryMaxElapsedTime time.Duration `yaml:"retry_max_elapsed_time" mapstructure:"retry_max_elapsed_time"`
-}
-
-// DefaultOTLPConfig returns an OTLPConfig with sensible production defaults:
-//   - Batch size of 512 events (balances throughput and latency)
-//   - Batch timeout of 5 seconds (ensures timely delivery)
-//   - Retry enabled with exponential backoff (1s initial, 30s max)
-//   - Total retry time of 5 minutes (handles extended outages)
-//   - No compression (can be enabled if network bandwidth is limited)
-//
-// Example:
-//
-//	cfg := DefaultOTLPConfig()
-//	cfg.Endpoint = "http://localhost:4318"
-//	cfg.Compression = "gzip"
-//	if err := cfg.Validate(); err != nil {
-//	    log.Fatal(err)
-//	}
-func DefaultOTLPConfig() OTLPConfig {
-	return OTLPConfig{
-		BatchSize:            512,
-		BatchTimeout:         5 * time.Second,
-		RetryEnabled:         true,
-		RetryInitialInterval: 1 * time.Second,
-		RetryMaxInterval:     30 * time.Second,
-		RetryMaxElapsedTime:  5 * time.Minute,
-		Headers:              make(map[string]string),
-	}
-}
-
-// Validate validates the OTLPConfig fields.
-// Returns an error if:
-//   - Compression is not "gzip", "none", or empty
-//   - BatchSize is <= 0
-//   - BatchTimeout is <= 0
-//   - Retry intervals are invalid (initial > max, negative values)
-//   - RetryMaxElapsedTime is negative
-func (c *OTLPConfig) Validate() error {
-	// Validate compression
-	if c.Compression != "" && c.Compression != "gzip" && c.Compression != "none" {
-		return fmt.Errorf("invalid compression: %s (must be 'gzip', 'none', or empty)", c.Compression)
-	}
-
-	// Validate batch size
-	if c.BatchSize <= 0 {
-		return fmt.Errorf("batch_size must be > 0, got %d", c.BatchSize)
-	}
-
-	// Validate batch timeout
-	if c.BatchTimeout <= 0 {
-		return fmt.Errorf("batch_timeout must be > 0, got %v", c.BatchTimeout)
-	}
-
-	// Validate retry configuration
-	if c.RetryEnabled {
-		if c.RetryInitialInterval < 0 {
-			return fmt.Errorf("retry_initial_interval must be >= 0, got %v", c.RetryInitialInterval)
-		}
-
-		if c.RetryMaxInterval < 0 {
-			return fmt.Errorf("retry_max_interval must be >= 0, got %v", c.RetryMaxInterval)
-		}
-
-		if c.RetryInitialInterval > c.RetryMaxInterval {
-			return fmt.Errorf("retry_initial_interval (%v) must be <= retry_max_interval (%v)",
-				c.RetryInitialInterval, c.RetryMaxInterval)
-		}
-
-		if c.RetryMaxElapsedTime < 0 {
-			return fmt.Errorf("retry_max_elapsed_time must be >= 0, got %v", c.RetryMaxElapsedTime)
-		}
-	}
-
-	return nil
 }

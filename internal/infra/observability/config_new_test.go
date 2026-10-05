@@ -5,7 +5,6 @@ package observability
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -39,25 +38,6 @@ func TestContentLoggingConfig_Integration(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// TestOTLPConfig_Integration demonstrates full mission.
-func TestOTLPConfig_Integration(t *testing.T) {
-	// Create config with defaults
-	cfg := DefaultOTLPConfig()
-	assert.Equal(t, 512, cfg.BatchSize)
-	assert.True(t, cfg.RetryEnabled)
-
-	// Customize config
-	cfg.Endpoint = "http://localhost:4318"
-	cfg.Compression = "gzip"
-	cfg.Headers = map[string]string{
-		"Authorization": "Bearer token123",
-	}
-
-	// Validate configuration
-	err := cfg.Validate()
-	assert.NoError(t, err)
-}
-
 // TestContentLoggingConfig_TruncateEdgeCases tests edge cases for truncation.
 func TestContentLoggingConfig_TruncateEdgeCases(t *testing.T) {
 	cfg := ContentLoggingConfig{}
@@ -71,32 +51,6 @@ func TestContentLoggingConfig_TruncateEdgeCases(t *testing.T) {
 	// Multi-byte UTF-8 characters
 	result := cfg.Truncate("世界你好世界你好", 3)
 	assert.Equal(t, "世界你... [truncated]", result)
-}
-
-// TestOTLPConfig_EdgeCases tests edge cases for OTLP configuration.
-func TestOTLPConfig_EdgeCases(t *testing.T) {
-	// Minimum valid config
-	cfg := OTLPConfig{
-		Endpoint:     "http://localhost:4318",
-		BatchSize:    1,
-		BatchTimeout: 1 * time.Millisecond,
-		RetryEnabled: false,
-	}
-	err := cfg.Validate()
-	assert.NoError(t, err)
-
-	// Zero retry intervals when retry is disabled (should be valid)
-	cfg2 := OTLPConfig{
-		Endpoint:             "http://localhost:4318",
-		BatchSize:            100,
-		BatchTimeout:         1 * time.Second,
-		RetryEnabled:         false,
-		RetryInitialInterval: 0,
-		RetryMaxInterval:     0,
-		RetryMaxElapsedTime:  0,
-	}
-	err = cfg2.Validate()
-	assert.NoError(t, err)
 }
 
 // TestContentLoggingConfig_MultipleRedactions tests multiple pattern matches.

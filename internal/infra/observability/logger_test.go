@@ -724,31 +724,3 @@ func TestLoggerWithComponentEmptyString(t *testing.T) {
 	_, hasComponent := entry["component"]
 	assert.False(t, hasComponent, "empty component should not be in log")
 }
-
-// TestLoggerJSONHandler verifies NewJSONHandler creates a valid handler
-func TestLoggerJSONHandler(t *testing.T) {
-	var buf bytes.Buffer
-	handler := NewJSONHandler(&buf, slog.LevelInfo)
-	require.NotNil(t, handler)
-
-	// Create a logger with the handler and verify it works
-	logger := slog.New(handler)
-	logger.Info("test message")
-
-	assert.Contains(t, buf.String(), "test message")
-	assert.Contains(t, buf.String(), `"level":"INFO"`)
-}
-
-// TestLoggerTextHandler verifies NewTextHandler creates a valid handler
-func TestLoggerTextHandler(t *testing.T) {
-	var buf bytes.Buffer
-	handler := NewTextHandler(&buf, slog.LevelInfo)
-	require.NotNil(t, handler)
-
-	// Create a logger with the handler and verify it works
-	logger := slog.New(handler)
-	logger.Info("test message")
-
-	assert.Contains(t, buf.String(), "test message")
-	assert.Contains(t, buf.String(), "level=INFO")
-}
