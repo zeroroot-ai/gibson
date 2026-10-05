@@ -1662,6 +1662,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// d.brainRegistry (just constructed above) so an enabled pack folds into
 	// the SAME per-tenant World WorldService reads.
 	d.registerDomainPack(ctx, srv)
+	d.registerCatalogPlugin(ctx, srv)
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
 	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,

@@ -645,6 +645,41 @@ func ListConnectors() []ConnectorEntry {
 	return out
 }
 
+// PluginEntry is the catalog view of one plugin: what a tenant sees when it
+// chooses a plugin to enable (gibson#815).
+type PluginEntry struct {
+	ID          string
+	DisplayName string
+	Description string
+}
+
+// ListPlugins returns the catalog plugins, in the order of the catalog.
+func ListPlugins() []PluginEntry {
+	var out []PluginEntry
+	for i := range catalog {
+		if catalog[i].plugin == nil {
+			continue
+		}
+		out = append(out, PluginEntry{
+			ID:          catalog[i].ID,
+			DisplayName: catalog[i].DisplayName,
+			Description: catalog[i].Description,
+		})
+	}
+	return out
+}
+
+// LookupPlugin returns the catalog plugin with the given id, and whether the
+// catalog lists one.
+func LookupPlugin(id string) (PluginEntry, bool) {
+	for _, e := range ListPlugins() {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return PluginEntry{}, false
+}
+
 // LookupContentTrust returns the contentTrust the catalog states for the
 // tool, plugin or agent of the given kind and id, and whether the catalog
 // lists such a component. The loader refuses a workload entry with no

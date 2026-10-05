@@ -248,6 +248,10 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.BudgetService/ListBudgets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
 /gibson.tenant.v1.BudgetService/SetBudget,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
 /gibson.tenant.v1.BudgetService/SetTenantBudgetDefaults,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/budget.proto,rule
+/gibson.tenant.v1.CatalogPluginService/DisableCatalogPlugin,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/catalog_plugin.proto,rule
+/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/catalog_plugin.proto,rule
+/gibson.tenant.v1.CatalogPluginService/ListCatalogPlugins,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/catalog_plugin.proto,rule
+/gibson.tenant.v1.CatalogPluginService/ListPluginCatalog,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/catalog_plugin.proto,rule
 /gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/connector_auth.proto,rule
 /gibson.tenant.v1.ConnectorAuthService/GetConnectorAuthStatus,member,tenant,tenant_from_identity,USER,gibson/tenant/v1/connector_auth.proto,rule
 /gibson.tenant.v1.ConnectorAuthService/RevokeConnectorGrant,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/connector_auth.proto,rule
