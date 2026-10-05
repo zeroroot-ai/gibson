@@ -36,17 +36,14 @@ const (
 	ConnectorShapeRemote ConnectorShape = "Remote"
 )
 
-// ConnectorRuntime is where a Hosted connector runs. The default is a pod in
-// the tenant namespace. setec is an opt-in hardening upgrade (ADR-0114).
+// ConnectorRuntime is where a Hosted connector runs. A connector has one
+// runtime: a pod in the tenant namespace (ADR-0114).
 type ConnectorRuntime string
 
 const (
 	// ConnectorRuntimePod runs the connector as a Kubernetes pod with a
-	// network egress permission profile. This is the default.
+	// network egress permission profile. It is the only runtime.
 	ConnectorRuntimePod ConnectorRuntime = "pod"
-	// ConnectorRuntimeSetec runs the connector as a setec microVM sandbox for
-	// hardware isolation. This is a paid upgrade.
-	ConnectorRuntimeSetec ConnectorRuntime = "setec"
 )
 
 // ConnectorTransport is the MCP transport the server speaks. A stdio server is
@@ -169,9 +166,8 @@ type ConnectorInstanceSpec struct {
 	// +optional
 	Transport ConnectorTransport `json:"transport,omitempty"`
 
-	// Runtime is where a Hosted connector runs. Defaults to pod. setec is a
-	// paid hardening upgrade.
-	// +kubebuilder:validation:Enum=pod;setec
+	// Runtime is where a Hosted connector runs. The only value is pod.
+	// +kubebuilder:validation:Enum=pod
 	// +kubebuilder:default=pod
 	// +optional
 	Runtime ConnectorRuntime `json:"runtime,omitempty"`
