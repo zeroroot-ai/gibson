@@ -27,7 +27,7 @@ type echoOut struct {
 // newFakeConnector starts a real MCP server over streamable HTTP, as the
 // ToolHive proxy of a connector serves it, and records the path of each
 // request.
-func newFakeConnector(t *testing.T) (*httptest.Server, *[]string) {
+func newFakeConnector(t *testing.T) (srv *httptest.Server, paths *[]string) {
 	t.Helper()
 	server := mcp.NewServer(&mcp.Implementation{Name: "fake-connector", Version: "v0"}, nil)
 	mcp.AddTool(server, &mcp.Tool{Name: "echo", Description: "echo the text"},
@@ -39,13 +39,13 @@ func newFakeConnector(t *testing.T) (*httptest.Server, *[]string) {
 			return nil, echoOut{}, errors.New("vendor said no")
 		})
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
-	var paths []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.URL.Path)
+	var seen []string
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path)
 		handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &paths
+	return srv, &seen
 }
 
 // newTestConnectorMCP points the client at srv for the connector "github" of
@@ -145,7 +145,7 @@ func TestConnectorMCP_TheDefaultAddressIsTheOperatorAddress(t *testing.T) {
 // token, an empty token sends none, and a token error stops the request.
 func TestConnectorHTTPClient_SendsTheToken(t *testing.T) {
 	var got []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		got = append(got, r.Header.Get("Authorization"))
 	}))
 	defer srv.Close()
