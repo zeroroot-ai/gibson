@@ -243,6 +243,10 @@ type ComponentServiceServer struct {
 	// Set via WithAuthorizer. Added by agent-auth-fga-integration spec (task 3).
 	authorizer authz.Authorizer
 
+	// enrollment answers how a principal enrolled (ADR-0066). See
+	// WithEnrollmentReader.
+	enrollment EnrollmentReader
+
 	// eventHub feeds WatchComponentEvents (gibson#154). nil means the stream
 	// is Unavailable; the daemon always wires one.
 	eventHub *componentevents.Hub
@@ -445,6 +449,22 @@ func (s *ComponentServiceServer) WithDiscoveryProcessor(dp ResultDiscoveryProces
 // Added by the agent-auth-fga-integration spec (task 3).
 func (s *ComponentServiceServer) WithAuthorizer(az authz.Authorizer) *ComponentServiceServer {
 	s.authorizer = az
+	return s
+}
+
+// EnrollmentReader answers how a component principal enrolled. The daemon
+// passes the capability-grant store. PrincipalIsAttested is true only for a
+// principal that enrolled with a SPIRE JWT-SVID (ADR-0066), never for one that
+// enrolled with a bootstrap token.
+type EnrollmentReader interface {
+	PrincipalIsAttested(ctx context.Context, tenantID, principalRef string) (bool, error)
+}
+
+// WithEnrollmentReader wires the reader the catalog paths ask before they
+// give a check-in the standing of a catalog component. With no reader, no
+// check-in gets that standing.
+func (s *ComponentServiceServer) WithEnrollmentReader(r EnrollmentReader) *ComponentServiceServer {
+	s.enrollment = r
 	return s
 }
 

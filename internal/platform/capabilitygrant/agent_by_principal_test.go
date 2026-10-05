@@ -117,3 +117,34 @@ func TestService_LookupEnrolledAgent(t *testing.T) {
 		require.NoError(t, m.mock.ExpectationsWereMet())
 	})
 }
+
+// TestStore_PrincipalIsAttested pins the question the store asks and its
+// fail-closed inputs. The real database behaviour is in
+// TestLive_GrantRecordStatesHowAComponentEnrolled.
+func TestStore_PrincipalIsAttested(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+	store := NewCapabilityGrantStore(db)
+	ctx := context.Background()
+
+	if _, err := store.PrincipalIsAttested(ctx, "", "plugin_principal:github"); err == nil {
+		t.Fatal("an empty tenant must be refused")
+	}
+	if _, err := store.PrincipalIsAttested(ctx, "acme", ""); err == nil {
+		t.Fatal("an empty principal must be refused")
+	}
+
+	mock.ExpectQuery(`bool_and\(a\.attested\)`).
+		WithArgs("acme", "plugin_principal:github").
+		WillReturnRows(sqlmock.NewRows([]string{"attested"}).AddRow(true))
+	got, err := store.PrincipalIsAttested(ctx, "acme", "plugin_principal:github")
+	if err != nil || !got {
+		t.Fatalf("got %v, %v, want true", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

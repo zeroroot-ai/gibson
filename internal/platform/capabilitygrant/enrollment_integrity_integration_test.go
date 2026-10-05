@@ -219,3 +219,46 @@ func TestLive_AgentReadsAndRevocationAreScopedToTheTenant(t *testing.T) {
 		`SELECT status FROM capability_grant_agents WHERE id = $1`, res.AgentID).Scan(&status))
 	assert.Equal(t, "revoked", status)
 }
+
+func (e *liveEnv) enroll(t *testing.T, hostKey, principal, bootstrapType, credential string) {
+	t.Helper()
+	_, err := e.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "github", "autonomous", principal,
+		json.RawMessage(hostKey), json.RawMessage(agentJWK),
+		bootstrapType, credential, nil,
+	)
+	require.NoError(t, err)
+}
+
+// The grant record states how a component enrolled (ADR-0066). An SVID
+// enrollment is attested and a token enrollment is not. A re-registration with
+// the host key keeps what the host row holds, in both directions. One token
+// row under the same principal makes the principal not attested.
+func TestLive_GrantRecordStatesHowAComponentEnrolled(t *testing.T) {
+	env := newLiveEnv(t)
+	store := NewCapabilityGrantStore(env.db)
+	ctx := context.Background()
+	attested := func(principal string) bool {
+		t.Helper()
+		ok, err := store.PrincipalIsAttested(ctx, "acme", principal)
+		require.NoError(t, err)
+		return ok
+	}
+
+	assert.False(t, attested("plugin_principal:github"), "a principal with no row is not attested")
+
+	env.enroll(t, hostJWK, "plugin_principal:github", BootstrapTypeSPIFFESVID, "svid-1")
+	assert.True(t, attested("plugin_principal:github"))
+	env.enroll(t, hostJWK, "plugin_principal:github", hostReRegistrationBootstrapType, "")
+	assert.True(t, attested("plugin_principal:github"), "a host key re-registration keeps the attested host")
+
+	env.enroll(t, otherHostJWK, "plugin_principal:4711", "bootstrap", "cred-1")
+	assert.False(t, attested("plugin_principal:4711"))
+	env.enroll(t, otherHostJWK, "plugin_principal:4711", hostReRegistrationBootstrapType, "")
+	assert.False(t, attested("plugin_principal:4711"), "a host key re-registration does not make a token host attested")
+
+	// A token enrollment on the attested host writes the host back to not
+	// attested, and its agent row takes the principal with it.
+	env.enroll(t, hostJWK, "plugin_principal:github", "bootstrap", "cred-2")
+	assert.False(t, attested("plugin_principal:github"), "one token row under the principal makes it not attested")
+}

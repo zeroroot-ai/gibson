@@ -94,8 +94,13 @@ type Host struct {
 	// host+jwt (which carries no bootstrap claims) can copy it onto each newly
 	// registered agent. Set at first registration from the bootstrap claims.
 	PrincipalRef string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	// Attested is true when the host enrolled with a SPIRE JWT-SVID, which
+	// means the platform attests the workload (ADR-0066). It is false for a
+	// host that enrolled with a bootstrap token. Enroll writes it, and every
+	// agent row copies it from its host.
+	Attested  bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // Agent represents an LLM-driven worker registered under a Host.
@@ -170,6 +175,12 @@ type Enrollment struct {
 	// agent held before.
 	Grants []Grant
 
+	// KeepHostAttestation is true when the caller proved possession of a host
+	// key it already holds (re-registration). That proof says nothing new
+	// about how the host first enrolled, so the host row keeps the value it
+	// has. Every other enrollment writes Host.Attested.
+	KeepHostAttestation bool
+
 	// BootstrapTokenHash is the hex SHA-256 of the enrollment credential the
 	// caller presented, and is consumed by this enrollment. Empty ONLY when the
 	// caller authenticated with a host key it already holds (re-registration),
@@ -216,7 +227,7 @@ func (s *CapabilityGrantStore) Enroll(ctx context.Context, e Enrollment) (err er
 			return err
 		}
 	}
-	err = upsertHostTx(ctx, tx, e.Host)
+	err = upsertHostTx(ctx, tx, e.Host, e.KeepHostAttestation)
 	if err != nil {
 		return err
 	}
@@ -279,14 +290,20 @@ ON CONFLICT (token_hash) DO NOTHING`
 // a host to a different tenant or return a revoked host to active — undoing a
 // revocation with a write the revoker never sees. tenant_id is also absent from
 // the SET list: a host belongs to the tenant that first registered it, for life.
-func upsertHostTx(ctx context.Context, tx *sql.Tx, host Host) error {
+//
+// attested follows the credential of THIS enrollment. A token enrollment
+// writes false and an SVID enrollment writes true, also over an older value. A
+// re-registration with the host key keeps the value on the row, and a host
+// that does not exist yet cannot re-register into an attested one: the insert
+// arm writes false when keepAttestation is set.
+func upsertHostTx(ctx context.Context, tx *sql.Tx, host Host, keepAttestation bool) error {
 	const query = `
 INSERT INTO capability_grant_hosts (
     id, tenant_id, user_id, display_name, public_key_jwk, status,
-    principal_ref, created_at, updated_at
+    principal_ref, attested, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, now(), now()
+    $7, $8::boolean AND NOT $9::boolean, now(), now()
 )
 ON CONFLICT (id) DO UPDATE SET
     user_id        = EXCLUDED.user_id,
@@ -297,6 +314,8 @@ ON CONFLICT (id) DO UPDATE SET
     -- an empty one (host+jwt path derives it from the row, not the request).
     principal_ref  = CASE WHEN EXCLUDED.principal_ref <> '' THEN EXCLUDED.principal_ref
                           ELSE capability_grant_hosts.principal_ref END,
+    attested       = CASE WHEN $9::boolean THEN capability_grant_hosts.attested
+                          ELSE $8::boolean END,
     updated_at     = now()
 WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
   AND  capability_grant_hosts.status <> 'revoked'`
@@ -309,6 +328,8 @@ WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
 		[]byte(host.PublicKeyJWK),
 		host.Status,
 		host.PrincipalRef,
+		host.Attested,
+		keepAttestation,
 	)
 	if err != nil {
 		return fmt.Errorf("capabilitygrant: UpsertHost %q: %w", host.ID, err)
@@ -332,15 +353,13 @@ func createAgentTx(ctx context.Context, tx *sql.Tx, agent Agent) error {
 INSERT INTO capability_grant_agents (
     id, host_id, tenant_id, user_id, name, mode,
     public_key_jwk, status, session_ttl_s, max_lifetime_s,
-    last_active_at, expires_at, principal_ref, created_at
+    last_active_at, expires_at, principal_ref, attested, created_at
 )
 SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text,
        $7::jsonb, $8::text, $9::int, $10::int,
-       $11::timestamptz, $12::timestamptz, $13::text, now()
-WHERE EXISTS (
-    SELECT 1 FROM capability_grant_hosts h
-    WHERE  h.id = $2::text AND h.tenant_id = $3::text AND h.status <> 'revoked'
-)`
+       $11::timestamptz, $12::timestamptz, $13::text, h.attested, now()
+FROM   capability_grant_hosts h
+WHERE  h.id = $2::text AND h.tenant_id = $3::text AND h.status <> 'revoked'`
 
 	res, err := tx.ExecContext(ctx, query,
 		agent.ID,
@@ -517,6 +536,31 @@ LIMIT 1`
 		return nil, fmt.Errorf("capabilitygrant: AgentByPrincipal %q: %w", principalRef, err)
 	}
 	return ag, nil
+}
+
+// PrincipalIsAttested reports whether the principal enrolled with a SPIRE
+// JWT-SVID (ADR-0066). It is true only when the principal has an active agent
+// row in the tenant and every such row is attested. One row from a token
+// enrollment makes the answer false, so a token can never borrow the standing
+// of an attested workload that shares its principal.
+func (s *CapabilityGrantStore) PrincipalIsAttested(ctx context.Context, tenantID, principalRef string) (bool, error) {
+	if tenantID == "" {
+		return false, errors.New("capabilitygrant: PrincipalIsAttested: tenant is required")
+	}
+	if principalRef == "" {
+		return false, errors.New("capabilitygrant: PrincipalIsAttested: principal_ref is required")
+	}
+	const query = `
+SELECT COALESCE(bool_and(a.attested), FALSE)
+FROM   capability_grant_agents a
+WHERE  a.tenant_id = $1
+  AND  a.principal_ref = $2
+  AND  a.status = 'active'`
+	var attested bool
+	if err := s.db.QueryRowContext(ctx, query, tenantID, principalRef).Scan(&attested); err != nil {
+		return false, fmt.Errorf("capabilitygrant: PrincipalIsAttested %q: %w", principalRef, err)
+	}
+	return attested, nil
 }
 
 // getAgent backs both agent reads. A non-empty tenantID adds the tenant

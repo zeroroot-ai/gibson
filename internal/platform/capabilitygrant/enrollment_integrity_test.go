@@ -297,7 +297,7 @@ func TestRegisterCapabilityGrant_AgentInsertRequiresALiveHostInTenant(t *testing
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectExec("INSERT INTO capability_grant_hosts").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	m.mock.ExpectExec("WHERE EXISTS ( SELECT 1 FROM capability_grant_hosts h WHERE h.id = $2::text AND h.tenant_id = $3::text AND h.status <> 'revoked' )").
+	m.mock.ExpectExec("FROM capability_grant_hosts h WHERE h.id = $2::text AND h.tenant_id = $3::text AND h.status <> 'revoked'").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectRollback()
 
