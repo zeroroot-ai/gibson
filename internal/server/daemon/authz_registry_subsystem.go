@@ -52,10 +52,8 @@ import (
 // key before any caller identity exists. The documents are public keys, so the
 // exposure that matters is substitution, not disclosure.
 //
-// The same route stays mounted on the plain-HTTP :8085 bootstrap listener while
-// deployed ext-authz instances still point there. That duplication is
-// transitional and must be removed once the chart repoints — see
-// bootstrap_subsystem.go.
+// This listener is the only origin of the key route. The plain-HTTP bootstrap
+// listener does not mount it.
 const (
 	envAuthzRegistryPort     = "GIBSON_AUTHZ_REGISTRY_PORT"
 	envAuthzRegistryReaders  = "GIBSON_AUTHZ_REGISTRY_READER_SVIDS"

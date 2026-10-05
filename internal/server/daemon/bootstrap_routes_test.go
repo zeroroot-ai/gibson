@@ -137,12 +137,55 @@ func TestBootstrapMux_ServesEveryAdvertisedPath(t *testing.T) {
 	}
 }
 
-// TestBootstrapMux_ServesDaemonDispatchKey pins the single key-resolution path
-// (ADR-0045): ext-authz resolves the daemon's dispatch signing key by kid from
-// this listener. Unmount capabilityGrantKeysPath and this goes red.
-func TestBootstrapMux_ServesDaemonDispatchKey(t *testing.T) {
+// TestBootstrapMux_ServesNoKeyDocument pins the rule that a component key
+// document has one origin, the SPIFFE-mTLS listener. The mux under test holds
+// a real Minter and a key lookup, so a 404 here proves that the route is not
+// mounted, not that its source is absent. Mount capabilityGrantKeysPath on
+// this listener and this goes red.
+func TestBootstrapMux_ServesNoKeyDocument(t *testing.T) {
 	const public = "https://api.zeroroot.ai:30443"
 	srv := httptest.NewServer(newTestBootstrapMux(t, public))
+	t.Cleanup(srv.Close)
+
+	for _, kid := range []string{testDaemonKeyID, "agent-1", ""} {
+		resp, err := http.Get(srv.URL + capabilityGrantKeysPath + kid)
+		if err != nil {
+			t.Fatalf("GET key %q: %v", kid, err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("kid %q: status = %d, want 404 on the bootstrap listener", kid, resp.StatusCode)
+		}
+	}
+
+	// The control: the same mux does serve the registration route, so the
+	// 404 above is not the answer of an empty mux.
+	resp, err := http.Get(srv.URL + capabilityGrantRegisterPath)
+	if err != nil {
+		t.Fatalf("GET register: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		t.Fatal("the registration route is not mounted, so this test proves nothing")
+	}
+}
+
+// TestAuthzRegistryMux_ServesDaemonDispatchKey pins the single key-resolution
+// path (ADR-0045): ext-authz resolves the daemon's dispatch signing key by kid
+// from the mTLS listener's mux, with a real Minter. Unmount
+// capabilityGrantKeysPath there and this goes red.
+func TestAuthzRegistryMux_ServesDaemonDispatchKey(t *testing.T) {
+	minter, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer:      "https://api.zeroroot.ai:30443",
+		Audience:    "gibson-daemon",
+		KeyProvider: testKeyProvider{key: []byte(strings.Repeat("k", 32))},
+		KeyID:       testDaemonKeyID,
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	lookup := &fakeAgentKeyLookup{jwks: []byte(`{"keys":[]}`)}
+	srv := httptest.NewServer(authzRegistryMux(minter, lookup, nil))
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL + capabilityGrantKeysPath + testDaemonKeyID)
