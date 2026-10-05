@@ -193,7 +193,10 @@ func (r *CatalogPluginRunnable) SetupWithManager(mgr manager.Manager) error {
 	if r.Client == nil {
 		r.Client = mgr.GetClient()
 	}
-	return mgr.Add(r)
+	if err := mgr.Add(r); err != nil {
+		return fmt.Errorf("catalog plugins: add the loop to the manager: %w", err)
+	}
+	return nil
 }
 
 // Start runs the loop until ctx ends.
@@ -525,7 +528,7 @@ func (r *CatalogPluginRunnable) ensureDeployment(ctx context.Context, p provisio
 		dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{
 			labelAppName: pluginObjectName(p.PluginID), labelAppComponent: pluginComponent,
 		}}
-		dep.Spec.Template.ObjectMeta.Labels = podLabels(p)
+		dep.Spec.Template.Labels = podLabels(p)
 		dep.Spec.Template.Spec = r.podSpec(p)
 		return nil
 	})

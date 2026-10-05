@@ -130,14 +130,23 @@ func cpIdentity(name string) *unstructured.Unstructured {
 	return u
 }
 
-// One pass makes each object of an instance with the fields of the contract
-// with the chart (gibson#815).
-func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
+// convergedInstance runs one pass for the one wish (acme, github) and returns
+// the loop, its client and its daemon.
+func convergedInstance(t *testing.T) (*CatalogPluginRunnable, client.Client, *fakeCatalogPluginDaemon) {
+	t.Helper()
 	d := &fakeCatalogPluginDaemon{desired: []provision.DesiredCatalogPlugin{cpWish(cpTenant, cpPlugin)}}
 	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant))
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
 	}
+	return r, c, d
+}
+
+// The tests below check each object of an instance against the contract with
+// the chart (gibson#815).
+
+func TestCatalogPlugins_NamespaceOfTheContract(t *testing.T) {
+	_, c, _ := convergedInstance(t)
 
 	var ns corev1.Namespace
 	cpGet(t, c, client.ObjectKey{Name: cpNamespace}, &ns)
@@ -156,15 +165,18 @@ func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
 	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != "gibson-tenant-operator-plugin-namespace" {
 		t.Errorf("RoleBinding roleRef = %+v", rb.RoleRef)
 	}
-	if len(rb.Subjects) != 1 || rb.Subjects[0].Name != "gibson-tenant-operator" || rb.Subjects[0].Namespace != "gibson" {
-		t.Errorf("RoleBinding subjects = %+v", rb.Subjects)
+	wantSubjects := []rbacv1.Subject{{Kind: "ServiceAccount", Name: "gibson-tenant-operator", Namespace: "gibson"}}
+	if !reflect.DeepEqual(rb.Subjects, wantSubjects) {
+		t.Errorf("RoleBinding subjects = %+v, want %+v", rb.Subjects, wantSubjects)
 	}
 
 	var deny networkingv1.NetworkPolicy
 	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "default-deny"}, &deny)
-	if len(deny.Spec.PodSelector.MatchLabels) != 0 || len(deny.Spec.PolicyTypes) != 2 ||
-		len(deny.Spec.Ingress) != 0 || len(deny.Spec.Egress) != 0 {
-		t.Errorf("default-deny spec = %+v", deny.Spec)
+	wantDeny := networkingv1.NetworkPolicySpec{
+		PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
+	}
+	if !reflect.DeepEqual(deny.Spec, wantDeny) {
+		t.Errorf("default-deny spec = %+v, want %+v", deny.Spec, wantDeny)
 	}
 
 	var cm corev1.ConfigMap
@@ -172,6 +184,10 @@ func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
 	if cm.Data["ca.crt"] != "PEM" {
 		t.Errorf("CA ConfigMap data = %v", cm.Data)
 	}
+}
+
+func TestCatalogPlugins_IdentityOfTheContract(t *testing.T) {
+	_, c, _ := convergedInstance(t)
 
 	var sa corev1.ServiceAccount
 	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &sa)
@@ -200,6 +216,10 @@ func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
 	if !reflect.DeepEqual(id.GetLabels(), wantIDLabels) {
 		t.Errorf("ClusterSPIFFEID labels = %v, want %v", id.GetLabels(), wantIDLabels)
 	}
+}
+
+func TestCatalogPlugins_PodOfTheContract(t *testing.T) {
+	_, c, _ := convergedInstance(t)
 
 	var np networkingv1.NetworkPolicy
 	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &np)
@@ -229,11 +249,17 @@ func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
 	for _, e := range pod.Containers[0].Env {
 		env[e.Name] = e.Value
 	}
-	if env["GIBSON_URL"] != "https://api.install.example" {
-		t.Errorf("GIBSON_URL = %q", env["GIBSON_URL"])
+	wantEnv := map[string]string{
+		"HOME":                   "/home/nonroot",
+		"GIBSON_URL":             "https://api.install.example",
+		"GIBSON_DAEMON_TLS":      "1",
+		"GIBSON_PLUGIN_RUNTIME":  "pod",
+		"GIBSON_PLUGIN_MANIFEST": "/etc/gibson/plugin.yaml",
+		"SSL_CERT_DIR":           "/etc/ssl/certs:/etc/ssl/envoy-ca",
+		"SPIFFE_ENDPOINT_SOCKET": "unix:///run/spire/sockets/api.sock",
 	}
-	if env["SSL_CERT_DIR"] != "/etc/ssl/certs:/etc/ssl/envoy-ca" {
-		t.Errorf("SSL_CERT_DIR = %q", env["SSL_CERT_DIR"])
+	if !reflect.DeepEqual(env, wantEnv) {
+		t.Errorf("plugin env = %v, want %v", env, wantEnv)
 	}
 	if len(pod.InitContainers) != 1 || pod.InitContainers[0].Image != "registry.example/busybox@sha256:1" {
 		t.Errorf("init containers = %+v", pod.InitContainers)
@@ -241,12 +267,17 @@ func TestCatalogPlugins_MakesTheInstanceOfTheContract(t *testing.T) {
 	for _, v := range restrictedPodViolations(pod) {
 		t.Errorf("the plugin pod breaks the restricted standard: %s", v)
 	}
+}
 
+// The loop reports Provisioning until the Deployment is available, then Ready.
+func TestCatalogPlugins_ReportsThePhase(t *testing.T) {
+	r, c, d := convergedInstance(t)
 	if got := d.lastReport(t); got != (cpReport{cpTenant, cpPlugin, "Provisioning", ""}) {
 		t.Errorf("report = %+v, want Provisioning", got)
 	}
 
-	// When the Deployment is available, the next pass reports Ready.
+	var dep appsv1.Deployment
+	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &dep)
 	dep.Status.AvailableReplicas = 1
 	if err := c.Status().Update(context.Background(), &dep); err != nil {
 		t.Fatalf("set Deployment status: %v", err)
@@ -274,36 +305,42 @@ func restrictedPodViolations(pod corev1.PodSpec) []string {
 	}
 	all := append(append([]corev1.Container{}, pod.InitContainers...), pod.Containers...)
 	for _, c := range all {
-		sc := c.SecurityContext
-		if sc == nil {
-			sc = &corev1.SecurityContext{}
+		out = append(out, restrictedContainerViolations(psc, c)...)
+	}
+	return out
+}
+
+func restrictedContainerViolations(psc *corev1.PodSecurityContext, c corev1.Container) []string {
+	var out []string
+	sc := c.SecurityContext
+	if sc == nil {
+		sc = &corev1.SecurityContext{}
+	}
+	if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
+		out = append(out, c.Name+": allowPrivilegeEscalation is not false")
+	}
+	dropsAll := false
+	if sc.Capabilities != nil {
+		for _, d := range sc.Capabilities.Drop {
+			dropsAll = dropsAll || d == "ALL"
 		}
-		if sc.AllowPrivilegeEscalation == nil || *sc.AllowPrivilegeEscalation {
-			out = append(out, c.Name+": allowPrivilegeEscalation is not false")
-		}
-		dropsAll := false
-		if sc.Capabilities != nil {
-			for _, d := range sc.Capabilities.Drop {
-				dropsAll = dropsAll || d == "ALL"
-			}
-		}
-		if !dropsAll {
-			out = append(out, c.Name+": does not drop ALL capabilities")
-		}
-		nonRoot := psc.RunAsNonRoot
-		if sc.RunAsNonRoot != nil {
-			nonRoot = sc.RunAsNonRoot
-		}
-		if nonRoot == nil || !*nonRoot {
-			out = append(out, c.Name+": runAsNonRoot is not true")
-		}
-		seccomp := psc.SeccompProfile
-		if sc.SeccompProfile != nil {
-			seccomp = sc.SeccompProfile
-		}
-		if seccomp == nil || seccomp.Type != corev1.SeccompProfileTypeRuntimeDefault {
-			out = append(out, c.Name+": seccomp profile is not RuntimeDefault")
-		}
+	}
+	if !dropsAll {
+		out = append(out, c.Name+": does not drop ALL capabilities")
+	}
+	nonRoot := psc.RunAsNonRoot
+	if sc.RunAsNonRoot != nil {
+		nonRoot = sc.RunAsNonRoot
+	}
+	if nonRoot == nil || !*nonRoot {
+		out = append(out, c.Name+": runAsNonRoot is not true")
+	}
+	seccomp := psc.SeccompProfile
+	if sc.SeccompProfile != nil {
+		seccomp = sc.SeccompProfile
+	}
+	if seccomp == nil || seccomp.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		out = append(out, c.Name+": seccomp profile is not RuntimeDefault")
 	}
 	return out
 }
