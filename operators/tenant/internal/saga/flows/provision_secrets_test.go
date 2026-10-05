@@ -22,7 +22,6 @@ import (
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -33,17 +32,16 @@ type stubVaultAdmin struct {
 	pingCalls          int
 	ensureErr          error
 	deleteErr          error
-	edition            vaultadmin.Edition
 	jwtAuthConfigCalls []string
 	jwtAuthConfigErr   error
 }
 
-func (s *stubVaultAdmin) EnsureTenantNamespace(_ context.Context, tenantID string) (vaultadmin.Edition, error) {
+func (s *stubVaultAdmin) EnsureTenantNamespace(_ context.Context, tenantID string) error {
 	s.ensureCalls = append(s.ensureCalls, tenantID)
 	if s.ensureErr != nil {
-		return s.edition, s.ensureErr
+		return s.ensureErr
 	}
-	return s.edition, nil
+	return nil
 }
 
 func (s *stubVaultAdmin) DeleteTenantNamespace(_ context.Context, tenantID string) error {
@@ -129,7 +127,7 @@ func newTestTenant(name string) *gibsonv1alpha1.Tenant {
 // grants / data-plane steps moved to the four owned sub-CRDs.
 func TestProvisionStepsOrdering(t *testing.T) {
 	t.Parallel()
-	stub := &stubVaultAdmin{edition: vaultadmin.EditionEnterprise}
+	stub := &stubVaultAdmin{}
 	deps := ProvisionDeps{Vault: stub}
 	steps := ProvisionSteps(deps)
 

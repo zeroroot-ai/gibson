@@ -503,10 +503,11 @@ func (p *pgProvisioner) runMigrations(ctx context.Context, tenantDSN, dbName str
 // the manual-recovery condition and the operator runs the documented
 // recovery flow (ADR-0003: one behavior in every environment).
 func (p *pgProvisioner) recoverFromDirtyMigrations(_ *migrate.Migrate, dirty migrate.ErrDirty, dbName string) error {
-	return clients.WrapPermanent(fmt.Errorf(
+	err := fmt.Errorf(
 		"dataplane/postgres: %q has dirty schema_migrations at version %d (manual recovery required — see runbook): %w",
 		dbName, dirty.Version, dirty,
-	))
+	)
+	return fmt.Errorf("%w", clients.WrapPermanent(err))
 }
 
 // buildTenantAdminDSN replaces the database component in the admin DSN with

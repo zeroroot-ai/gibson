@@ -117,7 +117,7 @@ func setupOpenBao(t *testing.T) string {
 // load-bearing slice 5 acceptance test.
 //
 // Asserts:
-//   - EnsureTenantNamespace returns EditionEnterprise + nil error
+//   - EnsureTenantNamespace returns nil
 //   - The expected JWT role exists at auth/jwt/role/gibson-plugin-acme
 //   - The role has bound_audiences=[gibson-saas]
 //   - The role MUST NOT have bound_claims (slice 5 invariant subsuming
@@ -152,10 +152,8 @@ func TestOpenBaoEnsureTenantNamespace(t *testing.T) {
 	const tenantID = "acme"
 
 	t.Run("EnsureTenantNamespace happy path", func(t *testing.T) {
-		ed, err := c.EnsureTenantNamespace(ctx, tenantID)
+		err := c.EnsureTenantNamespace(ctx, tenantID)
 		require.NoError(t, err, "EnsureTenantNamespace against OpenBao")
-		require.Equal(t, EditionEnterprise, ed,
-			"slice 5 returns EditionEnterprise for the OpenBao namespace-based path")
 	})
 
 	t.Run("role has bound_audiences, no bound_claims", func(t *testing.T) {
@@ -200,9 +198,8 @@ func TestOpenBaoEnsureTenantNamespace(t *testing.T) {
 	})
 
 	t.Run("idempotent rerun of EnsureTenantNamespace", func(t *testing.T) {
-		ed, err := c.EnsureTenantNamespace(ctx, tenantID)
+		err := c.EnsureTenantNamespace(ctx, tenantID)
 		require.NoError(t, err, "idempotent rerun")
-		require.Equal(t, EditionEnterprise, ed)
 	})
 
 	t.Run("DeleteTenantNamespace tears down", func(t *testing.T) {

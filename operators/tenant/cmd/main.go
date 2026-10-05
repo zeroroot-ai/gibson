@@ -572,7 +572,7 @@ func main() {
 	// TenantBrokerConfigWritten steps use, so there is one provisioning
 	// codepath (ADR-0027). The TenantSecretsBackend controller delegates to it.
 	secretsProvisioner := secrets.New(
-		secretsVaultAdapter{vaultAdminClient},
+		vaultAdminClient,
 		brokerConfigDeps,
 		func(err error) bool { return errors.Is(err, clients.ErrNotFound) },
 	)
@@ -1386,28 +1386,6 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 		os.Exit(1)
 	}
 	return c
-}
-
-// secretsVaultAdapter adapts the operator's vault.AdminClient to the
-// secrets.VaultAdmin interface. The only impedance mismatch is
-// EnsureTenantNamespace's (Edition, error) return — the Edition is saga
-// record-keeping only, so the adapter discards it. All methods stay
-// idempotent (the underlying client guarantees it).
-type secretsVaultAdapter struct {
-	c vaultadmin.AdminClient
-}
-
-func (a secretsVaultAdapter) EnsureTenantNamespace(ctx context.Context, tenantID string) error {
-	_, err := a.c.EnsureTenantNamespace(ctx, tenantID)
-	return err
-}
-
-func (a secretsVaultAdapter) ConfigureTenantJWTAuth(ctx context.Context, tenantID string) error {
-	return a.c.ConfigureTenantJWTAuth(ctx, tenantID)
-}
-
-func (a secretsVaultAdapter) DeleteTenantNamespace(ctx context.Context, tenantID string) error {
-	return a.c.DeleteTenantNamespace(ctx, tenantID)
 }
 
 // buildWriteTenantBrokerConfigDeps assembles the dependency bundle for

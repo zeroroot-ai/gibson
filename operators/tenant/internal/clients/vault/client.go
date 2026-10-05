@@ -56,23 +56,6 @@ var ErrTokenExpired = errors.New("vault token expired")
 // dropped in slice tenant-operator#171; per-tenant isolation is now always
 // namespace-based.
 //
-// The Edition type stays as the return value of EnsureTenantNamespace for
-// upstream callers (saga record-keeping), even though there is only one
-// non-Unknown value today. If we ever support a second secrets-engine
-// backend the typed return value gives us a clean extension point.
-type Edition string
-
-const (
-	// EditionUnknown is the zero value; never returned by a successful
-	// EnsureTenantNamespace today.
-	EditionUnknown Edition = ""
-
-	// EditionEnterprise enables namespace-based isolation per tenant. Each
-	// tenant gets its own Vault namespace under the configured root
-	// namespace. Name kept "Enterprise" for backward source-compat with
-	// callers; the runtime backend is OpenBao OSS.
-	EditionEnterprise Edition = "enterprise"
-)
 
 // AdminClient is the narrow admin surface used by the tenant-operator. All
 // methods are idempotent: re-running for an already-provisioned tenant is a
@@ -91,11 +74,7 @@ type AdminClient interface {
 	//     the tenant-<id>-app ACL policy, configures the JWT auth role
 	//     gibson-plugin-<id> bound to the configured platform audience.
 	//
-	// Returns:
-	//   - the Edition used to provision (always EditionEnterprise today;
-	//     the typed return stays for upstream saga record-keeping and
-	//     future second-backend support).
-	EnsureTenantNamespace(ctx context.Context, tenantID string) (Edition, error)
+	EnsureTenantNamespace(ctx context.Context, tenantID string) error
 
 	// DeleteTenantNamespace tears down the per-tenant Vault namespace.
 	// Idempotent: returns nil when the resources are already gone.

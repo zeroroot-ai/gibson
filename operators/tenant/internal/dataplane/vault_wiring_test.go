@@ -60,8 +60,8 @@ func newRecordingVaultAdmin() *recordingVaultAdmin {
 // Compile-time assertion that recordingVaultAdmin satisfies AdminClient.
 var _ vaultadmin.AdminClient = (*recordingVaultAdmin)(nil)
 
-func (r *recordingVaultAdmin) EnsureTenantNamespace(_ context.Context, _ string) (vaultadmin.Edition, error) {
-	return vaultadmin.EditionEnterprise, nil
+func (r *recordingVaultAdmin) EnsureTenantNamespace(_ context.Context, _ string) error {
+	return nil
 }
 func (r *recordingVaultAdmin) DeleteTenantNamespace(_ context.Context, _ string) error  { return nil }
 func (r *recordingVaultAdmin) Ping(_ context.Context) error                             { return nil }
