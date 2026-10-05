@@ -53,6 +53,9 @@ func newGateHarness(t *testing.T, trust componentpb.ContentTrust, shape dispatch
 	return &DefaultAgentHarness{
 		logger: slog.New(slog.NewTextHandler(noopWriter{}, nil)),
 		tracer: noop.NewTracerProvider().Tracer("test"),
+		// The execute gate runs before the trust gate these tests cover. The
+		// tenant has the tool enabled, so the trust gate is what decides.
+		componentAuthorizer: &recordingAuthorizer{allow: true},
 		componentRegistry: &gateFakeRegistry{
 			tenantInstances: []component.ComponentInfo{{
 				Kind:         "tool",
@@ -75,7 +78,7 @@ func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
 func callGate(t *testing.T, h *DefaultAgentHarness) error {
 	t.Helper()
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx := callerCtx(t, "user-42", "acme")
 	return h.CallToolProto(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
 }
 
@@ -135,7 +138,7 @@ func TestDispatchGate_TrustedSetecOnly_NotDenied(t *testing.T) {
 // before the stream is opened (gibson#995).
 func TestDispatchGateStream_UntrustedSetecOnly_Denied(t *testing.T) {
 	h := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx := callerCtx(t, "user-42", "acme")
 	err := h.CallToolProtoStream(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
 	if err == nil {
 		t.Fatal("expected a deny error, got nil")
@@ -149,7 +152,7 @@ func TestDispatchGateStream_UntrustedSetecOnly_Denied(t *testing.T) {
 // is not policy-denied (it proceeds and fails later for an unrelated reason).
 func TestDispatchGateStream_TrustedSetecOnly_NotDenied(t *testing.T) {
 	h := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	ctx := callerCtx(t, "user-42", "acme")
 	err := h.CallToolProtoStream(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
 	if code := gibsonCode(t, err); code == types.SANDBOX_POLICY_DENIED {
 		t.Fatal("trusted streaming tool must not be policy-denied")

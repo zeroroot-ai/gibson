@@ -67,6 +67,12 @@ func (h *DefaultAgentHarness) CallToolProtoStream(
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
+	// The execute gate, before any lookup: the same one decision CallToolProto
+	// makes. A streaming call is another road to the same tool.
+	if err := h.authorizeToolDispatch(ctx, name); err != nil {
+		return err
+	}
+
 	// Resolve the tool via the same dispatch path CallToolProto uses.
 	resolved, err := h.resolveToolForStreaming(ctx, name)
 	if err != nil {

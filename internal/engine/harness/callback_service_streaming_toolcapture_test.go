@@ -151,9 +151,11 @@ func (f fakeStreamDiscovery) DelegateToAgent(context.Context, string, agent.Task
 func newStreamingTestHarness(conn *grpc.ClientConn) *DefaultAgentHarness {
 	return &DefaultAgentHarness{
 		registryAdapter: fakeStreamDiscovery{t: streamConnTool{conn: conn}},
-		logger:          slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		tracer:          noop.NewTracerProvider().Tracer("test"),
-		missionCtx:      MissionContext{TenantID: "test-tenant"},
+		// The tenant has the tool enabled, so the execute gate passes.
+		componentAuthorizer: &recordingAuthorizer{allow: true},
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		tracer:              noop.NewTracerProvider().Tracer("test"),
+		missionCtx:          MissionContext{TenantID: "test-tenant"},
 	}
 }
 
@@ -198,7 +200,7 @@ func TestCallToolProtoStream_FeedsToolCallSink_OnComplete(t *testing.T) {
 		OutputType: "testtool.ToolOutput",
 		TimeoutMs:  5000,
 	}
-	stream := &fakeStreamSendServer{ctx: testCtxWithTenant()}
+	stream := &fakeStreamSendServer{ctx: callerCtx(t, "user-42", "test-tenant")}
 
 	deadline := time.Now().Add(10 * time.Second)
 	err := svc.CallToolProtoStream(req, stream)
@@ -241,7 +243,7 @@ func TestCallToolProtoStream_FeedsToolCallSink_OnError(t *testing.T) {
 		OutputType: "testtool.ToolOutput",
 		TimeoutMs:  5000,
 	}
-	stream := &fakeStreamSendServer{ctx: testCtxWithTenant()}
+	stream := &fakeStreamSendServer{ctx: callerCtx(t, "user-42", "test-tenant")}
 
 	err := svc.CallToolProtoStream(req, stream)
 	require.NoError(t, err)
@@ -285,7 +287,7 @@ func TestCallToolProtoStream_FeedsToolCallSink_OnTransportError(t *testing.T) {
 		OutputType: "testtool.ToolOutput",
 		TimeoutMs:  5000,
 	}
-	stream := &fakeStreamSendServer{ctx: testCtxWithTenant()}
+	stream := &fakeStreamSendServer{ctx: callerCtx(t, "user-42", "test-tenant")}
 
 	err := svc.CallToolProtoStream(req, stream)
 	require.Error(t, err, "a transport failure mid-stream must surface as an RPC error")

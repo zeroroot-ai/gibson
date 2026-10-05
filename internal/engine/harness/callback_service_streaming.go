@@ -14,6 +14,8 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // CallToolProtoStream implements the streaming tool execution RPC.
@@ -76,6 +78,33 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 	if !ok {
 		s.logger.Error("unexpected harness type", "tool", req.Name)
 		return fmt.Errorf("unexpected harness type")
+	}
+
+	// The execute gate, before the tool is resolved: the same one decision
+	// DefaultAgentHarness.CallToolProto makes. This handler resolves and
+	// streams the tool itself, so it must ask the question itself.
+	if authzErr := defaultHarness.authorizeToolDispatch(ctx, req.Name); authzErr != nil {
+		s.logger.Warn("streaming tool call refused by the execute gate", "tool", req.Name, "error", authzErr)
+		// gibson:no-tool-executed — the gate refused the call before any lookup.
+		errEvent := &harnesspb.CallToolProtoStreamResponse{
+			Payload: &harnesspb.CallToolProtoStreamResponse_Error{
+				Error: &harnesspb.ToolErrorEvent{
+					Error: &harnesspb.HarnessError{
+						Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+						Message: fmt.Sprintf("tool %s is not enabled for this tenant", req.Name),
+					},
+					Fatal: true,
+				},
+			},
+			TraceId:     req.Context.TraceId,
+			SpanId:      req.Context.SpanId,
+			Sequence:    1,
+			TimestampMs: time.Now().UnixMilli(),
+		}
+		if sendErr := stream.Send(errEvent); sendErr != nil {
+			s.logger.Error("failed to send error event", "error", sendErr)
+		}
+		return status.Errorf(codes.PermissionDenied, "tool %s is not enabled for this tenant", req.Name)
 	}
 
 	var resolvedTool tool.Tool

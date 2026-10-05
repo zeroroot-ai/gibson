@@ -800,16 +800,20 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
+	// ── The execute gate ──────────────────────────────────────────────────
+	// One decision before every dispatch path: may the caller execute
+	// component:tool/<name>? can_execute needs the tenant to have the tool
+	// enabled, so a tool that is in no catalog of the tenant is refused here,
+	// whatever registry it is found in. The gate is fail-closed, and it runs
+	// before any lookup, so a refusal starts nothing.
+	if err := h.authorizeToolDispatch(ctx, name); err != nil {
+		return err
+	}
+
 	// ── Manifest-sourced sandboxed tool (ADR-0117) ────────────────────────
 	// A kind:tool catalog manifest is the source of truth for a tool's runtime
-	// shape. When the tool is a sandboxed manifest tool, gate on the calling
-	// tenant's can_execute (per-tenant enablement, gibson#1638) and dispatch it
-	// to the sandbox. This is the one gated path that replaces the ungated
-	// _system refresher lookup below (removed in gibson#1641).
+	// shape. A sandboxed manifest tool is dispatched to the sandbox.
 	if spec, ok := h.sandboxedToolSpecFromManifest(name); ok {
-		if err := h.authorizeToolDispatch(ctx, name); err != nil {
-			return err
-		}
 		if h.sandboxedExecutor == nil {
 			return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 				fmt.Sprintf("tool %q is a sandboxed manifest tool but no sandboxed executor is wired", name), nil)
