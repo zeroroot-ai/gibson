@@ -71,6 +71,9 @@ func newChildOrchestrationReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
 		// Production always injects a reporter (cmd/main.go).
 		StatusReporter: NoopTenantStatusReporter{},
+		// Production always injects the backup gate (cmd/main.go). This stub
+		// reports a complete backup.
+		FinalBackup: &stubFinalBackup{done: true},
 	}
 	return r, fakeClient
 }
