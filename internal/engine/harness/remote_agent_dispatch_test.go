@@ -103,7 +103,7 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 		t.Fatalf("DelegateToAgent: %v", err)
 	}
 
-	if q.gotKind != "agent" || q.gotType != "agent_execute" {
+	if q.gotKind != "agent" || q.gotType != component.WorkTypeAgentExecute {
 		t.Errorf("enqueued kind/work_type = %q/%q, want agent/agent_execute", q.gotKind, q.gotType)
 	}
 	if q.gotTenant != "zerocool-lab" || q.gotName != "zerocool" {
