@@ -12,8 +12,7 @@
 // When SIGNUP_SELF_SERVE is off from first boot there is therefore no way to
 // sign in as the owner without briefly reopening self-serve registration. This
 // binary closes that gap without ever opening registration or requiring a
-// pre-existing human session — the actor invoking it IS the operator (same
-// shape as cmd/active-session-backfill).
+// pre-existing human session — the actor invoking it IS the operator.
 //
 // Given a tenant id (the Tenant CR name) and the owner's email, it:
 //
@@ -406,8 +405,8 @@ type fgaEnvConfig struct {
 	ModelID string
 }
 
-// resolveFgaEnvConfig reads the three required EXT_AUTHZ_FGA_* env vars,
-// matching cmd/active-session-backfill. Pure and independently testable.
+// resolveFgaEnvConfig reads the three required EXT_AUTHZ_FGA_* env vars.
+// Pure and independently testable.
 func resolveFgaEnvConfig() (fgaEnvConfig, error) {
 	addr := os.Getenv("EXT_AUTHZ_FGA_ADDR")
 	storeID := os.Getenv("EXT_AUTHZ_FGA_STORE_ID")

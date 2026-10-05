@@ -84,12 +84,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # use. A tool listed here has a chart Job, DaemonSet or documented `kubectl
 # exec` that runs it (gibson#507): a binary nothing invokes is not shipped.
 #
-# - active-session-backfill (spec instant-session-revocation, gibson#627 Slice 2
-#   / gibson#1302) is the chart's pre-upgrade Job that seeds the FGA
-#   active_session conditional tuple for every existing human tenant member.
-#   Without it, every user already signed in is locked out at the active_session
-#   cutover, because ext-authz starts requiring a tuple nobody has. Env-driven
-#   (EXT_AUTHZ_FGA_ADDR / _STORE_ID / _MODEL_ID), idempotent, exits zero.
 # - gibson-migrate (spec gibson-postgres-migrations, Req 4) is run as
 #   `gibson-migrate platform up` by the chart's pre-upgrade platform-db-migrate
 #   Job, applying embedded dashboard-DB migrations before the daemon
@@ -112,7 +106,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags="-s -w" -o /out/ \
-        ./cmd/active-session-backfill \
         ./cmd/gibson-migrate \
         ./cmd/sandbox-eviction-handler \
         ./cmd/bootstrap-tenant-owner
@@ -145,7 +138,6 @@ RUN echo "apk refresh ${APT_CACHE_BUST}" >/dev/null \
 
 # Copy gibson binary + auxiliary tools from builder
 COPY --from=builder /out/gibson /usr/local/bin/gibson
-COPY --from=builder /out/active-session-backfill /usr/local/bin/active-session-backfill
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler
 COPY --from=builder /out/bootstrap-tenant-owner /usr/local/bin/bootstrap-tenant-owner
