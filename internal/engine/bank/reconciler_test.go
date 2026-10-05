@@ -184,7 +184,7 @@ func (f *fakeJobs) Stale(_ context.Context, _, bankID string, staleSeconds int64
 
 func (f *fakeJobs) Close(_ context.Context, _ string, in job.CloseInput) (*job.Job, error) {
 	if err := in.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fake close: %w", err)
 	}
 	if err := f.closeErr[in.JobID]; err != nil {
 		return nil, err
