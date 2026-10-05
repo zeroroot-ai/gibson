@@ -51,7 +51,7 @@ func (s *ScopeValidator) CheckInput(ctx context.Context, input guardrail.Guardra
 		return guardrail.NewAllowResult(), nil
 	}
 
-	targetURL := input.TargetInfo.URL
+	targetURL := input.TargetInfo.URL()
 	if targetURL == "" {
 		// For now, if no URL is provided, we allow it
 		return guardrail.NewAllowResult(), nil

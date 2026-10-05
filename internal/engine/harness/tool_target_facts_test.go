@@ -84,9 +84,9 @@ func TestAddTargetFacts_ResolvesTheInstanceTargetNotThePrimary(t *testing.T) {
 	// Exactly the shape ForTarget produces: the instance id beside the
 	// primary's name and URL.
 	h := harnessWithFacts(TargetInfo{
-		ID:   instance,
-		Name: "primary",
-		URL:  "https://10.0.0.1:6443",
+		ID:         instance,
+		Name:       "primary",
+		Connection: map[string]any{"url": "https://10.0.0.1:6443"},
 	}, stub)
 
 	spec := sandboxed.ToolSpec{}

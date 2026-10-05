@@ -16,7 +16,7 @@ import (
 func TestForTarget_RedirectsTheScope(t *testing.T) {
 	primary := types.NewID()
 	instance := types.NewID()
-	h := &DefaultAgentHarness{targetInfo: TargetInfo{ID: primary, Name: "goat-a", URL: "https://10.0.0.1:6443"}}
+	h := &DefaultAgentHarness{targetInfo: TargetInfo{ID: primary, Name: "goat-a", Connection: map[string]any{"url": "https://10.0.0.1:6443"}}}
 
 	view := h.ForTarget(instance.String())
 
