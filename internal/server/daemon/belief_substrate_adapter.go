@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -46,7 +47,11 @@ func (s *tenantRoutedBeliefSubstrate) forTenant(ctx context.Context) (brain.Beli
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return brain.NewWorldBeliefSubstrate(s.registry.For(tenant.String())), nil
+	eng, ok := api.TenantEngine(s.registry, tenant.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return brain.NewWorldBeliefSubstrate(eng), nil
 }
 
 // Belief implements brain.BeliefSubstrate.
