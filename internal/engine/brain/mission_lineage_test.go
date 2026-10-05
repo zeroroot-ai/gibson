@@ -105,3 +105,11 @@ func TestMissionOriginated_SurvivesASnapshot(t *testing.T) {
 	assert.Equal(t, w.MissionLineageSnapshot(), restored.MissionLineageSnapshot())
 	require.Len(t, restored.MissionLineageSnapshot(), 2)
 }
+
+// The slice of the child holds its lineage event. The slice of the parent
+// does not.
+func TestMissionOriginated_InTheSliceOfTheChild(t *testing.T) {
+	evs := lineageEvents()
+	require.Len(t, MissionSlice(evs, "child-1"), 1)
+	assert.Len(t, MissionSlice(evs, "parent"), 1, "the parent slice holds only its projection")
+}
