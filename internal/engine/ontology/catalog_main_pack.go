@@ -78,5 +78,14 @@ func MainDomainPack() DomainPack {
 			// control, not damage" contract) turned up in what came back.
 			"prompt_injection_marker_present": `markerPresent(evidence, "SYSTEM_PROMPT_LEAKED")`,
 		},
+
+		// Each predicate above reads evidence of a request the target already
+		// answers. None of them needs a change on the target, so the pack
+		// states all three as non-destructive (ADR-0132).
+		NonDestructivePredicates: []string{
+			"credential_disclosure_detected",
+			"prompt_injection_marker_present",
+			"unauthenticated_endpoint_exposed",
+		},
 	}
 }

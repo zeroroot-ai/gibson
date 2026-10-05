@@ -53,17 +53,17 @@ func (s *tenantRoutedProofSettlement) forTenant(ctx context.Context) (*brain.Eng
 // per-technique-identifier lookup World.DomainPackPredicate performs for a
 // direct in-process reader, via the Engine's own read-locked DomainPacks
 // accessor (safe to call concurrently with that tenant's tick loop).
-func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, predicateName string) (expr string, ok bool, err error) {
+func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, predicateName string) (expr string, destructive, ok bool, err error) {
 	e, err := s.forTenant(ctx)
 	if err != nil {
-		return "", false, err
+		return "", true, false, err
 	}
 	for _, pack := range e.DomainPacks() {
 		if expr, ok := pack.Predicates[predicateName]; ok {
-			return expr, true, nil
+			return expr, pack.PredicateIsDestructive(predicateName), true, nil
 		}
 	}
-	return "", false, nil
+	return "", true, false, nil
 }
 
 // SettleBetTrue implements brain.ProofSettlementEngine by delegating to ctx's

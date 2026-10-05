@@ -43,8 +43,10 @@ type ProofSettlementEngine interface {
 	// World.DomainPackPredicate already does for direct in-process readers.
 	// ok is false, never an error, for a predicate name no enabled pack
 	// binds: an unknown predicate is SubmitProof's fail-closed case
-	// (ADR-0131), not a system failure.
-	DomainPackPredicate(ctx context.Context, predicateName string) (expr string, ok bool, err error)
+	// (ADR-0131), not a system failure. destructive is the pack's own
+	// statement about the predicate (ADR-0132): true unless the pack names
+	// the predicate as non-destructive.
+	DomainPackPredicate(ctx context.Context, predicateName string) (expr string, destructive, ok bool, err error)
 
 	// SettleBetTrue resolves ctx's tenant's Engine and delegates to its own
 	// Engine.SettleBetTrue (bet_settlement.go): evaluate registry's predicate

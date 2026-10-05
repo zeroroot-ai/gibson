@@ -406,6 +406,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			TaxonomyNodeLabels:        append([]string(nil), p.TaxonomyNodeLabels...),
 			TaxonomyRelationshipTypes: append([]string(nil), p.TaxonomyRelationshipTypes...),
 			Predicates:                clonePredicateMap(p.Predicates),
+			NonDestructivePredicates:  append([]string(nil), p.NonDestructivePredicates...),
 		})
 	}
 

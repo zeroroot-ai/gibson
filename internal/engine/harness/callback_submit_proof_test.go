@@ -54,6 +54,8 @@ type testProofSettlementEngine struct {
 	engine     *brain.Engine
 	tenant     string
 	predicates map[string]string
+	// packDestructive is the pack's statement about its predicates.
+	packDestructive bool
 }
 
 func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[string]string) *testProofSettlementEngine {
@@ -67,9 +69,12 @@ func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[st
 	}
 }
 
-func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predicateName string) (expr string, ok bool, err error) {
+// DomainPackPredicate states every predicate as non-destructive unless the
+// test set packDestructive, the same statement a pack makes with
+// NonDestructivePredicates.
+func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predicateName string) (expr string, destructive, ok bool, err error) {
 	expr, ok = e.predicates[predicateName]
-	return expr, ok, nil
+	return expr, e.packDestructive, ok, nil
 }
 
 // SettleBetTrue mirrors tenantRoutedProofSettlement.SettleBetTrue's ADR-0132
@@ -128,14 +133,13 @@ func newSubmitProofService(
 	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
 }
 
-func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, destructive bool, evidence ...*typespb.Evidence) *harnesspb.SubmitProofRequest {
+func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, evidence ...*typespb.Evidence) *harnesspb.SubmitProofRequest {
 	return &harnesspb.SubmitProofRequest{
 		Context:       &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
 		HypothesisId:  hypothesisID,
 		Technique:     technique,
 		PredicateName: predicateName,
 		Evidence:      evidence,
-		Destructive:   destructive,
 	}
 }
 
@@ -163,7 +167,7 @@ func TestSubmitProof_NotWired_Unavailable(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", nil, nil)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", false))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190"))
 	require.Nil(t, resp)
 	require.Error(t, err)
 	assert.Equal(t, codes.Unavailable, status.Code(err))
@@ -190,7 +194,7 @@ func TestSubmitProof_MissingFields_InvalidArgument(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", tt.hypothesisID, tt.technique, tt.predicateName, false))
+			resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", tt.hypothesisID, tt.technique, tt.predicateName))
 			require.Nil(t, resp)
 			require.Error(t, err)
 			assert.Equal(t, codes.InvalidArgument, status.Code(err))
@@ -207,7 +211,7 @@ func TestSubmitProof_UnknownPredicate_FailsClosed(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", newFakeBeliefSubstrate(), engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", false))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
@@ -229,7 +233,8 @@ func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", true, evidence))
+	engine.packDestructive = true
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Nil(t, resp.GetError())
@@ -308,7 +313,8 @@ func TestSubmitProof_DestructiveApproved_SettlesTrue(t *testing.T) {
 		Title:   "destructive demonstration",
 		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
 	}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", true, evidence))
+	engine.packDestructive = true
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -348,7 +354,8 @@ func TestSubmitProof_DestructiveDenied_PermissionDenied(t *testing.T) {
 		Title:   "destructive demonstration",
 		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
 	}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", true, evidence))
+	engine.packDestructive = true
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
@@ -376,7 +383,7 @@ func TestSubmitProof_PredicateFires_SettlesTrue(t *testing.T) {
 		Title:   "unauthenticated admin panel",
 		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
 	}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", false, evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -404,7 +411,7 @@ func TestSubmitProof_PredicateDoesNotFire_NotSettled(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE, Title: "no proof", Content: "HTTP/1.1 403 Forbidden"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", false, evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -424,7 +431,7 @@ func TestSubmitProof_NoStakedBet_FailsClosed(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "tok"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-never-staked", "T1190", "T1190", false, evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-never-staked", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
@@ -446,10 +453,52 @@ func TestSubmitProof_PredicateDoesNotCompile_FailsClosed(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", false))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
 	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INTERNAL, resp.GetError().GetCode())
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED, resp.GetOutcome())
+}
+
+// TestSubmitProof_PackStatesDestructive_AgentFlagIsNotRead is the failing
+// fixture for the rule that the pack, never the agent, states whether a
+// predicate is destructive (ADR-0132). The request says destructive=false.
+// The pack does not name the predicate as non-destructive, so the proof
+// waits for a human decision and never settles.
+func TestSubmitProof_PackStatesDestructive_AgentFlagIsNotRead(t *testing.T) {
+	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
+	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
+	engine.packDestructive = true
+	substrate := newFakeBeliefSubstrate()
+	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.6}}))
+	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
+	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence)
+	req.Destructive = false
+	resp, err := svc.SubmitProof(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION, resp.GetOutcome())
+	assert.Empty(t, engine.engine.BetSettlements())
+}
+
+// TestSubmitProof_PackStatesNonDestructive_AgentFlagIsNotRead proves the
+// other direction: a request that says destructive=true does not make the
+// daemon queue a proof the pack states as non-destructive.
+func TestSubmitProof_PackStatesNonDestructive_AgentFlagIsNotRead(t *testing.T) {
+	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
+	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
+	substrate := newFakeBeliefSubstrate()
+	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.6}}))
+	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
+	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence)
+	req.Destructive = true
+	resp, err := svc.SubmitProof(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_SETTLED_TRUE, resp.GetOutcome())
 }

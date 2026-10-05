@@ -50,3 +50,12 @@ func TestMainDomainPack_FreshValueEachCall(t *testing.T) {
 	}
 	assert.Len(t, b.Predicates, want, "mutating one call's map must never affect another")
 }
+
+// The catalog pack states each of its predicates as non-destructive. A new
+// predicate that the pack does not state is destructive, so this test makes
+// the author decide.
+func TestMainDomainPack_StatesEveryPredicate(t *testing.T) {
+	pack := MainDomainPack()
+	require.NoError(t, pack.Validate())
+	assert.Len(t, pack.NonDestructivePredicates, len(pack.Predicates))
+}

@@ -235,3 +235,40 @@ func TestDomainPack_SnapshotSortsMultiplePacksByName(t *testing.T) {
 		t.Fatalf("DomainPackSnapshot() names = %v, want sorted %v", names, want)
 	}
 }
+
+// A predicate is destructive unless the enabled pack names it as
+// non-destructive (ADR-0132). An event recorded before the pack format
+// carried the list replays with every predicate destructive.
+func TestDomainPackSnapshot_PredicateIsDestructive(t *testing.T) {
+	w := NewWorld("t")
+	Reduce(w, DomainPackEnabled{
+		Name:                     "main",
+		Version:                  1,
+		Predicates:               map[string]string{"read_only": "true", "writes": "true"},
+		NonDestructivePredicates: []string{"read_only"},
+	})
+	Reduce(w, DomainPackEnabled{Name: "old", Version: 1, Predicates: map[string]string{"legacy": "true"}})
+
+	snap := w.DomainPackSnapshot()
+	if len(snap) != 2 {
+		t.Fatalf("want 2 packs, got %d", len(snap))
+	}
+	main, old := snap[0], snap[1]
+	if main.PredicateIsDestructive("read_only") {
+		t.Fatal("the pack names read_only as non-destructive")
+	}
+	if !main.PredicateIsDestructive("writes") {
+		t.Fatal("a predicate the pack does not name must be destructive")
+	}
+	if !old.PredicateIsDestructive("legacy") {
+		t.Fatal("a pack with no list must treat every predicate as destructive")
+	}
+
+	restored, err := RestoreWorld(SnapshotWorld(w, "seq-1"), "t")
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if restored.DomainPackSnapshot()[0].PredicateIsDestructive("read_only") {
+		t.Fatal("the non-destructive list must survive a snapshot round trip")
+	}
+}
