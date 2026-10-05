@@ -20,8 +20,9 @@ package mission
 //	         (scope.go's TargetSetSubset). Widening is refused; no code path
 //	         here grows it.
 //	lineage  {originating component, capability-grant id, parent mission id,
-//	         parent work id} is recorded on the child at creation, from the
-//	         VERIFIED caller identity — never from the request payload.
+//	         parent work id} is recorded in the Timeline of the tenant when
+//	         the child is created, from the VERIFIED caller identity — never
+//	         from the request payload.
 //
 // The parent is mandatory, permanently. This is an invariant, not a gap.
 //
@@ -65,30 +66,38 @@ import (
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
-// Lineage metadata keys written on a component-originated mission. They are
-// plain Mission.Metadata entries rather than new struct fields because the
-// durable home for lineage is the Timeline (ADR-0163), and the Timeline's
-// Append is documented as callable only from the ECS-brain World engine's
-// single tick goroutine — a concurrent gRPC handler cannot write it today
-// (gibson#1358 gap 3). Metadata is the interim, explicitly-temporary home;
-// the follow-up migrates these four keys into a Timeline event once the
-// World engine has a command-intake path a handler may use.
-const (
-	// LineageOriginatingComponent is the FGA principal ref of the component
-	// that asked for the mission ("agent_principal:<id>"), taken from the
-	// request's verified identity.
-	LineageOriginatingComponent = "originating_component"
-	// LineageCapabilityGrantID is the id of the ACTIVE capability grant that
-	// carried mission:originate at the moment of the call. Recorded so a
-	// later revocation still leaves an answer to "which grant authorized
-	// this mission".
-	LineageCapabilityGrantID = "capability_grant_id"
-	// LineageParentMissionID is the originating mission, resolved server-side
-	// from the caller's work item.
-	LineageParentMissionID = "parent_mission_id"
-	// LineageParentWorkID is the work item the caller was executing.
-	LineageParentWorkID = "parent_work_id"
-)
+// Lineage is the attribution of one component-originated mission: which
+// mission started it, from which work item, by which component, under which
+// capability grant. Each field comes from the verified caller identity, never
+// from the request payload.
+//
+// The durable home of lineage is the Timeline (ADR-0163). The Originator
+// hands the lineage to a LineageRecorder, and the daemon's recorder submits it
+// to the tenant engine as an event. Mission.Metadata holds no lineage.
+type Lineage struct {
+	// MissionID is the new mission, the child.
+	MissionID types.ID
+	// ParentMissionID is the originating mission, resolved server-side from
+	// the caller's work item.
+	ParentMissionID types.ID
+	// ParentWorkID is the work item the caller was executing.
+	ParentWorkID string
+	// OriginatingComponent is the FGA principal ref of the component that
+	// asked for the mission ("agent_principal:<id>").
+	OriginatingComponent string
+	// CapabilityGrantID is the id of the ACTIVE capability grant that carried
+	// mission:originate at the moment of the call. Recorded so a later
+	// revocation still leaves an answer to "which grant authorized this
+	// mission".
+	CapabilityGrantID string
+}
+
+// LineageRecorder records the lineage of an originated mission in the
+// Timeline of the tenant. The daemon supplies one that is bound to the
+// caller's tenant engine.
+type LineageRecorder interface {
+	RecordLineage(l Lineage)
+}
 
 // MaxOriginationDepth bounds how deep a chain of component-originated
 // missions may go. Mirrors harness.DefaultSpawnLimits().MaxMissionDepth
@@ -114,12 +123,6 @@ var (
 	// ErrDepthExceeded is returned when the child would sit deeper than
 	// MaxOriginationDepth.
 	ErrDepthExceeded = errors.New("mission: origination would exceed the maximum mission depth")
-	// ErrLineageSupplied is returned when the request's mission definition
-	// metadata already carries lineage keys. Lineage is asserted by the
-	// daemon from the verified identity; a caller that supplies its own is
-	// trying to forge attribution, and the request is refused rather than
-	// silently overwritten.
-	ErrLineageSupplied = errors.New("mission: origination lineage may not be supplied by the caller")
 	// ErrMissingAttribution is returned when the caller's principal or grant
 	// id is empty. Lineage is mandatory (owner decision 4), so a mission
 	// that cannot be attributed is not created.
@@ -167,20 +170,27 @@ type Saver interface {
 
 // Originator applies the origination policy and persists the child mission.
 type Originator struct {
-	store  Saver
-	ledger ReservationLedger
-	logger *slog.Logger
+	store   Saver
+	ledger  ReservationLedger
+	lineage LineageRecorder
+	logger  *slog.Logger
 }
 
 // NewOriginator constructs an Originator. store and ledger must both be
 // bound to the CALLER'S tenant already (the per-tenant Conn is the isolation
 // boundary — there is no tenant argument anywhere below, deliberately, so
-// there is nothing for a payload to influence). logger may be nil.
-func NewOriginator(store Saver, ledger ReservationLedger, logger *slog.Logger) *Originator {
+// there is nothing for a payload to influence). lineage records the lineage of
+// each child in the Timeline of that same tenant. It must not be nil: lineage
+// is mandatory, and a mission with no recorded lineage cannot be attributed.
+// logger may be nil.
+func NewOriginator(store Saver, ledger ReservationLedger, lineage LineageRecorder, logger *slog.Logger) *Originator {
+	if lineage == nil {
+		panic("mission: NewOriginator: the lineage recorder must not be nil")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Originator{store: store, ledger: ledger, logger: logger}
+	return &Originator{store: store, ledger: ledger, lineage: lineage, logger: logger}
 }
 
 // Originate validates the request against the parent's budget and scope,
@@ -242,6 +252,16 @@ func (o *Originator) Originate(ctx context.Context, req OriginateRequest) (*Miss
 		return nil, fmt.Errorf("mission: originate: save child mission: %w", saveErr)
 	}
 
+	// The lineage goes to the Timeline after the save, so the Timeline names
+	// no mission that does not exist.
+	o.lineage.RecordLineage(Lineage{
+		MissionID:            child.ID,
+		ParentMissionID:      req.Parent.ID,
+		ParentWorkID:         req.ParentWorkID,
+		OriginatingComponent: req.Principal,
+		CapabilityGrantID:    req.GrantID,
+	})
+
 	o.logger.InfoContext(ctx, "component originated a mission",
 		slog.String("mission_id", child.ID.String()),
 		slog.String("parent_mission_id", req.Parent.ID.String()),
@@ -270,8 +290,8 @@ func (o *Originator) releaseAfterFailure(ctx context.Context, parentID, childID 
 }
 
 // buildChild assembles the child Mission record. Split out from Originate so
-// the assembly (and its lineage-forgery refusal) is testable without a
-// ledger.
+// the assembly is testable without a ledger. The record holds no lineage: the
+// Timeline does (Lineage).
 func (o *Originator) buildChild(
 	childID types.ID,
 	childDepth int,
@@ -279,21 +299,6 @@ func (o *Originator) buildChild(
 	granted ChildBudget,
 	req OriginateRequest,
 ) (*Mission, error) {
-	// Lineage is asserted, never accepted. A definition that already names
-	// any lineage key is refused outright rather than overwritten: the
-	// caller had no legitimate reason to set it, and silently correcting a
-	// forgery attempt hides it.
-	for _, k := range []string{
-		LineageOriginatingComponent,
-		LineageCapabilityGrantID,
-		LineageParentMissionID,
-		LineageParentWorkID,
-	} {
-		if _, present := def.GetMetadata()[k]; present {
-			return nil, fmt.Errorf("%w: %q", ErrLineageSupplied, k)
-		}
-	}
-
 	defJSON, marshalErr := MarshalDefinitionJSON(def)
 	if marshalErr != nil {
 		return nil, fmt.Errorf("mission: originate: marshal definition: %w", marshalErr)
@@ -311,12 +316,6 @@ func (o *Originator) buildChild(
 		Constraints:           grantedConstraints(def.GetConstraints(), granted),
 		ParentMissionID:       &parentID,
 		Depth:                 childDepth,
-		Metadata: map[string]any{
-			LineageOriginatingComponent: req.Principal,
-			LineageCapabilityGrantID:    req.GrantID,
-			LineageParentMissionID:      parentID.String(),
-			LineageParentWorkID:         req.ParentWorkID,
-		},
 	}
 	if len(req.TargetIDs) > 0 {
 		child.TargetID = req.TargetIDs[0]

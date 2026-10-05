@@ -51,19 +51,41 @@ func (r *recordingSaver) count() int {
 // miniredis-backed ledger, and hands back the ledger so a test can inspect
 // what is actually reserved afterwards.
 type originatorFixture struct {
-	orig   *Originator
-	saver  *recordingSaver
-	ledger ReservationLedger
+	orig    *Originator
+	saver   *recordingSaver
+	ledger  ReservationLedger
+	lineage *recordingLineage
+}
+
+// recordingLineage records each lineage that the Originator hands to the
+// Timeline.
+type recordingLineage struct {
+	mu       sync.Mutex
+	recorded []Lineage
+}
+
+func (r *recordingLineage) RecordLineage(l Lineage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recorded = append(r.recorded, l)
+}
+
+func (r *recordingLineage) all() []Lineage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Lineage(nil), r.recorded...)
 }
 
 func newOriginatorFixture(t *testing.T) originatorFixture {
 	t.Helper()
 	saver := &recordingSaver{}
 	ledger := newTestReservationLedger(t)
+	lineage := &recordingLineage{}
 	return originatorFixture{
-		orig:   NewOriginator(saver, ledger, nil),
-		saver:  saver,
-		ledger: ledger,
+		orig:    NewOriginator(saver, ledger, lineage, nil),
+		saver:   saver,
+		ledger:  ledger,
+		lineage: lineage,
 	}
 }
 
@@ -135,10 +157,15 @@ func TestOriginate_HappyPath_RecordsLineageBudgetAndScope(t *testing.T) {
 	assert.Equal(t, child.ID, f.saver.saved[0].ID)
 
 	// Lineage, from the verified caller, not the payload.
-	assert.Equal(t, "agent_principal:abc", child.Metadata[LineageOriginatingComponent])
-	assert.Equal(t, "grant-777", child.Metadata[LineageCapabilityGrantID])
-	assert.Equal(t, parent.ID.String(), child.Metadata[LineageParentMissionID])
-	assert.Equal(t, "work-123", child.Metadata[LineageParentWorkID])
+	// The lineage goes to the Timeline, and the mission record holds none.
+	assert.Empty(t, child.Metadata, "Mission.Metadata must hold no lineage")
+	require.Equal(t, []Lineage{{
+		MissionID:            child.ID,
+		ParentMissionID:      parent.ID,
+		ParentWorkID:         "work-123",
+		OriginatingComponent: "agent_principal:abc",
+		CapabilityGrantID:    "grant-777",
+	}}, f.lineage.all())
 	require.NotNil(t, child.ParentMissionID)
 	assert.Equal(t, parent.ID, *child.ParentMissionID)
 	assert.Equal(t, 1, child.Depth)
@@ -329,32 +356,22 @@ func TestOriginate_RefusesBeyondTheDepthLimit(t *testing.T) {
 	assertNothingReserved(context.Background(), t, f, parent.ID)
 }
 
-func TestOriginate_RefusesCallerSuppliedLineage(t *testing.T) {
-	ctx := context.Background()
+// A refused origination records no lineage: the Timeline names no mission
+// that does not exist.
+func TestOriginate_RecordsNoLineageWhenItRefuses(t *testing.T) {
+	f := newOriginatorFixture(t)
 	parent := parentWithTargets(5.00, 0)
+	req := validRequest(parent)
+	req.GrantID = ""
 
-	for _, key := range []string{
-		LineageOriginatingComponent,
-		LineageCapabilityGrantID,
-		LineageParentMissionID,
-		LineageParentWorkID,
-	} {
-		t.Run(key, func(t *testing.T) {
-			f := newOriginatorFixture(t)
-			req := validRequest(parent)
-			req.DefinitionJSON = definitionJSON(t, &missionv1.MissionDefinition{
-				Metadata: map[string]string{key: "forged"},
-			})
+	_, err := f.orig.Originate(context.Background(), req)
 
-			_, err := f.orig.Originate(ctx, req)
+	require.ErrorIs(t, err, ErrMissingAttribution)
+	assert.Empty(t, f.lineage.all())
+}
 
-			require.ErrorIs(t, err, ErrLineageSupplied)
-			assert.Equal(t, 0, f.saver.count())
-			// The refusal happens after the reservation, so this asserts the
-			// compensating release actually ran.
-			assertNothingReserved(ctx, t, f, parent.ID)
-		})
-	}
+func TestNewOriginator_RefusesANilLineageRecorder(t *testing.T) {
+	require.Panics(t, func() { NewOriginator(&recordingSaver{}, newTestReservationLedger(t), nil, nil) })
 }
 
 func TestOriginate_ReleasesTheReservationWhenTheSaveFails(t *testing.T) {
@@ -372,6 +389,7 @@ func TestOriginate_ReleasesTheReservationWhenTheSaveFails(t *testing.T) {
 
 	require.Error(t, err)
 	assertNothingReserved(ctx, t, f, parent.ID)
+	assert.Empty(t, f.lineage.all(), "a mission that was not saved has no lineage in the Timeline")
 }
 
 func TestOriginate_RejectsAMalformedDefinition(t *testing.T) {

@@ -92,6 +92,10 @@ type World struct {
 	// sighted facts.
 	domainPacks map[string]DomainPackState
 
+	// missionLineage holds the lineage of each mission that a component
+	// originated (mission_lineage.go, gibson#734), keyed by mission id.
+	missionLineage map[string]MissionLineage
+
 	// proofReviews holds the latest proof with agent-typed evidence for each
 	// hypothesis (proof_review.go, ADR-0131), keyed by hypothesis id.
 	proofReviews map[string]BetProofSubmittedForReview
@@ -255,6 +259,7 @@ func NewWorld(tenant string) *World {
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 		domainPacks:        make(map[string]DomainPackState),
+		missionLineage:     make(map[string]MissionLineage),
 		proofReviews:       make(map[string]BetProofSubmittedForReview),
 		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
 		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
@@ -488,6 +493,8 @@ func Reduce(w *World, ev Event) {
 		applyEdgeOutcomeObserved(w, e)
 	case NodeBeliefSet:
 		applyNodeBeliefSet(w, e)
+	case MissionOriginated:
+		applyMissionOriginated(w, e)
 	case DomainPackEnabled:
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:

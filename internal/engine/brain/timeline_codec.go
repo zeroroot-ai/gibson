@@ -144,6 +144,7 @@ func init() {
 	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
 
 	// domain_pack.go
+	registerEvent("mission.originated", func() Event { return &MissionOriginated{} })
 	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
 	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
 
@@ -280,6 +281,8 @@ func dereferenceEvent(ev Event) Event {
 	case *FlightRecorderPolicySet:
 		return *v
 	case *FlightRecorderRetentionSwept:
+		return *v
+	case *MissionOriginated:
 		return *v
 	case *DomainPackEnabled:
 		return *v
