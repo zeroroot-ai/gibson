@@ -294,15 +294,14 @@ func voiPlanCursor(w *World, missionID string) int {
 // the ambient host slice (the same budget/curation the Decider itself
 // reads, deciderHostBudget), every hypothesis (mirroring DeciderWorker's own
 // Findings() precedent — tenant-wide, since Mission carries no ScopeID to
-// filter by), and the current attack graph (DeriveAttackGraph over
-// HostsToInfraGraph, gibson#275/#286's live-wiring machinery, reused
-// unchanged) — plus the mission's capability catalog (Engine.Capabilities) and
-// the technique hierarchy (vw.hierarchy), so PlanVoI can resolve each
+// filter by), and the current attack graph (LiveAttackGraph: the ambient
+// hosts and the relationships of the World between them) — plus the
+// mission's capability catalog (Engine.Capabilities) and the technique
+// hierarchy (vw.hierarchy), so PlanVoI can resolve each
 // candidate's CoveringCapabilities (ADR-0135, gibson#387).
 func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
-	nodes := HostsToInfraGraph(hosts)
-	graph := DeriveAttackGraph(nodes, nil, vw.registry)
+	graph := LiveAttackGraph(vw.eng, hosts, vw.registry)
 	return VoIPlanInput{
 		Hosts:        hosts,
 		Hypotheses:   vw.eng.Hypotheses(),
