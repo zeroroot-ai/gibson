@@ -77,12 +77,6 @@ func ZitadelConnectURLFromEnv(getenv func(string) string) (string, error) {
 // On delete (finalizer)    → revoke Zitadel client, cap 3 retries on transient errors,
 //
 //	then proceed and emit Warning event.
-//
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients/finalizers,verbs=update
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 type OIDCClientReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
@@ -100,6 +94,17 @@ func (r *OIDCClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Secret{}).
 		Complete(r)
 }
+
+// The RBAC markers stand here, above a function and apart from its doc
+// comment, because controller-gen reads a marker only from a comment that
+// belongs to no type. In the doc comment of the reconciler type, where they
+// stood before, it ignored all of them and generated no role.
+//
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile runs the OIDCClient state machine.
 func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

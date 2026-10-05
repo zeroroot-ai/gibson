@@ -86,15 +86,6 @@ type VaultTokenSource interface {
 //
 // Children (OIDCClient CRs) are owned via ownerReferences so K8s GC
 // handles cascade on delete.
-//
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps/finalizers,verbs=update
-// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=create
 type PlatformBootstrapReconciler struct {
 	client.Client
 	// APIReader reads the PlatformBootstrap straight from the API server.
@@ -159,6 +150,20 @@ func (r *PlatformBootstrapReconciler) mapChildToParent(ctx context.Context, obj 
 	}
 	return nil
 }
+
+// The RBAC markers stand here, above a function and apart from its doc
+// comment, because controller-gen reads a marker only from a comment that
+// belongs to no type. In the doc comment of the reconciler type, where they
+// stood before, it ignored all of them and generated no role.
+//
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps/finalizers,verbs=update
+// +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=create
 
 // Reconcile is the top-level state-machine entry.
 func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
