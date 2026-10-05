@@ -33,11 +33,15 @@ type fakeAppZitadel struct {
 	createCalls    int
 	renames        []renameCall
 	renameErr      error // when set, UpdateOIDCClientName fails with it
+	projectErr     error // when set, GetProjectIDByName fails with it
 }
 
 type renameCall struct{ AppID, Name string }
 
 func (f *fakeAppZitadel) GetProjectIDByName(context.Context, string) (string, error) {
+	if f.projectErr != nil {
+		return "", f.projectErr
+	}
 	return "PROJ", nil
 }
 
@@ -209,4 +213,57 @@ func TestOIDCClient_RenameErrorIsSurfaced(t *testing.T) {
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionFalse, cond.Status)
 	require.Equal(t, "ZitadelPermanentError", cond.Reason)
+}
+
+// A transient Zitadel error sets ClientExists to Unknown. The next reconcile
+// that succeeds must set it back to True and drop the old error text. Before
+// this fix it stayed at Unknown beside Ready=True, which is what staging
+// showed on all five clients on 2026-10-05, and the tenant operator reads
+// ClientExists to decide that a tenant's identity is ready.
+func TestOIDCClient_ARecoveredClientSaysTheClientExists(t *testing.T) {
+	r, fz, key := newOIDCClientRenameFixture(t, "gibson-native-login", "gibson-native-login", "APP-OLD")
+	condition := func(typ string) *metav1.Condition {
+		t.Helper()
+		var got gibsonv1alpha1.OIDCClient
+		require.NoError(t, r.Get(context.Background(), key, &got))
+		return findStatusCondition(got.Status.Conditions, typ)
+	}
+
+	fz.projectErr = zitadel.ErrUnreachable
+	_, _ = r.Reconcile(context.Background(), ctrlRequest(key))
+	exists := condition(gibsonv1alpha1.ConditionOIDCClientExists)
+	require.NotNil(t, exists)
+	require.Equal(t, metav1.ConditionUnknown, exists.Status, "a transient error must read as Unknown")
+
+	fz.projectErr = nil
+	_, err := r.Reconcile(context.Background(), ctrlRequest(key))
+	require.NoError(t, err)
+
+	ready := condition(gibsonv1alpha1.ConditionReady)
+	require.NotNil(t, ready)
+	require.Equal(t, metav1.ConditionTrue, ready.Status)
+	exists = condition(gibsonv1alpha1.ConditionOIDCClientExists)
+	require.NotNil(t, exists)
+	require.Equal(t, metav1.ConditionTrue, exists.Status, "a reconcile that succeeded must say the client exists")
+	require.Equal(t, "Verified", exists.Reason)
+	require.NotContains(t, exists.Message, "unreachable", "the old error text must be gone")
+}
+
+// A client that was created keeps the reason that records how it came to
+// exist. A later successful reconcile does not rewrite it.
+func TestOIDCClient_ACreatedClientKeepsItsReason(t *testing.T) {
+	r, _, key := newOIDCClientRenameFixture(t, "gibson-native-login", "gibson-native-login", "APP-OLD")
+	var oc gibsonv1alpha1.OIDCClient
+	require.NoError(t, r.Get(context.Background(), key, &oc))
+	r.setCondition(&oc, gibsonv1alpha1.ConditionOIDCClientExists, metav1.ConditionTrue, "Created", "Zitadel client minted")
+	require.NoError(t, r.Status().Update(context.Background(), &oc))
+
+	_, err := r.Reconcile(context.Background(), ctrlRequest(key))
+	require.NoError(t, err)
+
+	require.NoError(t, r.Get(context.Background(), key, &oc))
+	exists := findStatusCondition(oc.Status.Conditions, gibsonv1alpha1.ConditionOIDCClientExists)
+	require.NotNil(t, exists)
+	require.Equal(t, metav1.ConditionTrue, exists.Status)
+	require.Equal(t, "Created", exists.Reason)
 }

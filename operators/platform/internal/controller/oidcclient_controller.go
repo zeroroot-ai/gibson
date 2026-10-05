@@ -901,6 +901,17 @@ func (r *OIDCClientReconciler) readSecretKey(ctx context.Context, fallbackNs str
 
 // setCondition writes a metav1.Condition onto the OIDCClient's status.
 func (r *OIDCClientReconciler) setCondition(oc *gibsonv1alpha1.OIDCClient, t string, s metav1.ConditionStatus, reason, message string) {
+	// Ready=True means every Zitadel step of this reconcile passed for the
+	// client, so the client exists. Say so. ClientExists was set to True only
+	// when the client was created, and a transient Zitadel error set it to
+	// Unknown. A later reconcile that succeeded left it at Unknown with the old
+	// error text, for ever: on staging on 2026-10-05 all five clients read
+	// ClientExists=Unknown beside Ready=True after one failed pass. The tenant
+	// operator gates a tenant's identity on ClientExists, so that stale value
+	// is not cosmetic.
+	if t == gibsonv1alpha1.ConditionReady && s == metav1.ConditionTrue {
+		r.confirmClientExists(oc)
+	}
 	now := metav1.Now()
 	for i := range oc.Status.Conditions {
 		c := &oc.Status.Conditions[i]
@@ -927,6 +938,21 @@ func (r *OIDCClientReconciler) setCondition(oc *gibsonv1alpha1.OIDCClient, t str
 		LastTransitionTime: now,
 		ObservedGeneration: oc.Generation,
 	})
+}
+
+// confirmClientExists sets ClientExists to True when it is not True already.
+// A True condition keeps its reason, which records how the client came to
+// exist ("Created", "MachineUserCreated").
+func (r *OIDCClientReconciler) confirmClientExists(oc *gibsonv1alpha1.OIDCClient) {
+	for i := range oc.Status.Conditions {
+		c := &oc.Status.Conditions[i]
+		if c.Type == gibsonv1alpha1.ConditionOIDCClientExists && c.Status == metav1.ConditionTrue {
+			c.ObservedGeneration = oc.Generation
+			return
+		}
+	}
+	r.setCondition(oc, gibsonv1alpha1.ConditionOIDCClientExists, metav1.ConditionTrue,
+		"Verified", "Every Zitadel step of the last reconcile passed for this client")
 }
 
 // statusUpdate writes status. Uses the status subresource.
