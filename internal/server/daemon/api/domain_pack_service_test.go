@@ -30,7 +30,7 @@ func newDomainPackServiceWithGate(t *testing.T, catalog *ontology.DomainPackCata
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx)
-	return NewDomainPackService(reg, catalog, gate), reg
+	return NewDomainPackService(reg, catalog, gate, &memImportStore{}), reg
 }
 
 // waitForDomainPacks polls until ListDomainPacks returns n packs or the

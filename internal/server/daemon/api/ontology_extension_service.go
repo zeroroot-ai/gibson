@@ -6,12 +6,15 @@ package api
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -47,12 +50,25 @@ type OntologyExtensionService struct {
 	tenantv1.UnimplementedOntologyExtensionServiceServer
 
 	registry *brain.Registry
+
+	// audit writes the submitted fragment as one audit record (gibson#712).
+	audit FragmentAuditWriter
 }
 
+// FragmentAuditWriter writes one audit record and returns its id.
+// *audit.Writer implements it.
+type FragmentAuditWriter interface {
+	WriteSyncID(ctx context.Context, event audit.Event) (int64, error)
+}
+
+// SubmittedFragmentAction is the audit action of a fragment submitted for
+// upstream review.
+const SubmittedFragmentAction = "ontology.extension.submitted"
+
 // NewOntologyExtensionService constructs the service over the given tenant
-// brain registry.
-func NewOntologyExtensionService(registry *brain.Registry) *OntologyExtensionService {
-	return &OntologyExtensionService{registry: registry}
+// brain registry and the audit writer of submitted fragments.
+func NewOntologyExtensionService(registry *brain.Registry, audit FragmentAuditWriter) *OntologyExtensionService {
+	return &OntologyExtensionService{registry: registry, audit: audit}
 }
 
 // engine resolves the caller's tenant from the ext-authz context and returns
@@ -185,9 +201,28 @@ func (s *OntologyExtensionService) SubmitOntologyExtensionUpstream(
 	if err != nil {
 		return nil, ontologyDecisionError("SubmitOntologyExtensionUpstream", err)
 	}
-	// The rendered pack is not returned (gibson#502): no consumer read it.
-	_ = pack
-	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{}, nil
+	// The fragment goes where a reviewer gets it: one audit record of the
+	// tenant, with the pack JSON in its metadata (gibson#712). The response
+	// names the record.
+	raw, err := ontology.EncodePackJSON(pack)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Internal, "SubmitOntologyExtensionUpstream: %v", err)
+	}
+	id, _ := auth.IdentityFromContext(ctx)
+	recordID, err := s.audit.WriteSyncID(ctx, audit.Event{
+		TenantID:   pack.Author,
+		ActorID:    id.Subject,
+		ActorType:  "user",
+		Action:     SubmittedFragmentAction,
+		TargetType: "ontology_extension",
+		TargetID:   label,
+		Decision:   "allow",
+		Metadata:   raw,
+	})
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.Unavailable, "SubmitOntologyExtensionUpstream: write the audit record: %v", err)
+	}
+	return &tenantv1.SubmitOntologyExtensionUpstreamResponse{AuditRecordId: strconv.FormatInt(recordID, 10)}, nil
 }
 
 // ontologyDecisionError maps Engine.ApproveOntologyExtension/RejectOntologyExtension's

@@ -415,13 +415,20 @@ func (w *Writer) run(ctx context.Context) {
 // exact value. It is truncated to microseconds — Postgres TIMESTAMPTZ
 // resolution — so the hash still reproduces after a round trip.
 func (w *Writer) flush(ctx context.Context, batch []Event) error {
+	_, err := w.insert(ctx, batch, false)
+	return err
+}
+
+// insert is flush. With returnID it also returns the id of the one row of
+// the batch, from INSERT ... RETURNING id.
+func (w *Writer) insert(ctx context.Context, batch []Event, returnID bool) (int64, error) {
 	if len(batch) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("audit: flush: begin transaction (%d rows): %w", len(batch), err)
+		return 0, fmt.Errorf("audit: flush: begin transaction (%d rows): %w", len(batch), err)
 	}
 	committed := false
 	defer func() {
@@ -445,12 +452,12 @@ func (w *Writer) flush(ctx context.Context, batch []Event) error {
 	rows := make([]chainRow, 0, len(batch))
 	for _, tenant := range tenants {
 		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, tenantAdvisoryKey(tenant)); err != nil {
-			return fmt.Errorf("audit: flush: lock chain for tenant %q: %w", tenant, err)
+			return 0, fmt.Errorf("audit: flush: lock chain for tenant %q: %w", tenant, err)
 		}
 
 		seq, prevHash, err := chainHead(ctx, tx, tenant)
 		if err != nil {
-			return fmt.Errorf("audit: flush: %w", err)
+			return 0, fmt.Errorf("audit: flush: %w", err)
 		}
 
 		for _, ev := range byTenant[tenant] {
@@ -525,13 +532,18 @@ func (w *Writer) flush(ctx context.Context, batch []Event) error {
 		 created_at, chain_seq, prev_hash, entry_hash)
 		VALUES ` + strings.Join(placeholders, ", ")
 
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("audit: flush: INSERT audit_log (%d rows): %w", len(rows), err)
+	var id int64
+	if returnID {
+		if err := tx.QueryRowContext(ctx, query+" RETURNING id", args...).Scan(&id); err != nil {
+			return 0, fmt.Errorf("audit: flush: INSERT audit_log (%d rows): %w", len(rows), err)
+		}
+	} else if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		return 0, fmt.Errorf("audit: flush: INSERT audit_log (%d rows): %w", len(rows), err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("audit: flush: commit (%d rows): %w", len(rows), err)
+		return 0, fmt.Errorf("audit: flush: commit (%d rows): %w", len(rows), err)
 	}
 	committed = true
-	return nil
+	return id, nil
 }

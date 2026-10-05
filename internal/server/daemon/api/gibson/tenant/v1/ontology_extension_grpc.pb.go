@@ -89,8 +89,9 @@ type OntologyExtensionServiceClient interface {
 	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
 	// own live extension nominates it for the shared catalog.
 	//
-	// This RPC renders the artifact only; it never opens a PR itself (see the
-	// response message's doc for why that hand-off exists).
+	// The handler writes the fragment as one audit record and returns its id
+	// (gibson#712). The Platform owner reviews the fragment there. The RPC
+	// opens no pull request.
 	SubmitOntologyExtensionUpstream(ctx context.Context, in *SubmitOntologyExtensionUpstreamRequest, opts ...grpc.CallOption) (*SubmitOntologyExtensionUpstreamResponse, error)
 }
 
@@ -173,8 +174,9 @@ type OntologyExtensionServiceServer interface {
 	// ApproveOntologyExtensionProposal: only the tenant that vouches for its
 	// own live extension nominates it for the shared catalog.
 	//
-	// This RPC renders the artifact only; it never opens a PR itself (see the
-	// response message's doc for why that hand-off exists).
+	// The handler writes the fragment as one audit record and returns its id
+	// (gibson#712). The Platform owner reviews the fragment there. The RPC
+	// opens no pull request.
 	SubmitOntologyExtensionUpstream(context.Context, *SubmitOntologyExtensionUpstreamRequest) (*SubmitOntologyExtensionUpstreamResponse, error)
 	mustEmbedUnimplementedOntologyExtensionServiceServer()
 }

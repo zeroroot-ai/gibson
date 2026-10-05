@@ -22,6 +22,7 @@ func TestRegisterOntologyExtension_ServesWithBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background()),
+		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
 

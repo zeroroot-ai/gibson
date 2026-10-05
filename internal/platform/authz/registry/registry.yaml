@@ -1702,6 +1702,19 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.DomainPackService/ExportDomainPack":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.DomainPackService/ImportDomainPack":
+    relation: "platform_owner"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.DomainPackService/ListDomainPackCatalog":
     relation: "member"
     object_type: "tenant"

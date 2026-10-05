@@ -124,6 +124,10 @@ message SubmitOntologyExtensionUpstreamResponse {
   // Removed in gibson#502: served and never read by any consumer.
   reserved 1, 2, 3, 4;
   reserved "pack_json", "suggested_file_path", "suggested_pr_title", "suggested_pr_body";
+  // audit_record_id names the place of the submitted fragment (gibson#712):
+  // the audit record with the action "ontology.extension.submitted", whose
+  // metadata holds the pack JSON. The Platform owner reviews it there.
+  string audit_record_id = 5;
 }
 
 service OntologyExtensionService {
@@ -178,8 +182,9 @@ service OntologyExtensionService {
   // ApproveOntologyExtensionProposal: only the tenant that vouches for its
   // own live extension nominates it for the shared catalog.
   //
-  // This RPC renders the artifact only; it never opens a PR itself (see the
-  // response message's doc for why that hand-off exists).
+  // The handler writes the fragment as one audit record and returns its id
+  // (gibson#712). The Platform owner reviews the fragment there. The RPC
+  // opens no pull request.
   rpc SubmitOntologyExtensionUpstream(SubmitOntologyExtensionUpstreamRequest) returns (SubmitOntologyExtensionUpstreamResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "owner"

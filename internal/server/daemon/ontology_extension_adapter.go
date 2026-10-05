@@ -34,6 +34,9 @@ func (d *daemonImpl) registerOntologyExtension(ctx context.Context, srv *grpc.Se
 		d.logger.Warn(ctx, "OntologyExtensionService: no brain registry; not registering")
 		return
 	}
-	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry))
+	// A submitted fragment is one audit record in the platform database
+	// (gibson#712).
+	writer := newStartedAuditWriter(ctx, d.platformDB, d.logger.Slog())
+	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry, writer))
 	d.logger.Info(ctx, "OntologyExtensionService registered (ADR-0133, gibson#392)")
 }
