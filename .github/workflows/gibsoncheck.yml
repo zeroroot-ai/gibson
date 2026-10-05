@@ -180,6 +180,14 @@ jobs:
           ./bin/gibsoncheck -tenantrolewrite      ./internal/... ./cmd/... ./operators/... ./pkg/...
           ./bin/gibsoncheck -orgmemberwrite       ./internal/... ./cmd/... ./operators/... ./pkg/...
 
+      # ADR-0023: the daemon holds no Kubernetes client. The analyzer existed
+      # for months and no workflow ran it, so six files came to break the
+      # rule (gibson#659). They are named exemptions in the analyzer, each
+      # with its issue, and a test refuses an exemption that exempts nothing.
+      # Every other file under internal/ and pkg/ is checked here.
+      - name: Run the daemon Kubernetes API guard (ADR-0023)
+        run: ./bin/gibsoncheck -nok8sapiindaemon ./internal/... ./pkg/...
+
       # The STALE half of the baseline ratchet. The analyzers above refuse
       # new findings; this refuses baseline lines whose site is fixed or
       # gone, so the file is forced monotonically downward and cannot
