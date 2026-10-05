@@ -4,7 +4,6 @@
 package ontology
 
 import (
-	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -68,8 +67,7 @@ func TestLoadCatalog_Refusals(t *testing.T) {
 				fsys[f] = &fstest.MapFile{Data: []byte(body)}
 			}
 			_, err := LoadCatalog(fsys)
-			require.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), tc.want), "error %q must contain %q", err, tc.want)
+			require.ErrorContains(t, err, tc.want)
 		})
 	}
 }
