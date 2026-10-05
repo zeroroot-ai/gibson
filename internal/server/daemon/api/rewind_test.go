@@ -37,16 +37,6 @@ func missionViewerCtx() context.Context {
 	})
 }
 
-// missionViewerAuthz grants testViewerSubject the mission#viewer relation on
-// each of the given mission IDs and nothing else.
-func missionViewerAuthz(missionIDs ...string) *fakeAuthorizer {
-	a := newFakeAuthorizer()
-	for _, id := range missionIDs {
-		a.allow("user:"+testViewerSubject, "viewer", "mission:"+id)
-	}
-	return a
-}
-
 // GHSA-v8j9: rewind is a WRITE path, so a nil (unconfigured) authorizer must
 // fail closed with Unavailable — never fall through to allow.
 func TestRequireMissionAdminForRewind_NilAuthorizerFailsClosed(t *testing.T) {
@@ -64,13 +54,13 @@ func TestRequireMissionAdminForRewind_NilAuthorizerFailsClosed(t *testing.T) {
 func TestResumeMission_RewindGoesThroughDaemonRewindMission(t *testing.T) {
 	d := newFakeDaemon().withCheckpoint("mission-1", CheckpointData{CheckpointID: "cp-target"})
 	// requireMissionAdminForRewind (server.go) checks
-	// (user:<sub>, admin, mission:<id>) directly. In production the FGA model
-	// cascades admin from tenant#admin; the fakeAuthorizer here does not
+	// (user:<sub>, can_rewind, mission:<id>). In production the FGA model
+	// cascades can_rewind from tenant#admin; the fakeAuthorizer here does not
 	// model that cascade, so the test seeds the resolved tuple explicitly.
 	a := newFakeAuthorizer().
 		allow("user:u-bob", "member", "tenant:acme").
 		allow("user:u-bob", "admin", "tenant:acme").
-		allow("user:u-bob", "admin", "mission:mission-1")
+		allow("user:u-bob", "can_rewind", "mission:mission-1")
 	w := newFakeAuditWriter()
 	srv := &DaemonServer{
 		daemon:                 d,
@@ -143,8 +133,8 @@ func TestResumeMission_RewindNotFoundTarget(t *testing.T) {
 	d := newFakeDaemon().withCheckpoint("mission-1", CheckpointData{CheckpointID: "cp-1"})
 	// The caller is a legitimate mission admin — this test exercises the
 	// missing-checkpoint path, not the authz gate.
-	a := missionViewerAuthz("mission-1").
-		allow("user:"+testViewerSubject, "admin", "mission:mission-1")
+	a := newFakeAuthorizer().
+		allow("user:"+testViewerSubject, "can_rewind", "mission:mission-1")
 	srv := &DaemonServer{daemon: d, logger: testSlogLogger, authorizer: a}
 	ctx := missionViewerCtx()
 	stream := &mockServerStreamForResume{ctx: ctx}
@@ -163,7 +153,7 @@ func rewindAdminServer(d *fakeDaemon) (*DaemonServer, *fakeAuditWriter, context.
 	a := newFakeAuthorizer().
 		allow("user:u-bob", "member", "tenant:acme").
 		allow("user:u-bob", "admin", "tenant:acme").
-		allow("user:u-bob", "admin", "mission:mission-1")
+		allow("user:u-bob", "can_rewind", "mission:mission-1")
 	w := newFakeAuditWriter()
 	srv := &DaemonServer{
 		daemon:                 d,

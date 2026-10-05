@@ -2309,11 +2309,13 @@ func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, mission
 		return status_grpc.Error(codes.Unavailable, "authorizer not configured")
 	}
 
-	// Mission-scoped admin check. The model relation cascades from
-	// tenant#admin; per-mission admin shares layer on top.
+	// Mission-scoped rewind check. can_rewind is the mission admin, which
+	// cascades from tenant#admin; per-mission admin shares layer on top. The
+	// check names the permission and not the role behind it, so the model
+	// can change who may rewind without a change here (hosted#358).
 	ok, err := s.authorizer.Check(ctx,
 		"user:"+id.Subject,
-		"admin",
+		"can_rewind",
 		"mission:"+missionID,
 	)
 	if err != nil {

@@ -103,24 +103,6 @@ var knownDriftServices = map[string]string{
 	"gibson.harness.v1.HarnessCallbackService": "component.can_use does not exist on the component type (can_use is defined on provider and model only)",
 }
 
-// knownDriftMethods covers single-RPC drift not shared across a whole
-// service.
-var knownDriftMethods = map[string]struct{ ObjectType, Relation, Reason string }{
-	// CreateMissionDefinition uses tenant.writer; writer exists only on
-	// mission_definition (where it's `admin from parent`). The annotation
-	// was probably copy-pasted from mission_definition's authz block.
-	// Both the OSS DaemonService and the admin DaemonAdminService have this
-	// same annotation drift introduced in fa1c311 (admin platform-sdk migration).
-	"/gibson.daemon.v1.DaemonService/CreateMissionDefinition": {
-		"tenant", "writer",
-		"writer is defined on mission_definition, not tenant — annotation likely copy-pasted from mission_definition",
-	},
-	"/gibson.daemon.admin.v1.DaemonAdminService/CreateMissionDefinition": {
-		"tenant", "writer",
-		"writer is defined on mission_definition, not tenant — annotation copy-pasted from OSS DaemonService; fix annotation in platform-sdk proto",
-	},
-}
-
 func methodService(method string) string {
 	// "/pkg.path.Service/Method" → "pkg.path.Service"
 	if !strings.HasPrefix(method, "/") {
@@ -150,10 +132,6 @@ func TestRegistryRelationsExistInModel(t *testing.T) {
 		}
 		// Skip known pre-existing drift at the service-wide level.
 		if _, ok := knownDriftServices[methodService(method)]; ok {
-			continue
-		}
-		// Skip single-method known drift.
-		if drift, ok := knownDriftMethods[method]; ok && drift.ObjectType == entry.ObjectType && drift.Relation == entry.Relation {
 			continue
 		}
 		relations, ok := model[entry.ObjectType]
