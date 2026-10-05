@@ -535,11 +535,15 @@ type WorldEmitter interface {
 
 // KnowledgeReader is reading what earlier work established.
 //
-// Deliberately NOT the same membership as the SDK's KnowledgeReader, which
-// carries eight reads including the five graphrag ones. This side has four and
-// no graph reads at all. That difference is the point of sharing the name: it is
-// now a diff of two named types rather than an eyeball comparison of 57 method
-// signatures. See ADR-0162.
+// It has nine reads: three finding and run reads (GetFindings,
+// GetMissionRunHistory, GetRunFindings), five graph reads (QueryNodes,
+// FindSimilarAttacks, GetAttackChains, FindSimilarFindings,
+// GetRelatedFindings) and ApplicationFindings. The graph reads of
+// DefaultAgentHarness are in knowledge_graph_reads.go.
+//
+// The SDK has a group with the same name and the same nine method names. The
+// shared name makes a difference between the two sides a diff of two named
+// types. See ADR-0162.
 type KnowledgeReader interface {
 
 	// GetFindings retrieves findings for the current mission, optionally filtered.
