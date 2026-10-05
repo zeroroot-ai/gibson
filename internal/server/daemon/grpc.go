@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	"io"
 	"log/slog"
 	"net"
@@ -502,6 +503,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// unrestricted access (fail-closed, gibson#1052). EnvoyID is not bypassed
 		// — browser-path traffic always carries the ext-authz headers and must
 		// continue to do so (spiffeBypassDecision returns matched=false for it).
+		// A belief trainer identity of a tenant (ADR-0106, gibson#788) is not
+		// on the exact peer list: there is one for each tenant. It may call
+		// the two trainer methods only, and each handler checks its tenant.
+		if trainerAllow, terr := trainerBypassDecision(svid, method, d.trainerTrustDomain()); terr != nil {
+			return ctx, false, terr
+		} else if trainerAllow {
+			return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid)), true, nil
+		}
 		allow, err := spiffeBypassDecision(svid, method, d.config.Auth.SPIFFE.AllowedPeerIDs, spiffeMethodAllowlist)
 		if err != nil {
 			return ctx, false, err
@@ -605,7 +614,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			}
 			allowed = append(allowed, id)
 		}
-		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeOneOf(allowed...))
+		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source,
+			authorizePeersOrTrainers(tlsconfig.AuthorizeOneOf(allowed...), d.trainerTrustDomain()))
 		d.logger.Info(ctx, "SPIFFE mTLS pinned to allow-list",
 			"envoy_id", envoyID,
 			"additional_peer_ids", d.config.Auth.SPIFFE.AllowedPeerIDs,
@@ -1477,6 +1487,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.connectorAuthSrv != nil {
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
 		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
+	}
+	// The two belief trainer RPCs (ADR-0106, gibson#788). Each one serves only
+	// the trainer identity of the tenant in the request.
+	if d.brainRegistry != nil {
+		daemonSvc.WithBeliefTrainer(d.brainRegistry, d.trainerTrustDomain())
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
@@ -3283,4 +3298,36 @@ func (d *daemonImpl) UpdateMissionDefinition(ctx context.Context, req api.Update
 	return api.UpdateMissionDefinitionResultData{
 		MissionDefinitionID: existingID,
 	}, nil
+}
+
+// trainerTrustDomain is the trust domain in which the daemon accepts a belief
+// trainer identity: the trust domain of the install. It is zero when SPIFFE is
+// not configured.
+func (d *daemonImpl) trainerTrustDomain() spiffeid.TrustDomain {
+	if d.config == nil || d.config.Auth.SPIFFE == nil {
+		return spiffeid.TrustDomain{}
+	}
+	td, err := spiffeid.TrustDomainFromString(d.config.Auth.SPIFFE.TrustDomain)
+	if err != nil {
+		return spiffeid.TrustDomain{}
+	}
+	return td
+}
+
+// authorizePeersOrTrainers accepts a TLS peer that peers accepts, or a belief
+// trainer identity spiffe://<td>/trainer/<tenant> of the trust domain td
+// (gibson#788). There is one trainer identity for each tenant, so an exact
+// list cannot hold them. The method policy and the handlers limit a trainer
+// to the two trainer RPCs of its own tenant.
+func authorizePeersOrTrainers(peers tlsconfig.Authorizer, td spiffeid.TrustDomain) tlsconfig.Authorizer {
+	return func(id spiffeid.ID, chains [][]*x509.Certificate) error {
+		if err := peers(id, chains); err == nil {
+			return nil
+		} else if td.IsZero() {
+			return err
+		} else if _, ok := trainerid.Tenant(id, td); !ok {
+			return err
+		}
+		return nil
+	}
 }

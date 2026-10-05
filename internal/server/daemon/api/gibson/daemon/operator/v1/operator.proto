@@ -269,6 +269,33 @@ service DaemonOperatorService {
     };
   }
 
+  // GetBeliefTrainingData returns the training data of one tenant from its
+  // World: one row for each observed host, and the outcome counts of each
+  // edge type (ADR-0106, gibson#788). The belief trainer of that tenant calls
+  // it over SPIFFE mTLS. The handler serves only the trainer identity of the
+  // tenant in the request, spiffe://<trust domain>/trainer/<tenant_id>.
+  rpc GetBeliefTrainingData(GetBeliefTrainingDataRequest) returns (GetBeliefTrainingDataResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // StoreBeliefArtifact stores the two artifacts of one fit as the next
+  // version of one tenant, with the state candidate (ADR-0106, gibson#788).
+  // The quality gate decides which version becomes current. The handler
+  // serves only the trainer identity of the tenant in the request.
+  rpc StoreBeliefArtifact(StoreBeliefArtifactRequest) returns (StoreBeliefArtifactResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -593,4 +620,46 @@ message GetConnectorAuthStatusResponse {
   // status is the same view the dashboard reads, reused rather than copied so
   // the two surfaces can never disagree about what a connector's state is.
   gibson.tenant.v1.GetConnectorAuthStatusResponse status = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Belief trainer (ADR-0106, gibson#788)
+// ---------------------------------------------------------------------------
+
+message GetBeliefTrainingDataRequest {
+  // tenant_id is the tenant slug. It must be the tenant of the caller.
+  string tenant_id = 1;
+}
+
+// BeliefTrainingRow is one training example: each belief variable of one
+// observed host, true or false.
+message BeliefTrainingRow {
+  map<string, bool> vars = 1;
+}
+
+// EdgeOutcomeCount is the Beta-Bernoulli statistic of one edge type.
+message EdgeOutcomeCount {
+  string edge_type = 1;
+  double alpha = 2;
+  double beta = 3;
+}
+
+message GetBeliefTrainingDataResponse {
+  repeated BeliefTrainingRow rows = 1;
+  // edge_outcomes are in edge_type order.
+  repeated EdgeOutcomeCount edge_outcomes = 2;
+}
+
+message StoreBeliefArtifactRequest {
+  // tenant_id is the tenant slug. It must be the tenant of the caller.
+  string tenant_id = 1;
+  // belief_model is the belief-CPT artifact, a JSON object.
+  bytes belief_model = 2;
+  // edge_posteriors is the edge-posterior artifact, a JSON object.
+  bytes edge_posteriors = 3;
+}
+
+message StoreBeliefArtifactResponse {
+  // version is the version the daemon gave the stored artifacts.
+  int64 version = 1;
 }
