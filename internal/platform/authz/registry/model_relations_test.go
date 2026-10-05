@@ -184,7 +184,6 @@ func TestRegistryRelationsExistInModel(t *testing.T) {
 func TestRegistryRelationsExistInModel_DetectsBadRelation(t *testing.T) {
 	model := parseModelRelations(t, modelPath(t))
 	bad := Entry{
-		Method:        "/synthetic.v1.Synthetic/Bogus",
 		ObjectType:    "tenant",
 		Relation:      "this_relation_does_not_exist_anywhere",
 		ObjectDeriver: "tenant_from_identity",
