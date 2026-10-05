@@ -109,8 +109,8 @@ func (p *HuggingFaceProvider) CredentialSchema() []llm.CredentialField {
 
 func HuggingFaceCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "api_key", Label: "HuggingFace API Token", Required: true, Secret: true, Placeholder: "hf_..."},
-		{Key: "base_url", Label: "TGI Endpoint (optional)", Placeholder: "https://your-tgi.example/v1", Help: "Leave empty to use the public HuggingFace Inference API."},
+		{Key: "api_key", Label: "HuggingFace API Token", Required: true, Secret: true, Placeholder: "hf_...", Type: llm.FieldPassword},
+		{Key: "base_url", Label: "TGI Endpoint (optional)", Placeholder: "https://your-tgi.example/v1", Help: "Leave empty to use the public HuggingFace Inference API.", Type: llm.FieldURL},
 	}
 }
 

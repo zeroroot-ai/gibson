@@ -27,4 +27,22 @@ type CredentialField struct {
 
 	// Help is a short description rendered beneath the field.
 	Help string
+
+	// Type is the input kind of the field (gibson#701). Each field sets one;
+	// TestEveryCredentialFieldHasAType fails on a field with none.
+	Type CredentialFieldType
 }
+
+// CredentialFieldType is the input kind of a credential field. The daemon
+// maps it to the CredentialFieldType enum of the provider proto, so the
+// dashboard builds its form from it.
+type CredentialFieldType string
+
+// The input kinds of a credential field.
+const (
+	FieldText     CredentialFieldType = "text"
+	FieldPassword CredentialFieldType = "password"
+	FieldURL      CredentialFieldType = "url"
+	FieldRegion   CredentialFieldType = "region"
+	FieldBool     CredentialFieldType = "bool"
+)

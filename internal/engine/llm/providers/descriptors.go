@@ -84,7 +84,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName: "Anthropic (Claude)",
 			DocsURL:     "https://docs.anthropic.com/",
 			Credentials: []llm.CredentialField{
-				{Key: "api_key", Label: "Anthropic API Key", Required: true, Secret: true},
+				{Key: "api_key", Label: "Anthropic API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
 			DefaultModels: catalogueModels("anthropic"),
 		}, true
@@ -94,8 +94,8 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName: "OpenAI (GPT)",
 			DocsURL:     "https://platform.openai.com/docs",
 			Credentials: []llm.CredentialField{
-				{Key: "api_key", Label: "OpenAI API Key", Required: true, Secret: true},
-				{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.openai.com/v1"},
+				{Key: "api_key", Label: "OpenAI API Key", Required: true, Secret: true, Type: llm.FieldPassword},
+				{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.openai.com/v1", Type: llm.FieldURL},
 			},
 			DefaultModels: catalogueModels("openai"),
 		}, true
@@ -105,7 +105,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName: "Google Gemini",
 			DocsURL:     "https://ai.google.dev/",
 			Credentials: []llm.CredentialField{
-				{Key: "api_key", Label: "Google API Key", Required: true, Secret: true},
+				{Key: "api_key", Label: "Google API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
 			DefaultModels: catalogueModels("google"),
 		}, true
@@ -116,7 +116,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DocsURL:     "https://ollama.com/",
 			SelfHosted:  true,
 			Credentials: []llm.CredentialField{
-				{Key: "base_url", Label: "Server URL", Placeholder: "http://localhost:11434", Help: "Where your Ollama server is reachable."},
+				{Key: "base_url", Label: "Server URL", Placeholder: "http://localhost:11434", Help: "Where your Ollama server is reachable.", Type: llm.FieldURL},
 			},
 			DefaultModels: catalogueModels("ollama"),
 		}, true
@@ -191,7 +191,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName: "Voyage AI",
 			DocsURL:     "https://docs.voyageai.com/",
 			Credentials: []llm.CredentialField{
-				{Key: "api_key", Label: "Voyage API Key", Required: true, Secret: true},
+				{Key: "api_key", Label: "Voyage API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
 			DefaultModels: catalogueModels("voyage"),
 		}, true
@@ -202,8 +202,8 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DocsURL:     "https://platform.openai.com/docs/api-reference/embeddings",
 			SelfHosted:  true,
 			Credentials: []llm.CredentialField{
-				{Key: "base_url", Label: "Endpoint URL", Required: true, Placeholder: "http://embedder:8080", Help: "URL of the OpenAI-compatible /v1/embeddings endpoint."},
-				{Key: "api_key", Label: "API Key (optional)", Secret: true, Help: "Leave empty if the endpoint does not require authentication."},
+				{Key: "base_url", Label: "Endpoint URL", Required: true, Placeholder: "http://embedder:8080", Help: "URL of the OpenAI-compatible /v1/embeddings endpoint.", Type: llm.FieldURL},
+				{Key: "api_key", Label: "API Key (optional)", Secret: true, Help: "Leave empty if the endpoint does not require authentication.", Type: llm.FieldPassword},
 			},
 			DefaultModels: catalogueModels("openai-compatible"),
 		}, true
@@ -214,7 +214,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DocsURL:     "https://huggingface.co/docs/text-embeddings-inference",
 			SelfHosted:  true,
 			Credentials: []llm.CredentialField{
-				{Key: "base_url", Label: "TEI URL", Required: true, Placeholder: "http://tei:8080", Help: "Base URL of the HuggingFace Text-Embeddings-Inference server."},
+				{Key: "base_url", Label: "TEI URL", Required: true, Placeholder: "http://tei:8080", Help: "Base URL of the HuggingFace Text-Embeddings-Inference server.", Type: llm.FieldURL},
 			},
 			DefaultModels: catalogueModels("tei"),
 		}, true

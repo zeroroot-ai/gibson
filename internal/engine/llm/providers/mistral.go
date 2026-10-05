@@ -116,8 +116,8 @@ func (p *MistralProvider) CredentialSchema() []llm.CredentialField { return Mist
 
 func MistralCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "api_key", Label: "Mistral API Key", Required: true, Secret: true},
-		{Key: "base_url", Label: "Endpoint (optional)", Placeholder: "https://api.mistral.ai/v1"},
+		{Key: "api_key", Label: "Mistral API Key", Required: true, Secret: true, Type: llm.FieldPassword},
+		{Key: "base_url", Label: "Endpoint (optional)", Placeholder: "https://api.mistral.ai/v1", Type: llm.FieldURL},
 	}
 }
 
