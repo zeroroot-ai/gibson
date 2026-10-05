@@ -4,6 +4,9 @@ modules:
 lint:
   use:
     - STANDARD
+# The breaking-change rule of the daemon-local protos is WIRE_JSON (ADR-0028,
+# rule 5). scripts/check-proto-breaking.sh runs it, because these protos import
+# the sdk and a plain `buf breaking` cannot resolve that import.
 breaking:
   use:
-    - FILE
+    - WIRE_JSON

@@ -438,6 +438,17 @@ jobs:
           make check-comment-paths
           make check-operator-rbac-scope
           make check-rules-enforced
+      - name: Install buf
+        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
+        with:
+          version: 1.72.0
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: The daemon-local protos do not break the wire
+        # gibson#698, ADR-0028 rule 5: WIRE_JSON against the base branch. The
+        # selftest inside the make target proves that a renumbered field fails.
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
+          make check-proto-breaking BUF=buf
       - name: Guard the public ADR index
         # gibson#740: docs/adr-index.md is the one list that each citation
         # guard reads. A malformed or short file fails each repo that copies it.
