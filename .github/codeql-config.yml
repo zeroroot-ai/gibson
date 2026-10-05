@@ -1,8 +1,9 @@
 # CodeQL configuration. Pin bundle + queries via Renovate (PRD 1.5).
 name: "zeroroot-ai default CodeQL config"
 
-# Default suite for the language. Custom queries from
-# zeroroot-ai/codeql-go-queries / codeql-ts-queries land via slices 4.3-4.5.
+# The custom queries of the org are in zeroroot-ai/.github
+# actions/codeql-queries. The shared workflow reusable-codeql.yml loads them,
+# and this repo moves to that workflow with gibson#684.
 queries:
   - uses: security-and-quality
 
