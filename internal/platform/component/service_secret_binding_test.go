@@ -197,7 +197,7 @@ func TestBindDeclaredSecrets_TokenEnrolledCallerWritesNothing(t *testing.T) {
 	cases := map[string]func(*ComponentServiceServer) *ComponentServiceServer{
 		"no reader": func(s *ComponentServiceServer) *ComponentServiceServer { return s },
 		"read failed": func(s *ComponentServiceServer) *ComponentServiceServer {
-			return s.WithEnrollmentReader(enrollmentAnswer{attested: true, err: fmt.Errorf("db down")})
+			return s.WithEnrollmentReader(enrollmentAnswer{attested: true, err: errors.New("db down")})
 		},
 		"token enrollment": func(s *ComponentServiceServer) *ComponentServiceServer {
 			return s.WithEnrollmentReader(enrollmentAnswer{attested: false})

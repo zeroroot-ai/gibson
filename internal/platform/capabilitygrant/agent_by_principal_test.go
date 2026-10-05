@@ -126,7 +126,7 @@ func TestStore_PrincipalIsAttested(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	store := NewCapabilityGrantStore(db)
 	ctx := context.Background()
 
