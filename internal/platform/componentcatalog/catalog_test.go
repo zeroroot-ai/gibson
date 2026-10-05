@@ -713,8 +713,9 @@ func TestCatalog_EveryWorkloadEntryStatesTrust(t *testing.T) {
 
 // The catalog lists the GitHub plugin, and LookupPlugin finds only plugins.
 func TestListAndLookupPlugin(t *testing.T) {
-	var ids []string
-	for _, p := range ListPlugins() {
+	plugins := ListPlugins()
+	ids := make([]string, 0, len(plugins))
+	for _, p := range plugins {
 		ids = append(ids, p.ID)
 		if p.DisplayName == "" || p.Description == "" {
 			t.Errorf("plugin %s has no display name or description", p.ID)
