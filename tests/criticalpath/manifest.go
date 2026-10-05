@@ -61,7 +61,10 @@ var Manifest = []CriticalPath{
 		Tests: []CoveringTest{
 			{Dir: "tests/integration", Func: "TestPerTenantMissionIsolation_TwoTenants"},
 			{Dir: "tests/integration", Func: "TestPerTenantMissionIsolation_CrossTenantGetReturnsNotFound"},
-			{Dir: "tests/integration", Func: "TestPerTenantFindingIDOR_CrossTenantGetReturnsNotFound"},
+			// In the finding package, not behind the integration tag: it needs
+			// a Redis Stack, and the coverage job is the lane that guarantees
+			// one (GIBSON_TEST_REQUIRE_REDIS). There a missing Redis fails it.
+			{Dir: "internal/engine/finding", Func: "TestPerTenantFindingIDOR_CrossTenantGetReturnsNotFound"},
 		},
 	},
 	{
