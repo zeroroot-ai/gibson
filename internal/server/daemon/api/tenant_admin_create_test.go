@@ -263,17 +263,9 @@ func TestCreateAgentIdentity_HappyPath(t *testing.T) {
 		t.Fatalf("CreateAgentIdentity: %v", err)
 	}
 	// gibson#670 / ADR-0045: the sole enrollment credential is the capability-grant
-	// bootstrap token. No OAuth client_id/client_secret is provisioned. (We assert
-	// the absence of OAuth creds via the enroll command rather than the response
-	// fields, which are being removed from the proto.)
+	// bootstrap token. No OAuth client_id/client_secret is provisioned.
 	if resp.BootstrapToken == "" {
 		t.Error("expected non-empty BootstrapToken")
-	}
-	// The daemon builds no enroll command. The component enrolls itself on its
-	// first start from GIBSON_URL and GIBSON_BOOTSTRAP_TOKEN, and the command
-	// the daemon used to return named a CLI verb that no longer exists.
-	if resp.EnrollCommand != "" {
-		t.Errorf("EnrollCommand = %q, want empty", resp.EnrollCommand)
 	}
 	if resp.PrincipalId == "" {
 		t.Error("expected non-empty PrincipalId")
