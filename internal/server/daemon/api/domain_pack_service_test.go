@@ -236,7 +236,7 @@ func TestEnableDomainPack_BadMappingRuleRefusesThePack(t *testing.T) {
 
 	_, err := s.EnableDomainPack(tenantCtx("acme"), &tenantv1.EnableDomainPackRequest{Name: "main"})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
-	assert.ErrorContains(t, err, `control "au-2"`)
+	require.ErrorContains(t, err, `control "au-2"`)
 
 	got, err := s.ListDomainPacks(tenantCtx("acme"), &tenantv1.ListDomainPacksRequest{})
 	require.NoError(t, err)
