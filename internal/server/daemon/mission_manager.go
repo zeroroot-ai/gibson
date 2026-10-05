@@ -301,21 +301,21 @@ func newMissionContext(ctx context.Context, tenant auth.TenantID) (context.Conte
 }
 
 // setActive registers a mission in the tenant-partitioned active map (C9 closure).
-func (mm *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	if mm.activeMissions[tenant] == nil {
-		mm.activeMissions[tenant] = make(map[string]*activeMission)
+func (m *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeMissions[tenant] == nil {
+		m.activeMissions[tenant] = make(map[string]*activeMission)
 	}
-	mm.activeMissions[tenant][missionID] = am
+	m.activeMissions[tenant][missionID] = am
 }
 
 // getActive retrieves an active mission scoped to the given tenant (C9 closure).
 // Returns nil, false if not found.
-func (mm *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	if sub, ok := mm.activeMissions[tenant]; ok {
+func (m *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if sub, ok := m.activeMissions[tenant]; ok {
 		am, exists := sub[missionID]
 		return am, exists
 	}
@@ -323,16 +323,16 @@ func (mm *missionManager) getActive(tenant auth.TenantID, missionID string) (*ac
 }
 
 // deleteActive removes a mission from the active map (C9 closure).
-func (mm *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	if sub, ok := mm.activeMissions[tenant]; ok {
+func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sub, ok := m.activeMissions[tenant]; ok {
 		delete(sub, missionID)
 		if len(sub) == 0 {
-			delete(mm.activeMissions, tenant)
+			delete(m.activeMissions, tenant)
 		}
 	}
-	mm.completedCount++
+	m.completedCount++
 }
 
 // Run starts a mission by reference and returns an event channel for progress

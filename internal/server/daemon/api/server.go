@@ -2155,11 +2155,11 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 			CreatedAt:     run.CreatedAt,
 			CompletedAt:   run.CompletedAt,
 			FindingsCount: int32(run.FindingsCount),
-			PreviousRunId:      run.PreviousRunID,
-			TraceId:            run.TraceID,
-			ParentMissionId:    run.ParentMissionID,
-			ParentCheckpointId: run.ParentCheckpointID,
+			PreviousRunId: run.PreviousRunID,
+			TraceId:       run.TraceID,
 		}
+		protoRuns[i].ParentMissionId = run.ParentMissionID
+		protoRuns[i].ParentCheckpointId = run.ParentCheckpointID
 	}
 
 	s.logger.Debug("mission history retrieved", "name", req.Name, "count", len(runs), "total", total)
