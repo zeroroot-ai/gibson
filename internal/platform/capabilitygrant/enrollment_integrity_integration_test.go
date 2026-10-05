@@ -262,3 +262,61 @@ func TestLive_GrantRecordStatesHowAComponentEnrolled(t *testing.T) {
 	env.enroll(t, hostJWK, "plugin_principal:github", "bootstrap", "cred-2")
 	assert.False(t, attested("plugin_principal:github"), "one token row under the principal makes it not attested")
 }
+
+// Migration 031 marks the rows of an attested plugin that predate the record.
+// The database stops at 030, gets one legacy row of each form, then takes 031.
+// The vendor form becomes attested. The numeric form of a token enrollment
+// does not. This is the failing fixture for the defect: without 031 the
+// platform's own plugin reads as a token enrollment on an existing install.
+func TestLive_BackfillMarksLegacyRowsOfAnAttestedPlugin(t *testing.T) {
+	ctx := context.Background()
+	pg := testhelpers.StartPostgresTLS(t, testhelpers.PostgresOptions{
+		User: "testuser", Password: "testpassword", Database: "testbackfill",
+	})
+	db, err := sql.Open("postgres", pg.DSN)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	require.Eventually(t, func() bool { return db.PingContext(ctx) == nil },
+		30*time.Second, 200*time.Millisecond, "Postgres did not become ready")
+
+	src, err := pgmigrations.NewPlatformSource()
+	require.NoError(t, err)
+	defer src.Close()
+	driver, err := migratepg.WithInstance(db, &migratepg.Config{})
+	require.NoError(t, err)
+	mig, err := migrate.NewWithInstance("embedded", src, "postgres", driver)
+	require.NoError(t, err)
+	require.NoError(t, mig.Migrate(30), "stop at the migration that adds the column")
+
+	legacy := func(id, principal string) {
+		t.Helper()
+		_, err := db.ExecContext(ctx, `
+INSERT INTO capability_grant_hosts (id, tenant_id, display_name, public_key_jwk, status, principal_ref, created_at, updated_at)
+VALUES ($1, 'acme', $1, '{}'::jsonb, 'active', $2, now(), now())`, "host-"+id, principal)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `
+INSERT INTO capability_grant_agents (id, host_id, tenant_id, name, mode, public_key_jwk, status, session_ttl_s, max_lifetime_s, principal_ref, created_at)
+VALUES ($1, $2, 'acme', 'plugin', 'autonomous', '{}'::jsonb, 'active', 0, 0, $3, now())`, "agt-"+id, "host-"+id, principal)
+		require.NoError(t, err)
+	}
+	legacy("svid", "plugin_principal:github")
+	legacy("token", "plugin_principal:310000000000000001")
+
+	store := NewCapabilityGrantStore(db)
+	before, err := store.PrincipalIsAttested(ctx, "acme", "plugin_principal:github")
+	require.NoError(t, err)
+	require.False(t, before, "before the backfill the legacy row reads as not attested")
+
+	require.NoError(t, mig.Up(), "apply the backfill")
+
+	github, err := store.PrincipalIsAttested(ctx, "acme", "plugin_principal:github")
+	require.NoError(t, err)
+	assert.True(t, github, "the vendor form is the SVID enrollment")
+	token, err := store.PrincipalIsAttested(ctx, "acme", "plugin_principal:310000000000000001")
+	require.NoError(t, err)
+	assert.False(t, token, "the numeric form is a token enrollment")
+
+	var hostAttested bool
+	require.NoError(t, db.QueryRow(`SELECT attested FROM capability_grant_hosts WHERE id = 'host-svid'`).Scan(&hostAttested))
+	assert.True(t, hostAttested)
+}
