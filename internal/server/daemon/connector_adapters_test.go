@@ -5,25 +5,24 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"google.golang.org/grpc"
 	"k8s.io/client-go/rest"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 const connectorServiceName = "gibson.tenant.v1.ConnectorService"
 
-// A pre-set connectorKube is returned by connectorKubeClient without an
-// API-server round trip, and registerConnector serves ConnectorService over it.
-// This is the hermetic path the daemon takes once the client is built (the
-// cluster-config path needs a real cluster and is exercised only in bringup).
-func TestRegisterConnector_ServesOverInjectedClient(t *testing.T) {
+// registerConnector serves ConnectorService over the platform database. It
+// needs no Kubernetes client (gibson#662).
+func TestRegisterConnector_ServesWithNoKubeClient(t *testing.T) {
 	d := &daemonImpl{
-		logger:        testObservabilityLogger(),
-		connectorKube: fakeConnectorKube(t),
-		authorizer:    wiringAuthorizer{},
+		logger:     testObservabilityLogger(),
+		authorizer: wiringAuthorizer{},
 	}
 	srv := grpc.NewServer()
 
@@ -37,7 +36,7 @@ func TestRegisterConnector_ServesOverInjectedClient(t *testing.T) {
 // The platform catalog gate needs the authorizer: without one the service is
 // not registered (fail closed, ADR-0067), matching the missing-kube path.
 func TestRegisterConnector_SkipsWithoutAuthorizer(t *testing.T) {
-	d := &daemonImpl{logger: testObservabilityLogger(), connectorKube: fakeConnectorKube(t)}
+	d := &daemonImpl{logger: testObservabilityLogger()}
 	srv := grpc.NewServer()
 
 	d.registerConnector(context.Background(), srv)
@@ -78,34 +77,49 @@ func TestNewConnectorKubeClient(t *testing.T) {
 	}
 }
 
-// The lister adapter returns the tenant's ConnectorInstance names only, and a
-// daemon without a kube client yields a nil lister (ListConnectors then fails
-// closed in the discovery server).
-func TestConnectorInstanceLister(t *testing.T) {
-	kube := fakeConnectorKube(t)
-	seed := func(name, ns string) {
-		ci := &connectorv1alpha1.ConnectorInstance{}
-		ci.Name = name
-		ci.Namespace = ns
-		if err := kube.Create(context.Background(), ci); err != nil {
-			t.Fatalf("seed %s/%s: %v", ns, name, err)
+// fakeTenantConnectors is an in-memory tenant connector list.
+type fakeTenantConnectors struct {
+	rows []tenantconnector.Connector
+	err  error
+}
+
+func (f *fakeTenantConnectors) List(_ context.Context, tenant string) ([]tenantconnector.Connector, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var out []tenantconnector.Connector
+	for _, r := range f.rows {
+		if r.TenantID == tenant {
+			out = append(out, r)
 		}
 	}
-	seed("gitlab", "tenant-acme")
-	seed("hosted-fixture", "tenant-acme")
-	seed("gitlab", "tenant-other")
+	return out, nil
+}
 
-	l := &connectorInstanceLister{kube: kube}
+// The lister adapter returns the connector ids of one tenant from the store,
+// and a store error fails the call.
+func TestTenantConnectorLister(t *testing.T) {
+	store := &fakeTenantConnectors{rows: []tenantconnector.Connector{
+		{TenantID: "acme", ConnectorID: "gitlab"},
+		{TenantID: "acme", ConnectorID: "slack"},
+		{TenantID: "other", ConnectorID: "gitlab"},
+	}}
+	l := &tenantConnectorLister{store: store}
 	ids, err := l.ListEnabledConnectors(context.Background(), "acme")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(ids) != 2 {
+	if len(ids) != 2 || ids[0] != "gitlab" || ids[1] != "slack" {
 		t.Fatalf("ids = %v, want the two acme connectors", ids)
 	}
 
-	d := &daemonImpl{logger: testObservabilityLogger(), connectorKube: kube}
+	store.err = errors.New("db down")
+	if _, err := l.ListEnabledConnectors(context.Background(), "acme"); err == nil {
+		t.Fatal("a store error must fail the list")
+	}
+
+	d := &daemonImpl{logger: testObservabilityLogger()}
 	if d.connectorLister(context.Background()) == nil {
-		t.Fatal("daemon with a kube client must return a lister")
+		t.Fatal("the daemon must return a lister")
 	}
 }

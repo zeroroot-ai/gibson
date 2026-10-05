@@ -105,13 +105,11 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 // decided on 2026-10-05 that the daemon holds no Kubernetes client. Until
 // each part lands, its files are exempt, and every OTHER file is checked.
 var noK8sAPIInDaemonExemptFiles = []string{
-	// gibson#662: the daemon reads and writes ConnectorInstance resources.
-	"internal/server/daemon/connector_adapters.go",
-	"internal/server/daemon/api/connector_service.go",
+	// gibson#663: the daemon lists ConnectorInstance resources to find the
+	// connectors whose credential it publishes, and writes connector token
+	// Secrets. The connector operator takes both over in gibson#663.
 	"internal/infra/reconciler/connector_catalog_source.go",
 	"internal/server/daemon/daemon.go",
-
-	// gibson#663: the daemon writes connector token Secrets.
 	"internal/server/daemon/connector_token_materializer.go",
 }
 

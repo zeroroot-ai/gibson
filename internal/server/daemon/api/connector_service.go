@@ -5,16 +5,14 @@ package api
 
 import (
 	"context"
-
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"errors"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -32,23 +30,27 @@ type CatalogGate interface {
 // model admits for `component.platform_enabled`.
 const systemTenantRef = "system_tenant:_system"
 
+// ConnectorStore holds the connectors each tenant enabled (gibson#662).
+// *tenantconnector.Store satisfies it.
+type ConnectorStore interface {
+	Enable(ctx context.Context, tenantID, connectorID string) (tenantconnector.Connector, error)
+	Disable(ctx context.Context, tenantID, connectorID string) error
+	List(ctx context.Context, tenantID string) ([]tenantconnector.Connector, error)
+}
+
 // ConnectorService is the daemon API a person drives to enable and manage
 // third-party MCP connectors (ADR-0114). It serves the connector lifecycle:
 // catalog, enable, list, disable. The RPC is the source of truth; the gibson
 // CLI and the dashboard are thin clients of it.
 //
-// EnableConnector writes a ConnectorInstance CR into the tenant namespace with
-// a NARROW, RBAC-scoped controller-runtime client. The write is declarative:
-// the connector-operator does all the reconcile work (ToolHive MCPServer /
-// MCPRemoteProxy, NetworkPolicy, credential ExternalSecret). This service never
-// touches ToolHive directly.
+// The service records what a tenant wants in the platform database and makes
+// no Kubernetes call (ADR-0023, gibson#662). The connector operator pulls the
+// desired connectors from the daemon, makes each ConnectorInstance, and
+// reports its state back, which ListConnectors shows.
 type ConnectorService struct {
 	tenantv1.UnimplementedConnectorServiceServer
 
-	// kube is the narrow client that writes ConnectorInstance CRs into tenant
-	// namespaces. Its RBAC is limited to ConnectorInstance CRUD (see the daemon
-	// ServiceAccount role in the deploy chart).
-	kube client.Client
+	store ConnectorStore
 
 	// gate answers the platform catalog gate: an entry without its
 	// platform_enabled tuple is invisible to ListCatalog and refused by
@@ -56,20 +58,20 @@ type ConnectorService struct {
 	gate CatalogGate
 }
 
-// NewConnectorService constructs the service over the given ConnectorInstance
-// client and catalog gate.
-func NewConnectorService(kube client.Client, gate CatalogGate) *ConnectorService {
-	return &ConnectorService{kube: kube, gate: gate}
+// NewConnectorService constructs the service over the given store and
+// catalog gate.
+func NewConnectorService(store ConnectorStore, gate CatalogGate) *ConnectorService {
+	return &ConnectorService{store: store, gate: gate}
 }
 
-// tenantNamespace resolves the caller's tenant namespace from the ext-authz
-// context, and only from there. The namespace is tenant-<id> (owner_ref.go).
-func (s *ConnectorService) tenantNamespace(ctx context.Context, rpc string) (string, error) {
+// callerTenant resolves the caller's tenant from the ext-authz context, and
+// only from there.
+func (s *ConnectorService) callerTenant(ctx context.Context, rpc string) (string, error) {
 	tenantID, ok := auth.TenantFromContext(ctx)
 	if !ok || tenantID.IsZero() {
 		return "", status_grpc.Errorf(codes.PermissionDenied, "%s: missing tenant in context", rpc)
 	}
-	return "tenant-" + tenantID.String(), nil
+	return tenantID.String(), nil
 }
 
 // ListCatalog returns the curated connectors the tenant may enable.
@@ -78,7 +80,7 @@ func (s *ConnectorService) ListCatalog(
 ) (*tenantv1.ListCatalogResponse, error) {
 	// A caller must be a tenant member; ext-authz enforces the RPC annotation,
 	// so the presence of a tenant in the context is the gate here.
-	if _, err := s.tenantNamespace(ctx, "ListCatalog"); err != nil {
+	if _, err := s.callerTenant(ctx, "ListCatalog"); err != nil {
 		return nil, err
 	}
 	entries := componentcatalog.ListConnectors()
@@ -116,13 +118,13 @@ func (s *ConnectorService) ListCatalog(
 	return &tenantv1.ListCatalogResponse{Entries: out}, nil
 }
 
-// EnableConnector creates a ConnectorInstance for the catalog entry in the
-// caller's tenant namespace. The operator reconciles it. An OAuth connector
-// comes up AuthorizationRequired until a human authorizes it.
+// EnableConnector records that the caller's tenant wants the catalog entry.
+// The connector operator makes the ConnectorInstance on its next pass. An
+// OAuth connector comes up AuthorizationRequired until a human authorizes it.
 func (s *ConnectorService) EnableConnector(
 	ctx context.Context, req *tenantv1.EnableConnectorRequest,
 ) (*tenantv1.EnableConnectorResponse, error) {
-	ns, err := s.tenantNamespace(ctx, "EnableConnector")
+	tenant, err := s.callerTenant(ctx, "EnableConnector")
 	if err != nil {
 		return nil, err
 	}
@@ -141,53 +143,54 @@ func (s *ConnectorService) EnableConnector(
 		return nil, status_grpc.Errorf(codes.NotFound,
 			"EnableConnector: connector %q is not in the catalog", entry.ID)
 	}
-	ci := entry.BuildConnectorInstance(ns)
-	if err := s.kube.Create(ctx, ci); err != nil {
-		if apierrors.IsAlreadyExists(err) {
+	c, err := s.store.Enable(ctx, tenant, entry.ID)
+	if err != nil {
+		if errors.Is(err, tenantconnector.ErrAlreadyEnabled) {
 			return nil, status_grpc.Errorf(codes.AlreadyExists,
 				"EnableConnector: connector %q is already enabled", entry.ID)
 		}
-		return nil, status_grpc.Errorf(codes.Internal, "EnableConnector: create ConnectorInstance: %v", err)
+		return nil, status_grpc.Errorf(codes.Internal, "EnableConnector: %v", err)
 	}
-	return &tenantv1.EnableConnectorResponse{
-		Connector: ci.Name,
-		Phase:     string(ci.Status.Phase),
-	}, nil
+	return &tenantv1.EnableConnectorResponse{Connector: c.ConnectorID, Phase: c.Phase}, nil
 }
 
-// ListConnectors returns the tenant's enabled connectors and their live status.
+// ListConnectors returns the tenant's enabled connectors with the state that
+// the connector operator reported last.
 func (s *ConnectorService) ListConnectors(
 	ctx context.Context, _ *tenantv1.ListConnectorsRequest,
 ) (*tenantv1.ListConnectorsResponse, error) {
-	ns, err := s.tenantNamespace(ctx, "ListConnectors")
+	tenant, err := s.callerTenant(ctx, "ListConnectors")
 	if err != nil {
 		return nil, err
 	}
-	var list connectorv1alpha1.ConnectorInstanceList
-	if err := s.kube.List(ctx, &list, client.InNamespace(ns)); err != nil {
+	rows, err := s.store.List(ctx, tenant)
+	if err != nil {
 		return nil, status_grpc.Errorf(codes.Internal, "ListConnectors: %v", err)
 	}
-	out := make([]*tenantv1.Connector, 0, len(list.Items))
-	for i := range list.Items {
-		ci := &list.Items[i]
-		out = append(out, &tenantv1.Connector{
-			Id:              ci.Name,
-			Shape:           string(ci.Spec.Shape),
-			Runtime:         string(ci.Spec.Runtime),
-			Phase:           string(ci.Status.Phase),
-			DiscoveredTools: ci.Status.DiscoveredTools,
-			LastError:       ci.Status.LastError,
-		})
+	out := make([]*tenantv1.Connector, 0, len(rows))
+	for _, r := range rows {
+		c := &tenantv1.Connector{
+			Id:              r.ConnectorID,
+			Runtime:         string(connectorv1alpha1.ConnectorRuntimePod),
+			Phase:           r.Phase,
+			DiscoveredTools: r.DiscoveredTools,
+			LastError:       r.LastError,
+		}
+		if entry, lerr := componentcatalog.LookupConnector(r.ConnectorID); lerr == nil {
+			c.Shape = string(entry.Shape)
+		}
+		out = append(out, c)
 	}
 	return &tenantv1.ListConnectorsResponse{Connectors: out}, nil
 }
 
-// DisableConnector deletes the ConnectorInstance. The operator cascade-removes
-// the ToolHive resource, the NetworkPolicy, and the credential secret.
+// DisableConnector removes the wish. The connector operator deletes the
+// ConnectorInstance on its next pass, and its finalizer revokes the grant and
+// removes the ToolHive resource, the NetworkPolicy and the credential secret.
 func (s *ConnectorService) DisableConnector(
 	ctx context.Context, req *tenantv1.DisableConnectorRequest,
 ) (*tenantv1.DisableConnectorResponse, error) {
-	ns, err := s.tenantNamespace(ctx, "DisableConnector")
+	tenant, err := s.callerTenant(ctx, "DisableConnector")
 	if err != nil {
 		return nil, err
 	}
@@ -195,11 +198,8 @@ func (s *ConnectorService) DisableConnector(
 	if name == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "DisableConnector: connector is required")
 	}
-	ci := &connectorv1alpha1.ConnectorInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-	}
-	if err := s.kube.Delete(ctx, ci); err != nil {
-		if apierrors.IsNotFound(err) {
+	if err := s.store.Disable(ctx, tenant, name); err != nil {
+		if errors.Is(err, tenantconnector.ErrNotEnabled) {
 			return nil, status_grpc.Errorf(codes.NotFound, "DisableConnector: connector %q is not enabled", name)
 		}
 		return nil, status_grpc.Errorf(codes.Internal, "DisableConnector: %v", err)
