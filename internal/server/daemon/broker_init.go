@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,7 +61,7 @@ func (d *daemonImpl) initBrokerStack(ctx context.Context, compSvc *component.Com
 		return fmt.Errorf("broker stack: state client is nil; cannot construct audit writer")
 	}
 	if d.platformDB == nil {
-		return fmt.Errorf("broker stack: platform database is nil; cannot construct audit writer")
+		return errors.New("broker stack: platform database is nil; cannot construct audit writer")
 	}
 	auditLogger := audit.NewAuditLogger(
 		ctx, d.stateClient, newStartedAuditWriter(ctx, d.platformDB, d.logger.Slog()), d.logger.Slog())

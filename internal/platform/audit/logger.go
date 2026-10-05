@@ -515,6 +515,8 @@ func actorTypeFor(c auth.CredentialType) string {
 		return "system"
 	case auth.CredentialCapabilityGrant:
 		return "agent"
+	case auth.CredentialOIDCUser:
+		return "user"
 	default:
 		return "user"
 	}

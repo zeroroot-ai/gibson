@@ -70,10 +70,10 @@ const (
 	// not yet full.
 	flushInterval = time.Second
 
-	// retryBackoffMin and retryBackoffMax bound the wait between two tries
+	// minRetryBackoff and maxRetryBackoff bound the wait between two tries
 	// of a batch that Postgres did not accept.
-	retryBackoffMin = 500 * time.Millisecond
-	retryBackoffMax = 15 * time.Second
+	minRetryBackoff = 500 * time.Millisecond
+	maxRetryBackoff = 15 * time.Second
 
 	// shutdownFlushTimeout bounds one write that the writer makes after it
 	// was told to stop.
@@ -157,10 +157,10 @@ type Writer struct {
 	stopping chan struct{}
 	stopOnce sync.Once
 
-	// retryMin and retryMax bound the backoff between two tries of a
+	// minBackoff and maxBackoff bound the backoff between two tries of a
 	// failed batch. Tests set shorter values.
-	retryMin time.Duration
-	retryMax time.Duration
+	minBackoff time.Duration
+	maxBackoff time.Duration
 }
 
 // NewWriter constructs a Writer. Both db and logger must be non-nil.
@@ -176,13 +176,13 @@ func NewWriter(db *sql.DB, logger *slog.Logger) *Writer {
 	}
 	initMetrics()
 	return &Writer{
-		db:       db,
-		buffer:   make(chan Event, writerBufferSize),
-		logger:   logger.With("component", "audit.writer"),
-		done:     make(chan struct{}),
-		stopping: make(chan struct{}),
-		retryMin: retryBackoffMin,
-		retryMax: retryBackoffMax,
+		db:         db,
+		buffer:     make(chan Event, writerBufferSize),
+		logger:     logger.With("component", "audit.writer"),
+		done:       make(chan struct{}),
+		stopping:   make(chan struct{}),
+		minBackoff: minRetryBackoff,
+		maxBackoff: maxRetryBackoff,
 	}
 }
 
@@ -200,7 +200,7 @@ func (w *Writer) Log(event Event) {
 	auditEventsTotal.WithLabelValues(event.Action).Inc()
 	select {
 	case <-w.stopping:
-		w.writeDirect([]Event{event})
+		w.writeDirect(context.Background(), []Event{event})
 		return
 	default:
 	}
@@ -208,7 +208,7 @@ func (w *Writer) Log(event Event) {
 	select {
 	case w.buffer <- event:
 	case <-w.stopping:
-		w.writeDirect([]Event{event})
+		w.writeDirect(context.Background(), []Event{event})
 		return
 	}
 
@@ -218,7 +218,7 @@ func (w *Writer) Log(event Event) {
 	// one reader, so no event is written twice.
 	select {
 	case <-w.stopping:
-		w.writeDirect(w.takeQueued())
+		w.writeDirect(context.Background(), w.takeQueued())
 	default:
 	}
 }
@@ -239,10 +239,14 @@ func (w *Writer) takeQueued() []Event {
 // writeDirect writes events to Postgres on the calling goroutine. The
 // writer uses it after Stop, when no flush goroutine can retry. A failure
 // here loses the events, and the log says so.
-func (w *Writer) writeDirect(events []Event) {
+//
+// The lifecycle context of the writer can be cancelled at this point, so
+// each write runs under a context that ignores that cancel and has a
+// timeout of its own.
+func (w *Writer) writeDirect(parent context.Context, events []Event) {
 	for start := 0; start < len(events); start += batchSize {
 		batch := events[start:min(start+batchSize, len(events))]
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownFlushTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), shutdownFlushTimeout)
 		err := w.flush(ctx, batch)
 		cancel()
 		if err != nil {
@@ -284,14 +288,14 @@ func (w *Writer) writeError(batch []Event, err error, consequence string) {
 // It gives up only when the writer stops. It then makes one last try and
 // reports a loss if that try fails.
 func (w *Writer) flushDurable(ctx context.Context, batch []Event) {
-	backoff := w.retryMin
+	backoff := w.minBackoff
 	for {
 		err := w.flush(ctx, batch)
 		if err == nil {
 			return
 		}
 		if ctx.Err() != nil {
-			w.writeDirect(batch)
+			w.writeDirect(ctx, batch)
 			return
 		}
 		w.writeError(batch, err, "the writer keeps the batch and tries again")
@@ -301,14 +305,14 @@ func (w *Writer) flushDurable(ctx context.Context, batch []Event) {
 		case <-timer.C:
 		case <-w.stopping:
 			timer.Stop()
-			w.writeDirect(batch)
+			w.writeDirect(ctx, batch)
 			return
 		case <-ctx.Done():
 			timer.Stop()
-			w.writeDirect(batch)
+			w.writeDirect(ctx, batch)
 			return
 		}
-		backoff = min(backoff*2, w.retryMax)
+		backoff = min(backoff*2, w.maxBackoff)
 	}
 }
 
@@ -367,8 +371,8 @@ func (w *Writer) run(ctx context.Context) {
 	// of its own. A Log call that races the stop writes its own event (see
 	// Log), so a drain that does not block terminates.
 	drainAndExit := func() {
-		w.writeDirect(batch)
-		w.writeDirect(w.takeQueued())
+		w.writeDirect(ctx, batch)
+		w.writeDirect(ctx, w.takeQueued())
 	}
 
 	for {
