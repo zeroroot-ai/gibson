@@ -19,6 +19,7 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -27,7 +28,7 @@ const (
 	testIssuer         = "https://app.example.com"
 	testInClusterAddr  = "http://gibson-zitadel.gibson.svc.cluster.local:8080"
 	testClusterDomain  = "gibson-zitadel.gibson.svc.cluster.local"
-	testExternalDomain = "app.example.com:30443"
+	testExternalDomain = "app.example.com"
 )
 
 // --- systemAPIBaseURL ------------------------------------------------------
@@ -58,7 +59,7 @@ func TestSystemAPIBaseURL(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("ZITADEL_INTERNAL_ADDRESS", tc.env)
+			t.Setenv("ZITADEL_URL", tc.env)
 			got := systemAPIBaseURL(tc.specURL, testClusterDomain)
 			if got != tc.want {
 				t.Fatalf("systemAPIBaseURL = %q, want %q", got, tc.want)
@@ -72,44 +73,15 @@ func TestSystemAPIBaseURL(t *testing.T) {
 	}
 }
 
-// --- systemAPIHostHeader ---------------------------------------------------
+// --- systemAPIClaimedHost --------------------------------------------------
 
-func TestSystemAPIHostHeader(t *testing.T) {
-	cases := []struct {
-		name           string
-		externalDomain string
-		issuer         string
-		want           string
-	}{
-		{
-			name:           "externalDomain is authoritative",
-			externalDomain: testExternalDomain,
-			issuer:         testIssuer,
-			want:           testExternalDomain,
-		},
-		{
-			name:   "derived from issuer when externalDomain unset",
-			issuer: "https://app.example.com:30443",
-			want:   "app.example.com:30443",
-		},
-		{
-			name:   "derived from issuer without port",
-			issuer: testIssuer,
-			want:   "app.example.com",
-		},
-		{
-			name:   "unparseable issuer yields empty host",
-			issuer: "://not-a-url",
-			want:   "",
-		},
+func TestSystemAPIClaimedHost(t *testing.T) {
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "env.example.com")
+	if got := systemAPIClaimedHost(testExternalDomain); got != testExternalDomain {
+		t.Errorf("systemAPIClaimedHost(spec) = %q, want the spec value %q", got, testExternalDomain)
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := systemAPIHostHeader(tc.externalDomain, tc.issuer); got != tc.want {
-				t.Fatalf("systemAPIHostHeader = %q, want %q", got, tc.want)
-			}
-		})
+	if got := systemAPIClaimedHost(""); got != "env.example.com" {
+		t.Errorf("systemAPIClaimedHost(empty spec) = %q, want ZITADEL_EXTERNAL_DOMAIN", got)
 	}
 }
 
@@ -164,7 +136,8 @@ func newTestBootstrap(sc *gibsonv1alpha1.SystemClientSpec, externalDomain string
 // the apiURL field existed must still reconcile, and must now dial the
 // in-cluster Service rather than the public issuer.
 func TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster(t *testing.T) {
-	t.Setenv("ZITADEL_INTERNAL_ADDRESS", "")
+	t.Setenv("ZITADEL_URL", "")
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "app.example.com")
 
 	var got capturedFactoryArgs
 	fake := &fakeSystemClient{}
@@ -193,11 +166,10 @@ func TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster(t *testing.T) {
 	if got.apiURL == testIssuer {
 		t.Errorf("apiURL still points at the public issuer %q", testIssuer)
 	}
-	// Host is still forged to the public domain — derived from the issuer
-	// because externalDomain is unset. This is what keeps Zitadel's instance
-	// router resolving the call.
+	// The claimed host comes from ZITADEL_EXTERNAL_DOMAIN because the spec
+	// leaves externalDomain unset. It is never derived from the issuer.
 	if got.externalDomain != "app.example.com" {
-		t.Errorf("forged Host = %q, want %q", got.externalDomain, "app.example.com")
+		t.Errorf("claimed host = %q, want %q", got.externalDomain, "app.example.com")
 	}
 	if got.systemUserName != "gibson-system-bot" {
 		t.Errorf("systemUserName = %q, want default gibson-system-bot", got.systemUserName)
@@ -216,7 +188,7 @@ func TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster(t *testing.T) {
 // TestReconcileTrustedDomain_ExplicitAPIURL proves the CRD seam is honoured
 // and that an explicit externalDomain wins over the issuer-derived host.
 func TestReconcileTrustedDomain_ExplicitAPIURL(t *testing.T) {
-	t.Setenv("ZITADEL_INTERNAL_ADDRESS", "http://env.svc:8080")
+	t.Setenv("ZITADEL_URL", "http://env.svc:8080")
 
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{
@@ -248,7 +220,7 @@ func TestReconcileTrustedDomain_ExplicitAPIURL(t *testing.T) {
 // TestReconcileTrustedDomain_EnvFallback covers a chart that sets only the
 // operator-Pod env var and no CRD field.
 func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
-	t.Setenv("ZITADEL_INTERNAL_ADDRESS", "http://gibson-zitadel.gibson.svc:8080")
+	t.Setenv("ZITADEL_URL", "http://gibson-zitadel.gibson.svc:8080")
 
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{
@@ -286,25 +258,25 @@ func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 	}
 }
 
-// TestReconcileTrustedDomain_ForgedHostReachesTheWire wires the REAL
+// TestReconcileTrustedDomain_ClaimedHostReachesTheWire wires the REAL
 // zitadel.NewSystemClient through the reconciler against a local server
 // standing in for the in-cluster Zitadel Service. It proves end to end that
-// the connection is made to the in-cluster address while the Host header
-// still carries the public domain — the property Zitadel's instance router
+// the connection is made to the in-cluster address while the instance header
+// carries the public domain — the property Zitadel's instance router
 // depends on, and the one that makes the public /system/v1/ route deletable.
-func TestReconcileTrustedDomain_ForgedHostReachesTheWire(t *testing.T) {
-	t.Setenv("ZITADEL_INTERNAL_ADDRESS", "")
+func TestReconcileTrustedDomain_ClaimedHostReachesTheWire(t *testing.T) {
+	t.Setenv("ZITADEL_URL", "")
 
 	var searchHost, domainsHost string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/system/v1/instances/_search", func(w http.ResponseWriter, r *http.Request) {
-		searchHost = r.Host
+		searchHost = r.Header.Get(zitadelconn.InstanceHostHeader)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"result":[{"id":"372802942115250284","domain":"app.example.com"}]}`))
 	})
 	mux.HandleFunc("/system/v1/instances/372802942115250284/domains/_search",
 		func(w http.ResponseWriter, r *http.Request) {
-			domainsHost = r.Host
+			domainsHost = r.Header.Get(zitadelconn.InstanceHostHeader)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"result":[{"domain":"` + testClusterDomain + `"}]}`))
 		})
@@ -325,7 +297,7 @@ func TestReconcileTrustedDomain_ForgedHostReachesTheWire(t *testing.T) {
 	}
 
 	if searchHost != testExternalDomain || domainsHost != testExternalDomain {
-		t.Errorf("forged Host = (%q, %q), want %q on both requests",
+		t.Errorf("instance header = (%q, %q), want %q on both requests",
 			searchHost, domainsHost, testExternalDomain)
 	}
 	if strings.Contains(srv.URL, testExternalDomain) {
@@ -355,4 +327,48 @@ func writeTestRSAKey(t *testing.T) string {
 		t.Fatalf("write key: %v", err)
 	}
 	return path
+}
+
+// TestZitadelEndpointFromEnv: both names are required at startup, and a
+// ported claimed host is refused (ADR-0092).
+func TestZitadelEndpointFromEnv(t *testing.T) {
+	env := func(m map[string]string) func(string) string {
+		return func(k string) string { return m[k] }
+	}
+	ep, err := ZitadelEndpointFromEnv(env(map[string]string{
+		"ZITADEL_URL": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": testExternalDomain,
+	}))
+	if err != nil || ep.BaseURL() != "http://gibson-zitadel:8080" || ep.Host() != testExternalDomain {
+		t.Fatalf("ZitadelEndpointFromEnv = %q, %q, %v; want the two configured values", ep.BaseURL(), ep.Host(), err)
+	}
+	for name, m := range map[string]map[string]string{
+		"no ZITADEL_URL":             {"ZITADEL_EXTERNAL_DOMAIN": testExternalDomain},
+		"no ZITADEL_EXTERNAL_DOMAIN": {"ZITADEL_URL": "http://gibson-zitadel:8080"},
+		"a ported claimed host":      {"ZITADEL_URL": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": "app.example.com:30443"},
+		"ZITADEL_INTERNAL_ADDRESS":   {"ZITADEL_INTERNAL_ADDRESS": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": testExternalDomain},
+	} {
+		if _, err := ZitadelEndpointFromEnv(env(m)); err == nil {
+			t.Errorf("%s: ZitadelEndpointFromEnv = nil error, want refusal", name)
+		}
+	}
+}
+
+// TestDefaultZitadelClientFactory_ClaimsTheConfiguredHost: the production
+// factory connects to the URL it is given and claims ZITADEL_EXTERNAL_DOMAIN
+// with the instance header.
+func TestDefaultZitadelClientFactory_ClaimsTheConfiguredHost(t *testing.T) {
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", testExternalDomain)
+	var gotInstance string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+	ok, err := DefaultZitadelClientFactory(srv.URL, "pat").VerifyClientSecret(context.Background(), "client", "secret")
+	if ok || err != nil {
+		t.Fatalf("VerifyClientSecret = %v, %v; want (false, nil) for a 401", ok, err)
+	}
+	if gotInstance != testExternalDomain {
+		t.Errorf("instance header = %q, want %q", gotInstance, testExternalDomain)
+	}
 }

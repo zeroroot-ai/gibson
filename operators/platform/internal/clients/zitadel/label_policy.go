@@ -175,9 +175,6 @@ func (c *httpClient) doRaw(ctx context.Context, method, path, contentType string
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
-	if c.externalDomain != "" {
-		req.Host = c.externalDomain
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, nil, fmt.Errorf("zitadel: %w: %w", err, ErrUnreachable)

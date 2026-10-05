@@ -107,7 +107,7 @@ func TestTenantIdentity_MintsDeclaredOIDCClients(t *testing.T) {
 	f.reconcile(t, 2)
 
 	portal := f.oidcClient(t, "acme-identity-portal")
-	if portal.Spec.ClientName != "acme/portal" || portal.Spec.ZitadelIssuer != "https://idp.example.test" ||
+	if portal.Spec.ClientName != "acme/portal" || portal.Spec.ZitadelURL != "https://idp.example.test" ||
 		portal.Spec.ProjectRef.Name != "gibson" || portal.Spec.AdminTokenRef.Name != "zitadel-admin-pat" {
 		t.Errorf("portal spec = %+v, want the bootstrap's issuer, token and project", portal.Spec)
 	}

@@ -10,13 +10,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 )
 
 func labelServer(t *testing.T, h http.HandlerFunc) Client {
 	t.Helper()
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return New(srv.URL, "test-pat", "app.example.test")
+	return New(srv.URL, "test-pat", testDomain)
 }
 
 func TestLabelAsset_FetchesThePathFromTheBaseURLWithTheInstanceHost(t *testing.T) {
@@ -24,8 +26,8 @@ func TestLabelAsset_FetchesThePathFromTheBaseURLWithTheInstanceHost(t *testing.T
 		if r.URL.Path != "/assets/v1/inst/policy/label/logo-1" || r.URL.RawQuery != "v=2" {
 			t.Errorf("request = %s?%s", r.URL.Path, r.URL.RawQuery)
 		}
-		if r.Host != "app.example.test" {
-			t.Errorf("Host = %q, want the instance host", r.Host)
+		if got := r.Header.Get(zitadelconn.InstanceHostHeader); got != testDomain {
+			t.Errorf("instance header = %q, want %s", got, testDomain)
 		}
 		_, _ = w.Write([]byte("<svg/>"))
 	})
@@ -148,14 +150,14 @@ func TestStatusError(t *testing.T) {
 func TestDoRaw_TransportFailureIsUnreachable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	srv.Close()
-	c := New(srv.URL, "p", "")
+	c := New(srv.URL, "p", testDomain)
 	if _, err := c.LabelAsset(context.Background(), srv.URL+"/assets/a"); !errors.Is(err, ErrUnreachable) {
 		t.Errorf("closed server = %v, want ErrUnreachable", err)
 	}
 }
 
 func TestErrClient_LabelPolicy(t *testing.T) {
-	c := New("://bad", "p", "")
+	c := New("://bad", "p", testDomain)
 	ctx := context.Background()
 	if _, err := c.GetLabelPolicy(ctx); err == nil {
 		t.Error("GetLabelPolicy")

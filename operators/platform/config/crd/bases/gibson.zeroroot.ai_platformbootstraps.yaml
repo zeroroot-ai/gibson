@@ -536,11 +536,11 @@ spec:
                     type: object
                   externalDomain:
                     description: |-
-                      ExternalDomain is the public hostname (e.g. "app.example.com:30443")
-                      forged onto the Host header on every Zitadel API request. Allows the
-                      operator to dial Zitadel's in-cluster Service name while satisfying
-                      Zitadel's instance router until all consumers are migrated. Equivalent
-                      to the ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
+                      ExternalDomain is the public hostname (e.g. "app.example.com") the
+                      operator claims on every Zitadel System API request with the
+                      x-zitadel-instance-host header (ADR-0092). It is a bare host: a value
+                      with a scheme or a port is refused. Equivalent to the
+                      ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
                     type: string
                   issuer:
                     description: |-
@@ -700,12 +700,12 @@ spec:
                           internet-facing edge and back.
 
                           Resolution order when empty:
-                           1. the ZITADEL_INTERNAL_ADDRESS env var on the operator Pod, then
+                           1. the ZITADEL_URL env var on the operator Pod, then
                            2. "http://<trustedClusterDomain>:8080".
 
-                          Zitadel routes by Host header, so whichever address is dialled the
-                          client still forges Host to the public domain
-                          (spec.zitadel.externalDomain, falling back to the issuer host).
+                          Whichever address is dialled, the client claims the public domain
+                          (spec.zitadel.externalDomain) with the x-zitadel-instance-host header
+                          (ADR-0092).
                         pattern: ^https?://
                         type: string
                       keyPath:

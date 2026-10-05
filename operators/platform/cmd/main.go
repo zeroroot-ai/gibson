@@ -220,23 +220,21 @@ func run(cfg runConfig) error {
 	//   zitadel    — GET <cluster-svc>/debug/ready (Zitadel reachability)
 	//   system-key — local file + PEM parse (cheap, no network call)
 	//
-	// The Zitadel probe MUST use the in-cluster service, not the external OIDC
-	// issuer (ZITADEL_ISSUER = app.<domain>): that origin doesn't resolve from
-	// inside the pod and Envoy doesn't route /debug/ to Zitadel, so probing it
-	// pins the pod at 0/1 forever (platform-operator#76, deploy#630). Derive a
-	// cluster-service default from the operator namespace when the chart does
-	// not set ZITADEL_INTERNAL_ADDRESS.
-	zitadelReadyAddr := os.Getenv("ZITADEL_INTERNAL_ADDRESS")
-	if zitadelReadyAddr == "" {
-		ns := os.Getenv("OPERATOR_NAMESPACE")
-		if ns == "" {
-			ns = "gibson"
-		}
-		zitadelReadyAddr = fmt.Sprintf("http://gibson-zitadel.%s.svc:8080", ns)
+	// The Zitadel probe uses the in-cluster Service (ZITADEL_URL, ADR-0092),
+	// never the public origin: that origin does not resolve from inside the
+	// pod and Envoy does not route /debug/ to Zitadel, so probing it pins the
+	// pod at 0/1 forever (platform-operator#76, deploy#630).
+	//
+	// ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN are required. They are the two
+	// facts every Zitadel call of this operator uses, and a missing one would
+	// otherwise surface later as a reconcile error on each resource.
+	zitadelEndpoint, err := controller.ZitadelEndpointFromEnv(os.Getenv)
+	if err != nil {
+		return err
 	}
 	agg := readiness.NewAggregator()
 	agg.Register(&probes.VaultProbe{Address: vaultAddr})
-	agg.Register(&probes.ZitadelProbe{Address: zitadelReadyAddr})
+	agg.Register(&probes.ZitadelProbe{Address: zitadelEndpoint.BaseURL()})
 	agg.Register(&systemKeyProbe{path: systemKeyPath})
 
 	// Liveness: always 200 — process is alive, runtime not deadlocked.
