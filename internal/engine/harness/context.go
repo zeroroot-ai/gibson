@@ -71,6 +71,11 @@ type MissionContext struct {
 	// is mission-level it is inherited unchanged by delegated child harnesses.
 	BlockedTools []string `json:"blocked_tools,omitempty"`
 
+	// NodeNetwork is the network scope of the mission node that this harness
+	// serves (gibson#865). Each tool sandbox that the node starts gets it.
+	// Nil keeps the egress of the catalog manifest.
+	NodeNetwork *agent.NodeNetwork `json:"-"`
+
 	// CreatedBy is the principal that created the mission (hosted#205). When
 	// it is a person, the harness factory puts that person on the context of
 	// every slot resolution of the run as the mission initiator, so the model

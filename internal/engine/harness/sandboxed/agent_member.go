@@ -126,6 +126,7 @@ func (l *AgentLauncher) LaunchMember(ctx context.Context, spec AgentLaunchSpec, 
 		SandboxClass: class,
 		Timeout:      memberLifetime + killGrace,
 		Egress:       spec.Egress,
+		NetworkMode:  spec.NetworkMode,
 	})
 	launchSpan.End()
 	if err != nil {

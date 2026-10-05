@@ -1308,6 +1308,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.CurrentAgent = name
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeNetwork = task.Network
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -2250,14 +2251,19 @@ func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandbo
 	if !ok || entry.DispatchMode != componentcatalog.DispatchModeSandboxed {
 		return sandboxed.ToolSpec{}, false
 	}
-	return sandboxed.ToolSpec{
+	spec := sandboxed.ToolSpec{
 		Image:   entry.Image,
 		Command: append([]string(nil), entry.Command...),
 		Env:     map[string]string{"GIBSON_TOOL_NAME": name},
 		VCPU:    entry.Resources.VCPU,
 		Memory:  entry.Resources.Memory,
 		Egress:  agentEgressCeiling(h.missionCtx.CurrentAgent),
-	}, true
+	}
+	// A tool that runs inside a node gets the network of that node (S6).
+	if n := h.missionCtx.NodeNetwork; n != nil {
+		spec.NetworkMode, spec.Egress = nodeNetworkScope(n)
+	}
+	return spec, true
 }
 
 func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error) {
