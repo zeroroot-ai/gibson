@@ -92,6 +92,31 @@ type WorkloadSpec struct {
 	Runtime string `yaml:"runtime"` // process | pod | setec
 	Image   string `yaml:"image"`   // must be a signed digest (…@sha256:…)
 	SVID    string `yaml:"svid"`
+	// ContentTrust is "trusted" or "untrusted" (ADR-0110). Every entry that
+	// runs code in the cluster states it, and the loader refuses an entry
+	// that does not. See validateContentTrust.
+	ContentTrust string `yaml:"contentTrust"`
+}
+
+// Content trust values of a catalog entry (ADR-0110).
+const (
+	ContentTrustTrusted   = "trusted"
+	ContentTrustUntrusted = "untrusted"
+)
+
+// validateContentTrust refuses a tool, plugin or agent entry that does not
+// state its content trust. There is no default: an entry that says nothing
+// would otherwise take whatever the reader of the catalog assumes, and the
+// safe assumption (untrusted) and the convenient one (trusted) differ.
+func validateContentTrust(id, kind, trust string) error {
+	switch trust {
+	case ContentTrustTrusted, ContentTrustUntrusted:
+		return nil
+	case "":
+		return fmt.Errorf("%s: a %s entry must state contentTrust (%s or %s)", id, kind, ContentTrustTrusted, ContentTrustUntrusted)
+	default:
+		return fmt.Errorf("%s: contentTrust %q must be %s or %s", id, trust, ContentTrustTrusted, ContentTrustUntrusted)
+	}
 }
 
 // PluginSpec is a plugin workload (ADR-0066): the shared workload hosting.
@@ -219,6 +244,9 @@ func (m *Manifest) validate() error {
 		if !strings.Contains(s.Image, digestMarker) {
 			return fmt.Errorf("%s: a plugin image must be digest-pinned (…%s…), got %q", m.ID, digestMarker, s.Image)
 		}
+		if err := validateContentTrust(m.ID, m.Kind, s.ContentTrust); err != nil {
+			return err
+		}
 		m.plugin = &s
 	case authz.KindTool:
 		var s ToolSpec
@@ -227,6 +255,9 @@ func (m *Manifest) validate() error {
 		}
 		if !strings.Contains(s.Image, digestMarker) {
 			return fmt.Errorf("%s: a tool image must be digest-pinned (…%s…), got %q", m.ID, digestMarker, s.Image)
+		}
+		if err := validateContentTrust(m.ID, m.Kind, s.ContentTrust); err != nil {
+			return err
 		}
 		m.tool = &s
 	case authz.KindAgent:
@@ -241,6 +272,15 @@ func (m *Manifest) validate() error {
 		}
 		if s.DispatchMode != "" && s.DispatchMode != DispatchModeSandboxed {
 			return fmt.Errorf("%s: agent dispatchMode %q must be %q or empty", m.ID, s.DispatchMode, DispatchModeSandboxed)
+		}
+		if err := validateContentTrust(m.ID, m.Kind, s.ContentTrust); err != nil {
+			return err
+		}
+		// An untrusted agent runs only in a sandbox. An entry that states
+		// untrusted with no sandboxed dispatch could never run on the hosted
+		// platform, so the loader refuses it here and not at the first dispatch.
+		if s.ContentTrust == ContentTrustUntrusted && s.DispatchMode != DispatchModeSandboxed {
+			return fmt.Errorf("%s: an untrusted agent must declare dispatchMode %q", m.ID, DispatchModeSandboxed)
 		}
 		// setec's Launch refuses "command must have at least one entry"; the
 		// image entrypoint is not consulted. A sandboxed agent declares it.

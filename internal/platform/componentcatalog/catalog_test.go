@@ -25,9 +25,9 @@ func manifestFSWith(files map[string]string) fstest.MapFS {
 func TestLoad_AllKinds(t *testing.T) {
 	fsys := manifestFSWith(map[string]string{
 		"conn.yaml": "id: gl\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x/mcp\n  auth: oauth\n",
-		"plug.yaml": "id: pl\nkind: plugin\nspec:\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n",
+		"plug.yaml": "id: pl\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n",
 		"tool.yaml": "id: nm\nkind: tool\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: nmap\n  image: ghcr.io/x/t@sha256:abc\n",
-		"agnt.yaml": "id: zc\nkind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n  model: sonnet\n",
+		"agnt.yaml": "id: zc\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n  model: sonnet\n",
 	})
 	got, err := load(fsys)
 	if err != nil {
@@ -59,14 +59,14 @@ func TestLoad_FailLoud(t *testing.T) {
 		body string
 		want string
 	}{
-		"missing id":             {"kind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x@sha256:a\n", "id is required"},
+		"missing id":             {"kind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x@sha256:a\n", "id is required"},
 		"unknown kind":           {"id: x\nkind: gadget\nspec: {}\n", "must be one of"},
-		"agent bare image":       {"id: x\nkind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
-		"agent no image":         {"id: x\nkind: agent\nspec:\n  runtime: pod\n  model: sonnet\n", "digest-pinned"},
-		"plugin bare image":      {"id: x\nkind: plugin\nspec:\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
+		"agent bare image":       {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
+		"agent no image":         {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  model: sonnet\n", "digest-pinned"},
+		"plugin bare image":      {"id: x\nkind: plugin\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x:latest\n", "digest-pinned"},
 		"tool bare image":        {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  image: ghcr.io/x:latest\n", "digest-pinned"},
 		"tool no image":          {"id: x\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  command: nmap\n", "digest-pinned"},
-		"sandboxed agent no cmd": {"id: x\nkind: agent\nspec:\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n", "must declare command"},
+		"sandboxed agent no cmd": {"id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n", "must declare command"},
 		"connector no endpoint":  {"id: x\nkind: connector\nspec:\n  shape: Remote\n  auth: none\n", "needs an endpoint"},
 		"connector remote+image": {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  image: y\n  auth: none\n", "must not set image"},
 		"connector bad auth":     {"id: x\nkind: connector\nspec:\n  shape: Remote\n  endpoint: https://x\n  auth: bogus\n", "must be none, secret, or oauth"},
@@ -107,8 +107,8 @@ func TestLoad_HostedConnectorImagePolicy(t *testing.T) {
 
 func TestLoad_DuplicateAndEmpty(t *testing.T) {
 	_, err := load(manifestFSWith(map[string]string{
-		"a.yaml": "id: dup\nkind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x/a@sha256:aa\n",
-		"b.yaml": "id: dup\nkind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x/b@sha256:bb\n",
+		"a.yaml": "id: dup\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/a@sha256:aa\n",
+		"b.yaml": "id: dup\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/x/b@sha256:bb\n",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("want duplicate error, got %v", err)
@@ -161,7 +161,7 @@ func TestAgentProjection(t *testing.T) {
 		"zc.yaml": "id: zerocool\nkind: agent\n" +
 			"displayName: ZeroCool\ndescription: flagship agent\n" +
 			"egressAllow:\n  - api.anthropic.com:443\n" +
-			"spec:\n  runtime: pod\n  image: ghcr.io/zeroroot-ai/zerocool@sha256:abc\n  model: sonnet\n  budgetLimit: 42\n",
+			"spec:\n  contentTrust: trusted\n  runtime: pod\n  image: ghcr.io/zeroroot-ai/zerocool@sha256:abc\n  model: sonnet\n  budgetLimit: 42\n",
 	}))
 	if err != nil {
 		t.Fatalf("load: %v", err)
@@ -268,12 +268,12 @@ func TestZerocoolManifest(t *testing.T) {
 // empty nor "sandboxed", and accepts both allowed values.
 func TestAgentDispatchModeValidation(t *testing.T) {
 	if _, err := load(manifestFSWith(map[string]string{
-		"bad.yaml": "id: x\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/a@sha256:aa\n  dispatchMode: bogus\n",
+		"bad.yaml": "id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/a@sha256:aa\n  dispatchMode: bogus\n",
 	})); err == nil || !strings.Contains(err.Error(), "dispatchMode") {
 		t.Fatalf("want dispatchMode rejection, got %v", err)
 	}
 	for _, mode := range []string{"", "sandboxed"} {
-		body := "id: x\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/a@sha256:aa\n"
+		body := "id: x\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/a@sha256:aa\n"
 		if mode != "" {
 			// A sandboxed agent must also name its launch command.
 			body += "  dispatchMode: " + mode + "\n  command: node /app/agent.js\n"
@@ -288,7 +288,7 @@ func TestAgentDispatchModeValidation(t *testing.T) {
 // credentials its sandbox needs (gibson#1621). Malformed declarations fail loud.
 func TestLoad_AgentCredentials(t *testing.T) {
 	good := manifestFSWith(map[string]string{
-		"claude.yaml": "id: claude\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n  credentials:\n    - provider: anthropic\n      env: ANTHROPIC_API_KEY\n",
+		"claude.yaml": "id: claude\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n  credentials:\n    - provider: anthropic\n      env: ANTHROPIC_API_KEY\n",
 	})
 	got, err := load(good)
 	if err != nil {
@@ -304,7 +304,7 @@ func TestLoad_AgentCredentials(t *testing.T) {
 		"launcher name": "  credentials:\n    - provider: anthropic\n      env: GIBSON_MODEL\n",
 		"duplicate env": "  credentials:\n    - provider: anthropic\n      env: KEY\n    - provider: openai\n      env: KEY\n",
 	} {
-		bad := manifestFSWith(map[string]string{"c.yaml": "id: c\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" + spec})
+		bad := manifestFSWith(map[string]string{"c.yaml": "id: c\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" + spec})
 		if _, err := load(bad); err == nil {
 			t.Errorf("%s: want load to fail loud", name)
 		}
@@ -314,7 +314,7 @@ func TestLoad_AgentCredentials(t *testing.T) {
 // TestAgentEntry_CommandProjectsShellSplit: the manifest's command string
 // reaches the launch spec as argv (setec needs at least one entry).
 func TestAgentEntry_CommandProjectsShellSplit(t *testing.T) {
-	c, err := load(manifestFSWith(map[string]string{"a.yaml": "id: a\nkind: agent\nspec:\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n  command: \"node /app/dist/sandbox.js\"\n"}))
+	c, err := load(manifestFSWith(map[string]string{"a.yaml": "id: a\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  dispatchMode: sandboxed\n  image: ghcr.io/x@sha256:a\n  command: \"node /app/dist/sandbox.js\"\n"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestImageRefs(t *testing.T) {
 // nothing reads it. Accepting it there would ship a declaration that silently
 // does nothing — the same shape of defect the floor itself exists to close.
 func TestLoad_AgentMinContextWindow(t *testing.T) {
-	const base = "id: t\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/t@sha256:abc\n"
+	const base = "id: t\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/t@sha256:abc\n"
 
 	got, err := load(manifestFSWith(map[string]string{
 		"t.yaml": base + "  dispatchMode: sandboxed\n  command: \"/t\"\n  minContextWindow: 32000\n",
@@ -482,7 +482,7 @@ func TestCVETriageManifest_DeclaresItsContextFloor(t *testing.T) {
 // TestLoad_CredentialShapes: a manifest carries one credential block per login
 // shape, and a malformed declaration fails loud (gibson#1714).
 func TestLoad_CredentialShapes(t *testing.T) {
-	const head = "id: claude\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n"
+	const head = "id: claude\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n"
 
 	t.Run("a shaped multi-variable block loads", func(t *testing.T) {
 		got, err := load(manifestFSWith(map[string]string{
@@ -537,7 +537,7 @@ func TestLoad_CredentialShapes(t *testing.T) {
 // TestLoad_MemberCommandAndJobCap: one image runs two shapes, so the member
 // shape is a different command on the same manifest (ADR-0119, gibson#1717).
 func TestLoad_MemberCommandAndJobCap(t *testing.T) {
-	const head = "id: claude\nkind: agent\nspec:\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" +
+	const head = "id: claude\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n  image: ghcr.io/x/c@sha256:abc\n" +
 		"  dispatchMode: sandboxed\n  command: node /app/one.js\n"
 
 	got, err := load(manifestFSWith(map[string]string{
@@ -566,7 +566,7 @@ func TestLoad_MemberCommandAndJobCap(t *testing.T) {
 
 	for name, spec := range map[string]string{
 		"negative job cap": head + "  maxJobsInFlight: -1\n",
-		"member command on a non-sandboxed dispatch": "id: c\nkind: agent\nspec:\n  runtime: setec\n" +
+		"member command on a non-sandboxed dispatch": "id: c\nkind: agent\nspec:\n  contentTrust: trusted\n  runtime: setec\n" +
 			"  image: ghcr.io/x/c@sha256:abc\n  memberCommand: node /app/member.js\n",
 	} {
 		t.Run("rejects "+name, func(t *testing.T) {
@@ -663,6 +663,50 @@ func TestIsDiscoveryTool(t *testing.T) {
 	for _, id := range []string{"amass", "zerocool", ""} {
 		if IsDiscoveryTool(id) {
 			t.Errorf("IsDiscoveryTool(%q) = true; the catalog lists no such tool", id)
+		}
+	}
+}
+
+// Every catalog entry that runs code in the cluster states its content trust
+// (ADR-0110). The loader refuses an entry that says nothing, an entry with
+// another value, and an untrusted agent with no sandboxed dispatch.
+func TestLoad_RefusesAnEntryWithNoTrustStatement(t *testing.T) {
+	cases := map[string]struct{ body, want string }{
+		"plugin says nothing": {"id: p\nkind: plugin\nspec:\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n", "must state contentTrust"},
+		"agent says nothing":  {"id: a\nkind: agent\nspec:\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n", "must state contentTrust"},
+		"tool says nothing":   {"id: t\nkind: tool\nspec:\n  dispatchMode: sandboxed\n  image: ghcr.io/x/t@sha256:abc\n", "must state contentTrust"},
+		"unknown value":       {"id: p\nkind: plugin\nspec:\n  contentTrust: maybe\n  runtime: pod\n  image: ghcr.io/x/p@sha256:abc\n", "must be trusted or untrusted"},
+		"untrusted agent with no sandbox": {
+			"id: a\nkind: agent\nspec:\n  contentTrust: untrusted\n  runtime: pod\n  image: ghcr.io/x/a@sha256:abc\n",
+			"an untrusted agent must declare dispatchMode",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(manifestFSWith(map[string]string{"m.yaml": tc.body}))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("load error = %v, want one that contains %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// The shipped catalog states trust for every tool, plugin and agent entry.
+func TestCatalog_EveryWorkloadEntryStatesTrust(t *testing.T) {
+	for _, m := range catalog {
+		var trust string
+		switch {
+		case m.tool != nil:
+			trust = m.tool.ContentTrust
+		case m.plugin != nil:
+			trust = m.plugin.ContentTrust
+		case m.agent != nil:
+			trust = m.agent.ContentTrust
+		default:
+			continue
+		}
+		if trust != ContentTrustTrusted && trust != ContentTrustUntrusted {
+			t.Errorf("%s/%s states contentTrust %q", m.Kind, m.ID, trust)
 		}
 	}
 }
