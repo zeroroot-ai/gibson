@@ -213,15 +213,22 @@ func (e *Engine) InfraGraph() ([]InfraNode, []InfraEdge) {
 	return e.World.infraGraph()
 }
 
-// LiveAttackGraph derives the attack graph of the tenant World (ADR-0129). It
-// is the one way that a live path gets an attack graph, so no path can leave
+// LiveAttackGraph derives the acyclic attack graph of the tenant World
+// (ADR-0129): LiveEnablementGraph with its cycles cut. The planner uses it. It
+// is the one way that the planner gets an attack graph, so no path can leave
 // the relationships of the World out (gibson#697).
+func LiveAttackGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.BeliefSchemaRegistry) AttackGraph {
+	return BreakCycles(LiveEnablementGraph(eng, hosts, registry))
+}
+
+// LiveEnablementGraph is the uncut enablement graph of the tenant World. The
+// belief engine slices it and breaks the cycles of each slice (gibson#700).
 //
 // hosts bounds the Host nodes of the graph: the belief engine passes each host
 // of the World, and the planner passes the ambient slice of the mission. An
 // edge to a host outside the bound has no endpoint in the graph, and
-// DeriveAttackGraph drops it.
-func LiveAttackGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.BeliefSchemaRegistry) AttackGraph {
+// EnablementGraph drops it.
+func LiveEnablementGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.BeliefSchemaRegistry) AttackGraph {
 	nodes, edges := eng.InfraGraph()
 
 	inBound := make(map[string]struct{}, len(hosts))
@@ -237,5 +244,5 @@ func LiveAttackGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.Belie
 		}
 		bounded = append(bounded, n)
 	}
-	return DeriveAttackGraph(bounded, edges, registry)
+	return EnablementGraph(bounded, edges, registry)
 }
