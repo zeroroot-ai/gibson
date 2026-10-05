@@ -54,10 +54,40 @@ func apocPluginMount() corev1.VolumeMount {
 // matters because the tenant Neo4j NetworkPolicy permits egress to DNS only.
 func apocInitContainer() corev1.Container {
 	return corev1.Container{
-		Name:         apocInitContainerName,
-		Image:        neo4jImage,
-		Command:      []string{"sh", "-c", pdataplane.APOCInstallCommand(pdataplane.Neo4jPluginsDir)},
-		VolumeMounts: []corev1.VolumeMount{apocPluginMount()},
+		Name:            apocInitContainerName,
+		Image:           neo4jImage,
+		Command:         []string{"sh", "-c", pdataplane.APOCInstallCommand(pdataplane.Neo4jPluginsDir)},
+		VolumeMounts:    []corev1.VolumeMount{apocPluginMount()},
+		SecurityContext: neo4jContainerSecurityContext(),
+	}
+}
+
+// neo4jUID is the numeric id of the neo4j user and group in the official
+// image. The pod runs as this id from the start, so the image entrypoint never
+// runs as root.
+const neo4jUID int64 = 7474
+
+// neo4jPodSecurityContext and neo4jContainerSecurityContext together make the
+// tenant Neo4j pod meet the Kubernetes Pod Security Standard "restricted"
+// (ADR-0165). The fsGroup makes the data volume and the plugins volume
+// writable for the neo4j group.
+func neo4jPodSecurityContext() *corev1.PodSecurityContext {
+	uid := neo4jUID
+	nonRoot := true
+	return &corev1.PodSecurityContext{
+		RunAsNonRoot:   &nonRoot,
+		RunAsUser:      &uid,
+		RunAsGroup:     &uid,
+		FSGroup:        &uid,
+		SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
+	}
+}
+
+func neo4jContainerSecurityContext() *corev1.SecurityContext {
+	no := false
+	return &corev1.SecurityContext{
+		AllowPrivilegeEscalation: &no,
+		Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 	}
 }
 
