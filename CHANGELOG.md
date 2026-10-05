@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.152.0](https://github.com/zeroroot-ai/gibson/compare/v0.151.0...v0.152.0) (2026-10-05)
+
+
+### Features
+
+* **brain:** edge outcomes fold into the world ([#638](https://github.com/zeroroot-ai/gibson/issues/638)) ([2a99079](https://github.com/zeroroot-ai/gibson/commit/2a990797b826f431739e8265a80c8c7b354804d5))
+* **connector:** declared credential refs reach the connector pod ([#639](https://github.com/zeroroot-ai/gibson/issues/639)) ([4eea790](https://github.com/zeroroot-ai/gibson/commit/4eea7903652485f05001120468f54195984558ab))
+* **enrollment:** spec.maxruntime caps the agent's sandboxed run ([#641](https://github.com/zeroroot-ai/gibson/issues/641)) ([3e41afa](https://github.com/zeroroot-ai/gibson/commit/3e41afa024084f144052cda6761689a31e9ef8d3))
+* **env:** the env reader set is a committed artifact with a drift gate ([#650](https://github.com/zeroroot-ai/gibson/issues/650)) ([00349d6](https://github.com/zeroroot-ai/gibson/commit/00349d6a9f204422f2c4f64c353a2a6daefa81d2))
+* **identity:** the declared oidc clients of a tenantidentity are minted ([#640](https://github.com/zeroroot-ai/gibson/issues/640)) ([52ae96a](https://github.com/zeroroot-ai/gibson/commit/52ae96a4002815db16d4782de8cbb44277a3100d))
+* **mission:** a join merges its sources by its declared strategy ([#646](https://github.com/zeroroot-ai/gibson/issues/646)) ([b45167c](https://github.com/zeroroot-ai/gibson/commit/b45167c0b2ebb21636b30d78931249efc768bb60))
+
+
+### Bug Fixes
+
+* **brain:** max_concurrency is a scheduler ceiling for parallel and for_each ([#636](https://github.com/zeroroot-ai/gibson/issues/636)) ([276324c](https://github.com/zeroroot-ai/gibson/commit/276324caf58c59887aefb9ce27dcfbe721b9d129))
+* **component:** delete the 102 functions of the component package nothing reaches ([#647](https://github.com/zeroroot-ai/gibson/issues/647)) ([0638cf0](https://github.com/zeroroot-ai/gibson/commit/0638cf0279e0bdabebfb1c865520dbf027e70654))
+* **crd:** delete AgentEnrollmentSpec.Mode and ConnectorInstanceSpec.CatalogRef, which nothing read ([8aab586](https://github.com/zeroroot-ai/gibson/commit/8aab586535eee9799c288e077a13974c7c6abaf8))
+* **crd:** delete agentenrollmentspec.mode and connectorinstancespec.catalogref, which nothing read ([#637](https://github.com/zeroroot-ai/gibson/issues/637)) ([8aab586](https://github.com/zeroroot-ai/gibson/commit/8aab586535eee9799c288e077a13974c7c6abaf8))
+* **finding:** delete the 98 functions of the finding package nothing reaches ([#648](https://github.com/zeroroot-ai/gibson/issues/648)) ([774d10a](https://github.com/zeroroot-ai/gibson/commit/774d10a87b912eea1e81ceca1292d80b6ab0c175))
+* **harness:** the discovery tool set comes from the catalog and the validator runs on dispatch ([#643](https://github.com/zeroroot-ai/gibson/issues/643)) ([17553e1](https://github.com/zeroroot-ai/gibson/commit/17553e19c0ff9cddf6bd127a877c5e1e6cb2bacb))
+* **rework:** the crd field gate runs from ast-checks, the one copy ([#649](https://github.com/zeroroot-ai/gibson/issues/649)) ([951e831](https://github.com/zeroroot-ai/gibson/commit/951e831e67f814d33ddabe3f8dcc9fdc97229497)), closes [#503](https://github.com/zeroroot-ai/gibson/issues/503)
+* **tenant-operator:** every zitadel call goes to the service and claims the host by header ([#651](https://github.com/zeroroot-ai/gibson/issues/651)) ([5d89529](https://github.com/zeroroot-ai/gibson/commit/5d89529345fbc48d6f0cc2cfd7e75ac8e5d26177))
+* **tooling:** one heavy run at a time, under a hard memory cap ([#645](https://github.com/zeroroot-ai/gibson/issues/645)) ([9b00c95](https://github.com/zeroroot-ai/gibson/commit/9b00c95fa53b32ab8e40e93cf3efed5efcdf24ed)), closes [#644](https://github.com/zeroroot-ai/gibson/issues/644)
+
 ## [0.151.0](https://github.com/zeroroot-ai/gibson/compare/v0.150.1...v0.151.0) (2026-10-04)
 
 
