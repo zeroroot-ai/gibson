@@ -177,7 +177,7 @@ message CompleteConnectorAuthorizationRequest {
   // code is the authorization code the vendor returned to the daemon callback.
   // The daemon exchanges it for the grant, so the refresh token is minted and
   // kept daemon-side and never transits this API.
-  string code = 2 [(buf.validate.field).string = { max_len: 1048576 }];
+  string code = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   // state is the value StartConnectorAuthorization returned. It binds the code
   // to that authorization (the CSRF binding) and selects the stored PKCE
   // verifier, token endpoint and client id. Single-use and short-lived.

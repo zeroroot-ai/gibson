@@ -98,7 +98,7 @@ message RejectOntologyExtensionProposalRequest {
   OntologyProposalKind kind = 1 [(buf.validate.field).enum = { defined_only: true }];
   string label = 2 [(buf.validate.field).string = { max_len: 4096 }];
   // reason is an optional free-text rationale, carried through for audit.
-  string reason = 3 [(buf.validate.field).string = { max_len: 1048576 }];
+  string reason = 3 [(buf.validate.field).string = { max_len: 16777216 }];
 }
 
 message RejectOntologyExtensionProposalResponse {}

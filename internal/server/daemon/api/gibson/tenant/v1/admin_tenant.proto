@@ -203,7 +203,7 @@ message AdminRejectRegistrationRequest {
   // never shown to the registrant, who is told nothing: an anonymous
   // registration surface that explained its refusals would explain them to
   // whoever probed it.
-  string reason = 2 [(buf.validate.field).string = { max_len: 1048576 }];
+  string reason = 2 [(buf.validate.field).string = { max_len: 16777216 }];
 }
 
 // AdminRejectRegistrationResponse confirms the refusal.

@@ -198,7 +198,7 @@ message RegisterRequest {
   // nothing else — never logged, never persisted by the daemon, never
   // returned. The account it lands on is created deactivated, so the password
   // cannot be used until an administrator approves the registration.
-  string password = 7 [(buf.validate.field).string = { max_len: 1048576 }];
+  string password = 7 [(buf.validate.field).string = { max_len: 16777216 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
   string client_ip = 8 [(buf.validate.field).string = { max_len: 4096 }];
@@ -271,7 +271,7 @@ message RequestEmailVerificationResponse {}
 message RedeemEmailVerificationRequest {
   // token is the raw value from the link. The daemon stores only its hash, so
   // this value cannot be recovered from the database.
-  string token = 1 [(buf.validate.field).string = { max_len: 1048576 }];
+  string token = 1 [(buf.validate.field).string = { max_len: 16777216 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
   string client_ip = 2 [(buf.validate.field).string = { max_len: 4096 }];
@@ -324,11 +324,11 @@ message SignupRequest {
   // never logged, never persisted by the daemon, never returned. It is only
   // ever applied to a user this call creates; if the address already has an
   // account, the RPC fails and the password is discarded.
-  string password = 8 [(buf.validate.field).string = { min_len: 1, max_len: 1048576 }];
+  string password = 8 [(buf.validate.field).string = { min_len: 1, max_len: 16777216 }];
 
   // verified_session_token is the value RedeemEmailVerification returned. It
   // is the capability for this call: no session, no provisioning.
-  string verified_session_token = 9 [(buf.validate.field).string = { max_len: 1048576 }];
+  string verified_session_token = 9 [(buf.validate.field).string = { max_len: 16777216 }];
 
   // client_ip — see RequestEmailVerificationRequest.client_ip.
   string client_ip = 10 [(buf.validate.field).string = { max_len: 4096 }];

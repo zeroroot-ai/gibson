@@ -311,7 +311,7 @@ message AccessTuple {
 message WriteAccessTuplesRequest {
   repeated AccessTuple add = 1;
   repeated AccessTuple delete = 2;
-  string reason = 3 [(buf.validate.field).string = { max_len: 1048576 }];
+  string reason = 3 [(buf.validate.field).string = { max_len: 16777216 }];
 }
 
 // WriteAccessTuplesResponse reports how many tuples were written/deleted.

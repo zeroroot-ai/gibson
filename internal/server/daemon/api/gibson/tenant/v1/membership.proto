@@ -343,7 +343,7 @@ message ListMembersRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // page_token is the pagination cursor returned by a previous
   // ListMembersResponse.next_page_token. Empty for the first page.
-  string page_token = 2 [(buf.validate.field).string = { max_len: 1048576 }];
+  string page_token = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   // page_size is the maximum number of members to return. 0 means server default.
   int32 page_size = 3;
   // name_filter is an optional case-insensitive substring applied to
@@ -432,7 +432,7 @@ message InviteMemberResponse {
 message AcceptInvitationRequest {
   // token is the raw invitation token from the accept link. Required; it is
   // the sole capability for this unauthenticated RPC.
-  string token = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1048576 }];
+  string token = 1 [(buf.validate.field).string = { min_len: 1, max_len: 16777216 }];
 }
 
 message AcceptInvitationResponse {
@@ -494,7 +494,7 @@ message TeamMember {
 message ListTeamsRequest {
   // tenant_id is the FGA id of the parent tenant (e.g. "tenant:acme").
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
-  string page_token = 2 [(buf.validate.field).string = { max_len: 1048576 }];
+  string page_token = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   // page_size caps the response. 0 → server default (50). Maximum 200.
   int32 page_size = 3;
 }
@@ -529,7 +529,7 @@ message DeleteTeamResponse {}
 message ListTeamMembersRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   string team_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
-  string page_token = 3 [(buf.validate.field).string = { max_len: 1048576 }];
+  string page_token = 3 [(buf.validate.field).string = { max_len: 16777216 }];
   int32 page_size = 4;
 }
 

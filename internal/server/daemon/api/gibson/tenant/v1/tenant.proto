@@ -238,7 +238,7 @@ message ListAuditEventsRequest {
   string from_time = 5 [(buf.validate.field).string = { max_len: 4096 }];
   string to_time = 6 [(buf.validate.field).string = { max_len: 4096 }];
   int32 limit = 7;
-  string cursor = 8 [(buf.validate.field).string = { max_len: 1048576 }];
+  string cursor = 8 [(buf.validate.field).string = { max_len: 16777216 }];
 }
 
 // ListAuditEventsResponse returns a page of audit events.
@@ -285,7 +285,7 @@ message ExportFindingsResponse {
 message SaveMissionDraftRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   string name = 2 [(buf.validate.field).string = { max_len: 1024 }];
-  string cue_source = 3 [(buf.validate.field).string = { max_len: 1048576 }];
+  string cue_source = 3 [(buf.validate.field).string = { max_len: 16777216 }];
   string draft_id = 4 [(buf.validate.field).string = { max_len: 1024 }];
   string mission_definition_id = 5 [(buf.validate.field).string = { max_len: 1024 }];
 

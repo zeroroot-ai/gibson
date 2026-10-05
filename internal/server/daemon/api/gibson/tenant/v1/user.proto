@@ -737,7 +737,7 @@ message InvalidateMembershipCacheResponse {}
 
 message StageAttachmentRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
-  string text = 2 [(buf.validate.field).string = { max_len: 1048576 }];
+  string text = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   int32 ttl_seconds = 3;
 }
 
