@@ -34,6 +34,27 @@ type Task struct {
 	//
 	// Spec: per-node-slot-override (gibson#539).
 	SlotOverrides map[string]*SlotConfig `json:"slot_overrides,omitempty"`
+
+	// Network is the network scope of the mission node that this task runs
+	// (owner decision S6, gibson#865). The sandbox of the node, and each tool
+	// sandbox that the node starts, get this scope. Nil keeps the egress of
+	// the catalog manifest.
+	Network *NodeNetwork `json:"network,omitempty"`
+}
+
+// NodeNetwork is the network scope of one mission node.
+type NodeNetwork struct {
+	// Research marks a node that the mission author made unrestricted. Each
+	// sandbox in the node gets external egress.
+	Research bool `json:"research,omitempty"`
+
+	// Targets are the addresses of the targets bound to the node: a host, a
+	// host and a port, or a CIDR. A for_each instance has its one target.
+	Targets []string `json:"targets,omitempty"`
+
+	// ProviderHosts are the hosts of the model provider that the agent of
+	// the node calls directly, as "host" or "host:port".
+	ProviderHosts []string `json:"provider_hosts,omitempty"`
 }
 
 // NewTask creates a new task with the given parameters
