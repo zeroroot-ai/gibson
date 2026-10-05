@@ -41,10 +41,9 @@ import (
 // gRPC errors, the same defense-in-depth split every other harness callback
 // in this package uses ahead of protovalidate. technique, blast_radius, and
 // reversibility are not required: the proto marks only the three fields
-// above as mandatory, and blast_radius/reversibility are not yet persisted
-// anywhere (the dashboard's PendingDestructiveAction already documents this
-// as a deliberate non-goal until a Domain Pack risk-tier signal exists —
-// destructive_authz_service.go's toPendingDestructiveActionPB).
+// above as mandatory. The blast radius and the reversibility that the agent
+// reports go into the durable request record, so the approver reads them
+// (ADR-0132).
 func (s *HarnessCallbackService) RequestDestructiveAuthorization(
 	ctx context.Context, req *harnesspb.RequestDestructiveAuthorizationRequest,
 ) (*harnesspb.RequestDestructiveAuthorizationResponse, error) {
@@ -81,6 +80,8 @@ func (s *HarnessCallbackService) RequestDestructiveAuthorization(
 		MissionID:     mission.ID.String(),
 		Technique:     req.GetTechnique(),
 		PredicateType: predicateName,
+		BlastRadius:   req.GetBlastRadius(),
+		Reversibility: brain.Reversibility(req.GetReversibility()),
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "RequestDestructiveAuthorization: enqueue hypothesis %q: %v", hypothesisID, err)
