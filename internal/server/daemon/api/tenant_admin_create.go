@@ -12,7 +12,9 @@
 //  5. Write FGA tuples (rollback on failure: DeleteServiceAccount).
 //  6. Mint a one-time capability-grant bootstrap token (rollback on failure).
 //  7. Emit audit event.
-//  8. Return response carrying the bootstrap token (+ enroll_command).
+//  8. Return response carrying the bootstrap token and the platform URL. The
+//     component enrolls itself on its first start from GIBSON_URL and
+//     GIBSON_BOOTSTRAP_TOKEN, so the daemon returns no command.
 //
 // There is NO OAuth2 client_credentials step. Under the unified-identity model
 // (ADR-0045) every component kind — agent, tool, plugin — enrolls through the
@@ -259,14 +261,12 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	)
 
 	gibsonURL := s.gibsonPublicURL
-	enrollCmd := buildEnrollCommand(kindStr)
 
 	return &tenantpb.CreateAgentIdentityResponse{
 		PrincipalId:    principalID,
 		Kind:           req.Kind,
 		Name:           req.Name,
 		GibsonUrl:      gibsonURL,
-		EnrollCommand:  enrollCmd,
 		BootstrapToken: bootstrapToken, // sole enrollment credential (ADR-0045, gibson#670)
 	}, nil
 }
@@ -347,21 +347,4 @@ func isNonHumanPrincipal(subject string) bool {
 	return strings.HasPrefix(subject, "agent_principal:") ||
 		strings.HasPrefix(subject, "tool_principal:") ||
 		strings.HasPrefix(subject, "plugin_principal:")
-}
-
-// buildEnrollCommand returns a complete copy-pasteable shell invocation for
-// registering the component install with the daemon.
-//
-// The verb is `gibson component register` — the ADK CLI command that *consumes*
-// an already-issued bootstrap token and runs the capability-grant handshake
-// (ADR-0045), writing the local host key + runtime credential. It is
-// deliberately NOT `gibson agent enroll`: that command *provisions a new*
-// identity (it calls CreateAgentIdentity again). `--token -` reads the
-// bootstrap token from stdin so it never lands in shell history. The same
-// command serves every kind; only --kind differs.
-func buildEnrollCommand(kind string) string {
-	if kind == "" {
-		kind = "<kind>"
-	}
-	return fmt.Sprintf("gibson component register --kind %s --token -", kind)
 }

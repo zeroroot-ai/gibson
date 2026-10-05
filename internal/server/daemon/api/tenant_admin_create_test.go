@@ -269,10 +269,11 @@ func TestCreateAgentIdentity_HappyPath(t *testing.T) {
 	if resp.BootstrapToken == "" {
 		t.Error("expected non-empty BootstrapToken")
 	}
-	// The enroll command uses the unified CG --token form for every kind — no
-	// --client-id/--client-secret.
-	if want := "gibson component register --kind agent --token -"; resp.EnrollCommand != want {
-		t.Errorf("EnrollCommand = %q, want %q", resp.EnrollCommand, want)
+	// The daemon builds no enroll command. The component enrolls itself on its
+	// first start from GIBSON_URL and GIBSON_BOOTSTRAP_TOKEN, and the command
+	// the daemon used to return named a CLI verb that no longer exists.
+	if resp.EnrollCommand != "" {
+		t.Errorf("EnrollCommand = %q, want empty", resp.EnrollCommand)
 	}
 	if resp.PrincipalId == "" {
 		t.Error("expected non-empty PrincipalId")
@@ -593,44 +594,6 @@ func TestCreateAgentIdentity_NoIdPConfigured(t *testing.T) {
 	})
 	if status.Code(err) != codes.Unavailable {
 		t.Errorf("got code %v, want Unavailable", status.Code(err))
-	}
-}
-
-// TestBuildEnrollCommand pins the exact copy-pasteable command the dashboard
-// wizard and CLI surface to customers. Under the unified-identity model
-// (ADR-0045) it MUST be the capability-grant `--token -` form of
-// `gibson component register` — the same command for every kind — not the
-// removed OAuth2 `--client-id/--client-secret` form (gibson#670). It is NOT
-// `gibson agent enroll`, which provisions a *new* identity. See #590.
-func TestBuildEnrollCommand(t *testing.T) {
-	tests := []struct {
-		name string
-		kind string
-		want string
-	}{
-		{
-			name: "agent",
-			kind: "agent",
-			want: "gibson component register --kind agent --token -",
-		},
-		{
-			name: "tool",
-			kind: "tool",
-			want: "gibson component register --kind tool --token -",
-		},
-		{
-			name: "empty kind falls back to placeholder",
-			kind: "",
-			want: "gibson component register --kind <kind> --token -",
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := buildEnrollCommand(tc.kind)
-			if got != tc.want {
-				t.Errorf("buildEnrollCommand() =\n  %q\nwant\n  %q", got, tc.want)
-			}
-		})
 	}
 }
 
