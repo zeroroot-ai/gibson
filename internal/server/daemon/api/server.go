@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"log/slog"
 	"os"
 	"strings"
@@ -107,6 +108,11 @@ type DaemonServer struct {
 	// GetConnectorAuthStatus (ADR-0061). Wired via
 	// WithConnectorAuthStatusReader; nil answers Unavailable.
 	connectorAuthStatusReader ConnectorAuthStatusReader
+
+	// beliefWorlds and trainerTrustDomain back the two belief trainer RPCs
+	// (gibson#788).
+	beliefWorlds       BeliefWorlds
+	trainerTrustDomain spiffeid.TrustDomain
 
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing

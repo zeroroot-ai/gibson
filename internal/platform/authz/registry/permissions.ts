@@ -830,6 +830,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData": {
+    method: "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData",
+    service: "gibson.daemon.operator.v1.DaemonOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
@@ -912,6 +922,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg",
+    service: "gibson.daemon.operator.v1.DaemonOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact": {
+    method: "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
     relation: "platform_operator",
     objectType: "system_tenant",

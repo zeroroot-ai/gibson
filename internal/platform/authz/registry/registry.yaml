@@ -529,6 +529,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -586,6 +593,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"

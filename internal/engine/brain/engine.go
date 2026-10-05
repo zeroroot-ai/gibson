@@ -589,6 +589,15 @@ func (e *Engine) DomainPacks() []DomainPackSnapshot {
 	return e.World.DomainPackSnapshot()
 }
 
+// ReadWorld runs fn with the live World under the read lock. fn must not keep
+// the pointer or change the World. The belief trainer reads its training rows
+// this way (gibson#788), because the trimmed Timeline can lose rows.
+func (e *Engine) ReadWorld(fn func(*World)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	fn(e.World)
+}
+
 // Events returns a copy of the Timeline (the Scroller scrubs this).
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
