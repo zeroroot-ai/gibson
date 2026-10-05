@@ -171,4 +171,29 @@ groups:
             access event. A sustained rate this high is unusual and may indicate a
             misconfigured or runaway operator process. Review the audit log for
             {{ $labels.subject }}.
+
+      # -----------------------------------------------------------------------
+      # WARNING: The copy of Timeline events from the Redis stream into the
+      # Postgres history of a tenant fails (ADR-0163). The store does not trim
+      # the stream after a failed copy, so no event is lost, and the stream of
+      # that tenant grows until the copy works again.
+      #
+      # Threshold: any failed copy in 10 minutes.
+      # For: 10m, so one failed copy during a Postgres restart does not page.
+      # -----------------------------------------------------------------------
+      - alert: GibsonTimelineArchiveErrors
+        expr: >
+          increase(gibson_timeline_archive_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+          team: platform
+        annotations:
+          summary: "The Timeline history write fails for tenant {{ $labels.tenant }}"
+          description: >
+            gibson_timeline_archive_errors_total increases for tenant={{ $labels.tenant }}.
+            The daemon cannot copy Timeline events into the timeline_events table of
+            the tenant database, so it does not trim the Redis stream of that tenant.
+            No event is lost. Check the Postgres database of the tenant and the
+            daemon log line "stream trim failed".
 `

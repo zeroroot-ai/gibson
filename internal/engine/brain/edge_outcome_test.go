@@ -164,10 +164,21 @@ func TestEdgeOutcomeObserved_RoundTripsTheCodec(t *testing.T) {
 // prefix a snapshot covers. It exists so the snapshot round trip below runs
 // against the same three calls the engine makes on the durable store.
 type memTimelineStore struct {
-	mu     sync.Mutex
-	events []memEvent
-	next   int
-	snap   *WorldSnapshot
+	mu      sync.Mutex
+	events  []memEvent
+	history []Event // the events that a trim removed, in order
+	next    int
+	snap    *WorldSnapshot
+}
+
+func (s *memTimelineStore) LoadHistory(_ context.Context, _ string) ([]Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]Event(nil), s.history...)
+	for _, me := range s.events {
+		out = append(out, me.ev)
+	}
+	return out, nil
 }
 
 type memEvent struct {
@@ -225,6 +236,8 @@ func (s *memTimelineStore) TrimTo(_ context.Context, _, handle string) error {
 	for _, me := range s.events {
 		if me.seq > upTo {
 			kept = append(kept, me)
+		} else {
+			s.history = append(s.history, me.ev)
 		}
 	}
 	s.events = kept

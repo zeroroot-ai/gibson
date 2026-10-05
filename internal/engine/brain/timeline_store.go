@@ -67,6 +67,13 @@ type TimelineStore interface {
 	// flat slice.
 	LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]Event, error)
 
+	// LoadHistory returns the full ordered history of the tenant: each event
+	// that a trim removed from the live stream, then the live stream. The
+	// store keeps the trimmed events in durable storage before it trims
+	// (ADR-0163), so this is each event that the tenant ever appended. A
+	// replay of an old frame and the belief trainer read it.
+	LoadHistory(ctx context.Context, tenant string) ([]Event, error)
+
 	// WriteSnapshot persists a serialised World snapshot for the tenant and
 	// returns an opaque snapshot handle. The handle is passed to TrimTo to
 	// prune the Timeline prefix the snapshot covers.
@@ -82,6 +89,9 @@ type TimelineStore interface {
 
 	// TrimTo removes Timeline entries that precede the snapshot identified by
 	// handle. Must only be called with a valid handle returned by WriteSnapshot.
+	// The store writes each entry to its durable history before it removes
+	// the entry. When that write fails, TrimTo removes nothing and returns
+	// the error.
 	//
 	// Implemented in slice #1117. Stub: returns ErrNotImplemented.
 	TrimTo(ctx context.Context, tenant string, handle string) error

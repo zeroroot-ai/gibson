@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	goredis "github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -69,7 +68,7 @@ type timelinePoolForer interface {
 //     (engine operates in-memory only for that tenant).
 //   - pool.For probe fails → logs a warning, returns nil (same fallback).
 //   - Probe succeeds → builds a per-op acquire closure and returns a
-//     *datapool.RedisTimelineStore so the idle evictor can never close the
+//     *datapool.TimelineStore so the idle evictor can never close the
 //     client underneath a long-lived reference (gibson#1114, ADR-0163).
 //
 // Extraction rationale: moving the closure body here makes it directly
@@ -104,13 +103,15 @@ func timelineStoreFactory(pool timelinePoolForer, log *slog.Logger) func(ctx con
 		// calls this closure to obtain a fresh Conn and releases it when
 		// the operation completes. This ensures the idle evictor can never
 		// close the client underneath a long-lived reference (gibson#1114, ADR-0163).
-		acquire := func(opCtx context.Context) (*goredis.Client, func(), error) {
+		acquire := func(opCtx context.Context) (datapool.TimelineConn, func(), error) {
 			conn, err := pool.For(opCtx, tenantID)
 			if err != nil {
-				return nil, nil, fmt.Errorf("brain/timeline: pool.For tenant %q: %w", tenant, err)
+				return datapool.TimelineConn{}, nil, fmt.Errorf("brain/timeline: pool.For tenant %q: %w", tenant, err)
 			}
-			return conn.Redis, conn.Release, nil
+			// Redis holds the live tail and Postgres holds the full history
+			// (ADR-0163, gibson#786).
+			return datapool.TimelineConn{Redis: conn.Redis, SQL: conn.SQL()}, conn.Release, nil
 		}
-		return datapool.NewRedisTimelineStore(acquire)
+		return datapool.NewTimelineStore(acquire)
 	}
 }

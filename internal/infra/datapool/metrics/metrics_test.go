@@ -268,6 +268,7 @@ func TestDataPlaneAlertRules_ContainsExpectedAlerts(t *testing.T) {
 		"GibsonProvisioningCheckCRDUnavailable",
 		"GibsonPoolIdleEvictionThrash",
 		"GibsonAdminPoolHighAcquisitionRate",
+		"GibsonTimelineArchiveErrors",
 	}
 	for _, name := range expectedAlerts {
 		assert.True(t, strings.Contains(rules, name),
@@ -288,7 +289,7 @@ func TestRegistration_Idempotent(t *testing.T) {
 	assert.NoError(t, err, "default gatherer should gather cleanly after package init")
 }
 
-// TestMetricNamesExistInGatherer ensures all 8 canonical metric names are
+// TestMetricNamesExistInGatherer ensures all 9 canonical metric names are
 // visible in the default Prometheus registry after package init.
 func TestMetricNamesExistInGatherer(t *testing.T) {
 	expectedNames := []string{
@@ -300,7 +301,11 @@ func TestMetricNamesExistInGatherer(t *testing.T) {
 		"gibson_pool_init_total",
 		"gibson_pool_init_failures_total",
 		"gibson_dataplane_provisioning_check_failures_total",
+		"gibson_timeline_archive_errors_total",
 	}
+
+	// A counter vector shows in a gather after its first observation.
+	metrics.IncTimelineArchiveError("names-tenant")
 
 	families, err := prometheus.DefaultGatherer.Gather()
 	require.NoError(t, err)
@@ -328,6 +333,7 @@ func TestMetricLint(t *testing.T) {
 	metrics.IncXTenantDecryptAttempt("lint-tenant")
 	metrics.IncAdminPoolAcquire("lint-rpc", "lint-subject")
 	metrics.IncPoolInit("lint-tenant", metrics.StorePostgres)
+	metrics.IncTimelineArchiveError("lint-tenant")
 	metrics.IncPoolInitFailure("lint-tenant", metrics.StorePostgres, "not_provisioned")
 	metrics.IncProvisioningCheckFailure(metrics.ReasonCRDUnavailable)
 

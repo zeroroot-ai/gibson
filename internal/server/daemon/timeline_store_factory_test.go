@@ -61,7 +61,7 @@ func discardSlog() *slog.Logger {
 // a per-op acquire closure. It then exercises Append through the store to
 // confirm the per-op acquire path actually works end-to-end.
 // Covers daemon.go lines 1153 (probeConn.Release), 1162-1169 (acquire closure
-// + NewRedisTimelineStore return).
+// + NewTimelineStore return).
 func TestTimelineStoreFactory_ValidTenant(t *testing.T) {
 	t.Parallel()
 

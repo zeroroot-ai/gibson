@@ -626,7 +626,63 @@ func (e *Engine) ReadWorld(fn func(*World)) {
 	fn(e.World)
 }
 
-// Events returns a copy of the Timeline (the Scroller scrubs this).
+// History returns the full ordered history of the tenant (ADR-0163). An engine
+// with a durable store reads it from the store: the events that a trim moved
+// to the durable history, then the live stream. An engine with no store never
+// trims, so its in-memory Timeline is the full history.
+func (e *Engine) History(ctx context.Context) ([]Event, error) {
+	if e.store == nil {
+		return e.Events(), nil
+	}
+	evs, err := e.store.LoadHistory(ctx, e.World.Tenant)
+	if err != nil {
+		return nil, fmt.Errorf("brain/engine: history of tenant %q: %w", e.World.Tenant, err)
+	}
+	return evs, nil
+}
+
+// MissionHistory returns the mission's slice of the full history
+// (gibson#1060), in order. An empty missionID returns the whole history.
+func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event, error) {
+	if e.store == nil {
+		return e.MissionEvents(missionID), nil
+	}
+	evs, err := e.History(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return MissionSlice(evs, missionID), nil
+}
+
+// HistoryFrameAt returns the World as of the first n events of the mission's
+// slice of the full history: a replay frame (ADR-0101: World ==
+// fold(Timeline)). An empty missionID folds the whole history. n is clamped to
+// [0, total]. It returns the frame, the clamped n and the total. The fold is
+// new and independent, so it never touches the live World.
+func (e *Engine) HistoryFrameAt(ctx context.Context, missionID string, n int) (frame *World, seq, total int, err error) {
+	if e.store == nil {
+		total = len(e.MissionEvents(missionID))
+		seq = min(max(n, 0), total)
+		if missionID == "" {
+			return e.FrameAt(seq), seq, total, nil
+		}
+		return e.MissionFrameAt(missionID, seq), seq, total, nil
+	}
+	evs, err := e.MissionHistory(ctx, missionID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	total = len(evs)
+	seq = min(max(n, 0), total)
+	tl := &Timeline{}
+	for _, ev := range evs[:seq] {
+		tl.Append(ev)
+	}
+	return Replay(e.World.Tenant, tl), seq, total, nil
+}
+
+// Events returns a copy of the in-memory Timeline: the events since the last
+// hydrate. For the full history of a tenant, use History.
 func (e *Engine) Events() []Event {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
