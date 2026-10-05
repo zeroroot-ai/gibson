@@ -17,7 +17,7 @@ import (
 
 // Row is one training example: a full assignment of every network variable
 // to a binary state (true/false) for a single observed host. Fitting is plain
-// (Laplace-smoothed) conditional counting over these rows (ADR-0005).
+// (Laplace-smoothed) conditional counting over these rows.
 type Row map[string]bool
 
 // RowsFromWorld derives the training rows for the belief-CPT model from a
@@ -27,7 +27,7 @@ type Row map[string]bool
 // lose a row.
 //
 // Every host with an outcome becomes a row. Outcomes come from the fold
-// itself, as ADR-0006 §4 describes: the log already records them, so most
+// itself: the log already records them, so most
 // labels are automatic; HITL labels override or augment them.
 //
 // Variables follow the belief model's evidence conventions:
