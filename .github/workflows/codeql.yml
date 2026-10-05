@@ -98,70 +98,40 @@ jobs:
             echo "security_paths=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The scan is the shared workflow of zeroroot-ai/.github (ADR-0018,
+  # gibson#684). It runs the suite security-extended and the custom Go
+  # queries of the organization. This repo keeps no CodeQL config file.
+  #
+  # The check name is `CodeQL / CodeQL (go)`. The ruleset of this repo in
+  # zeroroot-ai/.github requires that name.
   analyze:
-    name: Analyze Go
+    name: CodeQL
     needs: changes
     # always() overrides the implicit success()-on-needs gate: `changes` is
     # itself skipped on merge_group/schedule, and a skipped dependency would
     # otherwise force this job to skip too. Real scan on merge_group/schedule
     # unconditionally; on pull_request, real scan only if the path filter
-    # matched, else `skipped` (cheap, no runner spin-up).
+    # matched, else `skipped`.
     # lane-exception: dual-lane but path-filtered. `!= 'pull_request'` covers
     # merge_group and schedule, so this DOES run in both lanes -- but on a PR
     # only when the diff touches internal/platform/authz/, cmd/ext-authz/ or a
     # secrets/ path. A PR that changes none of those can therefore be evicted by
-    # a CodeQL failure it never ran (gibson#1236, the same class as #1233).
-    # Accepted rather than fixed here: a full CodeQL Go analysis is ~20 minutes
-    # and the path filter is the deliberate scanner-cadence decision. Made
-    # visible instead: merge-queue-eviction-report.yml comments the failing
-    # `Analyze Go` job onto the PR, so the eviction is attributable.
+    # a CodeQL failure it never ran (gibson#1236). Accepted: a full CodeQL Go
+    # analysis is about 20 minutes. merge-queue-eviction-report.yml comments the
+    # failing job onto the PR, so the eviction is attributable.
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.security_paths == 'true')
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
-      # security-events:write restored (scorecard-hygiene sweep, 2026-08):
-      # gibson went public in gibson#1040 (closed 2026-06-26), two days after
-      # gibson#974/PR#979 disabled the code-scanning upload to work around
-      # GHAS requiring a paid plan on a private repo. Code scanning (and the
-      # Security tab) is free on public repos, so the upload is restored per
-      # the plan already recorded in gibson#974. Until this landed, the
-      # default-branch code-scanning alert view was frozen at the last
-      # successful `refs/heads/main` analysis (2026-06-20) — three
-      # `go/allocation-size-overflow` alerts have sat "open" since, even
-      # though the flagged files were moved/deleted by later refactors,
-      # because nothing re-uploaded SARIF for main to reconcile them.
       security-events: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        with:
-          languages: go
-          queries: security-extended
-          config-file: .github/codeql-config.yml
-
-      - name: Build
-        run: go build ./...
-
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
-        with:
-          # Upload restored now that gibson is public (see permissions block
-          # above) — default is `upload: always`, so the Security tab and the
-          # code-scanning alerts API get fresh results again. `output:` is
-          # kept so the artifact step below still has a local copy.
-          output: codeql-results
-
-      - name: Upload CodeQL SARIF artifact
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codeql-sarif-go
-          path: codeql-results
-          if-no-files-found: warn
+    uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@__PIN__
+    with:
+      languages: '["go"]'
+      go-build-command: go build ./...
+      paths-ignore: |
+        **/zz_generated*.go
+        **/*.pb.go
+        **/*_grpc.pb.go
+        vendor/**
+        **/testdata/**
+        **/.worktrees/**

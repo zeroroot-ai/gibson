@@ -45,7 +45,7 @@ entirely in *when* they ran and *how* the failure surfaced.
 | `queue-gate` | **both** | native aggregator; the required status check |
 | `heavy` | **queue only** | `go test -race ./...` × 2 build tags + govulncheck |
 | `security / govulncheck` | **queue only** | govulncheck against the daemon binary |
-| `CodeQL / Analyze Go` | **both, path-filtered** | skipped on PRs that touch no security path |
+| `CodeQL / CodeQL (go)` | **both, path-filtered** | skipped on PRs that touch no security path |
 | `e2e-setec-roundtrip` | **queue only** | hardware-gated, self-hosted KVM runner |
 
 The PR-only gates cannot cause a surprise: a PR-only gate blocks queue *entry*,
