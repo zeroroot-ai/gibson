@@ -147,6 +147,24 @@ ORDER BY tenant_id, plugin_id`
 	return out, nil
 }
 
+// IsEnabled reports whether tenantID enabled pluginID. The daemon asks it
+// before it accepts the identity of a plugin instance, so an instance of a
+// plugin that the tenant did not enable, or disabled, gets no credential.
+func (s *Store) IsEnabled(ctx context.Context, tenantID, pluginID string) (bool, error) {
+	if tenantID == "" || pluginID == "" {
+		return false, errors.New("catalogplugin: IsEnabled: tenant and plugin are required")
+	}
+	const query = `
+SELECT EXISTS (
+  SELECT 1 FROM tenant_catalog_plugins WHERE tenant_id = $1 AND plugin_id = $2
+)`
+	var enabled bool
+	if err := s.db.QueryRowContext(ctx, query, tenantID, pluginID).Scan(&enabled); err != nil {
+		return false, fmt.Errorf("catalogplugin: IsEnabled %s/%s: %w", tenantID, pluginID, err)
+	}
+	return enabled, nil
+}
+
 // ReportStatus records the state the tenant operator reports for one tenant's
 // instance. It returns false when the tenant did not enable the plugin: a
 // report never creates a row, because a row is what a tenant wants.

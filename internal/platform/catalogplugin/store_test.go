@@ -130,3 +130,28 @@ func TestStore_ReportStatus(t *testing.T) {
 	require.Error(t, err, "an empty phase must be refused")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestStore_IsEnabled(t *testing.T) {
+	store, mock := newMockStore(t)
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("acme", "github").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	if got, err := store.IsEnabled(context.Background(), "acme", "github"); err != nil || !got {
+		t.Fatalf("IsEnabled(acme, github) = %v, %v, want true", got, err)
+	}
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("globex", "github").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	if got, err := store.IsEnabled(context.Background(), "globex", "github"); err != nil || got {
+		t.Fatalf("IsEnabled(globex, github) = %v, %v, want false", got, err)
+	}
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("acme", "github").WillReturnError(errors.New("down"))
+	if got, err := store.IsEnabled(context.Background(), "acme", "github"); err == nil || got {
+		t.Fatalf("IsEnabled with a read error = %v, %v, want false and an error", got, err)
+	}
+
+	if _, err := store.IsEnabled(context.Background(), "", "github"); err == nil {
+		t.Error("IsEnabled accepted an empty tenant")
+	}
+}

@@ -45,25 +45,50 @@ func craftJWT(typ string) string {
 	return hdr + ".eyJzdWIiOiJ4In0.sig"
 }
 
-func TestPluginVendorFromSPIFFEID(t *testing.T) {
+func TestPluginInstanceFromSPIFFEID(t *testing.T) {
 	td := spiffeid.RequireTrustDomainFromString("zeroroot.ai")
 
-	v, err := pluginVendorFromSPIFFEID(spiffeid.RequireFromPath(td, "/plugin/github"))
-	if err != nil || v != "github" {
-		t.Fatalf("valid plugin SVID: v=%q err=%v", v, err)
+	v, tenant, err := pluginInstanceFromSPIFFEID(spiffeid.RequireFromPath(td, "/plugin/github/acme"))
+	if err != nil || v != "github" || tenant != "acme" {
+		t.Fatalf("valid plugin SVID: vendor=%q tenant=%q err=%v", v, tenant, err)
+	}
+	if _, _, err := pluginInstanceFromSPIFFEID(spiffeid.RequireFromPath(td, "/plugin/github/a-1")); err != nil {
+		t.Errorf("a tenant with a dash and a digit was refused: %v", err)
 	}
 
 	for _, bad := range []string{
-		"/platform/daemon",   // not a plugin
-		"/agent/foo",         // not a plugin
-		"/plugin",            // no vendor subpath
-		"/plugin/x",          // too short for the name rule
-		"/plugin/Bad-Vendor", // uppercase not allowed
-		"/plugin/a_b",        // underscore not allowed
+		"/platform/daemon",               // not a plugin
+		"/agent/foo",                     // not a plugin
+		"/plugin",                        // no vendor
+		"/plugin/github",                 // the form of one instance for the install
+		"/plugin/github/acme/extra",      // three segments
+		"/plugin/x/acme",                 // vendor too short for the name rule
+		"/plugin/Bad-Vendor/acme",        // upper case in the vendor
+		"/plugin/a_b/acme",               // underscore in the vendor
+		"/plugin/github/Acme",            // upper case in the tenant
+		"/plugin/github/a.b",             // a dot in the tenant
+		"/plugin/github/a_b",             // an underscore in the tenant
+		"/plugin/github/-acme",           // the tenant starts with a dash
+		"/plugin/github/" + longTenant49, // the tenant is too long for a plugin namespace
+		"/ns/tenant-acme-plugins/sa/gibson-plugin-github", // the generic SPIRE form
 	} {
-		if _, err := pluginVendorFromSPIFFEID(spiffeid.RequireFromPath(td, bad)); err == nil {
+		if _, _, err := pluginInstanceFromSPIFFEID(spiffeid.RequireFromPath(td, bad)); err == nil {
 			t.Errorf("SPIFFE path %q should be rejected as a plugin identity", bad)
 		}
+	}
+}
+
+// longTenant49 has one character more than a tenant with a plugin namespace
+// can have.
+const longTenant49 = "a123456789b123456789c123456789d123456789e12345678"
+
+// Two different pairs never give the same principal name.
+func TestPluginInstancePrincipalName(t *testing.T) {
+	if got := pluginInstancePrincipalName("github", "acme"); got != "github.acme" {
+		t.Errorf("principal name = %q, want github.acme", got)
+	}
+	if pluginInstancePrincipalName("git-hub", "acme") == pluginInstancePrincipalName("git", "hub-acme") {
+		t.Error("two different pairs give the same principal name")
 	}
 }
 
@@ -143,6 +168,19 @@ func TestCGRegister_SVIDProvisionError500(t *testing.T) {
 
 // --- ResolvePluginBySVID: real JWT-SVID verification against a SPIRE bundle ---
 
+// fakeEnablement answers IsEnabled from a set of "tenant/plugin" keys.
+type fakeEnablement struct {
+	enabled map[string]bool
+	err     error
+}
+
+func (f *fakeEnablement) IsEnabled(_ context.Context, tenantID, pluginID string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.enabled[tenantID+"/"+pluginID], nil
+}
+
 type fakeProvisioner struct {
 	gotVendor, gotTenant string
 	ref                  string
@@ -198,14 +236,15 @@ func TestResolvePluginBySVID(t *testing.T) {
 	}
 
 	const registerURL = "https://api.test/capabilitygrant/v1/register"
-	pluginID := spiffeid.RequireFromPath(td, "/plugin/github")
+	pluginID := spiffeid.RequireFromPath(td, "/plugin/github/acme")
 
+	enabledPairs := &fakeEnablement{enabled: map[string]bool{"acme/github": true}}
 	newEnroller := func(prov *fakeProvisioner) *spiffePluginEnroller {
 		return &spiffePluginEnroller{
 			bundles:     bundle,
 			trustDomain: td,
 			cg:          prov,
-			tenantID:    "acme",
+			enabled:     enabledPairs,
 			logger:      slog.Default(),
 		}
 	}
@@ -218,11 +257,73 @@ func TestResolvePluginBySVID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ResolvePluginBySVID: %v", err)
 		}
-		if id.Name != "github" || id.PrincipalRef != "plugin_principal:github" || id.TenantID != "acme" || id.OwnerUserID != "owner-1" {
+		if id.Name != "github" || id.PrincipalRef != "plugin_principal:github.acme" || id.TenantID != "acme" || id.OwnerUserID != "owner-1" {
 			t.Errorf("identity = %+v", id)
 		}
-		if prov.gotVendor != "github" || prov.gotTenant != "acme" {
-			t.Errorf("provisioner got vendor=%q tenant=%q", prov.gotVendor, prov.gotTenant)
+		if prov.gotVendor != "github.acme" || prov.gotTenant != "acme" {
+			t.Errorf("provisioner got principal name=%q tenant=%q", prov.gotVendor, prov.gotTenant)
+		}
+	})
+
+	t.Run("each tenant gets its own principal", func(t *testing.T) {
+		prov := &fakeProvisioner{}
+		e := newEnroller(prov)
+		e.enabled = &fakeEnablement{enabled: map[string]bool{"acme/github": true, "globex/github": true}}
+		refs := map[string]string{}
+		for _, tenant := range []string{"acme", "globex"} {
+			sid := spiffeid.RequireFromPath(td, "/plugin/github/"+tenant)
+			token := mintTestJWTSVID(t, priv, "k1", sid, registerURL, time.Now().Add(time.Hour))
+			id, err := e.ResolvePluginBySVID(context.Background(), token, registerURL)
+			if err != nil {
+				t.Fatalf("tenant %s: %v", tenant, err)
+			}
+			if id.TenantID != tenant {
+				t.Errorf("tenant %s: identity tenant = %q", tenant, id.TenantID)
+			}
+			refs[tenant] = id.PrincipalRef
+		}
+		if refs["acme"] == refs["globex"] {
+			t.Errorf("two tenants share the principal %q", refs["acme"])
+		}
+	})
+
+	t.Run("a tenant that did not enable the plugin is unverified", func(t *testing.T) {
+		prov := &fakeProvisioner{}
+		e := newEnroller(prov)
+		sid := spiffeid.RequireFromPath(td, "/plugin/github/globex")
+		token := mintTestJWTSVID(t, priv, "k1", sid, registerURL, time.Now().Add(time.Hour))
+		if _, err := e.ResolvePluginBySVID(context.Background(), token, registerURL); !errors.Is(err, ErrSVIDUnverified) {
+			t.Errorf("err = %v, want ErrSVIDUnverified", err)
+		}
+		if prov.gotVendor != "" {
+			t.Error("a principal was provisioned for a tenant that did not enable the plugin")
+		}
+	})
+
+	t.Run("the form of one instance for the install is unverified", func(t *testing.T) {
+		prov := &fakeProvisioner{}
+		e := newEnroller(prov)
+		sid := spiffeid.RequireFromPath(td, "/plugin/github")
+		token := mintTestJWTSVID(t, priv, "k1", sid, registerURL, time.Now().Add(time.Hour))
+		if _, err := e.ResolvePluginBySVID(context.Background(), token, registerURL); !errors.Is(err, ErrSVIDUnverified) {
+			t.Errorf("err = %v, want ErrSVIDUnverified", err)
+		}
+		if prov.gotVendor != "" {
+			t.Error("a principal was provisioned for the old identity form")
+		}
+	})
+
+	t.Run("an enablement read error surfaces (not unverified, not accepted)", func(t *testing.T) {
+		prov := &fakeProvisioner{}
+		e := newEnroller(prov)
+		e.enabled = &fakeEnablement{err: errors.New("postgres down")}
+		token := mintTestJWTSVID(t, priv, "k1", pluginID, registerURL, time.Now().Add(time.Hour))
+		_, err := e.ResolvePluginBySVID(context.Background(), token, registerURL)
+		if err == nil || errors.Is(err, ErrSVIDUnverified) {
+			t.Errorf("err = %v, want a non-ErrSVIDUnverified error", err)
+		}
+		if prov.gotVendor != "" {
+			t.Error("a principal was provisioned although the enablement read failed")
 		}
 	})
 
