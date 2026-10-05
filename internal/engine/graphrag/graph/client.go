@@ -25,22 +25,12 @@ type GraphClient interface {
 	// Health returns the current health status of the graph database connection.
 	Health(ctx context.Context) types.HealthStatus
 
-	// Query executes a Cypher statement with the given parameters and returns
-	// its result set.
-	//
-	// Query is NOT a read-only method, despite its name: the adapter picks the
-	// transaction mode from the statement text (isWriteOperation), so a
-	// statement containing MERGE / CREATE / SET / DELETE runs in a write
-	// transaction. Its two production consumers use that deliberately — schema
-	// DDL migrations (internal/engine/graphrag/schema) and the DiscoveryResult
-	// ingest loader (internal/engine/graphrag/loader, being unwound in
-	// gibson#1266). It is NOT a general knowledge-graph entity writer: entity
-	// nodes are written solely by the graph projector through the per-tenant
-	// datapool session (ADR-0112), never through this interface. Splitting Query
-	// into a read-only entry point plus an explicit DDL/loader write path is the
-	// tracked next step (gibson#1300); until then the `graphwrite` analyzer
-	// keeps the write transaction reachable only from the driver-adapter files
-	// that legitimately hold it.
+	// Query runs a Cypher statement in a read transaction and returns its
+	// result set. It never writes: the transaction is read-only whatever the
+	// statement text says, so a write statement fails (ADR-0112). The
+	// knowledge graph has one writer, the graph projector, which reaches the
+	// driver through the per-tenant datapool session and derives the schema
+	// DDL from the Taxonomy (graph_projector_schema.go).
 	Query(ctx context.Context, cypher string, params map[string]any) (QueryResult, error)
 
 	// ExecuteRead runs fn inside a managed read transaction opened on the
@@ -58,23 +48,10 @@ type GraphClient interface {
 	// The driver retries fn on transient failures; fn must be idempotent.
 	ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error)
 
-	// There is deliberately no ExecuteWrite counterpart, and the former
-	// CreateNode / CreateRelationship / DeleteNode write methods were removed
-	// (gibson#1300 — they had no production callers). The knowledge graph's
-	// entity nodes have exactly one writer, the graph projector, which reaches
-	// the driver through the per-tenant datapool session rather than through
-	// this interface.
-	//
-	// This is NOT yet a pure property of the type system: Query still selects a
-	// write transaction from its statement text (see its doc above), so the
-	// invariant is held jointly by (a) the projector being the only entity
-	// writer, (b) Query's only write consumers being schema DDL and the
-	// being-retired loader, and (c) the `graphwrite` gibsoncheck analyzer, which
-	// now exempts only the specific driver-adapter files (neo4j.go,
-	// session_client.go) — a new write-capable method in any other file of this
-	// package is flagged. Do not re-add a general write method to this interface;
-	// finishing the type-system version (splitting Query) is tracked in
-	// gibson#1300.
+	// There is deliberately no write method on this interface (ADR-0112).
+	// The type system holds the rule: no method of GraphClient opens a write
+	// transaction, and the `graphwrite` gibsoncheck analyzer flags a write
+	// transaction in any file of this package. Do not add a write method here.
 }
 
 // QueryResult represents the result of a Cypher query execution.

@@ -33,13 +33,11 @@ func TestGraphWrite_ProjectorAllowedNeighbourIsNot(t *testing.T) {
 		"github.com/zeroroot-ai/gibson/internal/server/daemon")
 }
 
-// TestGraphWrite_AdapterAllowedNeighbourIsNot loads the driver-adapter package,
-// whose fixture holds two files: neo4j.go (an allowed adapter file, no `want`)
-// and extra_writer.go (a new write-capable method in the same package, flagged).
-// Same package, opposite verdicts — the point of gibson#1300: the exemption is
-// the specific driver-holding files, not the whole graphrag/graph package, so a
-// new write path added elsewhere in it can no longer slip through silently.
-func TestGraphWrite_AdapterAllowedNeighbourIsNot(t *testing.T) {
+// TestGraphWrite_AdapterPackageHasNoAllowance loads the driver-adapter
+// package. Its fixture holds a write through the read entry point (neo4j.go)
+// and a new write method (extra_writer.go). Both are flagged: the adapter
+// package has no allowance since Query became read-only (gibson#673).
+func TestGraphWrite_AdapterPackageHasNoAllowance(t *testing.T) {
 	testdata := analysistest.TestData()
 	analysistest.Run(t, testdata, checks.GraphWriteAnalyzer,
 		"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph")

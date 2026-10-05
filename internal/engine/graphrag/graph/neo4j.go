@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
@@ -133,9 +132,8 @@ func (c *Neo4jClient) Health(ctx context.Context) types.HealthStatus {
 	return types.Healthy("connected to Neo4j")
 }
 
-// Query executes a Cypher query with the given parameters.
-// Automatically detects write queries (CREATE, MERGE, SET, DELETE, REMOVE)
-// and uses ExecuteWrite; otherwise uses ExecuteRead for better performance.
+// Query runs a Cypher query in a read transaction on a read-mode session. A
+// write statement fails: Query never opens a write transaction (ADR-0112).
 func (c *Neo4jClient) Query(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
 	if c.driver == nil {
 		return QueryResult{}, types.NewError(ErrCodeGraphConnectionClosed,
@@ -144,14 +142,11 @@ func (c *Neo4jClient) Query(ctx context.Context, cypher string, params map[strin
 
 	startTime := time.Now()
 
-	// Create session
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
 		DatabaseName: c.config.Database,
+		AccessMode:   neo4j.AccessModeRead,
 	})
 	defer session.Close(ctx)
-
-	// Detect if query is a write operation
-	isWriteQuery := isWriteOperation(cypher)
 
 	// Transaction work function
 	txWork := func(tx neo4j.ManagedTransaction) (any, error) {
@@ -176,15 +171,7 @@ func (c *Neo4jClient) Query(ctx context.Context, cypher string, params map[strin
 		return convertNeo4jResult(records, summary), nil
 	}
 
-	var result any
-	var err error
-
-	if isWriteQuery {
-		result, err = session.ExecuteWrite(ctx, txWork)
-	} else {
-		result, err = session.ExecuteRead(ctx, txWork)
-	}
-
+	result, err := session.ExecuteRead(ctx, txWork)
 	if err != nil {
 		return QueryResult{}, types.WrapError(ErrCodeGraphQueryFailed,
 			"query execution failed", err)
@@ -210,31 +197,6 @@ func (c *Neo4jClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTran
 	})
 	defer session.Close(ctx)
 	return session.ExecuteRead(ctx, fn)
-}
-
-// isWriteOperation detects if a Cypher query is a write operation.
-// Write operations include CREATE, MERGE, SET, DELETE, REMOVE, and DETACH DELETE.
-func isWriteOperation(cypher string) bool {
-	// Convert to uppercase for case-insensitive matching
-	upper := strings.ToUpper(cypher)
-
-	// Check for write keywords
-	writeKeywords := []string{
-		"CREATE",
-		"MERGE",
-		"SET ", // Space to avoid matching OFFSET
-		"DELETE",
-		"REMOVE",
-		"DETACH",
-	}
-
-	for _, keyword := range writeKeywords {
-		if strings.Contains(upper, keyword) {
-			return true
-		}
-	}
-
-	return false
 }
 
 // convertNeo4jResult converts Neo4j records and summary to our QueryResult format.
