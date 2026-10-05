@@ -22,7 +22,10 @@ anywhere in this seam.
   `gen_parity_fixture.py` generates the same cases as a JSON fixture so a Go
   test (`beliefvi.TestPgmpyParity`) can assert the same 1e-12 agreement
   transitively, without pgmpy (or numpy) ever linking into the Go binary or
-  any runtime image.
+  any runtime image. The fixture is checked in at
+  `internal/engine/brain/beliefvi/testdata/parity.json.gz`, so `go test ./...`
+  runs the parity test with no Python. `beliefvi.TestParityFixtureIsCurrent`
+  fails when a reference file changed and the fixture did not.
 - **`models/base-v1.json`** stays canonical here — `braintrain`
   (`cmd/belief-trainer`, `internal/engine/braintrain`) and this package's own
   tests read it from this path. `internal/engine/brain/beliefvi` embeds a
@@ -118,7 +121,8 @@ python -m pytest test_model.py test_infer.py test_noisy_or.py test_ground.py -q 
 pip install --require-hashes -r requirements-dev.txt   # adds pgmpy — dev only
 python -m pytest test_parity.py -q                  # the pgmpy comparison
 
-python gen_parity_fixture.py > /tmp/belief-parity.json   # the Go-vs-reference fixture
-GIBSON_BELIEF_PARITY_FIXTURE=/tmp/belief-parity.json \
-    go test ../../internal/engine/brain/beliefvi/... -run TestPgmpyParity -v
+# The Go-vs-reference fixture is checked in. Make it again after a change to
+# gen_parity_fixture.py, infer.py, model.py or models/base-v1.json.
+python gen_parity_fixture.py ../../internal/engine/brain/beliefvi/testdata/parity.json.gz
+go test ../../internal/engine/brain/beliefvi/... -run 'TestPgmpyParity|TestParityFixtureIsCurrent' -v
 ```

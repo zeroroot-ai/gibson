@@ -85,13 +85,16 @@ jobs:
         run: python -m pytest test_parity.py -q
 
       # ADR-0134's other half: the Go port must agree with the
-      # SAME reference to the SAME 1e-12 tolerance, so this generates the
-      # fixture from the numpy reference (no pgmpy import needed here — that
-      # agreement was just proven by test_parity.py above) and points the Go
-      # test at it.
+      # SAME reference to the SAME 1e-12 tolerance. The fixture is checked in,
+      # and `go test ./...` runs the parity test against it on each PR
+      # (gibson#714). This job makes the fixture again from the numpy reference
+      # of this run (no pgmpy import needed here — that agreement was just
+      # proven by test_parity.py above) and runs the Go test against the new
+      # file. So the Go runtime is also held to the reference under the numpy
+      # version that this workflow pins.
       - name: Generate the Go-vs-reference parity fixture
         working-directory: sidecar/belief
-        run: python gen_parity_fixture.py > ${{ runner.temp }}/belief-parity.json
+        run: python gen_parity_fixture.py ../../internal/engine/brain/beliefvi/testdata/parity.json.gz
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -99,9 +102,7 @@ jobs:
           cache: true
 
       - name: Go belief runtime parity test (beliefvi vs the reference)
-        env:
-          GIBSON_BELIEF_PARITY_FIXTURE: ${{ runner.temp }}/belief-parity.json
-        run: go test ./internal/engine/brain/beliefvi/... -run TestPgmpyParity -v
+        run: go test ./internal/engine/brain/beliefvi/... -run 'TestPgmpyParity|TestParityFixtureIsCurrent' -v
 
       - name: Go belief runtime unit tests
         run: go test ./internal/engine/brain/beliefvi/...
