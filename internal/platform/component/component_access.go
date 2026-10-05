@@ -219,7 +219,7 @@ func (s *RedisComponentAccessStore) Enable(ctx context.Context, tenant, componen
 		Source:        "platform",
 		ConfiguredAt:  time.Now().UTC().Format(time.RFC3339),
 		ConfiguredBy:  configuredBy,
-		HasConfig:     config != nil && len(config) > 0,
+		HasConfig:     len(config) > 0,
 	}
 
 	accessJSON, err := json.Marshal(access)
