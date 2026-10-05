@@ -333,11 +333,11 @@ type team
 # gibson.daemon.v1.DaemonService/CreateMission, which writes the one tuple
 # this type holds: mission:<id>#belongs_to@tenant:<id>.
 #
-# One decision reads it. ResumeMission with a rewind checks `can_rewind`
-# (internal/server/daemon/api/server.go). Every tenant admin is a mission
-# admin through `belongs_to`, and a per-mission [user] grant layers on top.
+# No decision reads a mission relation. A rewind is authorized like a run:
+# whoever may run the mission may rewind it, through the writer check on the
+# tenant (D51). The mission-level admin and can_rewind relations are deleted.
 #
-# Every other mission, run, target, finding and mission-definition RPC is
+# Every mission, run, target, finding and mission-definition RPC is
 # authorized on the TENANT (`member` or `writer` on tenant:<id>, see
 # registry.yaml), not on a per-resource object. This model used to declare
 # per-resource read, execute and list relations on six object types. No RPC
@@ -347,8 +347,6 @@ type team
 type mission
   relations
     define belongs_to: [tenant]
-    define admin: [user] or admin from belongs_to
-    define can_rewind: admin
 
 # ----------------------------------------------------------------------
 # LLM provider / model access gating — spec `llm-user-attribution-governance`

@@ -38,7 +38,6 @@ func TestGibsonModelSubjectTypes(t *testing.T) {
 		{"component", "team_write_disabled", "user", true, "[team#member] → team.member → [user, …]"},
 		// Reached only through a tuple-to-userset hop.
 		{"component", "can_read", "user", true, "direct_read → [user, …]"},
-		{"mission", "can_rewind", "user", true, "admin → [user] or admin from belongs_to → tenant.admin → [user]"},
 
 		// --- must NOT admit user ---
 		{"team", "parent", "user", false, "[tenant] — the CreateTeam squat guard"},
@@ -46,6 +45,9 @@ func TestGibsonModelSubjectTypes(t *testing.T) {
 		{"secret", "can_resolve", "user", false, "[plugin_principal] — structural, spec non-plugin-secret-isolation"},
 		{"component", "owner", "user", false, "[tenant]"},
 		{"agent_principal", "belongs_to", "user", false, "[tenant]"},
+		// A rewind is authorized like a run, on the tenant (D51). The mission
+		// type keeps only the tuple that CreateMission writes.
+		{"mission", "belongs_to", "user", false, "[tenant]"},
 
 		// --- other subject types ---
 		{"team", "parent", "tenant", true, "[tenant]"},
