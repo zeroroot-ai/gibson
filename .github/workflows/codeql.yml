@@ -124,7 +124,7 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@__PIN__
+    uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@5d38e1f714d47b502cf18709a7d5e63430155f62 # v0.16.0
     with:
       languages: '["go"]'
       go-build-command: go build ./...
