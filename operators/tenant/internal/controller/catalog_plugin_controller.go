@@ -14,6 +14,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -58,6 +59,27 @@ const (
 	envoyCAConfigMap = "gibson-envoy-ca"
 	envoyCAKey       = "ca.crt"
 
+	// pluginNamespaceClusterRole is the ClusterRole of the chart that holds
+	// the rules the operator needs inside a plugin namespace. The operator
+	// binds it into each plugin namespace with a RoleBinding. It can bind this
+	// one name and cannot change its rules.
+	pluginNamespaceClusterRole = "gibson-tenant-operator-plugin-namespace"
+	// pluginNamespaceRoleBinding is the name of that RoleBinding.
+	pluginNamespaceRoleBinding = "gibson-tenant-operator-plugins"
+
+	// The Pod Security label of a plugin namespace. A plugin pod is a secure
+	// pod, so the API server refuses a pod that is not "restricted".
+	labelPodSecurityEnforce = "pod-security.kubernetes.io/enforce"
+	podSecurityRestricted   = "restricted"
+
+	// The SPIRE agent socket, as the CSI driver mounts it. The init container
+	// waits for the socket, and the plugin reads it at a second mount path.
+	spireSocketVolume     = "spire-agent-socket"
+	spireWaitMountPath    = "/run/spire/agent"
+	spireWaitSocket       = spireWaitMountPath + "/spire-agent.sock"
+	spirePluginMountPath  = "/run/spire/sockets"
+	spirePluginSocketAddr = "unix://" + spirePluginMountPath + "/api.sock"
+
 	// Phases the loop reports to the daemon.
 	catalogPluginPhaseProvisioning = "Provisioning"
 	catalogPluginPhaseReady        = "Ready"
@@ -98,6 +120,26 @@ type CatalogPluginConfig struct {
 	// WaitForSpireImage is the image of the init container that waits for the
 	// SPIRE agent socket (PLUGIN_WAIT_FOR_SPIRE_IMAGE). Required.
 	WaitForSpireImage string
+	// OperatorServiceAccount and OperatorNamespace name the ServiceAccount of
+	// this operator (OPERATOR_SERVICE_ACCOUNT_NAME and
+	// OPERATOR_SERVICE_ACCOUNT_NAMESPACE). The loop binds the plugin namespace
+	// rules to it. Required.
+	OperatorServiceAccount string
+	OperatorNamespace      string
+}
+
+// CatalogPluginConfigFromEnv reads the config from the environment of the
+// operator.
+func CatalogPluginConfigFromEnv(getenv func(string) string) CatalogPluginConfig {
+	return CatalogPluginConfig{
+		SpireClassName:         getenv("PLUGIN_SPIRE_CLASS_NAME"),
+		TrustDomain:            getenv("PLUGIN_TRUST_DOMAIN"),
+		GibsonURL:              getenv("PLUGIN_GIBSON_URL"),
+		EnvoyCAFile:            getenv("PLUGIN_ENVOY_CA_FILE"),
+		WaitForSpireImage:      getenv("PLUGIN_WAIT_FOR_SPIRE_IMAGE"),
+		OperatorServiceAccount: getenv(envOperatorSAName),
+		OperatorNamespace:      getenv(envOperatorSANamespace),
+	}
 }
 
 // Validate refuses a config with a required value missing.
@@ -107,6 +149,8 @@ func (c CatalogPluginConfig) Validate() error {
 		"PLUGIN_TRUST_DOMAIN":         c.TrustDomain,
 		"PLUGIN_GIBSON_URL":           c.GibsonURL,
 		"PLUGIN_WAIT_FOR_SPIRE_IMAGE": c.WaitForSpireImage,
+		envOperatorSAName:             c.OperatorServiceAccount,
+		envOperatorSANamespace:        c.OperatorNamespace,
 	} {
 		if v == "" {
 			return fmt.Errorf("catalog plugins: %s is required", name)
@@ -114,6 +158,14 @@ func (c CatalogPluginConfig) Validate() error {
 	}
 	return nil
 }
+
+// The cluster-wide rules of this loop. A ClusterSPIFFEID has no namespace, so
+// the rule is in the ClusterRole of the operator, and an admission policy of
+// the chart limits the objects that the operator can write. The rules for the
+// objects inside a plugin namespace are not here: the chart holds them in the
+// ClusterRole gibson-tenant-operator-plugin-namespace, and ensureNamespaceRBAC
+// binds it into each plugin namespace.
+// +kubebuilder:rbac:groups=spire.spiffe.io,resources=clusterspiffeids,verbs=get;list;create;update;delete
 
 // CatalogPluginRunnable converges the cluster to the catalog plugins the
 // tenants enabled.
@@ -209,6 +261,11 @@ func (r *CatalogPluginRunnable) converge(ctx context.Context) error {
 	for _, p := range desired {
 		phase, lastErr := catalogPluginPhaseProvisioning, ""
 		ready, ensureErr := r.ensureInstance(ctx, p)
+		if errors.Is(ensureErr, errTenantGone) {
+			// The tenant does not exist any more, or it is in deletion. Its
+			// instances are not wanted, so the prune below removes them.
+			continue
+		}
 		switch {
 		case ensureErr != nil:
 			phase, lastErr = catalogPluginPhaseFailed, ensureErr.Error()
@@ -230,6 +287,10 @@ func (r *CatalogPluginRunnable) converge(ctx context.Context) error {
 	return r.prune(ctx, wanted)
 }
 
+// errTenantGone reports a wish of a tenant that has no Tenant object, or whose
+// Tenant object is in deletion.
+var errTenantGone = errors.New("the tenant does not exist or is in deletion")
+
 // ensureInstance makes every object of one plugin instance and returns
 // whether its Deployment is available.
 func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.DesiredCatalogPlugin) (bool, error) {
@@ -237,11 +298,17 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 		return false, err
 	}
 	var tenant gibsonv1alpha1.Tenant
-	if err := r.Client.Get(ctx, client.ObjectKey{Name: p.TenantID}, &tenant); err != nil {
+	switch err := r.Client.Get(ctx, client.ObjectKey{Name: p.TenantID}, &tenant); {
+	case apierrors.IsNotFound(err):
+		return false, errTenantGone
+	case err != nil:
 		return false, fmt.Errorf("get Tenant %q: %w", p.TenantID, err)
 	}
+	if !tenant.DeletionTimestamp.IsZero() {
+		return false, errTenantGone
+	}
 	steps := []func(context.Context, provision.DesiredCatalogPlugin) error{
-		r.ensureNamespace, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
+		r.ensureNamespace, r.ensureNamespaceRBAC, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
 		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensureDeployment,
 	}
 	for _, step := range steps {
@@ -274,9 +341,20 @@ func podLabels(p provision.DesiredCatalogPlugin) map[string]string {
 	}
 }
 
+// errForeignNamespace reports a namespace with the name of a plugin namespace
+// that this loop did not make. The namespace tenant-<a>-plugins is also the
+// namespace of a tenant with the name <a>-plugins, so the loop never takes
+// over a namespace that does not carry its own labels.
+var errForeignNamespace = errors.New("the namespace exists and is not a plugin namespace of this tenant")
+
 func (r *CatalogPluginRunnable) ensureNamespace(ctx context.Context, p provision.DesiredCatalogPlugin) error {
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: pluginNamespace(p.TenantID)}}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, ns, func() error {
+		if !ns.CreationTimestamp.IsZero() || ns.ResourceVersion != "" {
+			if ns.Labels[labelManagedBy] != catalogPluginManagedBy || ns.Labels[labelPluginNamespaceOf] != p.TenantID {
+				return errForeignNamespace
+			}
+		}
 		if ns.Labels == nil {
 			ns.Labels = map[string]string{}
 		}
@@ -284,10 +362,37 @@ func (r *CatalogPluginRunnable) ensureNamespace(ctx context.Context, p provision
 		ns.Labels[labelPluginTenant] = p.TenantID
 		// For NetworkPolicy selectors only. No admission rule reads it.
 		ns.Labels[labelPluginNamespaceOf] = p.TenantID
+		ns.Labels[labelPodSecurityEnforce] = podSecurityRestricted
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("ensure Namespace %s: %w", ns.Name, err)
+	}
+	return nil
+}
+
+// ensureNamespaceRBAC gives the operator its rules inside the plugin
+// namespace. The cluster-wide role of the operator holds no rule for a
+// Deployment, a ServiceAccount, a ConfigMap or a NetworkPolicy. The chart
+// holds those rules in one ClusterRole, and this RoleBinding applies them to
+// this namespace only. It is the first object in a new namespace, because
+// each later step needs it.
+func (r *CatalogPluginRunnable) ensureNamespaceRBAC(ctx context.Context, p provision.DesiredCatalogPlugin) error {
+	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{
+		Name: pluginNamespaceRoleBinding, Namespace: pluginNamespace(p.TenantID),
+	}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, rb, func() error {
+		rb.Labels = map[string]string{labelManagedBy: catalogPluginManagedBy, labelPluginTenant: p.TenantID}
+		rb.Subjects = []rbacv1.Subject{{
+			Kind:      rbacv1.ServiceAccountKind,
+			Name:      r.Config.OperatorServiceAccount,
+			Namespace: r.Config.OperatorNamespace,
+		}}
+		rb.RoleRef = rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: pluginNamespaceClusterRole}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("ensure RoleBinding %s/%s: %w", rb.Namespace, rb.Name, err)
 	}
 	return nil
 }
@@ -440,11 +545,11 @@ func (r *CatalogPluginRunnable) podSpec(p provision.DesiredCatalogPlugin) corev1
 
 	mounts := []corev1.VolumeMount{
 		{Name: "state", MountPath: "/home/nonroot/.gibson"},
-		{Name: "spire-agent-socket", MountPath: "/run/spire/sockets", ReadOnly: true},
+		{Name: spireSocketVolume, MountPath: spirePluginMountPath, ReadOnly: true},
 	}
 	volumes := []corev1.Volume{
 		{Name: "state", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
-		{Name: "spire-agent-socket", VolumeSource: corev1.VolumeSource{
+		{Name: spireSocketVolume, VolumeSource: corev1.VolumeSource{
 			CSI: &corev1.CSIVolumeSource{Driver: "csi.spiffe.io", ReadOnly: &readOnly},
 		}},
 	}
@@ -473,16 +578,7 @@ func (r *CatalogPluginRunnable) podSpec(p provision.DesiredCatalogPlugin) corev1
 			RunAsNonRoot: &nonRoot, RunAsUser: &uid, RunAsGroup: &uid, FSGroup: &uid,
 			SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 		},
-		InitContainers: []corev1.Container{{
-			Name:  "wait-for-spire-socket",
-			Image: r.Config.WaitForSpireImage,
-			// Wait up to 60 seconds for the SPIRE agent socket, then fail, so
-			// the plugin never starts with no identity.
-			Command: []string{"sh", "-c",
-				"i=0; while [ $i -lt 60 ]; do [ -S /run/spire/sockets/api.sock ] && exit 0; i=$((i+1)); sleep 1; done; exit 1"},
-			SecurityContext: containerSecurity,
-			VolumeMounts:    []corev1.VolumeMount{{Name: "spire-agent-socket", MountPath: "/run/spire/sockets", ReadOnly: true}},
-		}},
+		InitContainers: []corev1.Container{r.waitForSpireSocket(containerSecurity)},
 		Containers: []corev1.Container{{
 			Name:            "plugin",
 			Image:           p.Image,
@@ -494,7 +590,7 @@ func (r *CatalogPluginRunnable) podSpec(p provision.DesiredCatalogPlugin) corev1
 				{Name: "GIBSON_PLUGIN_RUNTIME", Value: "pod"},
 				{Name: "GIBSON_PLUGIN_MANIFEST", Value: "/etc/gibson/plugin.yaml"},
 				{Name: "SSL_CERT_DIR", Value: certDirs},
-				{Name: "SPIFFE_ENDPOINT_SOCKET", Value: "unix:///run/spire/sockets/api.sock"},
+				{Name: "SPIFFE_ENDPOINT_SOCKET", Value: spirePluginSocketAddr},
 			},
 			Ports:           []corev1.ContainerPort{{Name: "health", ContainerPort: 8080, Protocol: corev1.ProtocolTCP}},
 			StartupProbe:    &corev1.Probe{ProbeHandler: probe("/healthz"), PeriodSeconds: 5, FailureThreshold: 12, TimeoutSeconds: 5},
@@ -508,6 +604,42 @@ func (r *CatalogPluginRunnable) podSpec(p provision.DesiredCatalogPlugin) corev1
 			},
 		}},
 		Volumes: volumes,
+	}
+}
+
+// waitForSpireSocketScript waits up to 60 seconds for the SPIRE agent socket,
+// then fails, so the plugin never starts with no identity. It is the script
+// that the chart helper gibson.waitForSpireSocket renders for each platform
+// pod.
+const waitForSpireSocketScript = `SOCK="` + spireWaitSocket + `"
+DEADLINE=$(( $(date +%s) + 60 ))
+echo "[wait-for-spire-socket] waiting for ${SOCK} (timeout: 60s)..."
+until [ -S "${SOCK}" ]; do
+  if [ $(date +%s) -ge ${DEADLINE} ]; then
+    echo "[wait-for-spire-socket] ERROR: ${SOCK} not present after 60s" >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo "[wait-for-spire-socket] ok"
+`
+
+func (r *CatalogPluginRunnable) waitForSpireSocket(security *corev1.SecurityContext) corev1.Container {
+	return corev1.Container{
+		Name:            "wait-for-spire-socket",
+		Image:           r.Config.WaitForSpireImage,
+		Command:         []string{"sh", "-c"},
+		Args:            []string{waitForSpireSocketScript},
+		SecurityContext: security,
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("10m"), corev1.ResourceMemory: resource.MustParse("16Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("32Mi"),
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{{Name: spireSocketVolume, MountPath: spireWaitMountPath, ReadOnly: true}},
 	}
 }
 
@@ -534,30 +666,36 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 		}
 	}
 
-	var deps appsv1.DeploymentList
-	if err := r.Client.List(ctx, &deps, managed); err != nil {
-		return fmt.Errorf("list plugin Deployments: %w", err)
-	}
-	for i := range deps.Items {
-		if isWanted(deps.Items[i].Labels) {
-			continue
-		}
-		if err := r.deleteInstanceObjects(ctx, deps.Items[i].Namespace, deps.Items[i].Name); err != nil {
-			return err
-		}
-	}
-
+	// The operator has rules for a Deployment only inside a plugin namespace,
+	// so the pass reads each plugin namespace and never lists Deployments for
+	// the whole cluster.
 	var namespaces corev1.NamespaceList
 	if err := r.Client.List(ctx, &namespaces, managed); err != nil {
 		return fmt.Errorf("list plugin namespaces: %w", err)
 	}
 	for i := range namespaces.Items {
-		tenant := namespaces.Items[i].Labels[labelPluginNamespaceOf]
-		if tenant == "" || len(wanted[tenant]) > 0 {
+		ns := &namespaces.Items[i]
+		tenant := ns.Labels[labelPluginNamespaceOf]
+		if tenant == "" || !ns.DeletionTimestamp.IsZero() {
 			continue
 		}
-		if err := r.Client.Delete(ctx, &namespaces.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete Namespace %s: %w", namespaces.Items[i].Name, err)
+		if len(wanted[tenant]) == 0 {
+			if err := r.Client.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete Namespace %s: %w", ns.Name, err)
+			}
+			continue
+		}
+		var deps appsv1.DeploymentList
+		if err := r.Client.List(ctx, &deps, client.InNamespace(ns.Name), managed); err != nil {
+			return fmt.Errorf("list plugin Deployments in %s: %w", ns.Name, err)
+		}
+		for d := range deps.Items {
+			if isWanted(deps.Items[d].Labels) {
+				continue
+			}
+			if err := r.deleteInstanceObjects(ctx, deps.Items[d].Namespace, deps.Items[d].Name); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
