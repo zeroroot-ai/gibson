@@ -85,8 +85,8 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 			// the binding, and clean the secret up. RegisterPlugin is not
 			// here: a chart-deployed plugin enrols with its SVID and binds
 			// its declared secrets itself (ADR-0066).
-			"/gibson.tenant.v1.SecretsService/SetSecret":                          true,
-			"/gibson.tenant.v1.SecretsService/DeleteSecret":                       true,
+			"/gibson.secrets.v1.SecretsService/SetSecret":                         true,
+			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
 			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
 			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
 		},

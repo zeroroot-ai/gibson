@@ -50,8 +50,8 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 )
 
 const (
@@ -104,16 +104,16 @@ func TestPluginSecretRevocation(t *testing.T) {
 	t.Cleanup(func() { _ = clients.Close() })
 
 	plugins := pluginadminv1.NewPluginAdminServiceClient(clients.Conn())
-	secretsAdmin := tenantv1.NewSecretsServiceClient(clients.Conn())
+	secretsAdmin := secretsv1.NewSecretsServiceClient(clients.Conn())
 	ctx := auth.ContextWithTenantString(context.Background(), revocationTenant)
 
 	// The plugin declares cred:github_token as a required startup secret:
 	// plugin.Serve refuses to start until it resolves. Seed it first, so the
 	// pod the workflow already deployed comes up on its next restart.
 	t.Run("the declared secret exists for the tenant", func(t *testing.T) {
-		_, err := secretsAdmin.SetSecret(ctx, &tenantv1.SetSecretRequest{
+		_, err := secretsAdmin.SetSecret(ctx, &secretsv1.SetSecretRequest{
 			Name:     revocationSecretName,
-			Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+			Category: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 			Value:    []byte("ghp_e2e_not_a_real_token"),
 		})
 		require.NoError(t, err, "SetSecret(%s) for %q", revocationDeclaredName, revocationTenant)
@@ -122,7 +122,7 @@ func TestPluginSecretRevocation(t *testing.T) {
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		_, _ = secretsAdmin.DeleteSecret(auth.ContextWithTenantString(c, revocationTenant),
-			&tenantv1.DeleteSecretRequest{Name: revocationDeclaredName})
+			&secretsv1.DeleteSecretRequest{Name: revocationDeclaredName})
 	})
 
 	var install *pluginadminv1.PluginInstallSummary

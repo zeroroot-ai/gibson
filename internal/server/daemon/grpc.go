@@ -64,6 +64,7 @@ import (
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	pluginadminv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -1403,7 +1404,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			tenantv1.RegisterMembershipServiceServer(srv, admin.NewUnavailableMembershipServer())
 		}
 
-		// SecretsService (gibson.tenant.v1.SecretsService) — combined broker-config + CRUD
+		// SecretsService (gibson.secrets.v1.SecretsService) — combined broker-config + CRUD
 		if brokerStackOK && secretsStackOK {
 			secretsAdminSvc, saErr := admin.NewSecretsAdminServer(admin.SecretsAdminConfig{
 				Service:            d.secretsService,
@@ -1414,14 +1415,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			})
 			if saErr != nil {
 				d.logger.Warn(ctx, "SecretsService CRUD side not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
-				tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+				secretsv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
 			} else {
-				tenantv1.RegisterSecretsServiceServer(srv, admin.NewCombinedSecretsServer(tenantAdminSvc, secretsAdminSvc))
-				d.logger.Info(ctx, "registered gibson.tenant.v1.SecretsService gRPC endpoint")
+				secretsv1.RegisterSecretsServiceServer(srv, admin.NewCombinedSecretsServer(tenantAdminSvc, secretsAdminSvc))
+				d.logger.Info(ctx, "registered gibson.secrets.v1.SecretsService gRPC endpoint")
 			}
 		} else {
-			d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.tenant.v1.SecretsService")
-			tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+			d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.secrets.v1.SecretsService")
+			secretsv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
 		}
 
 		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
