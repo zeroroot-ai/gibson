@@ -7,13 +7,9 @@
 // does not author YAML. This service is SEPARATE from ConnectorAuthService,
 // which owns the OAuth grant behind an authorized connector.
 //
-// NOTE (Slice 4, not yet wired): the enable/disable RPCs create and delete a
-// ConnectorInstance custom resource in the tenant namespace. The daemon has no
-// direct Kubernetes client today (it uses the operator/enqueue pattern for
-// tenant CRs). Wiring EnableConnector needs an architectural decision — give the
-// daemon a scoped ConnectorInstance client, or route through the operator like
-// tenant provisioning. This proto is the agreed surface; the implementation
-// waits on that decision.
+// The enable and disable RPCs record the wish of the tenant in the platform
+// database. The daemon holds no Kubernetes client (ADR-0023): the connector
+// operator pulls the wishes and makes each ConnectorInstance (gibson#662).
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 

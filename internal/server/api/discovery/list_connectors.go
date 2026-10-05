@@ -15,8 +15,8 @@ import (
 )
 
 // ConnectorLister enumerates the caller tenant's enabled connectors — the
-// catalog ids of its ConnectorInstance CRs. The daemon implements it over the
-// narrow ConnectorInstance kube client (connector_adapters.go).
+// catalog ids in the table of tenant connectors (gibson#662). The daemon
+// implements it over that table (connector_adapters.go).
 type ConnectorLister interface {
 	ListEnabledConnectors(ctx context.Context, tenant string) ([]string, error)
 }
