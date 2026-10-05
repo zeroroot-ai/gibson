@@ -137,7 +137,9 @@ func TestReconcile_RunsStepsInOrderAndPersistsStatus(t *testing.T) {
 	}
 	for _, want := range []struct{ cond, reason string }{
 		{gibsonv1alpha1.ConditionUnsealKeyEscrowed, "EscrowNotConfigured"},
-		{gibsonv1alpha1.ConditionZitadelProjectReady, "WaitingForAdminToken"},
+		// The admin token step stops the pass first: the spec has no system
+		// client, so the token cannot be minted (gibson#794).
+		{gibsonv1alpha1.ConditionAdminTokenReady, "SystemClientMissing"},
 	} {
 		c := findCondition(stored.Status.Conditions, want.cond)
 		if c == nil || c.Reason != want.reason {
