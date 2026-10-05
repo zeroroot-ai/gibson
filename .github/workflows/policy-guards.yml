@@ -10,7 +10,7 @@
 #   - vault-auth-method-deny-list (ADR-0009, org-level reusable workflow;
 #     formerly its own vault-auth-method-deny-list.yml, gibson#710 fixed the
 #     secrets-mapping startup_failure that had silently disabled it)
-#   - no-monorepo-shortcuts + runs-on-lint (board #44 / deploy#1067 / ADR-0060
+#   - no-monorepo-shortcuts + runs-on-lint (board #44 / deploy#1067
 #     -- neither had a caller anywhere in the org before this; runs-on-lint
 #     is the new guard rejecting any runs-on label that isn't ubuntu-* or
 #     staging-ephemeral)

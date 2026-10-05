@@ -137,7 +137,7 @@ linters:
       - ".*_grpc\\.pb\\.go$"
       - "zz_generated.*\\.go$"
       - "api/gen/.*"
-    # Per-rule exclusions go here. New exclusions require a tracked issue per ADR-0013.
+    # Per-rule exclusions go here. New exclusions require a tracked issue.
     rules: []
 
 issues:

@@ -5,7 +5,7 @@
 //
 // A tenant with no tenant_quotas row used to resolve to the zero Limits value,
 // which every enforcer reads as "unlimited on every dimension". That is the
-// correct permissive default for a self-hosted install (ADR-0006), and exactly
+// correct permissive default for a self-hosted install (ADR-0074), and exactly
 // the wrong one for a deployment that has declared entitlements mandatory —
 // there, an absent row is indistinguishable from a row that was never written,
 // and unlimited is a free grant.
@@ -53,7 +53,7 @@ func TestConfigProvider_MissingRowIsUnlimitedOnPrem(t *testing.T) {
 
 	lim, err := NewConfigProvider(db).Limits(context.Background(), "acme")
 	if err != nil {
-		t.Fatalf("self-hosted must keep the permissive default (ADR-0006), got err = %v", err)
+		t.Fatalf("self-hosted must keep the permissive default (ADR-0074), got err = %v", err)
 	}
 	if lim != (Limits{}) {
 		t.Fatalf("expected unlimited Limits on-prem, got %+v", lim)

@@ -4,7 +4,7 @@
 package api
 
 // admin_server_cue_test.go — unit tests for the CUE language-service RPCs
-// wired onto DaemonService (ADR-0037): ValidateMissionCUE, CompleteMissionCUE,
+// wired onto DaemonService (ADR-0058): ValidateMissionCUE, CompleteMissionCUE,
 // HoverMissionCUE, and the cue_source path of CreateMissionDefinition.
 //
 // These methods previously lived on DaemonAdminService (platform-sdk) and are

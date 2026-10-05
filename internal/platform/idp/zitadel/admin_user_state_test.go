@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // admin_user_state_test.go — the sign-in-state changes the admin-approval
-// registration rung runs on (ADR-0006, gibson#22).
+// registration rung runs on (ADR-0074, gibson#22).
 //
 // The rung's safety rests on one claim: a registered account cannot be used
 // until an administrator approves it. That claim is only as good as these

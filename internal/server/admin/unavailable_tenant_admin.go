@@ -10,7 +10,7 @@
 // surfaces an actionable "broker stack not initialised" message instead of
 // the misleading codes.Unimplemented.
 //
-// ADR-0039: formerly backed by adminv1.TenantAdminServiceServer; now backs
+// ADR-0058: formerly backed by adminv1.TenantAdminServiceServer; now backs
 // tenantv1.MembershipServiceServer.
 //
 // Spec: tenant-secrets-broker-completion (Task 8, design D2).

@@ -20,8 +20,6 @@
 // Having the numbers written out twice is what let one copy be fixed and the
 // other not. They are written once here instead, so the two listeners cannot
 // disagree again.
-//
-// ADR-0063.
 package grpckeepalive
 
 import (

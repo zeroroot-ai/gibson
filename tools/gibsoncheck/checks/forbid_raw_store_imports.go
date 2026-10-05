@@ -71,7 +71,7 @@ var allowedStorePackages = []string{
 	"/cmd/mission-storage-migrate", // one-off offline mission-storage migrator; peer of cmd/gibson-migrate (spec: mirror-delete-and-offline-migrator).
 
 	// Folded platform-clients / shared infra (gibson#913, E4 monorepo fold,
-	// ADR-0026/0056). These ARE the pool-construction / shared-store
+	// ADR-0056). These ARE the pool-construction / shared-store
 	// primitives every internal service consumes — constructing raw store
 	// clients is their entire purpose, so they are permanent peers of
 	// internal/infra/datapool, not daemon business logic.

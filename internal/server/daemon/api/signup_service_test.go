@@ -123,7 +123,7 @@ type memVerificationStore struct {
 	claimErr        error
 	markConsumedErr error
 
-	// Approval-rung failure injection (ADR-0006, gibson#22).
+	// Approval-rung failure injection (ADR-0074, gibson#22).
 	issuePendingErr   error
 	listPendingErr    error
 	claimApprovalErr  error

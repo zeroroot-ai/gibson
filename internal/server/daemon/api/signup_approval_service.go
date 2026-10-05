@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package api — signup_approval_service.go implements the admin-approval
-// registration rung (ADR-0006, gibson#22).
+// registration rung (ADR-0074, gibson#22).
 //
 // # The problem this solves, in one sentence
 //
@@ -374,7 +374,7 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 }
 
 // signupDeciderID returns the acting administrator's subject. A decision with
-// no name attached is not attributable, which ADR-0006 requires it to be, so
+// no name attached is not attributable, which ADR-0074 requires it to be, so
 // an unattributable caller is refused rather than recorded as nobody.
 func signupDeciderID(ctx context.Context) (string, error) {
 	identity, err := auth.IdentityFromContext(ctx)

@@ -4,7 +4,7 @@
 package api
 
 // signup_seam_gate_test.go — tests for the signup seam gate on SignupService
-// (deploy ADR-0006, gibson#1088).
+// (ADR-0074, gibson#1088).
 //
 // The gate runs first, before validation and before any side effect, on all
 // three RPCs. These tests verify that:
@@ -119,7 +119,7 @@ func TestSignup_SeamGate_ErrorMessageMentionsAdminProvision(t *testing.T) {
 // any content in the incoming request.
 //
 // This is the negative-test guarantee for the signup seam (gibson#1094,
-// deploy ADR-0006): only the environment drives the policy; request data is
+// ADR-0074): only the environment drives the policy; request data is
 // inert.
 func TestSignup_PolicyImmutableToRequestInput(t *testing.T) {
 	// Starts with PolicyAdminOnly — a self-hosted deployment where

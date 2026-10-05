@@ -101,7 +101,7 @@ type fakeIDPClient struct {
 	findUserFn    func(ctx context.Context, email string) (string, error)
 	findUserCalls []string
 
-	// Approval-rung recording (ADR-0006, gibson#22). deactivated,
+	// Approval-rung recording (ADR-0074, gibson#22). deactivated,
 	// reactivated and deletedUsers record the sign-in-state changes the
 	// registration and approval paths make; the *Err fields drive the failure
 	// branches that must never leave a usable unapproved account.

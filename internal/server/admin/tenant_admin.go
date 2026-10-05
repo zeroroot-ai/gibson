@@ -109,7 +109,7 @@ type ReservedNamesProvider interface {
 }
 
 // TenantAdminServer implements the membership side of gibson.tenant.v1 (MembershipService)
-// and — via CombinedSecretsServer — the broker-config side of SecretsService (ADR-0039).
+// and — via CombinedSecretsServer — the broker-config side of SecretsService (ADR-0058).
 type TenantAdminServer struct {
 	tenantv1.UnimplementedMembershipServiceServer
 

@@ -82,7 +82,7 @@ use ToolHive Cedar. The daemon is the only client of the ToolHive proxy Service.
 Gibson sets `oidcConfigRef` so that only the daemon's identity can call the proxy,
 with an audience bound per server to stop token replay. All tool-level
 authorization stays in FGA and the `search_tools` / `invoke_tool` meta-tools
-(ADR-0047). ToolHive is a dumb, isolated runtime. Gibson is the policy brain.
+(ADR-0065). ToolHive is a dumb, isolated runtime. Gibson is the policy brain.
 
 **5. http connectors use a curated catalog and a button, not YAML.** Gibson ships
 a curated catalog of known connectors (GitLab first). A catalog entry holds the

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# check-airgap-build.sh — CI gate (gibson#818, E14 / ADR-0050): a clean-room
+# check-airgap-build.sh — CI gate (gibson#818, E14 / ADR-0089): a clean-room
 # clone of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
 # integrations, gibson) builds air-gapped with zero undeclared external fetch.
 # This is the self-hostable/defense promise: mirror the public modules once,
@@ -21,7 +21,7 @@
 #      proving nothing reaches out at build time.
 #
 # Runtime phone-home / license-server checks are out of scope here: the OSS
-# stack has no license client by construction (ADR-0050/0054 — enforced
+# stack has no license client by construction (ADR-0089 — enforced
 # structurally by scripts/check-oss-boundary.sh, gibson#817); this gate pins
 # the build-time half of the air-gap promise.
 #

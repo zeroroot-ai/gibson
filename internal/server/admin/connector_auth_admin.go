@@ -4,7 +4,7 @@
 // Package admin — connector_auth_admin.go
 //
 // ConnectorAuthAdminServer implements gibson.tenant.v1.ConnectorAuthService —
-// the dashboard's surface for a connector's OAuth grant lifecycle (ADR-0064).
+// the dashboard's surface for a connector's OAuth grant lifecycle (ADR-0061).
 // Pairs with plugin_admin.go (the connectors themselves) and secrets_admin.go
 // (the broker the grant lives in).
 //
@@ -190,7 +190,7 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 	identity, err := auth.IdentityFromContext(ctx)
 	if err != nil || identity.Subject == "" {
 		// A grant with no recorded human is a service account nobody is
-		// accountable for — the thing ADR-0064 refuses to create.
+		// accountable for — the thing ADR-0061 refuses to create.
 		return nil, status.Error(codes.PermissionDenied, "no identity in context")
 	}
 	connector := req.GetConnector()
@@ -442,7 +442,7 @@ func (s *ConnectorAuthAdminServer) SetConnectorSecret(ctx context.Context, req *
 	identity, err := auth.IdentityFromContext(ctx)
 	if err != nil || identity.Subject == "" {
 		// A credential with no recorded human is a service account nobody is
-		// accountable for — the thing ADR-0064 refuses to create.
+		// accountable for — the thing ADR-0061 refuses to create.
 		return nil, status.Error(codes.PermissionDenied, "no identity in context")
 	}
 	connector := req.GetConnector()

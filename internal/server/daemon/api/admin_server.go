@@ -6,7 +6,7 @@
 // DaemonService CUE language-service RPCs: ValidateMissionCUE,
 // CompleteMissionCUE, HoverMissionCUE.
 //
-// These methods were previously on DaemonAdminService (platform-sdk). ADR-0037
+// These methods were previously on DaemonAdminService (platform-sdk). ADR-0058
 // moves them onto DaemonService (OSS SDK) so customers can use the CUE editor
 // without needing internal admin credentials. The DaemonAdminServer wrapper
 // is deleted; the business logic is wired directly onto DaemonServer.

@@ -292,7 +292,7 @@ func ensureTenantQuotasTable(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("alter tenant_quotas (plan_id): %w", err)
 	}
 	// concurrent_connectors is the plan-tier hosted-connector instance budget
-	// (ADR-0047 facet 3). ADD COLUMN IF NOT EXISTS keeps pre-existing tables
+	// (ADR-0065). ADD COLUMN IF NOT EXISTS keeps pre-existing tables
 	// forward-compatible.
 	const ensureConnectors = `
 		ALTER TABLE tenant_quotas

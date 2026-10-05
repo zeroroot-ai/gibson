@@ -385,7 +385,7 @@ check-no-tracked-binaries:
 check-bringup-diagnostics:
 	@bash scripts/ci/dump-bringup-diagnostics.sh --selftest
 
-# check-oss-boundary asserts the open-core boundary (gibson#817, ADR-0050/0054):
+# check-oss-boundary asserts the open-core boundary (gibson#817, ADR-0089):
 # the Apache layer (sdk/adk/setec/gibson-executor) links zero ELv2/closed code,
 # and gibson's go.mod never requires the closed billing repo. Clones the public
 # OSS repos (network) unless OSS_BOUNDARY_REPOS_DIR points at existing checkouts.
@@ -396,7 +396,7 @@ check-oss-boundary:
 	@echo "check-oss-boundary PASSED"
 
 # check-airgap-build asserts the clean-room air-gap promise (gibson#818,
-# ADR-0050): fresh anonymous clones of the OSS stack (sdk/adk/setec/
+# ADR-0089): fresh anonymous clones of the OSS stack (sdk/adk/setec/
 # gibson-executor) build + test-compile with zero external fetch after a
 # single public-proxy module-cache warm-up. Needs network for phases 0/1.
 # CI: .github/workflows/airgap-build.yml (path-filtered PRs + weekly sweep).

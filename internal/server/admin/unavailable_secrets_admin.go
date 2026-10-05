@@ -9,7 +9,7 @@
 // every RPC so the dashboard surfaces an actionable "secrets stack not
 // initialised" message instead of the misleading codes.Unimplemented.
 //
-// ADR-0039: formerly backed by adminv1.SecretsAdminServiceServer; now backs
+// ADR-0058: formerly backed by adminv1.SecretsAdminServiceServer; now backs
 // tenantv1.SecretsServiceServer (which adds broker-config RPCs).
 //
 // Spec: gibson#564 (SecretsAdminService was never registered).

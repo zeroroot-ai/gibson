@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-// The edge no longer bounds gRPC (ADR-0063), so these assertions are the only
+// The edge no longer bounds gRPC, so these assertions are the only
 // thing keeping a unary handler bounded at all. Each one fails if the
 // interceptor stops doing its job, rather than merely exercising it.
 

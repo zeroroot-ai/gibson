@@ -55,7 +55,7 @@ type signupVerificationStore interface {
 	MarkConsumed(ctx context.Context, rawSession string) error
 	PurgeExpired(ctx context.Context) (expired, deleted int64, err error)
 
-	// The admin-approval registration rung (ADR-0006, gibson#22).
+	// The admin-approval registration rung (ADR-0074, gibson#22).
 	IssuePendingApproval(ctx context.Context, p IssueParams, ownerUserID string) (SignupVerification, error)
 	ListPendingApprovals(ctx context.Context, limit int) ([]SignupVerification, error)
 	ClaimApproval(ctx context.Context, id, decidedBy string) (SignupVerification, error)

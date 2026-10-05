@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # check-coverage-floor.sh — absolute total-coverage floor (gibson#794, E3 /
-# QUALITY-BARS §4). Supersedes the old 60% bar (former ADR-0021).
+# QUALITY-BARS §4). Supersedes the old 60% bar.
 #
 # The repo total is well below the 80% target today (~48% on measured
 # packages), so an immediate hard 80% would red main — forbidden by the

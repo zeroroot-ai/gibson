@@ -3,7 +3,7 @@
 
 // Package integration — entitlements_seam_contract_test.go
 //
-// Contract / e2e test for the entitlements runtime seam (ADR-0003, ADR-0054,
+// Contract / e2e test for the entitlements runtime seam (ADR-0003, ADR-0089,
 // gibson#1026, gibson#1029).
 //
 // Architecture background:

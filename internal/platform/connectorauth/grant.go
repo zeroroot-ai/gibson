@@ -6,7 +6,7 @@
 // A connector fronts a third-party MCP server that ToolHive runs in the
 // customer's tenant namespace (ADR-0014, ADR-0065). When that vendor requires
 // OAuth — GitLab's first-party MCP server does, with no personal-access-token
-// path — something has to acquire and refresh a token. ADR-0064 decides that
+// path — something has to acquire and refresh a token. ADR-0061 decides that
 // something is the platform, never the connector's ToolHive proxy, and the
 // reason is in the code rather than a preference: the proxy presents a
 // credential it reads out of a Kubernetes Secret. It has no way to write one
@@ -91,7 +91,7 @@ type Grant struct {
 	RevocationEndpoint string `json:"revocation_endpoint,omitempty"`
 
 	// AuthorizedBy is the human who ran the authorization, and AuthorizedAt is
-	// when. ADR-0064 requires both to be recorded and surfaced: a connector is
+	// when. ADR-0061 requires both to be recorded and surfaced: a connector is
 	// a service account with an audit trail in front of it, and "who is this
 	// connector acting as" must have an answer on screen. Naming the boundary
 	// is what keeps it honest — implying per-user fidelity the vendor's own
@@ -128,7 +128,7 @@ func (g *Grant) Validate() error {
 	}
 	if g.AuthorizedBy == "" {
 		// Not cosmetic. A grant with no recorded human is a service account
-		// nobody is accountable for, which is the thing ADR-0064 refuses.
+		// nobody is accountable for, which is the thing ADR-0061 refuses.
 		missing = append(missing, "authorized_by")
 	}
 	if len(missing) > 0 {

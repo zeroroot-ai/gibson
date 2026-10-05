@@ -4,7 +4,7 @@
 package main
 
 // seed_first_admin_test.go — unit tests for the seed-first-admin subcommand
-// configuration loading and validation (deploy ADR-0006, gibson#1088).
+// configuration loading and validation (ADR-0074, gibson#1088).
 //
 // These tests only cover the config-parsing layer; the gRPC dial path is not
 // tested here (it requires a live daemon or a mock gRPC server, which belongs

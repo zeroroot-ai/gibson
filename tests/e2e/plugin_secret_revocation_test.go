@@ -30,7 +30,7 @@
 //     interval (the daemon hands it out at registration) plus the stream's
 //     latency plus a margin. A failure prints every poll.
 //
-// Per ADR-0012 this runs on `main` and on a schedule, never on a PR. The
+// Per ADR-0080 this runs on `main` and on a schedule, never on a PR. The
 // workflow is .github/workflows/exit-test-tool-dispatch.yml: the cluster
 // it stands up has Envoy, Zitadel, SPIRE and the test-mode daemon, and the
 // plugin is patched into the Argo application before this suite runs.

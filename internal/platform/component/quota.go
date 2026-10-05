@@ -30,7 +30,7 @@ type TenantQuota struct {
 	ConcurrentMissions int    `json:"concurrent_missions"`
 	ConcurrentAgents   int    `json:"concurrent_agents"`
 	// ConcurrentConnectors caps the hosted MCP connector instances a tenant
-	// may have running at once (ADR-0047 facet 3). 0 = unlimited. Unlike the
+	// may have running at once (ADR-0065). 0 = unlimited. Unlike the
 	// mission/agent counters, the live count is read from the component
 	// registry (heartbeat liveness) at launch time, so there is no separate
 	// active counter to keep in sync.

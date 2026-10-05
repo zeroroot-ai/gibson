@@ -46,7 +46,7 @@ const (
 	// ConditionTrustedDomainReady reports whether the cluster-internal
 	// Zitadel Service hostname has been registered as an additional trusted
 	// domain on the Zitadel instance. Once true, in-cluster consumers can
-	// dial Zitadel by Service name without hostAliases. See ADR-0006.
+	// dial Zitadel by Service name without hostAliases. See ADR-0092.
 	ConditionTrustedDomainReady = "TrustedDomainReady"
 
 	// ConditionUnsealKeyEscrowed reports whether the OpenBao unseal key has
@@ -56,7 +56,7 @@ const (
 	// ADR-0010 the platform MINTS the unseal key and no human ever types it,
 	// which is the secure shape — a key an operator supplies exists in a
 	// terminal, a file and a CI variable, whereas a minted key exists only in
-	// etcd. But it leaves the key with no copy, and ADR-0007's restore drill
+	// etcd. But it leaves the key with no copy, and ADR-0075's restore drill
 	// showed the archive ALONE cannot restore a Shamir store: lose etcd and
 	// the OpenBao volume is unreadable even from a perfect Postgres backup.
 	//

@@ -78,7 +78,7 @@ const (
 	signupStatusSendFailed = "send_failed"
 
 	// signupStatusPendingApproval is the approval rung's waiting state
-	// (ADR-0006, gibson#22): the registrant holds a deactivated account and an
+	// (ADR-0074, gibson#22): the registrant holds a deactivated account and an
 	// administrator has not decided yet.
 	signupStatusPendingApproval = "pending_approval"
 
@@ -619,7 +619,7 @@ func (s *SignupVerificationStore) PurgeExpired(ctx context.Context) (expired, de
 	// pending_approval is deliberately absent from this sweep. A registration
 	// waits for a person to decide it, and a clock that decided it instead
 	// would both take that decision away and strand the deactivated account
-	// the row names (ADR-0006, gibson#22).
+	// the row names (ADR-0074, gibson#22).
 	const expireQ = `
 		UPDATE signup_verification
 		   SET status = 'expired', updated_at = $1
@@ -689,7 +689,7 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 }
 
 // ---------------------------------------------------------------------------
-// Admin-approval registration rung (ADR-0006, gibson#22)
+// Admin-approval registration rung (ADR-0074, gibson#22)
 // ---------------------------------------------------------------------------
 
 // SignupApprovalPageSize is the default and the maximum number of pending

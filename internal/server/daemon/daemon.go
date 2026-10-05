@@ -236,7 +236,7 @@ type daemonImpl struct {
 	capabilityGrantSvc *capabilitygrant.CapabilityGrantService
 
 	// connectorTokenReconciler keeps connector vendor access tokens fresh
-	// ahead of expiry (ADR-0064). Constructed in buildGRPCServer (needs the
+	// ahead of expiry (ADR-0061). Constructed in buildGRPCServer (needs the
 	// secrets service + FGA authorizer) and started by Start. Nil when the
 	// secrets stack is unavailable.
 	connectorTokenReconciler *reconciler.ConnectorTokenReconciler
@@ -1199,7 +1199,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.entitlementsProvider = entitlements.New(d.platformDB)
 		d.quotaManager = component.NewQuotaManager(tenantStore, d.entitlementsProvider, d.logger.Slog())
 		d.logger.Info(ctx, "quota manager initialized via entitlements seam")
-		// Emit the startup seam-state table (deploy ADR-0006, gibson#1087):
+		// Emit the startup seam-state table (ADR-0074, gibson#1087):
 		// logs each registered seam as wired (remote SaaS component active) or
 		// fail-safe (self-hosted/OSS default). Any seam registered via
 		// seam.Register — including entitlements above — appears in the table.
@@ -2071,7 +2071,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Start the connector token refresher — mints fresh vendor access tokens
 	// ahead of expiry for every enabled connector with an OAuth grant
-	// (ADR-0064). Built in buildGRPCServer; nil when the secrets stack or
+	// (ADR-0061). Built in buildGRPCServer; nil when the secrets stack or
 	// authorizer is unavailable. Runs best-effort; failures are logged
 	// per-connector, not fatal.
 	if d.connectorTokenReconciler != nil {

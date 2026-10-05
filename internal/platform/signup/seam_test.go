@@ -84,7 +84,7 @@ func TestSignupSeam_KnobWhitespaceOnly_AdminOnly(t *testing.T) {
 	}
 }
 
-// TestSignupSeam_KnobApproval_ApprovalRung pins the middle rung of ADR-0006:
+// TestSignupSeam_KnobApproval_ApprovalRung pins the middle rung of ADR-0074:
 // the knob's VALUE selects it, so one knob describes all three rungs and no
 // combination of settings can describe a state that is not a rung.
 func TestSignupSeam_KnobApproval_ApprovalRung(t *testing.T) {

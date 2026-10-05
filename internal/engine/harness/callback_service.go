@@ -1193,7 +1193,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harnesspb.CallToolProtoRequest) (*harnesspb.CallToolProtoResponse, error) {
 	// Meta-tools (search_tools / invoke_tool) are synthetic: they are not
 	// registered tools, so intercept before the registry dispatch and resolve
-	// them against the connector catalog (ADR-0047 facet 5).
+	// them against the connector catalog (ADR-0065).
 	if isMetaTool(req.GetName()) {
 		return s.callMetaTool(ctx, req)
 	}
@@ -1420,7 +1420,7 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *harnesspb.L
 
 	// At MCP catalog scale the agent does not see the full tool set as native
 	// functions; it sees the two meta-tools and discovers via search_tools
-	// (ADR-0047 facet 5). Advertise them only when the catalog is wired.
+	// (ADR-0065). Advertise them only when the catalog is wired.
 	if s.metaToolsWired() {
 		tools = append(tools, metaToolDescriptors()...)
 	}

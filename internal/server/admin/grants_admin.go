@@ -64,7 +64,7 @@ type CapabilityGrantsReader interface {
 	ListActive(ctx context.Context, tenant auth.TenantID) ([]GrantInfo, error)
 }
 
-// GrantsAdminServer implements tenantv1.GrantsServiceServer (ADR-0039).
+// GrantsAdminServer implements tenantv1.GrantsServiceServer (ADR-0058).
 type GrantsAdminServer struct {
 	tenantv1.UnimplementedGrantsServiceServer
 

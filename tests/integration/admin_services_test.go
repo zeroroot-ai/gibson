@@ -298,7 +298,7 @@ func (a *allowAdminAuthorizer) ListUsersOfType(context.Context, string, string, 
 	return nil, nil
 }
 
-// Approval-rung sign-in-state changes (ADR-0006, gibson#22). This stub does not
+// Approval-rung sign-in-state changes (ADR-0074, gibson#22). This stub does not
 // exercise them; the registration and approval paths are covered in
 // internal/server/daemon/api.
 func (*fakeUserIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {

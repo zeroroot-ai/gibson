@@ -6,7 +6,7 @@ package authz
 import "testing"
 
 // The connector grant — a refresh token, a client id, and the human who
-// authorized them — is platform-only (ADR-0064). No component may resolve it.
+// authorized them — is platform-only (ADR-0061). No component may resolve it.
 //
 // That is not enforced by anyone remembering not to write a tuple. It is
 // structural: `secret.can_resolve` admits ONLY `plugin_principal`, so an

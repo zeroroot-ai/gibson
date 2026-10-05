@@ -12,7 +12,7 @@ import (
 )
 
 // Nothing could assert this while the options sat inline in buildGRPCServer,
-// which is how the main listener shipped without keepalive at all (ADR-0063).
+// which is how the main listener shipped without keepalive at all.
 // These are cheap, and they are the reason the assembly was extracted.
 
 func TestBaseServerOptionsInstallsEveryTransportOption(t *testing.T) {

@@ -7,7 +7,7 @@
 # member, the job closes with a verdict, a stranger tenant cannot read it,
 # and the bank scales to zero with no sandbox left behind.
 #
-# Runs on main and on a schedule, never on a pull request (ADR-0012). It feeds
+# Runs on main and on a schedule, never on a pull request (ADR-0080). It feeds
 # the scorecard and blocks nothing.
 #
 # Two things a human must set once, and only a human can set them:
@@ -141,7 +141,7 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
-      # Stage 0 writes the bringup keyring the install reads (ADR-0015,
+      # Stage 0 writes the bringup keyring the install reads (ADR-0083,
       # deploy#1730, deploy#1732). The registry pull token is the keyring
       # member GHCR_PULL_TOKEN now; baseline-up.sh refuses the environment
       # variable it used to take, so there is one path and no second one. The

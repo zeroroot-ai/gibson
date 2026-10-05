@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package metatool implements the two agent-facing meta-tools from ADR-0047
-// facet 5: search_tools (discovery over the FGA-scoped connector catalog) and
+// Package metatool implements the two agent-facing meta-tools from ADR-0065:
+// search_tools (discovery over the FGA-scoped connector catalog) and
 // invoke_tool (deterministic id → PluginInvoke{plugin_name, method} dispatch).
 //
 // Binding thousands of MCP tools to the LLM as native function names does not

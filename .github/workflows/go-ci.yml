@@ -1,8 +1,7 @@
 name: go-ci
 
 # Thin caller for the canonical three-tier Go CI (Epic: cicd-efficiency, board #44,
-# slice S2, gibson#1128). See docs/testing/ci-lanes.md and
-# docs/adr/0060-ci-runner-split-hosted-default-ephemeral-metal.md.
+# slice S2, gibson#1128). See docs/testing/ci-lanes.md.
 #
 # ---------------------------------------------------------------------------
 # LANE PARITY (gibson#1236 / #1233 / #1280) — read this before adding a job.

@@ -16,7 +16,7 @@ import (
 // Envoy carried `timeout: 60s` on every `/gibson.` route, which applied to
 // unary and streaming alike because route matching is by path prefix and
 // cannot tell the two apart. That was fatal for streaming: a Mission has no
-// bounded duration (gibson CONTEXT.md), so every mission died at 60s. ADR-0063
+// bounded duration (gibson CONTEXT.md), so every mission died at 60s. The fix
 // removes the edge timeout entirely and moves the unary half here, where the
 // two call shapes ARE distinguishable.
 const defaultUnaryDeadline = 60 * time.Second
@@ -79,8 +79,6 @@ func resolveUnaryDeadline(configured time.Duration) (deadline time.Duration, adj
 // The return type is the guarantee, checked by the compiler at this line:
 // grpc.UnaryServerInterceptor cannot be installed on the stream chain, so no
 // amount of later editing can attach this deadline to RunMission.
-//
-// ADR-0063.
 func newUnaryDeadlineInterceptor(d time.Duration) grpc.UnaryServerInterceptor {
 	d, _ = resolveUnaryDeadline(d)
 	return func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
