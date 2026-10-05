@@ -89,23 +89,21 @@ func (s *DaemonServer) emitRewindAudit(ctx context.Context, parentID, checkpoint
 		"parent_checkpoint_id", checkpointID,
 		"caller_subject", subject,
 	)
-	if s.tenantAdminAuditWriter == nil {
-		return
+	if s.tenantAdminAuditWriter != nil {
+		meta, err := json.Marshal(map[string]string{
+			"parent_mission_id":    parentID,
+			"parent_checkpoint_id": checkpointID,
+		})
+		if err == nil {
+			s.tenantAdminAuditWriter.Log(audit.Event{
+				TenantID:   tenantID,
+				ActorID:    subject,
+				ActorType:  "user",
+				Action:     "mission.rewound",
+				TargetType: "mission",
+				TargetID:   newID,
+				Metadata:   meta,
+			})
+		}
 	}
-	meta, err := json.Marshal(map[string]string{
-		"parent_mission_id":    parentID,
-		"parent_checkpoint_id": checkpointID,
-	})
-	if err != nil {
-		return
-	}
-	s.tenantAdminAuditWriter.Log(audit.Event{
-		TenantID:   tenantID,
-		ActorID:    subject,
-		ActorType:  "user",
-		Action:     "mission.rewound",
-		TargetType: "mission",
-		TargetID:   newID,
-		Metadata:   meta,
-	})
 }
