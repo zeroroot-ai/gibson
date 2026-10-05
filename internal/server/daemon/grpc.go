@@ -2005,6 +2005,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// exact-object check has to be made here. One-code-path slice
 			// deploy#195: d.authorizer is always a real FGA client.
 			pluginInvokeSvc.WithAuthorizer(d.authorizer)
+			pluginInvokeSvc.WithEnrollmentReader(capabilitygrant.NewCapabilityGrantStore(d.platformDB))
 			pluginpb.RegisterPluginInvokeServiceServer(srv, pluginInvokeSvc)
 			d.logger.Info(ctx, "PluginInvokeService gRPC endpoint registered")
 		} else {

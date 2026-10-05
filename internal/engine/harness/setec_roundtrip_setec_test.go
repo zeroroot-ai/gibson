@@ -199,6 +199,7 @@ func TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed(t *testing.T) {
 			Kind:         "tool",
 			Name:         deniedTool,
 			ContentTrust: componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+			Attested:     true, // cluster code the catalog does not list
 			Metadata:     map[string]string{"grpc_endpoint": "localhost:1"},
 		}},
 	}, nil)

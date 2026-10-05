@@ -56,7 +56,11 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 				Name:         "acme-registry-tool",
 				InstanceID:   "i1",
 				ContentTrust: trust,
-				Metadata:     map[string]string{"grpc_endpoint": "localhost:1"},
+				// The gate reads where an instance runs, not what it reports.
+				// The denied case is an attested instance the catalog does not
+				// list. The allowed case is an instance on the tenant's machine.
+				Attested: trust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+				Metadata: map[string]string{"grpc_endpoint": "localhost:1"},
 			}},
 		},
 		registryAdapter: spy,

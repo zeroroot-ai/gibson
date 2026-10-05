@@ -645,7 +645,29 @@ func ListConnectors() []ConnectorEntry {
 	return out
 }
 
-// LookupConnector returns the connector entry with the given id.
+// LookupContentTrust returns the contentTrust the catalog states for the
+// tool, plugin or agent of the given kind and id, and whether the catalog
+// lists such a component. The loader refuses a workload entry with no
+// statement, so a listed entry always returns "trusted" or "untrusted".
+func LookupContentTrust(kind, id string) (string, bool) {
+	for i := range catalog {
+		m := &catalog[i]
+		if m.Kind != kind || m.ID != id {
+			continue
+		}
+		switch {
+		case m.tool != nil:
+			return m.tool.ContentTrust, true
+		case m.plugin != nil:
+			return m.plugin.ContentTrust, true
+		case m.agent != nil:
+			return m.agent.ContentTrust, true
+		}
+		return "", false
+	}
+	return "", false
+}
+
 // LookupEgress returns the egressAllow ceiling declared for the catalog
 // component of the given kind and id, and whether such a component is listed.
 // An agent's ceiling is applied to the setec egress of its tool dispatches

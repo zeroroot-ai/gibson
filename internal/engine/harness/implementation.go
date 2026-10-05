@@ -848,9 +848,11 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				// Dispatch-policy gate (ADR-0110 / gibson#994). We reach here
 				// only when the tool has no SANDBOXED entry (the top block
 				// returned !found), so there is no sandboxed dispatch available.
-				// An UNTRUSTED component must not take a direct-gRPC or
-				// work-queue path under setec-only — deny before selecting one.
-				if dispatchpolicy.Decide(info.ContentTrust, false, h.deploymentShape) == dispatchpolicy.Deny {
+				// The gate reads where the instance runs and, for code in the
+				// platform's cluster, the trust the catalog states. What the
+				// instance reported about itself is not an input.
+				placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
+				if dispatchpolicy.Decide(placement, trust, false, h.deploymentShape) == dispatchpolicy.Deny {
 					return types.WrapError(types.SANDBOX_POLICY_DENIED,
 						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", name), nil)
 				}
@@ -2286,10 +2288,10 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	//   - a sandboxed agent launcher is wired → launch the agent as an
 	//     ephemeral Setec sandbox for this one mission run (ADR-0116);
 	//   - no launcher is wired → deny, fail-closed, exactly as before.
-	// Agents whose content trust is unknown / unspecified are treated as
-	// trusted, so delegation of first-party agents is unchanged. (Every tool
-	// the delegated agent calls is independently gated by CallToolProto.)
-	agentTrust, trustErr := h.resolveAgentContentTrust(ctx, name)
+	// The gate inputs come from where the agent runs and from the catalog,
+	// never from what an instance reported (resolveAgentStanding). (Every
+	// tool the delegated agent calls is independently gated by CallToolProto.)
+	agentPlacement, agentTrust, trustErr := h.resolveAgentStanding(ctx, name)
 	if trustErr != nil {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent %q: content trust could not be established; refusing in-process delegation", name), trustErr)
@@ -2303,6 +2305,7 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	// leaves agentTrust as the registry established it.
 	if h.agentDispatchMode != nil {
 		if mode, listed := h.agentDispatchMode(name); listed && mode == componentcatalog.DispatchModeSandboxed {
+			agentPlacement = dispatchpolicy.PlacementCluster
 			agentTrust = componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 		}
 	}
@@ -2310,9 +2313,10 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	// in-process. That is "untrusted content" OR a catalog manifest that
 	// declares dispatchMode==sandboxed (forced UNTRUSTED just above), so a
 	// trusted first-party agent still routes to the sandbox launch.
-	sandboxAgent := agentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+	sandboxAgent := agentPlacement == dispatchpolicy.PlacementCluster &&
+		agentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 	hasSandboxedAgentDispatch := sandboxAgent && h.agentLauncher != nil
-	switch dispatchpolicy.Decide(agentTrust, hasSandboxedAgentDispatch, h.deploymentShape) {
+	switch dispatchpolicy.Decide(agentPlacement, agentTrust, hasSandboxedAgentDispatch, h.deploymentShape) {
 	case dispatchpolicy.Deny:
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process delegation", name), nil)
@@ -3099,43 +3103,52 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 	return sandboxed.EgressRulesFromAllow(allow)
 }
 
-// resolveAgentContentTrust returns the strictest content-trust classification
-// registered for an agent in the component registry (UNTRUSTED if any live
-// instance is untrusted), or CONTENT_TRUST_UNSPECIFIED when the agent has no
-// registry entry. Used by the DelegateToAgent dispatch-policy gate (ADR-0110 /
-// gibson#996).
+// resolveAgentStanding returns the dispatch gate inputs for delegating to the
+// named agent (ADR-0110 / gibson#996): where its code runs and how far the
+// platform trusts it. Neither comes from what a registered instance reported.
 //
-// It returns an error — meaning DENY the delegation — whenever the trust of
-// the named agent could not be established: a request carrying no tenant, or
-// a registry lookup that failed. Delegation runs the delegated agent's own
-// code in this process and there is no sandboxed agent dispatch to fall back
-// to, so "we could not tell" has to deny. Reporting UNSPECIFIED for those
-// cases (which the gate reads as TRUSTED) meant an untrusted sub-agent was
-// delegated in-process whenever the registry was briefly unreachable.
+//   - An instance whose principal enrolled with an attested identity runs in
+//     the platform's cluster. If any live instance is attested, the agent
+//     takes the trust the catalog states for its name, and no statement
+//     means untrusted to the gate.
+//   - If instances exist and none is attested, the agent runs on the tenant's
+//     own machine and gets its work through the queue.
+//   - With no registered instance the delegation can only reach an agent
+//     built into the daemon, which is the platform's own code: trusted.
 //
-// A harness with no component registry at all is a different case: the
-// feature is not configured, no agent is classified either way, and the
-// pre-registry behaviour stands.
-func (h *DefaultAgentHarness) resolveAgentContentTrust(ctx context.Context, name string) (componentpb.ContentTrust, error) {
+// It returns an error — meaning DENY the delegation — whenever the standing
+// could not be established: a request carrying no tenant, or a registry
+// lookup that failed. "We could not tell" has to deny.
+//
+// A harness with no component registry at all is a different case: no agent
+// is registered either way, and only built-in agents can run.
+func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name string) (dispatchpolicy.Placement, componentpb.ContentTrust, error) {
+	const builtInTrust = componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
 	if h.componentRegistry == nil {
-		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED, nil
+		return dispatchpolicy.PlacementCluster, builtInTrust, nil
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
+		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
 			fmt.Errorf("no tenant in context")
 	}
-	instances, err := h.componentRegistry.Discover(ctx, tenant, "agent", name)
+	instances, err := h.componentRegistry.Discover(ctx, tenant, authz.KindAgent, name)
 	if err != nil {
-		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
+		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
 			fmt.Errorf("component registry discover: %w", err)
 	}
+	if len(instances) == 0 {
+		return dispatchpolicy.PlacementCluster, builtInTrust, nil
+	}
+	attested := false
 	for _, info := range instances {
-		if info.ContentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
-			return componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, nil
+		if info.Attested {
+			attested = true
+			break
 		}
 	}
-	return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED, nil
+	placement, trust := component.DispatchStanding(attested, authz.KindAgent, name)
+	return placement, trust, nil
 }
 
 // taskGrantAllowedRPCs is the callback surface a dispatched component's task
