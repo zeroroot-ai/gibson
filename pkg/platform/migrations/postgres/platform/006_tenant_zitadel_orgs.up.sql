@@ -2,7 +2,7 @@
 --
 -- gibson#621: the daemon's MembershipService writes the Zitadel half of human
 -- membership (org member add/remove) for granular member operations, so the
--- dashboard can stop writing TenantMember CRs (ADR-0044). The daemon cannot
+-- dashboard can stop writing TenantMember CRs (ADR-0058). The daemon cannot
 -- read Kubernetes (ADR-0023), so it cannot resolve a tenant's per-tenant
 -- Zitadel org id from Tenant.Status.ZitadelOrgID. The tenant-operator — the
 -- lifecycle coordinator that provisions the org at standup — seeds the

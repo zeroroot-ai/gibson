@@ -1,0 +1,12 @@
+# The allow list of the ADR citation guard (the shared workflow
+# adr-citations.yml of zeroroot-ai/.github). An entry exempts each wrong
+# citation in one file. An entry that exempts no finding fails the guard.
+
+# why: this file cites ADR-0007 for ADR-0107. Lane 3 owns the file during the release push. gibson#830 corrects it.
+internal/server/daemon/grpc.go
+# why: this file cites ADR-0012 for ADR-0112. Lane 3 owns the file during the release push. gibson#830 corrects it.
+internal/server/daemon/mission_lifecycle.go
+# why: this file cites ADR-0005 for ADR-0129. Lane 2 owns the file during the release push. gibson#830 corrects it.
+internal/engine/brain/beliefvi/models/base-v1.json
+# why: this file is the source of the embedded copy above, and the two files stay equal byte for byte. gibson#830 corrects it.
+sidecar/belief/models/base-v1.json

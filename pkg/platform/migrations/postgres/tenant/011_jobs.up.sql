@@ -1,6 +1,6 @@
 -- 011_jobs.up.sql
 --
--- Jobs, their inputs and their event log (ADR-0019, gibson#1710).
+-- Jobs, their inputs and their event log (ADR-0119, gibson#1710).
 --
 -- jobs        — one persistent Claude Code session on a bank member.
 -- job_inputs  — the messages sent to a job, in order. The member pulls them

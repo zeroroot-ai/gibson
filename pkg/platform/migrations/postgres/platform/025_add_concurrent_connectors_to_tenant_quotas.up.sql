@@ -1,7 +1,7 @@
 -- 025_add_concurrent_connectors_to_tenant_quotas.up.sql
 --
 -- Adds concurrent_connectors to tenant_quotas: the plan-tier budget of hosted
--- MCP connector instances (ADR-0047 facet 3), read by the entitlements
+-- MCP connector instances (ADR-0065), read by the entitlements
 -- provider on every Limits call alongside concurrent_missions and
 -- concurrent_agents.
 --

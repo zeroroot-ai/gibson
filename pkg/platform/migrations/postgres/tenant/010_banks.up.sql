@@ -1,6 +1,6 @@
 -- 010_banks.up.sql
 --
--- Banks of always-on coding agents and their members (ADR-0019, gibson#1708).
+-- Banks of always-on coding agents and their members (ADR-0119, gibson#1708).
 --
 -- banks         — the declarative pool: owner, desired count, login shape, policies.
 -- bank_members  — one row per running member, with the status it last reported.
