@@ -3,42 +3,87 @@
 
 package ontology
 
-// catalog_main_pack.go: the platform's seed "main" Domain Pack (ADR-0133's
-// "the seed main pack is default-off", gibson#382, epic #376).
-//
-// MainDomainPack is a skeleton, not a fully-fleshed vertical: a small,
-// representative set of technique -> CEL predicate bindings, plus the
-// taxonomy structure they reference, curated by the platform owner
-// (Visibility public — free, like every pack). It exists so the catalog
-// gibson#381 built the enablement mechanism for is non-empty from the first
-// daemon that ships it, and so EnableDomainPack has real, compiling content
-// to fold into a tenant's World end to end.
-//
-// The pack ships default-off (ADR-0133): registering it in
-// DomainPackCatalog makes it visible and enable-able, never enabled. A
-// fresh tenant's brain.Engine.DomainPacks() starts empty regardless of what
-// the catalog carries — DomainPackEnabled is the only thing that ever adds
-// to it (see DomainPackService.EnableDomainPack) — so with MainDomainPack
-// off, none of its Predicates are bound to any tenant's settlement path: no
-// bet settles TRUE by proof against them. That is the intended default.
+import (
+	"strings"
+	"testing"
+	"testing/fstest"
 
-// MainDomainPackName is the catalog name of the platform's seed pack.
-const MainDomainPackName = "main"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
 
-// MainDomainPack returns the platform's seed catalog pack: a skeleton set of
-// predicate bindings spanning a few of the platform's core technique
-// categories (types.TechniqueType — prompt_injection, reconnaissance,
-// extraction), plus the small taxonomy structure they assume. Every
-// predicate expression is plain CEL text, valid against the gibson-owned
-// environment (internal/engine/settlement/celenv.NewEnv) — this package
-// never compiles or type-checks it (ADR-0131 draws that line at
-// celenv, strictly after DomainPack.Validate has already accepted the text
-// here as well-formed).
-//
-// MainDomainPack returns a fresh value on every call: a caller that mutates
-// the result (e.g. NewDomainPackCatalog's own defensive copies via List)
-// never corrupts a shared instance.
-func MainDomainPack() DomainPack {
+// mainPack returns the main pack from the embedded catalog.
+func mainPack(t *testing.T) DomainPack {
+	t.Helper()
+	p, ok := EmbeddedPack(MainDomainPackName)
+	require.True(t, ok, "the embedded catalog must hold the main pack")
+	return p
+}
+
+// TestEmbeddedMainPack_IsTheFormerGoLiteral proves that the data file has
+// the same content as the Go literal that it replaces (gibson#710).
+// wantMainPack is that literal, kept here as the expected value.
+func TestEmbeddedMainPack_IsTheFormerGoLiteral(t *testing.T) {
+	assert.Equal(t, wantMainPack(), mainPack(t))
+}
+
+// TestLoadCatalog_ASecondPackNeedsNoGoChange: a second file is a second
+// pack.
+func TestLoadCatalog_ASecondPackNeedsNoGoChange(t *testing.T) {
+	main, err := embeddedPackFiles.ReadFile("packs/main.json")
+	require.NoError(t, err)
+	fsys := fstest.MapFS{
+		"packs/main.json": {Data: main},
+		"packs/web.json":  {Data: []byte(`{"name":"web","version":2,"predicates":{"t1":"true"}}`)},
+	}
+	c, err := LoadCatalog(fsys)
+	require.NoError(t, err)
+	names := make([]string, 0, 2)
+	for _, p := range c.List() {
+		names = append(names, p.Name)
+	}
+	assert.Equal(t, []string{"main", "web"}, names)
+	web, ok := c.Get("web")
+	require.True(t, ok)
+	assert.Equal(t, 2, web.Version)
+}
+
+func TestLoadCatalog_Refusals(t *testing.T) {
+	cases := map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"no file":          {map[string]string{}, "no catalog pack file"},
+		"bad JSON":         {map[string]string{"packs/a.json": `{"name":`}, "packs/a.json"},
+		"unknown field":    {map[string]string{"packs/a.json": `{"name":"a","predicate":{}}`}, "unknown field"},
+		"two documents":    {map[string]string{"packs/a.json": `{"name":"a"} {"name":"a"}`}, "more than one"},
+		"name is not file": {map[string]string{"packs/a.json": `{"name":"b"}`}, `want "a"`},
+		"invalid pack":     {map[string]string{"packs/a.json": `{"name":"a","taxonomy_node_labels":["bad label"]}`}, `catalog pack "a"`},
+		"bad technique":    {map[string]string{"packs/a.json": `{"name":"a","techniques":{"t":"no_such"}}`}, "not admitted"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fsys := fstest.MapFS{}
+			for f, body := range tc.files {
+				fsys[f] = &fstest.MapFile{Data: []byte(body)}
+			}
+			_, err := LoadCatalog(fsys)
+			require.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), tc.want), "error %q must contain %q", err, tc.want)
+		})
+	}
+}
+
+// TestEmbeddedCatalog_EveryFileLoads: each embedded pack file loads and
+// validates. This is the check that keeps the start-time panic of
+// EmbeddedCatalog out of a release.
+func TestEmbeddedCatalog_EveryFileLoads(t *testing.T) {
+	c, err := LoadCatalog(embeddedPackFiles)
+	require.NoError(t, err)
+	assert.NotEmpty(t, c.List())
+}
+
+func wantMainPack() DomainPack {
 	return DomainPack{
 		Name:       MainDomainPackName,
 		Version:    1,

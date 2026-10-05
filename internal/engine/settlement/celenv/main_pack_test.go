@@ -21,7 +21,7 @@ import (
 // — the same LoadDomainPack path EnableDomainPack's downstream settlement
 // consumer (gibson#389) will run for any tenant that enables it.
 func TestLoadDomainPack_MainCatalogPackCompiles(t *testing.T) {
-	pack := ontology.MainDomainPack()
+	pack := mustMainPack(t)
 
 	compiled, err := LoadDomainPack(&pack)
 	require.NoError(t, err)
@@ -37,7 +37,7 @@ func TestLoadDomainPack_MainCatalogPackCompiles(t *testing.T) {
 // predicate against evidence built to satisfy it, proving the bindings are
 // not just syntactically valid but evaluate to their intended verdict.
 func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
-	pack := ontology.MainDomainPack()
+	pack := mustMainPack(t)
 	compiled, err := LoadDomainPack(&pack)
 	require.NoError(t, err)
 
@@ -97,4 +97,28 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, got)
 	})
+}
+
+// mustMainPack returns the main pack from the embedded catalog.
+func mustMainPack(t *testing.T) ontology.DomainPack {
+	t.Helper()
+	p, ok := ontology.EmbeddedPack(ontology.MainDomainPackName)
+	if !ok {
+		t.Fatal("the embedded catalog must hold the main pack")
+	}
+	return p
+}
+
+// TestLoadDomainPack_EveryEmbeddedCatalogPackCompiles: each pack file that
+// the binary embeds compiles against the CEL environment. A new pack file
+// gets this check with no Go change (gibson#710).
+func TestLoadDomainPack_EveryEmbeddedCatalogPackCompiles(t *testing.T) {
+	packs := ontology.EmbeddedCatalog().List()
+	require.NotEmpty(t, packs)
+	for i := range packs {
+		t.Run(packs[i].Name, func(t *testing.T) {
+			_, err := LoadDomainPack(&packs[i])
+			require.NoError(t, err)
+		})
+	}
 }

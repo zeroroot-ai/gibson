@@ -133,12 +133,12 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 
 	// Initialize the Domain Pack catalog (ADR-0133, gibson#381):
 	// the curated, shipped set of packs DomainPackService.ListCatalog reads
-	// and EnableDomainPack resolves a name against. Seeded with the platform's
-	// skeleton "main" pack (gibson#382) — registering it here only makes it
+	// and EnableDomainPack resolves a name against. It holds each pack file
+	// that the binary embeds (gibson#710). Registering a pack only makes it
 	// visible and enable-able; it ships default-off (ADR-0133), so
 	// a fresh tenant's World carries none of its bindings until that tenant's
 	// admin calls EnableDomainPack.
-	d.domainPackCatalog = ontology.NewDomainPackCatalog(ontology.MainDomainPack())
+	d.domainPackCatalog = ontology.EmbeddedCatalog()
 
 	// Initialize Redis client for tool execution
 	// Redis is required for distributed tool execution via work queues

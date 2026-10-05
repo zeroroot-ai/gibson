@@ -17,7 +17,7 @@ import (
 // core hierarchy holds no technique, and after the main pack extends it,
 // each technique of the pack resolves to its category.
 func TestMainDomainPack_TechniquesRollUpToTheirCategories(t *testing.T) {
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	require.NotEmpty(t, pack.Techniques, "the main pack must declare one technique or more")
 	require.Empty(t, taxonomy.GlobalTechniques.Techniques(), "the core hierarchy holds categories only")
 
@@ -43,7 +43,7 @@ func TestMainDomainPack_TechniquesRollUpToTheirCategories(t *testing.T) {
 // TestMainDomainPack_EachPredicateIsBoundToADeclaredTechnique: the predicate
 // of the pack and the technique of the pack use one name.
 func TestMainDomainPack_EachPredicateIsBoundToADeclaredTechnique(t *testing.T) {
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	for technique := range pack.Predicates {
 		assert.Containsf(t, pack.Techniques, technique, "predicate %q has no declared technique", technique)
 	}
@@ -84,7 +84,7 @@ func TestMainDomainPack_BeliefSchemaRegistersOnTheCoreSeed(t *testing.T) {
 	require.False(t, reg.IsBeliefBearing("WebEndpoint"))
 	require.False(t, reg.IsEnablementEdge("EXPOSES"))
 
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	require.False(t, pack.BeliefSchema.empty())
 	require.NoError(t, pack.RegisterBeliefSchema(reg))
 
@@ -141,7 +141,7 @@ func TestDomainPack_BeliefSchema(t *testing.T) {
 // TestDomainPack_TechniquesAndBeliefSchemaSurviveJSON: a pack moves between
 // installs as JSON, and the two new fields move with it.
 func TestDomainPack_TechniquesAndBeliefSchemaSurviveJSON(t *testing.T) {
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	raw, err := json.Marshal(pack)
 	require.NoError(t, err)
 	assert.Contains(t, string(raw), `"techniques"`)

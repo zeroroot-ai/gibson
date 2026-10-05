@@ -1,0 +1,54 @@
+{
+  "name": "main",
+  "version": 1,
+  "taxonomy_node_labels": [
+    "WebEndpoint"
+  ],
+  "taxonomy_relationship_types": [
+    "EXPOSES"
+  ],
+  "taxonomy_node_identity": {
+    "WebEndpoint": "url"
+  },
+  "predicates": {
+    "credential_disclosure_detected": "evidence.exists(e, regexMatch(evidenceText(e), \"(?i)(api[_-]?key|password|secret)\\\\s*[:=]\\\\s*\\\\S+\"))",
+    "prompt_injection_marker_present": "markerPresent(evidence, \"SYSTEM_PROMPT_LEAKED\")",
+    "unauthenticated_endpoint_exposed": "evidence.exists(e, httpStatus(e) == 200)"
+  },
+  "non_destructive_predicates": [
+    "credential_disclosure_detected",
+    "prompt_injection_marker_present",
+    "unauthenticated_endpoint_exposed"
+  ],
+  "techniques": {
+    "credential_disclosure_detected": "extraction",
+    "prompt_injection_marker_present": "prompt_injection",
+    "unauthenticated_endpoint_exposed": "reconnaissance"
+  },
+  "belief_schema": {
+    "nodes": [
+      {
+        "node_type": "WebEndpoint",
+        "variables": [
+          {
+            "name": "reachable"
+          },
+          {
+            "name": "exploitable",
+            "depends_on": [
+              "reachable"
+            ]
+          }
+        ]
+      }
+    ],
+    "enablement_edges": [
+      {
+        "rel_type": "EXPOSES",
+        "target_variable": "reachable"
+      }
+    ]
+  },
+  "author": "zeroroot",
+  "visibility": "public"
+}

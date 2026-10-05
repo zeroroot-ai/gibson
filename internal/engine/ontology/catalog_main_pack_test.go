@@ -11,7 +11,7 @@ import (
 )
 
 func TestMainDomainPack_IsValid(t *testing.T) {
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	require.NoError(t, pack.Validate())
 	assert.Equal(t, MainDomainPackName, pack.Name)
 	assert.Equal(t, "main", pack.Name)
@@ -22,26 +22,26 @@ func TestMainDomainPack_IsValid(t *testing.T) {
 
 // TestMainDomainPack_RegistersIntoCatalog proves the seed pack is a valid
 // catalog entry: NewDomainPackCatalog panics on any pack that fails
-// Validate or carries a bad Name, so this also re-proves MainDomainPack's
+// Validate or carries a bad Name, so this also re-proves the main pack's
 // shape end to end through the exact constructor the daemon calls.
 func TestMainDomainPack_RegistersIntoCatalog(t *testing.T) {
-	catalog := NewDomainPackCatalog(MainDomainPack())
+	catalog := NewDomainPackCatalog(mainPack(t))
 
 	got, ok := catalog.Get(MainDomainPackName)
 	require.True(t, ok, "the seed pack must be reachable by its catalog name")
-	assert.Equal(t, MainDomainPack(), got)
+	assert.Equal(t, mainPack(t), got)
 
 	list := catalog.List()
 	require.Len(t, list, 1)
 	assert.Equal(t, MainDomainPackName, list[0].Name)
 }
 
-// TestMainDomainPack_FreshValueEachCall proves MainDomainPack never hands
+// TestMainDomainPack_FreshValueEachCall proves EmbeddedPack never hands
 // back a shared, mutable instance: a caller that mutates one call's Predicates
 // map must never affect another.
 func TestMainDomainPack_FreshValueEachCall(t *testing.T) {
-	a := MainDomainPack()
-	b := MainDomainPack()
+	a := mainPack(t)
+	b := mainPack(t)
 	want := len(b.Predicates)
 
 	for technique := range a.Predicates {
@@ -55,7 +55,7 @@ func TestMainDomainPack_FreshValueEachCall(t *testing.T) {
 // predicate that the pack does not state is destructive, so this test makes
 // the author decide.
 func TestMainDomainPack_StatesEveryPredicate(t *testing.T) {
-	pack := MainDomainPack()
+	pack := mainPack(t)
 	require.NoError(t, pack.Validate())
 	assert.Len(t, pack.NonDestructivePredicates, len(pack.Predicates))
 }
