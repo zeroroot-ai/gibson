@@ -163,10 +163,7 @@ service DaemonOperatorService {
   // reconciler calls this best-effort after each status patch; the daemon
   // cannot read the CR itself, so the operator is the sole source of this
   // snapshot. Idempotent: re-reporting the same status is a no-op upsert.
-  //
-  // Note: billing_active is NOT carried here — it is owned by the dashboard
-  // billing webhook via TenantProvisioningService.SetTenantBillingActive and
-  // must not be clobbered by an operator status report.
+
   // SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
   // declares (spec.maxRuntime) so the daemon can bound that agent's
   // sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
@@ -429,8 +426,7 @@ message SetTenantZitadelOrgResponse {}
 // provisioned, awaiting Tenant-CR creation by the operator. It carries exactly
 // what the operator needs to build the Tenant CR spec (the same shape the
 // dashboard used to write directly): tenant_id (CR name), workspace_name
-// (displayName), owner_email (spec.owner), tier (spec.tier), and the optional
-// stripe_customer_id (annotation).
+// (displayName), owner_email (spec.owner) and tier (spec.tier).
 message PendingTenant {
   // tenant_id is the deterministic tenant slug (SignupResponse.tenant_id) —
   // becomes the Tenant CR's metadata.name.
@@ -444,9 +440,9 @@ message PendingTenant {
   string workspace_name = 4;
   // tier becomes Tenant.spec.tier ("team"/"org"/"enterprise").
   string tier = 5;
-  // stripe_customer_id, when non-empty, is stamped on the Tenant CR as the
-  // gibson.zeroroot.ai/stripe-customer-id annotation for billing adoption.
-  string stripe_customer_id = 6;
+  // Field 6 (stripe_customer_id) was removed (ADR-0060, D54).
+  reserved 6;
+  reserved "stripe_customer_id";
 }
 
 // ListPendingTenantProvisioningRequest queries the pending queue. No filters
@@ -512,14 +508,11 @@ message ReportTenantStatusRequest {
   string store_neo4j = 6;
   // zitadel_org_slug mirrors status.zitadelOrgSlug.
   string zitadel_org_slug = 7;
-  // stripe_customer_id mirrors status.stripeCustomerId.
-  string stripe_customer_id = 8;
+  // Field 8 (stripe_customer_id) was removed (ADR-0060, D54).
+  reserved 8;
+  reserved "stripe_customer_id";
 }
 
-// ReportTenantStatusResponse confirms the snapshot was persisted and echoes the
-// dashboard-owned billing_active flag back so the operator can stamp the
-// gibson.zeroroot.ai/billing-active CR annotation the saga waits on — without a
-// second round trip and without the operator ever owning that flag.
 // SetAgentEnrollmentLimitsRequest carries one enrollment's runtime cap.
 message SetAgentEnrollmentLimitsRequest {
   // tenant_id is the tenant slug (Tenant CR name). Required.
@@ -533,13 +526,13 @@ message SetAgentEnrollmentLimitsRequest {
 
 message SetAgentEnrollmentLimitsResponse {}
 
+// ReportTenantStatusResponse confirms the snapshot was persisted.
 message ReportTenantStatusResponse {
   // updated is true when the row was inserted or any reported field changed.
   bool updated = 1;
-  // billing_active is the current dashboard-recorded billing-active state
-  // (set via TenantProvisioningService.SetTenantBillingActive). The operator
-  // stamps the CR annotation when this is true.
-  bool billing_active = 2;
+  // Field 2 (billing_active) was removed (ADR-0060, D54).
+  reserved 2;
+  reserved "billing_active";
 }
 
 // ---------------------------------------------------------------------------

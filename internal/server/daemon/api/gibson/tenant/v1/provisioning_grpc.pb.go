@@ -9,10 +9,9 @@
 // dashboard#813).
 //
 // Once the dashboard stops touching Kubernetes, it can no longer read the
-// Tenant CR's status (data-plane provisioning progress, billing state) to drive
-// the onboarding / signup-status / billing surfaces, nor patch the
-// billing-active annotation from the Stripe webhook. ADR-0023 forbids the
-// daemon from reading Kubernetes, so the daemon cannot read the CR either.
+// Tenant CR's status (data-plane provisioning progress) to drive the
+// onboarding and signup-status surfaces. ADR-0023 forbids the daemon from
+// reading Kubernetes, so the daemon cannot read the CR either.
 //
 // Instead the tenant-operator — the one component that already watches Tenant
 // CRs — REPORTS the observed status into the daemon's platform Postgres
@@ -21,38 +20,16 @@
 //
 //   - GetTenantProvisioningStatus replaces the dashboard's getTenant() reads
 //     (onboarding data-plane progress, signup-status polling, tenant-available
-//     existence check, billing customer-id lookup).
-//   - SetTenantBillingActive replaces the dashboard billing webhook's
-//     patchTenant() that stamped the gibson.zeroroot.ai/billing-active
-//     annotation. The webhook records billing-active here; the operator reads
-//     it back and stamps the CR annotation, so the saga's
-//     WaitForBillingConfirmation step is unchanged.
+//     existence check).
 //
-// Authorization (gibson#1230, gibson#1339): both RPCs remain REACHABLE without
-// a tenant JWT — signup polling and the Stripe webhook both run before any
-// principal exists — but reachability is not authorization, and each handler
-// now enforces its own gate:
+// Authorization (gibson#1230, gibson#1339): GetTenantProvisioningStatus is
+// intentionally unauthenticated, because signup polling runs before any
+// principal exists. It serves ONLY existence plus coarse provisioning progress
+// (phase, data_plane_ready, per-store states, zitadel_org_ready). It does NOT
+// serve the cross-tenant identifier zitadel_org_slug to anyone.
 //
-//   - GetTenantProvisioningStatus is intentionally unauthenticated and serves
-//     ONLY existence plus coarse provisioning progress (phase, data_plane_ready,
-//     per-store states, zitadel_org_ready) — the data the pre-identity signup
-//     page needs. It does NOT serve the cross-tenant identifiers
-//     (zitadel_org_slug, stripe_customer_id) or the billing state to anyone.
-//
-//     gibson#1230 originally gated those behind an in-handler "same authenticated
-//     tenant" redaction, but ext-authz never resolves a tenant for an
-//     unauthenticated-mode RPC (skipTenantResolution), so that allow-branch was
-//     unreachable for EVERY caller — including the tenant's own billing portal
-//     (gibson#1339). The identifiers now live on rule-mode RPCs where ext-authz
-//     + FGA can actually authorize the caller: TenantService.GetTenantBilling
-//     (own tenant, tenant_from_identity) and AdminTenantService
-//     .AdminGetTenantBilling (cross-tenant, platform_owner).
-//   - SetTenantBillingActive requires a fresh HMAC assertion bound to this
-//     tenant_id and active value, signed with the deployment's billing-webhook
-//     secret. Envoy routing alone used to be the only control, which meant any
-//     caller on that route could flip billing_active for any tenant. This gate
-//     is CORRECT precisely because the webhook caller is identity-less — an
-//     identity-based gate here would repeat the gibson#1339 mistake.
+// The billing state and the billing customer id were removed (ADR-0060, D54):
+// the public platform does not know that a billing component exists.
 
 package tenantv1
 
@@ -70,7 +47,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	TenantProvisioningService_GetTenantProvisioningStatus_FullMethodName = "/gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus"
-	TenantProvisioningService_SetTenantBillingActive_FullMethodName      = "/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive"
 )
 
 // TenantProvisioningServiceClient is the client API for TenantProvisioningService service.
@@ -95,26 +71,9 @@ type TenantProvisioningServiceClient interface {
 	//
 	// UNAUTHENTICATED-REACHABLE: runs pre-membership (signup polling, slug
 	// availability). EVERY caller receives existence plus coarse progress only
-	// (phase, data_plane_ready, stores, zitadel_org_ready); the org slug, Stripe
-	// customer id and billing_active are never served here — read them via
-	// TenantService.GetTenantBilling (own tenant) or
-	// AdminTenantService.AdminGetTenantBilling (cross-tenant) (gibson#1230,
-	// gibson#1339).
+	// (phase, data_plane_ready, stores, zitadel_org_ready); the org slug is
+	// never served here (gibson#1230, gibson#1339).
 	GetTenantProvisioningStatus(ctx context.Context, in *GetTenantProvisioningStatusRequest, opts ...grpc.CallOption) (*GetTenantProvisioningStatusResponse, error)
-	// SetTenantBillingActive records the tenant's billing-active state, replacing
-	// the dashboard billing webhook's patchTenant of the
-	// gibson.zeroroot.ai/billing-active annotation. The daemon persists the flag
-	// in tenant_status; the tenant-operator reads it back on its next reconcile
-	// and stamps the CR annotation the saga's WaitForBillingConfirmation step
-	// waits on. Idempotent.
-	//
-	// UNAUTHENTICATED-REACHABLE: the Stripe webhook path has no tenant JWT. The
-	// caller must instead present x-gibson-billing-signature and
-	// x-gibson-billing-issued-at — an HMAC over this tenant_id and active value,
-	// signed with the deployment's billing-webhook secret and valid for a bounded
-	// window. A daemon with no secret configured refuses every caller
-	// (gibson#1230).
-	SetTenantBillingActive(ctx context.Context, in *SetTenantBillingActiveRequest, opts ...grpc.CallOption) (*SetTenantBillingActiveResponse, error)
 }
 
 type tenantProvisioningServiceClient struct {
@@ -129,16 +88,6 @@ func (c *tenantProvisioningServiceClient) GetTenantProvisioningStatus(ctx contex
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetTenantProvisioningStatusResponse)
 	err := c.cc.Invoke(ctx, TenantProvisioningService_GetTenantProvisioningStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *tenantProvisioningServiceClient) SetTenantBillingActive(ctx context.Context, in *SetTenantBillingActiveRequest, opts ...grpc.CallOption) (*SetTenantBillingActiveResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SetTenantBillingActiveResponse)
-	err := c.cc.Invoke(ctx, TenantProvisioningService_SetTenantBillingActive_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -167,26 +116,9 @@ type TenantProvisioningServiceServer interface {
 	//
 	// UNAUTHENTICATED-REACHABLE: runs pre-membership (signup polling, slug
 	// availability). EVERY caller receives existence plus coarse progress only
-	// (phase, data_plane_ready, stores, zitadel_org_ready); the org slug, Stripe
-	// customer id and billing_active are never served here — read them via
-	// TenantService.GetTenantBilling (own tenant) or
-	// AdminTenantService.AdminGetTenantBilling (cross-tenant) (gibson#1230,
-	// gibson#1339).
+	// (phase, data_plane_ready, stores, zitadel_org_ready); the org slug is
+	// never served here (gibson#1230, gibson#1339).
 	GetTenantProvisioningStatus(context.Context, *GetTenantProvisioningStatusRequest) (*GetTenantProvisioningStatusResponse, error)
-	// SetTenantBillingActive records the tenant's billing-active state, replacing
-	// the dashboard billing webhook's patchTenant of the
-	// gibson.zeroroot.ai/billing-active annotation. The daemon persists the flag
-	// in tenant_status; the tenant-operator reads it back on its next reconcile
-	// and stamps the CR annotation the saga's WaitForBillingConfirmation step
-	// waits on. Idempotent.
-	//
-	// UNAUTHENTICATED-REACHABLE: the Stripe webhook path has no tenant JWT. The
-	// caller must instead present x-gibson-billing-signature and
-	// x-gibson-billing-issued-at — an HMAC over this tenant_id and active value,
-	// signed with the deployment's billing-webhook secret and valid for a bounded
-	// window. A daemon with no secret configured refuses every caller
-	// (gibson#1230).
-	SetTenantBillingActive(context.Context, *SetTenantBillingActiveRequest) (*SetTenantBillingActiveResponse, error)
 	mustEmbedUnimplementedTenantProvisioningServiceServer()
 }
 
@@ -199,9 +131,6 @@ type UnimplementedTenantProvisioningServiceServer struct{}
 
 func (UnimplementedTenantProvisioningServiceServer) GetTenantProvisioningStatus(context.Context, *GetTenantProvisioningStatusRequest) (*GetTenantProvisioningStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetTenantProvisioningStatus not implemented")
-}
-func (UnimplementedTenantProvisioningServiceServer) SetTenantBillingActive(context.Context, *SetTenantBillingActiveRequest) (*SetTenantBillingActiveResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetTenantBillingActive not implemented")
 }
 func (UnimplementedTenantProvisioningServiceServer) mustEmbedUnimplementedTenantProvisioningServiceServer() {
 }
@@ -243,24 +172,6 @@ func _TenantProvisioningService_GetTenantProvisioningStatus_Handler(srv interfac
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TenantProvisioningService_SetTenantBillingActive_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetTenantBillingActiveRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantProvisioningServiceServer).SetTenantBillingActive(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantProvisioningService_SetTenantBillingActive_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantProvisioningServiceServer).SetTenantBillingActive(ctx, req.(*SetTenantBillingActiveRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // TenantProvisioningService_ServiceDesc is the grpc.ServiceDesc for TenantProvisioningService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -271,10 +182,6 @@ var TenantProvisioningService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTenantProvisioningStatus",
 			Handler:    _TenantProvisioningService_GetTenantProvisioningStatus_Handler,
-		},
-		{
-			MethodName: "SetTenantBillingActive",
-			Handler:    _TenantProvisioningService_SetTenantBillingActive_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

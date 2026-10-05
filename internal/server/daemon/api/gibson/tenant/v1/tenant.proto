@@ -143,32 +143,8 @@ service TenantService {
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Billing (gibson#1339)
-  // ---------------------------------------------------------------------------
-
-  // GetTenantBilling returns the CALLING tenant's own billing identifiers — the
-  // Stripe customer id, the billing-active flag and the Zitadel org slug — for
-  // the billing-portal surface (dashboard#1016).
-  //
-  // These fields used to be served by the unauthenticated
-  // TenantProvisioningService.GetTenantProvisioningStatus behind an in-handler
-  // "same authenticated tenant" redaction. That gate was unsatisfiable: an
-  // unauthenticated-mode RPC never has its tenant resolved by ext-authz
-  // (skipTenantResolution), so the own-tenant branch could not fire for ANY
-  // caller and the billing portal 400'd for every tenant (gibson#1339). The
-  // read is moved here, to a rule-mode RPC whose tenant_from_identity object
-  // deriver lets ext-authz + FGA enforce same-tenant BEFORE the handler runs.
-  // There is deliberately no tenant_id in the request — the tenant is the
-  // caller's own identity, so there is nothing for a caller to spoof.
-  rpc GetTenantBilling(GetTenantBillingRequest) returns (GetTenantBillingResponse) {
-    option (gibson.auth.v1.authz) = {
-      relation: "admin"
-      object_type: "tenant"
-      object_deriver: "tenant_from_identity"
-      allowed_identities: 3  // USER | SERVICE
-    };
-  }
+  // GetTenantBilling was removed (ADR-0060, D54): the public platform holds no
+  // billing identifiers.
 }
 
 // ---------------------------------------------------------------------------
@@ -371,24 +347,3 @@ message DeleteMissionDraftRequest {
 // DeleteMissionDraftResponse is empty — Delete is idempotent.
 message DeleteMissionDraftResponse {}
 
-// ---------------------------------------------------------------------------
-// Billing (gibson#1339)
-// ---------------------------------------------------------------------------
-
-// GetTenantBillingRequest carries no fields: the tenant is the caller's own,
-// resolved from the authenticated identity (tenant_from_identity), never named
-// in the request. There is no tenant_id to spoof.
-message GetTenantBillingRequest {}
-
-// GetTenantBillingResponse carries the calling tenant's billing identifiers.
-message GetTenantBillingResponse {
-  // found is false when the tenant has no provisioning record yet.
-  bool found = 1;
-  // stripe_customer_id mirrors tenant_status.stripe_customer_id — used by the
-  // billing portal to open the Stripe customer portal.
-  string stripe_customer_id = 2;
-  // billing_active is the tenant's billing-active state.
-  bool billing_active = 3;
-  // zitadel_org_slug is the per-tenant Zitadel org login slug.
-  string zitadel_org_slug = 4;
-}
