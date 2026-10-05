@@ -417,6 +417,14 @@ type model
 # That path now routes through plugin_principal:llm-config with explicit
 # per-name object IDs (no wildcard) — see spec
 # secrets-blast-radius-reduction Layer 2.
+#
+# Scope (ADR-0096, owner decision of 2026-10-05). A secret has two scopes,
+# and they are the full set:
+#   tenant scope — belongs_to names the one tenant that owns the secret.
+#   job scope    — a job lists the credentials that its work can read in
+#                  credential_names (harness.CredentialAllowedByJob).
+# A secret has no user scope: no relation names a user who owns it, and no
+# owner relation is to be added.
 
 type secret
   relations
