@@ -281,24 +281,67 @@ func (d *daemonImpl) newSlotManagerForTenant() func(context.Context, string) (ll
 		if err != nil {
 			return nil, nil, fmt.Errorf("resolve per-tenant providers for %q: %w", tenantID, err)
 		}
-		return d.buildSlotManagerForSet(set), set.Registry, nil
+		sm, err := d.buildSlotManagerForSet(rctx, tenantID, set)
+		if err != nil {
+			return nil, nil, err
+		}
+		return sm, set.Registry, nil
 	}
 }
 
 // buildSlotManagerForSet turns a resolved per-tenant provider Set into a slot
 // manager: it wraps the set's registry, prefers the tenant's default provider
-// for unpinned slots (gibson#531), and hard-enforces the FGA model-access gate
-// on every resolution (gibson#527) when an authorizer is present. Split out of
-// newSlotManagerForTenant's closure purely so this tail is unit-testable with a
-// hand-built Set (no live broker/Postgres) — behaviour is byte-for-byte the
-// same as the inline sequence it replaced.
-func (d *daemonImpl) buildSlotManagerForSet(set *tenantprovider.Set) *DaemonSlotManager {
+// for unpinned slots (gibson#531), gives the tenant's members the default
+// grant on each provider of the set (hosted#358), and installs the FGA
+// model-access gate on every resolution (gibson#527). Split out of
+// newSlotManagerForTenant's closure so this tail is unit-testable with a
+// hand-built Set (no live broker/Postgres).
+//
+// The gate is always installed. A daemon with no authorizer gets a gate that
+// denies every model, never a slot manager with no gate.
+func (d *daemonImpl) buildSlotManagerForSet(ctx context.Context, tenantID string, set *tenantprovider.Set) (*DaemonSlotManager, error) {
+	if err := d.ensureDefaultModelGrants(ctx, tenantID, set.Registry.ListProviders()); err != nil {
+		return nil, err
+	}
 	sm := NewDaemonSlotManager(set.Registry, d.logger.WithComponent("slot-manager").Slog())
 	sm.WithDefaultProvider(set.DefaultName)
-	if d.authorizer != nil {
-		sm.WithModelFilter(modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0))
+	sm.WithModelFilter(modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0))
+	return sm, nil
+}
+
+// ensureDefaultModelGrants gives the members of a tenant the default grant on
+// each named provider, once per provider (modelgate.EnsureDefaultGrant). It
+// runs before the tenant's first slot resolution, so a new tenant can run a
+// mission with no manual grant, and a provider configured before the default
+// existed gets it on first use.
+//
+// A provider that this process already handled is skipped without a call to
+// FGA. An error stops the build: without the default, the gate would deny the
+// tenant's members, and the cause would read as a denial and not as an FGA
+// failure.
+func (d *daemonImpl) ensureDefaultModelGrants(ctx context.Context, tenantID string, names []string) error {
+	if len(names) == 0 {
+		return nil
 	}
-	return sm
+	if d.authorizer == nil {
+		return errors.New("model access: no authorizer is configured, so the default grant cannot be written")
+	}
+	for _, name := range names {
+		key := tenantID + "|" + name
+		if _, done := d.defaultModelGrants.Load(key); done {
+			continue
+		}
+		wrote, err := modelgate.EnsureDefaultGrant(ctx, d.authorizer, tenantID, name)
+		if err != nil {
+			return fmt.Errorf("model access for tenant %q: %w", tenantID, err)
+		}
+		if wrote {
+			d.logger.Slog().InfoContext(ctx, "model access: wrote the default grant for the tenant's members",
+				"tenant", tenantID, "provider", name)
+		}
+		d.defaultModelGrants.Store(key, struct{}{})
+	}
+	return nil
 }
 
 // agentLauncherWiring decides whether a constructed sandboxed-agent launcher is

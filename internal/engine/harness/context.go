@@ -9,6 +9,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // MissionContext represents the broader mission context for agent execution.
@@ -69,6 +70,13 @@ type MissionContext struct {
 	// invoke_tool meta-tool — so it fails closed regardless of the agent. Because it
 	// is mission-level it is inherited unchanged by delegated child harnesses.
 	BlockedTools []string `json:"blocked_tools,omitempty"`
+
+	// CreatedBy is the principal that created the mission (hosted#205). When
+	// it is a person, the harness factory puts that person on the context of
+	// every slot resolution of the run as the mission initiator, so the model
+	// gate decides for the person who asked for the run (hosted#358). A
+	// delegated child harness copies it with the rest of the MissionContext.
+	CreatedBy principal.Principal `json:"created_by,omitempty"`
 }
 
 // NewMissionContext creates a new mission context with the given ID, name, and current agent.
@@ -114,6 +122,12 @@ func (m MissionContext) WithMissionRunID(missionRunID string) MissionContext {
 // WithRunNumber sets the sequential run number for this mission.
 func (m MissionContext) WithRunNumber(runNumber int) MissionContext {
 	m.RunNumber = runNumber
+	return m
+}
+
+// WithCreatedBy sets the principal that created the mission.
+func (m MissionContext) WithCreatedBy(p principal.Principal) MissionContext {
+	m.CreatedBy = p
 	return m
 }
 

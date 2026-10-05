@@ -101,6 +101,61 @@ func DomainPackComponentObject(name string) string {
 // same separator or Check will never match Write.
 const TenantQualifiedSep = "/"
 
+// ErrInvalidModelAccessObject marks a provider or model name, or a tenant,
+// that cannot form a model-access object.
+var ErrInvalidModelAccessObject = errors.New("invalid model-access object")
+
+// ProviderObject returns the FGA object of one tenant's LLM provider:
+// "provider:<tenant>/<name>". ModelObject returns the object of one model as
+// that tenant uses it: "model:<tenant>/<name>".
+//
+// Both are tenant-qualified (hosted#358). They used to be global
+// ("provider:anthropic"), so an administrator of one tenant could write a
+// grant that another tenant's model gate honored. The tenant segment MUST come
+// from the authenticated context or from the mission, never from a request.
+//
+// The name may contain ':' and '/', as model names do ("llama3:8b",
+// "meta/llama-3"): only the first separator after the tenant splits the id.
+func ProviderObject(tenant, name string) (string, error) {
+	return modelAccessObject("provider", tenant, name)
+}
+
+// ModelObject is the model counterpart of ProviderObject.
+func ModelObject(tenant, name string) (string, error) {
+	return modelAccessObject("model", tenant, name)
+}
+
+func modelAccessObject(typ, tenant, name string) (string, error) {
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidModelAccessObject, err)
+	}
+	switch {
+	case name == "":
+		return "", fmt.Errorf("%w: %s name required", ErrInvalidModelAccessObject, typ)
+	case strings.Contains(name, "#"):
+		return "", fmt.Errorf("%w: %s name must not contain '#'", ErrInvalidModelAccessObject, typ)
+	case strings.ContainsFunc(name, unicode.IsSpace):
+		return "", fmt.Errorf("%w: %s name must not contain whitespace", ErrInvalidModelAccessObject, typ)
+	}
+	return typ + ":" + tenant + TenantQualifiedSep + name, nil
+}
+
+// ModelAccessNameFromObject is the inverse of ProviderObject and ModelObject:
+// it returns the type ("provider" or "model") and the bare name of an object
+// that belongs to tenant, and false for anything else, which includes another
+// tenant's object and a legacy global object with no tenant segment.
+func ModelAccessNameFromObject(tenant, object string) (typ, name string, ok bool) {
+	if tenant == "" {
+		return "", "", false
+	}
+	for _, t := range []string{"provider", "model"} {
+		if n, found := strings.CutPrefix(object, t+":"+tenant+TenantQualifiedSep); found && n != "" {
+			return t, n, true
+		}
+	}
+	return "", "", false
+}
+
 // PluginObject returns the canonical FGA object reference for plugin
 // invocation: "plugin:<tenant>/<name>". The tenant-qualified id must match
 // what the PluginInvoke RPC's tenant_and_field('PluginName') deriver produces

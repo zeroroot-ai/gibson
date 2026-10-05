@@ -77,7 +77,6 @@
 /gibson.tenant.v1.MembershipService/ResendInvitation
 /gibson.tenant.v1.MembershipService/SetTeamAdmin
 /gibson.tenant.v1.ModelAccessService/GrantAccess
-/gibson.tenant.v1.ModelAccessService/ListAccess
 /gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents
 /gibson.tenant.v1.ProviderService/ListProviderModels
 /gibson.tenant.v1.TenantService/DeleteMissionDraft

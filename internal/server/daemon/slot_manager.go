@@ -35,8 +35,9 @@ type DaemonSlotManager struct {
 	mu       sync.RWMutex // Protects concurrent access to slot resolution
 
 	// modelFilter gates the resolved (provider, model) against the
-	// calling user's FGA can_use grants. Nil = permit-all (backwards
-	// compatible with pre-spec behavior). Wired in daemon bootstrap.
+	// request's subject (modelgate). Both production builders always install
+	// one (buildSlotManagerForSet, grpc.go). Nil means no gate, and occurs
+	// only in a test that builds a slot manager by hand.
 	// Spec: llm-user-attribution-governance (Requirement 4).
 	modelFilter modelgate.Filter
 
@@ -63,8 +64,8 @@ func NewDaemonSlotManager(registry llm.LLMRegistry, logger *slog.Logger) *Daemon
 }
 
 // WithModelFilter wires a modelgate.Filter so slot resolution checks the
-// calling user's FGA can_use grants against the picked (provider, model).
-// Pass nil to disable gating (which is also the default — permit-all).
+// request's subject against the picked (provider, model). See modelgate for
+// the rule and for the subject.
 // Spec: llm-user-attribution-governance Requirement 4.
 // WithDefaultProvider sets the tenant's default provider, preferred when a slot
 // has no explicit provider (gibson#531). Makes resolution deterministic and

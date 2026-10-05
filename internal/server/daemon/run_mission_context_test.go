@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // Every field here is one a wrong value would break silently rather than
@@ -18,9 +19,10 @@ import (
 // method chain nobody reads.
 func TestNewRunMissionContext_CarriesWhatARunNeeds(t *testing.T) {
 	m := &mission.Mission{
-		ID:       types.NewID(),
-		Name:     "cluster-assessment",
-		TenantID: "tenant-acme",
+		ID:        types.NewID(),
+		Name:      "cluster-assessment",
+		TenantID:  "tenant-acme",
+		CreatedBy: principal.Principal{Kind: principal.User, ID: "alice"},
 	}
 	run := &mission.MissionRun{RunNumber: 7}
 	def := &missionpb.MissionDefinition{
@@ -41,6 +43,11 @@ func TestNewRunMissionContext_CarriesWhatARunNeeds(t *testing.T) {
 	// A wrong tenant shows one tenant's run on another's console.
 	if got.TenantID != "tenant-acme" {
 		t.Errorf("TenantID = %q, want the mission's tenant", got.TenantID)
+	}
+	// The model gate decides for this person on every slot resolution of the
+	// run. Without it the gate cannot name who asked (hosted#358).
+	if got.CreatedBy != m.CreatedBy {
+		t.Errorf("CreatedBy = %+v, want the mission's creator %+v", got.CreatedBy, m.CreatedBy)
 	}
 	// Mission-scoped GraphRAG storage keys by this.
 	if got.MissionRunID != "run-77" {

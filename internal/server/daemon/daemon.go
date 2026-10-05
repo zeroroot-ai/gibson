@@ -410,6 +410,11 @@ type daemonImpl struct {
 	// fallback. If FGA is unreachable, the daemon exits.
 	authorizer authz.Authorizer
 
+	// defaultModelGrants records the (tenant, provider) pairs whose default
+	// model-access grant this process already ensured (hosted#358), so a
+	// slot manager build does not ask FGA again. Keyed "tenant|provider".
+	defaultModelGrants sync.Map
+
 	// budgetEnforcer is the per-user/team/tenant LLM budget enforcer.
 	// Wired in grpcSubsystem alongside the rate limiter when a Redis
 	// client is available. Also used by the PeriodRolloverJob as the

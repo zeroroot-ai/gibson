@@ -229,7 +229,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 
 	// Create and return DefaultAgentHarness
 	var harness AgentHarness = &DefaultAgentHarness{
-		slotManager:             slotManager,
+		slotManager:             withMissionInitiator(slotManager, missionCtx.CreatedBy),
 		llmRegistry:             llmRegistry,
 		registryAdapter:         f.config.RegistryAdapter,
 		findingStore:            f.config.FindingStore,
