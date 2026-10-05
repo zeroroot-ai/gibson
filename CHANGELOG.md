@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.153.1](https://github.com/zeroroot-ai/gibson/compare/v0.153.0...v0.153.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **catalog:** each entry that runs code states its content trust ([#773](https://github.com/zeroroot-ai/gibson/issues/773)) ([03a9dd4](https://github.com/zeroroot-ai/gibson/commit/03a9dd42f728b541942bee3a06ce5da463529f2a)), closes [#772](https://github.com/zeroroot-ai/gibson/issues/772)
+* **graphrag:** delete the 35 functions of the graphrag package nothing reaches ([#745](https://github.com/zeroroot-ai/gibson/issues/745)) ([e77a309](https://github.com/zeroroot-ai/gibson/commit/e77a30957f706b21a4648d919f0193b5669ccd03)), closes [#508](https://github.com/zeroroot-ai/gibson/issues/508)
+* **guards:** an allowlist entry that allows nothing fails the gate ([#753](https://github.com/zeroroot-ai/gibson/issues/753)) ([45744ef](https://github.com/zeroroot-ai/gibson/commit/45744efb77e73245a7e9fb6cfff833b1af4945b3))
+* **harness:** every tool dispatch passes the execute gate ([#744](https://github.com/zeroroot-ai/gibson/issues/744)) ([b421395](https://github.com/zeroroot-ai/gibson/commit/b4213955395da67ca31fa3a82037f74bd6d72a4a))
+* **identity:** no test reads the enroll command field ([13e07bb](https://github.com/zeroroot-ai/gibson/commit/13e07bb2462dfcab3ef8185c05c2a0b703f8beb8))
+* **identity:** the daemon builds no enroll command ([#749](https://github.com/zeroroot-ai/gibson/issues/749)) ([cdff53d](https://github.com/zeroroot-ai/gibson/commit/cdff53dc6e83ead6afe4cb632793b44a34616a62))
+* **identity:** the grant record states how a component enrolled ([#771](https://github.com/zeroroot-ai/gibson/issues/771)) ([90f46a6](https://github.com/zeroroot-ai/gibson/commit/90f46a6569fa68ae874e6ac5b2fef5de6e0155c1))
+* **platform-operator:** the rbac markers are read, and each generated role is checked against its markers ([#768](https://github.com/zeroroot-ai/gibson/issues/768)) ([8b5ab0e](https://github.com/zeroroot-ai/gibson/commit/8b5ab0eb8f9afc4594b3e071b82a003487089bff))
+* **registry:** a check-in cannot set the keys only the daemon may set ([#783](https://github.com/zeroroot-ai/gibson/issues/783)) ([6b6dae9](https://github.com/zeroroot-ai/gibson/commit/6b6dae9245b765dc641e9544c03a1d41daca833b)), closes [#782](https://github.com/zeroroot-ai/gibson/issues/782)
+* **rework:** no test reads the enroll command field ([#778](https://github.com/zeroroot-ai/gibson/issues/778)) ([13e07bb](https://github.com/zeroroot-ai/gibson/commit/13e07bb2462dfcab3ef8185c05c2a0b703f8beb8))
+* **settlement:** the pack states which predicates are destructive ([#770](https://github.com/zeroroot-ai/gibson/issues/770)) ([3037eda](https://github.com/zeroroot-ai/gibson/commit/3037eda8ff8824aeeb7c30a1a93d9755d746efd2)), closes [#769](https://github.com/zeroroot-ai/gibson/issues/769)
+* **settlement:** the proof technique is the predicate name ([#780](https://github.com/zeroroot-ai/gibson/issues/780)) ([5a4b38b](https://github.com/zeroroot-ai/gibson/commit/5a4b38bcfb0700777a293cfcd7e8196d0d3f82b6)), closes [#779](https://github.com/zeroroot-ai/gibson/issues/779)
+* **vector:** delete the 40 functions of the memory vector package nothing reaches ([#746](https://github.com/zeroroot-ai/gibson/issues/746)) ([1022434](https://github.com/zeroroot-ai/gibson/commit/1022434cc7c0b3a57cdf25911e35a3173faffd68)), closes [#508](https://github.com/zeroroot-ai/gibson/issues/508)
+
 ## [0.153.0](https://github.com/zeroroot-ai/gibson/compare/v0.152.0...v0.153.0) (2026-10-05)
 
 
