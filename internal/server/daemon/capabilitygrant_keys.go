@@ -22,8 +22,9 @@ import (
 //     principal/tenant — it trusts no caller-asserted identity.
 //
 // ext-authz fetches this per-kid (bounded — one key per request, no JWKS-wide
-// enumeration). Served on the pre-auth :8085 listener; public keys are
-// non-secret.
+// enumeration). Served on the SPIFFE-mTLS listener only
+// (authz_registry_subsystem.go). The keys are public, and the transport
+// protects them against substitution.
 
 // capabilityGrantKeysPath is the per-kid key endpoint prefix; the kid is the
 // trailing path segment.

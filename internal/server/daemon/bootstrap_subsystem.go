@@ -94,18 +94,16 @@ type nativeLoginResponse struct {
 }
 
 // cgBootstrapMinter is the daemon Minter subset the pre-auth listener needs:
-// bootstrap-token verification for first registration, and the daemon's own
-// public key for the per-kid key endpoint.
+// bootstrap-token verification for first registration. The listener serves no
+// key document, so it holds no key source.
 type cgBootstrapMinter interface {
 	bootstrapVerifier
-	cgKeyMinter
 }
 
 // cgBootstrapRegistrar is the CapabilityGrantService subset the pre-auth
-// listener needs: host+agent registration, and per-kid agent key lookup.
+// listener needs: host+agent registration.
 type cgBootstrapRegistrar interface {
 	capabilityGrantRegistrar
-	cgAgentKeyLookup
 }
 
 // nativeLoginHandler returns the HTTP handler for the well-known endpoint. It is
@@ -141,27 +139,15 @@ func nativeLoginHandler(cfg nativeLoginConfig, cgMinter cgBootstrapMinter, cgSvc
 	// pre-auth listener; a component holds no Capability Grant yet at discovery
 	// time. Envoy publishes it on an allow_missing route alongside gibson-login.
 	mux.HandleFunc(agentConfigWellKnownPath, agentConfigHandler(cfg.PublicURL))
-	// CG host registration + per-kid key serving (gibson#648). Mounted only when
-	// both the daemon Minter and the CapabilityGrantService are wired; otherwise
-	// the routes are absent and the SDK gets a clear 404 rather than a
-	// half-working endpoint.
+	// CG host registration (gibson#648). Mounted only when both the daemon
+	// Minter and the CapabilityGrantService are wired; otherwise the route is
+	// absent and the SDK gets a clear 404 rather than a half-working endpoint.
+	//
+	// This listener serves no key document. The per-kid key route is mounted
+	// on the SPIFFE-mTLS listener only (authz_registry_subsystem.go), and
+	// TestBootstrapMux_ServesNoKeyDocument fails if a mount returns here.
 	if cgMinter != nil && cgSvc != nil {
 		mux.HandleFunc(capabilityGrantRegisterPath, capabilityGrantRegisterHandler(cgMinter, cgSvc, svidEnroller, cfg.PublicURL, logger))
-		// Trailing-slash prefix mount so {kid} is the path tail; the handler
-		// resolves the daemon CG key (kid == Minter.KeyID) or a registered
-		// agent's key (kid == agentID). ext-authz fetches per-kid (ADR-0045).
-		//
-		// TRANSITIONAL (deploy#1187, GHSA-8m76-9r77-xvh3): the same route is
-		// also served on the :8086 SPIFFE-mTLS listener, and that is now the
-		// only origin ext-authz will read it from — cmd/ext-authz refuses a
-		// non-https EXT_AUTHZ_CGJWT_KEYS_URL, because the document binds every
-		// component to an FGA principal and an unauthenticated origin for it is
-		// an unauthenticated origin for the caller's identity.
-		//
-		// This plaintext copy remains only for the SDK's own registration flow,
-		// which reaches the bootstrap listener before it holds any credential.
-		// Delete it once the chart is on the mTLS URL and nothing else reads it.
-		mux.HandleFunc(capabilityGrantKeysPath, capabilityGrantKeysHandler(cgMinter, cgSvc))
 	}
 	// Connector OAuth callback (ADR-0114) — mounted on the same pre-auth
 	// listener because the vendor redirects a browser here before it holds any
