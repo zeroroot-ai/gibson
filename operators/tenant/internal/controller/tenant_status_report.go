@@ -92,6 +92,29 @@ func (r *TenantReconciler) reportStatusToDaemon(ctx context.Context, tenant *gib
 	}
 }
 
+// reportTeardownToDaemon tells the daemon that a tenant is in teardown or is
+// gone. It reports the given phase and a data plane that is not ready, so no
+// reader of tenant_status serves the tenant again. Best-effort, as
+// reportStatusToDaemon is: the deletion path reports on every pass, so a
+// daemon blip on one pass is repaired by the next. It never stamps the
+// billing annotation: a tenant in deletion gets no new annotation.
+func (r *TenantReconciler) reportTeardownToDaemon(ctx context.Context, tenant *gibsonv1alpha1.Tenant, phase gibsonv1alpha1.TenantPhase) {
+	logger := log.FromContext(ctx).WithName("tenant-status-report")
+	_, err := r.StatusReporter.ReportTenantStatus(ctx, provision.TenantStatusReport{
+		TenantID:         tenant.Name,
+		Phase:            string(phase),
+		DataPlaneReady:   false,
+		StorePostgres:    tenant.Status.DataPlane.Stores.Postgres.State,
+		StoreRedis:       tenant.Status.DataPlane.Stores.Redis.State,
+		StoreNeo4j:       tenant.Status.DataPlane.Stores.Neo4j.State,
+		ZitadelOrgSlug:   tenant.Status.ZitadelOrgSlug,
+		StripeCustomerID: tenant.Status.StripeCustomerID,
+	})
+	if err != nil {
+		logger.Info("report tenant teardown to daemon failed (best-effort)", "tenant", tenant.Name, "phase", string(phase), "err", err.Error())
+	}
+}
+
 // ensureBillingActiveAnnotation stamps gibson.zeroroot.ai/billing-active=true on
 // the Tenant CR if not already present. Idempotent; a no-op once set, so it
 // patches at most once per tenant.

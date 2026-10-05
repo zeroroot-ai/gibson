@@ -41,7 +41,7 @@ import (
 //     (operator-shared library; tenant-operator imports it)
 //   - any file path containing "/testdata/"      (analysistest fixtures)
 //
-// Deferred-deletion file paths: six, the staged removal of gibson#659.
+// Deferred-deletion file paths: the staged removal of gibson#659.
 // See noK8sAPIInDaemonExemptFiles. New entries are not added.
 //
 // Forbidden imports (the rule flags any of these in an in-scope file):
@@ -100,13 +100,11 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 // TestNoK8sAPIInDaemon_ExemptionsAreLive fails on an entry whose file is
 // gone or no longer imports a forbidden package.
 //
-// The six entries below are the staged removal of gibson#659. The owner
+// The entries below are the staged removal of gibson#659 (six at the start;
+// gibson#661 removed the bank reconciler). The owner
 // decided on 2026-10-05 that the daemon holds no Kubernetes client. Until
 // each part lands, its files are exempt, and every OTHER file is checked.
 var noK8sAPIInDaemonExemptFiles = []string{
-	// gibson#661: the bank reconciler lists Tenant resources.
-	"internal/server/daemon/bank_member_launcher.go",
-
 	// gibson#662: the daemon reads and writes ConnectorInstance resources.
 	"internal/server/daemon/connector_adapters.go",
 	"internal/server/daemon/api/connector_service.go",

@@ -68,6 +68,9 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		// Production always injects a reporter (cmd/main.go). The no-op one
+		// is what it injects when report-back is off.
+		StatusReporter: NoopTenantStatusReporter{},
 	}
 	return r, fakeClient
 }

@@ -5,17 +5,12 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	ctrl "sigs.k8s.io/controller-runtime"
 
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
@@ -177,14 +172,13 @@ func (l *memberLauncher) StopMember(ctx context.Context, _ string, m *bank.Membe
 
 // startBankRunner builds the bank reconciler over the daemon's seams and starts
 // it. A daemon that cannot launch a member (no data-plane pool, no sandboxed
-// dispatch, no signing key, no tenant lister) logs why and serves everything
+// dispatch, no signing key) logs why and serves everything
 // else: a bank on such a daemon stays at zero members, visibly.
 func (d *daemonImpl) startBankRunner(ctx context.Context) {
-	tenants, err := d.bankTenantSource()
-	if err != nil {
-		d.logger.Warn(ctx, "bank reconciler not started: no tenant lister", "error", err)
-		return
-	}
+	// The tenants come from tenant_status in platform Postgres, which the
+	// tenant operator fills. The daemon holds no Kubernetes client (ADR-0023).
+	// The pool is resolved on each pass because it is opened after this runs.
+	tenants := &bankTenantLister{db: func() *sql.DB { return d.platformDB }}
 	runner, err := d.buildBankRunner(tenants)
 	if err != nil {
 		d.logger.Warn(ctx, "bank reconciler not started", "error", err)
@@ -221,57 +215,4 @@ func (d *daemonImpl) buildBankRunner(tenants bankengine.TenantSource) (*bankengi
 		return nil, fmt.Errorf("build the bank runner: %w", err)
 	}
 	return runner, nil
-}
-
-// bankTenantSource lists the tenants whose banks are reconciled, from the
-// Kubernetes Tenant CRs.
-//
-// It reads the CRs itself rather than through the admin pool's lister: the
-// admin pool is the cross-tenant data-plane seam and only the admin surfaces
-// may import it (database-per-tenant Requirement 11.5). The reconciler needs
-// tenant NAMES, not a cross-tenant connection, and it takes each tenant's own
-// pool connection the ordinary way.
-func (d *daemonImpl) bankTenantSource() (bankengine.TenantSource, error) {
-	cfg, err := ctrl.GetConfig()
-	if err != nil {
-		return nil, fmt.Errorf("kube config: %w", err)
-	}
-	client, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("kube dynamic client: %w", err)
-	}
-	return &tenantCRLister{client: client}, nil
-}
-
-// tenantGVR is the Tenant CRD the tenant operator reconciles.
-var tenantGVR = schema.GroupVersionResource{Group: "gibson.zeroroot.ai", Version: "v1alpha1", Resource: "tenants"}
-
-// tenantCRLister lists Tenant CRs that are not being deleted.
-type tenantCRLister struct {
-	client dynamic.Interface
-}
-
-func (l *tenantCRLister) ListTenants(ctx context.Context) ([]auth.TenantID, error) {
-	list, err := l.client.Resource(tenantGVR).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("list Tenant CRs: %w", err)
-	}
-	return tenantIDsOf(list.Items), nil
-}
-
-// tenantIDsOf reads the tenant ids out of Tenant CRs, skipping any being
-// deleted and any whose name is not a tenant id.
-func tenantIDsOf(items []unstructured.Unstructured) []auth.TenantID {
-	out := make([]auth.TenantID, 0, len(items))
-	for i := range items {
-		if items[i].GetDeletionTimestamp() != nil {
-			continue
-		}
-		tid, err := auth.NewTenantID(items[i].GetName())
-		if err != nil {
-			continue
-		}
-		out = append(out, tid)
-	}
-	return out
 }
