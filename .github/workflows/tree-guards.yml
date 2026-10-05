@@ -1,10 +1,12 @@
-# Caller workflow for the two org tree guards. Copy to
+# Caller workflow for the org tree guards. Copy to
 # .github/workflows/tree-guards.yml in any repository.
 #
-#   brand-guard  fails on a retired brand string anywhere in the tracked tree
-#   link-check   fails on a broken link in any Markdown file
+#   brand-guard        fails on a retired brand string anywhere in the tracked tree
+#   link-check         fails on a broken link in any Markdown file
+#   exit-tests-off-pr  fails when an exit-test workflow has a pull request or
+#                      merge queue trigger, or has no schedule (ADR-0080)
 #
-# Both reusables live in zeroroot-ai/.github. Neither needs a secret: the
+# The reusables live in zeroroot-ai/.github. Neither needs a secret: the
 # checkout uses the calling repository's own GITHUB_TOKEN, and the scanners
 # travel with the composite actions.
 #
@@ -38,3 +40,6 @@ jobs:
 
   link-check:
     uses: zeroroot-ai/.github/.github/workflows/link-check.yml@f2ca779edd5461be94bdd0a0762657f85317983e # v0.7.2
+
+  exit-tests-off-pr:
+    uses: zeroroot-ai/.github/.github/workflows/exit-tests-off-pr.yml@53a2406de391869c35d5cf5b851a21b80185ff48 # v0.14.0
