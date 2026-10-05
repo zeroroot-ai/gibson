@@ -8,54 +8,72 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
 )
 
-func testEndpoint(t *testing.T) zitadelconn.Endpoint {
-	t.Helper()
-	ep, err := zitadelconn.New("http://gibson-zitadel:8080", "app.example.test")
+// wiringEnv is a complete Zitadel configuration for newZitadelWiring.
+func wiringEnv(overrides map[string]string) func(string) string {
+	env := map[string]string{
+		"ZITADEL_URL":                           "http://gibson-zitadel:8080",
+		"ZITADEL_EXTERNAL_DOMAIN":               "app.example.test",
+		"ZITADEL_TENANT_OPERATOR_CLIENT_ID":     "tenant-operator",
+		"ZITADEL_TENANT_OPERATOR_CLIENT_SECRET": "s3cret",
+	}
+	for k, v := range overrides {
+		env[k] = v
+	}
+	return func(name string) string { return env[name] }
+}
+
+func TestNewZitadelWiring_BuildsEverythingFromOneEndpoint(t *testing.T) {
+	w, err := newZitadelWiring(context.Background(), wiringEnv(nil))
 	if err != nil {
-		t.Fatalf("endpoint: %v", err)
+		t.Fatalf("newZitadelWiring: %v", err)
 	}
-	return ep
-}
-
-func TestNewZitadelClient_UsesTheOperatorsOwnCredentials(t *testing.T) {
-	c, err := newZitadelClient(context.Background(), testEndpoint(t), "tenant-operator", "s3cret")
-	if err != nil || c == nil {
-		t.Fatalf("newZitadelClient = %v, %v; want a client", c, err)
+	if w.client == nil || w.tokens.API == nil || w.tokens.Platform == nil {
+		t.Fatalf("wiring = %+v; want a client and both token sources", w)
 	}
-}
-
-// TestNewZitadelClient_RefusesWithoutCredentials: with no client credentials
-// there is no token, and the operator must not start (one-code-path).
-func TestNewZitadelClient_RefusesWithoutCredentials(t *testing.T) {
-	if _, err := newZitadelClient(context.Background(), testEndpoint(t), "", ""); err == nil {
-		t.Fatal("newZitadelClient without client credentials = nil error, want refusal")
+	if got := w.endpoint.BaseURL(); got != "http://gibson-zitadel:8080" {
+		t.Errorf("endpoint base URL = %q, want ZITADEL_URL", got)
+	}
+	if got := w.endpoint.Host(); got != "app.example.test" {
+		t.Errorf("endpoint host = %q, want ZITADEL_EXTERNAL_DOMAIN", got)
 	}
 }
 
-// TestNewZitadelClient_RefusesAZeroEndpoint: an endpoint that zitadelconn
-// never validated is refused, and the operator must not start (ADR-0092).
-func TestNewZitadelClient_RefusesAZeroEndpoint(t *testing.T) {
-	if _, err := newZitadelClient(context.Background(), zitadelconn.Endpoint{}, "tenant-operator", "s3cret"); err == nil {
-		t.Fatal("newZitadelClient with a zero endpoint = nil error, want refusal")
+// TestNewZitadelWiring_RefusesAnIncompleteConfiguration: each of the four env
+// vars is required, a ported claimed host is refused (ADR-0092), and the
+// operator must not start (one-code-path). ZITADEL_ISSUER is not among them:
+// the operator no longer reads it.
+func TestNewZitadelWiring_RefusesAnIncompleteConfiguration(t *testing.T) {
+	for name, overrides := range map[string]map[string]string{
+		"no ZITADEL_URL":             {"ZITADEL_URL": ""},
+		"no ZITADEL_EXTERNAL_DOMAIN": {"ZITADEL_EXTERNAL_DOMAIN": ""},
+		"a ported claimed host":      {"ZITADEL_EXTERNAL_DOMAIN": "app.example.test:443"},
+		"no client ID":               {"ZITADEL_TENANT_OPERATOR_CLIENT_ID": ""},
+		"no client secret":           {"ZITADEL_TENANT_OPERATOR_CLIENT_SECRET": ""},
+	} {
+		if _, err := newZitadelWiring(context.Background(), wiringEnv(overrides)); err == nil {
+			t.Errorf("%s: newZitadelWiring = nil error, want refusal", name)
+		}
 	}
 }
 
-// TestNewPlatformTokenSource_AsksTheServiceNotTheIssuer is the gibson#222
+// TestNewZitadelWiring_PlatformTokenComesFromTheService is the gibson#222
 // regression test. The token the operator sends to the dashboard comes from
 // the in-cluster Zitadel Service, selected by the instance header. The fake
 // answers 404 to a request that names no instance, and its claimed host can
 // never resolve, so a client that dials the public issuer fails here.
-func TestNewPlatformTokenSource_AsksTheServiceNotTheIssuer(t *testing.T) {
+func TestNewZitadelWiring_PlatformTokenComesFromTheService(t *testing.T) {
 	fake := zitadelconntest.New(t, "", nil)
-	ts, err := newPlatformTokenSource(context.Background(), fake.Endpoint(t), "tenant-operator", "s3cret")
+	w, err := newZitadelWiring(context.Background(), wiringEnv(map[string]string{
+		"ZITADEL_URL":             fake.URL,
+		"ZITADEL_EXTERNAL_DOMAIN": fake.Domain,
+	}))
 	if err != nil {
-		t.Fatalf("newPlatformTokenSource: %v", err)
+		t.Fatalf("newZitadelWiring: %v", err)
 	}
-	tok, err := ts.Token()
+	tok, err := w.tokens.Platform.Token()
 	if err != nil {
 		t.Fatalf("Token: %v", err)
 	}
@@ -70,21 +88,28 @@ func TestNewPlatformTokenSource_AsksTheServiceNotTheIssuer(t *testing.T) {
 	}
 }
 
-func TestNewPlatformTokenSource_RefusesWithoutCredentials(t *testing.T) {
-	if _, err := newPlatformTokenSource(context.Background(), testEndpoint(t), "", ""); err == nil {
-		t.Fatal("newPlatformTokenSource without client credentials = nil error, want refusal")
+func TestZitadelWiring_TenantRoleGrants(t *testing.T) {
+	w, err := newZitadelWiring(context.Background(), wiringEnv(nil))
+	if err != nil {
+		t.Fatalf("newZitadelWiring: %v", err)
+	}
+	if g := w.tenantRoleGrants("PROJ-1"); g == nil {
+		t.Fatal("tenantRoleGrants = nil; want grants")
 	}
 }
 
-func TestNewTenantRoleGrants_UsesTheOperatorsOwnCredentials(t *testing.T) {
-	g, err := newTenantRoleGrants(context.Background(), testEndpoint(t), "tenant-operator", "s3cret", "PROJ-1")
-	if err != nil || g == nil {
-		t.Fatalf("newTenantRoleGrants = %v, %v; want grants", g, err)
-	}
-}
+// TestZitadelWiringOrExit: a complete configuration yields the wiring and no
+// exit. An incomplete one exits with status 1, which is what turns a
+// misconfigured operator into a CrashLoopBackOff.
+func TestZitadelWiringOrExit(t *testing.T) {
+	exits := []int{}
+	exit := func(code int) { exits = append(exits, code) }
 
-func TestNewTenantRoleGrants_RefusesWithoutCredentials(t *testing.T) {
-	if _, err := newTenantRoleGrants(context.Background(), testEndpoint(t), "", "", "PROJ-1"); err == nil {
-		t.Fatal("newTenantRoleGrants without client credentials = nil error, want refusal")
+	if w := zitadelWiringOrExit(context.Background(), wiringEnv(nil), exit); w == nil || len(exits) != 0 {
+		t.Fatalf("complete configuration: wiring = %v, exits = %v; want the wiring and no exit", w, exits)
+	}
+	zitadelWiringOrExit(context.Background(), wiringEnv(map[string]string{"ZITADEL_URL": ""}), exit)
+	if len(exits) != 1 || exits[0] != 1 {
+		t.Fatalf("incomplete configuration: exits = %v; want one exit with status 1", exits)
 	}
 }

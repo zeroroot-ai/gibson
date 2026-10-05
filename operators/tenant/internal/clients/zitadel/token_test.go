@@ -17,11 +17,11 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
-// TestTokenSource_ClientCredentialsForTheOperatorsOwnUser proves the client
+// TestTokenSources_ClientCredentialsForTheOperatorsOwnUser proves the client
 // authenticates with a client_credentials token for the operator's own
 // machine user: the grant, the scopes, the instance header, and the token on
 // the API call that follows. One token serves both calls.
-func TestTokenSource_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
+func TestTokenSources_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
 	var tokenCalls int
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,11 +66,11 @@ func TestTokenSource_ClientCredentialsForTheOperatorsOwnUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("endpoint: %v", err)
 	}
-	ts, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", APIScopes())
+	ts, err := NewTokenSources(context.Background(), ep, "tenant-operator", "s3cret")
 	if err != nil {
-		t.Fatalf("TokenSource: %v", err)
+		t.Fatalf("NewTokenSources: %v", err)
 	}
-	c := mustNew(t, srv.URL, ts)
+	c := mustNew(t, srv.URL, ts.API)
 	for range 2 {
 		if _, err := c.GetOrganization(context.Background(), "org-1"); !errors.Is(err, clients.ErrNotFound) {
 			t.Fatalf("GetOrganization: %v, want ErrNotFound from the empty search", err)
@@ -93,34 +93,27 @@ func testEndpoint(t *testing.T) zitadelconn.Endpoint {
 	return ep
 }
 
-func TestTokenSource_RefusesMissingCredentials(t *testing.T) {
+func TestTokenSources_RefuseMissingCredentials(t *testing.T) {
 	for _, tc := range []struct{ id, secret string }{{"", "s"}, {"id", ""}} {
-		if _, err := TokenSource(context.Background(), testEndpoint(t), tc.id, tc.secret, APIScopes()); err == nil {
-			t.Errorf("TokenSource(%q, %q) = nil error, want refusal", tc.id, tc.secret)
+		if _, err := NewTokenSources(context.Background(), testEndpoint(t), tc.id, tc.secret); err == nil {
+			t.Errorf("NewTokenSources(%q, %q) = nil error, want refusal", tc.id, tc.secret)
 		}
 	}
 }
 
-// TestTokenSource_RefusesAZeroEndpoint: a token request with no validated
+// TestTokenSources_RefuseAZeroEndpoint: a token request with no validated
 // endpoint has nowhere to go and no host to claim.
-func TestTokenSource_RefusesAZeroEndpoint(t *testing.T) {
-	if _, err := TokenSource(context.Background(), zitadelconn.Endpoint{}, "id", "s", APIScopes()); err == nil {
-		t.Error("TokenSource with a zero endpoint = nil error, want refusal")
+func TestTokenSources_RefuseAZeroEndpoint(t *testing.T) {
+	if _, err := NewTokenSources(context.Background(), zitadelconn.Endpoint{}, "id", "s"); err == nil {
+		t.Error("NewTokenSources with a zero endpoint = nil error, want refusal")
 	}
 }
 
-// TestTokenSource_RefusesNoScopes: a token with no scope has no audience, and
-// every API then answers 401 far from the cause.
-func TestTokenSource_RefusesNoScopes(t *testing.T) {
-	if _, err := TokenSource(context.Background(), testEndpoint(t), "id", "s", nil); err == nil {
-		t.Error("TokenSource with no scopes = nil error, want refusal")
-	}
-}
-
-// TestPlatformScopes_NameThePlatformAudience pins the audience scope of the
-// token the operator sends to the dashboard. Envoy jwt_authn rejects a token
-// without gibson-platform in its audience.
-func TestPlatformScopes_NameThePlatformAudience(t *testing.T) {
+// TestTokenSources_PlatformNamesThePlatformAudience pins the audience scope
+// of the token the operator sends to the dashboard, and proves that its
+// request goes to the Service with the instance header (gibson#222). Envoy
+// jwt_authn rejects a token without gibson-platform in its audience.
+func TestTokenSources_PlatformNamesThePlatformAudience(t *testing.T) {
 	var gotScope string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
@@ -138,11 +131,11 @@ func TestPlatformScopes_NameThePlatformAudience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("endpoint: %v", err)
 	}
-	ts, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", PlatformScopes())
+	ts, err := NewTokenSources(context.Background(), ep, "tenant-operator", "s3cret")
 	if err != nil {
-		t.Fatalf("TokenSource: %v", err)
+		t.Fatalf("NewTokenSources: %v", err)
 	}
-	if _, err := ts.Token(); err != nil {
+	if _, err := ts.Platform.Token(); err != nil {
 		t.Fatalf("Token: %v", err)
 	}
 	if !strings.Contains(gotScope, "urn:zitadel:iam:org:project:id:gibson-platform:aud") {

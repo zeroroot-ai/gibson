@@ -12,7 +12,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -91,29 +90,23 @@ type Organization struct {
 // with the instance header, both through the shared zitadelconn package
 // (ADR-0092). It builds no URL from an issuer and sets no Host header.
 type httpClient struct {
-	baseURL *url.URL
-	tokens  oauth2.TokenSource
-	http    *http.Client
+	endpoint zitadelconn.Endpoint
+	tokens   oauth2.TokenSource
+	http     *http.Client
 }
 
 // requestTimeout bounds one Management API request.
 const requestTimeout = 30 * time.Second
 
-// New constructs a Zitadel Management API client for ep.
-// tokens supplies the Bearer token for every request (see TokenSource).
-func New(ep zitadelconn.Endpoint, tokens oauth2.TokenSource) (Client, error) {
-	if ep.IsZero() {
-		return nil, errors.New("zitadel: the endpoint is not set; build it with zitadelconn.New or zitadelconn.FromEnv")
-	}
-	u, err := url.Parse(ep.BaseURL())
-	if err != nil {
-		return nil, fmt.Errorf("zitadel: endpoint base URL %q: %w", ep.BaseURL(), err)
-	}
+// New constructs a Zitadel Management API client for ep, which must come
+// from zitadelconn.New or zitadelconn.FromEnv.
+// tokens supplies the Bearer token for every request (see NewTokenSources).
+func New(ep zitadelconn.Endpoint, tokens oauth2.TokenSource) Client {
 	return &httpClient{
-		baseURL: u,
-		tokens:  tokens,
-		http:    ep.HTTPClient(requestTimeout),
-	}, nil
+		endpoint: ep,
+		tokens:   tokens,
+		http:     ep.HTTPClient(requestTimeout),
+	}
 }
 
 // CreateOrganization implements Client.
@@ -487,7 +480,7 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 	if err != nil {
 		return fmt.Errorf("zitadel: path %q: %w", path, clients.ErrInvalidInput)
 	}
-	u := c.baseURL.ResolveReference(ref)
+	u := c.endpoint.URL(ref.RequestURI())
 
 	var reqBody io.Reader
 	if body != nil {
@@ -497,7 +490,7 @@ func (c *httpClient) doJSONWithOrg(ctx context.Context, method, path, orgID stri
 		}
 		reqBody = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, u, reqBody)
 	if err != nil {
 		return fmt.Errorf("zitadel: build request: %w", err)
 	}

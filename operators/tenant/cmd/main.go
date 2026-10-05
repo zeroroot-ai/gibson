@@ -39,7 +39,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
-	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
@@ -326,41 +325,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The one Zitadel endpoint (ADR-0092, gibson#222): the operator connects
-	// to the in-cluster Service (ZITADEL_URL) and claims the public host
-	// (ZITADEL_EXTERNAL_DOMAIN) with the instance header. Every Zitadel call
-	// below uses it: the platform token, the Management client and the tenant
-	// role grants. No call builds a URL from an issuer, so no call depends on
-	// hostAliases or on Envoy.
-	//
-	// The operator refuses to start without it (one-code-path / deploy#196):
-	// a missing endpoint would otherwise surface days later as a Ready tenant
-	// with no Zitadel org.
-	zitadelEndpoint, err := zitadelconn.FromEnv()
-	if err != nil {
-		setupLog.Error(err, "Zitadel endpoint (ADR-0092): the operator refuses to start")
-		os.Exit(1)
-	}
-
-	// Token source for outbound calls to the dashboard's admin provisioning
-	// API. The dashboard validates the incoming Bearer token against Zitadel's
-	// JWKS endpoint. We use the OAuth2 client_credentials grant exclusively.
-	//
-	// Required env vars — operator refuses to start if either is empty:
-	//   ZITADEL_TENANT_OPERATOR_CLIENT_ID
-	//   ZITADEL_TENANT_OPERATOR_CLIENT_SECRET
-	operatorClientID := os.Getenv("ZITADEL_TENANT_OPERATOR_CLIENT_ID")
-	operatorClientSecret := os.Getenv("ZITADEL_TENANT_OPERATOR_CLIENT_SECRET")
-	platformTokens, err := newPlatformTokenSource(context.Background(), zitadelEndpoint, operatorClientID, operatorClientSecret)
-	if err != nil {
-		setupLog.Error(err,
-			"operator outbound auth: set ZITADEL_TENANT_OPERATOR_CLIENT_ID and "+
-				"ZITADEL_TENANT_OPERATOR_CLIENT_SECRET")
-		os.Exit(1)
-	}
-	operatorTokenSource := &provision.OAuth2TokenSource{Source: platformTokens}
-	setupLog.Info("Zitadel operator token source initialized (client_credentials)",
-		"clientID", operatorClientID, "url", zitadelEndpoint.BaseURL(), "external-domain", zitadelEndpoint.Host())
+	// Zitadel wiring (ADR-0092, gibson#222): one endpoint for the platform
+	// token, the Management client and the tenant role grants. The operator
+	// refuses to start without it (one-code-path / deploy#196). See
+	// newZitadelWiring for the required env vars.
+	zw := zitadelWiringOrExit(context.Background(), os.Getenv, os.Exit)
+	operatorTokenSource := &provision.OAuth2TokenSource{Source: zw.tokens.Platform}
+	zitadelClient := zw.client
 
 	// Construct subsystem clients from environment config.
 	// One-code-path slice deploy#195: FGA is a hard dependency. The operator
@@ -493,15 +464,6 @@ func main() {
 	// is not reachable, so the failure surfaces as a CrashLoopBackOff on
 	// the tenant-operator pod rather than a "Tenant.Status.Ready=True with
 	// missing-org" silent corruption days later.
-	zitadelClient, err := newZitadelClient(context.Background(), zitadelEndpoint, operatorClientID, operatorClientSecret)
-	if err != nil {
-		setupLog.Error(err, "Zitadel client (one-code-path / deploy#196): the operator refuses to start without its own client credentials")
-		os.Exit(1)
-	}
-	setupLog.Info("Zitadel client initialized",
-		"url", zitadelEndpoint.BaseURL(),
-		"external-domain", zitadelEndpoint.Host())
-
 	// ZITADEL_PROJECT_ID (ADR-0093): the gibson project every tenant org is
 	// granted, and every tenant role is a user grant on. One-code-path, same
 	// style as ZITADEL_URL above: a tenant-operator that started without it
@@ -628,11 +590,7 @@ func main() {
 	// operator already requires, claiming the instance by header (ADR-0092)
 	// and authenticating as the operator's own machine user, with the same
 	// client credentials as the management-API client.
-	tenantRoleGrants, err := newTenantRoleGrants(context.Background(), zitadelEndpoint, operatorClientID, operatorClientSecret, zitadelProjectID)
-	if err != nil {
-		setupLog.Error(err, "tenant role grants (ADR-0092, ADR-0093): the operator refuses to start")
-		os.Exit(1)
-	}
+	tenantRoleGrants := zw.tenantRoleGrants(zitadelProjectID)
 	tenantRoleTuples := fga.NewTenantRoleTuples(fgaClient)
 	tenantRoleSyncer := tenantrole.NewSyncer(tenantRoleGrants, tenantRoleTuples, nil)
 	tenantRoleSyncInterval := controller.DefaultTenantRoleSyncInterval

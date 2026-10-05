@@ -55,20 +55,7 @@ func mustNew(t *testing.T, connectURL string, tokens oauth2.TokenSource) Client 
 	if err != nil {
 		t.Fatalf("endpoint: %v", err)
 	}
-	c, err := New(ep, tokens)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	return c
-}
-
-// TestNew_RefusesAZeroEndpoint: an Endpoint that zitadelconn never validated
-// names no Service and no host, so New refuses it at construction time.
-func TestNew_RefusesAZeroEndpoint(t *testing.T) {
-	c, err := New(zitadelconn.Endpoint{}, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "t"}))
-	if err == nil || c != nil {
-		t.Fatalf("New(zero endpoint) = %v, %v; want a refusal", c, err)
-	}
+	return New(ep, tokens)
 }
 
 // TestManagementCalls_SelectTheInstanceByHeader proves the Management client
@@ -80,14 +67,11 @@ func TestManagementCalls_SelectTheInstanceByHeader(t *testing.T) {
 		writeJSON(w, http.StatusOK, map[string]any{"result": []any{}})
 	}))
 	ep := fake.Endpoint(t)
-	tokens, err := TokenSource(context.Background(), ep, "tenant-operator", "s3cret", APIScopes())
+	tokens, err := NewTokenSources(context.Background(), ep, "tenant-operator", "s3cret")
 	if err != nil {
-		t.Fatalf("TokenSource: %v", err)
+		t.Fatalf("NewTokenSources: %v", err)
 	}
-	c, err := New(ep, tokens)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	c := New(ep, tokens.API)
 	if _, err := c.GetOrganization(context.Background(), "org-1"); !errors.Is(err, clients.ErrNotFound) {
 		t.Fatalf("GetOrganization: %v, want ErrNotFound from the empty search", err)
 	}
