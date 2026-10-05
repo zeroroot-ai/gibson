@@ -548,10 +548,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 		Name:     req.Name,
 		Version:  req.Version,
 		TenantID: tenant,
-		Metadata: req.Metadata,
-	}
-	if info.Metadata == nil {
-		info.Metadata = make(map[string]string)
+		Metadata: checkInMetadata(req.Metadata),
 	}
 
 	// Capabilities, methods, and descriptor set are stored in metadata so that
@@ -2294,6 +2291,29 @@ func componentAccessErrToStatus(err error, componentName string) error {
 	default:
 		return status.Errorf(codes.Internal, "plugin access operation failed: %v", err)
 	}
+}
+
+// daemonOwnedMetadataKeys are the registry metadata keys only the daemon may
+// set. A check-in that carries one of them loses it.
+//
+//   - grpc_endpoint is an address the harness would dial. No component of the
+//     platform sets it, so a value can only come from the caller's own
+//     request, and the daemon does not dial an address a caller names.
+//   - owner_user_id is the user a later delegation is attributed to. The
+//     daemon sets it from the caller's verified identity.
+var daemonOwnedMetadataKeys = []string{"grpc_endpoint", ComponentMetadataOwnerUserID}
+
+// checkInMetadata returns a copy of the metadata of a check-in without the
+// keys only the daemon may set. It never returns nil and never changes md.
+func checkInMetadata(md map[string]string) map[string]string {
+	out := make(map[string]string, len(md))
+	for k, v := range md {
+		out[k] = v
+	}
+	for _, k := range daemonOwnedMetadataKeys {
+		delete(out, k)
+	}
+	return out
 }
 
 // contentTrustFromMetadata maps the plugin:content_trust registration metadata
