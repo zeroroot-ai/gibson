@@ -1351,18 +1351,20 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 // materializes the :AgentRun nodes and the DELEGATED_TO edge.
 func (h *DefaultAgentHarness) observeDelegation(ctx context.Context, name string, childHarness AgentHarness) {
 	parentRunID := h.missionCtx.AgentRunID
-	dah, ok := childHarness.(*DefaultAgentHarness)
-	if h.delegationSink == nil || parentRunID == "" || !ok || dah.missionCtx.AgentRunID == "" {
-		return
+	var childRunID string
+	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
+		childRunID = dah.missionCtx.AgentRunID
 	}
-	h.delegationSink(ctx, DelegationObserved{
-		Tenant:      h.missionCtx.TenantID,
-		Scope:       h.missionCtx.ID.String(),
-		ParentRunID: parentRunID,
-		ParentAgent: h.missionCtx.CurrentAgent,
-		ChildRunID:  dah.missionCtx.AgentRunID,
-		ChildAgent:  name,
-	})
+	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
+		h.delegationSink(ctx, DelegationObserved{
+			Tenant:      h.missionCtx.TenantID,
+			Scope:       h.missionCtx.ID.String(),
+			ParentRunID: parentRunID,
+			ParentAgent: h.missionCtx.CurrentAgent,
+			ChildRunID:  childRunID,
+			ChildAgent:  name,
+		})
+	}
 }
 
 // trackInFlightAgent does the concurrent_agents quota bookkeeping for one
