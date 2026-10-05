@@ -138,12 +138,17 @@ func parseMarker(body string) ([]triple, error) {
 	return out, nil
 }
 
-// roleTriples reads the permissions of a generated ClusterRole.
-func roleTriples(t *testing.T, path string) map[triple]bool {
+// rolePath is the generated ClusterRole, relative to an operator's root.
+const rolePath = "config/rbac/role.yaml"
+
+// roleTriples reads the permissions of the generated ClusterRole of the
+// operator at root.
+func roleTriples(t *testing.T, root string) map[triple]bool {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	path := filepath.Join(root, rolePath)
+	raw, err := fs.ReadFile(os.DirFS(root), rolePath)
 	if err != nil {
-		t.Fatalf("read %s: %v (generate it with `make -C %s manifests`)", path, err, filepath.Dir(filepath.Dir(filepath.Dir(path))))
+		t.Fatalf("read %s: %v (generate it with `make -C %s manifests`)", path, err, root)
 	}
 	var role struct {
 		Kind  string `json:"kind"`
@@ -202,7 +207,7 @@ func TestGeneratedRoleMatchesTheMarkers(t *testing.T) {
 			if markers < minMarkers {
 				t.Fatalf("found %d rbac marker(s) under %s, want at least %d: the scan is not looking at the operator", markers, root, minMarkers)
 			}
-			role := roleTriples(t, filepath.Join(root, "config", "rbac", "role.yaml"))
+			role := roleTriples(t, root)
 			for _, missing := range diff(granted, role) {
 				t.Errorf("role.yaml does not grant %s, which a marker states. Run `make -C operators/%s manifests`", missing, op)
 			}
