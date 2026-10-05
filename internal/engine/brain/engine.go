@@ -435,33 +435,6 @@ func (e *Engine) Hydrate(ctx context.Context) error {
 	return nil
 }
 
-// RewindTo makes the frame after folding the first n Timeline events the new live
-// state: it truncates the Timeline to n events and rebuilds the World by replay
-// (ADR-0101: World == fold(Timeline)). Brain-native rewind — the durable record IS
-// the Timeline, so rewinding is discarding the tail and re-folding; no checkpoint
-// store. n is clamped to [0, len(Timeline)].
-//
-// Work that was `running` in the rewound frame is left as recorded; the caller
-// should reconcile in-flight work (e.g. ResumeFailInFlight) so the engine
-// re-engages it, since the original dispatch is no longer outstanding.
-func (e *Engine) RewindTo(n int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	evs := e.Timeline.Events()
-	if n < 0 {
-		n = 0
-	}
-	if n > len(evs) {
-		n = len(evs)
-	}
-	tl := &Timeline{}
-	for _, ev := range evs[:n] {
-		tl.Append(ev)
-	}
-	e.Timeline = tl
-	e.World = Replay(e.World.Tenant, tl)
-}
-
 // Read accessors — read-locked, safe to call concurrently with the tick loop
 // (the read path / Scroller use these). They return value snapshots, never live
 // references into the World.
