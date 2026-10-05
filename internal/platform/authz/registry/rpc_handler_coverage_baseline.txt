@@ -14,7 +14,6 @@
 /gibson.component.v1.ComponentService/GetPluginConfig
 /gibson.component.v1.ComponentService/GetTaxonomySchema
 /gibson.component.v1.ComponentService/ListAvailablePlugins
-/gibson.component.v1.ComponentService/ListTenantPlugins
 /gibson.component.v1.ComponentService/QueryPlugin
 /gibson.component.v1.ComponentService/QueueToolWork
 /gibson.component.v1.ComponentService/ReportStepHints
