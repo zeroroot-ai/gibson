@@ -134,6 +134,9 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		// = tenant-ambient — never attaches to a mission frame, fixing the prior
 		// run_id-based cross-mission bleed (gibson#1063).
 		return e.MissionID != "" && e.MissionID == missionID
+	case BetProofSubmittedForReview:
+		// A proof belongs to the mission whose agent submitted it.
+		return e.MissionID != "" && e.MissionID == missionID
 	case AgentToolCallObserved:
 		// Flight recorder (ADR-0120, gibson#271): same mission-evidence edge as
 		// LlmCallObserved, so a mission-scoped frame's Timeline shows the tool

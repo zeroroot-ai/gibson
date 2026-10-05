@@ -62,4 +62,15 @@ type ProofSettlementEngine interface {
 	// methods above. The fleet keeps working while the human decision is
 	// pending; this never blocks.
 	RequestDestructiveAuthorization(ctx context.Context, req DestructiveAuthorizationRequest) (authorizationRequestID string, err error)
+
+	// RecordedToolCalls resolves ctx's tenant's Engine and returns the tool
+	// calls the daemon recorded for missionID under ids, and the ids it holds
+	// no record for (Engine.RecordedToolCalls). SubmitProof evaluates the
+	// pack predicate on these records, never on text the agent supplied.
+	RecordedToolCalls(ctx context.Context, missionID string, ids []string) (found []AgentToolCallSnapshot, missing []string, err error)
+
+	// SubmitProofForReview resolves ctx's tenant's Engine and records a
+	// proof that carries only agent-typed evidence, so a human can review it
+	// and settle the bet (Engine.SubmitProofForReview).
+	SubmitProofForReview(ctx context.Context, req ProofReviewRequest) error
 }

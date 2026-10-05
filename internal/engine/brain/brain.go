@@ -92,6 +92,10 @@ type World struct {
 	// sighted facts.
 	domainPacks map[string]DomainPackState
 
+	// proofReviews holds the latest proof with agent-typed evidence for each
+	// hypothesis (proof_review.go, ADR-0131), keyed by hypothesis id.
+	proofReviews map[string]BetProofSubmittedForReview
+
 	// ontologyGate is this tenant's taxonomy-discovery safety gate
 	// (taxonomy.PromotionGate, ADR-0124, ADR-0133,
 	// gibson#391/#392), folded from OntologyExtensionProposed/Approved
@@ -247,6 +251,7 @@ func NewWorld(tenant string) *World {
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 		domainPacks:        make(map[string]DomainPackState),
+		proofReviews:       make(map[string]BetProofSubmittedForReview),
 		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
 		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
 		edgeOutcomes:       make(map[string]EdgeOutcomeCount),
@@ -480,6 +485,8 @@ func Reduce(w *World, ev Event) {
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:
 		applyDomainPackDisabled(w, e)
+	case BetProofSubmittedForReview:
+		applyBetProofSubmittedForReview(w, e)
 	case OntologyExtensionProposed:
 		applyOntologyExtensionProposed(w, e)
 	case OntologyExtensionApproved:

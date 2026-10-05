@@ -4,12 +4,14 @@
 package harness
 
 // callback_submit_proof.go implements SubmitProof (ADR-0131,
-// gibson#389, epic #376): an agent posts raw evidence and names the
-// hypothesis and (technique, predicate) it settles — never a verdict. The
-// daemon resolves the named predicate from the caller's tenant's currently
-// enabled Domain Packs, compiles and evaluates it as CEL over the submitted
-// evidence (internal/engine/settlement/celenv, gibson#388), and on a true
-// result reaches Engine.SettleBetTrue to fold BetSettledTrue. This clears
+// gibson#389, epic #376): an agent names the hypothesis and (technique,
+// predicate) it settles, and the tool calls that prove it — never a verdict.
+// The daemon resolves the named predicate from the caller's tenant's
+// currently enabled Domain Packs, compiles and evaluates it as CEL over its
+// OWN records of those tool calls (internal/engine/settlement/celenv,
+// gibson#388), and on a true result reaches Engine.SettleBetTrue to fold
+// BetSettledTrue. A proof that carries only text the agent typed goes to a
+// human review and settles nothing here. This clears
 // the deadcode baseline for SettleBetTrue / settlement.NewRegistry: before
 // this file, nothing in the live daemon ever reached either.
 //
@@ -76,7 +78,6 @@ import (
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -93,7 +94,7 @@ import (
 const domainPackCELPredicateType settlement.PredicateType = "domain_pack_cel"
 
 // SubmitProof implements harnesspb.HarnessCallbackServiceServer.SubmitProof
-// (ADR-0131): an agent triggers settlement and supplies raw evidence; the
+// (ADR-0131): an agent triggers settlement and names recorded tool calls; the
 // daemon decides via a deterministic pack CEL predicate, never the agent's
 // own verdict.
 //
@@ -178,6 +179,34 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		}, nil
 	}
 
+	// Two forms of proof (ADR-0131). A proof that names recorded tool calls
+	// settles on the daemon's own record of those calls. A proof that carries
+	// only text the agent typed settles nothing here: the daemon cannot tell
+	// where the text came from, so a human reviews it.
+	toolCallIDs := req.GetToolCallIds()
+	if len(toolCallIDs) == 0 {
+		return s.submitProofForReview(ctx, req, mission.ID.String(), target.ID.String())
+	}
+	if len(toolCallIDs) > brain.MaxProofToolCallIDs {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"tool_call_ids names %d calls, over the limit of %d", len(toolCallIDs), brain.MaxProofToolCallIDs)
+	}
+	calls, missing, err := s.proofSettlement.RecordedToolCalls(ctx, mission.ID.String(), toolCallIDs)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "SubmitProof: read recorded tool calls: %v", err)
+	}
+	if len(missing) > 0 {
+		return &harnesspb.SubmitProofResponse{
+			HypothesisId: hypothesisID,
+			Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED,
+			Error: &harnesspb.HarnessError{
+				Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+				Message: fmt.Sprintf(
+					"SubmitProof: the daemon holds no record of tool call %q for this mission", missing[0]),
+			},
+		}, nil
+	}
+
 	registry := settlement.NewRegistry()
 	if regErr := registry.Register(settlement.TechniqueID(technique), domainPackCELPredicateType, evaluateDomainPackCEL); regErr != nil {
 		return nil, status.Errorf(codes.Internal, "SubmitProof: register predicate: %v", regErr)
@@ -195,7 +224,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		Technique:            settlement.TechniqueID(technique),
 		PredicateType:        domainPackCELPredicateType,
 		PredicateParams:      json.RawMessage(rawExpr),
-		Evidence:             submitProofEvidence(req.GetEvidence()),
+		Evidence:             recordedToolCallEvidence(calls),
 		Destructive:          destructive,
 		PredictedProbability: predictedProbability,
 	})
@@ -280,78 +309,56 @@ func evaluateDomainPackCEL(params json.RawMessage, evidence []finding.EnhancedEv
 	return ok, nil
 }
 
-// submitProofEvidenceType converts the wire EvidenceType (raw evidence the
-// agent posted, never a verdict) to the internal finding.EvidenceType celenv
-// evaluates against. Every enum value is enumerated explicitly (exhaustive
-// lint): an evidence type this daemon does not distinguish (UNSPECIFIED,
-// OTHER) degrades to EvidenceLog rather than being refused — the predicate
-// itself, not this conversion, decides whether an evidence item is relevant.
-func submitProofEvidenceType(t typespb.EvidenceType) finding.EvidenceType {
-	switch t {
-	case typespb.EvidenceType_EVIDENCE_TYPE_UNSPECIFIED:
-		return finding.EvidenceLog
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return finding.EvidenceHTTPRequest
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return finding.EvidenceHTTPResponse
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return finding.EvidenceScreenshot
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return finding.EvidenceCodeSnippet
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return finding.EvidenceLog
-	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
-		return finding.EvidenceLog
-	default:
-		return finding.EvidenceLog
+// submitProofForReview records a proof that carries only agent-typed
+// evidence and reports SETTLEMENT_OUTCOME_PENDING_REVIEW. The bet stays open
+// until a human settles it. A proof with no tool call and no evidence is
+// refused: there is nothing to evaluate and nothing to review.
+func (s *HarnessCallbackService) submitProofForReview(
+	ctx context.Context, req *harnesspb.SubmitProofRequest, missionID, scopeID string,
+) (*harnesspb.SubmitProofResponse, error) {
+	typed := req.GetEvidence()
+	if len(typed) == 0 {
+		return nil, status.Error(codes.InvalidArgument,
+			"a proof must name recorded tool calls (tool_call_ids) or carry evidence")
 	}
+	evidence := make([]brain.ProofReviewEvidence, len(typed))
+	for i, e := range typed {
+		evidence[i] = brain.ProofReviewEvidence{
+			Type:    e.GetType().String(),
+			Title:   e.GetTitle(),
+			Content: e.GetContent(),
+		}
+	}
+	if err := s.proofSettlement.SubmitProofForReview(ctx, brain.ProofReviewRequest{
+		HypothesisID:        req.GetHypothesisId(),
+		MissionID:           missionID,
+		ScopeID:             scopeID,
+		Technique:           req.GetTechnique(),
+		Evidence:            evidence,
+		SubmittedAtUnixNano: time.Now().UnixNano(),
+	}); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "SubmitProof: %v", err)
+	}
+	return &harnesspb.SubmitProofResponse{
+		HypothesisId: req.GetHypothesisId(),
+		Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_REVIEW,
+	}, nil
 }
 
-// submitProofEvidence converts the raw evidence the agent posted
-// (gibson.types.v1.Evidence, wire) into the celenv-evaluated shape
-// (finding.EnhancedEvidence). SubmitProofRequest's evidence is deliberately
-// unstructured raw tool output (ADR-0131) — a flat content string, never a
-// typed, pre-parsed evidence payload — so submitProofEvidenceContent adapts
-// it to the shape celenv's evidenceText/httpStatus helpers already know how
-// to read per type (functions.go). Timestamp is the daemon's own receipt
-// time: the wire message carries none, and this is at least as trustworthy
-// as an agent-supplied one would be (ADR-0131's independent-evidence-
-// integrity stance never trusts the agent's own account of when something
-// happened, only that it happened, via the flight recorder).
-func submitProofEvidence(items []*typespb.Evidence) []finding.EnhancedEvidence {
-	if len(items) == 0 {
-		return nil
-	}
-	receivedAt := time.Now()
-	out := make([]finding.EnhancedEvidence, len(items))
-	for i, e := range items {
-		t := submitProofEvidenceType(e.GetType())
+// recordedToolCallEvidence turns the daemon's own records of tool calls into
+// the evidence a pack predicate evaluates. Content is the result the tool
+// returned, as the flight recorder stored it (ADR-0120), and Timestamp is
+// when the daemon observed the call. Nothing here comes from the proof
+// request except the ids that selected the records.
+func recordedToolCallEvidence(calls []brain.AgentToolCallSnapshot) []finding.EnhancedEvidence {
+	out := make([]finding.EnhancedEvidence, len(calls))
+	for i, c := range calls {
 		out[i] = finding.EnhancedEvidence{
-			Type:      t,
-			Title:     e.GetTitle(),
-			Content:   submitProofEvidenceContent(t, e.GetContent()),
-			Timestamp: receivedAt,
+			Type:      finding.EvidenceLog,
+			Title:     fmt.Sprintf("tool call %s (%s)", c.ToolName, c.ToolCallID),
+			Content:   c.Result,
+			Timestamp: time.Unix(0, c.RecordedAtUnixNano),
 		}
 	}
 	return out
-}
-
-// submitProofEvidenceContent shapes one evidence item's raw text content for
-// celenv. evidenceText/httpStatus (celenv/functions.go) read an
-// EvidenceHTTPRequest/EvidenceHTTPResponse item's content as a
-// {"body": ..., "status_code": ...}-shaped map (finding.HTTPResponseEvidence's
-// own JSON tags), never a bare string — without this, a pack predicate's
-// evidenceText/markerPresent/httpStatus calls would silently see "" for
-// every RESPONSE/REQUEST evidence item SubmitProof ever carries, since the
-// wire message gives agents no way to submit a pre-structured body. Wrapping
-// the raw text as body preserves it exactly (never fabricating a status
-// code SubmitProof was not given) while making it reachable through the
-// same helpers a pack predicate already uses for every other evidence type.
-// Every other type's content already round-trips as celenv expects: a bare
-// string.
-func submitProofEvidenceContent(t finding.EvidenceType, content string) any {
-	if t == finding.EvidenceHTTPRequest || t == finding.EvidenceHTTPResponse {
-		return map[string]any{"body": content}
-	}
-	return content
 }

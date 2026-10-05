@@ -101,7 +101,7 @@ func (s *HarnessCallbackService) ProposeOntologyExtension(
 
 // proposeOntologyExtensionKind converts the wire OntologyExtensionKind to the
 // taxonomy vocabulary Engine.ProposeOntologyExtension folds against. Unlike
-// submitProofEvidenceType's evidence-type conversion (which degrades an
+// an evidence-type conversion (which can degrade an
 // unrecognized value, because the predicate, not the conversion, decides
 // relevance), kind SELECTS one of Taxonomy's two vocabularies (node label vs
 // relationship type): an unspecified or unrecognized kind names neither, so

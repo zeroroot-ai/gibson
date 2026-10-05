@@ -144,6 +144,9 @@ func init() {
 	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
 	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
 
+	// proof_review.go
+	registerEvent("bet.proof_submitted_for_review", func() Event { return &BetProofSubmittedForReview{} })
+
 	// ontology_extension.go
 	registerEvent("ontology_extension.proposed", func() Event { return &OntologyExtensionProposed{} })
 	registerEvent("ontology_extension.approved", func() Event { return &OntologyExtensionApproved{} })
@@ -276,6 +279,8 @@ func dereferenceEvent(ev Event) Event {
 	case *DomainPackEnabled:
 		return *v
 	case *DomainPackDisabled:
+		return *v
+	case *BetProofSubmittedForReview:
 		return *v
 	case *OntologyExtensionProposed:
 		return *v

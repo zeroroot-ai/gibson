@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +78,29 @@ func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predi
 	return expr, e.packDestructive, ok, nil
 }
 
+func (e *testProofSettlementEngine) RecordedToolCalls(_ context.Context, missionID string, ids []string) (found []brain.AgentToolCallSnapshot, missing []string, err error) {
+	found, missing = e.engine.RecordedToolCalls(missionID, ids)
+	return found, missing, nil
+}
+
+func (e *testProofSettlementEngine) SubmitProofForReview(ctx context.Context, req brain.ProofReviewRequest) error {
+	return e.engine.SubmitProofForReview(ctx, req)
+}
+
+// recordToolCall puts one tool call on the tenant's flight recorder, the way
+// the daemon does when an agent calls a tool, and waits until the engine
+// folded it. result is what the tool returned.
+func recordToolCall(t *testing.T, e *testProofSettlementEngine, missionID, id, result string) {
+	t.Helper()
+	e.engine.Submit(brain.AgentToolCallObserved{
+		ToolCallID: id, MissionID: missionID, ToolName: "httpx", Result: result, RecordedAtUnixNano: 1,
+	})
+	require.Eventually(t, func() bool {
+		found, _ := e.engine.RecordedToolCalls(missionID, []string{id})
+		return len(found) == 1
+	}, 2*time.Second, 5*time.Millisecond, "the tool call was never recorded")
+}
+
 // SettleBetTrue mirrors tenantRoutedProofSettlement.SettleBetTrue's ADR-0132
 // wiring (proof_settlement_adapter.go): when the caller (the SubmitProof
 // handler) leaves authorize nil for a destructive request, the real tenant
@@ -133,13 +157,13 @@ func newSubmitProofService(
 	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
 }
 
-func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, evidence ...*typespb.Evidence) *harnesspb.SubmitProofRequest {
+func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, toolCallIDs ...string) *harnesspb.SubmitProofRequest {
 	return &harnesspb.SubmitProofRequest{
 		Context:       &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
 		HypothesisId:  hypothesisID,
 		Technique:     technique,
 		PredicateName: predicateName,
-		Evidence:      evidence,
+		ToolCallIds:   toolCallIDs,
 	}
 }
 
@@ -235,9 +259,9 @@ func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
+	recordToolCall(t, engine, "mission-A", "call-1", "tok observed")
 	engine.packDestructive = true
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Nil(t, resp.GetError())
@@ -311,13 +335,9 @@ func TestSubmitProof_DestructiveApproved_SettlesTrue(t *testing.T) {
 	require.NoError(t, engine.engine.DestructiveAuthorizationQueue().Decide("hyp-1", "reviewer-1", true))
 	awaitDestructiveDecided(t, engine.engine, "hyp-1")
 
-	evidence := &typespb.Evidence{
-		Type:    typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
-		Title:   "destructive demonstration",
-		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
-	}
+	recordToolCall(t, engine, "mission-A", "call-1", "HTTP/1.1 200 OK\nproof-token-9f3a\n")
 	engine.packDestructive = true
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -352,13 +372,9 @@ func TestSubmitProof_DestructiveDenied_PermissionDenied(t *testing.T) {
 	require.NoError(t, engine.engine.DestructiveAuthorizationQueue().Decide("hyp-1", "reviewer-1", false))
 	awaitDestructiveDecided(t, engine.engine, "hyp-1")
 
-	evidence := &typespb.Evidence{
-		Type:    typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
-		Title:   "destructive demonstration",
-		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
-	}
+	recordToolCall(t, engine, "mission-A", "call-1", "HTTP/1.1 200 OK\nproof-token-9f3a\n")
 	engine.packDestructive = true
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
@@ -381,12 +397,8 @@ func TestSubmitProof_PredicateFires_SettlesTrue(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	evidence := &typespb.Evidence{
-		Type:    typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
-		Title:   "unauthenticated admin panel",
-		Content: "HTTP/1.1 200 OK\nproof-token-9f3a\n",
-	}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+	recordToolCall(t, engine, "mission-A", "call-1", "HTTP/1.1 200 OK\nproof-token-9f3a\n")
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -413,8 +425,8 @@ func TestSubmitProof_PredicateDoesNotFire_NotSettled(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE, Title: "no proof", Content: "HTTP/1.1 403 Forbidden"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+	recordToolCall(t, engine, "mission-A", "call-1", "HTTP/1.1 403 Forbidden")
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.Nil(t, resp.GetError())
@@ -433,8 +445,8 @@ func TestSubmitProof_NoStakedBet_FailsClosed(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", newFakeBeliefSubstrate(), engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "tok"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-never-staked", "T1190", "T1190", evidence))
+	recordToolCall(t, engine, "mission-A", "call-1", "tok")
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-never-staked", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	require.NotNil(t, resp.GetError())
@@ -464,23 +476,116 @@ func TestSubmitProof_PredicateDoesNotCompile_FailsClosed(t *testing.T) {
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED, resp.GetOutcome())
 }
 
-// TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman is the fixture
-// for the rule that the pack states whether a predicate is destructive
-// (ADR-0132). The request has no say: it carries no destructive field the
-// handler reads. The pack does not name the predicate as non-destructive, so
-// the proof waits for a human decision and never settles.
-func TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman(t *testing.T) {
+// stakedProofService builds a SubmitProof service for tenant acme with one
+// bet staked on hyp-1 and one pack predicate that looks for a marker.
+func stakedProofService(t *testing.T) (*HarnessCallbackService, *testProofSettlementEngine, context.Context) {
+	t.Helper()
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
 	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
-	engine.packDestructive = true
 	substrate := newFakeBeliefSubstrate()
 	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.6}}))
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+	return svc, engine, auth.ContextWithTenantString(context.Background(), "acme")
+}
 
-	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
-	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
+// TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman is the fixture
+// for the rule that the pack states whether a predicate is destructive
+// (ADR-0132). The pack does not name the predicate as non-destructive, so the
+// proof waits for a human decision and never settles.
+func TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman(t *testing.T) {
+	svc, engine, ctx := stakedProofService(t)
+	engine.packDestructive = true
+	recordToolCall(t, engine, "mission-A", "call-1", "tok observed")
+
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1"))
 	require.NoError(t, err)
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION, resp.GetOutcome())
 	assert.Empty(t, engine.engine.BetSettlements())
+}
+
+// TestSubmitProof_TypedEvidenceIsNotEvaluated is the failing fixture for the
+// rule that a predicate runs only on the daemon's own record (ADR-0131). The
+// recorded tool call does not hold the marker. The request also carries
+// evidence the agent typed, and that text holds the marker. The predicate
+// must not fire.
+func TestSubmitProof_TypedEvidenceIsNotEvaluated(t *testing.T) {
+	svc, engine, ctx := stakedProofService(t)
+	recordToolCall(t, engine, "mission-A", "call-1", "HTTP/1.1 403 Forbidden")
+
+	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", "call-1")
+	req.Evidence = []*typespb.Evidence{{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}}
+	resp, err := svc.SubmitProof(ctx, req)
+	require.NoError(t, err)
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_NOT_SETTLED, resp.GetOutcome())
+	assert.Empty(t, engine.engine.BetSettlements())
+}
+
+// TestSubmitProof_TypedEvidenceOnly_GoesToReview proves a proof with no
+// recorded tool call settles nothing and waits for a human. The text holds
+// the marker, so on main this proof settled the bet true.
+func TestSubmitProof_TypedEvidenceOnly_GoesToReview(t *testing.T) {
+	svc, engine, ctx := stakedProofService(t)
+
+	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190")
+	req.Evidence = []*typespb.Evidence{{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}}
+	resp, err := svc.SubmitProof(ctx, req)
+	require.NoError(t, err)
+	assert.Nil(t, resp.GetError())
+	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_REVIEW, resp.GetOutcome())
+	assert.Empty(t, engine.engine.BetSettlements())
+
+	require.Eventually(t, func() bool { return len(engine.engine.ProofReviews()) == 1 },
+		2*time.Second, 5*time.Millisecond, "the proof never reached the review list")
+	review := engine.engine.ProofReviews()[0]
+	assert.Equal(t, "hyp-1", review.HypothesisID)
+	assert.Equal(t, "mission-A", review.MissionID)
+	require.Len(t, review.Evidence, 1)
+	assert.Equal(t, "tok observed", review.Evidence[0].Content)
+}
+
+// TestSubmitProof_NothingToEvaluate_InvalidArgument proves a proof with no
+// tool call and no evidence is refused.
+func TestSubmitProof_NothingToEvaluate_InvalidArgument(t *testing.T) {
+	svc, _, ctx := stakedProofService(t)
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190"))
+	require.Nil(t, resp)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// TestSubmitProof_UnrecordedToolCall_FailsClosed proves a proof settles only
+// on a call the daemon recorded for the proof's own mission. An unknown id
+// and the id of another mission's call both fail closed.
+func TestSubmitProof_UnrecordedToolCall_FailsClosed(t *testing.T) {
+	svc, engine, ctx := stakedProofService(t)
+	recordToolCall(t, engine, "mission-B", "call-of-b", "tok observed")
+
+	for _, id := range []string{"never-recorded", "call-of-b"} {
+		resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", id))
+		require.NoError(t, err)
+		require.NotNil(t, resp.GetError(), id)
+		assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, resp.GetError().GetCode(), id)
+		assert.Empty(t, engine.engine.BetSettlements(), id)
+	}
+}
+
+// TestSubmitProof_Bounds_InvalidArgument proves the two bounds of a proof: the
+// number of tool calls it names, and the size of the evidence it sends for a
+// review.
+func TestSubmitProof_Bounds_InvalidArgument(t *testing.T) {
+	svc, engine, ctx := stakedProofService(t)
+
+	ids := make([]string, brain.MaxProofToolCallIDs+1)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("call-%d", i)
+	}
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", ids...))
+	require.Nil(t, resp)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190")
+	req.Evidence = []*typespb.Evidence{{Content: strings.Repeat("a", brain.MaxProofReviewEvidenceBytes+1)}}
+	resp, err = svc.SubmitProof(ctx, req)
+	require.Nil(t, resp)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+	assert.Empty(t, engine.engine.ProofReviews())
 }
