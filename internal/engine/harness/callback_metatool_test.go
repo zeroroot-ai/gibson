@@ -6,12 +6,15 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math"
 	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -51,7 +54,7 @@ func TestMetaSearch_MapsCandidatesAndEmbedsRawSchema(t *testing.T) {
 	h := metatool.NewHandler(mtSearcher{ret: []catalog.Candidate{
 		{ID: "mcp:gitlab:create_issue", Source: "mcp", Connector: "gitlab", Tool: "create_issue",
 			Description: "open an issue", InputSchema: []byte(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
-	}}, mtAuthz{}, nil)
+	}}, mtAuthz{}, nil, nil)
 
 	resp, err := newSvc().metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, []byte(`{"query":"issue","limit":3}`))
 	if err != nil {
@@ -81,9 +84,9 @@ func TestMetaSearch_MapsCandidatesAndEmbedsRawSchema(t *testing.T) {
 // invoke_tool dispatches the decoded id and wraps the result under "result".
 func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q, nil)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -110,7 +113,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 // this fix, invoke_tool never called captureToolCall at all.
 func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q, nil)
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
@@ -123,7 +126,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 		MissionId: "m1", MissionRunId: "run-1", ToolExecutionId: "tool-exec-meta-1",
 	}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -162,7 +165,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 // is captured too, mirroring captureToolCall's contract on the native path.
 func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	q := &mtQuerier{}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q, nil)
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
@@ -173,7 +176,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -205,7 +208,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 // than silently dropping the whole capture.
 func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.T) {
 	q := &mtQuerier{ret: math.Inf(1)}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q, nil)
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
@@ -216,7 +219,7 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -246,9 +249,9 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 // An unauthorized id is reported as PERMISSION_DENIED and never dispatched.
 func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	q := &mtQuerier{}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q, nil)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -265,9 +268,9 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 // before authz or dispatch — even though the caller would otherwise be allowed.
 func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 	q := &mtQuerier{}
-	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q, nil)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"},
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"},
 		[]string{"mcp:gitlab:create_issue"},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
@@ -298,8 +301,8 @@ func TestMatchBlocked(t *testing.T) {
 }
 
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
-	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{}, nil, []byte(`{"args":{}}`))
+	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{}, nil)
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, nil, []byte(`{"args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -326,5 +329,115 @@ func TestMetaToolDescriptors_Shape(t *testing.T) {
 	}
 	if !isMetaTool(metatool.SearchToolsName) || isMetaTool("nmap") {
 		t.Fatal("isMetaTool classification wrong")
+	}
+}
+
+// newNativeMetaSvc builds a callback service whose harness serves one native
+// tool, and the native caller that invoke_tool uses for it.
+func newNativeMetaSvc(t *testing.T, captured *[]capturedTool, toolErr error) (*HarnessCallbackService, *nativeToolCaller, *harnesspb.ContextInfo) {
+	t.Helper()
+	mockHarness := &mockHarnessWithResolver{
+		toolDescriptors: map[string]*ToolDescriptor{
+			"test-external-tool": {
+				Name:            "test-external-tool",
+				InputProtoType:  "testtool.ToolInput",
+				OutputProtoType: "testtool.ToolOutput",
+				Metadata:        map[string]string{"file_descriptor_set": createTestFileDescriptorSetForCallback()},
+			},
+		},
+		toolHandler: func(_ context.Context, _ string, _, response proto.Message) error {
+			if toolErr != nil {
+				return toolErr
+			}
+			out := response.ProtoReflect()
+			out.Set(out.Descriptor().Fields().ByName("result"), protoreflect.ValueOfString("success"))
+			return nil
+		},
+	}
+	registry := NewCallbackHarnessRegistry()
+	registry.Register("test-mission-123", "test-agent", mockHarness)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.Default(), registry,
+		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
+			*captured = append(*captured, capturedTool{tenant: tn, call: call})
+		}),
+	)
+	contextInfo := &harnesspb.ContextInfo{
+		TaskId: "task-123", AgentName: "test-agent", MissionId: "test-mission-123",
+		MissionRunId: "run-1", ToolExecutionId: "tool-exec-native-1",
+	}
+	return svc, &nativeToolCaller{s: svc, harness: mockHarness, contextInfo: contextInfo}, contextInfo
+}
+
+// TestMetaInvoke_NativeToolRunsThroughTheDirectHandler proves that invoke_tool
+// dispatches a native:<tool> id (gibson#725). The call takes the direct tool
+// call handler, and the flight recorder gets exactly one record of it.
+func TestMetaInvoke_NativeToolRunsThroughTheDirectHandler(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{}, native)
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{"query":"q","limit":2}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() != nil {
+		t.Fatalf("unexpected error response: %v", resp.GetError())
+	}
+	var out struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(resp.GetOutputJson(), &out); err != nil || out.Result["result"] != "success" {
+		t.Fatalf("result not wrapped: %s (%v)", resp.GetOutputJson(), err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured %d tool calls, want exactly 1", len(captured))
+	}
+	if captured[0].call.ToolName != "test-external-tool" || captured[0].call.Err != "" {
+		t.Fatalf("captured call = %+v, want one success record of test-external-tool", captured[0].call)
+	}
+}
+
+// TestMetaInvoke_NativeToolNotEnabledIsRefused proves that a native tool that
+// the tenant did not enable gets a refusal and never runs. The refusal is
+// recorded one time.
+func TestMetaInvoke_NativeToolNotEnabledIsRefused(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, &mtQuerier{}, native)
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("error = %v, want PERMISSION_DENIED", resp.GetError())
+	}
+	if native.dispatched {
+		t.Fatal("a refused native tool reached the direct handler")
+	}
+	if len(captured) != 1 || captured[0].call.ToolName != "native:test-external-tool" || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v, want one refusal record", captured)
+	}
+}
+
+// TestMetaInvoke_NativeToolFailureIsRecordedOnce proves that a native tool
+// that fails after dispatch returns an error and leaves one record.
+func TestMetaInvoke_NativeToolFailureIsRecordedOnce(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, errors.New("tool boom"))
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{}, native)
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() == nil {
+		t.Fatal("want an error response for a failed tool")
+	}
+	if len(captured) != 1 || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v, want exactly one failure record", captured)
 	}
 }

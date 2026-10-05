@@ -3,7 +3,9 @@
 
 // Package metatool implements the two agent-facing meta-tools from ADR-0065:
 // search_tools (discovery over the FGA-scoped connector catalog) and
-// invoke_tool (deterministic id → PluginInvoke{plugin_name, method} dispatch).
+// invoke_tool (deterministic id → dispatch). An mcp:<connector>:<tool> id goes
+// to PluginInvoke{plugin_name, method}. A native:<tool> id goes to the native
+// tool dispatch of the harness: the sandbox path or the work queue path.
 //
 // Binding thousands of MCP tools to the LLM as native function names does not
 // scale and forbids structured ids, so at MCP scale the agent loop presents
@@ -46,6 +48,13 @@ type PluginQuerier interface {
 	QueryPlugin(ctx context.Context, name, method string, params map[string]any) (any, error)
 }
 
+// NativeCaller runs one native tool with JSON-object arguments and returns the
+// JSON-decodable result. The harness callback service satisfies it. It uses
+// the same dispatch as a direct tool call.
+type NativeCaller interface {
+	CallNativeTool(ctx context.Context, tool string, args map[string]any) (any, error)
+}
+
 // Searcher returns the ranked, authz-filtered, tenant-scoped catalog candidates
 // for a query. Satisfied by *catalog.Engine.
 type Searcher interface {
@@ -59,13 +68,14 @@ type Handler struct {
 	search  Searcher
 	authz   catalog.Authorizer
 	querier PluginQuerier
+	native  NativeCaller
 }
 
 // NewHandler constructs a Handler. Any collaborator may be nil; the dependent
 // meta-tool then fails closed with a configuration error rather than panicking,
 // so a partially-wired daemon degrades loudly.
-func NewHandler(search Searcher, authz catalog.Authorizer, querier PluginQuerier) *Handler {
-	return &Handler{search: search, authz: authz, querier: querier}
+func NewHandler(search Searcher, authz catalog.Authorizer, querier PluginQuerier, native NativeCaller) *Handler {
+	return &Handler{search: search, authz: authz, querier: querier, native: native}
 }
 
 // Search runs the discovery meta-tool, returning the narrowed candidate set the
@@ -78,24 +88,18 @@ func (h *Handler) Search(ctx context.Context, caller catalog.Caller, q catalog.Q
 }
 
 // Invoke runs the invocation meta-tool: decode the canonical id, re-check
-// can_execute (ADR-0067: on the connector component for mcp tools), then
-// dispatch through the existing plugin-method path. args is the
-// LLM-supplied argument object, passed through unchanged for the pinned-schema
-// validation QueryPlugin performs.
+// can_execute (ADR-0067: on the connector component for mcp tools, on the tool
+// component for native tools), then dispatch. An mcp id goes through the
+// plugin-method path. A native id goes through the native tool dispatch. args
+// is the LLM-supplied argument object, passed through unchanged for the
+// validation that the dispatch path performs.
 func (h *Handler) Invoke(ctx context.Context, caller catalog.Caller, id string, args map[string]any) (any, error) {
-	if h.querier == nil || h.authz == nil {
+	if h.authz == nil {
 		return nil, fmt.Errorf("metatool: invoke is not configured")
 	}
 	tid, err := decodeID(id)
 	if err != nil {
 		return nil, err
-	}
-	name, method, ok := tid.PluginRef()
-	if !ok {
-		// native:<tool> primitives are not PluginInvoke targets; the daemon's
-		// native dispatch path owns them and the native authz object is not yet
-		// standardized (gibson#700), so invoke_tool declines them explicitly.
-		return nil, fmt.Errorf("metatool: native tool %q is not invocable via invoke_tool", id)
 	}
 	allowed, err := h.authz.CanExecute(ctx, caller, tid)
 	if err != nil {
@@ -104,7 +108,16 @@ func (h *Handler) Invoke(ctx context.Context, caller catalog.Caller, id string, 
 	if !allowed {
 		return nil, fmt.Errorf("%w: %s", ErrUnauthorized, id)
 	}
-	return h.querier.QueryPlugin(ctx, name, method, args)
+	if name, method, ok := tid.PluginRef(); ok {
+		if h.querier == nil {
+			return nil, fmt.Errorf("metatool: the connector dispatch is not configured")
+		}
+		return h.querier.QueryPlugin(ctx, name, method, args)
+	}
+	if h.native == nil {
+		return nil, fmt.Errorf("metatool: the native tool dispatch is not configured")
+	}
+	return h.native.CallNativeTool(ctx, tid.Tool, args)
 }
 
 // decodeID accepts the canonical colon form (mcp:<connector>:<tool>) that
