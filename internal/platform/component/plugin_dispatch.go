@@ -118,7 +118,8 @@ func (s *PluginInvokeService) installStanding(ctx context.Context, tenant, name 
 		var err error
 		attested, err = s.enrollment.PrincipalIsAttested(ctx, tenant, install.PrincipalRef)
 		if err != nil {
-			return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED, err
+			return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
+				fmt.Errorf("read enrollment of %s: %w", install.PrincipalRef, err)
 		}
 	}
 	placement, trust := DispatchStanding(attested, authz.KindPlugin, name)
