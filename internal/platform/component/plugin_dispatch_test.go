@@ -71,6 +71,7 @@ func (f *fakeComponentInstallRegistry) addInstall(tenant auth.TenantID, name str
 		Name:            name,
 		DeclaredMethods: methods,
 		Status:          ComponentInstallStatusServing,
+		PrincipalRef:    tokenPrincipal,
 	})
 }
 
@@ -106,7 +107,7 @@ func TestPluginInvokeService_HappyPath(t *testing.T) {
 		return []byte("{}"), nil // empty success
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -125,7 +126,7 @@ func TestPluginInvokeService_HappyPath(t *testing.T) {
 
 func TestPluginInvokeService_UNAVAILABLE_NoInstalls(t *testing.T) {
 	reg := newFakeComponentInstallRegistry() // no installs registered
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -148,7 +149,7 @@ func TestPluginInvokeService_METHOD_NOT_FOUND(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
 	reg.addInstall(tenant, "lookup", []string{"search"}) // only "search" declared
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -172,7 +173,7 @@ func TestPluginInvokeService_DEADLINE_EXCEEDED(t *testing.T) {
 		return nil, fmt.Errorf("timeout waiting for work abc: %w", context.DeadlineExceeded)
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -197,7 +198,7 @@ func TestPluginInvokeService_HANDLER_FAILED(t *testing.T) {
 		return nil, &PluginWorkError{Code: "HANDLER_FAILED", Message: "handler panicked"}
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -221,7 +222,7 @@ func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 		return nil, ErrComponentUnavailable
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -238,7 +239,7 @@ func TestPluginInvokeService_UNAVAILABLE_RegistryError(t *testing.T) {
 
 func TestPluginInvokeService_InvalidArgument_EmptyPluginName(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	_, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -264,7 +265,7 @@ func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 		return []byte("{}"), nil
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 
 	// Fill the semaphore with pluginConcurrencyDefault goroutines.
 	done := make(chan struct{}, int(pluginConcurrencyDefault))
@@ -312,7 +313,7 @@ func TestPluginInvokeService_ConcurrencyLimit(t *testing.T) {
 
 func TestPluginInvokeService_MissingIdentity(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 
 	// Context with no identity.
 	resp, err := svc.PluginInvoke(context.Background(), &pluginpb.PluginInvokeRequest{
@@ -356,7 +357,7 @@ func TestPluginErrorResponse(t *testing.T) {
 }
 
 func TestPluginInvokeService_ClassifyDispatchError_PluginWorkError(t *testing.T) {
-	svc := NewPluginInvokeService(newFakeComponentInstallRegistry(), dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(newFakeComponentInstallRegistry(), dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := context.Background()
 
 	cases := []struct {
@@ -431,7 +432,7 @@ func TestDispatchEcho_ManifestDerived(t *testing.T) {
 		return []byte("{}"), nil
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -457,7 +458,7 @@ func TestDispatchOne_MethodDeclaredCheck(t *testing.T) {
 	// Register debug-plugin with only "Echo" declared.
 	reg.addInstall(tenant, "debug-plugin", []string{"Echo"})
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -489,6 +490,7 @@ func (f *fakeComponentInstallRegistry) addInstallWithTrust(tenant auth.TenantID,
 		DeclaredMethods: methods,
 		Status:          ComponentInstallStatusServing,
 		ContentTrust:    trust,
+		PrincipalRef:    standingPrincipal(trust),
 	})
 }
 
@@ -507,7 +509,7 @@ func TestPluginInvoke_UntrustedDeniedUnderSetecOnly(t *testing.T) {
 		return []byte("{}"), nil
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
@@ -529,7 +531,7 @@ func TestPluginInvoke_UntrustedAllowedUnderCustomerIsolation(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
 	reg.addInstallWithTrust(tenant, "scanner", []string{"run"}, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED)
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeCustomerIsolation, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeCustomerIsolation, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
@@ -548,7 +550,7 @@ func TestPluginInvoke_TrustedAllowedUnderSetecOnly(t *testing.T) {
 	reg := newFakeComponentInstallRegistry()
 	reg.addInstallWithTrust(tenant, "scanner", []string{"run"}, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{PluginName: "scanner", Method: "run"})
@@ -636,7 +638,7 @@ func TestPluginInvoke_GoFirstJSONRoundTrip(t *testing.T) {
 		return respJSON, nil
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	// The tool caller marshals its typed args to JSON and puts them in
@@ -694,7 +696,7 @@ func TestPluginInvoke_EmptyResultLeavesResultNil(t *testing.T) {
 		return nil, nil // a method that returns no body
 	}
 
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(allowInvokeAuthz)
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
@@ -710,5 +712,126 @@ func TestPluginInvoke_EmptyResultLeavesResultNil(t *testing.T) {
 	}
 	if resp.GetResult() != nil {
 		t.Fatalf("empty result should leave result nil, got %v", resp.GetResult())
+	}
+}
+
+// The dispatch gate reads where an install runs from the enrollment record of
+// its principal, not from the trust the install reported. These fixtures
+// state the placement through the principal: attestedPrincipal enrolled with
+// a SPIRE identity (code in the platform's cluster), tokenPrincipal enrolled
+// with a bootstrap token (code on the tenant's machine).
+const (
+	attestedPrincipal = "plugin_principal:attested"
+	tokenPrincipal    = "plugin_principal:1001"
+)
+
+type fixtureEnrollment struct{}
+
+func (fixtureEnrollment) PrincipalIsAttested(_ context.Context, _, principalRef string) (bool, error) {
+	return principalRef == attestedPrincipal, nil
+}
+
+// standingPrincipal maps the trust argument of addInstallWithTrust to a
+// placement. The denied case of the gate is cluster code the catalog does not
+// state as trusted, and the allowed case is an install on the tenant's machine.
+func standingPrincipal(trust componentpb.ContentTrust) string {
+	if trust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
+		return attestedPrincipal
+	}
+	return tokenPrincipal
+}
+
+func invokeRun(t *testing.T, svc *PluginInvokeService, plugin string) *pluginpb.PluginError {
+	t.Helper()
+	resp, err := svc.PluginInvoke(buildPluginInvokeCtx("tenant-abc"), &pluginpb.PluginInvokeRequest{PluginName: plugin, Method: "run"})
+	if err != nil {
+		t.Fatalf("unexpected gRPC error: %v", err)
+	}
+	return resp.GetError()
+}
+
+// TestPluginInvoke_SelfReportedTrustIsNotAnInput is the failing fixture for
+// the rule that placement and the catalog decide, never what an install
+// reports. An attested install of a plugin the catalog does not list reports
+// TRUSTED and is denied. A token install reports UNTRUSTED and is not denied,
+// because the platform runs none of its code.
+func TestPluginInvoke_SelfReportedTrustIsNotAnInput(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+
+	reg := newFakeComponentInstallRegistry()
+	reg.installs[tenant.String()+"/scanner"] = []InstallInfo{{
+		InstallID: "i1", TenantID: tenant, Name: "scanner", DeclaredMethods: []string{"run"},
+		Status: ComponentInstallStatusServing, PrincipalRef: attestedPrincipal,
+		ContentTrust: componentpb.ContentTrust_CONTENT_TRUST_TRUSTED,
+	}}
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).
+		WithAuthorizer(allowInvokeAuthz).WithEnrollmentReader(fixtureEnrollment{})
+	if e := invokeRun(t, svc, "scanner"); e == nil || e.GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("cluster code that reports TRUSTED but is not in the catalog must be denied, got %v", e)
+	}
+
+	reg.installs[tenant.String()+"/scanner"][0].PrincipalRef = tokenPrincipal
+	reg.installs[tenant.String()+"/scanner"][0].ContentTrust = componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+	if e := invokeRun(t, svc, "scanner"); e != nil && e.GetKind() == pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("an install on the tenant's machine must not be policy-denied, got %v", e)
+	}
+}
+
+// TestPluginInvoke_CatalogTrustedClusterPluginRuns proves the catalog
+// statement is what lets cluster code run: the catalog states the github
+// plugin as trusted.
+func TestPluginInvoke_CatalogTrustedClusterPluginRuns(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	reg := newFakeComponentInstallRegistry()
+	reg.installs[tenant.String()+"/github"] = []InstallInfo{{
+		InstallID: "i1", TenantID: tenant, Name: "github", DeclaredMethods: []string{"run"},
+		Status: ComponentInstallStatusServing, PrincipalRef: attestedPrincipal,
+	}}
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).
+		WithAuthorizer(allowInvokeAuthz).WithEnrollmentReader(fixtureEnrollment{})
+	if e := invokeRun(t, svc, "github"); e != nil && e.GetKind() == pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("the catalog states github as trusted, got %v", e)
+	}
+}
+
+type failingEnrollment struct{}
+
+func (failingEnrollment) PrincipalIsAttested(context.Context, string, string) (bool, error) {
+	return false, errors.New("db down")
+}
+
+// TestPluginInvoke_UnknownPlacementDenies proves the gate fails closed: a
+// failed read of the enrollment record, a service with no reader, and an
+// install row with no principal all refuse the dispatch.
+func TestPluginInvoke_UnknownPlacementDenies(t *testing.T) {
+	tenant := auth.MustNewTenantID("tenant-abc")
+	newReg := func(principal string) *fakeComponentInstallRegistry {
+		reg := newFakeComponentInstallRegistry()
+		reg.installs[tenant.String()+"/scanner"] = []InstallInfo{{
+			InstallID: "i1", TenantID: tenant, Name: "scanner", DeclaredMethods: []string{"run"},
+			Status: ComponentInstallStatusServing, PrincipalRef: principal,
+		}}
+		reg.dispatchFunc = func(context.Context, auth.TenantID, string, string, []byte, time.Duration) ([]byte, error) {
+			t.Error("the install was dispatched")
+			return []byte("{}"), nil
+		}
+		return reg
+	}
+
+	failing := NewPluginInvokeService(newReg(tokenPrincipal), dispatchpolicy.ShapeSetecOnly, nil).
+		WithAuthorizer(allowInvokeAuthz).WithEnrollmentReader(failingEnrollment{})
+	if e := invokeRun(t, failing, "scanner"); e == nil || e.GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAVAILABLE {
+		t.Fatalf("a failed enrollment read must answer UNAVAILABLE, got %v", e)
+	}
+
+	noReader := NewPluginInvokeService(newReg(tokenPrincipal), dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(allowInvokeAuthz)
+	if e := invokeRun(t, noReader, "scanner"); e == nil || e.GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("a service with no reader must deny, got %v", e)
+	}
+
+	noPrincipal := NewPluginInvokeService(newReg(""), dispatchpolicy.ShapeSetecOnly, nil).
+		WithAuthorizer(allowInvokeAuthz).WithEnrollmentReader(fixtureEnrollment{})
+	if e := invokeRun(t, noPrincipal, "scanner"); e == nil || e.GetKind() != pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED {
+		t.Fatalf("an install with no principal must deny, got %v", e)
 	}
 }

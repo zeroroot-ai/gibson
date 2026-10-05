@@ -86,6 +86,7 @@ func TestCallToolProto_UntrustedWithNoSandboxedDispatch_Denied(t *testing.T) {
 		tenantInstances: []component.ComponentInfo{{
 			Kind: "tool", Name: "acme-registry-tool", InstanceID: "i1",
 			ContentTrust: componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+			Attested:     true, // cluster code the catalog does not list
 			Metadata:     map[string]string{"grpc_endpoint": "localhost:1"},
 		}},
 	})

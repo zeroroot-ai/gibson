@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"testing"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
@@ -212,5 +215,42 @@ func TestBindDeclaredSecrets_TokenEnrolledCallerWritesNothing(t *testing.T) {
 				t.Fatalf("wrote %d tuples in %d calls, want none", len(rec.written), rec.calls)
 			}
 		})
+	}
+}
+
+// attestedRegistry keeps the ComponentInfo of the last Register call.
+type attestedRegistry struct {
+	noopRegistry
+	got ComponentInfo
+}
+
+func (r *attestedRegistry) Register(_ context.Context, _, _, _ string, info ComponentInfo) (string, error) {
+	r.got = info
+	return "instance-1", nil
+}
+
+// TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord proves the
+// daemon sets ComponentInfo.Attested from its own enrollment record, and
+// refuses the check-in when it cannot read the record.
+func TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord(t *testing.T) {
+	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
+	for _, want := range []bool{true, false} {
+		reg := &attestedRegistry{}
+		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+			WithEnrollmentReader(enrollmentAnswer{attested: want})
+		if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "my-tool")); err != nil {
+			t.Fatalf("attested=%v: %v", want, err)
+		}
+		if reg.got.Attested != want {
+			t.Fatalf("Attested = %v, want %v", reg.got.Attested, want)
+		}
+	}
+
+	reg := &attestedRegistry{}
+	svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil).
+		WithEnrollmentReader(enrollmentAnswer{err: errors.New("db down")})
+	_, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "my-tool"))
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("a failed enrollment read: err = %v, want Unavailable", err)
 	}
 }

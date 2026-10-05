@@ -89,6 +89,7 @@ func untrustedAgentInstances() []component.ComponentInfo {
 		Name:         "zerocool",
 		InstanceID:   "i1",
 		ContentTrust: componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
+		Attested:     true, // cluster code; the catalog states zerocool untrusted
 	}}
 }
 

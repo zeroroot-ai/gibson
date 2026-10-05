@@ -127,7 +127,7 @@ func TestPluginInvoke_DeniedWithoutCanInvoke(t *testing.T) {
 	}
 
 	fga := &recordingInvokeAuthorizer{allow: false}
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(fga)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(fga)
 
 	ctx := invokeCallerCtx(t, "tool_principal:9", "acme")
 	_, err := svc.PluginInvoke(ctx, invokeReq("lookup"))
@@ -163,7 +163,7 @@ func TestPluginInvoke_AllowedWithCanInvoke(t *testing.T) {
 	}
 
 	fga := &recordingInvokeAuthorizer{allow: true}
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(fga)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(fga)
 
 	ctx := invokeCallerCtx(t, "tool_principal:9", "acme")
 	resp, err := svc.PluginInvoke(ctx, invokeReq("lookup"))
@@ -190,7 +190,7 @@ func TestPluginInvoke_DeniedWhenNoAuthorizerWired(t *testing.T) {
 	}
 
 	// No WithAuthorizer call — the authorizer is nil.
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{})
 
 	ctx := invokeCallerCtx(t, "tool_principal:9", "acme")
 	_, err := svc.PluginInvoke(ctx, invokeReq("lookup"))
@@ -214,7 +214,7 @@ func TestPluginInvoke_FGAErrorFailsClosed(t *testing.T) {
 	}
 
 	fga := &recordingInvokeAuthorizer{err: errors.New("fga down")}
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(fga)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(fga)
 
 	ctx := invokeCallerCtx(t, "tool_principal:9", "acme")
 	_, err := svc.PluginInvoke(ctx, invokeReq("lookup"))
@@ -273,7 +273,7 @@ func TestAuthorizeInvoke_FailsClosedOnEveryAxis(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := newFakeComponentInstallRegistry()
-			svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil)
+			svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{})
 			if tc.authorizer != nil {
 				svc = svc.WithAuthorizer(tc.authorizer)
 			}
@@ -312,7 +312,7 @@ func TestPluginInvoke_UserCredentialStillGated(t *testing.T) {
 	}
 
 	fga := &recordingInvokeAuthorizer{allow: false}
-	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithAuthorizer(fga)
+	svc := NewPluginInvokeService(reg, dispatchpolicy.ShapeSetecOnly, nil).WithEnrollmentReader(fixtureEnrollment{}).WithAuthorizer(fga)
 
 	ctx := auth.WithIdentity(auth.ContextWithTenant(context.Background(), tenant), auth.Identity{
 		Subject:        "user:42",

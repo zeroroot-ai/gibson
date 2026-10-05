@@ -20,6 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -277,7 +278,8 @@ func (h *DefaultAgentHarness) resolveToolForStreaming(ctx context.Context, name 
 				// that path under setec-only; deny before resolving it.
 				// (Sandboxed tools have no persistent gRPC conn and degrade to
 				// the gated CallToolProto path instead.)
-				if dispatchpolicy.Decide(instances[0].ContentTrust, false, h.deploymentShape) == dispatchpolicy.Deny {
+				placement, trust := component.DispatchStanding(instances[0].Attested, authz.KindTool, name)
+				if dispatchpolicy.Decide(placement, trust, false, h.deploymentShape) == dispatchpolicy.Deny {
 					return nil, types.WrapError(types.SANDBOX_POLICY_DENIED,
 						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids streaming in-process execution", name), nil)
 				}

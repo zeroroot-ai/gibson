@@ -13,6 +13,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 )
 
 const (
@@ -78,15 +81,15 @@ type ComponentInfo struct {
 	Description           string                   `json:"description,omitempty"`
 	Tags                  []string                 `json:"tags,omitempty"`
 
-	// ContentTrust classifies the trust level of input data this component
-	// processes at call-time. Consumed by the daemon's dispatch policy gate
-	// (`internal/dispatch.Policy.Decide`) along with DispatchMode to enforce
-	// the `content_trust=UNTRUSTED ⇒ dispatch_mode=SANDBOXED` invariant.
-	//
-	// Zero value (CONTENT_TRUST_UNSPECIFIED) is treated as TRUSTED at gate-
-	// evaluation time for backward compat with descriptors registered before
-	// the SDK shipped the field. Spec: setec-sandbox-prod-default R3.1, R3.2.
+	// ContentTrust is the trust the component reported about itself when it
+	// checked in. The dispatch gate does not read it: see DispatchStanding.
 	ContentTrust componentpb.ContentTrust `json:"content_trust,omitempty"`
+
+	// Attested is true when the principal that checked this instance in
+	// enrolled with a SPIRE identity, so the platform attests the workload
+	// and it runs in the platform's cluster (ADR-0066). The daemon sets it at
+	// check-in from its own enrollment record. A check-in cannot set it.
+	Attested bool `json:"attested,omitempty"`
 
 	// Methods carries per-method metadata for plugin components (name +
 	// description + optional JSON-Schema input), populated from
@@ -427,4 +430,29 @@ func (r *RedisComponentRegistry) scan(ctx context.Context, pattern string) ([]Co
 	}
 
 	return results, nil
+}
+
+// DispatchStanding returns the two inputs of the dispatch gate for one
+// registered component (dispatchpolicy.Decide). Neither comes from what the
+// component reports about itself.
+//
+// A component that did not enroll with an attested identity runs on the
+// tenant's own machine: PlacementOutside, and its trust does not matter to
+// the gate. An attested component runs in the platform's cluster, and its
+// trust is what the signed catalog states for its kind and name. An attested
+// component the catalog does not list has no stated trust, and the gate
+// treats that as untrusted.
+func DispatchStanding(attested bool, kind, name string) (dispatchpolicy.Placement, componentpb.ContentTrust) {
+	if !attested {
+		return dispatchpolicy.PlacementOutside, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+	}
+	trust, _ := componentcatalog.LookupContentTrust(kind, name)
+	switch trust {
+	case componentcatalog.ContentTrustTrusted:
+		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
+	case componentcatalog.ContentTrustUntrusted:
+		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+	default:
+		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+	}
 }

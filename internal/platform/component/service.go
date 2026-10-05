@@ -614,6 +614,26 @@ func (s *ComponentServiceServer) RegisterComponent(
 		info.Metadata[ComponentMetadataOwnerUserID] = uid
 	}
 
+	// Record where this component runs, from the daemon's own enrollment
+	// record (ADR-0066). The dispatch gate reads it (DispatchStanding). A
+	// read that fails refuses the check-in: a component whose placement is
+	// unknown must not get the standing of either kind, and it tries again.
+	// A caller with no component principal, and a daemon with no reader
+	// wired, leave the mark false.
+	if s.enrollment != nil && principalRef != "" {
+		attested, attErr := s.enrollment.PrincipalIsAttested(ctx, tenant, principalRef)
+		if attErr != nil {
+			s.logger.ErrorContext(ctx, "component registration refused: enrollment read failed",
+				slog.String("tenant", tenant),
+				slog.String("kind", req.Kind),
+				slog.String("name", req.Name),
+				slog.String("error", attErr.Error()),
+			)
+			return nil, status.Error(codes.Unavailable, "the enrollment record could not be read, try again")
+		}
+		info.Attested = attested
+	}
+
 	instanceID, err := s.registry.Register(ctx, tenant, req.Kind, req.Name, info)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "component registration failed",

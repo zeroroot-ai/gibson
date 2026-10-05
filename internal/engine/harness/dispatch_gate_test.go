@@ -62,6 +62,10 @@ func newGateHarness(t *testing.T, trust componentpb.ContentTrust, shape dispatch
 				Name:         "acme-registry-tool",
 				InstanceID:   "i1",
 				ContentTrust: trust,
+				// The gate reads where an instance runs, not what it reports.
+				// The denied case is an attested instance the catalog does not
+				// list. The allowed case is an instance on the tenant's machine.
+				Attested: trust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED,
 				// A direct gRPC endpoint would be the bypass path; the gate must
 				// fire before it is selected. registryAdapter is nil so the
 				// allowed path simply falls through to "tool not found".
@@ -174,32 +178,58 @@ func TestDispatchGateDelegate_UntrustedSetecOnly_Denied(t *testing.T) {
 	}
 }
 
-// TestResolveAgentContentTrust feeds the DelegateToAgent gate. A trusted /
-// unspecified agent resolves to a trust level that Decide does NOT deny (so
-// delegation proceeds), while an untrusted agent resolves to UNTRUSTED (which,
-// with no sandboxed dispatch under setec-only, Decide denies). The full
-// allow-path is exercised end-to-end by the E3 round-trip (gibson#999); a unit
-// delegation would require standing up the whole child-harness machinery.
-func TestResolveAgentContentTrust(t *testing.T) {
+// TestResolveAgentStanding feeds the DelegateToAgent gate. An agent whose
+// instances all run on the tenant's machine is not denied. An attested
+// instance of an agent the catalog does not list is denied under setec-only
+// with no sandboxed dispatch. An agent with no instance is a built-in one.
+func TestResolveAgentStanding(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
-
-	trustedH := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
-	got, err := trustedH.resolveAgentContentTrust(ctx, "scanner")
-	if err != nil {
-		t.Fatalf("trusted agent: unexpected error %v", err)
-	}
-	if got == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
-		t.Fatalf("trusted agent resolved as UNTRUSTED")
-	} else if dispatchpolicy.Decide(got, false, dispatchpolicy.ShapeSetecOnly) == dispatchpolicy.Deny {
-		t.Fatalf("trusted agent would be denied; want allowed")
+	decide := func(h *DefaultAgentHarness, name string) dispatchpolicy.Decision {
+		t.Helper()
+		placement, trust, err := h.resolveAgentStanding(ctx, name)
+		if err != nil {
+			t.Fatalf("%s: unexpected error %v", name, err)
+		}
+		return dispatchpolicy.Decide(placement, trust, false, dispatchpolicy.ShapeSetecOnly)
 	}
 
-	untrustedH := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
-	got, err = untrustedH.resolveAgentContentTrust(ctx, "scanner")
-	if err != nil {
-		t.Fatalf("untrusted agent: unexpected error %v", err)
+	outside := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	if decide(outside, "scanner") == dispatchpolicy.Deny {
+		t.Fatal("an agent on the tenant's machine would be denied; want allowed")
 	}
-	if got != componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED {
-		t.Fatalf("untrusted agent resolved as %v; want UNTRUSTED", got)
+
+	cluster := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	if decide(cluster, "scanner") != dispatchpolicy.Deny {
+		t.Fatal("an attested agent the catalog does not list would run; want denied")
+	}
+
+	none := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	none.componentRegistry = &gateFakeRegistry{}
+	if decide(none, "scanner") == dispatchpolicy.Deny {
+		t.Fatal("a built-in agent would be denied; want allowed")
+	}
+
+	if _, _, err := outside.resolveAgentStanding(context.Background(), "scanner"); err == nil {
+		t.Fatal("a request with no tenant must fail, so the delegation is denied")
+	}
+}
+
+// TestDispatchGate_SelfReportedTrustIsNotAnInput is the failing fixture for
+// the rule that placement and the catalog decide where a tool runs. An
+// attested instance the catalog does not list reports TRUSTED and is denied.
+// An instance on the tenant's machine reports UNTRUSTED and is not denied.
+func TestDispatchGate_SelfReportedTrustIsNotAnInput(t *testing.T) {
+	cluster := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	reg := cluster.componentRegistry.(*gateFakeRegistry)
+	reg.tenantInstances[0].ContentTrust = componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
+	if code := gibsonCode(t, callGate(t, cluster)); code != types.SANDBOX_POLICY_DENIED {
+		t.Fatalf("cluster code that reports TRUSTED: code = %q; want SANDBOX_POLICY_DENIED", code)
+	}
+
+	outside := newGateHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	reg = outside.componentRegistry.(*gateFakeRegistry)
+	reg.tenantInstances[0].ContentTrust = componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+	if code := gibsonCode(t, callGate(t, outside)); code == types.SANDBOX_POLICY_DENIED {
+		t.Fatal("an instance on the tenant's machine that reports UNTRUSTED was policy-denied")
 	}
 }

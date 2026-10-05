@@ -44,6 +44,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -89,6 +90,40 @@ type PluginInvokeService struct {
 	// authorizer fail-closes (every invocation denies), matching the credential
 	// endpoints (service_credential_authz.go, callback_credential_authz.go).
 	authorizer authz.Authorizer
+
+	// enrollment answers how the principal of an install enrolled, which is
+	// the placement input of the dispatch gate. Set via WithEnrollmentReader.
+	// With no reader every install counts as code in the platform's cluster,
+	// the strict side of the gate.
+	enrollment EnrollmentReader
+}
+
+// WithEnrollmentReader wires the enrollment record the dispatch gate reads
+// for the placement of a plugin install. The daemon passes the
+// capability-grant store.
+func (s *PluginInvokeService) WithEnrollmentReader(r EnrollmentReader) *PluginInvokeService {
+	s.enrollment = r
+	return s
+}
+
+// installStanding returns the dispatch gate inputs for one install. An
+// install whose principal enrolled with a bootstrap token runs on the
+// tenant's machine. An install with an attested principal runs in the
+// platform's cluster and takes the trust the catalog states for the plugin.
+// With no reader, or with no principal on the install row, the install
+// counts as cluster code with whatever the catalog states.
+func (s *PluginInvokeService) installStanding(ctx context.Context, tenant, name string, install InstallInfo) (dispatchpolicy.Placement, componentpb.ContentTrust, error) {
+	attested := true
+	if s.enrollment != nil && install.PrincipalRef != "" {
+		var err error
+		attested, err = s.enrollment.PrincipalIsAttested(ctx, tenant, install.PrincipalRef)
+		if err != nil {
+			return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
+				fmt.Errorf("read enrollment of %s: %w", install.PrincipalRef, err)
+		}
+	}
+	placement, trust := DispatchStanding(attested, authz.KindPlugin, name)
+	return placement, trust, nil
 }
 
 // NewPluginInvokeService constructs a PluginInvokeService.
@@ -218,13 +253,28 @@ func (s *PluginInvokeService) PluginInvoke(
 	}
 
 	// 5b. Dispatch-policy gate (ADR-0110 / gibson#997). PluginInvoke dispatches
-	//     in-process via the work queue; there is no sandboxed plugin dispatch.
-	//     An UNTRUSTED plugin therefore must not execute under the hosted
-	//     setec-only shape — deny before dispatch, no in-process fallback. All
-	//     installs of one plugin_name share a manifest within a deployment, so
-	//     the first install's trust classification is authoritative. Mirrors
-	//     harness.CallToolProto's gate.
-	if dispatchpolicy.Decide(installs[0].ContentTrust, false, s.deploymentShape) == dispatchpolicy.Deny {
+	//     through the work queue; there is no sandboxed plugin dispatch. The
+	//     gate reads where the install runs and, for code in the platform's
+	//     cluster, the trust the catalog states (installStanding). What the
+	//     install reported about itself is not an input. A placement that
+	//     cannot be read denies. Every serving install must pass, because
+	//     DispatchOne picks any one of them.
+	for _, install := range installs {
+		placement, trust, standingErr := s.installStanding(ctx, tenantStr, componentName, install)
+		if standingErr != nil {
+			s.logger.ErrorContext(ctx, "PluginInvoke: denied, the enrollment record could not be read",
+				slog.String("tenant", tenantStr),
+				slog.String("plugin", componentName),
+				slog.String("error", standingErr.Error()),
+			)
+			return pluginErrorResponse(
+				pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAVAILABLE,
+				fmt.Sprintf("plugin %s: the placement of an install could not be read, try again", componentName),
+			), nil
+		}
+		if dispatchpolicy.Decide(placement, trust, false, s.deploymentShape) != dispatchpolicy.Deny {
+			continue
+		}
 		s.logger.WarnContext(ctx, "PluginInvoke: denied untrusted plugin with no sandboxed dispatch",
 			slog.String("tenant", tenantStr),
 			slog.String("plugin", componentName),

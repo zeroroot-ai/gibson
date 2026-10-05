@@ -42,33 +42,49 @@ func TestDecide(t *testing.T) {
 	)
 	cases := []struct {
 		name       string
+		placement  Placement
 		trust      componentpb.ContentTrust
 		hasSandbox bool
 		shape      DeploymentShape
 		want       Decision
 	}{
-		// The load-bearing rule: untrusted + hosted + no sandbox ⇒ Deny.
-		{"untrusted/no-sandbox/saas", untrusted, false, ShapeSetecOnly, Deny},
-		// Untrusted with a sandbox always goes to setec.
-		{"untrusted/sandbox/saas", untrusted, true, ShapeSetecOnly, RequireSetec},
-		{"untrusted/sandbox/onprem", untrusted, true, ShapeCustomerIsolation, RequireSetec},
-		// Under customer-isolation the customer owns isolation: untrusted with
-		// no sandbox is allowed in-process.
-		{"untrusted/no-sandbox/onprem", untrusted, false, ShapeCustomerIsolation, AllowInProcess},
-		// Trusted always takes its existing path.
-		{"trusted/no-sandbox/saas", trusted, false, ShapeSetecOnly, AllowInProcess},
-		{"trusted/sandbox/saas", trusted, true, ShapeSetecOnly, RequireSetec},
-		// Unspecified is treated as trusted for backward-compat.
-		{"unspecified/no-sandbox/saas", unspecified, false, ShapeSetecOnly, AllowInProcess},
-		{"unspecified/sandbox/saas", unspecified, true, ShapeSetecOnly, RequireSetec},
+		// Code in the platform's cluster with no sandbox, hosted: only a
+		// stated trust runs. The unspecified case is the failing fixture: it
+		// was AllowInProcess before.
+		{"cluster/untrusted/no-sandbox/saas", PlacementCluster, untrusted, false, ShapeSetecOnly, Deny},
+		{"cluster/unspecified/no-sandbox/saas", PlacementCluster, unspecified, false, ShapeSetecOnly, Deny},
+		{"cluster/trusted/no-sandbox/saas", PlacementCluster, trusted, false, ShapeSetecOnly, AllowInProcess},
+		// A component on the tenant's own machine gets queued work whatever
+		// it says about itself. Untrusted was Deny before.
+		{"outside/untrusted/no-sandbox/saas", PlacementOutside, untrusted, false, ShapeSetecOnly, AllowInProcess},
+		{"outside/unspecified/no-sandbox/saas", PlacementOutside, unspecified, false, ShapeSetecOnly, AllowInProcess},
+		{"outside/trusted/no-sandbox/saas", PlacementOutside, trusted, false, ShapeSetecOnly, AllowInProcess},
+		// A sandboxed dispatch is always used.
+		{"cluster/untrusted/sandbox/saas", PlacementCluster, untrusted, true, ShapeSetecOnly, RequireSetec},
+		{"cluster/trusted/sandbox/saas", PlacementCluster, trusted, true, ShapeSetecOnly, RequireSetec},
+		{"cluster/unspecified/sandbox/saas", PlacementCluster, unspecified, true, ShapeSetecOnly, RequireSetec},
+		{"outside/untrusted/sandbox/saas", PlacementOutside, untrusted, true, ShapeSetecOnly, RequireSetec},
+		{"cluster/untrusted/sandbox/onprem", PlacementCluster, untrusted, true, ShapeCustomerIsolation, RequireSetec},
+		// Under customer-isolation the customer owns isolation.
+		{"cluster/untrusted/no-sandbox/onprem", PlacementCluster, untrusted, false, ShapeCustomerIsolation, AllowInProcess},
+		{"cluster/unspecified/no-sandbox/onprem", PlacementCluster, unspecified, false, ShapeCustomerIsolation, AllowInProcess},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Decide(tc.trust, tc.hasSandbox, tc.shape); got != tc.want {
-				t.Errorf("Decide(%v, sandbox=%v, shape=%d) = %d; want %d",
-					tc.trust, tc.hasSandbox, tc.shape, got, tc.want)
+			if got := Decide(tc.placement, tc.trust, tc.hasSandbox, tc.shape); got != tc.want {
+				t.Errorf("Decide(placement=%d, %v, sandbox=%v, shape=%d) = %d; want %d",
+					tc.placement, tc.trust, tc.hasSandbox, tc.shape, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestZeroValuePlacementIsCluster pins the fail-closed property: a caller that
+// does not know where a component runs gets the strict rule.
+func TestZeroValuePlacementIsCluster(t *testing.T) {
+	var p Placement
+	if p != PlacementCluster {
+		t.Fatalf("zero-value Placement = %d; want PlacementCluster", p)
 	}
 }
 

@@ -152,10 +152,14 @@ type InstallInfo struct {
 	LastHeartbeatAt time.Time
 	// Status is the transient status (from Redis): "serving" or "unreachable".
 	Status ComponentInstallStatus
-	// ContentTrust is the component's trust classification (ADR-0110 / gibson#997),
-	// read from the persistent install row. Zero value (UNSPECIFIED) is treated
-	// as trusted by the dispatch-policy gate.
+	// ContentTrust is the trust the install reported about itself at
+	// check-in, read from the persistent install row. The dispatch gate does
+	// not read it: see DispatchStanding.
 	ContentTrust componentpb.ContentTrust
+	// PrincipalRef is the FGA user the install checked in as, read from the
+	// persistent install row. The dispatch gate asks the enrollment record
+	// how this principal enrolled.
+	PrincipalRef string
 }
 
 // RegistryStatus is a summary of all installs of a named plugin, used for
@@ -519,7 +523,8 @@ func (r *postgresComponentInstallRegistry) Status(ctx context.Context, tenant au
 // not populated (the caller enriches it from Redis).
 func (r *postgresComponentInstallRegistry) queryInstalls(ctx context.Context, tenant auth.TenantID, name string) ([]InstallInfo, error) {
 	const q = `
-SELECT id, tenant_id, component_name, version, declared_methods, content_trust
+SELECT id, tenant_id, component_name, version, declared_methods, content_trust,
+       COALESCE(principal_ref, '')
 FROM   component_install
 WHERE  tenant_id      = $1
 AND    component_name = $2
@@ -537,7 +542,7 @@ ORDER BY created_at`
 		var methodsJSON []byte
 		var tenantIDStr string
 		var contentTrustStr string
-		if err := rows.Scan(&info.InstallID, &tenantIDStr, &info.Name, &info.Version, &methodsJSON, &contentTrustStr); err != nil {
+		if err := rows.Scan(&info.InstallID, &tenantIDStr, &info.Name, &info.Version, &methodsJSON, &contentTrustStr, &info.PrincipalRef); err != nil {
 			return nil, fmt.Errorf("plugin registry: scan install row: %w", err)
 		}
 		info.ContentTrust = contentTrustFromDB(contentTrustStr)
