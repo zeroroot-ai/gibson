@@ -6,6 +6,7 @@ package zitadel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
@@ -121,5 +122,60 @@ func TestAdminTokenValid(t *testing.T) {
 	}
 	if ok, err := c.AdminTokenValid(context.Background(), ""); ok || err != nil {
 		t.Errorf("empty token: %v %v", ok, err)
+	}
+}
+
+// Each step of the mint that fails, or that answers with no id or token,
+// fails the mint. No partial result returns.
+func TestMintAdminToken_EachStepCanFail(t *testing.T) {
+	fail := func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"code":13}`, http.StatusInternalServerError)
+	}
+	empty := func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}
+	cases := map[string]map[string]http.HandlerFunc{
+		"default org fails":      {"GET /admin/v1/orgs/default": fail},
+		"default org has no id":  {"GET /admin/v1/orgs/default": empty},
+		"user search fails":      {"POST /management/v1/users/_search": fail},
+		"user create fails":      {"POST /management/v1/users/machine": fail},
+		"created user has no id": {"POST /management/v1/users/machine": empty},
+		"membership fails":       {"POST /admin/v1/members": fail},
+		"token mint fails":       {"POST /management/v1/users/user-new/pats": fail},
+		"minted token is empty":  {"POST /management/v1/users/user-new/pats": empty},
+	}
+	for name, override := range cases {
+		t.Run(name, func(t *testing.T) {
+			var created int
+			var orgs []string
+			routes := fakeAdminZitadel(t, false, &created, &orgs)
+			for k, h := range override {
+				routes[k] = h
+			}
+			c := adminSystemClient(t, routes)
+			userID, pat, err := c.MintAdminToken(context.Background(), "iam-admin", time.Now().Add(time.Hour))
+			if err == nil || userID != "" || pat != "" {
+				t.Fatalf("got user=%q pat=%q err=%v, want an error and no result", userID, pat, err)
+			}
+		})
+	}
+
+	c := adminSystemClient(t, map[string]http.HandlerFunc{})
+	if _, _, err := c.MintAdminToken(context.Background(), "", time.Now()); !errors.Is(err, ErrInvalidInput) {
+		t.Errorf("no user name: %v, want ErrInvalidInput", err)
+	}
+}
+
+// A token check that fails for a reason other than a refused token returns
+// the error.
+func TestAdminTokenValid_OtherErrorReturns(t *testing.T) {
+	c := adminSystemClient(t, map[string]http.HandlerFunc{
+		"GET /admin/v1/orgs/default": func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, `{"code":13}`, http.StatusInternalServerError)
+		},
+	})
+	if ok, err := c.AdminTokenValid(context.Background(), "some-pat"); ok || err == nil {
+		t.Errorf("got %v %v, want false and an error", ok, err)
 	}
 }
