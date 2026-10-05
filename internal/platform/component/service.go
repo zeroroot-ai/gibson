@@ -33,6 +33,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -632,6 +633,24 @@ func (s *ComponentServiceServer) RegisterComponent(
 			return nil, status.Error(codes.Unavailable, "the enrollment record could not be read, try again")
 		}
 		info.Attested = attested
+	}
+
+	// A catalog plugin name belongs to the workload the platform attests
+	// (ADR-0066). A caller that did not enroll with an attested identity
+	// cannot check in under that name: the registry would list it as the
+	// platform's plugin, and work for the platform's plugin would reach it.
+	// The rule covers plugins only. An agent or a tool with a catalog name
+	// always takes the sandbox launch of the catalog, whatever is registered.
+	if req.Kind == authz.KindPlugin && !info.Attested {
+		if _, listed := componentcatalog.LookupContentTrust(req.Kind, req.Name); listed {
+			s.logger.WarnContext(ctx, "component registration refused: a catalog plugin name needs an attested identity",
+				slog.String("tenant", tenant),
+				slog.String("name", req.Name),
+				slog.String("principal", principalRef),
+			)
+			return nil, status.Errorf(codes.PermissionDenied,
+				"the plugin name %q belongs to a platform plugin, use another name", req.Name)
+		}
 	}
 
 	instanceID, err := s.registry.Register(ctx, tenant, req.Kind, req.Name, info)

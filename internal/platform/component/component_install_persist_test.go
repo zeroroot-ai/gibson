@@ -112,6 +112,9 @@ func TestRegisterComponent_PersistsTheCallersPrincipal(t *testing.T) {
 	spy := &installRegistrySpy{}
 	svc := newParityServer()
 	svc.WithComponentInstallRegistry(spy)
+	// The caller is the platform's own plugin: it enrolled with an attested
+	// identity, which is what a catalog plugin name needs.
+	svc.WithEnrollmentReader(attestedCaller{})
 
 	ctx := credCallerCtx(t, "plugin_principal:github", "test-tenant")
 	if _, err := svc.RegisterComponent(ctx, &componentpb.RegisterComponentRequest{
