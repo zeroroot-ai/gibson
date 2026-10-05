@@ -5,6 +5,7 @@ package protorules
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -250,7 +251,7 @@ func TestGuardFixture(t *testing.T) {
 // invalidRequest returns a request of the message that breaks one stated rule,
 // and the name of the field. It returns nil when no field of the message has a
 // string rule with a bound that a test can break.
-func invalidRequest(t *testing.T, msg protoreflect.MessageDescriptor, xt protoreflect.ExtensionType) (proto.Message, string) {
+func invalidRequest(t *testing.T, msg protoreflect.MessageDescriptor, xt protoreflect.ExtensionType) (req proto.Message, fieldName string) {
 	t.Helper()
 	fields := msg.Fields()
 	for i := range fields.Len() {
@@ -268,9 +269,13 @@ func invalidRequest(t *testing.T, msg protoreflect.MessageDescriptor, xt protore
 		if maxLen == nil || !str.Has(maxLen) {
 			continue
 		}
-		req := dynamicpb.NewMessage(msg)
-		req.Set(field, protoreflect.ValueOfString(strings.Repeat("a", int(str.Get(maxLen).Uint())+1)))
-		return req, string(field.Name())
+		bound := str.Get(maxLen).Uint()
+		if bound >= math.MaxInt32 {
+			continue
+		}
+		msgReq := dynamicpb.NewMessage(msg)
+		msgReq.Set(field, protoreflect.ValueOfString(strings.Repeat("a", int(bound)+1)))
+		return msgReq, string(field.Name())
 	}
 	return nil, ""
 }
