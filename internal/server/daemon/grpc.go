@@ -1741,7 +1741,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			var findingSubmitter component.FindingSubmitter
 			if d.brainRegistry != nil {
 				graphRAGSubmitter := component.NewGraphRAGFindingSubmitter(
-					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0107)
+					ingestComponentFinding(d.brainRegistry), // findings → World → projector (ADR-0007)
 					d.pool,                                  // per-tenant Pool: nil when security.key_provider not configured
 					d.stateClient,
 					d.logger.WithComponent("finding-submitter").Slog(),

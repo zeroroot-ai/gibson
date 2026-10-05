@@ -201,7 +201,7 @@ func TestEngine_WithStore_NilSafe(t *testing.T) {
 }
 
 // TestHydrate_EquivalenceAfterRestart is the primary correctness test for
-// ADR-0011 slice #1114: a fresh Engine hydrated from the persisted Timeline must
+// ADR-0163 slice #1114: a fresh Engine hydrated from the persisted Timeline must
 // reproduce the same World state as the original engine (fold-determinism).
 //
 // Scenario:
@@ -300,7 +300,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 
 // TestHydrate_InFlightWorkFailedOnRestart verifies that work still `running`
 // in the persisted Timeline is transitioned to WorkFailed on hydration
-// (ADR-0011 decision 5: a crash IS a failure).
+// (ADR-0163: a crash IS a failure).
 func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	const tenant = "tenant-inflight"
 	ctx, cancel := context.WithCancel(context.Background())
@@ -574,7 +574,7 @@ func TestTimelineStore_AcquireError(t *testing.T) {
 }
 
 // TestAcquirePerOp_EvictionRobustness is the regression test for gibson#1114
-// (ADR-0011): after one Timeline operation releases its connection and the
+// (ADR-0163): after one Timeline operation releases its connection and the
 // underlying *redis.Client is closed (simulating idle eviction), a subsequent
 // operation via a fresh acquire still succeeds.
 //
@@ -670,7 +670,7 @@ func TestAssertAOFEnabled_Yes(t *testing.T) {
 
 // TestAssertAOFEnabled_No verifies the fail-fast path the boot guard exists
 // for: a Redis with AOF disabled must be rejected loudly, not silently
-// degrade to a Timeline that is lost on restart (gibson#1119, ADR-0011).
+// degrade to a Timeline that is lost on restart (gibson#1119, ADR-0163).
 func TestAssertAOFEnabled_No(t *testing.T) {
 	t.Parallel()
 

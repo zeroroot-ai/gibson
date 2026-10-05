@@ -3,7 +3,7 @@
 
 //go:build !embedder_tests
 
-// Package brain — event codec for durable Timeline serialisation (ADR-0011).
+// Package brain — event codec for durable Timeline serialisation (ADR-0163).
 package brain
 
 import (

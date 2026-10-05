@@ -200,7 +200,7 @@ func TestFlightRecorderRetentionSwept_ZeroCutoffIsNoOp(t *testing.T) {
 // event kinds (AgentToolCallObserved, FlightRecorderPolicySet,
 // FlightRecorderRetentionSwept) survive the durable Timeline's JSON envelope
 // round trip (EncodeEvent/DecodeEvent) — required for durable persistence
-// (ADR-0011) and for the codec's kind registry to stay complete.
+// (ADR-0163) and for the codec's kind registry to stay complete.
 func TestFlightRecorderEvents_CodecRoundTrip(t *testing.T) {
 	events := []Event{
 		AgentToolCallObserved{

@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package brain — TimelineStore: the durable-append seam for the per-tenant
-// event Timeline (ADR-0011, gibson#1112/#1113).
+// event Timeline (ADR-0163, gibson#1112/#1113).
 package brain
 
 import (
@@ -15,7 +15,7 @@ import (
 var ErrNotImplemented = errors.New("brain: not implemented (pending slice)")
 
 // TimelineStore is the durable-log abstraction the brain writes through
-// (ADR-0011). The brain package depends only on this interface — no Redis
+// (ADR-0163). The brain package depends only on this interface — no Redis
 // types leak into internal/engine/brain.
 //
 // # Serialisation contract
@@ -43,7 +43,7 @@ var ErrNotImplemented = errors.New("brain: not implemented (pending slice)")
 // The durable Timeline stream is NEVER blind-trimmed (the old MAXLEN ~10000
 // cap is NOT applied). Trimming is snapshot-driven only (WriteSnapshot /
 // TrimTo), so the full ordered log is preserved until a snapshot covers it
-// (ADR-0011 decision 3b).
+// (ADR-0163).
 type TimelineStore interface {
 	// Append durably persists one event at the end of the tenant's Timeline
 	// stream and returns the stream sequence ID assigned by the store (e.g.

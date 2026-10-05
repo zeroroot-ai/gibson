@@ -1148,7 +1148,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "ECS brain executor wired (brain is the mission engine)")
 
 		// Install the Timeline→lifecycle projector on every per-tenant engine
-		// (ADR-0011 decision 4, gibson#1116). The projector converts brain.Events
+		// (ADR-0163, gibson#1116). The projector converts brain.Events
 		// to the coarse dashboard vocabulary (status + node.*) and publishes them
 		// to the in-process EventBus and the tenant's Redis stream. This replaces
 		// the scattered emitEvent calls that previously emitted these events from
@@ -1418,7 +1418,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.pool = p
 				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
 
-				// Wire the durable Timeline store into the brain registry (ADR-0011,
+				// Wire the durable Timeline store into the brain registry (ADR-0163,
 				// gibson#1114). Now that the data-plane pool is available we can resolve
 				// a per-tenant Redis client for each new engine. The factory is
 				// invoked lazily inside Registry.For on first tenant touch — not at
@@ -1433,7 +1433,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						return aofErr
 					}
 					d.brainRegistry.WithStoreFactory(timelineStoreFactory(d.pool, d.logger.Slog()))
-					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0011, #1114)")
+					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0163, #1114)")
 				}
 			}
 

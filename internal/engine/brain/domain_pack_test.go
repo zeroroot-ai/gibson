@@ -184,7 +184,7 @@ func TestEngine_DomainPacks(t *testing.T) {
 
 // TestDomainPackEvents_CodecRoundTrip proves DomainPackEnabled/Disabled
 // survive the durable Timeline's JSON envelope round trip (EncodeEvent/
-// DecodeEvent) — required for durable persistence (ADR-0011) and for the
+// DecodeEvent) — required for durable persistence (ADR-0163) and for the
 // codec's kind registry to stay complete.
 func TestDomainPackEvents_CodecRoundTrip(t *testing.T) {
 	events := []Event{

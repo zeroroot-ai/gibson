@@ -15,7 +15,7 @@ import (
 const TickInterval = 50 * time.Millisecond
 
 // defaultSnapshotCadence is the number of persisted events between automatic
-// snapshot-and-trim cycles (ADR-0011). After every N appended events the Engine
+// snapshot-and-trim cycles (ADR-0163). After every N appended events the Engine
 // writes a snapshot and trims the Timeline prefix it covers, bounding the replay
 // cost on restart to at most N events plus the restore overhead.
 const defaultSnapshotCadence = 100
@@ -45,11 +45,11 @@ type Engine struct {
 	systems     []System
 	subscribers []func(Event) // live-only event taps (ADR-0109); never fire on Replay
 
-	// store is the durable-log seam (ADR-0011). Nil when no durable store is
+	// store is the durable-log seam (ADR-0163). Nil when no durable store is
 	// configured (in-memory only, backward-compatible). Set via WithStore.
 	store TimelineStore
 
-	// Snapshot-cadence bookkeeping (ADR-0011 decision 3b). After every
+	// Snapshot-cadence bookkeeping (ADR-0163). After every
 	// snapshotCadence persisted events the engine writes a snapshot and trims
 	// the Timeline prefix it covers.
 	snapshotCadence    int    // 0 = disabled; defaultSnapshotCadence at construction
@@ -89,7 +89,7 @@ func (e *Engine) WithSnapshotCadence(n int) *Engine {
 	return e
 }
 
-// WithStore wires a TimelineStore for durable event persistence (ADR-0011).
+// WithStore wires a TimelineStore for durable event persistence (ADR-0163).
 // Returns the receiver for chaining. Call before the first Submit or Run.
 // A nil store (the default) is safe — the engine operates in-memory only.
 func (e *Engine) WithStore(s TimelineStore) *Engine {
@@ -239,7 +239,7 @@ func (e *Engine) Run(ctx context.Context) {
 }
 
 // Hydrate loads the persisted Timeline from the store and folds it into the
-// Engine's live World (ADR-0011 crash-resume: "on resume, work still `running`
+// Engine's live World (ADR-0163 crash-resume: "on resume, work still `running`
 // with no completion is marked WorkFailed"). It is called once per Engine, before
 // the tick loop starts, so the World is fully reconstructed before the first tick
 // applies live events.
@@ -314,7 +314,7 @@ func (e *Engine) Hydrate(ctx context.Context) {
 	e.Timeline = tl
 
 	// Fail any work that was `running` when the daemon crashed — a crash IS a
-	// failure (ADR-0011 decision 5). Submit them to the live intake queue so the
+	// failure (ADR-0163). Submit them to the live intake queue so the
 	// retry System / Decider re-engage on the next tick without re-firing the
 	// original dispatch (effects are live-only, ADR-0109).
 	for _, failEv := range ResumeFailInFlight(e.World) {

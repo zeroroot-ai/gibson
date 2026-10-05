@@ -13,7 +13,7 @@ import (
 
 // ListMissions returns mission list with optional filtering and pagination.
 //
-// Status and progress are World-derived (ADR-0011/gibson#1118): the brain's
+// Status and progress are World-derived (ADR-0163/gibson#1118): the brain's
 // folded World is the single source of truth — no Redis store reads for status.
 // The caller may filter by status string, name pattern, and active-only.
 //

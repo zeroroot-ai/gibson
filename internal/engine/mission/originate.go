@@ -67,7 +67,7 @@ import (
 
 // Lineage metadata keys written on a component-originated mission. They are
 // plain Mission.Metadata entries rather than new struct fields because the
-// durable home for lineage is the Timeline (ADR-0011), and the Timeline's
+// durable home for lineage is the Timeline (ADR-0163), and the Timeline's
 // Append is documented as callable only from the ECS-brain World engine's
 // single tick goroutine — a concurrent gRPC handler cannot write it today
 // (gibson#1358 gap 3). Metadata is the interim, explicitly-temporary home;

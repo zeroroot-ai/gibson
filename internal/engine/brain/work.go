@@ -198,7 +198,7 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	// Idempotent: a late WorkCompleted arriving for work that is already in a
 	// terminal state (failed, done, skipped — including one already failed by
 	// ResumeFailInFlight) is a no-op. This prevents a worker that outlived the
-	// daemon from corrupting the World after a restart (ADR-0011 decision 5).
+	// daemon from corrupting the World after a restart (ADR-0163).
 	switch wi.State {
 	case WorkFailed, WorkDone, WorkSkipped:
 		return

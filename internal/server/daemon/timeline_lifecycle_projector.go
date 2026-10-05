@@ -4,8 +4,8 @@
 // Package daemon — timeline_lifecycle_projector.go
 //
 // TimelineLifecycleProjector is the single, canonical source of coarse
-// dashboard lifecycle events (status + node.*) as required by ADR-0011
-// decision 4 and gibson#1116.
+// dashboard lifecycle events (status + node.*) as required by ADR-0163
+// and gibson#1116.
 //
 // The old path emitted MissionEventData directly from mission_manager
 // executeMission via scattered emitEvent calls. This projector replaces that
@@ -66,7 +66,7 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 	case brain.WorkDispatched:
 		// work.dispatched → node.started
 		// nodeId = CUE node id (WorkDispatched.ID is the work item ID which IS
-		// the CUE node id, per ADR-0011 decision 4: "WorkNode.ID is the CUE
+		// the CUE node id, per ADR-0163: "WorkNode.ID is the CUE
 		// node id").
 		mid := e.MissionID
 		if mid == "" {
@@ -272,7 +272,7 @@ func (p *lifecycleProjectorTap) fanOut(out api.EventData) {
 // InstallLifecycleProjector registers a lifecycle projector tap on the given
 // engine. It is called once per engine creation via brain.Registry.OnEngine.
 // The projector converts brain.Events to the coarse dashboard vocabulary and
-// publishes them to eventBus + redisStream (ADR-0011 decision 4, gibson#1116).
+// publishes them to eventBus + redisStream (ADR-0163, gibson#1116).
 //
 // The tap must be installed before the tick loop starts (before the first
 // engine.Run call), which is guaranteed because OnEngine hooks fire inside

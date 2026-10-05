@@ -70,7 +70,7 @@ type Mission struct {
 	BeliefModel string
 
 	// Metadata carried at launch so the World is the single source of truth for
-	// mission status + display data (ADR-0011/ADR-0027, gibson#1118).
+	// mission status + display data (ADR-0163/ADR-0027, gibson#1118).
 	// These fields are populated by MissionStarted and never mutated.
 	Name        string              // human-readable mission name (from the definition)
 	Description string              // mission description (from the definition)
@@ -90,7 +90,7 @@ type Mission struct {
 
 // MissionStarted launches a mission. (CUE-mission projection lands later; this is
 // the minimal launch event.)
-// As of ADR-0011 (gibson#1118) this event also carries display metadata
+// As of ADR-0163 (gibson#1118) this event also carries display metadata
 // (Name/Description/TargetID/TenantID) so the World is the single source of
 // truth for mission status and identity — no parallel Redis store needed.
 type MissionStarted struct {
@@ -99,7 +99,7 @@ type MissionStarted struct {
 	// BeliefModel pins the belief-model version (ADR-0134); empty → unpinned.
 	BeliefModel string
 
-	// Display metadata (ADR-0011/gibson#1118): carried from the CUE definition and
+	// Display metadata (ADR-0163/gibson#1118): carried from the CUE definition and
 	// target at launch so ListMissions can fold the World without a secondary store.
 	Name        string
 	Description string
@@ -330,7 +330,7 @@ type MissionSnapshot struct {
 	DeciderSlot      DeciderSlot
 	BeliefModel      string // pinned belief-model version (ADR-0134)
 
-	// Display metadata (ADR-0011/gibson#1118): folded from MissionStarted so
+	// Display metadata (ADR-0163/gibson#1118): folded from MissionStarted so
 	// ListMissions can serve all mission data from the World without a secondary store.
 	Name        string
 	Description string
@@ -343,7 +343,7 @@ type MissionSnapshot struct {
 
 	// Progress is the ratio of completed work nodes to total work nodes for the
 	// mission (0.0–1.0), derived from the World's WorkItem entities at snapshot time
-	// (ADR-0011/gibson#1118). Zero when no work nodes are projected yet.
+	// (ADR-0163/gibson#1118). Zero when no work nodes are projected yet.
 	Progress float64
 	// FindingsCount is the number of Finding entities in the World attributed to
 	// this mission, derived at snapshot time.

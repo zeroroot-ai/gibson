@@ -67,7 +67,7 @@ func CapabilitiesForTechnique(hierarchy *taxonomy.TechniqueHierarchy, technique 
 // declaration. VoICandidate.CoveringCapabilities stores refs rather than full
 // Capability values for a concrete reason, not stylistic preference:
 // Capability.Coverage carries unexported internal state (taxonomy.Coverage's
-// category/technique sets) that the JSON-based Timeline codec (ADR-0011,
+// category/technique sets) that the JSON-based Timeline codec (ADR-0163,
 // timeline_codec.go) silently drops on marshal — a persisted VoIPlanned event
 // would replay with every covering capability's Coverage reset to empty. Kind
 // and Name are plain exported strings, so a CapabilityRef replays exactly as

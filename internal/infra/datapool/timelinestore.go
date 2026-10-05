@@ -20,7 +20,7 @@ import (
 // RedisTimelineStore implements brain.TimelineStore using Redis Streams
 // (XADD/XRANGE).
 // Per-tenant stream key: "gibson:timeline:<tenantID>"
-// No blind MAXLEN trim is applied on XADD (ADR-0011 decision 3b).
+// No blind MAXLEN trim is applied on XADD (ADR-0163).
 //
 // This type lives in internal/infra/datapool (not internal/engine/brain) so
 // that raw store client imports stay confined to the data-plane allowlist
@@ -31,7 +31,7 @@ import (
 // *redis.Client plus a release function that returns the connection to the
 // pool. This per-op acquire pattern prevents the "client is closed" error that
 // occurs when a long-lived *redis.Client is closed by the idle evictor between
-// operations (gibson#1114, ADR-0011).
+// operations (gibson#1114, ADR-0163).
 type RedisTimelineStore struct {
 	acquire func(ctx context.Context) (*redis.Client, func(), error)
 }
@@ -60,7 +60,7 @@ type redisConfigGetter interface {
 // assertAOFEnabled verifies that the Redis server behind client has
 // append-only-file persistence enabled (CONFIG GET appendonly == "yes").
 //
-// The durable Timeline (ADR-0011, PRD gibson#1112) is only durable if the
+// The durable Timeline (ADR-0163, PRD gibson#1112) is only durable if the
 // backing Redis persists its log: with AOF off, a Redis restart silently
 // discards every Timeline event while the store keeps LOOKING durable. Any
 // failure to positively confirm appendonly=yes — including a CONFIG GET
@@ -70,14 +70,14 @@ type redisConfigGetter interface {
 func assertAOFEnabled(ctx context.Context, client redisConfigGetter) error {
 	vals, err := client.ConfigGet(ctx, "appendonly").Result()
 	if err != nil {
-		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly failed — cannot verify AOF persistence for the durable Timeline (ADR-0011): %w", err)
+		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly failed — cannot verify AOF persistence for the durable Timeline (ADR-0163): %w", err)
 	}
 	val, ok := vals["appendonly"]
 	if !ok {
-		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly returned no value — cannot verify AOF persistence for the durable Timeline (ADR-0011)")
+		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly returned no value — cannot verify AOF persistence for the durable Timeline (ADR-0163)")
 	}
 	if val != "yes" {
-		return fmt.Errorf("datapool/redis-timeline: Redis AOF persistence is disabled (appendonly=%q, want \"yes\") — the durable Timeline (ADR-0011, gibson#1112) would silently lose all events on a Redis restart; enable AOF on the data-plane Redis (deploy#1063 sets appendonly=yes on the redis-stack chart) instead of running with a Timeline that only looks durable", val)
+		return fmt.Errorf("datapool/redis-timeline: Redis AOF persistence is disabled (appendonly=%q, want \"yes\") — the durable Timeline (ADR-0163, gibson#1112) would silently lose all events on a Redis restart; enable AOF on the data-plane Redis (deploy#1063 sets appendonly=yes on the redis-stack chart) instead of running with a Timeline that only looks durable", val)
 	}
 	return nil
 }
@@ -103,7 +103,7 @@ func AssertTimelineAOF(ctx context.Context, addr, password string) error {
 }
 
 // Append durably persists ev to the tenant's Redis Stream. MaxLen 0 means no
-// cap — the stream grows unbounded until TrimTo prunes it (ADR-0011).
+// cap — the stream grows unbounded until TrimTo prunes it (ADR-0163).
 func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain.Event) (string, error) {
 	client, release, err := s.acquire(ctx)
 	if err != nil {
@@ -117,7 +117,7 @@ func (s *RedisTimelineStore) Append(ctx context.Context, tenant string, ev brain
 	}
 	seq, err := client.XAdd(ctx, &redis.XAddArgs{
 		Stream: s.streamKey(tenant),
-		MaxLen: 0, // no cap — ADR-0011 no blind trim
+		MaxLen: 0, // no cap — ADR-0163 no blind trim
 		ID:     "*",
 		Values: map[string]any{"ev": string(encoded)},
 	}).Result()

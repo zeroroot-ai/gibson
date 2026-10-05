@@ -17,7 +17,7 @@ import (
 
 // TestOntologyExtensionProposed_CodecRoundTrip proves OntologyExtensionProposed
 // survives the durable Timeline's JSON envelope round trip (EncodeEvent/
-// DecodeEvent) — required for durable persistence (ADR-0011) and for the
+// DecodeEvent) — required for durable persistence (ADR-0163) and for the
 // codec's kind registry to stay complete, mirroring
 // TestDomainPackEvents_CodecRoundTrip.
 func TestOntologyExtensionProposed_CodecRoundTrip(t *testing.T) {

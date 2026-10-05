@@ -71,7 +71,7 @@ type MissionProjected struct {
 	// re-loads the exact model. Empty → no pinned model (placeholder / OSS).
 	BeliefModel string
 
-	// Display metadata (ADR-0011/gibson#1118): carried from the CUE definition and
+	// Display metadata (ADR-0163/gibson#1118): carried from the CUE definition and
 	// target so the World is the single source of truth — no secondary store.
 	Name        string
 	Description string

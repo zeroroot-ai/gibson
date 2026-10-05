@@ -17,7 +17,7 @@ func crashAndResume(w *World) []Event {
 
 // TestCrashResume_RetryPolicyReDispatches proves that crash-failed work with a
 // non-zero RetryPolicy is re-dispatched by RetrySystem on the next tick —
-// bounded by MaxRetries (ADR-0011 decision 5: "re-dispatch iff RetryPolicy
+// bounded by MaxRetries (ADR-0163: "re-dispatch iff RetryPolicy
 // allows").
 func TestCrashResume_RetryPolicyReDispatches(t *testing.T) {
 	// Build a World with one running tool (MaxRetries=2).
@@ -59,7 +59,7 @@ func TestCrashResume_RetryPolicyReDispatches(t *testing.T) {
 
 // TestCrashResume_NoRetryPolicyStaysFailed proves that a crash-failed work
 // item with MaxRetries=0 (no CUE RetryPolicy) is NOT re-dispatched — no blind
-// auto-re-dispatch (ADR-0011 decision 5).
+// auto-re-dispatch (ADR-0163).
 func TestCrashResume_NoRetryPolicyStaysFailed(t *testing.T) {
 	// A tool node with no RetryPolicy (MaxRetries=0, the default).
 	w := NewWorld("t1")
@@ -124,7 +124,7 @@ func TestCrashResume_RetryBoundedByMaxRetries(t *testing.T) {
 
 // TestCrashResume_GoalMissionDeciderReEngages proves that after a crash-fail,
 // a goal mission's Decider re-engages with judgment on the re-folded World
-// (ADR-0011 decision 5: "the Decider re-engages with judgment on the
+// (ADR-0163: "the Decider re-engages with judgment on the
 // re-folded World rather than a blind re-dispatch").
 //
 // Mechanism: a WorkFailed counts in terminalWorkCount → the evidence cursor
@@ -193,7 +193,7 @@ func TestCrashResume_GoalMissionDeciderReEngages(t *testing.T) {
 // TestCrashResume_LateWorkCompletedIsIdempotent proves that a WorkCompleted
 // arriving from a worker that outlived the daemon, for a work item already in
 // a terminal state (WorkFailed via ResumeFailInFlight), is a no-op — no
-// corruption, no state flip (ADR-0011 decision 5).
+// corruption, no state flip (ADR-0163).
 func TestCrashResume_LateWorkCompletedIsIdempotent(t *testing.T) {
 	w := NewWorld("t1")
 	Reduce(w, WorkDispatched{ID: "slow-tool", MissionID: "m1", ItemKind: "tool", Target: "slow"})

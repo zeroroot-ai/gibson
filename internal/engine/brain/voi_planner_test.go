@@ -373,7 +373,7 @@ func (s *slowBeliefSubstrate) calls() int {
 // (TestVoIWorker_ReplayReproducesThePlan above, via Replay()->Reduce
 // directly) was never affected — the gap is specifically the DURABLE store
 // path (EncodeEvent/DecodeEvent, used by a TimelineStore) and the
-// snapshot-and-trim path (ADR-0011's SnapshotWorld/RestoreWorld), both of
+// snapshot-and-trim path (ADR-0163's SnapshotWorld/RestoreWorld), both of
 // which a live daemon actually uses and neither of which Replay exercises.
 // -----------------------------------------------------------------------
 
@@ -433,7 +433,7 @@ func TestTimelineCodec_EncodeDecode_VoIPlanned(t *testing.T) {
 
 // TestSnapshotRestore_RoundTripsVoIPlanState_InFlight proves an in-flight
 // VoI plan (requested, not yet completed) survives a snapshot-and-restore
-// cycle (ADR-0011) — the exact scenario a snapshot-and-trim right after a
+// cycle (ADR-0163) — the exact scenario a snapshot-and-trim right after a
 // VoIGateSystem request, before VoIWorker completes it, would hit. Before
 // this fix, VoIPlanState had no entry in worldSnapshotData at all, so
 // RestoreWorld silently produced a World with no memory of it ever having
@@ -459,7 +459,7 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_InFlight(t *testing.T) {
 // candidate's Technique/CoveringCapabilities (ADR-0135,
 // gibson#387) — the same JSON-safety property
 // TestTimelineCodec_EncodeDecode_VoIPlanned proves for the durable Timeline
-// path, proven here for the snapshot-and-trim path (ADR-0011), which
+// path, proven here for the snapshot-and-trim path (ADR-0163), which
 // round-trips through the same encoding/json marshal (world_snapshot.go).
 func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 	w := NewWorld("t")
