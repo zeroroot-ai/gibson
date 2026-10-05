@@ -1,0 +1,54 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - secrets
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - oidcclients
+  - platformbootstraps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - oidcclients/finalizers
+  - platformbootstraps/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - gibson.zeroroot.ai
+  resources:
+  - oidcclients/status
+  - platformbootstraps/status
+  verbs:
+  - get
+  - patch
+  - update
