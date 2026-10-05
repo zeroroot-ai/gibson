@@ -658,22 +658,22 @@ func main() {
 	// Plan→quota and Stripe subscription reconciliation moved to the closed
 	// billing tier (E7/gibson#798): the operator no longer loads a plan
 	// registry or runs an entitlements/billing reconciler.
-	// tenantStatusReporter is bound to the daemon gRPC client when the operator
-	// has a daemon address, so the TenantReconciler reports status back to the
-	// daemon (gibson#948, dashboard#813). Defaults to a no-op (report-back
-	// disabled) rather than nil, so the reconcile path never nil-guards an
-	// injected dependency (production-readiness no-graceful-nil gate).
-	var tenantStatusReporter controller.TenantStatusReporter = controller.NoopTenantStatusReporter{}
-	// orgMappingSeeder seeds the daemon's tenant -> Zitadel org mapping
-	// (ADR-0093 decision 4). Left nil when GIBSON_DAEMON_GRPC_ADDRESS is
-	// unset; TenantIdentityReconciler then fails every reconcile loud, the
-	// same as a nil Provisioner, rather than mark a tenant Ready with no
-	// mapping ext-authz can resolve.
+	// The daemon is a required dependency (ADR-0003, ADR-0002). The operator
+	// reports each tenant status to it, seeds the tenant to Zitadel org
+	// mapping in it (ADR-0093 decision 4), sends the enrollment runtime cap
+	// to it (gibson#597) and drains its provisioning queues. With no daemon
+	// address the operator does not start.
+	grpcAddr, addrErr := requireDaemonGRPCAddress(os.Getenv)
+	if addrErr != nil {
+		setupLog.Error(addrErr, "the operator cannot start")
+		os.Exit(1)
+	}
+	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
-	// The enrollment runtime cap reaches the daemon through the same gRPC
-	// client (gibson#597); without it the enrollment saga fails loudly.
 	var agentLimits flows.AgentLimitsReporter
-	if grpcAddr := os.Getenv("GIBSON_DAEMON_GRPC_ADDRESS"); grpcAddr != "" {
+	// One block for the wiring of the daemon client and of each loop that
+	// needs it.
+	{
 		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
 		if daemonSVID == "" {
 			daemonSVID = "spiffe://zeroroot.ai/platform/daemon"
@@ -730,8 +730,6 @@ func main() {
 			setupLog.Error(err, "first-tenant seed registration failed")
 			os.Exit(1)
 		}
-	} else {
-		setupLog.Info("GIBSON_DAEMON_GRPC_ADDRESS unset; DaemonGRPC saga capability unbound; operator-pull tenant provisioning disabled")
 	}
 
 	provisionSteps := flows.ProvisionSteps(deps)

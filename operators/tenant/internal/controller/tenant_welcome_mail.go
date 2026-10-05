@@ -46,7 +46,7 @@ const welcomeRetryInterval = 60 * time.Second
 //
 // Returns true when the caller should requeue to retry the send. The caller
 // gates on a non-nil r.Mail, matching the operator's other optional-collaborator
-// call sites (r.StatusReporter, r.MigrationEmitter).
+// call site (r.MigrationEmitter).
 func (r *TenantReconciler) sendWelcomeEmail(ctx context.Context, tenant *gibsonv1alpha1.Tenant) bool {
 	log := logf.FromContext(ctx).WithValues("tenant", tenant.Name)
 
