@@ -8,6 +8,7 @@ package datapool
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -74,7 +75,7 @@ func assertAOFEnabled(ctx context.Context, client redisConfigGetter) error {
 	}
 	val, ok := vals["appendonly"]
 	if !ok {
-		return fmt.Errorf("datapool/redis-timeline: CONFIG GET appendonly returned no value — cannot verify AOF persistence for the durable Timeline (ADR-0163)")
+		return errors.New("datapool/redis-timeline: CONFIG GET appendonly returned no value — cannot verify AOF persistence for the durable Timeline (ADR-0163)")
 	}
 	if val != "yes" {
 		return fmt.Errorf("datapool/redis-timeline: Redis AOF persistence is disabled (appendonly=%q, want \"yes\") — the durable Timeline (ADR-0163, gibson#1112) would silently lose all events on a Redis restart; enable AOF on the data-plane Redis (deploy#1063 sets appendonly=yes on the redis-stack chart) instead of running with a Timeline that only looks durable", val)
