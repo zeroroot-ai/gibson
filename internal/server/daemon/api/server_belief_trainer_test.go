@@ -168,3 +168,24 @@ func TestBeliefTrainerRPCs_Unwired(t *testing.T) {
 		t.Errorf("code %v, want Unavailable", status.Code(err))
 	}
 }
+
+// Each request that the handlers cannot serve gets a clear code.
+func TestBeliefTrainerRPCs_RefuseWhatTheyCannotServe(t *testing.T) {
+	ctx := tlsPeerCtx(t, trainerOfAcme)
+	store := &daemonoperatorv1.StoreBeliefArtifactRequest{
+		TenantId: "acme", BeliefModel: []byte(`{}`), EdgePosteriors: []byte(`{}`),
+	}
+
+	srv, _, _ := trainerServer(t)
+	if _, err := srv.GetBeliefTrainingData(ctx, &daemonoperatorv1.GetBeliefTrainingDataRequest{}); status.Code(err) != codes.InvalidArgument {
+		t.Errorf("no tenant: code %v, want InvalidArgument", status.Code(err))
+	}
+
+	noBrain := newPendingServer().WithBeliefTrainer(nil, trainerTD)
+	if _, err := noBrain.GetBeliefTrainingData(ctx, &daemonoperatorv1.GetBeliefTrainingDataRequest{TenantId: "acme"}); status.Code(err) != codes.Unavailable {
+		t.Errorf("no brain: code %v, want Unavailable", status.Code(err))
+	}
+	if _, err := noBrain.StoreBeliefArtifact(ctx, store); status.Code(err) != codes.Unavailable {
+		t.Errorf("no platform Postgres: code %v, want Unavailable", status.Code(err))
+	}
+}
