@@ -41,7 +41,7 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 		t.Skip("skipping e2e test in short mode")
 	}
 
-	ctx := context.Background()
+	ctx := callerCtx(t, "user-42", "acme")
 
 	// Create FileDescriptorSet for a mock remote tool
 	fdsBase64, inputTypeName, outputTypeName := createMockToolFileDescriptorSet(t)
@@ -483,10 +483,12 @@ func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDis
 	// Create minimal harness with resolver
 	harness := &DefaultAgentHarness{
 		registryAdapter: mockRegistry,
-		resolver:        resolver,
-		tracer:          noop.NewTracerProvider().Tracer("test"),
-		logger:          slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		metrics:         &noopMetricsRecorder{},
+		// The tenant has the tool enabled, so the execute gate passes.
+		componentAuthorizer: &recordingAuthorizer{allow: true},
+		resolver:            resolver,
+		tracer:              noop.NewTracerProvider().Tracer("test"),
+		logger:              slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		metrics:             &noopMetricsRecorder{},
 		missionCtx: MissionContext{
 			ID:   types.ID("test-mission"),
 			Name: "test",
