@@ -12,15 +12,22 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
-// gateSeedAuthorizer records writes; ListObjects answers empty so every
-// embedded catalog entry counts as missing.
+// gateSeedAuthorizer records writes and deletes. ListObjects answers existing,
+// which is empty by default, so every embedded catalog entry counts as missing.
 type gateSeedAuthorizer struct {
 	authz.Authorizer
-	writes []authz.Tuple
+	existing []string
+	writes   []authz.Tuple
+	deletes  []authz.Tuple
 }
 
 func (a *gateSeedAuthorizer) ListObjects(context.Context, string, string, string) ([]string, error) {
-	return nil, nil
+	return a.existing, nil
+}
+
+func (a *gateSeedAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
+	a.deletes = append(a.deletes, tuples...)
+	return nil
 }
 
 func (a *gateSeedAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
@@ -56,5 +63,28 @@ func TestSeedConnectorCatalogGate_SeedsEmbeddedCatalog(t *testing.T) {
 	}
 	if !sawAgent {
 		t.Error("the seed must platform_enable the zerocool agent (component:agent/zerocool), not connectors only")
+	}
+}
+
+// A cluster that has the platform_enabled tuple of the OSV prototype loses it
+// at the next seed, because the entry left the catalog (gibson#750). The seed
+// keeps each listed entry and each Domain Pack, which another seed owns.
+func TestSeedComponentCatalogGate_RemovesTheRetiredOSVConnector(t *testing.T) {
+	a := &gateSeedAuthorizer{existing: []string{
+		"component:connector/osv",
+		"component:agent/zerocool",
+		"component:domainpack/web",
+	}}
+	if err := seedComponentCatalogGate(context.Background(), a, &stubVerifier{}, slog.Default()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	want := authz.Tuple{User: "system_tenant:_system", Relation: "platform_enabled", Object: "component:connector/osv"}
+	if len(a.deletes) != 1 || a.deletes[0] != want {
+		t.Fatalf("deleted %+v, want only %+v", a.deletes, want)
+	}
+	for _, w := range a.writes {
+		if w.Object == "component:connector/osv" {
+			t.Fatal("the seed wrote a tuple for the retired OSV connector")
+		}
 	}
 }
