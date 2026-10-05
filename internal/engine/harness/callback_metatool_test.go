@@ -40,8 +40,8 @@ type mtQuerier struct {
 	ret                any
 }
 
-func (f *mtQuerier) QueryPlugin(_ context.Context, name, method string, _ map[string]any) (any, error) {
-	f.gotName, f.gotMethod = name, method
+func (f *mtQuerier) CallConnectorTool(_ context.Context, _, connector, tool string, _ map[string]any) (any, error) {
+	f.gotName, f.gotMethod = connector, tool
 	return f.ret, nil
 }
 
@@ -522,4 +522,67 @@ func TestInvokeNativeTool_Refusals(t *testing.T) {
 			t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
 		}
 	})
+}
+
+// TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead is the rule of
+// ADR-0067 for gibson#723: a plugin and a connector have one name, and the
+// caller may execute the connector only. invoke_tool checks can_execute on
+// the connector object and calls that connector through MCP. No plugin
+// method is reached.
+func TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead(t *testing.T) {
+	var captured []capturedTool
+	svc, harness, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentAuthorizer = authzer
+	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{
+		{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue"}}},
+	}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	var called []string
+	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
+	pluginCalls := 0
+	harness.queryPluginHook = func() { pluginCalls++ }
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`),
+	})
+	if err != nil || resp.GetError() != nil {
+		t.Fatalf("resp = %v, err = %v; want a result", resp, err)
+	}
+	if authzer.lastObject != "component:connector/gitlab" {
+		t.Errorf("can_execute object = %q; want component:connector/gitlab", authzer.lastObject)
+	}
+	if len(called) != 1 || called[0] != "test-tenant/gitlab/create_issue" {
+		t.Errorf("connector calls = %v; want one call of gitlab for the tenant of the run", called)
+	}
+	if pluginCalls != 0 {
+		t.Errorf("the plugin of the same name was called %d time(s)", pluginCalls)
+	}
+	if len(captured) != 1 {
+		t.Errorf("captured %d records; want 1", len(captured))
+	}
+}
+
+// TestInvokeTool_AnMCPIdWithNoClientFailsClosed: with no MCP client wired, an
+// mcp: id gets an error and one record.
+func TestInvokeTool_AnMCPIdWithNoClientFailsClosed(t *testing.T) {
+	var captured []capturedTool
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentRegistry = fakeSearchReg{}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{}}`),
+	})
+	if err != nil || resp.GetError() == nil {
+		t.Fatalf("resp = %v, err = %v; want an error response", resp, err)
+	}
+	if len(captured) != 1 {
+		t.Errorf("captured %d records; want 1", len(captured))
+	}
 }

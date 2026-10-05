@@ -152,6 +152,10 @@ type ComponentServiceServer struct {
 	queue    WorkQueue
 	logger   *slog.Logger
 
+	// connectorTools lists the connector tools of a tenant for ListTools
+	// (ADR-0065). Nil lists no connector tools.
+	connectorTools ConnectorToolSource
+
 	// Harness proxy dependencies.
 	//
 	// llmCompleter routes LLM completions back to Gibson's provider system.
@@ -335,6 +339,13 @@ func NewComponentServiceServer(
 //	svc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(stateClient))
 func (s *ComponentServiceServer) WithWorkContextRegistry(r WorkContextRegistry) *ComponentServiceServer {
 	s.workContext = r
+	return s
+}
+
+// WithConnectorTools wires the source of the connector tools that ListTools
+// returns. The daemon passes its one MCP client (ConnectorMCP).
+func (s *ComponentServiceServer) WithConnectorTools(src ConnectorToolSource) *ComponentServiceServer {
+	s.connectorTools = src
 	return s
 }
 

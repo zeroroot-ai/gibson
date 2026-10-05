@@ -48,7 +48,7 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 	}
 
 	engine := catalog.NewEngine(
-		component.NewCatalogToolLister(s.componentRegistry),
+		component.NewCatalogToolLister(s.componentRegistry, s.connectors),
 		catalog.NewFGAAuthorizer(s.componentAuthorizer),
 	)
 	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}

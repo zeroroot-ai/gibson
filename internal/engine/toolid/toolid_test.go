@@ -113,19 +113,6 @@ func TestFlattenRejectsAmbiguousSegment(t *testing.T) {
 
 // PluginRef: an MCP id decomposes to the existing (plugin_name, method) dispatch
 // key; a native id does not.
-func TestPluginRef(t *testing.T) {
-	mcp := toolid.ID{Source: toolid.SourceMCP, Connector: "gitlab-acme", Tool: "create_merge_request"}
-	name, method, ok := mcp.PluginRef()
-	if !ok || name != "gitlab-acme" || method != "create_merge_request" {
-		t.Fatalf("PluginRef(mcp) = (%q,%q,%v), want (gitlab-acme,create_merge_request,true)", name, method, ok)
-	}
-
-	nat := toolid.ID{Source: toolid.SourceNative, Tool: "nmap"}
-	if _, _, ok := nat.PluginRef(); ok {
-		t.Fatalf("PluginRef(native) ok = true, want false (native tools are not PluginInvoke targets)")
-	}
-}
-
 func TestForConnectorTool(t *testing.T) {
 	id, err := toolid.ForMCP("gitlab", "create_issue")
 	if err != nil {
