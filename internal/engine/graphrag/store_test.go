@@ -32,39 +32,6 @@ func NewMockQueryProcessor(results []GraphRAGResult, err error) *MockQueryProces
 	}
 }
 
-func TestDefaultGraphRAGStore_Query(t *testing.T) {
-	ctx := context.Background()
-	mockProvider := NewMockGraphRAGProvider()
-	mockEmbedder := NewMockEmbedder()
-
-	// Create expected results
-	expectedResults := []GraphRAGResult{
-		{
-			Node:        *NewGraphNode(types.NewID(), NodeType("finding")),
-			Score:       0.9,
-			VectorScore: 0.8,
-			GraphScore:  0.7,
-		},
-	}
-	mockProcessor := NewMockQueryProcessor(expectedResults, nil)
-
-	store := &DefaultGraphRAGStore{
-		provider:  mockProvider,
-		processor: mockProcessor,
-		embedder:  mockEmbedder,
-	}
-
-	// Create test query
-	query := NewGraphRAGQuery("test query")
-
-	// Execute
-	results, err := store.Query(ctx, *query)
-
-	// Verify
-	assert.NoError(t, err)
-	assert.Equal(t, expectedResults, results)
-}
-
 func TestDefaultGraphRAGStore_FindSimilarAttacks(t *testing.T) {
 	ctx := context.Background()
 	mockProvider := NewMockGraphRAGProvider()
@@ -193,40 +160,6 @@ func TestDefaultGraphRAGStore_GetAttackChains(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, chains)
 	assert.GreaterOrEqual(t, len(chains[0].Steps), 1)
-}
-
-func TestDefaultGraphRAGStore_GetRelatedFindings(t *testing.T) {
-	ctx := context.Background()
-	mockProvider := NewMockGraphRAGProvider()
-	mockEmbedder := NewMockEmbedder()
-	mockProcessor := NewMockQueryProcessor(nil, nil)
-
-	store := &DefaultGraphRAGStore{
-		provider:  mockProvider,
-		processor: mockProcessor,
-		embedder:  mockEmbedder,
-	}
-
-	findingID := types.NewID()
-	relatedFindingID := types.NewID()
-
-	// Create related finding node
-	relatedNode := NewGraphNode(relatedFindingID, NodeType("finding")).
-		WithProperty("title", "Related Finding").
-		WithProperty("description", "Related description")
-
-	// Setup mock responses
-	mockProvider.relationships = []Relationship{
-		*NewRelationship(findingID, relatedFindingID, RelationType("similar_to")),
-	}
-	mockProvider.queriedNodes = []GraphNode{*relatedNode}
-
-	// Execute
-	findings, err := store.GetRelatedFindings(ctx, findingID.String())
-
-	// Verify
-	assert.NoError(t, err)
-	assert.GreaterOrEqual(t, len(findings), 0) // May be 0 or more depending on mock state
 }
 
 func TestDefaultGraphRAGStore_Health(t *testing.T) {

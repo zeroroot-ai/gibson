@@ -182,19 +182,6 @@ type Relationship struct {
 	CreatedAt  time.Time      `json:"created_at"`
 }
 
-// NewRelationship creates a new Relationship between two nodes.
-func NewRelationship(fromID, toID types.ID, relType RelationType) *Relationship {
-	return &Relationship{
-		ID:         types.NewID(),
-		FromID:     fromID,
-		ToID:       toID,
-		Type:       relType,
-		Properties: make(map[string]any),
-		Weight:     1.0, // Default weight
-		CreatedAt:  time.Now(),
-	}
-}
-
 // WithProperty adds a property to the relationship.
 // Returns the relationship for method chaining.
 func (r *Relationship) WithProperty(key string, value any) *Relationship {
@@ -242,23 +229,6 @@ type AttackPattern struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// NewAttackPattern creates a new AttackPattern.
-func NewAttackPattern(techniqueID, name, description string) *AttackPattern {
-	now := time.Now()
-	return &AttackPattern{
-		ID:          types.NewID(),
-		TechniqueID: techniqueID,
-		Name:        name,
-		Description: description,
-		Tactics:     []string{},
-		Platforms:   []string{},
-		DataSources: []string{},
-		References:  []string{},
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-}
-
 // ToGraphNode converts the AttackPattern to a GraphNode.
 func (ap *AttackPattern) ToGraphNode() *GraphNode {
 	node := NewGraphNode(ap.ID, NodeType("attack_pattern"))
@@ -295,20 +265,6 @@ type FindingNode struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
-// NewFindingNode creates a new FindingNode.
-func NewFindingNode(id types.ID, title, description string, missionID types.ID) *FindingNode {
-	now := time.Now()
-	return &FindingNode{
-		ID:          id,
-		Title:       title,
-		Description: description,
-		MissionID:   missionID,
-		Confidence:  1.0,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-}
-
 // ToGraphNode converts the FindingNode to a GraphNode.
 func (fn *FindingNode) ToGraphNode() *GraphNode {
 	node := NewGraphNode(fn.ID, NodeType("finding"))
@@ -342,36 +298,4 @@ type TechniqueNode struct {
 	Embedding   []float64 `json:"embedding,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-// NewTechniqueNode creates a new TechniqueNode.
-func NewTechniqueNode(techniqueID, name, description, tactic string) *TechniqueNode {
-	now := time.Now()
-	return &TechniqueNode{
-		ID:          types.NewID(),
-		TechniqueID: techniqueID,
-		Name:        name,
-		Description: description,
-		Tactic:      tactic,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-}
-
-// ToGraphNode converts the TechniqueNode to a GraphNode.
-func (tn *TechniqueNode) ToGraphNode() *GraphNode {
-	node := NewGraphNode(tn.ID, NodeType("technique"))
-	node.WithProperties(map[string]any{
-		"technique_id": tn.TechniqueID,
-		"name":         tn.Name,
-		"description":  tn.Description,
-		"tactic":       tn.Tactic,
-		"platform":     tn.Platform,
-	})
-	if len(tn.Embedding) > 0 {
-		node.WithEmbedding(tn.Embedding)
-	}
-	node.CreatedAt = tn.CreatedAt
-	node.UpdatedAt = tn.UpdatedAt
-	return node
 }

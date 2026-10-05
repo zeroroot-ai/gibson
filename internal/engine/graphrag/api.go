@@ -110,34 +110,3 @@ func NewGraphRAGStoreForOwnedProvider(
 		config:    config,
 	}, nil
 }
-
-func NewGraphRAGStoreWithProvider(config GraphRAGConfig, emb embedder.Embedder, prov GraphRAGProvider) (GraphRAGStore, error) {
-	// Apply defaults and validate config
-	config.ApplyDefaults()
-	if err := config.Validate(); err != nil {
-		return nil, NewConfigError("invalid GraphRAG configuration", err)
-	}
-
-	// Validate embedder
-	if emb == nil {
-		return nil, NewConfigError("embedder cannot be nil", nil)
-	}
-
-	// Validate provider
-	if prov == nil {
-		return nil, NewConfigError("provider cannot be nil", nil)
-	}
-
-	// Create query pipeline (nil logger defaults to slog.Default())
-	pipeline, err := NewQueryPipelineFromConfig(config, emb, nil)
-	if err != nil {
-		return nil, NewConfigError("failed to create query pipeline", err)
-	}
-
-	return &DefaultGraphRAGStore{
-		provider:  prov,
-		processor: pipeline,
-		embedder:  emb,
-		config:    config,
-	}, nil
-}
