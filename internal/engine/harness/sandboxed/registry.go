@@ -36,8 +36,8 @@ type ToolSpec struct {
 
 	// Egress, when non-empty, confines the tool sandbox to exactly these
 	// targets — the dispatching agent's egressAllow ceiling (ADR-0136). Empty
-	// means unrestricted: the sandbox keeps setec's default mode=full. Sandbox
-	// isolation is unconditional; this only bounds egress breadth.
+	// means the sandbox takes the defaultNetworkMode of its SandboxClass.
+	// Sandbox isolation is unconditional; this only bounds egress breadth.
 	Egress []EgressRule
 
 	// Live carries the per-call scope the running-sandbox console keys by.

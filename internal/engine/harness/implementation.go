@@ -3089,9 +3089,10 @@ func (h *DefaultAgentHarness) Close(_ context.Context) error {
 
 // agentEgressCeiling returns the setec egress rules bounding the tool launches
 // of the dispatching agent, from its platform-catalog egressAllow ceiling
-// (ADR-0136). It returns nil — unrestricted, sandbox mode=full — when there is
-// no dispatching agent, the agent is not a platform-catalog agent, or its
-// ceiling is "*". Tool sandbox isolation is unconditional regardless.
+// (ADR-0136). It returns nil when there is no dispatching agent, the agent is
+// not a platform-catalog agent, or its ceiling is "*". The tool sandbox then
+// takes the defaultNetworkMode of its SandboxClass. Tool sandbox isolation is
+// unconditional regardless.
 func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 	if agentName == "" {
 		return nil
