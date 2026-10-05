@@ -622,7 +622,7 @@ message GetConnectorAuthStatusResponse {
 
 message GetBeliefTrainingDataRequest {
   // tenant_id is the tenant slug. It must be the tenant of the caller.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // BeliefTrainingRow is one training example: each belief variable of one
@@ -646,7 +646,7 @@ message GetBeliefTrainingDataResponse {
 
 message StoreBeliefArtifactRequest {
   // tenant_id is the tenant slug. It must be the tenant of the caller.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // belief_model is the belief-CPT artifact, a JSON object.
   bytes belief_model = 2;
   // edge_posteriors is the edge-posterior artifact, a JSON object.
