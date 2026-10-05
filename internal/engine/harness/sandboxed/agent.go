@@ -25,7 +25,9 @@
 package sandboxed
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -208,14 +210,60 @@ type LiveInstance struct {
 }
 
 // AgentRunResult is the terminal outcome of one agent sandbox run. It reports
-// how the sandbox ended — NOT the agent's structured mission result, which
-// returns over the callback seam. LogTail is the last streamed stdout lines,
-// kept for diagnostics on a non-zero exit.
+// how the sandbox ended and the structured result that the agent wrote.
+// LogTail is the last streamed stdout lines, kept for diagnostics on a
+// non-zero exit.
 type AgentRunResult struct {
 	SandboxID string
 	ExitCode  int32
 	Reason    string
 	LogTail   string
+
+	// Result is the terminal result line of the agent. It is nil when the
+	// agent wrote none.
+	Result *AgentTerminalResult
+}
+
+// AgentTerminalResult is the structured result of one sandboxed agent run.
+// The agent writes it as the last NDJSON line on its stdout, with
+// `"type":"result"`, before it exits:
+//
+//	{"type":"result","success":true,"output":"...","finding_ids":["..."],"metadata":{"k":"v"}}
+//
+// The line is the word of the agent about its own run, like each other
+// output of a sandbox. The exit status still comes from setec.
+type AgentTerminalResult struct {
+	Success    bool           `json:"success"`
+	Output     string         `json:"output"`
+	FindingIDs []string       `json:"finding_ids,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+}
+
+// terminalResultType is the value of the `type` key that marks the result
+// line apart from the event lines on the same stream.
+const terminalResultType = "result"
+
+// parseTerminalResult returns the last complete result line in the stdout of
+// an agent run, or nil when the stream holds none. A line that is not JSON,
+// or that has a different type, is an event line and is ignored.
+func parseTerminalResult(stdout []byte) *AgentTerminalResult {
+	lines := bytes.Split(stdout, []byte("\n"))
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
+		var probe struct {
+			Type string `json:"type"`
+			AgentTerminalResult
+		}
+		if err := json.Unmarshal(line, &probe); err != nil || probe.Type != terminalResultType {
+			continue
+		}
+		res := probe.AgentTerminalResult
+		return &res
+	}
+	return nil
 }
 
 // AgentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
@@ -294,11 +342,11 @@ func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 // per-dispatch grant and egress envelope, streams the run's logs, and waits for
 // the terminal phase + exit status. It returns the terminal AgentRunResult.
 //
-// It does NOT return the agent's structured mission result: that returns over
-// the agent's own callback seam to the daemon, not through setec (which reports
-// only exit status and streamed stdout). Teardown is left to setec's
-// finished-TTL reaper; on a timeout the sandbox is killed best-effort so it is
-// reaped promptly rather than left running.
+// The agent writes its structured mission result as the last result line on
+// its stdout (AgentTerminalResult), and LaunchAgent returns it with the exit
+// status. Teardown is left to setec's finished-TTL reaper; on a timeout the
+// sandbox is killed best-effort so it is reaped promptly rather than left
+// running.
 func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, dispatch AgentDispatch) (AgentRunResult, error) {
 	ctx, span := l.tracer.Start(ctx, "harness.sandboxed.launch_agent")
 	defer span.End()
@@ -418,6 +466,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 		ExitCode:  waitResp.ExitCode,
 		Reason:    waitResp.Reason,
 		LogTail:   ringBuf.tail(32),
+		Result:    parseTerminalResult(ringBuf.bytes()),
 	}, nil
 }
 

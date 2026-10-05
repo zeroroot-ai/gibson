@@ -122,7 +122,7 @@ func newSandboxDelegateHarness(
 // an untrusted agent with a launcher wired is LAUNCHED as an ephemeral sandbox
 // (the launcher is called), not denied and not enqueued to the work queue.
 func TestDelegateToAgent_UntrustedWithLauncher_Launches(t *testing.T) {
-	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-1", ExitCode: 0}}
+	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-1", ExitCode: 0, Result: &sandboxed.AgentTerminalResult{Success: true, Output: "done"}}}
 	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{
 		Image:        "ghcr.io/zeroroot-ai/zerocool:dev",
 		SandboxClass: "agent",
@@ -293,5 +293,74 @@ func TestCapRunTimeout(t *testing.T) {
 		if got := capRunTimeout(c.requested, c.cap); got != c.want {
 			t.Errorf("capRunTimeout(%v, %v) = %v, want %v", c.requested, c.cap, got, c.want)
 		}
+	}
+}
+
+// sandboxedDelegation runs one delegation of the agent "zerocool" through a
+// launcher that returns the given outcome.
+func sandboxedDelegation(t *testing.T, outcome sandboxed.AgentRunResult) (agent.Result, error) {
+	t.Helper()
+	launcher := &recordingLauncher{outcome: outcome}
+	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent"}}
+	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
+	return h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal", nil))
+}
+
+// TestDelegateToAgent_SandboxResultReturnsInOutput proves that the structured
+// result of a sandboxed agent returns to the caller in Result.Output
+// (gibson#682).
+func TestDelegateToAgent_SandboxResultReturnsInOutput(t *testing.T) {
+	res, err := sandboxedDelegation(t, sandboxed.AgentRunResult{
+		SandboxID: "sbx-1",
+		Result: &sandboxed.AgentTerminalResult{
+			Success:    true,
+			Output:     "two hosts answer on 443",
+			FindingIDs: []string{"f-1", "f-2"},
+			Metadata:   map[string]any{"finish_reason": "stop"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DelegateToAgent: %v", err)
+	}
+	if res.Status != agent.ResultStatusCompleted {
+		t.Errorf("status = %q; want completed", res.Status)
+	}
+	if got := res.Output["output"]; got != "two hosts answer on 443" {
+		t.Errorf("Output[output] = %v; want the text of the agent", got)
+	}
+	ids, _ := res.Output["finding_ids"].([]any)
+	if len(ids) != 2 || ids[0] != "f-1" || ids[1] != "f-2" {
+		t.Errorf("Output[finding_ids] = %v; want [f-1 f-2]", res.Output["finding_ids"])
+	}
+	md, _ := res.Output["metadata"].(map[string]any)
+	if md["finish_reason"] != "stop" {
+		t.Errorf("Output[metadata] = %v; want the metadata of the agent", res.Output["metadata"])
+	}
+}
+
+// TestDelegateToAgent_SandboxExitWithNoResultIsAnError proves that a sandbox
+// that exits 0 and wrote no result line returns a clear error.
+func TestDelegateToAgent_SandboxExitWithNoResultIsAnError(t *testing.T) {
+	_, err := sandboxedDelegation(t, sandboxed.AgentRunResult{SandboxID: "sbx-1"})
+	if err == nil {
+		t.Fatal("want an error for a run with no result line")
+	}
+	if code := gibsonCode(t, err); code != ErrHarnessDelegationFailed {
+		t.Errorf("code = %q; want %q", code, ErrHarnessDelegationFailed)
+	}
+	if !strings.Contains(err.Error(), "wrote no result line") {
+		t.Errorf("err = %v; want it to name the missing result line", err)
+	}
+}
+
+// TestDelegateToAgent_SandboxFailureResultIsAnError proves that a result line
+// that reports a failure fails the delegation with the reason of the agent.
+func TestDelegateToAgent_SandboxFailureResultIsAnError(t *testing.T) {
+	_, err := sandboxedDelegation(t, sandboxed.AgentRunResult{
+		SandboxID: "sbx-1",
+		Result:    &sandboxed.AgentTerminalResult{Success: false, Output: "the model refused"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "the model refused") {
+		t.Fatalf("err = %v; want the failure reason of the agent", err)
 	}
 }

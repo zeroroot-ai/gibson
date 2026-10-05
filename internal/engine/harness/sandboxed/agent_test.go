@@ -396,3 +396,58 @@ func TestBuildEnv_PlatformCA(t *testing.T) {
 		t.Fatalf("%s = %q, want the launcher's own", envPlatformCAPEM, env[envPlatformCAPEM])
 	}
 }
+
+// TestLaunchAgent_ReturnsTheTerminalResultLine proves the correlation with a
+// fake sandbox client: the launcher reads the last result line of the stdout
+// stream and returns it with the exit status (gibson#682). A chunk boundary
+// can split a line, and event lines and an earlier result line come first.
+func TestLaunchAgent_ReturnsTheTerminalResultLine(t *testing.T) {
+	c := &mockClient{
+		launch: func(_ context.Context, _ LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "s"}, nil
+		},
+		streamLog: func(_ context.Context, _ string) (LogStream, error) {
+			return &fixedLogs{chunks: [][]byte{
+				[]byte("{\"type\":\"step\",\"text\":\"scan\"}\nplain text line\n"),
+				[]byte("{\"type\":\"result\",\"success\":false,\"output\":\"early\"}\n{\"type\":\"result\",\"succ"),
+				[]byte("ess\":true,\"output\":\"done\",\"finding_ids\":[\"f-1\"],\"metadata\":{\"tokens_total\":\"12\"}}\n"),
+			}}, nil
+		},
+		wait: func(_ context.Context, _ string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0}, nil
+		},
+		kill: func(_ context.Context, _ string) error { return nil },
+	}
+	out, err := newAgentLauncher(t, c).LaunchAgent(context.Background(), agentSpec, AgentDispatch{})
+	if err != nil {
+		t.Fatalf("LaunchAgent: %v", err)
+	}
+	if out.Result == nil {
+		t.Fatal("Result = nil; want the terminal result line")
+	}
+	if !out.Result.Success || out.Result.Output != "done" {
+		t.Errorf("Result = %+v; want the last result line", *out.Result)
+	}
+	if len(out.Result.FindingIDs) != 1 || out.Result.FindingIDs[0] != "f-1" {
+		t.Errorf("FindingIDs = %v; want [f-1]", out.Result.FindingIDs)
+	}
+	if out.Result.Metadata["tokens_total"] != "12" {
+		t.Errorf("Metadata = %v; want tokens_total=12", out.Result.Metadata)
+	}
+}
+
+// TestParseTerminalResult_NoResultLine proves that event lines and plain
+// text are not a result.
+func TestParseTerminalResult_NoResultLine(t *testing.T) {
+	for _, stdout := range []string{
+		"",
+		"plain text\n",
+		"{\"type\":\"step\"}\n",
+		"{\"success\":true,\"output\":\"no type\"}\n",
+		"{\"type\":\"result\",\"success\":tr", // cut off
+	} {
+		if got := parseTerminalResult([]byte(stdout)); got != nil {
+			t.Errorf("parseTerminalResult(%q) = %+v; want nil", stdout, *got)
+		}
+	}
+}
