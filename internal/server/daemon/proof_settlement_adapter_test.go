@@ -171,3 +171,41 @@ func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructi
 		t.Fatal("want settled=true once the recorded decision is approved")
 	}
 }
+
+// TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement
+// proves the adapter reports a predicate as destructive unless the tenant's
+// enabled pack names it as non-destructive (ADR-0132).
+func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	registry := brain.NewRegistry(ctx)
+	s := newTenantRoutedProofSettlement(registry)
+	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	registry.For("acme").Submit(brain.DomainPackEnabled{
+		Name:                     "main",
+		Version:                  1,
+		Predicates:               map[string]string{"read_only": "true", "writes": "true"},
+		NonDestructivePredicates: []string{"read_only"},
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for len(registry.For("acme").DomainPacks()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the pack never became enabled")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	for name, want := range map[string]bool{"read_only": false, "writes": true} {
+		_, destructive, ok, err := s.DomainPackPredicate(acmeCtx, name)
+		if err != nil || !ok {
+			t.Fatalf("%s: ok=%v err=%v", name, ok, err)
+		}
+		if destructive != want {
+			t.Fatalf("%s: destructive=%v, want %v", name, destructive, want)
+		}
+	}
+	if _, destructive, ok, _ := s.DomainPackPredicate(acmeCtx, "unknown"); ok || !destructive {
+		t.Fatalf("an unknown predicate: ok=%v destructive=%v, want false and true", ok, destructive)
+	}
+}

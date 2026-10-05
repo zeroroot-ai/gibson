@@ -169,6 +169,7 @@ func (s *DomainPackService) EnableDomainPack(
 		TaxonomyNodeLabels:        append([]string(nil), pack.TaxonomyNodeLabels...),
 		TaxonomyRelationshipTypes: append([]string(nil), pack.TaxonomyRelationshipTypes...),
 		Predicates:                clonePredicates(pack.Predicates),
+		NonDestructivePredicates:  append([]string(nil), pack.NonDestructivePredicates...),
 	})
 	return &tenantv1.EnableDomainPackResponse{Name: pack.Name, Version: int32Count(pack.Version)}, nil
 }

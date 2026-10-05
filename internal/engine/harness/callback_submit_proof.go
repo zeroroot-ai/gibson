@@ -37,8 +37,11 @@ package harness
 // Engine.SettleBetTrue.
 //
 // Destructive proofs (ADR-0132, gibson#390) go through the SAME
-// compile/stake/evaluate path as a non-destructive proof, carrying
-// req.Destructive onto the BetSettlementRequest. Engine.SettleBetTrue's
+// compile/stake/evaluate path as a non-destructive proof. The enabled pack
+// states whether the named predicate is destructive, and a predicate the
+// pack does not name as non-destructive is destructive. The handler never
+// reads SubmitProofRequest.destructive: the agent that submits a proof does
+// not decide how the daemon treats it. Engine.SettleBetTrue's
 // authorizer (wired in by the daemon-side tenant-routing adapter,
 // proof_settlement_adapter.go, as brain.DestructiveAuthorizationQueue.Verify)
 // then refuses to even evaluate the predicate unless a human already
@@ -58,7 +61,7 @@ package harness
 //     an approval to attempt the demonstration is not a verdict that it
 //     succeeded.
 //
-// The named predicate is still resolved first regardless of Destructive, so
+// The named predicate is still resolved first in every case, so
 // a destructive proof for an unknown predicate name fails closed the same
 // way a non-destructive one does, rather than reporting PENDING_AUTHORIZATION
 // for a predicate that could never settle.
@@ -127,7 +130,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 	mission := h.Mission()
 	target := h.Target()
 
-	expr, ok, err := s.proofSettlement.DomainPackPredicate(ctx, predicateName)
+	expr, destructive, ok, err := s.proofSettlement.DomainPackPredicate(ctx, predicateName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "SubmitProof: resolve predicate %q: %v", predicateName, err)
 	}
@@ -188,7 +191,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		PredicateType:        domainPackCELPredicateType,
 		PredicateParams:      json.RawMessage(rawExpr),
 		Evidence:             submitProofEvidence(req.GetEvidence()),
-		Destructive:          req.GetDestructive(),
+		Destructive:          destructive,
 		PredictedProbability: predictedProbability,
 	})
 	if err != nil {

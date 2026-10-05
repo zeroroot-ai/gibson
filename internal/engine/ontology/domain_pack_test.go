@@ -610,3 +610,17 @@ func TestDomainPack_ExportImport_RoundTripsNodeIdentity(t *testing.T) {
 	require.NoError(t, json.Unmarshal(data, &roundTripped))
 	assert.Equal(t, original.TaxonomyNodeIdentity, roundTripped.TaxonomyNodeIdentity)
 }
+
+// A pack states which predicates are non-destructive (ADR-0132). Validate
+// refuses a name that is not a predicate of the pack, and a name listed twice.
+func TestDomainPack_Validate_NonDestructivePredicates(t *testing.T) {
+	pack := catalogPack()
+	pack.NonDestructivePredicates = []string{"exposed_dashboard"}
+	require.NoError(t, pack.Validate())
+
+	pack.NonDestructivePredicates = []string{"not_a_predicate"}
+	require.ErrorContains(t, pack.Validate(), "is not a predicate of this pack")
+
+	pack.NonDestructivePredicates = []string{"exposed_dashboard", "exposed_dashboard"}
+	require.ErrorContains(t, pack.Validate(), "is listed twice")
+}

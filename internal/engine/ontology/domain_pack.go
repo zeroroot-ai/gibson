@@ -133,6 +133,13 @@ type DomainPack struct {
 	// type-checks as CEL.
 	Predicates map[string]string `json:"predicates,omitempty"`
 
+	// NonDestructivePredicates names the Predicates keys whose demonstration
+	// changes nothing on the target (ADR-0132). The pack states this, never
+	// the agent that submits a proof. A predicate this list does not name is
+	// destructive: its proof settles only after a human approves it. Validate
+	// requires every entry to name a Predicates key, once.
+	NonDestructivePredicates []string `json:"non_destructive_predicates,omitempty"`
+
 	// Author identifies who curates this pack (ADR-0133): the
 	// platform owner for a catalog pack, or the tenant that proposed a
 	// tenant extension. Free text, never a secret — Validate only bounds
@@ -215,6 +222,7 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //     every value is well-formed CEL-expression TEXT (ADR-0131)
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
+//   - every NonDestructivePredicates entry names a Predicates key, once;
 //   - Author is valid UTF-8 within MaxAuthorBytes, and Visibility is one of
 //     the recognized [PackVisibility] values;
 //   - every TaxonomyNodeIdentity entry (gibson#484) names a node label the
@@ -251,6 +259,16 @@ func (p *DomainPack) Validate() error {
 		if err := validPredicateExpressionText(expr); err != nil {
 			return fmt.Errorf("domain pack %q: predicate for technique %q: %w", p.Name, technique, err)
 		}
+	}
+	seen := make(map[string]struct{}, len(p.NonDestructivePredicates))
+	for _, technique := range p.NonDestructivePredicates {
+		if _, ok := p.Predicates[technique]; !ok {
+			return fmt.Errorf("domain pack %q: non-destructive predicate %q is not a predicate of this pack", p.Name, technique)
+		}
+		if _, dup := seen[technique]; dup {
+			return fmt.Errorf("domain pack %q: non-destructive predicate %q is listed twice", p.Name, technique)
+		}
+		seen[technique] = struct{}{}
 	}
 	if !utf8.ValidString(p.Author) {
 		return fmt.Errorf("domain pack %q: author must be valid UTF-8", p.Name)

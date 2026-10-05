@@ -47,6 +47,9 @@ type DomainPackState struct {
 	// Opaque text here too — brain never compiles or evaluates CEL; that is
 	// gibson#388's job, reading this map.
 	Predicates map[string]string
+	// NonDestructivePredicates names the Predicates keys the pack states as
+	// non-destructive (ADR-0132). A predicate it does not name is destructive.
+	NonDestructivePredicates []string
 }
 
 // DomainPackEnabled records that a tenant enabled the named catalog Domain
@@ -61,6 +64,10 @@ type DomainPackEnabled struct {
 	TaxonomyNodeLabels        []string
 	TaxonomyRelationshipTypes []string
 	Predicates                map[string]string
+	// NonDestructivePredicates is absent on an event recorded before the
+	// pack format carried it. Replay then treats every predicate of that
+	// pack as destructive until the tenant enables the pack again.
+	NonDestructivePredicates []string
 }
 
 // Kind identifies this event on the Timeline.
@@ -81,6 +88,7 @@ func applyDomainPackEnabled(w *World, e DomainPackEnabled) {
 		TaxonomyNodeLabels:        append([]string(nil), e.TaxonomyNodeLabels...),
 		TaxonomyRelationshipTypes: append([]string(nil), e.TaxonomyRelationshipTypes...),
 		Predicates:                clonePredicateMap(e.Predicates),
+		NonDestructivePredicates:  append([]string(nil), e.NonDestructivePredicates...),
 	}
 }
 
@@ -107,6 +115,19 @@ type DomainPackSnapshot struct {
 	TaxonomyNodeLabels        []string
 	TaxonomyRelationshipTypes []string
 	Predicates                map[string]string
+	NonDestructivePredicates  []string
+}
+
+// PredicateIsDestructive reports whether the pack treats the named predicate
+// as destructive (ADR-0132). Every predicate is destructive unless the pack
+// names it in NonDestructivePredicates.
+func (s DomainPackSnapshot) PredicateIsDestructive(technique string) bool {
+	for _, name := range s.NonDestructivePredicates {
+		if name == technique {
+			return false
+		}
+	}
+	return true
 }
 
 // DomainPackSnapshot returns the tenant's currently enabled Domain Packs, in
@@ -123,6 +144,7 @@ func (w *World) DomainPackSnapshot() []DomainPackSnapshot {
 			TaxonomyNodeLabels:        append([]string(nil), s.TaxonomyNodeLabels...),
 			TaxonomyRelationshipTypes: append([]string(nil), s.TaxonomyRelationshipTypes...),
 			Predicates:                clonePredicateMap(s.Predicates),
+			NonDestructivePredicates:  append([]string(nil), s.NonDestructivePredicates...),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
