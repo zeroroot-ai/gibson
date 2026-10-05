@@ -5,9 +5,12 @@ package brain
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TickInterval is the clock-tick period (ADR-0104): ~one gRPC round-trip, the
@@ -23,6 +26,15 @@ const defaultSnapshotCadence = 100
 // intakeBuffer bounds the number of un-applied events Submit can queue between
 // ticks before it blocks (back-pressure).
 const intakeBuffer = 4096
+
+// appendAttempts is the number of times the tick tries one durable append
+// before it stops the engine (ADR-0163). Each try uses the same idempotency key.
+const appendAttempts = 3
+
+// appendRetryDelay is the wait before the second try of a durable append. Each
+// later try waits twice as long. The tick holds the write lock for the wait, so
+// the total stays below one second.
+var appendRetryDelay = 50 * time.Millisecond
 
 // maxSweeps caps the drain+systems iterations within one tick, guarding against a
 // non-quiescent system that emits an event every call (a programming error).
@@ -69,6 +81,14 @@ type Engine struct {
 	// most engines never see a destructive proof request.
 	destructiveAuthzOnce sync.Once
 	destructiveAuthz     *DestructiveAuthorizationQueue
+
+	// stopped closes when the engine stops with an error (ADR-0163). stopErr
+	// is written once, before the close, so a reader that sees the close also
+	// sees the error. onStop tells the owner (the Registry) to drop the engine.
+	stopped  chan struct{}
+	stopOnce sync.Once
+	stopErr  error
+	onStop   func(*Engine)
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
@@ -78,7 +98,37 @@ func NewEngine(tenant string) *Engine {
 		Timeline:        &Timeline{},
 		intake:          make(chan Event, intakeBuffer),
 		snapshotCadence: defaultSnapshotCadence,
+		stopped:         make(chan struct{}),
 	}
+}
+
+// Err returns the error that stopped the engine, or nil while the engine runs.
+// A stopped engine applies no event and its World is not the fold of the
+// Timeline, so a caller must not serve from it (ADR-0163). The Registry drops a
+// stopped engine, and the next For builds a new one from the durable store.
+func (e *Engine) Err() error {
+	select {
+	case <-e.stopped:
+		return e.stopErr
+	default:
+		return nil
+	}
+}
+
+// stop puts the engine in its terminal state. It is safe to call more than once.
+// The first error wins.
+func (e *Engine) stop(err error) {
+	e.stopOnce.Do(func() {
+		e.stopErr = err
+		close(e.stopped)
+		slog.Error("brain/engine: the engine stopped",
+			"tenant", e.World.Tenant,
+			"err", err,
+		)
+		if e.onStop != nil {
+			e.onStop(e)
+		}
+	})
 }
 
 // WithSnapshotCadence overrides the automatic snapshot-and-trim cadence (number
@@ -119,30 +169,77 @@ func (e *Engine) Subscribe(fn func(Event)) { e.subscribers = append(e.subscriber
 
 // Submit enqueues an event for application on the next tick. Safe from any
 // goroutine; never mutates the World directly.
-func (e *Engine) Submit(ev Event) { e.intake <- ev }
+//
+// A stopped engine drops the event and logs it: the event is in neither the
+// Timeline nor the World, so the two stay equal (ADR-0163).
+func (e *Engine) Submit(ev Event) {
+	select {
+	case <-e.stopped:
+		e.logDropped(ev)
+		return
+	default:
+	}
+	select {
+	case e.intake <- ev:
+	case <-e.stopped:
+		e.logDropped(ev)
+	}
+}
 
-func (e *Engine) apply(ev Event) {
-	// Persist to the durable log before folding into the in-memory World.
-	// Errors are logged and do not abort the tick — a transient store failure
-	// must not crash the live engine. The caller (tick goroutine) holds the
-	// write lock; context.Background() is used because no caller context is
-	// available inside the single-writer tick.
+func (e *Engine) logDropped(ev Event) {
+	slog.Warn("brain/engine: the engine is stopped, so the event is dropped",
+		"tenant", e.World.Tenant,
+		"kind", ev.Kind(),
+		"err", e.stopErr,
+	)
+}
+
+// appendDurable writes ev to the durable log. It tries up to appendAttempts
+// times with one idempotency key, so a try whose reply was lost writes nothing
+// the second time.
+func (e *Engine) appendDurable(ev Event) (string, error) {
+	key := uuid.NewString()
+	delay := appendRetryDelay
+	var lastErr error
+	for attempt := 1; attempt <= appendAttempts; attempt++ {
+		seq, err := e.store.Append(context.Background(), e.World.Tenant, key, ev)
+		if err == nil {
+			return seq, nil
+		}
+		lastErr = err
+		slog.Warn("brain/engine: durable append failed",
+			"tenant", e.World.Tenant,
+			"kind", ev.Kind(),
+			"attempt", attempt,
+			"err", err,
+		)
+		if attempt < appendAttempts {
+			time.Sleep(delay)
+			delay *= 2
+		}
+	}
+	return "", fmt.Errorf("durable append of %q failed after %d tries: %w", ev.Kind(), appendAttempts, lastErr)
+}
+
+// apply appends ev to the durable log and then folds it into the World. When
+// the append fails after its retries, apply folds nothing, stops the engine and
+// returns false (ADR-0163: the append comes before the fold). The caller (the
+// tick goroutine) holds the write lock. The append uses context.Background()
+// because the tick has no caller context.
+func (e *Engine) apply(ev Event) bool {
 	snapshotDue := false
 	if e.store != nil {
-		if seq, err := e.store.Append(context.Background(), e.World.Tenant, ev); err != nil {
-			slog.Error("brain/engine: durable append failed",
-				"tenant", e.World.Tenant,
-				"kind", ev.Kind(),
-				"err", err,
-			)
-		} else {
-			e.lastAppendedSeq = seq
-			if e.snapshotCadence > 0 {
-				e.snapshotEventCount++
-				if e.snapshotEventCount >= e.snapshotCadence {
-					e.snapshotEventCount = 0
-					snapshotDue = true
-				}
+		seq, err := e.appendDurable(ev)
+		if err != nil {
+			e.stop(err)
+			return false
+		}
+		e.lastAppendedSeq = seq
+		if e.snapshotCadence > 0 {
+			e.snapshotEventCount++
+			if e.snapshotEventCount >= e.snapshotCadence {
+				e.snapshotEventCount = 0
+				snapshotDue = true
 			}
 		}
 	}
@@ -157,6 +254,7 @@ func (e *Engine) apply(ev Event) {
 	for _, fn := range e.subscribers {
 		fn(ev)
 	}
+	return true
 }
 
 // maybeSnapshot writes a snapshot of the current World and trims the Timeline
@@ -186,7 +284,9 @@ func (e *Engine) drainIntake() int {
 	for {
 		select {
 		case ev := <-e.intake:
-			e.apply(ev)
+			if !e.apply(ev) {
+				return n
+			}
 			n++
 		default:
 			return n
@@ -197,8 +297,13 @@ func (e *Engine) drainIntake() int {
 func (e *Engine) runSystems() int {
 	n := 0
 	for _, sys := range e.systems {
+		if e.Err() != nil {
+			return n
+		}
 		for _, ev := range sys(e.World) {
-			e.apply(ev)
+			if !e.apply(ev) {
+				return n
+			}
 			n++
 		}
 	}
@@ -207,12 +312,15 @@ func (e *Engine) runSystems() int {
 
 // Tick applies queued events and runs systems, sweeping to quiescence (events
 // beget systems beget events) until nothing new is produced. Returns the number
-// of events applied.
+// of events applied. A stopped engine applies nothing.
 func (e *Engine) Tick() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	applied := 0
 	for i := 0; i < maxSweeps; i++ {
+		if e.Err() != nil {
+			break
+		}
 		n := e.drainIntake() + e.runSystems()
 		applied += n
 		if n == 0 {
@@ -222,13 +330,15 @@ func (e *Engine) Tick() int {
 	return applied
 }
 
-// Run ticks every TickInterval until ctx is cancelled. It is the single writer;
-// run it in exactly one goroutine per tenant.
+// Run ticks every TickInterval until ctx is cancelled or the engine stops with
+// an error. It is the single writer; run it in exactly one goroutine per tenant.
 func (e *Engine) Run(ctx context.Context) {
 	ticker := time.NewTicker(TickInterval)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-e.stopped:
+			return
 		case <-ctx.Done():
 			e.Tick() // final drain
 			return
@@ -251,56 +361,49 @@ func (e *Engine) Run(ctx context.Context) {
 // via ResumeFailInFlight events, which ARE submitted to the live intake queue so
 // the retry system and mission-completion system run on the next tick.
 //
-// A nil store is a no-op (the Engine operates in-memory only, backward-compatible).
-// Errors are logged and cause Hydrate to return the partially-folded World as-is
-// rather than aborting — a best-effort recovery is better than refusing to start.
-func (e *Engine) Hydrate(ctx context.Context) {
+// A nil store is a no-op (the Engine operates in-memory only).
+//
+// Hydrate returns an error when the snapshot or the Timeline tail does not load
+// or the snapshot does not restore. The engine then keeps its empty World and
+// the caller must not serve from it: after a trim, a replay without the
+// snapshot gives a partial World (ADR-0163).
+func (e *Engine) Hydrate(ctx context.Context) error {
 	if e.store == nil {
-		return
+		return nil
+	}
+	tenant := e.World.Tenant
+
+	// A snapshot covers the events up to its AtSeq. The replay then reads only
+	// the tail, so its cost is at most snapshotCadence events.
+	snap, err := e.store.LoadSnapshot(ctx, tenant)
+	if err != nil {
+		return fmt.Errorf("brain/engine: hydrate tenant %q: load the snapshot: %w", tenant, err)
+	}
+	afterSeq := ""
+	var restored *World
+	if snap != nil {
+		restored, err = RestoreWorld(*snap, tenant)
+		if err != nil {
+			return fmt.Errorf("brain/engine: hydrate tenant %q: restore the snapshot: %w", tenant, err)
+		}
+		afterSeq = snap.AtSeq
 	}
 
-	// Try loading a snapshot first. A snapshot covers events up to its AtSeq;
-	// we then replay only the tail (events after the snapshot) rather than the
-	// full Timeline — bounding replay cost to at most snapshotCadence events.
-	afterSeq := ""
-	snap, snapErr := e.store.LoadSnapshot(ctx, e.World.Tenant)
-	if snapErr != nil {
-		slog.Error("brain/engine: hydrate: failed to load snapshot",
-			"tenant", e.World.Tenant,
-			"err", snapErr,
-		)
-		// Fall through to full replay (afterSeq stays "").
+	evs, err := e.store.LoadForReplay(ctx, tenant, afterSeq)
+	if err != nil {
+		return fmt.Errorf("brain/engine: hydrate tenant %q: load the Timeline: %w", tenant, err)
+	}
+
+	if afterSeq == "" && len(evs) == 0 {
+		return nil // no history and no snapshot: a new tenant
 	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if snap != nil {
-		w, restoreErr := RestoreWorld(*snap, e.World.Tenant)
-		if restoreErr != nil {
-			slog.Error("brain/engine: hydrate: failed to restore snapshot; falling back to full replay",
-				"tenant", e.World.Tenant,
-				"err", restoreErr,
-			)
-			// Fall through to full replay (afterSeq stays "").
-		} else {
-			e.World = w
-			afterSeq = snap.AtSeq
-			e.lastSnapshotSeq = snap.AtSeq
-		}
-	}
-
-	evs, err := e.store.LoadForReplay(ctx, e.World.Tenant, afterSeq)
-	if err != nil {
-		slog.Error("brain/engine: hydrate: failed to load Timeline from store",
-			"tenant", e.World.Tenant,
-			"err", err,
-		)
-		return
-	}
-
-	if afterSeq == "" && len(evs) == 0 {
-		return // no history and no snapshot — fresh tenant
+	if restored != nil {
+		e.World = restored
+		e.lastSnapshotSeq = afterSeq
 	}
 
 	// Fold the tail events into the (possibly snapshot-restored) World.
@@ -329,6 +432,7 @@ func (e *Engine) Hydrate(ctx context.Context) {
 		"snapshot_seq", afterSeq,
 		"tail_events", len(evs),
 	)
+	return nil
 }
 
 // RewindTo makes the frame after folding the first n Timeline events the new live

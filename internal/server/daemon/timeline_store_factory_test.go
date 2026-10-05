@@ -76,7 +76,7 @@ func TestTimelineStoreFactory_ValidTenant(t *testing.T) {
 
 	// Confirm the per-op acquire closure works by doing a real Append.
 	ev := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
-	seq, err := store.Append(context.Background(), "acme", ev)
+	seq, err := store.Append(context.Background(), "acme", "key-1", ev)
 	require.NoError(t, err, "Append via per-op acquire must succeed")
 	assert.NotEmpty(t, seq, "Append must return a non-empty sequence ID")
 }
