@@ -116,7 +116,7 @@ func TestWriter_FailedFlushIsRetriedNotDropped(t *testing.T) {
 	var buf bytes.Buffer
 	logger, mu := capturingLogger(&buf)
 	w := NewWriter(db, logger)
-	w.retryMin, w.retryMax = 5*time.Millisecond, 10*time.Millisecond
+	w.minBackoff, w.maxBackoff = 5*time.Millisecond, 10*time.Millisecond
 
 	before := testutil.ToFloat64(auditWriteErrorsTotal)
 	w.Start(context.Background())
@@ -132,7 +132,7 @@ func TestWriter_FailedFlushIsRetriedNotDropped(t *testing.T) {
 	defer cancel()
 	w.Stop(stopCtx)
 
-	assert.Equal(t, float64(1), testutil.ToFloat64(auditWriteErrorsTotal)-before,
+	assert.InDelta(t, 1, testutil.ToFloat64(auditWriteErrorsTotal)-before, 0.001,
 		"gibson_audit_write_errors_total must count the failed write")
 	mu.Lock()
 	out := buf.String()
@@ -155,7 +155,7 @@ func TestWriter_QueueBacksUpWhilePostgresIsDown(t *testing.T) {
 	}
 
 	w := NewWriter(db, silentLogger())
-	w.retryMin, w.retryMax = 20*time.Millisecond, 20*time.Millisecond
+	w.minBackoff, w.maxBackoff = 20*time.Millisecond, 20*time.Millisecond
 	w.Start(context.Background())
 
 	// One full batch starts a flush at once. That flush fails and is retried.
@@ -242,7 +242,7 @@ func TestLog_AfterStopReportsALostRecord(t *testing.T) {
 	before := testutil.ToFloat64(auditWriteErrorsTotal)
 	w.Log(Event{TenantID: "acme", ActorID: "u1", Action: "post.stop"})
 
-	assert.Equal(t, float64(1), testutil.ToFloat64(auditWriteErrorsTotal)-before)
+	assert.InDelta(t, 1, testutil.ToFloat64(auditWriteErrorsTotal)-before, 0.001)
 	mu.Lock()
 	out := buf.String()
 	mu.Unlock()
@@ -262,7 +262,7 @@ func TestWriteSync_CountsTheWriteError(t *testing.T) {
 	w := NewWriter(db, silentLogger())
 	before := testutil.ToFloat64(auditWriteErrorsTotal)
 	require.Error(t, w.WriteSync(context.Background(), testEvent("acme", "grant_created")))
-	assert.Equal(t, float64(1), testutil.ToFloat64(auditWriteErrorsTotal)-before)
+	assert.InDelta(t, 1, testutil.ToFloat64(auditWriteErrorsTotal)-before, 0.001)
 }
 
 // TestStop_IsIdempotent — a double Stop must not panic on a double close.

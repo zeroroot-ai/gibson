@@ -252,7 +252,7 @@ func TestRetention_Prune_GoesOnAfterOneTenantFails(t *testing.T) {
 	removed, err := r.Prune(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, int64(1), removed, "the rows of the tenant that passed are counted")
-	assert.Equal(t, float64(1), testutil.ToFloat64(auditRetentionErrorsTotal)-before)
+	assert.InDelta(t, 1, testutil.ToFloat64(auditRetentionErrorsTotal)-before, 0.001)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -263,7 +263,8 @@ func TestRetention_Prune_ListFailure(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestRetention_Run_PrunesAtStartAndStopsWithTheContext.
+// TestRetention_Run_PrunesAtStartAndStopsWithTheContext: Run makes one run
+// at once, and it returns when its context ends.
 func TestRetention_Run_PrunesAtStartAndStopsWithTheContext(t *testing.T) {
 	r, mock := newTestRetention(t, 13, time.Now())
 	mock.ExpectQuery("SELECT DISTINCT tenant_id FROM audit_log").

@@ -612,7 +612,7 @@ func TestAuditLogger_FullTailQueueDoesNotHoldTheCaller(t *testing.T) {
 	}
 
 	assert.Len(t, durableOf(t, al).recorded(), 1, "the durable writer must hold the record")
-	assert.Equal(t, float64(1), tailErrorCounter()-before,
+	assert.InDelta(t, 1, tailErrorCounter()-before, 0.001,
 		"gibson_audit_tail_errors_total must count the record that is not in the tail")
 }
 
