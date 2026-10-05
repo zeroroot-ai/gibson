@@ -25,7 +25,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -1992,11 +1991,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithComponentInstallRegistry(componentInstallRegistry)
 			d.logger.Info(ctx, "ComponentInstallRegistry wired into ComponentService (Postgres + Redis transient state)")
 
-			// Register PluginInvokeService on the same gRPC port. The deployment
-			// shape gates untrusted plugin invocation (ADR-0110 / gibson#997).
+			// Register PluginInvokeService on the same gRPC port.
 			pluginInvokeSvc := component.NewPluginInvokeService(
 				componentInstallRegistry,
-				dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
 				d.logger.WithComponent("plugin-invoke").Slog(),
 			)
 			// Wire the FGA authorizer so PluginInvoke makes the per-plugin

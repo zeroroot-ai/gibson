@@ -274,14 +274,14 @@ func (h *DefaultAgentHarness) resolveToolForStreaming(ctx context.Context, name 
 			if discErr == nil && len(instances) > 0 {
 				// Dispatch-policy gate (ADR-0110 / gibson#995). A streaming
 				// tool is dispatched over its own gRPC connection — a bypass
-				// of the setec sandbox. An untrusted component must not take
-				// that path under setec-only; deny before resolving it.
+				// of the setec sandbox. Cluster code that the catalog does not
+				// state as trusted must not take that path; deny before resolving it.
 				// (Sandboxed tools have no persistent gRPC conn and degrade to
 				// the gated CallToolProto path instead.)
 				placement, trust := component.DispatchStanding(instances[0].Attested, authz.KindTool, name)
-				if dispatchpolicy.Decide(placement, trust, false, h.deploymentShape) == dispatchpolicy.Deny {
+				if dispatchpolicy.Decide(placement, trust, false) == dispatchpolicy.Deny {
 					return nil, types.WrapError(types.SANDBOX_POLICY_DENIED,
-						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids streaming in-process execution", name), nil)
+						fmt.Sprintf("tool %q runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", name), nil)
 				}
 				if endpoint := instances[0].Metadata["grpc_endpoint"]; endpoint != "" && h.registryAdapter != nil {
 					if remoteTool, adapterErr := h.registryAdapter.DiscoverTool(ctx, name); adapterErr == nil {

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -26,7 +25,7 @@ import (
 // DiscoverTool deliberately returns a sentinel error (rather than a working
 // tool) so the test asserts on *reachability*, not on a full in-process
 // execution: reaching it at all is the violation we are guarding against for
-// untrusted components under setec-only.
+// untrusted components.
 type spyAdapter struct {
 	component.ComponentDiscovery
 	discoverToolCalled bool
@@ -41,7 +40,7 @@ func (s *spyAdapter) DiscoverTool(_ context.Context, _ string) (tool.Tool, error
 // tenant instance carries a grpc_endpoint and a spyAdapter is installed, so a
 // component that clears the dispatch-policy gate WILL reach DiscoverTool. The
 // gate must stop an untrusted component before that happens.
-func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape dispatchpolicy.DeploymentShape) (*DefaultAgentHarness, *spyAdapter) {
+func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust) (*DefaultAgentHarness, *spyAdapter) {
 	t.Helper()
 	spy := &spyAdapter{}
 	h := &DefaultAgentHarness{
@@ -64,7 +63,6 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 			}},
 		},
 		registryAdapter: spy,
-		deploymentShape: shape,
 	}
 	return h, spy
 }
@@ -75,11 +73,11 @@ func newNoFallbackHarness(t *testing.T, trust componentpb.ContentTrust, shape di
 // below pass for the wrong reason and the control test fail outright.
 
 // TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback is the AC-3 invariant
-// (gibson#999): an untrusted tool with no sandboxed dispatch under setec-only is
+// (gibson#999): an untrusted tool with no sandboxed dispatch is
 // denied with the typed SANDBOX_POLICY_DENIED code AND never reaches the
 // in-process direct-gRPC path — the spy adapter's DiscoverTool is not called.
 func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED)
 	ctx := callerCtx(t, "user-42", "acme")
 
 	err := h.CallToolProto(ctx, "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
@@ -96,7 +94,7 @@ func TestDispatchGate_UntrustedSetecOnly_NoInProcessFallback(t *testing.T) {
 // invoked). This proves the no-fallback assertion above is load-bearing — the
 // path is genuinely reachable and only the gate stops the untrusted case.
 func TestDispatchGate_TrustedSetecOnly_ReachesInProcess(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	ctx := callerCtx(t, "user-42", "acme")
 
 	// Error is expected (the spy returns one); we only assert the path was taken.

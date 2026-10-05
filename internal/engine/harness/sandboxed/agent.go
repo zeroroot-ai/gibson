@@ -255,7 +255,7 @@ type AgentLauncherConfig struct {
 // NewAgentLauncher constructs an AgentLauncher. It returns a clear error on
 // misconfiguration so the daemon can log a warning and continue without
 // sandboxed agent dispatch (the harness then denies untrusted agents
-// fail-closed under setec-only).
+// fail-closed).
 func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("sandboxed.NewAgentLauncher: Client is required")

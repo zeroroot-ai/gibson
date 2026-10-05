@@ -258,7 +258,6 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		componentAuthorizer:     f.config.ComponentAuthorizer,
 		maxDelegationDepth:      f.config.MaxDelegationDepth,
 		sandboxedExecutor:       f.config.SandboxedExecutor,
-		deploymentShape:         f.config.DeploymentShape,
 		agentLauncher:           f.config.AgentLauncher,
 		agentLaunchSpecResolver: f.config.AgentLaunchSpecResolver,
 		agentCallbackEndpoint:   f.config.AgentCallbackEndpoint,

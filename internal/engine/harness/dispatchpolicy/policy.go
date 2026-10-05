@@ -2,66 +2,32 @@
 // Copyright 2026 Zero Root AI
 
 // Package dispatchpolicy is the single fail-closed gate that decides whether a
-// component may execute and how, given its content-trust classification, the
-// availability of a sandboxed dispatch, and the daemon's deployment shape.
+// component may execute and how. Its inputs are where the component runs,
+// the trust the catalog states for it, and whether a sandboxed dispatch
+// exists.
 //
-// It exists so that no execution path in the harness can run untrusted code
-// outside a setec sandbox in the hosted deployment. See ADR-0110
-// and gibson#994.
+// The platform starts mission code only in a setec sandbox. No config value
+// and no grant selects a different place. See ADR-0110.
 package dispatchpolicy
 
 import (
-	capabilitypb "github.com/zeroroot-ai/sdk/api/gen/gibson/capability/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
-
-// DeploymentShape is how the daemon is deployed, which determines the isolation
-// policy for untrusted execution. Sourced from GIBSON_UNTRUSTED_EXEC and
-// fail-closed to ShapeSetecOnly. The zero value is ShapeSetecOnly so an
-// unwired harness fails closed.
-type DeploymentShape int
-
-const (
-	// ShapeSetecOnly is the hosted (multi-tenant, our-infrastructure)
-	// deployment: untrusted execution is setec-or-denied. Fail-closed default.
-	ShapeSetecOnly DeploymentShape = iota
-
-	// ShapeCustomerIsolation is a customer-operated (on-prem / self-hosted)
-	// deployment where the customer owns the isolation boundary.
-	ShapeCustomerIsolation
-)
-
-// Config values for GIBSON_UNTRUSTED_EXEC.
-const (
-	ModeSetecOnly         = "setec-only"
-	ModeCustomerIsolation = "customer-isolation"
-)
-
-// ParseShape resolves a GIBSON_UNTRUSTED_EXEC value to a DeploymentShape.
-// "customer-isolation" selects ShapeCustomerIsolation; "setec-only" and the
-// empty string select ShapeSetecOnly. It never errs — any unrecognised value
-// fail-closes to ShapeSetecOnly. The config loader is responsible for rejecting
-// invalid values loudly (see config.loadUntrustedExec); this function stays
-// total so callers downstream of a validated config can never panic.
-func ParseShape(raw string) DeploymentShape {
-	if raw == ModeCustomerIsolation {
-		return ShapeCustomerIsolation
-	}
-	return ShapeSetecOnly
-}
 
 // Decision is the gate's verdict for a single execution.
 type Decision int
 
 const (
-	// Deny: the component must not execute under this policy.
+	// Deny: the component must not execute.
 	Deny Decision = iota
 
-	// RequireSetec: the component must execute via the setec sandbox.
+	// RequireSetec: the platform starts the code, and it starts it in a setec
+	// sandbox.
 	RequireSetec
 
-	// AllowInProcess: the component may take the in-process / direct-gRPC path.
-	AllowInProcess
+	// AllowWorkQueue: the platform does not start the code. The component
+	// runs already, and it pulls its work from the work queue.
+	AllowWorkQueue
 )
 
 // Placement is where a component's code runs. It comes from how the
@@ -84,55 +50,24 @@ const (
 
 // Decide is the gate. It is pure and total.
 //
-//   - When a sandboxed dispatch is available it is always honoured
-//     (RequireSetec), for every placement, trust level and shape.
-//   - Under ShapeCustomerIsolation the customer owns isolation, so everything
-//     else is AllowInProcess.
-//   - Under ShapeSetecOnly a PlacementOutside component is AllowInProcess: its
-//     code runs on the tenant's machine, and the daemon only queues work for
-//     it.
-//   - Under ShapeSetecOnly a PlacementCluster component is AllowInProcess only
-//     when its trust is TRUSTED. UNTRUSTED and CONTENT_TRUST_UNSPECIFIED are
-//     both Deny: code in the platform's cluster that nothing states as
-//     trusted runs in a sandbox or not at all.
-func Decide(placement Placement, trust componentpb.ContentTrust, hasSandboxedDispatch bool, shape DeploymentShape) Decision {
+//   - When a sandboxed dispatch is available it is always used
+//     (RequireSetec), for every placement and trust level.
+//   - A PlacementOutside component is AllowWorkQueue: its code runs on the
+//     tenant's machine, and the daemon only queues work for it.
+//   - A PlacementCluster component is AllowWorkQueue only when the catalog
+//     states that it is TRUSTED. Such a component runs as a platform pod and
+//     pulls its work. UNTRUSTED and CONTENT_TRUST_UNSPECIFIED are both Deny:
+//     code in the platform's cluster that nothing states as trusted runs in
+//     a sandbox or not at all.
+func Decide(placement Placement, trust componentpb.ContentTrust, hasSandboxedDispatch bool) Decision {
 	if hasSandboxedDispatch {
 		return RequireSetec
 	}
-	if shape != ShapeSetecOnly || placement == PlacementOutside {
-		return AllowInProcess
+	if placement == PlacementOutside {
+		return AllowWorkQueue
 	}
 	if trust == componentpb.ContentTrust_CONTENT_TRUST_TRUSTED {
-		return AllowInProcess
+		return AllowWorkQueue
 	}
 	return Deny
-}
-
-// IsolationAllowed reports whether a capability grant's isolation mode is
-// permitted under the deployment shape (ADR-0110 / gibson#998). It is the
-// fail-closed gate for WHERE untrusted execution may be isolated:
-//
-//   - ShapeSetecOnly (hosted SaaS): only ISOLATION_MODE_HOSTED_SANDBOX is
-//     permitted — untrusted execution must run in the platform-operated setec
-//     fleet. ISOLATION_MODE_UNSPECIFIED is treated as HOSTED_SANDBOX (back-compat
-//     for grants minted before the field shipped), so it is also permitted.
-//     Every customer-operated mode is rejected.
-//   - ShapeCustomerIsolation (on-prem / self-hosted): the customer owns the
-//     isolation boundary, so every mode is permitted. ON_PREM_SANDBOX_ENDPOINT
-//     additionally requires a configured customer-pointed setec endpoint, which
-//     the caller resolves separately.
-//
-// It is pure and total: an unrecognised mode under ShapeSetecOnly is rejected
-// (fail-closed), and any mode under ShapeCustomerIsolation is allowed.
-func IsolationAllowed(isolation capabilitypb.IsolationMode, shape DeploymentShape) bool {
-	if shape == ShapeCustomerIsolation {
-		return true
-	}
-	switch isolation {
-	case capabilitypb.IsolationMode_ISOLATION_MODE_UNSPECIFIED,
-		capabilitypb.IsolationMode_ISOLATION_MODE_HOSTED_SANDBOX:
-		return true
-	default:
-		return false
-	}
 }
