@@ -54,48 +54,51 @@ func InfraNodeID(label, key string) string {
 // coordinate is the (scope, address) or (scope, name) identity of a thing.
 type coordinate struct{ scope, name string }
 
-// infraGraph returns the infra graph of the World, in a deterministic order:
-// the nodes by id, the edges by (From, To, Type). The caller holds the lock.
-//
-// A Host node exists only for a Host that the World holds. An entity with the
-// label Host adds edges to that node and never a second node: the belief
-// substrate has no state for a host that the World did not observe.
-func (w *World) infraGraph() ([]InfraNode, []InfraEdge) {
-	kinds := map[string]string{} // node id -> kind
-	var edges []InfraEdge
-	link := func(edgeType, from, to string) {
-		edges = append(edges, InfraEdge{Type: edgeType, From: from, To: to})
-	}
+// infraBuilder collects the nodes and the edges of one infra graph.
+type infraBuilder struct {
+	kinds  map[string]string // node id -> kind
+	edges  []InfraEdge
+	hostAt map[coordinate]string // (scope, address) -> Host node id
+}
 
-	hostAt := map[coordinate]string{}
-	hq := ecs.NewFilter1[Host](w.ecs).Query()
-	for hq.Next() {
-		h := hq.Get()
+func (b *infraBuilder) link(edgeType, from, to string) {
+	b.edges = append(b.edges, InfraEdge{Type: edgeType, From: from, To: to})
+}
+
+// addHosts adds each Host with its open ports and their services.
+func (b *infraBuilder) addHosts(w *World) {
+	q := ecs.NewFilter1[Host](w.ecs).Query()
+	for q.Next() {
+		h := q.Get()
 		id := HostNodeID(h.ID)
-		kinds[id] = infraKindHost
-		hostAt[coordinate{h.ScopeID, h.Address}] = id
+		b.kinds[id] = infraKindHost
+		b.hostAt[coordinate{h.ScopeID, h.Address}] = id
 		for _, p := range h.Ports {
 			if !p.Open {
 				continue
 			}
 			port := InfraNodeID("Port", id+"/"+strconv.Itoa(p.Number))
-			kinds[port] = "Port"
-			link(infraEdgeHasPort, id, port)
+			b.kinds[port] = "Port"
+			b.link(infraEdgeHasPort, id, port)
 			if p.Service.Name == "" {
 				continue
 			}
 			service := InfraNodeID("Service", id+"/"+strconv.Itoa(p.Number))
-			kinds[service] = "Service"
-			link(infraEdgeRunsService, port, service)
+			b.kinds[service] = "Service"
+			b.link(infraEdgeRunsService, port, service)
 		}
 	}
+}
 
+// addNames adds each Domain and Subdomain, and the hosts that a subdomain
+// resolves to.
+func (b *infraBuilder) addNames(w *World) {
 	domainAt := map[coordinate]string{}
 	dq := ecs.NewFilter1[Domain](w.ecs).Query()
 	for dq.Next() {
 		d := dq.Get()
 		id := InfraNodeID("Domain", strconv.FormatUint(d.ID, 10))
-		kinds[id] = "Domain"
+		b.kinds[id] = "Domain"
 		domainAt[coordinate{d.ScopeID, d.Name}] = id
 	}
 
@@ -103,34 +106,41 @@ func (w *World) infraGraph() ([]InfraNode, []InfraEdge) {
 	for sq.Next() {
 		s := sq.Get()
 		id := InfraNodeID("Subdomain", strconv.FormatUint(s.ID, 10))
-		kinds[id] = "Subdomain"
+		b.kinds[id] = "Subdomain"
 		if domain, ok := domainAt[coordinate{s.ScopeID, s.DomainName}]; ok {
-			link(infraEdgeHasSubdomain, domain, id)
+			b.link(infraEdgeHasSubdomain, domain, id)
 		}
 		for _, addr := range s.Addresses {
-			if host, ok := hostAt[coordinate{s.ScopeID, addr}]; ok {
-				link(infraEdgeResolvesTo, id, host)
+			if host, ok := b.hostAt[coordinate{s.ScopeID, addr}]; ok {
+				b.link(infraEdgeResolvesTo, id, host)
 			}
 		}
 	}
+}
 
-	fq := ecs.NewFilter1[Finding](w.ecs).Query()
-	for fq.Next() {
-		f := fq.Get()
+// addFindings adds each Finding and the host that it affects.
+func (b *infraBuilder) addFindings(w *World) {
+	q := ecs.NewFilter1[Finding](w.ecs).Query()
+	for q.Next() {
+		f := q.Get()
 		id := InfraNodeID("Finding", f.ID)
-		kinds[id] = "Finding"
-		if host, ok := hostAt[coordinate{f.ScopeID, f.Address}]; ok {
-			link(infraEdgeAffects, id, host)
+		b.kinds[id] = "Finding"
+		if host, ok := b.hostAt[coordinate{f.ScopeID, f.Address}]; ok {
+			b.link(infraEdgeAffects, id, host)
 		}
 	}
+}
 
+// addProvenance adds each agent run and LLM call, with the delegation and the
+// issue edges.
+func (b *infraBuilder) addProvenance(w *World) {
 	rq := ecs.NewFilter1[AgentRun](w.ecs).Query()
 	for rq.Next() {
 		r := rq.Get()
 		id := InfraNodeID("AgentRun", r.RunID)
-		kinds[id] = "AgentRun"
+		b.kinds[id] = "AgentRun"
 		if r.ParentRunID != "" {
-			link(infraEdgeDelegatedTo, InfraNodeID("AgentRun", r.ParentRunID), id)
+			b.link(infraEdgeDelegatedTo, InfraNodeID("AgentRun", r.ParentRunID), id)
 		}
 	}
 
@@ -138,38 +148,58 @@ func (w *World) infraGraph() ([]InfraNode, []InfraEdge) {
 	for cq.Next() {
 		c := cq.Get()
 		id := InfraNodeID("LlmCall", c.CallID)
-		kinds[id] = "LlmCall"
+		b.kinds[id] = "LlmCall"
 		if c.RunID != "" {
-			link(infraEdgeIssued, InfraNodeID("AgentRun", c.RunID), id)
+			b.link(infraEdgeIssued, InfraNodeID("AgentRun", c.RunID), id)
 		}
 	}
+}
 
-	eq := ecs.NewFilter1[Entity](w.ecs).Query()
-	for eq.Next() {
-		e := eq.Get()
+// addEntities adds each typed lifecycle entity and its edges. An entity with
+// the label Host adds edges only: see infraGraph.
+func (b *infraBuilder) addEntities(w *World) {
+	q := ecs.NewFilter1[Entity](w.ecs).Query()
+	for q.Next() {
+		e := q.Get()
 		id := InfraNodeID(e.Label, e.Key)
 		if e.Label != infraKindHost {
-			kinds[id] = e.Label
+			b.kinds[id] = e.Label
 		}
 		for _, edge := range e.Edges {
-			link(edge.Type, id, InfraNodeID(edge.TargetLabel, edge.TargetKey))
+			b.link(edge.Type, id, InfraNodeID(edge.TargetLabel, edge.TargetKey))
 		}
 	}
+}
 
-	nodes := make([]InfraNode, 0, len(kinds))
-	for id, kind := range kinds {
+// infraGraph returns the infra graph of the World, in a deterministic order:
+// the nodes by id, the edges by (From, To, Type). The caller holds the lock.
+//
+// A Host node exists only for a Host that the World holds. An entity with the
+// label Host adds edges to that node and never a second node: the belief
+// substrate has no state for a host that the World did not observe.
+func (w *World) infraGraph() ([]InfraNode, []InfraEdge) {
+	b := &infraBuilder{kinds: map[string]string{}, hostAt: map[coordinate]string{}}
+	b.addHosts(w) // first: the later steps look a host up by its coordinate
+	b.addNames(w)
+	b.addFindings(w)
+	b.addProvenance(w)
+	b.addEntities(w)
+
+	nodes := make([]InfraNode, 0, len(b.kinds))
+	for id, kind := range b.kinds {
 		nodes = append(nodes, InfraNode{ID: id, Kind: kind})
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	edges := b.edges
 	sort.Slice(edges, func(i, j int) bool {
-		a, b := edges[i], edges[j]
-		if a.From != b.From {
-			return a.From < b.From
+		x, y := edges[i], edges[j]
+		if x.From != y.From {
+			return x.From < y.From
 		}
-		if a.To != b.To {
-			return a.To < b.To
+		if x.To != y.To {
+			return x.To < y.To
 		}
-		return a.Type < b.Type
+		return x.Type < y.Type
 	})
 	return nodes, edges
 }

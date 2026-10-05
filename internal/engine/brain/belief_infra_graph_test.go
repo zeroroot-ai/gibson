@@ -156,7 +156,7 @@ func TestSliceBeliefRound_ALinkedHostChangesTheBeliefOfTheOtherHost(t *testing.T
 		t.Helper()
 		_, scored, err := SliceBeliefRound(ctx, e, registry, gate, worker, sliceOpts, propagateOpts)
 		require.NoError(t, err)
-		e.Tick()
+		e.Tick() //nolint:contextcheck // Tick takes no context
 		return scored
 	}
 	settleRounds := func() {
