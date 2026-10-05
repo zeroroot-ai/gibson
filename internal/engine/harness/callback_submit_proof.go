@@ -18,11 +18,12 @@ package harness
 // and predicate_name is that identifier from the agent's perspective —
 // resolution is fail-closed (ADR-0131) for a predicate name no currently
 // enabled pack binds, mirroring ADR-0131's anti-gaming stance
-// that an unregistered predicate never evaluates to true. technique rides on
-// the request separately because it is what BetSettlement records for
-// reputation (ADR-0122's technique x environment key), not a second lookup
-// key: this schema binds one CEL predicate per technique, so the common case
-// has technique == predicate_name, but a mismatch is not itself refused.
+// that an unregistered predicate never evaluates to true. technique is what
+// BetSettlement records for reputation (ADR-0122's technique x environment
+// key). A pack binds one CEL predicate to one technique, so the two names are
+// the same value, and a request where they differ is refused. Without the
+// refusal a proof could settle under one technique on the predicate of
+// another.
 //
 // Engine.SettleBetTrue still speaks the older
 // internal/engine/settlement.Registry/Predicate/Evaluator shapes (ADR-0131),
@@ -121,6 +122,10 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 	}
 	if predicateName == "" {
 		return nil, status.Error(codes.InvalidArgument, "predicate_name must not be empty")
+	}
+	if technique != predicateName {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"technique %q does not match predicate_name %q: a pack binds one predicate to one technique", technique, predicateName)
 	}
 
 	h, err := s.getHarness(ctx, req.GetContext())

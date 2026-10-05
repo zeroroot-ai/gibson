@@ -178,7 +178,7 @@ func TestSubmitProof_NotWired_Unavailable(t *testing.T) {
 // PlaceBet's validateBet).
 func TestSubmitProof_MissingFields_InvalidArgument(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
-	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `true`})
+	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `true`, "T1595": `true`})
 	svc := newSubmitProofService(t, h, "recon-agent", newFakeBeliefSubstrate(), engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
@@ -191,6 +191,9 @@ func TestSubmitProof_MissingFields_InvalidArgument(t *testing.T) {
 		{"empty hypothesis id", "", "T1190", "T1190"},
 		{"empty technique", "hyp-1", "", "T1190"},
 		{"empty predicate name", "hyp-1", "T1190", ""},
+		// The failing fixture for the rule that the technique is the predicate:
+		// both names exist in the pack, and the request pairs one with the other.
+		{"technique is not the predicate", "hyp-1", "T1595", "T1190"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
