@@ -207,8 +207,11 @@ def read_org(read_token: str) -> tuple[list[dict], list[str], list[str]]:
 
 
 def write_report(body: str, token: str) -> str:
-    rows = gh_json_pages(f"repos/{HOME_REPO}/issues?state=open&creator=app/github-actions&per_page=100", token) or []
-    existing = [r for r in rows if r["title"] == REPORT_TITLE and "pull_request" not in r]
+    rows = gh_json_pages(f"repos/{HOME_REPO}/issues?state=open&per_page=100", token)
+    if rows is None:
+        raise SystemExit("issue-report: the run did not read the issues of this repo")
+    existing = sorted((r for r in rows if r["title"] == REPORT_TITLE and "pull_request" not in r),
+                      key=lambda r: r["number"])
     if existing:
         number = existing[0]["number"]
         code, text = gh(["api", "-X", "PATCH", f"repos/{HOME_REPO}/issues/{number}", "-f", f"body={body}",
