@@ -13,20 +13,23 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 )
 
 // replayStoreOn returns a replay store on the given Redis. Each call makes a
 // new client, as each ext-authz replica has its own.
 func replayStoreOn(t *testing.T, mr *miniredis.Miniredis) *RedisReplayStore {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	store, err := NewRedisReplayStore(client)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	cfg.MaxRetries = -1 // a closed Redis fails at once
+	client, err := state.NewStateClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store
+	t.Cleanup(func() { _ = client.Close() })
+	return NewRedisReplayStore(client)
 }
 
 // newTestReplayStore returns a replay store on a Redis of its own.
@@ -42,12 +45,6 @@ func mustAdmit(t *testing.T, s ReplayStore, kid, jti string, ttl time.Duration) 
 		t.Fatalf("Admit(%s, %s): %v", kid, jti, err)
 	}
 	return first
-}
-
-func TestNewRedisReplayStore_RequiresClient(t *testing.T) {
-	if _, err := NewRedisReplayStore(nil); err == nil {
-		t.Fatal("a nil client must be an error")
-	}
 }
 
 func TestRedisReplayStore_AdmitsOnceThenRefuses(t *testing.T) {
@@ -124,7 +121,7 @@ func TestRedisReplayStore_ConcurrentAdmitElectsOneWinner(t *testing.T) {
 		wins int
 	)
 	start := make(chan struct{})
-	for i := 0; i < callers; i++ {
+	for range callers {
 		s := replayStoreOn(t, mr)
 		wg.Add(1)
 		go func() {
@@ -236,5 +233,20 @@ func TestNewComponentVerifier_RequiresReplayStore(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("NewComponentVerifier accepted a missing replay store")
+	}
+}
+
+// TestReplayTTL: the record lives for the time that the token has left. A
+// token with no time left is expired.
+func TestReplayTTL(t *testing.T) {
+	now := time.Now()
+	if ttl, ok := replayTTL(now.Add(40*time.Second), now); !ok || ttl != 40*time.Second {
+		t.Fatalf("ttl = %v ok = %v, want 40s and true", ttl, ok)
+	}
+	if _, ok := replayTTL(now, now); ok {
+		t.Fatal("a token at its expiry has no time left")
+	}
+	if _, ok := replayTTL(now.Add(-time.Second), now); ok {
+		t.Fatal("a token past its expiry has no time left")
 	}
 }

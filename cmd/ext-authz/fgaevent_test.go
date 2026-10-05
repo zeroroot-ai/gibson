@@ -87,3 +87,47 @@ func TestRunFGAEventSubscriber_EvictsTheUser(t *testing.T) {
 		t.Fatalf("evicted %q, want the bare user id", ev.seen[0])
 	}
 }
+
+// TestInitRedis_RefusesToStartWithNoRedis: an empty URL and a Redis that
+// does not answer each stop the start of ext-authz.
+func TestInitRedis_RefusesToStartWithNoRedis(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	for name, rawURL := range map[string]string{"empty": "", "unreachable": "redis://127.0.0.1:1"} {
+		if _, _, err := initRedis(ctx, slog.Default(), &recordingEvicter{}, rawURL, ""); err == nil {
+			t.Fatalf("%s: initRedis returned no error", name)
+		}
+	}
+}
+
+// TestInitRedis_StartsTheSubscriberAndGivesAReplayStore: with a Redis that
+// answers, the FGA event subscriber runs, and the replay store records a
+// token id one time.
+func TestInitRedis_StartsTheSubscriberAndGivesAReplayStore(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mr := miniredis.RunT(t)
+
+	sc, replay, err := initRedis(ctx, slog.Default(), &recordingEvicter{}, "redis://"+mr.Addr(), "")
+	if err != nil {
+		t.Fatalf("initRedis: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for mr.PubSubNumSub(fgaevent.Channel)[fgaevent.Channel] == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscriber never subscribed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	first, err := replay.Admit(ctx, "kid-1", "jti-1", time.Minute)
+	if err != nil || !first {
+		t.Fatalf("first Admit: first=%v err=%v", first, err)
+	}
+	again, err := replay.Admit(ctx, "kid-1", "jti-1", time.Minute)
+	if err != nil || again {
+		t.Fatalf("second Admit: first=%v err=%v, want false", again, err)
+	}
+}

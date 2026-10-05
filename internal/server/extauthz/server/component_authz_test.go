@@ -21,11 +21,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	openfga "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
-	"github.com/redis/go-redis/v9"
 	"google.golang.org/genproto/googleapis/rpc/code"
 
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 )
@@ -136,13 +136,15 @@ func mintComponentJWT(t *testing.T, priv ed25519.PrivateKey, kid string) string 
 // client of its own, as each ext-authz replica has.
 func componentReplayStoreOn(t *testing.T, mr *miniredis.Miniredis) cgjwt.ReplayStore {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	store, err := cgjwt.NewRedisReplayStore(client)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	cfg.MaxRetries = -1 // a closed Redis fails at once
+	client, err := state.NewStateClient(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store
+	t.Cleanup(func() { _ = client.Close() })
+	return cgjwt.NewRedisReplayStore(client)
 }
 
 // componentTestReplayStore returns a replay store on a Redis of its own.

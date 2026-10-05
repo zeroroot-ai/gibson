@@ -4,13 +4,13 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
@@ -72,11 +72,10 @@ func TestBuildComponentVerifier_RefusesNoReplayStore(t *testing.T) {
 func testReplayStore(t *testing.T) cgjwt.ReplayStore {
 	t.Helper()
 	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	store, err := cgjwt.NewRedisReplayStore(client)
+	sc, err := requiredStateClient(context.Background(), "redis://"+mr.Addr(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store
+	t.Cleanup(func() { _ = sc.Close() })
+	return cgjwt.NewRedisReplayStore(sc)
 }

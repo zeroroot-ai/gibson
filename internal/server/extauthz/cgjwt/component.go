@@ -398,13 +398,11 @@ func (v *ComponentVerifier) checkReplay(ctx context.Context, kid, jti string, pa
 		componentRejectedTotal.WithLabelValues("no_expiry").Inc()
 		return fmt.Errorf("%w: token has no usable exp", ErrExpired)
 	}
-	// The record lives as long as the token does, never longer. The exp
-	// claim has a resolution of one second, so the remaining time is
-	// positive for a token that passed the expiry check. The floor covers
-	// the instant of expiry.
-	ttl := time.Until(exp.Time)
-	if ttl < time.Millisecond {
-		ttl = time.Millisecond
+	// The record lives as long as the token does, never longer.
+	ttl, ok := replayTTL(exp.Time, time.Now())
+	if !ok {
+		componentRejectedTotal.WithLabelValues("expired").Inc()
+		return fmt.Errorf("%w: token expired during verification", ErrExpired)
 	}
 	first, err := v.replay.Admit(ctx, kid, jti, ttl)
 	if err != nil {

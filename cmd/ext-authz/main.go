@@ -221,22 +221,13 @@ func main() {
 
 	// Redis is required. It holds the replay state of component tokens, which
 	// all replicas share, and it carries the FGA write events.
-	stateClient, err := requiredStateClient(ctx, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	stateClient, replayStore, err := initRedis(ctx, log, cachedChecker,
+		os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
 	if err != nil {
 		log.Error("init Redis", "err", err)
 		os.Exit(1)
 	}
-	defer func() {
-		if cerr := stateClient.Close(); cerr != nil {
-			log.Warn("close Redis client", "err", cerr)
-		}
-	}()
-	go runFGAEventSubscriber(ctx, stateClient, log, cachedChecker)
-	replayStore, err := cgjwt.NewRedisReplayStore(stateClient.Client())
-	if err != nil {
-		log.Error("init component token replay store", "err", err)
-		os.Exit(1)
-	}
+	defer func() { _ = stateClient.Close() }()
 
 	// Both capability-grant verifiers, on one SVID-pinned key transport.
 	cgVerifier, componentVerifier, err := buildCGVerifiers(log, x509Source, x509Source, replayStore)
@@ -1001,6 +992,24 @@ const defaultFGACacheMaxSize = 100_000
 // subjectEvicter is the one method of the decision cache the subscriber uses.
 type subjectEvicter interface {
 	InvalidateSubject(subject string) int
+}
+
+// initRedis connects ext-authz to its required Redis. It starts the
+// subscriber that evicts cached decisions on an FGA write event (hosted#204),
+// and it returns the store for the replay state of component tokens. The
+// caller closes the returned client.
+func initRedis(
+	ctx context.Context,
+	log *slog.Logger,
+	cc subjectEvicter,
+	redisURL, password string,
+) (*state.StateClient, cgjwt.ReplayStore, error) {
+	sc, err := requiredStateClient(ctx, redisURL, password)
+	if err != nil {
+		return nil, nil, err
+	}
+	go runFGAEventSubscriber(ctx, sc, log, cc)
+	return sc, cgjwt.NewRedisReplayStore(sc), nil
 }
 
 // requiredStateClient builds the Redis client of ext-authz from a URL and an

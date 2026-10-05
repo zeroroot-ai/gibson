@@ -12,7 +12,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/redis/go-redis/v9"
 )
 
 // ErrReplayStateUnavailable is returned when the replay store does not
@@ -45,36 +44,40 @@ func replayKey(kid, jti string) string {
 	return replayKeyPrefix + strconv.Itoa(len(kid)) + ":" + kid + ":" + jti
 }
 
+// SetIfAbsenter is the one Redis operation that the replay store needs: an
+// atomic write of a key that does not exist, with an expiry. It reports
+// whether this call wrote the key. *state.StateClient implements it.
+type SetIfAbsenter interface {
+	SetIfAbsent(ctx context.Context, key, value string, ttl time.Duration) (bool, error)
+}
+
 // RedisReplayStore is the ReplayStore on Redis.
 type RedisReplayStore struct {
-	client redis.Cmdable
+	client SetIfAbsenter
 }
 
 // NewRedisReplayStore returns a ReplayStore that keeps its records in the
-// given Redis.
-func NewRedisReplayStore(client redis.Cmdable) (*RedisReplayStore, error) {
-	if client == nil {
-		return nil, errors.New("cgjwt: NewRedisReplayStore: redis client required")
-	}
-	return &RedisReplayStore{client: client}, nil
+// given Redis. client must not be nil.
+func NewRedisReplayStore(client SetIfAbsenter) *RedisReplayStore {
+	return &RedisReplayStore{client: client}
 }
 
-// Admit writes the pair with SET NX and the given expiry. Redis runs the
-// command atomically, so exactly one of many concurrent callers gets true.
+// Admit writes the pair with one atomic set-if-absent call and the given
+// expiry, so exactly one of many concurrent callers gets true.
 func (s *RedisReplayStore) Admit(ctx context.Context, kid, jti string, ttl time.Duration) (bool, error) {
-	if ttl <= 0 {
-		return false, errors.New("cgjwt: replay record needs a positive ttl")
+	first, err := s.client.SetIfAbsent(ctx, replayKey(kid, jti), "1", ttl)
+	if err != nil {
+		return false, fmt.Errorf("replay record: %w", err)
 	}
-	err := s.client.SetArgs(ctx, replayKey(kid, jti), "1", redis.SetArgs{Mode: "NX", TTL: ttl}).Err()
-	switch {
-	case err == nil:
-		return true, nil
-	case errors.Is(err, redis.Nil):
-		// SET NX answers nil when the key exists: the token is a replay.
-		return false, nil
-	default:
-		return false, fmt.Errorf("redis SET NX: %w", err)
-	}
+	return first, nil
+}
+
+// replayTTL returns how long the replay record of a token must live: the
+// time that the token has left. It reports false when the token has no time
+// left, which means that the token is expired.
+func replayTTL(exp, now time.Time) (time.Duration, bool) {
+	ttl := exp.Sub(now)
+	return ttl, ttl > 0
 }
 
 var (
