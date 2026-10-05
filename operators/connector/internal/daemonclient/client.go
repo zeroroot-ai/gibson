@@ -113,6 +113,19 @@ func (c *Client) AdoptConnector(ctx context.Context, tenantID, connector string)
 	return nil
 }
 
+// ConnectorCredential reads the content of the connector-cred Secret of one
+// tenant connector (gibson#663). The daemon serves it to the direct-dial
+// SPIFFE ID of this operator only. The error never holds a value.
+func (c *Client) ConnectorCredential(
+	ctx context.Context, req *daemonoperatorv1.GetConnectorCredentialRequest,
+) (*daemonoperatorv1.GetConnectorCredentialResponse, error) {
+	resp, err := c.operator.GetConnectorCredential(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("connector credential %s/%s: %w", req.GetTenantId(), req.GetConnectorId(), err)
+	}
+	return resp, nil
+}
+
 // Close releases the connection and the SPIRE X509Source. Idempotent; a
 // Client built with NewWithConn owns no transport and closes nothing.
 func (c *Client) Close() error {

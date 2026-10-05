@@ -114,8 +114,8 @@ func (r connectorCredentialReader) clock() time.Time {
 // be served at all (ADR-0061): a dead token is withheld, never cached.
 func (r connectorCredentialReader) read(
 	tctx context.Context, connector string, refs []*daemonoperatorv1.ConnectorCredentialRef,
-) (map[string][]byte, bool, error) {
-	data := make(map[string][]byte, 1+len(refs))
+) (data map[string][]byte, withdraw bool, err error) {
+	data = make(map[string][]byte, 1+len(refs))
 	header, expired, err := r.bearerHeader(tctx, connector)
 	if err != nil {
 		return nil, false, err
@@ -142,7 +142,9 @@ func (r connectorCredentialReader) read(
 // bearerHeader resolves the minted access token as "Bearer <token>". It
 // returns nil when nothing is minted yet, and expired=true when the token's
 // lifetime has passed, in which case the header is withheld.
-func (r connectorCredentialReader) bearerHeader(tctx context.Context, connector string) ([]byte, bool, error) {
+func (r connectorCredentialReader) bearerHeader(
+	tctx context.Context, connector string,
+) (header []byte, expired bool, err error) {
 	meta, err := r.secrets.Resolve(tctx, connectorauth.AccessMetaSecretName(connector))
 	if err != nil {
 		if status.Code(err) == codes.NotFound {

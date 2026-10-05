@@ -30,6 +30,25 @@ type fakeDesiredDaemon struct {
 	reports  []*daemonoperatorv1.ReportConnectorStatusRequest
 	adopted  []string
 	adoptErr error
+
+	// cred is the answer of ConnectorCredential, credErr makes it fail, and
+	// credReqs records each request.
+	cred     *daemonoperatorv1.GetConnectorCredentialResponse
+	credErr  error
+	credReqs []*daemonoperatorv1.GetConnectorCredentialRequest
+}
+
+func (f *fakeDesiredDaemon) ConnectorCredential(
+	_ context.Context, req *daemonoperatorv1.GetConnectorCredentialRequest,
+) (*daemonoperatorv1.GetConnectorCredentialResponse, error) {
+	f.credReqs = append(f.credReqs, req)
+	if f.credErr != nil {
+		return nil, f.credErr
+	}
+	if f.cred == nil {
+		return &daemonoperatorv1.GetConnectorCredentialResponse{}, nil
+	}
+	return f.cred, nil
 }
 
 func (f *fakeDesiredDaemon) ListDesiredConnectors(context.Context) ([]*daemonoperatorv1.DesiredConnector, error) {
@@ -255,5 +274,113 @@ func TestDesiredConnectors_UpdatesTheSpecAndKeepsCredentials(t *testing.T) {
 	}
 	if len(ci.Spec.Credentials) != 1 {
 		t.Errorf("credentials = %v, want them kept", ci.Spec.Credentials)
+	}
+}
+
+func credSecret(t *testing.T, c client.Client, ns, name string) (*corev1.Secret, bool) {
+	t.Helper()
+	sec := &corev1.Secret{}
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name + "-connector-cred"}, sec)
+	if apierrors.IsNotFound(err) {
+		return nil, false
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sec, true
+}
+
+// The loop writes the connector-cred Secret from the daemon answer, with an
+// ownerReference to the ConnectorInstance, and replaces its whole content.
+func TestDesiredConnectors_WritesTheCredentialSecret(t *testing.T) {
+	d := &fakeDesiredDaemon{
+		desired: []*daemonoperatorv1.DesiredConnector{gitlabWish("acme")},
+		cred: &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{
+			"authorization": []byte("Bearer t1"), "OLD": []byte("x"),
+		}},
+	}
+	r, c := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	sec, ok := credSecret(t, c, "tenant-acme", "gitlab")
+	if !ok {
+		t.Fatal("the Secret was not written")
+	}
+	if string(sec.Data["authorization"]) != "Bearer t1" {
+		t.Errorf("authorization = %q", sec.Data["authorization"])
+	}
+	ci, _ := getCI(t, c, "tenant-acme", "gitlab")
+	if len(sec.OwnerReferences) != 1 || sec.OwnerReferences[0].Name != "gitlab" ||
+		sec.OwnerReferences[0].UID != ci.UID || sec.OwnerReferences[0].Kind != "ConnectorInstance" {
+		t.Errorf("ownerReferences = %+v", sec.OwnerReferences)
+	}
+	if req := d.credReqs[len(d.credReqs)-1]; req.GetTenantId() != "acme" || req.GetConnectorId() != "gitlab" {
+		t.Errorf("credential request = %v", req)
+	}
+
+	// A rotated token replaces the content, and a key that left is gone.
+	d.cred = &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{"authorization": []byte("Bearer t2")}}
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	sec, _ = credSecret(t, c, "tenant-acme", "gitlab")
+	if string(sec.Data["authorization"]) != "Bearer t2" || len(sec.Data) != 1 {
+		t.Errorf("data after the rotation = %v", sec.Data)
+	}
+
+	// A token past its expiry is withdrawn.
+	d.cred = &daemonoperatorv1.GetConnectorCredentialResponse{Withdraw: true}
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if _, ok := credSecret(t, c, "tenant-acme", "gitlab"); ok {
+		t.Error("the Secret of an expired token still exists")
+	}
+}
+
+// The declared credential refs go to the daemon with their env names, and a
+// connector with no auth and no ref asks for nothing.
+func TestDesiredConnectors_CredentialRequestAndNoAuth(t *testing.T) {
+	existing := managedCI("tenant-acme", "gitlab", connectorOperatorManagedBy)
+	existing.Spec.Credentials = []connectorv1alpha1.CredentialRef{{Key: "gitlab-pat", Property: "token", TargetEnv: "GITLAB_PAT"}}
+	d := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{gitlabWish("acme")}}
+	r, _ := desiredLoop(t, d, existing)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	refs := d.credReqs[0].GetCredentials()
+	if len(refs) != 1 || refs[0].GetKey() != "gitlab-pat" || refs[0].GetTargetEnv() != "GITLAB_PAT" {
+		t.Fatalf("refs = %v", refs)
+	}
+
+	none := gitlabWish("acme")
+	none.ConnectorId, none.Auth = "osv", "none"
+	d2 := &fakeDesiredDaemon{desired: []*daemonoperatorv1.DesiredConnector{none}}
+	r2, _ := desiredLoop(t, d2)
+	if err := r2.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if len(d2.credReqs) != 0 {
+		t.Errorf("a connector with no auth asked for a credential: %v", d2.credReqs)
+	}
+}
+
+// A failed credential read leaves the Secret as it is and the pass goes on.
+func TestDesiredConnectors_CredentialErrorKeepsTheSecret(t *testing.T) {
+	d := &fakeDesiredDaemon{
+		desired: []*daemonoperatorv1.DesiredConnector{gitlabWish("acme")},
+		cred:    &daemonoperatorv1.GetConnectorCredentialResponse{Data: map[string][]byte{"authorization": []byte("Bearer t1")}},
+	}
+	r, c := desiredLoop(t, d)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	d.credErr = errors.New("daemon down")
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("a credential error failed the pass: %v", err)
+	}
+	if sec, ok := credSecret(t, c, "tenant-acme", "gitlab"); !ok || string(sec.Data["authorization"]) != "Bearer t1" {
+		t.Error("a failed read changed the Secret")
 	}
 }

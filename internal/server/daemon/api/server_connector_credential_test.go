@@ -59,7 +59,8 @@ func (s *fakeCredStore) Resolve(ctx context.Context, name string) ([]byte, error
 
 func credMeta(t *testing.T, offset time.Duration) []byte {
 	t.Helper()
-	b, err := json.Marshal(connectorauth.AccessToken{ExpiresAt: credNow.Add(offset)})
+	// Only the expiry is set; the token field stays empty.
+	b, err := json.Marshal(connectorauth.AccessToken{ExpiresAt: credNow.Add(offset)}) //nolint:gosec // G117: no secret value
 	if err != nil {
 		t.Fatal(err)
 	}
