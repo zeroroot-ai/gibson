@@ -1,0 +1,108 @@
+// Use of this source code is governed by the Elastic License 2.0
+// that can be found in the LICENSE file in the repo root.
+
+
+syntax = "proto3";
+
+package gibson.tenant.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
+
+import "gibson/auth/v1/options.proto";
+
+// CatalogPluginService is the API a tenant uses to enable a plugin of the
+// platform catalog (gibson#815). The platform then runs one instance of the
+// plugin for that tenant.
+//
+// The service records what the tenant wants. It starts nothing itself: the
+// tenant operator reads the desired state from the daemon and converges the
+// cluster to it.
+service CatalogPluginService {
+  // ListPluginCatalog returns the catalog plugins the tenant may enable.
+  rpc ListPluginCatalog(ListPluginCatalogRequest) returns (ListPluginCatalogResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // EnableCatalogPlugin records that the tenant wants one instance of the
+  // plugin. A plugin the tenant already enabled answers ALREADY_EXISTS.
+  rpc EnableCatalogPlugin(EnableCatalogPluginRequest) returns (EnableCatalogPluginResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ListCatalogPlugins returns the plugins the tenant enabled, with the
+  // state the tenant operator last reported for each instance.
+  rpc ListCatalogPlugins(ListCatalogPluginsRequest) returns (ListCatalogPluginsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // DisableCatalogPlugin removes the plugin from what the tenant wants. A
+  // plugin the tenant did not enable answers NOT_FOUND.
+  rpc DisableCatalogPlugin(DisableCatalogPluginRequest) returns (DisableCatalogPluginResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+}
+
+// PluginCatalogEntry is one plugin of the platform catalog.
+message PluginCatalogEntry {
+  // id is the catalog id of the plugin, for example "github".
+  string id = 1;
+  string display_name = 2;
+  string description = 3;
+}
+
+message ListPluginCatalogRequest {}
+
+message ListPluginCatalogResponse {
+  repeated PluginCatalogEntry entries = 1;
+}
+
+message EnableCatalogPluginRequest {
+  // plugin_id is the catalog id of the plugin to enable.
+  string plugin_id = 1;
+}
+
+message EnableCatalogPluginResponse {
+  CatalogPlugin plugin = 1;
+}
+
+// CatalogPlugin is one plugin a tenant enabled.
+message CatalogPlugin {
+  string id = 1;
+  // phase is the state of the tenant's instance: "Pending" until the tenant
+  // operator reports, then what it reports.
+  string phase = 2;
+  // last_error is the last error the tenant operator reported, or empty.
+  string last_error = 3;
+}
+
+message ListCatalogPluginsRequest {}
+
+message ListCatalogPluginsResponse {
+  repeated CatalogPlugin plugins = 1;
+}
+
+message DisableCatalogPluginRequest {
+  string plugin_id = 1;
+}
+
+message DisableCatalogPluginResponse {}

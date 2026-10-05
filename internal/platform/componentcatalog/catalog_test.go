@@ -710,3 +710,23 @@ func TestCatalog_EveryWorkloadEntryStatesTrust(t *testing.T) {
 		}
 	}
 }
+
+// The catalog lists the GitHub plugin, and LookupPlugin finds only plugins.
+func TestListAndLookupPlugin(t *testing.T) {
+	var ids []string
+	for _, p := range ListPlugins() {
+		ids = append(ids, p.ID)
+		if p.DisplayName == "" || p.Description == "" {
+			t.Errorf("plugin %s has no display name or description", p.ID)
+		}
+	}
+	if len(ids) == 0 {
+		t.Fatal("the catalog lists no plugin")
+	}
+	if _, ok := LookupPlugin("github"); !ok {
+		t.Fatalf("LookupPlugin(github) not found, catalog plugins = %v", ids)
+	}
+	if _, ok := LookupPlugin("nmap"); ok {
+		t.Fatal("LookupPlugin must not return a tool")
+	}
+}
