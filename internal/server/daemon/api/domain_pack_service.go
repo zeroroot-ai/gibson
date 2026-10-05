@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/settlement/auditcel"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement/celenv"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -160,6 +161,14 @@ func (s *DomainPackService) EnableDomainPack(
 	// map from ever reaching a tenant's World (domain_pack.go's
 	// applyDomainPackEnabled stores them as opaque, uncompiled text).
 	if _, err := celenv.LoadDomainPack(&pack); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument,
+			"EnableDomainPack: domain pack %q: %v", pack.Name, err)
+	}
+	// The same rule for the compliance mapping rules (gibson#765): each one
+	// compiles against the audit event environment, or the pack does not
+	// become live. The rules come from the catalog only. The request names a
+	// pack and carries no rule, so a tenant cannot change a first-party rule.
+	if _, err := auditcel.LoadMappingRules(&pack); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument,
 			"EnableDomainPack: domain pack %q: %v", pack.Name, err)
 	}

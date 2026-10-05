@@ -149,6 +149,69 @@ type DomainPack struct {
 	// Visibility is this pack's sharing scope (ADR-0133). See
 	// [PackVisibility].
 	Visibility PackVisibility `json:"visibility,omitempty"`
+
+	// MappingRules is the compliance mapping of this pack (ADR-0133,
+	// gibson#765). Each rule names one control and one CEL predicate over
+	// one audit event. An audit event that matches the predicate is
+	// evidence for the control. It is never a verdict about the control.
+	//
+	// The expression is text here, as for Predicates. Validate checks the
+	// shape of each rule. The package internal/engine/settlement/auditcel
+	// compiles the expressions against the audit event environment.
+	MappingRules []MappingRule `json:"mapping_rules,omitempty"`
+}
+
+// MappingRule maps audit events onto one control of a framework.
+type MappingRule struct {
+	// ControlID is the id of the control in its framework, for example
+	// "ac-2" or "ac-2.4" for NIST SP 800-53 rev 5.
+	ControlID string `json:"control_id"`
+	// Expression is a CEL predicate over the variable "event".
+	Expression string `json:"expression"`
+}
+
+// MaxControlIDBytes bounds the ControlID of a mapping rule.
+const MaxControlIDBytes = 64
+
+// validControlID reports whether id is a plain control id: 1 to
+// MaxControlIDBytes ASCII letters, digits and the characters ".", "-", "_",
+// "(" and ")".
+func validControlID(id string) error {
+	if id == "" {
+		return errors.New("control id must not be empty")
+	}
+	if len(id) > MaxControlIDBytes {
+		return fmt.Errorf("control id is %d bytes, over the %d-byte cap", len(id), MaxControlIDBytes)
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.', r == '-', r == '_', r == '(', r == ')':
+		default:
+			return fmt.Errorf("control id %q has the character %q", id, r)
+		}
+	}
+	return nil
+}
+
+// validateMappingRules checks the shape of each mapping rule: a plain
+// control id, at most one rule for each control, and well-formed expression
+// text. A rule that needs two conditions uses one expression with "||".
+func (p *DomainPack) validateMappingRules() error {
+	seen := make(map[string]struct{}, len(p.MappingRules))
+	for i, rule := range p.MappingRules {
+		if err := validControlID(rule.ControlID); err != nil {
+			return fmt.Errorf("domain pack %q: mapping rule %d: %w", p.Name, i, err)
+		}
+		if _, dup := seen[rule.ControlID]; dup {
+			return fmt.Errorf("domain pack %q: control %q has more than one mapping rule", p.Name, rule.ControlID)
+		}
+		seen[rule.ControlID] = struct{}{}
+		if err := validPredicateExpressionText(rule.Expression); err != nil {
+			return fmt.Errorf("domain pack %q: mapping rule for control %q: %w", p.Name, rule.ControlID, err)
+		}
+	}
+	return nil
 }
 
 // ExportDomainPack captures name's currently discovered structure:
@@ -279,7 +342,7 @@ func (p *DomainPack) Validate() error {
 	if err := p.Visibility.Validate(); err != nil {
 		return fmt.Errorf("domain pack %q: %w", p.Name, err)
 	}
-	return nil
+	return p.validateMappingRules()
 }
 
 // validateNodeIdentity checks the written key forms a pack carries
