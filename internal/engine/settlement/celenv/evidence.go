@@ -76,8 +76,7 @@ func normalizeContent(content any) any {
 // BinaryBinding doc comments) means this should not happen for a compiled
 // predicate, but a helper never panics on it regardless: it degrades to its
 // documented not-applicable sentinel, the same fail-closed-to-false stance
-// [CompiledPredicate.Evaluate]'s siblings in internal/engine/brain and
-// internal/engine/settlement/builtin already take.
+// that internal/engine/brain takes for a mission condition.
 func evidenceItemFromVal(v ref.Val) (map[string]any, bool) {
 	native, err := v.ConvertToNative(mapStringAnyType)
 	if err != nil {

@@ -50,9 +50,7 @@ const (
 //   - markerPresent(evidence, marker) -> bool: true iff at least one
 //     evidence item's evidenceText contains marker as an exact,
 //     case-sensitive substring (the deterministic check behind "proof of
-//     control, not damage", the same property
-//     internal/engine/settlement/builtin.MarkerPresent gives the legacy
-//     per-technique registry).
+//     control, not damage").
 //
 // Every helper here is a pure, terminating function of its arguments —
 // never an LLM call, wall-clock read, or source of randomness — matching
@@ -197,9 +195,8 @@ func markerPresentImpl(listVal, markerVal ref.Val) ref.Val {
 
 // evidenceItemText is evidenceText's implementation, working from the plain
 // map[string]any an evidence item converts to (see evidenceItemFromVal)
-// rather than a finding.EnhancedEvidence directly — mirroring
-// internal/engine/settlement/builtin.evidenceText's per-type switch, adapted
-// to the JSON-normalized shape [normalizeContent] guarantees.
+// rather than a finding.EnhancedEvidence directly: one case for each
+// evidence type, on the JSON-normalized shape [normalizeContent] guarantees.
 func evidenceItemText(item map[string]any) (string, bool) {
 	typ, _ := item["type"].(string)
 	content := item["content"]
