@@ -1806,3 +1806,38 @@ func TestUpdateOIDCClientName_ErrorsAreReturned(t *testing.T) {
 		t.Fatalf("errClient err = %v, want %v", err, want)
 	}
 }
+
+// TestVerifyClientSecret_AsksTheClientsOwnEndpoint: the check goes to
+// /oauth/v2/introspect on the connect base of the client, with the instance
+// header and HTTP Basic client credentials. It takes no issuer URL: the
+// caller cannot send it to another address (gibson#223). 200 means the secret
+// is good, 401 means it is wrong, and any other status is an error.
+func TestVerifyClientSecret_AsksTheClientsOwnEndpoint(t *testing.T) {
+	status := http.StatusOK
+	var gotPath, gotInstance, gotID, gotSecret string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
+		gotID, gotSecret, _ = r.BasicAuth()
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	c := New(srv.URL, "pat", testDomain)
+
+	ok, err := c.VerifyClientSecret(context.Background(), "client-1", "s3cret")
+	if err != nil || !ok {
+		t.Fatalf("VerifyClientSecret on 200 = %v, %v; want true", ok, err)
+	}
+	if gotPath != "/oauth/v2/introspect" || gotInstance != testDomain || gotID != "client-1" || gotSecret != "s3cret" {
+		t.Errorf("request = path %q, instance %q, client %q/%q", gotPath, gotInstance, gotID, gotSecret)
+	}
+
+	status = http.StatusUnauthorized
+	if ok, err := c.VerifyClientSecret(context.Background(), "client-1", "wrong"); err != nil || ok {
+		t.Errorf("VerifyClientSecret on 401 = %v, %v; want false with no error", ok, err)
+	}
+	status = http.StatusBadGateway
+	if ok, err := c.VerifyClientSecret(context.Background(), "client-1", "s3cret"); err == nil || ok {
+		t.Errorf("VerifyClientSecret on 502 = %v, %v; want an error", ok, err)
+	}
+}

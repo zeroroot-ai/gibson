@@ -329,17 +329,18 @@ func writeTestRSAKey(t *testing.T) string {
 	return path
 }
 
-// TestZitadelEndpointFromEnv: both names are required at startup, and a
-// ported claimed host is refused (ADR-0092).
-func TestZitadelEndpointFromEnv(t *testing.T) {
+// TestZitadelConnectURLFromEnv: both names are required at startup, a ported
+// claimed host is refused (ADR-0092), and the old variable name configures
+// nothing.
+func TestZitadelConnectURLFromEnv(t *testing.T) {
 	env := func(m map[string]string) func(string) string {
 		return func(k string) string { return m[k] }
 	}
-	ep, err := ZitadelEndpointFromEnv(env(map[string]string{
+	got, err := ZitadelConnectURLFromEnv(env(map[string]string{
 		"ZITADEL_URL": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": testExternalDomain,
 	}))
-	if err != nil || ep.BaseURL() != "http://gibson-zitadel:8080" || ep.Host() != testExternalDomain {
-		t.Fatalf("ZitadelEndpointFromEnv = %q, %q, %v; want the two configured values", ep.BaseURL(), ep.Host(), err)
+	if err != nil || got != "http://gibson-zitadel:8080" {
+		t.Fatalf("ZitadelConnectURLFromEnv = %q, %v; want ZITADEL_URL", got, err)
 	}
 	for name, m := range map[string]map[string]string{
 		"no ZITADEL_URL":             {"ZITADEL_EXTERNAL_DOMAIN": testExternalDomain},
@@ -347,8 +348,8 @@ func TestZitadelEndpointFromEnv(t *testing.T) {
 		"a ported claimed host":      {"ZITADEL_URL": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": "app.example.com:30443"},
 		"ZITADEL_INTERNAL_ADDRESS":   {"ZITADEL_INTERNAL_ADDRESS": "http://gibson-zitadel:8080", "ZITADEL_EXTERNAL_DOMAIN": testExternalDomain},
 	} {
-		if _, err := ZitadelEndpointFromEnv(env(m)); err == nil {
-			t.Errorf("%s: ZitadelEndpointFromEnv = nil error, want refusal", name)
+		if _, err := ZitadelConnectURLFromEnv(env(m)); err == nil {
+			t.Errorf("%s: ZitadelConnectURLFromEnv = nil error, want refusal", name)
 		}
 	}
 }

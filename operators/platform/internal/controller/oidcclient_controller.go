@@ -51,16 +51,16 @@ func DefaultZitadelClientFactory(connectURL, pat string) zitadel.Client {
 	return zitadel.New(connectURL, pat, os.Getenv(zitadelconn.EnvExternalDomain))
 }
 
-// ZitadelEndpointFromEnv validates the operator's Zitadel configuration at
+// ZitadelConnectURLFromEnv validates the operator's Zitadel configuration at
 // startup: ZITADEL_URL (the in-cluster Service the operator connects to) and
 // ZITADEL_EXTERNAL_DOMAIN (the public host it claims). Both are required
-// (ADR-0092). The readiness probe uses the returned connect base.
-func ZitadelEndpointFromEnv(getenv func(string) string) (zitadelconn.Endpoint, error) {
+// (ADR-0092). It returns the connect base, which the readiness probe dials.
+func ZitadelConnectURLFromEnv(getenv func(string) string) (string, error) {
 	ep, err := zitadelconn.New(getenv(zitadelconn.EnvURL), getenv(zitadelconn.EnvExternalDomain))
 	if err != nil {
-		return zitadelconn.Endpoint{}, fmt.Errorf("zitadel endpoint (ADR-0092): %w", err)
+		return "", fmt.Errorf("zitadel endpoint (ADR-0092): %w", err)
 	}
-	return ep, nil
+	return ep.BaseURL(), nil
 }
 
 // OIDCClientReconciler reconciles OIDCClient CRs.

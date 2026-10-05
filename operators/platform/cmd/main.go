@@ -228,13 +228,13 @@ func run(cfg runConfig) error {
 	// ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN are required. They are the two
 	// facts every Zitadel call of this operator uses, and a missing one would
 	// otherwise surface later as a reconcile error on each resource.
-	zitadelEndpoint, err := controller.ZitadelEndpointFromEnv(os.Getenv)
+	zitadelReadyAddr, err := controller.ZitadelConnectURLFromEnv(os.Getenv)
 	if err != nil {
 		return fmt.Errorf("platform-operator configuration: %w", err)
 	}
 	agg := readiness.NewAggregator()
 	agg.Register(&probes.VaultProbe{Address: vaultAddr})
-	agg.Register(&probes.ZitadelProbe{Address: zitadelEndpoint.BaseURL()})
+	agg.Register(&probes.ZitadelProbe{Address: zitadelReadyAddr})
 	agg.Register(&systemKeyProbe{path: systemKeyPath})
 
 	// Liveness: always 200 — process is alive, runtime not deadlocked.
