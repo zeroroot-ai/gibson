@@ -7,7 +7,7 @@
 // Package gibson.tenant.v1 — GrantsService: customer-callable capability-grant
 // inspection and per-agent FGA-grant management surface. Moved from
 // gibson.admin.v1.GrantsAdminService (platform-sdk) into the OSS SDK as part of
-// the admin-surface-recategorization (ADR-0039 implementation).
+// the admin-surface-recategorization (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // Authorization: every RPC carries a (gibson.auth.v1.authz) annotation.
 

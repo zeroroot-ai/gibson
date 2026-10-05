@@ -30,7 +30,7 @@
 //     Signup                    → identity, billing and provisioning, all of it
 //                                 strictly after that proof
 //
-//   The APPROVAL rung (ADR-0006, gibson#22) replaces that round trip with one
+//   The APPROVAL rung (ADR-0074, gibson#22) replaces that round trip with one
 //   Register call and an administrator's decision. It is a different proof of
 //   the same thing, not a second completion path: approval runs exactly the
 //   work Signup runs.
@@ -129,7 +129,7 @@ type SignupServiceClient interface {
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
-	// Register is the APPROVAL rung's single registration call (ADR-0006,
+	// Register is the APPROVAL rung's single registration call (ADR-0074,
 	// gibson#22). It is served only when the deployment selects that rung, and
 	// the four RPCs above are refused on it; on every other rung Register is
 	// refused instead. One rung is live at a time.
@@ -275,7 +275,7 @@ type SignupServiceServer interface {
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
-	// Register is the APPROVAL rung's single registration call (ADR-0006,
+	// Register is the APPROVAL rung's single registration call (ADR-0074,
 	// gibson#22). It is served only when the deployment selects that rung, and
 	// the four RPCs above are refused on it; on every other rung Register is
 	// refused instead. One rung is live at a time.

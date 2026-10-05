@@ -4,7 +4,7 @@ syntax = "proto3";
 // the gRPC network seam between the OSS gibson daemon and the closed
 // commercial billing service.
 //
-// Architecture context (ADR-0003 / ADR-0054 / gibson#1026 / gibson#1027):
+// Architecture context (ADR-0089 / gibson#1026 / gibson#1027):
 // The entitlements seam converts from compile-time injection (Option A,
 // billing repo imports gibson's pkg/billing/entitlements.Provider) to a
 // runtime gRPC call (Option B). The OSS daemon ships a config-gated caching

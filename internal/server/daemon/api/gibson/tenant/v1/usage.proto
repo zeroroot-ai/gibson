@@ -3,7 +3,7 @@ syntax = "proto3";
 // Package gibson.tenant.v1 — UsageService: customer-callable LLM cost and
 // token usage aggregation surface. Moved from gibson.usage.v1.UsageService
 // (platform-sdk) into the OSS SDK under the gibson.tenant.v1 package as part
-// of the admin-surface-recategorization (ADR-0039 implementation).
+// of the admin-surface-recategorization (ADR-0058 later moved the tenant admin services into gibson, where this file lives).
 //
 // Only tenant-scoped RPCs are included here. The daemon aggregates token
 // usage from the budget enforcer's per-period counters (and, for agent /

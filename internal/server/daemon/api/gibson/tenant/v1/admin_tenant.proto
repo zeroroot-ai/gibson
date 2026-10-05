@@ -107,7 +107,7 @@ service AdminTenantService {
   }
 
   // ---------------------------------------------------------------------------
-  // Admin-approval registration rung (ADR-0006, gibson#22)
+  // Admin-approval registration rung (ADR-0074, gibson#22)
   // ---------------------------------------------------------------------------
 
   // AdminListPendingRegistrations returns the registrations awaiting a

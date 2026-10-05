@@ -21,10 +21,10 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Reversibility is the demonstration's reversibility signal (ADR-0028
+// Reversibility is the demonstration's reversibility signal (ADR-0132
 // decision 1). UNSPECIFIED today for every action: the signal is meant to
 // come from a technique flag in the Domain Pack, which is not built yet
-// (ADR-0028's own text names it a plus-one to the risk-tier decision) — the
+// (ADR-0132's own text names it a plus-one to the risk-tier decision) — the
 // only live gating signal today is BetSettlementRequest.Destructive itself
 // (internal/engine/brain/bet_settlement.go), which is exactly why every
 // action reaching this queue is already known destructive-or-irreversible.

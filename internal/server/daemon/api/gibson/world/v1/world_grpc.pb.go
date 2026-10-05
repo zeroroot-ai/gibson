@@ -42,7 +42,7 @@ const (
 // WorldService is the daemon-mediated read path into the ECS brain (epic
 // ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
 // and reads only that tenant's live brain World + Timeline (one World per tenant,
-// no cross-tenant anything — ADR-0001). The dashboard never touches the brain
+// no cross-tenant anything — ADR-0101). The dashboard never touches the brain
 // directly; it reads through here over Envoy + ext-authz, like TracesService.
 //
 // Every RPC is ext-authz-gated via the tenant member relation.
@@ -65,45 +65,45 @@ type WorldServiceClient interface {
 	// this. Optional mission_id filters to one mission's events.
 	GetTimeline(ctx context.Context, in *GetTimelineRequest, opts ...grpc.CallOption) (*GetTimelineResponse, error)
 	// GetFrameAt returns the World as of folding the first `seq` Timeline events —
-	// a replay frame (ADR-0001: World == fold(Timeline)). This is what the Scroller
+	// a replay frame (ADR-0101: World == fold(Timeline)). This is what the Scroller
 	// scrubs to: a server-side fold of the log to a point, not a stored snapshot.
 	// `seq` is clamped to [0, total]; seq == total is the live World.
 	GetFrameAt(ctx context.Context, in *GetFrameAtRequest, opts ...grpc.CallOption) (*GetFrameAtResponse, error)
 	// ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
-	// Findings, each with any label already applied (ADR-0006). The async labelling
+	// Findings, each with any label already applied (ADR-0106). The async labelling
 	// UI reads this; it is a read-only projection and NEVER gates a mission.
 	ListReviewQueue(ctx context.Context, in *ListReviewQueueRequest, opts ...grpc.CallOption) (*ListReviewQueueResponse, error)
 	// SubmitLabel records a human review judgement (true/false-positive, severity,
 	// category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
-	// (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+	// (ADR-0106). Labels POOL across the tenant's users and NEVER cross tenants. It
 	// is async: the call appends the event and returns; the mission never waits on
 	// it. Any tenant member may label (the pool is shared), so the relation is
 	// member, not admin.
 	SubmitLabel(ctx context.Context, in *SubmitLabelRequest, opts ...grpc.CallOption) (*SubmitLabelResponse, error)
-	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+	// ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
 	// training signal the offline trainer consumes alongside auto-outcomes.
 	ListLabels(ctx context.Context, in *ListLabelsRequest, opts ...grpc.CallOption) (*ListLabelsResponse, error)
 	// GetCalibration returns the tenant's reliability/calibration report from
-	// settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+	// settled bets (gibson#284, ADR-0122/ADR-0106): does a predicted 0.8 mean
 	// 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(ctx context.Context, in *GetCalibrationRequest, opts ...grpc.CallOption) (*GetCalibrationResponse, error)
 	// GetReputation returns one technique's current track record in one scope
-	// (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+	// (ADR-0122, ADR-0129 §3, gibson#267): does this technique tend to work
 	// here? Read-only projection of the technique x environment belief a
 	// settled bet updates (brain.UpdateReputation) — a caller that only needs
 	// one key's current value, not the full tenant-wide breakdown
 	// GetCalibration gives.
 	GetReputation(ctx context.Context, in *GetReputationRequest, opts ...grpc.CallOption) (*GetReputationResponse, error)
 	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
-	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+	// a Hypothesis that carries a bettable HypothesisID (ADR-0121/ADR-0122,
 	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
 	// HITL-settle review queue. Read-only, so relation is member like every
 	// other WorldService read.
 	ListOpenBets(ctx context.Context, in *ListOpenBetsRequest, opts ...grpc.CallOption) (*ListOpenBetsResponse, error)
 	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
-	// ADR-0023 decision 3): true_positive/false_positive settle the bet
+	// ADR-0123 decision 3): true_positive/false_positive settle the bet
 	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
 	// backend's own refusal semantics (a bet's binary settlement has no "not
 	// actionable" outcome the way a surfaced surprise does). A settlement is a
@@ -268,7 +268,7 @@ func (c *worldServiceClient) SettleBetByHITL(ctx context.Context, in *SettleBetB
 // WorldService is the daemon-mediated read path into the ECS brain (epic
 // ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
 // and reads only that tenant's live brain World + Timeline (one World per tenant,
-// no cross-tenant anything — ADR-0001). The dashboard never touches the brain
+// no cross-tenant anything — ADR-0101). The dashboard never touches the brain
 // directly; it reads through here over Envoy + ext-authz, like TracesService.
 //
 // Every RPC is ext-authz-gated via the tenant member relation.
@@ -291,45 +291,45 @@ type WorldServiceServer interface {
 	// this. Optional mission_id filters to one mission's events.
 	GetTimeline(context.Context, *GetTimelineRequest) (*GetTimelineResponse, error)
 	// GetFrameAt returns the World as of folding the first `seq` Timeline events —
-	// a replay frame (ADR-0001: World == fold(Timeline)). This is what the Scroller
+	// a replay frame (ADR-0101: World == fold(Timeline)). This is what the Scroller
 	// scrubs to: a server-side fold of the log to a point, not a stored snapshot.
 	// `seq` is clamped to [0, total]; seq == total is the live World.
 	GetFrameAt(context.Context, *GetFrameAtRequest) (*GetFrameAtResponse, error)
 	// ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
-	// Findings, each with any label already applied (ADR-0006). The async labelling
+	// Findings, each with any label already applied (ADR-0106). The async labelling
 	// UI reads this; it is a read-only projection and NEVER gates a mission.
 	ListReviewQueue(context.Context, *ListReviewQueueRequest) (*ListReviewQueueResponse, error)
 	// SubmitLabel records a human review judgement (true/false-positive, severity,
 	// category, dismiss) on a surfaced item, as a tenant-scoped LabelApplied event
-	// (ADR-0006). Labels POOL across the tenant's users and NEVER cross tenants. It
+	// (ADR-0106). Labels POOL across the tenant's users and NEVER cross tenants. It
 	// is async: the call appends the event and returns; the mission never waits on
 	// it. Any tenant member may label (the pool is shared), so the relation is
 	// member, not admin.
 	SubmitLabel(context.Context, *SubmitLabelRequest) (*SubmitLabelResponse, error)
-	// ListLabels returns the tenant's pooled review labels (ADR-0006) — the HITL
+	// ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
 	// training signal the offline trainer consumes alongside auto-outcomes.
 	ListLabels(context.Context, *ListLabelsRequest) (*ListLabelsResponse, error)
 	// GetCalibration returns the tenant's reliability/calibration report from
-	// settled bets (gibson#284, ADR-0022/ADR-0006): does a predicted 0.8 mean
+	// settled bets (gibson#284, ADR-0122/ADR-0106): does a predicted 0.8 mean
 	// 80% in reality? A tenant-wide summary plus a per-technique breakdown, each
 	// with a Brier score and a binned reliability-diagram curve — the source for
 	// the dashboard's reliability diagram (dashboard#98).
 	GetCalibration(context.Context, *GetCalibrationRequest) (*GetCalibrationResponse, error)
 	// GetReputation returns one technique's current track record in one scope
-	// (ADR-0022, ADR-0029 §3, gibson#267): does this technique tend to work
+	// (ADR-0122, ADR-0129 §3, gibson#267): does this technique tend to work
 	// here? Read-only projection of the technique x environment belief a
 	// settled bet updates (brain.UpdateReputation) — a caller that only needs
 	// one key's current value, not the full tenant-wide breakdown
 	// GetCalibration gives.
 	GetReputation(context.Context, *GetReputationRequest) (*GetReputationResponse, error)
 	// ListOpenBets returns the tenant's placed-but-unsettled bets (gibson#339):
-	// a Hypothesis that carries a bettable HypothesisID (ADR-0021/ADR-0022,
+	// a Hypothesis that carries a bettable HypothesisID (ADR-0121/ADR-0122,
 	// sdk#89) with no matching BetSettlement yet. Backend for dashboard#97's
 	// HITL-settle review queue. Read-only, so relation is member like every
 	// other WorldService read.
 	ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error)
 	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
-	// ADR-0023 decision 3): true_positive/false_positive settle the bet
+	// ADR-0123 decision 3): true_positive/false_positive settle the bet
 	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
 	// backend's own refusal semantics (a bet's binary settlement has no "not
 	// actionable" outcome the way a surfaced surprise does). A settlement is a

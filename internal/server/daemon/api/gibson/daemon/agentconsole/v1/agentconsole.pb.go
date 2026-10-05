@@ -45,13 +45,13 @@ type RunningAgent struct {
 	MissionId    string `protobuf:"bytes,5,opt,name=mission_id,json=missionId,proto3" json:"mission_id,omitempty"`
 	MissionRunId string `protobuf:"bytes,6,opt,name=mission_run_id,json=missionRunId,proto3" json:"mission_run_id,omitempty"`
 	// sandbox_class is the setec SandboxClass the run was launched under
-	// (ADR-0016 decision 4), so a viewer sees the isolation posture.
+	// (ADR-0116 decision 4), so a viewer sees the isolation posture.
 	SandboxClass string `protobuf:"bytes,7,opt,name=sandbox_class,json=sandboxClass,proto3" json:"sandbox_class,omitempty"`
 	// component_kind is what kind of component is running: "agent" or "tool".
 	// Both run in sandboxes and both appear here.
 	ComponentKind string `protobuf:"bytes,8,opt,name=component_kind,json=componentKind,proto3" json:"component_kind,omitempty"`
 	// bank_id and member_id name the bank member this instance is, when it is
-	// one (ADR-0019). Empty for a one-shot dispatch. A console joins the row to
+	// one (ADR-0119). Empty for a one-shot dispatch. A console joins the row to
 	// the bank surface by these rather than by mission_run_id.
 	BankId   string `protobuf:"bytes,9,opt,name=bank_id,json=bankId,proto3" json:"bank_id,omitempty"`
 	MemberId string `protobuf:"bytes,10,opt,name=member_id,json=memberId,proto3" json:"member_id,omitempty"`

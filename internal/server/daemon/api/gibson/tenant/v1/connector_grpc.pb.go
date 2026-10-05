@@ -1,7 +1,7 @@
 // Use of this source code is governed by the Elastic License 2.0
 // that can be found in the LICENSE file in the repo root.
 
-// ConnectorService is the tenant-facing connector lifecycle (ADR-0014). A
+// ConnectorService is the tenant-facing connector lifecycle (ADR-0114). A
 // person enables a connector from the curated catalog and it becomes a running
 // ConnectorInstance the connector-operator reconciles onto ToolHive. The person
 // does not author YAML. This service is SEPARATE from ConnectorAuthService,

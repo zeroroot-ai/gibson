@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 // Package gibson.tenant.v1 — ConnectorAuthService: the dashboard-facing
-// surface for a connector's OAuth grant lifecycle (ADR-0064).
+// surface for a connector's OAuth grant lifecycle (ADR-0061).
 //
 // The human authorization round trip runs in the operator's browser against
 // the customer's own vendor instance; what reaches this service is the
@@ -41,7 +41,7 @@ service ConnectorAuthService {
   // a random state, holds them in a short-TTL server-side store keyed by
   // state, and returns the authorize URL the operator opens. The browser round
   // trip returns to the daemon callback, so no human pastes a URL and no local
-  // listener runs by hand (ADR-0014).
+  // listener runs by hand (ADR-0114).
   rpc StartConnectorAuthorization(StartConnectorAuthorizationRequest) returns (StartConnectorAuthorizationResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "admin"
@@ -84,7 +84,7 @@ service ConnectorAuthService {
   }
   // SetConnectorSecret stores a customer-supplied static credential (for
   // example a personal access token) for an `auth: secret` connector
-  // (ADR-0015). The daemon writes it to the tenant's configured secret store
+  // (ADR-0061). The daemon writes it to the tenant's configured secret store
   // (the hosted OpenBao namespace or the customer's BYO Vault) as the
   // connector's access secret, and records a static grant that names the
   // human who supplied it. The materializer then publishes it to the

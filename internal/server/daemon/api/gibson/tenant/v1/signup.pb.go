@@ -30,7 +30,7 @@
 //     Signup                    → identity, billing and provisioning, all of it
 //                                 strictly after that proof
 //
-//   The APPROVAL rung (ADR-0006, gibson#22) replaces that round trip with one
+//   The APPROVAL rung (ADR-0074, gibson#22) replaces that round trip with one
 //   Register call and an administrator's decision. It is a different proof of
 //   the same thing, not a second completion path: approval runs exactly the
 //   work Signup runs.

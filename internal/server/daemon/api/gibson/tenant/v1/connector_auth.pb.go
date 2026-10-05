@@ -5,7 +5,7 @@
 // source: gibson/tenant/v1/connector_auth.proto
 
 // Package gibson.tenant.v1 — ConnectorAuthService: the dashboard-facing
-// surface for a connector's OAuth grant lifecycle (ADR-0064).
+// surface for a connector's OAuth grant lifecycle (ADR-0061).
 //
 // The human authorization round trip runs in the operator's browser against
 // the customer's own vendor instance; what reaches this service is the
