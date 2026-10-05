@@ -144,10 +144,10 @@ func TestSetComponentAccess_WritesTheUsersetTheModelDeclares(t *testing.T) {
 // rejects, reported to the caller as "fga service unavailable".
 func TestSetComponentAccess_RejectsARelationItDoesNotOwn(t *testing.T) {
 	for _, relation := range []string{
-		"can_execute",            // a computed relation, not a settable deny
-		"team_admin",             // not a component deny relation
-		"bogus_relation",         // unknown
-		"direct_read", // a GRANT relation, not a settable deny
+		"can_execute",    // a computed relation, not a settable deny
+		"team_admin",     // not a component deny relation
+		"bogus_relation", // unknown
+		"direct_read",    // a GRANT relation, not a settable deny
 	} {
 		t.Run(relation, func(t *testing.T) {
 			// The team IS the caller's, so an InvalidArgument here can only
