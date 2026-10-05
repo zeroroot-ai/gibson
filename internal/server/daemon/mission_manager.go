@@ -1299,7 +1299,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		if activeOnly && ms.Status != brain.MissionRunning && ms.Status != brain.MissionPaused {
 			continue
 		}
-		result = append(result, missionSnapshotToData(ms))
+		result = append(result, missionSnapshotToData(eng, ms))
 	}
 
 	total := len(result)
@@ -1338,7 +1338,7 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			break
 		}
-		data := missionSnapshotToData(ms)
+		data := missionSnapshotToData(eng, ms)
 		return &data, nil
 	}
 	return nil, fmt.Errorf("mission %s not found", missionID)
@@ -1346,9 +1346,10 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 
 // missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0163)
 // to api.MissionData. Status and progress are authoritative — they come from the
-// folded World, not a secondary store.
-func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
-	return api.MissionData{
+// folded World, not a secondary store. The parent of a rewound mission comes
+// from the same World (ADR-0170).
+func missionSnapshotToData(eng *brain.Engine, ms brain.MissionSnapshot) api.MissionData {
+	data := api.MissionData{
 		ID:           ms.ID,
 		TenantID:     ms.TenantID,
 		Name:         ms.Name,
@@ -1359,6 +1360,11 @@ func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
 		FindingCount: ms.FindingsCount,
 		CreatedBy:    ms.CreatedBy,
 	}
+	if r, ok := eng.MissionRewind(ms.ID); ok {
+		data.ParentMissionID = r.ParentMissionID
+		data.ParentCheckpointID = r.ParentCheckpointID
+	}
+	return data
 }
 
 // worldMissionStatus returns the current status string for missionID from the
