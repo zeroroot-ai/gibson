@@ -8,6 +8,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,9 +19,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -29,7 +27,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
-	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 )
 
 // ---------------------------------------------------------------------------
@@ -150,14 +148,12 @@ func TestRegisterConnectorAuth_RegistersServiceWithoutAuthorizer(t *testing.T) {
 	}
 }
 
-func TestRegisterConnectorAuth_BuildsReconcilerWithKubeClient(t *testing.T) {
-	// The OAuth token reconciler's connector set now comes from ConnectorInstance
-	// CRs (ADR-0065), so it needs a kube lister — not the FGA authorizer or the
-	// platform DB. Injecting a fake client is enough to build it.
+func TestRegisterConnectorAuth_BuildsReconcilerWithNoKubeClient(t *testing.T) {
+	// The token reconciler reads the connectors from the table (gibson#662)
+	// and needs no Kubernetes client (gibson#663).
 	d := &daemonImpl{
 		logger:         testObservabilityLogger(),
 		secretsService: newTestSecretsService(t, newMemBroker()),
-		connectorKube:  fakeConnectorKube(t),
 	}
 	srv := grpc.NewServer()
 
@@ -167,20 +163,43 @@ func TestRegisterConnectorAuth_BuildsReconcilerWithKubeClient(t *testing.T) {
 		t.Fatal("ConnectorAuthService must be registered")
 	}
 	if d.connectorTokenReconciler == nil {
-		t.Fatal("the token reconciler must be built when a kube client is present")
+		t.Fatal("the token reconciler must be built")
 	}
 }
 
-// fakeConnectorKube builds a controller-runtime fake client carrying the
-// ConnectorInstance scheme, so the token reconciler can be wired without a live
-// cluster.
-func fakeConnectorKube(t *testing.T) client.Client {
-	t.Helper()
-	scheme := apiruntime.NewScheme()
-	if err := connectorv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("connector scheme: %v", err)
+// fakeTenantConnectorRows answers ListAll from fixed rows.
+type fakeTenantConnectorRows struct {
+	rows []tenantconnector.Connector
+	err  error
+}
+
+func (f *fakeTenantConnectorRows) ListAll(context.Context) ([]tenantconnector.Connector, error) {
+	return f.rows, f.err
+}
+
+// The token source keeps only the OAuth connectors of the catalog.
+func TestTenantConnectorCatalogSource(t *testing.T) {
+	src := &tenantConnectorCatalogSource{
+		store: &fakeTenantConnectorRows{rows: []tenantconnector.Connector{
+			{TenantID: "acme", ConnectorID: "gitlab"},
+			{TenantID: "acme", ConnectorID: "osv"},
+			{TenantID: "acme", ConnectorID: "left-the-catalog"},
+			{TenantID: "BAD TENANT", ConnectorID: "gitlab"},
+		}},
+		logger: testObservabilityLogger().Slog(),
 	}
-	return fake.NewClientBuilder().WithScheme(scheme).Build()
+	got, err := src.DesiredConnectors(context.Background())
+	if err != nil {
+		t.Fatalf("DesiredConnectors: %v", err)
+	}
+	if len(got) != 1 || got[0].Tenant.String() != "acme" || got[0].Connector != "gitlab" {
+		t.Fatalf("desired = %+v, want acme/gitlab only", got)
+	}
+
+	src.store = &fakeTenantConnectorRows{err: errors.New("db down")}
+	if _, err := src.DesiredConnectors(context.Background()); err == nil {
+		t.Fatal("a store error must fail the pass")
+	}
 }
 
 // ---------------------------------------------------------------------------

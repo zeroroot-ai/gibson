@@ -821,6 +821,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential": {
+		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors": {
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",

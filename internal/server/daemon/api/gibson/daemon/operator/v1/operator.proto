@@ -334,6 +334,22 @@ service DaemonOperatorService {
     };
   }
 
+  // GetConnectorCredential returns the content of the connector-cred Secret of
+  // one tenant connector: the "authorization" header with the short-lived
+  // access token, and each declared static credential (gibson#663). It never
+  // returns a refresh token or a Grant. The connector operator writes the
+  // Secret. The handler serves only the direct-dial SPIFFE peer of the
+  // connector operator, and refuses each other caller, also a caller with a
+  // platform_operator token through the edge.
+  rpc GetConnectorCredential(GetConnectorCredentialRequest) returns (GetConnectorCredentialResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -757,3 +773,31 @@ message AdoptConnectorRequest {
 }
 
 message AdoptConnectorResponse {}
+
+// ConnectorCredentialRef names one declared static credential of a
+// connector: the tenant secret key, an optional property inside a structured
+// secret, and the env var name the connector reads it as.
+message ConnectorCredentialRef {
+  string key = 1;
+  string property = 2;
+  string target_env = 3;
+}
+
+message GetConnectorCredentialRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1;
+  // connector_id is the catalog id of the connector. Required.
+  string connector_id = 2;
+  // credentials are the credential refs that the ConnectorInstance declares.
+  repeated ConnectorCredentialRef credentials = 3;
+}
+
+message GetConnectorCredentialResponse {
+  // data is the content of the Secret, by key. It is empty when nothing is
+  // minted yet and nothing is declared.
+  map<string, bytes> data = 1;
+  // withdraw is true when the access token is past its expiry and no other
+  // credential is declared. The operator then deletes the Secret, so a dead
+  // token is never left mounted (ADR-0061).
+  bool withdraw = 2;
+}

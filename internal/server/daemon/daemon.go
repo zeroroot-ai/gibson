@@ -60,7 +60,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 	healthhttp "github.com/zeroroot-ai/sdk/health/http"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // targetStore is an interface for target data access. It is satisfied by
@@ -268,13 +267,6 @@ type daemonImpl struct {
 	// ConnectorAuthService status RPC can show an operator why a token is
 	// stale. Shared between the reconciler's freshener and the RPC handler.
 	connectorTokenStatus *connectorauth.StatusBook
-
-	// connectorKube is the narrow ConnectorInstance controller-runtime client,
-	// built once and shared by registerConnector (writes CRs) and
-	// registerConnectorAuth (lists CRs to drive the OAuth token freshener,
-	// ADR-0065). Nil when no cluster config is reachable (a unit test or a
-	// detached daemon), in which case both connector paths degrade quietly.
-	connectorKube client.Client
 
 	// connectorAuthSrv is the ConnectorAuthService handler. Hoisted onto the
 	// daemon (built in registerConnectorAuth) so the pre-auth native-login

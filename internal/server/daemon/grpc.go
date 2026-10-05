@@ -1492,9 +1492,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithBeliefTrainer(d.brainRegistry, d.trainerTrustDomain())
 	}
 
+	// The connector operator reads the content of the connector-cred Secret
+	// through GetConnectorCredential and writes the Secret (gibson#663). The
+	// handler serves the direct-dial connector operator SVID only.
+	if d.secretsService != nil {
+		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID)
+	}
+
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
-	// list, disable) that writes ConnectorInstance CRs for the operator to
-	// reconcile onto ToolHive (ADR-0114).
+	// list, disable). It records the wishes in Postgres, and the connector
+	// operator makes the ConnectorInstances (ADR-0114, gibson#662).
 	d.registerConnector(ctx, srv)
 
 	// Register IdentityService — caller-side "what can I do?" RPC.

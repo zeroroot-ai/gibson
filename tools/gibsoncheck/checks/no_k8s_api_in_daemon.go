@@ -105,12 +105,7 @@ var noK8sAPIInDaemonExemptSubstrings = []string{
 // decided on 2026-10-05 that the daemon holds no Kubernetes client. Until
 // each part lands, its files are exempt, and every OTHER file is checked.
 var noK8sAPIInDaemonExemptFiles = []string{
-	// gibson#663: the daemon lists ConnectorInstance resources to find the
-	// connectors whose credential it publishes, and writes connector token
-	// Secrets. The connector operator takes both over in gibson#663.
-	"internal/infra/reconciler/connector_catalog_source.go",
-	"internal/server/daemon/daemon.go",
-	"internal/server/daemon/connector_token_materializer.go",
+	// gibson#659 is complete for the daemon: no file is exempt.
 }
 
 // forbiddenK8sImportPrefixes lists the import-path prefixes that the

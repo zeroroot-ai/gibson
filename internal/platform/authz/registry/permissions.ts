@@ -890,6 +890,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential": {
+    method: "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential",
+    service: "gibson.daemon.operator.v1.DaemonOperatorService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors": {
     method: "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors",
     service: "gibson.daemon.operator.v1.DaemonOperatorService",
