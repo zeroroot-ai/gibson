@@ -102,17 +102,6 @@ func (e Endpoint) BaseURL() string {
 	return strings.TrimRight(e.base.String(), "/")
 }
 
-// Base returns a copy of the in-cluster connect base, for a client that
-// resolves its request paths against a *url.URL. It is nil for a zero
-// Endpoint.
-func (e Endpoint) Base() *url.URL {
-	if e.base == nil {
-		return nil
-	}
-	u := *e.base
-	return &u
-}
-
 // URL joins a Zitadel path onto the connect base. path must start with "/".
 func (e Endpoint) URL(path string) string {
 	return e.BaseURL() + path

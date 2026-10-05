@@ -84,7 +84,7 @@ func NewSystemClient(connectURL, systemUserName, externalDomain, keyPath string)
 		return nil, fmt.Errorf("zitadel system client: %w: %w", err, ErrInvalidInput)
 	}
 	return &systemHTTPClient{
-		baseURL:        ep.Base(),
+		endpoint:       ep,
 		systemUserName: systemUserName,
 		audience:       "https://" + ep.Host(),
 		key:            key,
@@ -127,7 +127,7 @@ func loadRSAKey(path string) (*rsa.PrivateKey, error) {
 
 // systemHTTPClient implements SystemClient.
 type systemHTTPClient struct {
-	baseURL        *url.URL
+	endpoint       zitadelconn.Endpoint
 	systemUserName string
 	// audience is the JWT aud claim: the portless public origin
 	// "https://<ZITADEL_EXTERNAL_DOMAIN>". Zitadel requires the exact string,
@@ -331,12 +331,12 @@ func (c *systemHTTPClient) doJSON(ctx context.Context, token, method, path strin
 		bodyReader = bytes.NewReader(buf)
 	}
 
-	full, err := c.baseURL.Parse(path)
+	full, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("zitadel system: path %q: %w", path, ErrInvalidInput)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.URL(full.RequestURI()), bodyReader)
 	if err != nil {
 		return fmt.Errorf("zitadel system: new request: %w", err)
 	}

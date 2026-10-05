@@ -389,16 +389,16 @@ func New(connectURL, pat, externalDomain string) Client {
 	// for Authorization" loop with no actual transient error. Trim once
 	// here so every caller benefits.
 	return &httpClient{
-		baseURL: ep.Base(),
-		pat:     strings.TrimSpace(pat),
-		http:    ep.HTTPClient(requestTimeout),
+		endpoint: ep,
+		pat:      strings.TrimSpace(pat),
+		http:     ep.HTTPClient(requestTimeout),
 	}
 }
 
 type httpClient struct {
-	baseURL *url.URL
-	pat     string
-	http    *http.Client
+	endpoint zitadelconn.Endpoint
+	pat      string
+	http     *http.Client
 }
 
 // EnsureProject implements Client.
@@ -642,14 +642,10 @@ func (c *httpClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID 
 //     fallback policy applies (typically: don't rotate, log, retry
 //     on next reconcile).
 func (c *httpClient) VerifyClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error) {
-	full, err := c.baseURL.Parse("/oauth/v2/introspect")
-	if err != nil {
-		return false, fmt.Errorf("VerifyClientSecret: build introspect path: %w", ErrInvalidInput)
-	}
 	// A non-empty token body keeps Zitadel happy with the request shape;
 	// the actual value is never validated when Basic auth fails first.
 	form := url.Values{"token": []string{"verify-client-secret-probe"}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, full.String(),
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint.URL("/oauth/v2/introspect"),
 		strings.NewReader(form.Encode()))
 	if err != nil {
 		return false, fmt.Errorf("VerifyClientSecret: new request: %w", err)
@@ -736,11 +732,11 @@ func (c *httpClient) doJSONWithHeaders(ctx context.Context, method, path string,
 		}
 		bodyReader = bytes.NewReader(buf)
 	}
-	full, err := c.baseURL.Parse(path)
+	full, err := url.Parse(path)
 	if err != nil {
 		return fmt.Errorf("zitadel: path %q: %w", path, ErrInvalidInput)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, full.String(), bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint.URL(full.RequestURI()), bodyReader)
 	if err != nil {
 		return fmt.Errorf("zitadel: new request: %w", err)
 	}
@@ -892,7 +888,7 @@ func (e *errClient) GetOIDCClient(ctx context.Context, projectID, appID string) 
 func (e *errClient) GetOIDCClientByName(ctx context.Context, projectID, name string) (*OIDCClient, error) {
 	return nil, e.err
 }
-func (e *errClient) VerifyClientSecret(ctx context.Context, clientID, clientSecret string) (bool, error) {
+func (e *errClient) VerifyClientSecret(_ context.Context, _, _ string) (bool, error) {
 	return false, e.err
 }
 func (e *errClient) EnsureJWTAccessToken(ctx context.Context, projectID, appID string) (bool, error) {

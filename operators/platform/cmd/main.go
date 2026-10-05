@@ -230,7 +230,7 @@ func run(cfg runConfig) error {
 	// otherwise surface later as a reconcile error on each resource.
 	zitadelEndpoint, err := controller.ZitadelEndpointFromEnv(os.Getenv)
 	if err != nil {
-		return err
+		return fmt.Errorf("platform-operator configuration: %w", err)
 	}
 	agg := readiness.NewAggregator()
 	agg.Register(&probes.VaultProbe{Address: vaultAddr})

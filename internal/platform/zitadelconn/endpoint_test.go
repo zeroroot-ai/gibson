@@ -152,23 +152,3 @@ func TestTransport_WrapsATransportError(t *testing.T) {
 		t.Fatalf("want the dial error wrapped by zitadelconn, got %v", err)
 	}
 }
-
-// TestBase_IsACopyOfTheConnectBase: a client may resolve paths against Base,
-// and a change to the copy never reaches the Endpoint.
-func TestBase_IsACopyOfTheConnectBase(t *testing.T) {
-	e, err := zitadelconn.New("http://gibson-zitadel:8080", "app.example.test")
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	u := e.Base()
-	if got := u.String(); got != "http://gibson-zitadel:8080" {
-		t.Errorf("Base = %q, want the connect base", got)
-	}
-	u.Host = "changed:1"
-	if got := e.BaseURL(); got != "http://gibson-zitadel:8080" {
-		t.Errorf("BaseURL after a change to the copy = %q, want it unchanged", got)
-	}
-	if (zitadelconn.Endpoint{}).Base() != nil {
-		t.Error("Base of a zero Endpoint is not nil")
-	}
-}
