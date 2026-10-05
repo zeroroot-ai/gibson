@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package bank holds the reconciler that keeps a bank's members running
-// (ADR-0019 decision 1, gibson#1709).
+// (ADR-0119, gibson#1709).
 //
 // A bank is declarative: it says how many members should run. The reconciler is
 // what makes the running count match. It owns the POLICY — how many, which one
@@ -31,7 +31,7 @@ type MemberLauncher interface {
 	// LaunchMember starts one member of the bank and returns what the daemon
 	// needs to find it again. A member backs no mission of its own: the bank
 	// is its origin, its grant is scoped to the bank, and the jobs it serves
-	// are the missions' work (ADR-0019). The implementation launches the
+	// are the missions' work (ADR-0119). The implementation launches the
 	// agent in member mode with the base grant.
 	//
 	// memberID is chosen by the reconciler, not the launcher: a relaunch keeps

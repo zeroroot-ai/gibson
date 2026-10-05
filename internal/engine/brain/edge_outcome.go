@@ -6,13 +6,13 @@ package brain
 import "sort"
 
 // EdgeOutcomeObserved records one cause-active, effect-observed outcome for
-// an enablement-edge TYPE (ADR-0037 decision 2): the slice that produced a
+// an enablement-edge TYPE (ADR-0137): the slice that produced a
 // hypothesis carried this edge type among its causes, and the bet on that
 // hypothesis settled. Success is the settlement verdict. One event is folded
 // per cause edge type of the settled bet, by the engine, right after the
 // settlement event itself (gibson#613).
 //
-// It folds through the normal reducer path (ADR-0007), so replay reproduces
+// It folds through the normal reducer path (ADR-0107), so replay reproduces
 // the same counts, and the counts live in the World so a snapshot carries
 // them and TrimTo loses nothing: the trainer (gibson#614) reads
 // World.EdgeOutcomeCounts, never the event stream.
@@ -84,8 +84,8 @@ func (e *Engine) EdgeOutcomeCounts() map[string]EdgeOutcomeCount {
 
 // sliceCauseEdgeTypes lists, sorted and unique, the types of the slice edges
 // that feed nodeID. A slice is already ontology-filtered (DeriveAttackGraph
-// keeps only enablement edges), so these are exactly the causes ADR-0037
-// decision 2 learns from.
+// keeps only enablement edges), so these are exactly the causes ADR-0137
+// learns from.
 func sliceCauseEdgeTypes(slice AttackGraph, nodeID string) []string {
 	seen := map[string]struct{}{}
 	for _, e := range slice.Edges {

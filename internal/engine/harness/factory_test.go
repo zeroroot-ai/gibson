@@ -972,7 +972,7 @@ func TestListPlugins_NoAdapter(t *testing.T) {
 
 // TestAgentDispatchModeOrDefault covers the seam-default helper: an injected
 // seam is returned as-is; a nil seam yields a closure over the embedded catalog
-// (gibson#1598 / ADR-0016).
+// (gibson#1598 / ADR-0116).
 func TestAgentDispatchModeOrDefault(t *testing.T) {
 	// Injected seam wins and is returned verbatim.
 	stub := func(string) (string, bool) { return "sandboxed", true }

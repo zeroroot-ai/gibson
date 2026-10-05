@@ -100,7 +100,7 @@ func TestOntologyExtensionProposed_NodeLabelAndRelationshipTypeAreDistinctCounte
 }
 
 // TestOntologyExtensionProposed_IsPerTenant proves proposal recurrence is
-// structurally per-tenant (ADR-0033 decision 1): proposing in one tenant's
+// structurally per-tenant (ADR-0133): proposing in one tenant's
 // World never affects another's, mirroring TestDomainPack_Enable_IsPerTenant.
 func TestOntologyExtensionProposed_IsPerTenant(t *testing.T) {
 	acme := NewWorld("acme")
@@ -190,7 +190,7 @@ func TestOntologyDiscoveryEngine_EngineSatisfiesTheSeam(t *testing.T) {
 
 // -----------------------------------------------------------------------
 // Engine.ApproveOntologyExtension / RejectOntologyExtension (gibson#392,
-// ADR-0033 decision 3): the tenant-owner approval flow.
+// ADR-0133): the tenant-owner approval flow.
 // -----------------------------------------------------------------------
 
 // proposeNTimes submits label n times through ProposeOntologyExtension and
@@ -260,7 +260,7 @@ func TestApproveOntologyExtension_PromotesOnceSettled(t *testing.T) {
 	assert.Positive(t, snapshot[0].PromotedVersion)
 
 	// The live effect: the tenant's own taxonomy registry now admits the
-	// promoted label — this IS "a live tenant extension" (ADR-0033).
+	// promoted label — this IS "a live tenant extension" (ADR-0133).
 	assert.Contains(t, e.World.ontologyGate.Base().NodeLabels(), "Container")
 }
 
@@ -268,7 +268,7 @@ func TestApproveOntologyExtension_PromotesOnceSettled(t *testing.T) {
 // proves approving BEFORE enough recurrence records the owner's decision
 // without promoting — and that a later sighting completes promotion without
 // requiring the owner to approve twice (settlement is symmetric in its two
-// halves, ADR-0033 decision 2).
+// halves, ADR-0133).
 func TestApproveOntologyExtension_NotYetSettledRecordsApprovalWithoutPromoting(t *testing.T) {
 	e := newTestEngine()
 	proposeNTimes(t, e, taxonomy.ProposedNodeLabel, "Container", 1)

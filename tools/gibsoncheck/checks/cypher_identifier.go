@@ -15,7 +15,7 @@ import (
 )
 
 // CypherIdentifierAnalyzer closes the read-path half of gibson#1440: the
-// write path (ADR-0012's graph projector) has exactly one writer, enforced
+// write path (ADR-0112's graph projector) has exactly one writer, enforced
 // structurally by GraphWriteAnalyzer, but the read path in
 // internal/engine/graphrag/local_provider.go still assembled Cypher text from
 // caller-supplied node types, relationship types and property keys via

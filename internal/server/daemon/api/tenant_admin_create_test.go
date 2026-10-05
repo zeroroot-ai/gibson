@@ -462,8 +462,8 @@ func TestCreateAgentIdentity_FGAOnlyNoMembership(t *testing.T) {
 }
 
 // TestCreateAgentIdentity_EnablesComponentForOwningTenant pins gibson#1609:
-// enrollment is the tenant admin's act of turning the component on (ADR-0015,
-// decision 2), so the tuple that gates every user-facing can_* through
+// enrollment is the tenant admin's act of turning the component on (ADR-0136),
+// so the tuple that gates every user-facing can_* through
 // in_tenant_catalog is written here, on the kind-qualified object the
 // component later registers as.
 func TestCreateAgentIdentity_EnablesComponentForOwningTenant(t *testing.T) {

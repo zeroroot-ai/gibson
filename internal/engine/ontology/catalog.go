@@ -8,20 +8,20 @@ import (
 	"sort"
 )
 
-// catalog.go: the curated, platform-owned Domain Pack catalog (ADR-0033
-// decision 1's "tier 2"), gibson#381.
+// catalog.go: the curated, platform-owned Domain Pack catalog (ADR-0133's
+// "tier 2"), gibson#381.
 //
 // A catalog Pack ships as SDK-sourced content via the standard release/
-// rollout pipeline (ADR-0033 decision 4) — never hot-reloaded, never written
+// rollout pipeline (ADR-0133) — never hot-reloaded, never written
 // by a tenant. DomainPackCatalog is the in-process registry
 // DomainPackService.ListCatalog reads and EnableDomainPack resolves a
 // catalog name against. gibson#381 built the enablement mechanism; gibson#382
 // seeds the catalog's content — see MainDomainPack in catalog_main_pack.go,
-// the "main" pack ADR-0033 names, default-off.
+// the "main" pack ADR-0133 names, default-off.
 
 // DomainPackCatalog is the curated set of catalog Domain Packs available to
 // enable, keyed by Name. Immutable after construction — a catalog never
-// changes underneath a running daemon (no hot-reload, ADR-0033 decision 4);
+// changes underneath a running daemon (no hot-reload, ADR-0133);
 // picking up new or changed catalog content is a daemon restart, like every
 // other embedded-content catalog in this codebase (componentcatalog).
 type DomainPackCatalog struct {

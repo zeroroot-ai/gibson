@@ -10,10 +10,10 @@ import (
 )
 
 // belief_attack_graph.go derives the directed-acyclic Bayesian attack graph
-// belief propagates over (ADR-0029 §1) from the raw infra graph — whatever
+// belief propagates over (ADR-0129) from the raw infra graph — whatever
 // cyclic shape trust/reachability/credential relationships actually take.
 //
-// It answers ADR-0029 §1's two questions structurally:
+// It answers ADR-0129's two questions structurally:
 //
 //  1. Direction: an edge is part of the attack graph only when the ontology's
 //     schema (internal/engine/ontology, gibson#296) flags its relationship
@@ -24,13 +24,13 @@ import (
 //     a DNS resolution cycle), so cycles are broken deterministically by a
 //     topological potential — an ordinal assigned by a cycle-breaking
 //     topological sort, ties AND forced picks both resolved by the
-//     lexicographically smallest stable node id (ADR-0029 §1/§4). An edge
+//     lexicographically smallest stable node id (ADR-0129). An edge
 //     whose potential does not strictly increase From -> To is the back-edge
 //     that closed the cycle, and is cut.
 //
 // Out of scope here (later, separate slices): grounding the per-node CPTs
 // into a solvable network and running inference (gibson#275's belief engine
-// proper), and the BOUNDED, per-node SLICE extraction ADR-0029 §4-5 describes
+// proper), and the BOUNDED, per-node SLICE extraction ADR-0129-5 describes
 // for the actual inference hot path — this derivation produces one whole-graph
 // DAG from whatever infra graph it is handed; slicing it down before inference
 // is a different concern with a different, bounded-by-budget algorithm.
@@ -40,7 +40,7 @@ import (
 // the WHOLE infra graph the caller hands in — not just within Kind. Callers
 // already have one (a graph merge key, a brain entity id stringified with its
 // kind, ...); this package treats ID as an opaque, comparable string it never
-// interprets beyond the ordering ADR-0029's tiebreak requires.
+// interprets beyond the ordering ADR-0129's tiebreak requires.
 type InfraNode struct {
 	ID   string
 	Kind string
@@ -60,9 +60,9 @@ type InfraEdge struct {
 // AttackGraphNode is one node retained in the derived attack graph: a
 // belief-bearing infra node (ontology.BeliefSchemaRegistry.IsBeliefBearing),
 // its declared belief variables (ontology.BeliefSchemaRegistry.Variables,
-// ADR-0029 §2 — carried here so a later grounding step needs no second
+// ADR-0129 — carried here so a later grounding step needs no second
 // registry lookup), and Potential: the topological potential
-// DeriveAttackGraph assigned it (ADR-0029 §1/§4). Potential is a deterministic
+// DeriveAttackGraph assigned it (ADR-0129). Potential is a deterministic
 // ordinal, not a literal attack-distance hop count: every kept edge goes from
 // a strictly smaller Potential to a strictly larger one, by construction.
 type AttackGraphNode struct {
@@ -72,9 +72,9 @@ type AttackGraphNode struct {
 }
 
 // AttackGraph is the derived directed-acyclic enablement graph belief
-// propagates over (ADR-0029 §1) — never the raw infra graph. Edges is the
+// propagates over (ADR-0129) — never the raw infra graph. Edges is the
 // kept, directed, acyclic edge set. Dropped is every enablement edge cut to
-// break a cycle: a back-edge in THIS derivation. (ADR-0029 §4 notes a
+// break a cycle: a back-edge in THIS derivation. (ADR-0129 notes a
 // back-edge dropped in one node's bounded slice can be a forward edge in
 // another's — that per-node slicing is the separate, later concern noted on
 // this file; a whole-graph derivation has no "other node's slice" to be a
@@ -86,7 +86,7 @@ type AttackGraph struct {
 }
 
 // DeriveAttackGraph builds the Bayesian attack graph from the raw infra
-// graph (ADR-0029 §1):
+// graph (ADR-0129):
 //
 //  1. Keep only nodes the ontology declares belief-bearing (registry.IsBeliefBearing)
 //     — a node with no belief variables cannot be part of a graph belief
@@ -100,7 +100,7 @@ type AttackGraph struct {
 //     lexicographically smallest node id with no remaining incoming kept
 //     edge; once no such node exists — meaning what is left is entirely
 //     cyclic — take the lexicographically smallest remaining node id
-//     instead, forcing it through. That forced pick is exactly ADR-0029's
+//     instead, forcing it through. That forced pick is exactly ADR-0129's
 //     "topological potential, tiebroken by stable id": the same total order
 //     (potential, then id) resolves both an ordinary tie among ready nodes
 //     and a genuine cycle.
@@ -199,7 +199,7 @@ func sortEdges(edges []InfraEdge) {
 //
 // Complexity is O(len(ids)^2 + len(edges)): each of len(ids) iterations scans
 // ids once to find the next node to process. Belief inference itself runs on
-// depth/budget-bounded slices (ADR-0029 §5), not the whole graph, so this
+// depth/budget-bounded slices (ADR-0129), not the whole graph, so this
 // whole-graph derivation is not expected to run on a scale where that matters;
 // a heap-based O((V+E) log V) version is a mechanical change if it ever does.
 func assignTopologicalPotential(ids []string, edges []InfraEdge) map[string]int {
@@ -236,7 +236,7 @@ func assignTopologicalPotential(ids []string, edges []InfraEdge) map[string]int 
 		if pick == "" {
 			// Nothing is ready: every remaining node has an incoming edge from
 			// another remaining node — a cycle. Force the smallest remaining
-			// id, the deterministic tiebreak ADR-0029 §1/§4 names. Whichever
+			// id, the deterministic tiebreak ADR-0129 names. Whichever
 			// of its incoming edges is still unaccounted-for becomes the
 			// back-edge DeriveAttackGraph drops once potentials are compared.
 			for _, id := range ids {

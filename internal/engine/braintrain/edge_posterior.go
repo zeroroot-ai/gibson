@@ -13,15 +13,15 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// edge_posterior.go is gibson#395 (ADR-0037 decisions 2 and 5): a
+// edge_posterior.go is gibson#395 (ADR-0137): a
 // Beta(alpha, beta) posterior PER enablement-edge-type, shipped as a
-// versioned artifact, for the thing ADR-0037 scopes as "learned, not
+// versioned artifact, for the thing ADR-0137 scopes as "learned, not
 // authored": an enablement edge's noisy-OR strength. This file is the
 // runtime half, the loader. The fitter and the trainer that wrote the
 // artifact left with cmd/belief-trainer (gibson#507) and come back with the
 // training lane (gibson#590).
 //
-// The fitted artifact is "one output, two uses" (ADR-0037 decision 4): its
+// The fitted artifact is "one output, two uses" (ADR-0137): its
 // Provider() is a brain.PinnedEdgeStrengthPosteriorProvider that
 // brain.NativeSliceBeliefProvider (belief_slice_native.go) consumes via the
 // posterior MEAN for exact inference, and brain.NewBAMCPPlanner consumes via
@@ -31,7 +31,7 @@ import (
 // Fit is the standard Beta-Bernoulli conjugate update: posterior alpha =
 // prior alpha + successes, posterior beta = prior beta + failures. The prior
 // is the SAME uninformative Beta(1,1) brain.UninformativeEdgePosteriors
-// already grounds an edge type at cold-start (ADR-0037 decision 3) — read
+// already grounds an edge type at cold-start (ADR-0137) — read
 // from that type directly (never re-declared as a second magic-number pair),
 // so the prior this fit starts from and the prior the belief runtime falls
 // back to when no posterior is pinned are, structurally, the same number.
@@ -49,7 +49,7 @@ type edgePosteriorJSON struct {
 
 // EdgePosteriorArtifact is the on-disk, versioned output of
 // FitEdgePosteriors: a per-enablement-edge-type Beta(alpha,beta) posterior
-// (ADR-0037 decisions 2 and 5, gibson#395). It is what a mission pins for
+// (ADR-0137, gibson#395). It is what a mission pins for
 // replay: see (*EdgePosteriorArtifact).Provider.
 type EdgePosteriorArtifact struct {
 	Version     string                       `json:"version"`
@@ -97,7 +97,7 @@ func LoadEdgePosteriorArtifact(path string) (*EdgePosteriorArtifact, error) {
 // fitted posteriors, identified by a.Version — the SAME artifact both
 // brain.NativeSliceBeliefProvider (the posterior MEAN, exact inference) and
 // brain.NewBAMCPPlanner (the full posterior, Thompson-sampled) consume
-// (ADR-0037 decision 4, "one output, two uses"). An edge type with no fitted
+// (ADR-0137, "one output, two uses"). An edge type with no fitted
 // row — never observed yet, or the artifact predates that Domain Pack's edge
 // type — falls back to brain.UninformativeEdgePosteriors' own Beta(1,1) cold
 // start: never a hand-authored number, and never a hard error, the same

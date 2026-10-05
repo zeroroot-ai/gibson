@@ -17,7 +17,7 @@ import (
 // The distinctness case is the one that matters: "seen again three weeks later"
 // is signal in this domain, so a content-hash identity — the obvious wrong
 // choice — would silently collapse the input Sensing needs to promote a shape
-// (ADR-0012).
+// (ADR-0112).
 func TestObservationRecorded_FoldDedupReplay(t *testing.T) {
 	tl := &Timeline{}
 	w := NewWorld("t")

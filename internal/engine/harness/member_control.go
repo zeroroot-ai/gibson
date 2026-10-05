@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// The sign-in relay's control channel (ADR-0019 decision 4, gibson#1715).
+// The sign-in relay's control channel (ADR-0119, gibson#1715).
 //
 // A subscription member signs in inside its sandbox: the driver runs
 // `claude auth login`, relays the authorization URL and the paste prompt on

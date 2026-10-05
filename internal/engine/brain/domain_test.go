@@ -9,7 +9,7 @@ import (
 )
 
 // TestDomainSubdomain_FoldDedupReplay proves domains/subdomains fold with
-// scope-relative identity (ADR-0002), subdomains enrich their parent + resolved
+// scope-relative identity (ADR-0102), subdomains enrich their parent + resolved
 // addresses progressively (union, never shrinks), and the World survives replay.
 func TestDomainSubdomain_FoldDedupReplay(t *testing.T) {
 	tl := &Timeline{}

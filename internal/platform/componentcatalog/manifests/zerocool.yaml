@@ -1,5 +1,5 @@
 # Zerocool agent — the flagship platform agent, launched-on-dispatch into an
-# ephemeral setec sandbox (ADR-0015/0016). Its trust comes from this signed
+# ephemeral setec sandbox (ADR-0136/0116). Its trust comes from this signed
 # manifest (dispatchMode: sandboxed), not from the registry, because it is not a
 # registered polling worker. Model is resolved newest at dispatch, so no model
 # is pinned; budget is the tenant default, so no budgetLimit is set.

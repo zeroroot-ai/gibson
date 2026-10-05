@@ -236,7 +236,7 @@ func (r *Refresher) NeedsRefresh(ctx context.Context, connector string) bool {
 
 // EnsureFresh refreshes only when needed and returns whether it did.
 //
-// A static grant (a customer-supplied credential, ADR-0015) is never
+// A static grant (a customer-supplied credential, ADR-0061) is never
 // refreshed: there is no refresh token and no expiry the platform manages,
 // so the access secret stays as the tenant admin set it.
 func (r *Refresher) EnsureFresh(ctx context.Context, connector string) (refreshed bool, err error) {

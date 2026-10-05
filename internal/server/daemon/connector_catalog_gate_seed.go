@@ -15,7 +15,7 @@ import (
 )
 
 // seedComponentCatalogGate feeds the embedded component catalog refs to the
-// platform-catalog-gate converge (ADR-0015). Split from Start so the ref
+// platform-catalog-gate converge (ADR-0136). Split from Start so the ref
 // collection and the converge call are directly testable.
 func seedComponentCatalogGate(
 	ctx context.Context,
@@ -25,7 +25,7 @@ func seedComponentCatalogGate(
 ) error {
 	// Verify before seeding: platform_enabled is the tuple that makes a
 	// component offerable, so the signature check has to happen on the near
-	// side of it (ADR-0015, gibson#1639). Components whose image does not
+	// side of it (ADR-0136, gibson#1639). Components whose image does not
 	// verify are dropped here and never reach the converge.
 	refs, verifyErr := verifyCatalogImages(ctx, verifier, componentcatalog.Refs(), logger)
 	if verifyErr != nil {

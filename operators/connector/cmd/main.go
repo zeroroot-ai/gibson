@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Command connector-operator reconciles ConnectorInstance resources into
-// ToolHive resources (ADR-0014).
+// ToolHive resources (ADR-0114).
 package main
 
 import (
@@ -32,8 +32,8 @@ const defaultDaemonSVID = "spiffe://zeroroot.ai/platform/daemon"
 
 // wireReconciler registers the ConnectorInstance controller on the manager
 // with the daemon client it needs: the finalizer revokes the grant on delete
-// (ADR-0015 §5) and the controller reads the credential state so the CR
-// reports Degraded rather than a silent Active (ADR-0015 decision 4). One
+// (ADR-0061) and the controller reads the credential state so the CR
+// reports Degraded rather than a silent Active (ADR-0061). One
 // client serves both, because both are the same SPIFFE-mTLS dial.
 func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
 	if err := (&controller.ConnectorInstanceReconciler{
@@ -49,13 +49,13 @@ func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
 
 // daemonSettings reads the daemon dial settings from the environment. The
 // address is required: an operator that cannot reach the daemon can neither
-// revoke a grant (ADR-0015 §5) nor tell whether a credential is still alive
-// (ADR-0015 decision 4), so it fails at boot rather than silently leaving
+// revoke a grant (ADR-0061) nor tell whether a credential is still alive
+// (ADR-0061), so it fails at boot rather than silently leaving
 // grants alive after every delete. The SVID defaults to the platform daemon.
 func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 	addr = getenv("GIBSON_DAEMON_GRPC_ADDRESS")
 	if addr == "" {
-		return "", "", errors.New("GIBSON_DAEMON_GRPC_ADDRESS is required (the ConnectorInstance finalizer revokes grants through the daemon, ADR-0015)")
+		return "", "", errors.New("GIBSON_DAEMON_GRPC_ADDRESS is required (the ConnectorInstance finalizer revokes grants through the daemon, ADR-0061)")
 	}
 	svid = getenv("GIBSON_DAEMON_SPIFFE_ID")
 	if svid == "" {
@@ -66,7 +66,7 @@ func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 
 // buildDaemonClient reads the dial settings and opens the SPIFFE-mTLS daemon
 // client the operator revokes grants through and reads credential state from
-// (ADR-0002, ADR-0015). Both failure modes — missing address, unreachable
+// (ADR-0002, ADR-0061). Both failure modes — missing address, unreachable
 // SPIRE Workload API — fail the boot, so a misconfigured operator never runs
 // with grants it cannot revoke.
 func buildDaemonClient(ctx context.Context, getenv func(string) string) (*daemonclient.Client, error) {
@@ -117,8 +117,8 @@ func main() {
 	}
 
 	// The ConnectorInstance finalizer revokes the connector's grant through
-	// the daemon on delete (ADR-0015 §5), and the controller reads the
-	// credential state from it every pass (ADR-0015 decision 4). The dial is
+	// the daemon on delete (ADR-0061), and the controller reads the
+	// credential state from it every pass (ADR-0061). The dial is
 	// SPIFFE mTLS over the SPIRE Workload API socket (ADR-0002).
 	daemon, err := buildDaemonClient(context.Background(), os.Getenv)
 	if err != nil {

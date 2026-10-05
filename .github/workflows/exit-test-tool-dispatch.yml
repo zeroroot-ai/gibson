@@ -1,16 +1,16 @@
 # ----------------------------------------------------------------------------
-# ADR-0017 manifest-seeded TOOL dispatch — the exit test (slice gibson#1659).
+# ADR-0117 manifest-seeded TOOL dispatch — the exit test (slice gibson#1659).
 #
 # In plain words: a tenant that switched a tool on can run it, a tenant that
 # never did cannot, and nobody can run a tool that is not in the catalog.
 #
 # WHAT THIS PROVES vs. the other exit tests. hosted's exit-test-baseline-install
 # proves the SANCTIONED PROFILE installs. exit-test-sandboxed-dispatch proves
-# AGENT dispatch isolation. This proves the TOOL half of ADR-0017: the catalog
+# AGENT dispatch isolation. This proves the TOOL half of ADR-0117: the catalog
 # manifest is the single source of truth for a tool's runtime shape, and the
 # per-tenant can_execute gate (gibson#1638) decides every dispatch.
 #
-# It matters because until ADR-0017 a tool could reach dispatch two ways — the
+# It matters because until ADR-0117 a tool could reach dispatch two ways — the
 # manifest path, and a runtime catalog refresher whose `_system` registry
 # entries dispatched with NO per-tenant check. That refresher is deleted
 # (gibson#1641, ADR-0027 hard cutover); this test fails if a second, ungated

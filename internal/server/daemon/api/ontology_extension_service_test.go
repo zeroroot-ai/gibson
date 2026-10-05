@@ -51,7 +51,7 @@ func proposeNTimes(ctx context.Context, t *testing.T, e *brain.Engine, kind taxo
 // waitForOntologyProposal polls the tenant engine's proposal snapshot until
 // it sees a proposal for label whose Status is wantStatus, or the deadline
 // passes. ApproveOntologyExtensionProposal/RejectOntologyExtensionProposal
-// submit asynchronously (ADR-0001), so the decided state lands on the next
+// submit asynchronously (ADR-0101), so the decided state lands on the next
 // fold. The RPC list carries no proposals (gibson#502), so the engine is the
 // observable.
 func waitForOntologyProposal(t *testing.T, e *brain.Engine, label string, wantStatus brain.OntologyProposalStatus) brain.OntologyProposalSnapshot {
@@ -221,7 +221,7 @@ func TestApproveOntologyExtensionProposal_PromotesOnceSettled(t *testing.T) {
 	p := waitForOntologyProposal(t, reg.For("acme"), "Container", brain.OntologyProposalApproved)
 	assert.Equal(t, "owner-1", p.Reviewer)
 	// Promoted is the authoritative "is this a live tenant extension yet"
-	// signal (ADR-0033) — the brain package's own tests
+	// signal (ADR-0133) — the brain package's own tests
 	// (TestApproveOntologyExtension_PromotesOnceSettled) verify this maps to
 	// an actual admitted taxonomy.Registry label; this RPC-level test proves
 	// the signal reaches the wire.
@@ -327,7 +327,7 @@ func TestRejectOntologyExtensionProposal_RecordsRejectionAndNeverPromotes(t *tes
 }
 
 // -----------------------------------------------------------------------
-// SubmitOntologyExtensionUpstream (gibson#393, ADR-0033 decision 2)
+// SubmitOntologyExtensionUpstream (gibson#393, ADR-0133)
 // -----------------------------------------------------------------------
 
 // promoteViaRPC drives (kind, label) to a live tenant extension entirely
@@ -382,7 +382,7 @@ func TestSubmitOntologyExtensionUpstream_NotFoundIsNotFound(t *testing.T) {
 }
 
 // TestSubmitOntologyExtensionUpstream_PendingProposalIsFailedPrecondition
-// proves ADR-0033 decision 3's "available only from a live tenant
+// proves ADR-0133's "available only from a live tenant
 // extension" through this RPC surface: a merely-observed, never-approved
 // proposal is refused.
 func TestSubmitOntologyExtensionUpstream_PendingProposalIsFailedPrecondition(t *testing.T) {

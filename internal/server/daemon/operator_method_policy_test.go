@@ -98,7 +98,7 @@ func assertPolicyClassifiesDescriptor(t *testing.T, name string, policy map[stri
 
 // TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs pins the
 // connector-operator's grant to the two RPCs it dials: the finalizer's revoke
-// (ADR-0015 §5) and the controller's credential read (ADR-0015 decision 4). A
+// (ADR-0061) and the controller's credential read (ADR-0061). A
 // surplus grant is an over-grant; a missing revoke wedges every connector
 // delete behind a PermissionDenied, and a missing status read leaves every
 // ConnectorInstance reporting a health nobody checked.

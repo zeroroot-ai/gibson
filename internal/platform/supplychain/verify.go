@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package supplychain verifies that a first-party image the platform is about
-// to offer was actually built by the release pipeline (ADR-0015, ADR-0017).
+// to offer was actually built by the release pipeline (ADR-0136, ADR-0117).
 //
 // A digest pin answers "is everyone running the same bytes". It does not answer
 // "did we build those bytes" — anyone who can push to the registry can produce

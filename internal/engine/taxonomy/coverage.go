@@ -11,8 +11,8 @@ import (
 	"sort"
 )
 
-// coverage.go is the capability side of the VoI dispatch bridge (ADR-0035
-// decision 4, gibson#386): a capability (an Agent, Tool or Plugin catalog
+// coverage.go is the capability side of the VoI dispatch bridge (ADR-0135,
+// gibson#386): a capability (an Agent, Tool or Plugin catalog
 // entry — CONTEXT.md "capability vs execution") declares the taxonomy
 // categories and/or fine-grained techniques it covers. #387 resolves a VoI
 // candidate's technique to its category (TechniqueHierarchy.CategoryOf) and

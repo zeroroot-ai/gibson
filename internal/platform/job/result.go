@@ -11,7 +11,7 @@ import (
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 )
 
-// Result is what a closed job hands back (ADR-0019 decisions 11 and 16,
+// Result is what a closed job hands back (ADR-0119,
 // gibson#1712): the verdict and the score the scorer gave, what the member
 // delivered, the Claude session that holds the transcript, and how many
 // passes it took. It is the record a delegating caller reads, and it is

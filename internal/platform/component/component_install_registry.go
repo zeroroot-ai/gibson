@@ -94,7 +94,7 @@ type ComponentInstall struct {
 	// SetecRequired is true when the manifest declares spec.policy.setec_required.
 	SetecRequired bool
 	// ContentTrust classifies the trust level of input this component processes
-	// at call time (ADR-0010 / gibson#997). Sourced from the plugin:content_trust
+	// at call time (ADR-0110 / gibson#997). Sourced from the plugin:content_trust
 	// registration metadata key. Consumed by the PluginInvoke dispatch-policy
 	// gate. Zero value (UNSPECIFIED) is treated as trusted.
 	ContentTrust componentpb.ContentTrust
@@ -152,7 +152,7 @@ type InstallInfo struct {
 	LastHeartbeatAt time.Time
 	// Status is the transient status (from Redis): "serving" or "unreachable".
 	Status ComponentInstallStatus
-	// ContentTrust is the component's trust classification (ADR-0010 / gibson#997),
+	// ContentTrust is the component's trust classification (ADR-0110 / gibson#997),
 	// read from the persistent install row. Zero value (UNSPECIFIED) is treated
 	// as trusted by the dispatch-policy gate.
 	ContentTrust componentpb.ContentTrust

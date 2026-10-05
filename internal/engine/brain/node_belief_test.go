@@ -38,7 +38,7 @@ func TestApplyNodeBeliefSet_EmptyRefIsANoOp(t *testing.T) {
 }
 
 // TestApplyNodeBeliefSet_OverwritesInFull proves a belief is never blended or
-// averaged across writes (ADR-0005 §2: exact, deterministic) — the second
+// averaged across writes (ADR-0134: exact, deterministic) — the second
 // write replaces the first outright, matching BeliefSubstrate.SetBelief's own
 // documented contract.
 func TestApplyNodeBeliefSet_OverwritesInFull(t *testing.T) {

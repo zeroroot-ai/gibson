@@ -99,12 +99,12 @@ type DaemonServer struct {
 	quotaManager MissionQuotaChecker
 
 	// connectorGrantRevoker backs the operator-scoped RevokeConnectorGrant
-	// (ADR-0015 §5). Wired via WithConnectorGrantRevoker; nil answers
+	// (ADR-0061). Wired via WithConnectorGrantRevoker; nil answers
 	// Unavailable.
 	connectorGrantRevoker ConnectorGrantRevoker
 
 	// connectorAuthStatusReader backs the operator-scoped
-	// GetConnectorAuthStatus (ADR-0015 decision 4). Wired via
+	// GetConnectorAuthStatus (ADR-0061). Wired via
 	// WithConnectorAuthStatusReader; nil answers Unavailable.
 	connectorAuthStatusReader ConnectorAuthStatusReader
 
@@ -1022,7 +1022,7 @@ type LLMCallRecord struct {
 	PromptTokens     int
 	CompletionTokens int
 	// Transcript: prompt messages + the assistant completion, captured in full
-	// every time (ADR-0020 flight recorder, gibson#271 — never optional), so
+	// every time (ADR-0120 flight recorder, gibson#271 — never optional), so
 	// the World can back the dashboard conversation view without a separate
 	// trace store.
 	Messages   []LLMMessage

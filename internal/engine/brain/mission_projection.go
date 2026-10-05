@@ -54,7 +54,7 @@ type WorkNode struct {
 	Limit int
 }
 
-// MissionProjected is the launch event for a scripted CUE mission (ADR-0001): the
+// MissionProjected is the launch event for a scripted CUE mission (ADR-0101): the
 // mission definition projected into the World. The reducer seeds the Mission
 // (goal + budget) and one `pending` WorkItem per node, wired with DependsOn. A
 // mission with an empty Goal is a no-goal mission — it runs deterministically to
@@ -66,8 +66,8 @@ type MissionProjected struct {
 	Budget      Budget
 	Nodes       []WorkNode
 	DeciderSlot DeciderSlot // mission-level Decider LLM (gibson#850); empty → tenant default
-	// BeliefModel pins the belief-model version this mission ran under (ADR-0005
-	// §5): the daemon stamps the provider's current artifact at launch so replay
+	// BeliefModel pins the belief-model version this mission ran under (ADR-0134):
+	// the daemon stamps the provider's current artifact at launch so replay
 	// re-loads the exact model. Empty → no pinned model (placeholder / OSS).
 	BeliefModel string
 

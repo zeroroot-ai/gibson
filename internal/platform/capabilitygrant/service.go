@@ -970,7 +970,7 @@ func parseCapabilityName(capName string) (componentRef, kind, name string, ok bo
 		return "", "", "", false
 	}
 	// The capability name carries the kind ("{verb}:{kind}:{name}"), so the FGA
-	// object is the canonical kind-prefixed ref (ADR-0015).
+	// object is the canonical kind-prefixed ref (ADR-0136).
 	return authz.ComponentObject(parts[1], parts[2]), parts[1], parts[2], true
 }
 

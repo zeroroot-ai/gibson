@@ -16,7 +16,7 @@ import (
 
 // These cover the gate that makes a digest pin mean something: the platform
 // offers a component only when its image can be shown to come from the release
-// pipeline (ADR-0015 runtime verification, gibson#1639).
+// pipeline (ADR-0136 runtime verification, gibson#1639).
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.DiscardHandler)

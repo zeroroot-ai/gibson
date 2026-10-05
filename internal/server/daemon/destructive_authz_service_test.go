@@ -20,7 +20,7 @@ import (
 
 // awaitPending polls ListPendingDestructiveActions until it returns want
 // entries, or fails the test — the request is folded onto the engine's
-// Timeline asynchronously (ADR-0001), so a call made immediately after
+// Timeline asynchronously (ADR-0101), so a call made immediately after
 // Request starts can race the fold.
 func awaitPending(ctx context.Context, t *testing.T, srv destructiveauthzv1.DestructiveAuthorizationServiceServer, want int) *destructiveauthzv1.ListPendingDestructiveActionsResponse {
 	t.Helper()
@@ -96,7 +96,7 @@ func TestListPendingDestructiveActions_OtherTenantIsInvisible(t *testing.T) {
 
 // TestApproveDestructiveAction_RecordsApproval proves an approval both drops
 // the action off the pending list AND becomes the fact SettleBetTrue's
-// verification (DestructiveAuthorizationQueue.Verify, ADR-0032) reads back —
+// verification (DestructiveAuthorizationQueue.Verify, ADR-0132) reads back —
 // the two effects ApproveDestructiveAction exists to produce, now that
 // nothing blocks waiting for it directly.
 func TestApproveDestructiveAction_RecordsApproval(t *testing.T) {
@@ -161,7 +161,7 @@ func TestApproveDestructiveAction_UnknownActionErrors(t *testing.T) {
 
 // TestDenyDestructiveAction_RecordsDenial proves a denial both drops the
 // action off the pending list AND becomes the fact Verify reads back as a
-// terminal refusal (ErrDestructiveActionDenied, ADR-0032) — the bet can
+// terminal refusal (ErrDestructiveActionDenied, ADR-0132) — the bet can
 // never settle this way.
 func TestDenyDestructiveAction_RecordsDenial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

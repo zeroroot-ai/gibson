@@ -135,7 +135,7 @@ func TestBAMCPPlanner_DifferentSeedsCanDisagree(t *testing.T) {
 // TestBAMCPPlanner_PreservesCandidateIdentityAndRanksByTopK proves Plan keeps
 // PlanVoI's candidate set intact (same RefIDs/Kinds) while only overwriting
 // Value, and that topK truncation still applies to the BAMCP-refined ranking
-// (ADR-0026 decision 1: "the planner computes the top-k").
+// (ADR-0126: "the planner computes the top-k").
 func TestBAMCPPlanner_PreservesCandidateIdentityAndRanksByTopK(t *testing.T) {
 	reg := bamcpTestRegistry(t)
 	in := bamcpTestInput(reg)
@@ -249,7 +249,7 @@ func TestBamcpTopoOrder_IsIndependentOfInputOrder(t *testing.T) {
 // enablement cause's realized rate tracks the SUPPLIED posterior's mean, not
 // the fixed UninformativePriorStrength constant groundAttackGraph's exact
 // inference uses -- the whole point of Thompson-sampling per edge TYPE
-// (ADR-0037 decision 4) rather than reading one fixed number. A posterior
+// (ADR-0137) rather than reading one fixed number. A posterior
 // concentrated near 1.0 (Beta(200,1), mean ~0.995) must make the downstream host's
 // "reachable" ground var realize true far more often than the uninformative
 // default (mean 0.5) would, across enough independent seeds.

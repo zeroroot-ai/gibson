@@ -47,7 +47,7 @@ const (
 
 // QuotaManager enforces per-tenant resource quotas.
 //
-// Architecture (post ADR-0003 entitlements seam):
+// Architecture (post ADR-0089 entitlements seam):
 //   - Limits (config) come exclusively from the entitlements.Provider. The
 //     QuotaManager never reads plans, Stripe, or the tenant_quotas row
 //     directly — it asks the Provider "what are this tenant's limits?" The

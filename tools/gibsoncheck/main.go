@@ -90,7 +90,7 @@
 //
 //   - graphwrite: only the graph projector may open a Neo4j write
 //     transaction. The knowledge graph is a projection of the ECS World
-//     (ADR-0007) with exactly one writer (ADR-0012); every other package
+//     (ADR-0107) with exactly one writer (ADR-0112); every other package
 //     that reaches for session.ExecuteWrite / BeginTransaction is a second
 //     writer. cmd/gibson-migrate (DDL) and gibson-backup (APOC export) are
 //     operational tools outside the data plane and are exempt. Ships with

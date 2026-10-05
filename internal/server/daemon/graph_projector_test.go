@@ -134,7 +134,7 @@ func (f *fakeGraphWriter) UpsertMission(_ context.Context, tenant string, m Miss
 }
 
 // TestGraphProjector_ProjectsWorldPerTenant: the projector reads each tenant's
-// World and upserts its hosts (ADR-0007), with strict per-tenant isolation and
+// World and upserts its hosts (ADR-0107), with strict per-tenant isolation and
 // the host's stable id + service detail carried through to the writer.
 func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

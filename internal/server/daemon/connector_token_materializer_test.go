@@ -3,7 +3,7 @@
 
 // connector_token_materializer_test.go — the daemon adapter that publishes a
 // connector's fresh access token into the <connector>-connector-cred Secret
-// (ADR-0015).
+// (ADR-0061).
 package daemon
 
 import (
@@ -65,7 +65,7 @@ var materializerNow = time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 
 // accessMeta renders the platform's access-token bookkeeping blob with an
 // expiry offset from materializerNow. It is what proves a token may still be
-// served (ADR-0015 decision 4).
+// served (ADR-0061).
 func accessMeta(t *testing.T, offset time.Duration) []byte {
 	t.Helper()
 	b, err := json.Marshal(connectorauth.AccessToken{ExpiresAt: materializerNow.Add(offset)})
@@ -179,7 +179,7 @@ func TestConnectorTokenMaterializer_UpdatesInPlace(t *testing.T) {
 	}
 }
 
-// --- ADR-0015 decision 4: no fallback cache
+// --- ADR-0061: no fallback cache
 
 // TestConnectorTokenMaterializer_WithdrawsAnExpiredToken is the no-fallback-cache
 // regression. The grant is revoked, the refresh fails, and the published access

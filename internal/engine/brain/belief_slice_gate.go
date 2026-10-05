@@ -15,7 +15,7 @@ import (
 
 // belief_slice_gate.go extends belief.go's per-host evidence-digest gate to a
 // SLICE-digest gate over the generic BeliefSubstrate (gibson#272) and the
-// bounded slices gibson#286/#287 derive (ADR-0029 §8, gibson#289).
+// bounded slices gibson#286/#287 derive (ADR-0129, gibson#289).
 //
 // The shape mirrors belief.go deliberately:
 //
@@ -35,7 +35,7 @@ import (
 //     outstanding request — the slice moved on while the model was scoring —
 //     mirroring applyBeliefScored's staleness check.
 //   - SliceGate.Invalidate / downstreamAffected implement "propagate bounded
-//     to affected downstream nodes" (ADR-0029 §8): when a node's belief
+//     to affected downstream nodes" (ADR-0129): when a node's belief
 //     changes, every node within a bounded number of forward enablement-edge
 //     hops has that change re-checked on its next Check, instead of either
 //     ignoring it (a stale downstream posterior) or re-checking the whole
@@ -88,9 +88,9 @@ type SliceScored struct {
 // Kind is the event's Timeline kind. See SliceScoreRequested.Kind.
 func (SliceScored) Kind() string { return "belief.slice_scored" }
 
-// SliceBeliefProvider scores every node in a bounded slice at once (ADR-0029
-// §5/§6). The real implementation, nativeSliceBelief (belief_slice_native.go,
-// ADR-0034/ADR-0037, gibson#394), grounds and solves the slice in-process via
+// SliceBeliefProvider scores every node in a bounded slice at once (ADR-0129).
+// The real implementation, nativeSliceBelief (belief_slice_native.go,
+// ADR-0134/ADR-0137, gibson#394), grounds and solves the slice in-process via
 // internal/engine/brain/beliefvi's GroundSlice/SolveSlice (gibson#288's
 // ported ground.py); this interface is the seam it implements.
 type SliceBeliefProvider interface {
@@ -116,7 +116,7 @@ type SliceBeliefProvider interface {
 // when new evidence arrives — mirroring the same input/output separation the
 // per-host evidence-digest gate relies on. A belief-only change on an
 // upstream node therefore does NOT, by itself, move a downstream node's
-// digest; that propagation is SliceGate.Invalidate's job (ADR-0029 §8), not
+// digest; that propagation is SliceGate.Invalidate's job (ADR-0129), not
 // this digest's.
 //
 // Two calls over the same slice content and the same substrate state yield
@@ -245,7 +245,7 @@ func (g *SliceGate) Invalidate(graph AttackGraph, changed string, opts SliceOpti
 // downstreamAffected returns every node reachable from changed by following
 // enablement edges FORWARD (successors — the mirror image of
 // ExtractBoundedSlice's backward predecessor walk), bounded by opts.MaxDepth
-// hops and opts.NodeBudget nodes (ADR-0029 §8: "propagate... bounded", no
+// hops and opts.NodeBudget nodes (ADR-0129: "propagate... bounded", no
 // unbounded cascade). Sorted, so the result — and therefore which ids get
 // invalidated — never depends on graph.Edges' input order.
 func downstreamAffected(graph AttackGraph, changed string, opts SliceOptions) []string {

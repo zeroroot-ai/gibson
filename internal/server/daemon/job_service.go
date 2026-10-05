@@ -5,7 +5,7 @@
 //
 // jobServer implements gibson.job.v1.JobService: opening jobs on a bank,
 // sending them input, closing them with a verdict, and reading them back
-// (ADR-0019, gibson#1710).
+// (ADR-0119, gibson#1710).
 //
 // The rule the whole design rests on lives here: the worker never closes its
 // own job. CloseJob is authorized against can_close, which a member's can_send

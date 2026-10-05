@@ -20,7 +20,7 @@ import (
 // declares, when the Pack loads. Nothing else may add a predicate type for
 // a technique it does not own: NewPredicate and Evaluate both fail closed
 // ([ErrUnregisteredPredicate]) for any (technique, type) pair no one has
-// registered. This is the seam ADR-0027 decision 3 requires, and it is the
+// registered. This is the seam ADR-0131 requires, and it is the
 // only way settlement code should ever construct or evaluate a [Predicate].
 //
 // The zero value is not usable; construct one with [NewRegistry]. A

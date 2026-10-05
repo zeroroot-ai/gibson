@@ -3,14 +3,14 @@
 
 // Package brain is the ECS-native mission brain (epic ecs-brain).
 //
-// The brain is an Entity-Component-System (ark) per ADR-0001. Its core invariant
+// The brain is an Entity-Component-System (ark) per ADR-0101. Its core invariant
 // is log-first event sourcing: a per-tenant append-only Timeline of domain events
 // is the system of record, and the Tenant World is a fold of that Timeline. A
 // single-writer reducer is the only thing that mutates the World; everything else
 // emits events and reads snapshots. Replaying the Timeline into a fresh World
 // reproduces state exactly.
 //
-// Entity identity is scope-relative (ADR-0002, gibson#746): the coordinate of a
+// Entity identity is scope-relative (ADR-0102, gibson#746): the coordinate of a
 // host is (ScopeID, Address), and resolution is a scope-partitioned loop-compare
 // over strong identity signals — see identity.go.
 package brain
@@ -34,7 +34,7 @@ type Host struct {
 	SSHHostKey string // strong identity signal (stable across addresses)
 	CloudID    string // strong identity signal
 	Ports      []PortObservation
-	Belief     Belief // attack-path belief (derived; ADR-0005)
+	Belief     Belief // attack-path belief (derived; ADR-0129)
 	// CauseEdgeTypes are the enablement-edge types that fed this host in the
 	// slice its Belief was scored from (gibson#613): the causes a settled bet
 	// on a hypothesis about this host credits or blames. Sorted, unique.
@@ -54,12 +54,12 @@ type Host struct {
 
 // Surprise marks an entity the model did not expect — here, an identity
 // contradiction (an address reused by a different host). It is the input to the
-// attention/anomaly signal (ADR-0005/0006); it is not itself a separate entity.
+// attention/anomaly signal (ADR-0129/0106); it is not itself a separate entity.
 type Surprise struct {
 	Reason string
 }
 
-// World is a single tenant's in-memory ECS world (ADR-0001: one World per tenant,
+// World is a single tenant's in-memory ECS world (ADR-0101: one World per tenant,
 // never shared). Only the reducer mutates it.
 type World struct {
 	Tenant      string
@@ -77,7 +77,7 @@ type World struct {
 	accounts    *ecs.Map1[Account]
 	agentRuns   *ecs.Map1[AgentRun]
 	llmCalls    *ecs.Map1[LlmCall]
-	// agentToolCalls holds the flight recorder's tool-I/O capture (ADR-0020,
+	// agentToolCalls holds the flight recorder's tool-I/O capture (ADR-0120,
 	// gibson#271) — the tool-call counterpart to llmCalls.
 	agentToolCalls *ecs.Map1[AgentToolCall]
 	// flightRecorderPolicy is the tenant's current retention/redaction policy
@@ -86,14 +86,14 @@ type World struct {
 	flightRecorderPolicy FlightRecorderPolicy
 
 	// domainPacks holds this tenant's currently enabled Domain Packs
-	// (domain_pack.go, ADR-0033, gibson#381) — the "live registry" a
+	// (domain_pack.go, ADR-0133, gibson#381) — the "live registry" a
 	// DomainPackEnabled/Disabled fold maintains. Not ECS-backed: keyed
 	// per-tenant state, like flightRecorderPolicy, not a collection of
 	// sighted facts.
 	domainPacks map[string]DomainPackState
 
 	// ontologyGate is this tenant's taxonomy-discovery safety gate
-	// (taxonomy.PromotionGate, ADR-0024 §2, ADR-0033 decisions 2-3,
+	// (taxonomy.PromotionGate, ADR-0124, ADR-0133,
 	// gibson#391/#392), folded from OntologyExtensionProposed/Approved
 	// (ontology_extension.go). Base is taxonomy.Global — the platform's own
 	// core Taxonomy — the same base gibson#281's original design classifies
@@ -105,7 +105,7 @@ type World struct {
 	ontologyGate *taxonomy.PromotionGate
 
 	// ontologyProposals holds this tenant's currently observed ontology/
-	// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decisions 2-3,
+	// taxonomy extension proposals (ADR-0124, ADR-0133,
 	// gibson#391/#392), keyed by (kind, label) — the read model
 	// OntologyExtensionService.ListOntologyExtensionProposals (gibson#392)
 	// lists from. Not ECS-backed: like domainPacks, per-tenant
@@ -115,11 +115,11 @@ type World struct {
 	ontologyProposals map[ontologyProposalKey]OntologyProposalState
 
 	// edgeOutcomes is the per-enablement-edge-type Beta-Bernoulli statistic
-	// ADR-0037 decision 2 learns from (gibson#613), folded from
+	// ADR-0137 learns from (gibson#613), folded from
 	// EdgeOutcomeObserved and carried by WorldSnapshot so TrimTo loses none.
 	edgeOutcomes map[string]EdgeOutcomeCount
 
-	// observations holds out-of-taxonomy shapes (ADR-0012). Keyed by Timeline
+	// observations holds out-of-taxonomy shapes (ADR-0112). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
 	observations *ecs.Map1[Observation]
 
@@ -127,27 +127,27 @@ type World struct {
 	// keyed by (Taxonomy label, stable key). See entity.go.
 	entities *ecs.Map1[Entity]
 
-	// hypotheses holds the Hypothesis provenance class (ADR-0021, gibson#265):
+	// hypotheses holds the Hypothesis provenance class (ADR-0121, gibson#265):
 	// an agent's proposed, unproven claim, keyed by (ScopeID, Claim). See
 	// hypothesis.go. Distinct from both Evidence (hosts, domains, ...) and
 	// Belief (belief.go) — a Hypothesis is folded and stored separately from
 	// both, never derived from or into either.
 	hypotheses *ecs.Map1[Hypothesis]
 
-	// betSettlements holds proof-of-demonstration verdicts (ADR-0027,
+	// betSettlements holds proof-of-demonstration verdicts (ADR-0131,
 	// gibson#278), keyed by HypothesisID — the same externally-given-string
 	// identity AgentRun uses for RunID, never a derived counter. See
 	// bet_settlement.go.
 	betSettlements *ecs.Map1[BetSettlement]
 
 	// destructiveActions holds pending/decided destructive-proof
-	// authorization records (ADR-0028, gibson#336), keyed by HypothesisID —
+	// authorization records (ADR-0132, gibson#336), keyed by HypothesisID —
 	// the same externally-given-string identity BetSettlement uses. See
 	// destructive_authz.go.
 	destructiveActions *ecs.Map1[DestructiveAction]
 
 	// voiPlans holds each mission's VoI planning state (gibson#283,
-	// ADR-0026): whether a plan is in flight, the evidence cursor it answers
+	// ADR-0126): whether a plan is in flight, the evidence cursor it answers
 	// for, and the last completed plan's ranked, top-k candidates. See
 	// voi_planner.go. Standalone, like decisions — never a field on Mission.
 	voiPlans *ecs.Map1[VoIPlanState]
@@ -155,7 +155,7 @@ type World struct {
 	// nodeBeliefs backs BeliefSubstrate (belief_substrate.go, gibson#272) for
 	// every node kind that is not its own ECS entity — NodeKindClaim (the
 	// market view) and NodeKindTechniqueEnvironment (the reputation view),
-	// ADR-0029 §3. Host belief stays on the Host component itself
+	// ADR-0129. Host belief stays on the Host component itself
 	// (belief.go); this is the general-purpose store for every other kind.
 	// See node_belief.go.
 	nodeBeliefs *ecs.Map1[NodeBeliefRecord]
@@ -255,7 +255,7 @@ func NewWorld(tenant string) *World {
 
 // HostSnapshot is a stable, comparable view of a Host for assertions/inspection.
 type HostSnapshot struct {
-	ID         uint64 // stable, replay-deterministic id — the graph projection key (ADR-0007)
+	ID         uint64 // stable, replay-deterministic id — the graph projection key (ADR-0107)
 	ScopeID    string
 	Address    string
 	SSHHostKey string
@@ -270,7 +270,7 @@ type HostSnapshot struct {
 	Belief       Belief // attack-path belief (zero until a BeliefSystem scores it)
 	// CauseEdgeTypes mirrors Host.CauseEdgeTypes (gibson#613).
 	CauseEdgeTypes []string
-	Attention      float64 // derived: belief.Juicy + surprise boost (ADR-0005/0006)
+	Attention      float64 // derived: belief.Juicy + surprise boost (ADR-0129/0106)
 	MissionID      string  // the mission that discovered this host (gibson#1075); empty if none
 	// EvidenceDigest fingerprints the evidence Belief was scored against
 	// (belief.go). Belief is a first-class property of the node (gibson#272), so
@@ -369,7 +369,7 @@ type Event interface{ Kind() string }
 // with strong identity signals, the set of ports observed open in this scan, and
 // optional per-port service detail. Services is keyed by port number; a port may
 // appear in OpenPorts without a Services entry (a bare open port) — service detail
-// is enriched progressively across observations (ADR-0007).
+// is enriched progressively across observations (ADR-0107).
 type HostObserved struct {
 	// MissionID links the sighting to the mission whose work produced it — the
 	// mission-evidence edge (gibson#1075), carried from the ingest ContextInfo so a

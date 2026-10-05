@@ -2,15 +2,15 @@
 // Copyright 2026 Zero Root AI
 
 // Package brain — domain_pack.go: per-tenant Domain Pack enablement
-// (ADR-0033, gibson#381, epic #376).
+// (ADR-0133, gibson#381, epic #376).
 //
 // A Domain Pack (internal/engine/ontology.DomainPack) is curated, versioned
 // structure — taxonomy labels, ontology extensions, and technique -> CEL
-// predicate bindings — never code (ADR-0033 decision 1). Pack CONTENT ships
-// once, via the SDK release/rollout pipeline (ADR-0033 decision 4): it never
+// predicate bindings — never code (ADR-0133). Pack CONTENT ships
+// once, via the SDK release/rollout pipeline (ADR-0133): it never
 // hot-reloads. What DOES change per tenant, at any time, is ENABLEMENT — and
 // that is a fact about this tenant's World, so it folds through the same
-// log-first event-sourcing discipline as everything else here (ADR-0001):
+// log-first event-sourcing discipline as everything else here (ADR-0101):
 // DomainPackEnabled/DomainPackDisabled are Timeline-durable, replayable, and
 // (like every brain Event) implicitly mission-pinned by the tenant Timeline
 // they land on.
@@ -27,14 +27,14 @@ package brain
 import "sort"
 
 // DomainPackState is the taxonomy/ontology/predicate content of one Domain
-// Pack currently enabled for a tenant — the "live registry" ADR-0033
-// decision 4 describes. It is a plain value, not an ecs.Map1 entity: like
+// Pack currently enabled for a tenant — the "live registry" ADR-0133
+// describes. It is a plain value, not an ecs.Map1 entity: like
 // FlightRecorderPolicy, it is per-tenant singleton-shaped state keyed by pack
 // name, not a growing collection of sighted facts.
 type DomainPackState struct {
 	// Version is the pack version that was enabled, carried through from the
 	// catalog entry at enable time (never re-resolved against a possibly
-	// newer catalog on replay — ADR-0033 decision 4's "version-pinned for
+	// newer catalog on replay — ADR-0133's "version-pinned for
 	// replay").
 	Version int
 	// TaxonomyNodeLabels and TaxonomyRelationshipTypes are the vocabulary
@@ -43,14 +43,14 @@ type DomainPackState struct {
 	TaxonomyNodeLabels        []string
 	TaxonomyRelationshipTypes []string
 	// Predicates is this pack's technique -> CEL-expression bindings
-	// (ADR-0031 decision 1), carried verbatim from ontology.DomainPack.
+	// (ADR-0131), carried verbatim from ontology.DomainPack.
 	// Opaque text here too — brain never compiles or evaluates CEL; that is
 	// gibson#388's job, reading this map.
 	Predicates map[string]string
 }
 
 // DomainPackEnabled records that a tenant enabled the named catalog Domain
-// Pack — ADR-0033 decision 4: "per-tenant enable/disable folds a
+// Pack — ADR-0133: "per-tenant enable/disable folds a
 // DomainPackEnabled brain event". The event carries the pack's full resolved
 // content (never just a catalog_id to look up later) so replay is
 // deterministic and self-contained: it never needs to re-resolve the

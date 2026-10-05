@@ -13,7 +13,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Category and Technique are taxonomy nodes (ADR-0035 decision 1).
+// Category and Technique are taxonomy nodes (ADR-0135).
 // ---------------------------------------------------------------------------
 
 func TestCategoryAndTechniqueAreAdmittedNodeLabels(t *testing.T) {
@@ -31,8 +31,8 @@ func TestRollsUpToIsAnAdmittedRelationshipType(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Seeding: the core categories come from types.TechniqueType (ADR-0035
-// decision 1, gibson#379 acceptance criterion 2).
+// Seeding: the core categories come from types.TechniqueType (ADR-0135,
+// gibson#379 acceptance criterion 2).
 // ---------------------------------------------------------------------------
 
 func TestCoreCategoriesAreSeededFromTechniqueType(t *testing.T) {
@@ -65,7 +65,7 @@ func TestCoreCategoriesAreValid(t *testing.T) {
 
 func TestGlobalTechniquesSeedsNoTechniques(t *testing.T) {
 	// The core pack fixes only the coarse level; fine-grained techniques are
-	// pack-defined (ADR-0033) and arrive via WithTechnique, not the seed.
+	// pack-defined (ADR-0133) and arrive via WithTechnique, not the seed.
 	assert.Empty(t, GlobalTechniques.Techniques())
 }
 
@@ -163,7 +163,7 @@ func TestHasCategoryAndHasTechnique(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// WithTechnique: pack-extensible, immutable (ADR-0035 "pack-extensible").
+// WithTechnique: pack-extensible, immutable (ADR-0135 "pack-extensible").
 // ---------------------------------------------------------------------------
 
 func TestWithTechniqueAddsWithoutMutatingTheReceiver(t *testing.T) {

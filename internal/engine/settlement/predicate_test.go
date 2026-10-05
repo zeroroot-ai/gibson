@@ -96,7 +96,7 @@ func TestPredicate_Validate(t *testing.T) {
 
 // TestPredicate_JSONRoundTrip proves a Predicate is plain, serializable data:
 // it must survive a marshal/unmarshal round trip unchanged, because
-// settlement (ADR-0027) stores it on the graph next to the Hypothesis it
+// settlement (ADR-0131) stores it on the graph next to the Hypothesis it
 // belongs to and reconstructs it later for replay.
 func TestPredicate_JSONRoundTrip(t *testing.T) {
 	original := Predicate{

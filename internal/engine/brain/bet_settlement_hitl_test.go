@@ -41,7 +41,7 @@ func TestBetSettledByHITL_MarksSettled(t *testing.T) {
 
 // TestBetSettledByHITL_FalseVerdict proves a HITL settlement can also
 // resolve a bet FALSE — HITL is a source of either outcome, not a third
-// outcome of its own (ADR-0023 decision 3).
+// outcome of its own (ADR-0123).
 func TestBetSettledByHITL_FalseVerdict(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, BetSettledByHITL{HypothesisID: "hyp-1", Verdict: SettlementVerdictFalse, UserID: "reviewer-1"})
@@ -183,7 +183,7 @@ func awaitLabels(t *testing.T, e *Engine, want int) []LabelSnapshot {
 
 // TestSettleBetByHITL_TruePositive_SettlesTrue proves a human's
 // true_positive verdict settles the bet TRUE without pausing anything
-// (ADR-0008) — the call returns immediately; the fold happens on the
+// (ADR-0108) — the call returns immediately; the fold happens on the
 // engine's own async single-writer path.
 func TestSettleBetByHITL_TruePositive_SettlesTrue(t *testing.T) {
 	e := newSettlementTestEngine(t)

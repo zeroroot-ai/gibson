@@ -3,7 +3,7 @@
 
 // Package daemon — connector_oauth_callback.go
 //
-// The OAuth callback for the connector authorize flow (ADR-0014). The vendor
+// The OAuth callback for the connector authorize flow (ADR-0114). The vendor
 // redirects the operator's browser here after they approve. The route mounts
 // on the pre-auth :8085 listener, in the same bucket as /.well-known/gibson-login,
 // because the browser holds no gibson credential at this point.

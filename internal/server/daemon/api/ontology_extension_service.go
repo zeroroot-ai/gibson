@@ -17,9 +17,9 @@ import (
 )
 
 // OntologyExtensionService is the daemon API backing the tenant OWNER's
-// review of agent-proposed Taxonomy extensions (ADR-0024 §2, ADR-0033
-// decisions 2-3, gibson#392) and, once a proposal is live, the owner's
-// "submit upstream" contribution action (ADR-0033 decision 2, gibson#393).
+// review of agent-proposed Taxonomy extensions (ADR-0124, ADR-0133,
+// gibson#392) and, once a proposal is live, the owner's
+// "submit upstream" contribution action (ADR-0133, gibson#393).
 // An agent proposes a new Taxonomy node label or relationship type via
 // ProposeOntologyExtension (gibson#391, the agent-facing
 // HarnessCallbackService RPC); this service is the other end of that
@@ -33,7 +33,7 @@ import (
 // rule (internal/engine/brain/ontology_extension.go). Once a proposal has
 // BOTH recurred enough independent times AND been approved, the single-writer
 // fold promotes it into live, per-tenant, replayable Cypher structure —
-// exactly the tenant extension ADR-0033 describes. Rejection submits an
+// exactly the tenant extension ADR-0133 describes. Rejection submits an
 // OntologyExtensionRejected event, a terminal audit decision that never
 // mutates the Taxonomy. SubmitOntologyExtensionUpstream submits no event at
 // all — it is a pure render over already-live state
@@ -89,7 +89,7 @@ func ontologyProposalKind(k tenantv1.OntologyProposalKind) (taxonomy.ProposalKin
 // ListOntologyExtensionProposals returns every ontology/taxonomy extension
 // proposal this tenant's agents have made, pending and decided alike, so the
 // tenant owner has full visibility into what agents are proposing
-// (ADR-0033's "the tenant owner seeing every proposal").
+// (ADR-0133's "the tenant owner seeing every proposal").
 func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 	ctx context.Context, _ *tenantv1.ListOntologyExtensionProposalsRequest,
 ) (*tenantv1.ListOntologyExtensionProposalsResponse, error) {
@@ -105,7 +105,7 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 }
 
 // ApproveOntologyExtensionProposal is the tenant owner's explicit approval of
-// a pending proposal (ADR-0033 decision 3). See the .proto's doc for why the
+// a pending proposal (ADR-0133). See the .proto's doc for why the
 // response is deliberately empty: whether this approval also completed
 // settlement is decided by the tenant's single-writer fold, asynchronously —
 // call ListOntologyExtensionProposals afterward for the resulting state.
@@ -162,7 +162,7 @@ func (s *OntologyExtensionService) RejectOntologyExtensionProposal(
 }
 
 // SubmitOntologyExtensionUpstream renders a live tenant extension as an SDK
-// Domain Pack contribution artifact (ADR-0033 decision 2, gibson#393). See
+// Domain Pack contribution artifact (ADR-0133, gibson#393). See
 // the .proto's doc for why opening the resulting PR is a deliberate
 // owner/credential hand-off this handler never performs: it returns the
 // rendered file content plus ready-to-paste PR text, nothing more.

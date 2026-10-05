@@ -77,7 +77,7 @@ func TestRequestDestructiveAuthorization_MissingFields_InvalidArgument(t *testin
 }
 
 // TestRequestDestructiveAuthorization_Success_EnqueuesAndReturnsImmediately
-// proves the ADR-0032 decision 1 contract: the call enqueues a pending
+// proves the ADR-0132 contract: the call enqueues a pending
 // destructive action on the caller's tenant's DestructiveAuthorizationQueue
 // and returns immediately with an authorization_request_id — never blocking
 // on a human decision, and never settling anything (this RPC never touches

@@ -86,7 +86,7 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 }
 
 // LaunchMember starts one bank member and returns as soon as the sandbox is
-// running and admitted (ADR-0019 decision 1, gibson#1709).
+// running and admitted (ADR-0119, gibson#1709).
 //
 // It is LaunchAgent without the wait: a member serves many jobs over its life,
 // so the caller cannot block on its exit. The live-console registration, the

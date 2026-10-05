@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Command tool-manifest-gen writes one kind:tool catalog manifest per parser
-// compiled into the gibson-executor image (ADR-0017).
+// compiled into the gibson-executor image (ADR-0117).
 //
 // The input is executor-catalog.json: the verbatim `gibson-runner --list-tools`
 // output of one digest-pinned executor image, plus the digest it came from.
@@ -243,12 +243,12 @@ func manifest(image string, t tool) []byte {
 		fmt.Fprintf(&b, "  %s\n", line)
 	}
 	fmt.Fprintf(&b, "# A scanner reaches the mission's targets. The effective egress of a tool\n")
-	fmt.Fprintf(&b, "# launch is bounded by the dispatching agent's ceiling (ADR-0016), so this\n")
+	fmt.Fprintf(&b, "# launch is bounded by the dispatching agent's ceiling (ADR-0116), so this\n")
 	fmt.Fprintf(&b, "# is a ceiling, not a grant.\n")
 	fmt.Fprintf(&b, "egressAllow:\n  - \"*\"\n")
 	fmt.Fprintf(&b, "spec:\n")
 	// Third-party scanners parsing attacker-influenced output: untrusted, and
-	// therefore always sandboxed (ADR-0010).
+	// therefore always sandboxed (ADR-0110).
 	fmt.Fprintf(&b, "  contentTrust: untrusted\n")
 	fmt.Fprintf(&b, "  dispatchMode: sandboxed\n")
 	fmt.Fprintf(&b, "  image: %s\n", image)

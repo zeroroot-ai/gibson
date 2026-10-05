@@ -120,7 +120,7 @@ type Config struct {
 	// Shape is the daemon's untrusted-execution deployment shape
 	// (GIBSON_UNTRUSTED_EXEC). The zero value ShapeSetecOnly fail-closes:
 	// an unwired Minter rejects every non-hosted isolation mode at issuance
-	// (ADR-0010 / gibson#998).
+	// (ADR-0110 / gibson#998).
 	Shape dispatchpolicy.DeploymentShape
 }
 
@@ -234,7 +234,7 @@ type MintRequest struct {
 	RecipientClass string
 
 	// Isolation is where this grant's untrusted-execution boundary lives
-	// (ADR-0010). The zero value (ISOLATION_MODE_UNSPECIFIED) is treated as
+	// (ADR-0110). The zero value (ISOLATION_MODE_UNSPECIFIED) is treated as
 	// HOSTED_SANDBOX, so grants minted without setting it pass under every
 	// shape. Under ShapeSetecOnly, Mint rejects any non-hosted mode at
 	// issuance (gibson#998).
@@ -289,7 +289,7 @@ func (e *CGMintDeniedByRecipientClassError) Error() string {
 
 // CGMintDeniedByIsolationError is returned by Mint when the requested
 // MintRequest.Isolation is not permitted under the daemon's deployment shape
-// (ADR-0010 / gibson#998) — e.g. a customer-isolation mode requested under the
+// (ADR-0110 / gibson#998) — e.g. a customer-isolation mode requested under the
 // hosted setec-only shape. Fails CLOSED.
 type CGMintDeniedByIsolationError struct {
 	Isolation capabilitypb.IsolationMode
@@ -336,7 +336,7 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		}
 	}
 
-	// Layer (ADR-0010 / gibson#998): refuse to issue a CG-JWT whose isolation
+	// Layer (ADR-0110 / gibson#998): refuse to issue a CG-JWT whose isolation
 	// boundary is not permitted under the deployment shape. Fails CLOSED — under
 	// the hosted setec-only shape only HOSTED_SANDBOX (and UNSPECIFIED, treated
 	// as HOSTED_SANDBOX) is allowed; every customer-operated mode is rejected.

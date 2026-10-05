@@ -40,7 +40,7 @@ func TestComponentObjectRef(t *testing.T) {
 	})
 
 	t.Run("bare, kind-less refs are refused", func(t *testing.T) {
-		// The kind is part of the object identity (ADR-0015); a kind-less
+		// The kind is part of the object identity (ADR-0136); a kind-less
 		// reference is never silently assigned one.
 		for _, in := range []string{"nmap", "a-b_c.d", "component:nmap"} {
 			got, err := componentObjectRef(in)

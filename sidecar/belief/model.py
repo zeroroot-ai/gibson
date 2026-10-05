@@ -1,4 +1,4 @@
-"""Belief-field model artifacts and exact inference (gibson#750, ADR-0005).
+"""Belief-field model artifacts and exact inference (gibson#750, ADR-0134).
 
 A model artifact is a versioned JSON file describing a discrete Bayesian network:
 binary variables, directed edges, and a CPT per variable. Inference is **exact**
@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-# The three belief-field components every model MUST expose (ADR-0005).
+# The three belief-field components every model MUST expose (ADR-0129).
 QUERY_VARS: Tuple[str, ...] = ("juicy", "exploitable", "reachable")
 
 # Binary state labels, fixed so CPT column order is deterministic across artifacts.
@@ -28,7 +28,7 @@ def evidence_to_observations(evidence: dict, known_vars: set) -> Tuple[Dict[str,
 
     Returns ``(observations, novel)`` where ``observations`` maps a known network
     variable to its observed state ("true"/"false"), and ``novel`` lists evidence
-    tokens the network has no variable for (ADR-0005 §6: the caller's LLM fills
+    tokens the network has no variable for (ADR-0129: the caller's LLM fills
     these, the math does not guess). Deterministic: identical evidence yields
     identical observations, so exact inference is reproducible.
 
@@ -177,7 +177,7 @@ class BeliefModel:
         """Run exact inference and return the three components plus any novel vars.
 
         ``priors`` (optional) supplies caller-estimated priors for novel nodes
-        (ADR-0005 §6). They are applied as virtual evidence on the query vars when
+        (ADR-0129). They are applied as virtual evidence on the query vars when
         the network truly has no table — here they directly seed the response for
         a missing component, keeping the call bounded and deterministic.
         """

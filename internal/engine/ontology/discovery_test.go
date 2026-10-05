@@ -353,7 +353,7 @@ func TestProposeExtension_CanonicalHashIsOrderIndependentAcrossEveryField(t *tes
 // natural-key rule gibson#484 enforces at promotion applies to taxonomy
 // node-label promotion (gibson#281, taxonomy.PromotionGate), not here.
 //
-// ADR-0024 §1 draws this line: a proposed ontology class is a prefix:localname
+// ADR-0124 draws this line: a proposed ontology class is a prefix:localname
 // IRI the Reasoner reasons OVER, never a Cypher query token. These tests make
 // that boundary executable, so a later change that tried to route an ontology
 // class into node-label structure (where it WOULD need a collision-proof key,
@@ -412,6 +412,6 @@ func TestProposeExtension_DoesNotTouchTaxonomyNodeLabels(t *testing.T) {
 	require.True(t, out.Accepted)
 
 	// The global taxonomy node-label vocabulary is untouched: ontology and
-	// taxonomy are separate vocabularies (ADR-0024 §1).
+	// taxonomy are separate vocabularies (ADR-0124).
 	assert.Equal(t, before, taxonomy.Global.NodeLabels())
 }

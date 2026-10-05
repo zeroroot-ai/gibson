@@ -2,10 +2,10 @@
 // Copyright 2026 Zero Root AI
 
 // Package brain — ontology_extension.go: agent-facing taxonomy/ontology
-// extension PROPOSAL (ADR-0024 §2, ADR-0033 decision 2, gibson#391, epic
+// extension PROPOSAL (ADR-0124, ADR-0133, gibson#391, epic
 // #376).
 //
-// ADR-0033 decision 2's lifecycle is "Agent captures -> proposal (through the
+// ADR-0133's lifecycle is "Agent captures -> proposal (through the
 // ValidIdentifier safety gate; PromotionGate observes recurrence and
 // de-dupes) -> explicit tenant-owner approval -> tenant extension -> ...".
 // This file builds the FIRST arrow only: an agent proposing a new Taxonomy
@@ -29,11 +29,11 @@
 // This is the "future integration" internal/engine/ontology/discovery.go's
 // StructuralHypothesis doc anticipates ("a harness tool or daemon RPC that
 // accepts an agent-proposed ontology extension"). It intentionally does NOT
-// reuse ontology.StructuralHypothesis/ProposeExtension: that is ADR-0024 §1's
+// reuse ontology.StructuralHypothesis/ProposeExtension: that is ADR-0124's
 // LIGHT gate for ontology triples (classes/equivalences/IFPs), which never
 // become Cypher structure and so need no ValidIdentifier check at all. A
-// Taxonomy node label or relationship type is the opposite case — ADR-0024
-// §2's HEAVY gate — because a promoted label DOES become Cypher query
+// Taxonomy node label or relationship type is the opposite case — ADR-0124's
+// HEAVY gate — because a promoted label DOES become Cypher query
 // structure (taxonomy.PromotionGate's own doc explains why that gate is
 // non-negotiable). The two proposal kinds intentionally stay separate
 // Go-level concerns, the same way brain.Hypothesis and
@@ -49,8 +49,8 @@ import (
 )
 
 // OntologyExtensionProposed records that an agent proposed a new Taxonomy
-// node label or relationship type at runtime (ADR-0024 §2, ADR-0033 decision
-// 2, gibson#391). Folding this event runs taxonomy.PromotionGate.Observe for
+// node label or relationship type at runtime (ADR-0124, ADR-0133,
+// gibson#391). Folding this event runs taxonomy.PromotionGate.Observe for
 // this tenant, counting recurrence toward the eventual settlement gibson#392
 // promotes on (recurrence + explicit tenant-owner HITL confirmation).
 //
@@ -80,7 +80,7 @@ func (OntologyExtensionProposed) Kind() string { return "ontology_extension.prop
 
 // OntologyExtensionApproved records that the tenant owner explicitly
 // approved a previously-proposed Taxonomy node label or relationship type
-// (ADR-0033 decision 3, gibson#392). Folding this event runs
+// (ADR-0133, gibson#392). Folding this event runs
 // taxonomy.PromotionGate.Confirm for this tenant — the HITL half of
 // settlement — and attempts Promote; the label becomes a live, per-tenant
 // taxonomy extension immediately once BOTH settlement halves (recurrence and
@@ -106,7 +106,7 @@ func (OntologyExtensionApproved) Kind() string { return "ontology_extension.appr
 
 // OntologyExtensionRejected records that the tenant owner explicitly
 // rejected a previously-proposed Taxonomy node label or relationship type
-// (ADR-0033 decision 3, gibson#392). Folding this event never touches
+// (ADR-0133, gibson#392). Folding this event never touches
 // taxonomy.PromotionGate — a rejected proposal is simply never Confirmed, so
 // it can never be promoted through this tenant's gate. Terminal: this
 // package exposes no "undo a rejection" event.
@@ -133,7 +133,7 @@ type ontologyProposalKey struct {
 }
 
 // OntologyProposalStatus is a proposed taxonomy label or relationship type's
-// current position in ADR-0033 decision 2's lifecycle, as observed by this
+// current position in ADR-0133's lifecycle, as observed by this
 // tenant's World: proposed and awaiting a decision, explicitly approved by
 // the tenant owner, or explicitly rejected. It is independent of Promoted
 // (below) — an OntologyProposalApproved proposal that has not yet recurred
@@ -188,7 +188,7 @@ type OntologyProposalState struct {
 	LastProposer string
 	LastClaim    string
 	// Status is this proposal's position in the approval lifecycle
-	// (gibson#392, ADR-0033 decision 3). Zero value is OntologyProposalPending.
+	// (gibson#392, ADR-0133). Zero value is OntologyProposalPending.
 	Status OntologyProposalStatus
 	// Reviewer is the tenant owner who approved or rejected this proposal.
 	// Empty while Status is Pending.
@@ -218,7 +218,7 @@ type OntologyProposalState struct {
 //
 // Calling Observe here (inside the single-writer fold), rather than in
 // ProposeOntologyExtension before Submit, is what makes recurrence counting
-// replay-deterministic (ADR-0001): folding the identical sequence of
+// replay-deterministic (ADR-0101): folding the identical sequence of
 // OntologyExtensionProposed events against a fresh World reproduces the
 // identical sequence of Observe calls, hence identical recurrence counts.
 //
@@ -241,7 +241,7 @@ func applyOntologyExtensionProposed(w *World, e OntologyExtensionProposed) {
 }
 
 // applyOntologyExtensionApproved is the reducer half of
-// OntologyExtensionApproved (ADR-0033 decision 3, gibson#392): the tenant
+// OntologyExtensionApproved (ADR-0133, gibson#392): the tenant
 // owner's explicit approval is the HITL half of taxonomy.PromotionGate's
 // settlement rule. Folding this event runs PromotionGate.Confirm for e's
 // (kind, label) — recording the reviewer — then attempts promoteIfSettled:
@@ -277,7 +277,7 @@ func applyOntologyExtensionApproved(w *World, e OntologyExtensionApproved) {
 }
 
 // applyOntologyExtensionRejected is the reducer half of
-// OntologyExtensionRejected (ADR-0033 decision 3, gibson#392): records the
+// OntologyExtensionRejected (ADR-0133, gibson#392): records the
 // tenant owner's explicit rejection. This never touches ontologyGate — a
 // rejected proposal is simply never Confirmed, so PromotionGate.Promote can
 // never admit it; rejection is audit state, not a Taxonomy mutation.
@@ -298,7 +298,7 @@ func applyOntologyExtensionRejected(w *World, e OntologyExtensionRejected) {
 // path (applyOntologyExtensionProposed or applyOntologyExtensionApproved)
 // calls Promote, so a proposal is never promoted twice nor by two different
 // code paths — settlement is symmetric in its two halves (recurrence and
-// HITL confirmation, ADR-0033 decision 2), and whichever half completes
+// HITL confirmation, ADR-0133), and whichever half completes
 // last is the one that actually triggers promotion.
 //
 // A no-op once state.Promoted is already true, or while state.Status is not
@@ -356,8 +356,8 @@ func (w *World) OntologyProposalSnapshot() []OntologyProposalSnapshot {
 }
 
 // OntologyDiscoveryEngine is the tenant-scoped capability a future
-// ProposeOntologyExtension RPC needs (gibson#391, ADR-0024 §2, ADR-0033
-// decision 2): fold a per-tenant OntologyExtensionProposed event through the
+// ProposeOntologyExtension RPC needs (gibson#391, ADR-0124, ADR-0133):
+// fold a per-tenant OntologyExtensionProposed event through the
 // ValidIdentifier safety gate and PromotionGate's recurrence counting. It
 // mirrors ProofSettlementEngine's (proof_settlement.go) seam pattern
 // exactly, for the same reason: nothing in this repo calls it yet.
@@ -396,7 +396,7 @@ var _ OntologyDiscoveryEngine = (*Engine)(nil)
 //
 // Like SettleBetTrue/SettleBetFalse, the resulting OntologyExtensionProposed
 // event is folded asynchronously through the normal single-writer Submit
-// path (ADR-0001): a caller that needs the resulting recurrence count should
+// path (ADR-0101): a caller that needs the resulting recurrence count should
 // read OntologyProposals() afterward rather than assume it is visible the
 // instant this call returns.
 func (e *Engine) ProposeOntologyExtension(_ context.Context, kind taxonomy.ProposalKind, label, proposer, claim string) error {
@@ -419,7 +419,7 @@ func (e *Engine) ProposeOntologyExtension(_ context.Context, kind taxonomy.Propo
 }
 
 // OntologyProposals returns the tenant's currently observed ontology/
-// taxonomy extension proposals (ADR-0024 §2, ADR-0033 decision 2,
+// taxonomy extension proposals (ADR-0124, ADR-0133,
 // gibson#391).
 func (e *Engine) OntologyProposals() []OntologyProposalSnapshot {
 	e.mu.RLock()
@@ -470,7 +470,7 @@ func (e *Engine) ontologyProposalState(kind taxonomy.ProposalKind, label string)
 
 // ApproveOntologyExtension is the entry point the tenant-owner-gated
 // OntologyExtensionService.ApproveOntologyExtensionProposal RPC calls
-// (gibson#392, ADR-0033 decision 3): the tenant owner approves a
+// (gibson#392, ADR-0133): the tenant owner approves a
 // previously-proposed Taxonomy node label or relationship type. It is the
 // ONLY exported way an OntologyExtensionApproved event reaches this Engine's
 // intake.
@@ -488,7 +488,7 @@ func (e *Engine) ontologyProposalState(kind taxonomy.ProposalKind, label string)
 // (kind, label) already carries a terminal decision.
 //
 // Like ProposeOntologyExtension, the resulting event is folded asynchronously
-// through the normal single-writer Submit path (ADR-0001): whether this
+// through the normal single-writer Submit path (ADR-0101): whether this
 // approval actually promoted the extension (enough recurrence, not just
 // approval) is visible only after the fold — read OntologyProposals()
 // afterward, never assume Promoted the instant this call returns.
@@ -516,7 +516,7 @@ func (e *Engine) ApproveOntologyExtension(_ context.Context, kind taxonomy.Propo
 
 // RejectOntologyExtension is the entry point the tenant-owner-gated
 // OntologyExtensionService.RejectOntologyExtensionProposal RPC calls
-// (gibson#392, ADR-0033 decision 3): the tenant owner rejects a
+// (gibson#392, ADR-0133): the tenant owner rejects a
 // previously-proposed Taxonomy node label or relationship type. Same
 // existence/terminal-decision/attribution checks as ApproveOntologyExtension;
 // reason is optional (a rejection needs no rationale to take effect, unlike

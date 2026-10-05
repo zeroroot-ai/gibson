@@ -10,7 +10,7 @@ import (
 )
 
 // AgentRun is a single agent execution within a mission — a unit of run-provenance
-// (ADR-0007). Identity is the globally-unique RunID assigned by the harness, so it
+// (ADR-0107). Identity is the globally-unique RunID assigned by the harness, so it
 // needs no scope-relative resolution: RunID is the stable graph-projection key.
 // ParentRunID links a delegated run to the run that spawned it (the DELEGATED_TO
 // edge in the projected graph); it is empty for a root agent run.

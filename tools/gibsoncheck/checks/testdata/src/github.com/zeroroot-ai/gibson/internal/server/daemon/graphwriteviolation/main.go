@@ -1,5 +1,5 @@
 // Package graphwriteviolation is a synthetic re-introduction of the write path
-// ADR-0012 removed: an RPC-layer file in the daemon package tree that opens its
+// ADR-0112 removed: an RPC-layer file in the daemon package tree that opens its
 // own Neo4j write transaction. This is the mutation case — if the graphwrite
 // analyzer stops flagging this file, the guard has stopped working.
 package graphwriteviolation

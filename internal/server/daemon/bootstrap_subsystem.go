@@ -163,7 +163,7 @@ func nativeLoginHandler(cfg nativeLoginConfig, cgMinter cgBootstrapMinter, cgSvc
 		// Delete it once the chart is on the mTLS URL and nothing else reads it.
 		mux.HandleFunc(capabilityGrantKeysPath, capabilityGrantKeysHandler(cgMinter, cgSvc))
 	}
-	// Connector OAuth callback (ADR-0014) — mounted on the same pre-auth
+	// Connector OAuth callback (ADR-0114) — mounted on the same pre-auth
 	// listener because the vendor redirects a browser here before it holds any
 	// gibson credential. Absent when the ConnectorAuthService is not wired
 	// (secrets stack down), so the browser gets a clear 404 rather than a

@@ -3,7 +3,7 @@
 
 // Package taxonomy is the global, platform-versioned allow-list of node labels
 // and relationship types the Knowledge graph may materialise — the same for
-// every tenant (ADR-0012).
+// every tenant (ADR-0112).
 //
 // # The gate
 //
@@ -93,7 +93,7 @@ var coreNodeLabels = []string{
 	"Repository",
 	"Vulnerability",
 
-	// Technique hierarchy (v3, ADR-0035, gibson#379). See technique.go: a
+	// Technique hierarchy (v3, ADR-0135, gibson#379). See technique.go: a
 	// Technique node rolls up to a Category node via
 	// RollsUpToRelationshipType.
 	CategoryLabel,
@@ -139,7 +139,7 @@ var coreRelationshipTypes = []string{
 	"TOUCHES",        // Finding -> Control
 	"VERIFIED_BY",    // Finding -> Pipeline
 
-	// Technique hierarchy (v3, ADR-0035, gibson#379).
+	// Technique hierarchy (v3, ADR-0135, gibson#379).
 	RollsUpToRelationshipType, // Technique -> Category
 
 	// Mission graph (v4, gibson#550). Written by the per-run graph bootstrap.
@@ -310,7 +310,7 @@ func ValidIdentifier(s string) error {
 // It is NOT the node's identity. Two sightings of the same fact three weeks
 // apart share a content hash and remain distinct nodes, because "seen again" is
 // signal in this domain and is the input Sensing needs to decide what to
-// promote. Identity is the Timeline event id (ADR-0012).
+// promote. Identity is the Timeline event id (ADR-0112).
 func ContentHash(shape string, payload map[string]string) string {
 	keys := slices.Collect(maps.Keys(payload))
 	sort.Strings(keys)

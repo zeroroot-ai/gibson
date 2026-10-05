@@ -17,7 +17,7 @@ import (
 // voi_planner.go is gibson#283's gate/worker layer: it makes voi_plan.go's
 // PlanVoI LIVE against a running Engine, off the ~50ms tick, exactly mirroring
 // decider.go's own gate/worker split (DeciderGateSystem/DeciderWorker) —
-// ADR-0026 §1/§4's "off-tick", "recorded and replayable" requirements.
+// ADR-0126's "off-tick", "recorded and replayable" requirements.
 //
 //   - VoIGateSystem (mechanical, in-tick, quiescent) emits a VoIPlanRequested
 //     for a running goal mission when new evidence has landed and no plan is
@@ -28,7 +28,7 @@ import (
 //     VoIPlanInput from the engine's live ambient hosts + hypotheses + attack
 //     graph, calls PlanVoI, and Submits the ranked result as VoIPlanned.
 //
-// "Sequential planning via the closed loop" (ADR-0026 §4, and the overseer's
+// "Sequential planning via the closed loop" (ADR-0126, and the overseer's
 // explicit scope: "one-step-exact per node, sequence via the closed loop") is
 // this gate/worker cycle itself: every evidence change re-triggers a fresh
 // one-step-exact plan, rather than an internal multi-step search tree.
@@ -37,7 +37,7 @@ import (
 // the rest of the scope ledger): it does not dispatch anything. VoIPlanState
 // records the ranked top-k candidates for a mission — the "choice" AC3 asks
 // to be "recorded and replayable" — and each candidate now also carries its
-// resolved CoveringCapabilities (ADR-0035 decision 4, gibson#387's
+// resolved CoveringCapabilities (ADR-0135, gibson#387's
 // technique -> capability bridge, wired through catalog/hierarchy below), the
 // mapping from a VoICandidate to the dispatchable capabilities that can
 // address it. Refining that ranking into a multi-step plan is gibson#396's
@@ -75,7 +75,7 @@ func (VoIPlanRequested) Kind() string { return "voi.plan.requested" }
 // candidates PlanVoI produced (nil if the round failed — see VoIWorker.plan).
 // Recording the full candidate breakdown, not just a chosen id, is what makes
 // the plan auditable and its ranking reproducible from the same recorded
-// event on replay (ADR-0026 §3/§4).
+// event on replay (ADR-0126).
 type VoIPlanned struct {
 	MissionID  string
 	Cursor     int
@@ -190,7 +190,7 @@ type VoIWorker struct {
 	// catalog returns the mission's enrolled capability catalog (the same
 	// shape ExecutorDeps.Catalog supplies to DeciderWorker) — the set VoI
 	// dispatch gating's technique -> capability bridge resolves each
-	// candidate's CoveringCapabilities against (ADR-0035 decision 4,
+	// candidate's CoveringCapabilities against (ADR-0135,
 	// gibson#387). Never nil (NewVoIWorker defaults it).
 	catalog func(missionID string) []Capability
 	// hierarchy is the taxonomy technique hierarchy a candidate's Technique
@@ -199,10 +199,10 @@ type VoIWorker struct {
 	// default brainExecutor.agentCoverage uses to validate a capability's own
 	// declared coverage).
 	hierarchy *taxonomy.TechniqueHierarchy
-	// bamcp is the native BAMCP planner (ADR-0026 decision 4, gibson#396)
+	// bamcp is the native BAMCP planner (ADR-0126, gibson#396)
 	// that refines PlanVoI's one-step candidate ranking into a multi-step,
 	// model-uncertainty-aware one before it is Submitted. Never nil
-	// (NewVoIWorker defaults it via NewBAMCPPlanner) — ADR-0026 names BAMCP
+	// (NewVoIWorker defaults it via NewBAMCPPlanner) — ADR-0126 names BAMCP
 	// as the planner, not an optional refinement, so there is no "off" path.
 	bamcp *BAMCPPlanner
 
@@ -300,15 +300,15 @@ func voiPlanCursor(w *World, missionID string) int {
 	return 0
 }
 
-// buildInput gathers the mission's ambient-bounded candidate set (ADR-0026
-// §2): the ambient host slice (the same budget/curation the Decider itself
+// buildInput gathers the mission's ambient-bounded candidate set (ADR-0126):
+// the ambient host slice (the same budget/curation the Decider itself
 // reads, deciderHostBudget), every hypothesis (mirroring DeciderWorker's own
 // Findings() precedent — tenant-wide, since Mission carries no ScopeID to
 // filter by), and the current attack graph (DeriveAttackGraph over
 // HostsToInfraGraph, gibson#275/#286's live-wiring machinery, reused
 // unchanged) — plus the mission's capability catalog and the technique
 // hierarchy (vw.catalog/vw.hierarchy), so PlanVoI can resolve each
-// candidate's CoveringCapabilities (ADR-0035 decision 4, gibson#387).
+// candidate's CoveringCapabilities (ADR-0135, gibson#387).
 func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
 	nodes := HostsToInfraGraph(hosts)

@@ -16,7 +16,7 @@ import (
 type StoreFactory func(ctx context.Context, tenant string) TimelineStore
 
 // Registry holds one brain Engine per tenant and runs each engine's tick loop.
-// It is the daemon's entry point to the brain: live, per-tenant Worlds (ADR-0001:
+// It is the daemon's entry point to the brain: live, per-tenant Worlds (ADR-0101:
 // one World per tenant, never shared — no cross-tenant anything). The read path
 // (WorldService / TimelineService) and event ingest both go through here.
 type Registry struct {

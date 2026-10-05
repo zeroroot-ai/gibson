@@ -46,7 +46,7 @@ func TestGraphWrite_AdapterAllowedNeighbourIsNot(t *testing.T) {
 }
 
 // TestGraphWrite_MigrateExempt verifies cmd/gibson-migrate is untouched by the
-// rule — schema DDL is operational, outside the data plane (ADR-0012).
+// rule — schema DDL is operational, outside the data plane (ADR-0112).
 func TestGraphWrite_MigrateExempt(t *testing.T) {
 	testdata := analysistest.TestData()
 	// No `want` comments — an exempt path produces zero diagnostics.
@@ -55,15 +55,15 @@ func TestGraphWrite_MigrateExempt(t *testing.T) {
 }
 
 // TestGraphWrite_NoBaseline guards the decision that this analyzer ships with no
-// baseline (ADR-0012 step 5). A baseline is a list of exceptions that never
+// baseline (ADR-0112). A baseline is a list of exceptions that never
 // shrinks; if one is ever added, this test should be the thing that argues
 // against it rather than a comment nobody reads.
 func TestGraphWrite_NoBaseline(t *testing.T) {
 	if checks.GraphWriteAnalyzer.Flags.Lookup("baseline") != nil {
-		t.Fatal("graphwrite must not grow a baseline flag: by ADR-0012 step 5 there " +
+		t.Fatal("graphwrite must not grow a baseline flag: by ADR-0112 there " +
 			"are no pre-existing violations, and a baseline would only ever accumulate new ones")
 	}
-	if !strings.Contains(checks.GraphWriteAnalyzer.Doc, "ADR-0012") {
+	if !strings.Contains(checks.GraphWriteAnalyzer.Doc, "ADR-0112") {
 		t.Errorf("graphwrite doc must cite the ADR it enforces, got %q", checks.GraphWriteAnalyzer.Doc)
 	}
 }

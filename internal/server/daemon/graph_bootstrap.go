@@ -28,7 +28,7 @@ import (
 // for semantic querying and graph-based reasoning.
 type GraphBootstrapper struct {
 	graphClient graph.GraphClient
-	// graphWriter is the sole writer of a :Mission node (ADR-0012). The
+	// graphWriter is the sole writer of a :Mission node (ADR-0112). The
 	// bootstrap used to MERGE its own, on a different key and a different
 	// property name than the projector's; see gibson#551.
 	graphWriter GraphWriter

@@ -5,7 +5,7 @@
 
 // Package daemon — Setec-backed constructor for the ephemeral agent launcher.
 //
-// This mirrors NewSetecSandboxedExecutor for the agent-process path (ADR-0016,
+// This mirrors NewSetecSandboxedExecutor for the agent-process path (ADR-0116,
 // gibson#1596). It reuses the same setec gRPC client (NewSetecSandboxClient) —
 // an agent launch needs exactly the Launch / StreamLogs / Wait / Kill surface a
 // tool call needs — and wires a sandboxed.AgentLauncher over it.

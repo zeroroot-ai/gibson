@@ -128,7 +128,7 @@ func firstNonEmpty(vs ...string) string {
 // The target is read from the World's own mission record, not from the request,
 // for the reason CONTEXT.md gives for ScopeID: a caller that could name the
 // scope could point a fix job at findings it was never granted. A Finding's
-// ScopeID IS the target UUID (ADR-0002 makes host identity the (ScopeID,
+// ScopeID IS the target UUID (ADR-0102 makes host identity the (ScopeID,
 // Address) coordinate), so the match needs no new provenance.
 func openFindingsResolver(reg *brain.Registry) jobnode.FindingsResolver {
 	return jobnode.FindingsResolverFunc(func(_ context.Context, tenant, missionRunID string) ([]string, error) {

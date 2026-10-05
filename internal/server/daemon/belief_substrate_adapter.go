@@ -16,7 +16,7 @@ import (
 )
 
 // tenantRoutedBeliefSubstrate implements brain.BeliefSubstrate for
-// HarnessCallbackService.PlaceBet (ADR-0022, gibson#273/#278). PlaceBet
+// HarnessCallbackService.PlaceBet (ADR-0122, gibson#273/#278). PlaceBet
 // wires ONE BeliefSubstrate value shared across every tenant's calls, but
 // brain.WorldBeliefSubstrate is bound to a single *brain.Engine — one
 // tenant's World. This adapter closes that gap: it resolves the caller's
@@ -75,7 +75,7 @@ func (s *tenantRoutedBeliefSubstrate) SetBelief(ctx context.Context, ref brain.N
 }
 
 // wirePlaceBetBeliefSubstrate wires PlaceBet's belief substrate onto callback
-// (ADR-0022, ADR-0029 §3, gibson#273/#278): before this, PlaceBet always
+// (ADR-0122, ADR-0129, gibson#273/#278): before this, PlaceBet always
 // answered Unavailable — no daemon ever gave it a substrate to persist a
 // staked bet to. Extracted from daemon.go's Start() into its own function so
 // this wiring step is unit-testable independent of Start()'s much larger

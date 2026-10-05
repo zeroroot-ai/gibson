@@ -62,7 +62,7 @@ const maxSetecRecvMsgBytes = 4 * 1024 * 1024 // 4 MiB
 // are the sandboxed tool executor, the agent launcher (gibson#1596) and the
 // interactive session client. The catalog refresher that once used it to
 // launch `gibson-runner --list-tools` on a schedule is gone: tools are
-// manifest-seeded now (ADR-0017).
+// manifest-seeded now (ADR-0117).
 func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, error) {
 	tlsCfg, err := cfg.Setec.MTLS.BuildTLSConfig()
 	if err != nil {

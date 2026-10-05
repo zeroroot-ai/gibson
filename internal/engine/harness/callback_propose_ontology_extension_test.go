@@ -85,7 +85,7 @@ func proposeOntologyExtensionRequest(missionID, agentName string, kind harnesspb
 // awaitOntologyProposalRecurrence polls e's OntologyProposals for (kind,
 // label) until it reaches wantRecurrence, or fails the test —
 // Engine.ProposeOntologyExtension folds OntologyExtensionProposed
-// asynchronously through the normal single-writer Submit path (ADR-0001),
+// asynchronously through the normal single-writer Submit path (ADR-0101),
 // mirroring awaitProofSettlements.
 func awaitOntologyProposalRecurrence(t *testing.T, e *brain.Engine, label string, wantRecurrence int) []brain.OntologyProposalSnapshot {
 	t.Helper()
@@ -177,7 +177,7 @@ func TestProposeOntologyExtension_InvalidIdentifier_RejectedInBand(t *testing.T)
 // TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs proves the
 // full accept path: a valid identifier is accepted, folded through the real
 // Engine (not a mock), and recorded with recurrence 1 on the first sighting
-// and 2 on the second — the ADR-0024 §2 recurrence counting a later
+// and 2 on the second — the ADR-0124 recurrence counting a later
 // promotion (gibson#392) will read.
 func TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())

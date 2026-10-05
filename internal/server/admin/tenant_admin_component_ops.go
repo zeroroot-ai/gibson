@@ -371,7 +371,7 @@ func componentObjectRef(component string) (string, error) {
 	if component == "" {
 		return "", status.Error(codes.InvalidArgument, "a component reference is required")
 	}
-	// Canonicalize to component:<kind>/<name> (ADR-0015). This accepts an
+	// Canonicalize to component:<kind>/<name> (ADR-0136). This accepts an
 	// already-canonical ref, a kind-qualified "<kind>:<name>", or the legacy
 	// colon object, and fails closed on a bare, kind-less reference — the kind
 	// is part of the object identity, so "component:<name>" is not valid.

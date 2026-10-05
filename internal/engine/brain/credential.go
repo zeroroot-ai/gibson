@@ -10,7 +10,7 @@ import (
 )
 
 // Credential is a discovered-credential entity. Identity is (ScopeID, SecretHash)
-// — the hash, never the raw secret (ADR-0002 scope-relative; ADR-0007).
+// — the hash, never the raw secret (ADR-0102 scope-relative; ADR-0107).
 type Credential struct {
 	ID         uint64
 	ScopeID    string

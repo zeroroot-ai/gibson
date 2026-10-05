@@ -17,12 +17,12 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// belief.go is the belief field (ADR-0005) and the evidence-change gate that
+// belief.go is the belief field (ADR-0129) and the evidence-change gate that
 // keeps it current.
 //
 // Inference is slow — the real provider is an HTTP call to the pgmpy sidecar —
 // and the tick is ~50ms, so belief follows the same async-by-observation pattern
-// as the Decider (ADR-0004/0009):
+// as the Decider (ADR-0104/0109):
 //
 //   - BeliefSystem (mechanical, in-tick, quiescent) compares each host's current
 //     evidence with the evidence its outstanding score was requested for, and
@@ -35,7 +35,7 @@ import (
 // evidence moved on while the model was scoring is stale, and the reducer drops
 // it (the digest on the event no longer matches the host's outstanding request).
 
-// Belief is the attack-path belief over a target (ADR-0005): the one field with
+// Belief is the attack-path belief over a target (ADR-0129): the one field with
 // three uses (juicy-target score, prioritization, attention scope). It is derived
 // from evidence by a BeliefProvider and recorded on the entity. Model pins the
 // model version that produced it (replay reproduces; missions pin their version).
@@ -63,7 +63,7 @@ type BeliefEvidence struct {
 	// FindingCritical / FindingHigh report the highest severity of a confirmed,
 	// still-active finding on this host (gibson#478). ExploitDemonstrated reports
 	// that a bet settled TRUE against this host — a proof-of-demonstration
-	// exploit (ADR-0027), the strongest evidence for exploitable.
+	// exploit (ADR-0131), the strongest evidence for exploitable.
 	FindingCritical     bool `json:"finding_critical"`
 	FindingHigh         bool `json:"finding_high"`
 	ExploitDemonstrated bool `json:"exploit_demonstrated"`
@@ -109,8 +109,8 @@ func evidenceDigest(ev BeliefEvidence) string {
 
 // BeliefProvider scores attack-path beliefs from a host's evidence.
 //
-// The real implementation is nativeBelief (belief_native.go, ADR-0005,
-// ADR-0034): exact, read-only Bayesian inference computed in-process via
+// The real implementation is nativeBelief (belief_native.go, ADR-0129,
+// ADR-0134): exact, read-only Bayesian inference computed in-process via
 // internal/engine/brain/beliefvi — the native Go port that replaced the old
 // Python pgmpy sidecar (ADR-0027 hard cutover, gibson#377). This interface
 // is the seam attention (#751) and the Decider consume belief through.
@@ -119,7 +119,7 @@ func evidenceDigest(ev BeliefEvidence) string {
 type BeliefProvider interface {
 	Score(ev BeliefEvidence) Belief
 	// Version is the model artifact the provider currently scores against, so a
-	// mission can pin it at launch (ADR-0005 §5) and replay reproduces. The
+	// mission can pin it at launch (ADR-0134) and replay reproduces. The
 	// pgmpy provider returns its pinned/served version; the placeholder returns
 	// its static stand-in id.
 	Version() string
@@ -176,7 +176,7 @@ func applyBeliefScored(w *World, e BeliefScored) {
 
 // hostEvidenceKey is the scope-relative identity a finding or a demonstrated
 // exploit is correlated to a host by (gibson#478): the (ScopeID, Address) pair a
-// Finding carries and a Host is addressed by (ADR-0002, scope-relative identity).
+// Finding carries and a Host is addressed by (ADR-0102, scope-relative identity).
 func hostEvidenceKey(scopeID, address string) string {
 	return scopeID + "\x00" + address
 }
@@ -209,7 +209,7 @@ func findingSeverityByHost(w *World) (critical, high map[string]bool) {
 
 // demonstratedExploitByHost reports, per host key, whether a bet settled TRUE on
 // that host — a demonstrated exploit, the strongest evidence for exploitable
-// (ADR-0027 proof-of-demonstration, gibson#478). A BetSettlement is keyed by
+// (ADR-0131 proof-of-demonstration, gibson#478). A BetSettlement is keyed by
 // HypothesisID (bet_settlement.go), and a Hypothesis names the host its claim is
 // about through its References (hypothesis.go). The join is therefore
 // settlement -> (HypothesisID) hypothesis -> (a reference whose id-property value

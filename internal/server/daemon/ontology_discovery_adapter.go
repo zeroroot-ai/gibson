@@ -17,8 +17,8 @@ import (
 )
 
 // tenantRoutedOntologyDiscovery implements brain.OntologyDiscoveryEngine for
-// HarnessCallbackService.ProposeOntologyExtension (ADR-0024 §2, ADR-0033
-// decision 2, gibson#391), mirroring tenantRoutedProofSettlement
+// HarnessCallbackService.ProposeOntologyExtension (ADR-0124, ADR-0133,
+// gibson#391), mirroring tenantRoutedProofSettlement
 // (proof_settlement_adapter.go) exactly and for the same reason:
 // ProposeOntologyExtension wires ONE OntologyDiscoveryEngine value shared
 // across every tenant's calls, but *brain.Engine (and the
@@ -60,7 +60,7 @@ func (s *tenantRoutedOntologyDiscovery) ProposeOntologyExtension(
 var _ brain.OntologyDiscoveryEngine = (*tenantRoutedOntologyDiscovery)(nil)
 
 // wireOntologyDiscovery wires ProposeOntologyExtension's ontology-discovery
-// engine onto callback (ADR-0024 §2, ADR-0033 decision 2, gibson#391): before
+// engine onto callback (ADR-0124, ADR-0133, gibson#391): before
 // this, ProposeOntologyExtension always answered Unavailable — no daemon
 // ever gave it an engine to fold the proposal through ValidIdentifier and
 // PromotionGate.Observe. Extracted from daemon.go's Start() into its own

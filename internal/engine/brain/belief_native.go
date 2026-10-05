@@ -9,12 +9,12 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 )
 
-// belief_native.go is the real BeliefProvider (ADR-0005, ADR-0034): exact,
+// belief_native.go is the real BeliefProvider (ADR-0129, ADR-0134): exact,
 // read-only Bayesian inference over the attack-path network, computed
 // IN-PROCESS by internal/engine/brain/beliefvi and returning the three
 // posteriors (P(juicy)/P(exploitable)/P(reachable)).
 //
-// This replaces the Python pgmpy sidecar and its HTTP round-trip (ADR-0034,
+// This replaces the Python pgmpy sidecar and its HTTP round-trip (ADR-0134,
 // gibson#377, hard cutover per ADR-0027): beliefvi is a line-for-line port
 // of the sidecar's exact-inference algorithm (variable elimination), parity-
 // tested to 1e-12 against the pgmpy/numpy reference sidecar/belief/infer.py
@@ -25,7 +25,7 @@ import (
 //
 // Inference is exact (variable elimination) so the field is deterministic
 // and replay-reproducible, and read-only — the model never learns online
-// (training is a separate offline batch job, ADR-0005 §4, run by braintrain).
+// (training is a separate offline batch job, ADR-0129, run by braintrain).
 //
 // The provider records the model's version in Belief.Model, so each scored
 // host carries the version that produced it and replay reproduces it
@@ -36,7 +36,7 @@ type nativeBelief struct {
 }
 
 // NativeBeliefProvider returns a BeliefProvider backed by model, scoring
-// in-process via beliefvi (ADR-0034). priors (optional) supplies LLM
+// in-process via beliefvi (ADR-0134). priors (optional) supplies LLM
 // priors for novel nodes; nil disables that path.
 func NativeBeliefProvider(model *beliefvi.BeliefModel, priors PriorProvider) BeliefProvider {
 	return &nativeBelief{model: model, priors: priors}
@@ -92,11 +92,11 @@ func (p *nativeBelief) Score(ev BeliefEvidence) Belief {
 }
 
 // Version is the model artifact this provider scores against, for mission
-// pinning (ADR-0005 §5) and daemon startup logging.
+// pinning (ADR-0134) and daemon startup logging.
 func (p *nativeBelief) Version() string { return p.model.Version() }
 
 // PriorProvider supplies a prior for a *novel* node the network has no CPT for
-// (ADR-0005 §6: "the LLM fills gaps, not the math"). The native provider passes
+// (ADR-0134: "the LLM fills gaps, not the math"). The native provider passes
 // any node the model reports as novel to this seam; the returned priors feed
 // the next inference. A nil PriorProvider means novel nodes keep the model's
 // uninformed default — the math still runs, just without an LLM-estimated prior.

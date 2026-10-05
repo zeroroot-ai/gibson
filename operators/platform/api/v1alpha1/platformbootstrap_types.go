@@ -53,7 +53,7 @@ const (
 	// been copied to a destination declared in spec.unsealEscrow.
 	//
 	// Ready is gated on this, and that is the point (deploy#1629). Per
-	// ADR-0010 the platform MINTS the unseal key and no human ever types it,
+	// ADR-0075 the platform MINTS the unseal key and no human ever types it,
 	// which is the secure shape — a key an operator supplies exists in a
 	// terminal, a file and a CI variable, whereas a minted key exists only in
 	// etcd. But it leaves the key with no copy, and ADR-0075's restore drill

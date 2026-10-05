@@ -30,7 +30,7 @@ import (
 )
 
 // This file proves the gibson#380 fix for the streaming bypass named in
-// ADR-0030 §3: before this, CallToolProtoStream (the streaming counterpart of
+// ADR-0131: before this, CallToolProtoStream (the streaming counterpart of
 // CallToolProto) never called captureToolCall at all, on any outcome — a
 // streamed tool call could complete and hand the agent a real result with
 // zero independent flight-recorder record. See internal/engine/harness/

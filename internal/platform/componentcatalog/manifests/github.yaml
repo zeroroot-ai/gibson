@@ -1,4 +1,4 @@
-# GitHub connector — remote MCP, PAT-authenticated (ADR-0014/0015).
+# GitHub connector — remote MCP, PAT-authenticated (ADR-0114/0061).
 id: github
 kind: connector
 displayName: GitHub

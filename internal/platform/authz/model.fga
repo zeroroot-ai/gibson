@@ -26,7 +26,7 @@
 #                   cross-tenant platform-operator privilege
 # team            — a subdivision of a tenant for grouping users and controlling data access
 #
-# TENANT FOUR-TIER ROLE HIERARCHY (spec: tenant-role-taxonomy, ADR-0037)
+# TENANT FOUR-TIER ROLE HIERARCHY (spec: tenant-role-taxonomy, ADR-0093)
 # -----------------------------------------------------------------------
 # The tenant type exposes four user-facing roles in a strict computed-union
 # hierarchy. Roles are additive upward: an owner implicitly satisfies admin,
@@ -45,7 +45,7 @@
 #   writer (mid)     — tenant write-tier. Grants all write-path SDK RPCs
 #                      (CreateProvider, SaveMissionDraft, CreateAgentIdentity,
 #                      CreateMissionDefinition, etc.) without granting admin
-#                      privilege. ADR-0037: "writer is a tenant-scoped permission
+#                      privilege. ADR-0093: "writer is a tenant-scoped permission
 #                      level granted to tenant owners by design".
 #                      Direct grant OR inherited from admin (which includes owner).
 #                      Definition: [user] or admin
@@ -471,7 +471,7 @@ type plugin
     define belongs_to: [tenant]
     define can_invoke: [tool_principal, tenant#member]
 
-# bank — a pool of always-on coding agents with one owner (ADR-0019,
+# bank — a pool of always-on coding agents with one owner (ADR-0119,
 # gibson#1706). It is the object every BankService RPC authorizes against, and
 # the parent a job inherits from.
 #
@@ -506,7 +506,7 @@ type bank
     # can_read — see the bank and list its members.
     define can_read: [user, tenant#member, team#member] or can_send or owner
 
-# job — one unit of work a bank member holds (ADR-0019). Its parent is the
+# job — one unit of work a bank member holds (ADR-0119). Its parent is the
 # bank, so the rights a caller has on the bank carry to the jobs on it and no
 # per-job tuple is needed for the ordinary case.
 #

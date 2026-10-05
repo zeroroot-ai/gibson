@@ -1,4 +1,4 @@
-# Multi-stage build for the gibson connector-operator (ADR-0014).
+# Multi-stage build for the gibson connector-operator (ADR-0114).
 # ghcr.io/zeroroot-ai/mirror/golang:1.27.1-alpine, the one builder every
 # gibson image uses: the Go that go.mod names, kept equal by the org guard
 # (check-go-toolchain.sh, .github#22). GOTOOLCHAIN=local makes a mismatch

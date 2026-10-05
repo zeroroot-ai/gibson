@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package liveagents holds the daemon's in-memory registry of running agent
-// instances and their live structured-event feeds (ADR-0016 S11, gibson#1599).
+// instances and their live structured-event feeds (ADR-0116 S11, gibson#1599).
 //
 // While a sandboxed agent runs, the launcher tees the agent's structured
 // output (opencode NDJSON) into this registry. A read-only surface
@@ -67,7 +67,7 @@ type Instance struct {
 	// SandboxID is the setec sandbox backing this run, for operator diagnostics.
 	SandboxID string
 	// SandboxClass is the setec SandboxClass the run was launched under
-	// (ADR-0016 decision 4). It names the isolation posture, so a viewer can
+	// (ADR-0116). It names the isolation posture, so a viewer can
 	// see what a run is confined by, not only that it is confined.
 	SandboxClass string
 	// ComponentKind is what kind of component is running: "agent" or "tool".
@@ -212,7 +212,7 @@ func (r *Registry) List(tenant string) []Instance {
 // from one that never existed, so the surface never leaks another tenant's run
 // ids.
 // Publish appends one event to a running instance's feed from outside the
-// launcher: the daemon's own job and member-status lines (ADR-0019,
+// launcher: the daemon's own job and member-status lines (ADR-0119,
 // gibson#1716). A console reading the member's stream sees them in order with
 // the agent's own output. ErrInstanceNotFound when the run is not live.
 func (r *Registry) Publish(tenant, runID string, data []byte) error {

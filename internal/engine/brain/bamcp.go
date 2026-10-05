@@ -17,7 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
-// bamcp.go is gibson#396 (ADR-0026 decision 4/5/6, ADR-0037 decision 4): the
+// bamcp.go is gibson#396 (ADR-0126, ADR-0137): the
 // native Go BAMCP (Bayes-Adaptive Monte Carlo Planning) implementation
 // voi_score.go's own doc comment named as future work -- "a genuine BAMCP
 // implementation needs a generative belief-network simulator and a
@@ -30,7 +30,7 @@ import (
 // real one -- the day it does, only the EdgeStrengthPosteriorProvider passed
 // to NewBAMCPPlanner changes, never this file's rollout/sampling code.
 //
-// ADR-0026 decision 4 calls for full multi-step sequential planning "off-tick
+// ADR-0126 calls for full multi-step sequential planning "off-tick
 // ... it plans over the belief network as the simulator, samples promising
 // trajectories deep." PlanVoI (voi_plan.go) already computes the one-step-
 // exact candidate set VoI dispatch gating gates on (decision 1); BAMCPPlanner
@@ -44,23 +44,23 @@ import (
 //     number.
 //  2. For each candidate, run Config.Simulations independent rollouts: each
 //     draws a fresh Thompson sample of every enablement edge's Beta
-//     posterior (ADR-0037 decision 4 -- "BAMCP Thompson-samples the full
+//     posterior (ADR-0137 -- "BAMCP Thompson-samples the full
 //     posterior for model-uncertainty planning"), ancestrally samples one
 //     entire possible world from the resulting noisy-OR network
 //     (bamcpSampleWorld -- the generative simulator), then walks a fixed,
 //     Value-ranked sequence of candidates starting from the one under
-//     evaluation, accumulating discounted reward (ADR-0026 decision 6:
+//     evaluation, accumulating discounted reward (ADR-0126:
 //     heavily-weighted info-gain shaping plus a terminal bonus for a
 //     demonstrated finding).
 //  3. Average the Config.Simulations returns into the candidate's
-//     PlannedValue, re-rank by it, and truncate to topK -- ADR-0026 decision
-//     1's "the planner computes the top-k" is this step.
+//     PlannedValue, re-rank by it, and truncate to topK -- ADR-0126's
+//     "the planner computes the top-k" is this step.
 //
-// "Fully Bayesian, no UCB" (ADR-0026): action selection never uses a UCB1
+// "Fully Bayesian, no UCB" (ADR-0126): action selection never uses a UCB1
 // exploration bonus. Instead every simulation samples ONE full model
 // instantiation from the posterior and acts w.r.t. it (bamcpSampleWorld) --
 // that IS Thompson sampling, applied at the model-uncertainty layer instead
-// of at a tree-policy layer, which is exactly what ADR-0037 decision 4 asks
+// of at a tree-policy layer, which is exactly what ADR-0137 asks
 // the planner to do with the learned posterior.
 //
 // Determinism (this issue's hard acceptance criterion): every random draw in
@@ -78,7 +78,7 @@ const (
 	// DefaultBAMCPSimulations is the number of Monte Carlo rollouts averaged
 	// per root candidate. BAMCP's model uncertainty comes entirely from the
 	// Thompson-sampled edge posteriors (there is no UCB bonus to smooth
-	// noise, ADR-0026), so enough rollouts must run to average that sampling
+	// noise, ADR-0126), so enough rollouts must run to average that sampling
 	// noise out; a few hundred is the range Bayes-Adaptive MCP literature
 	// reports for a branching factor this small (the ambient-bounded slice,
 	// at most a few dozen candidates) converging comfortably, while staying
@@ -87,8 +87,8 @@ const (
 	DefaultBAMCPSimulations = 200
 
 	// DefaultBAMCPDepth bounds how many candidates one rollout resolves
-	// after (and including) its root action -- the planning horizon ADR-0026
-	// decision 4 calls "a receding horizon." 3 matches the depth of the
+	// after (and including) its root action -- the planning horizon ADR-0126
+	// calls "a receding horizon." 3 matches the depth of the
 	// seed belief chain this codebase grounds today (Host's
 	// reachable -> exploitable -> juicy is 3 variables deep,
 	// belief_slice_native.go) -- deep enough for a rollout to see a root
@@ -98,7 +98,7 @@ const (
 	DefaultBAMCPDepth = 3
 
 	// DefaultBAMCPDiscount is the per-step reward discount (gamma).
-	// ADR-0026 decision 6 asks for "a long horizon" balanced against
+	// ADR-0126 asks for "a long horizon" balanced against
 	// "it commits" -- 0.9 keeps a reward 3 steps out (DefaultBAMCPDepth)
 	// worth 0.9^3 ~= 73% of an immediate one: distant reward still counts
 	// for a lot, without letting an arbitrarily deep hypothetical step
@@ -106,8 +106,8 @@ const (
 	DefaultBAMCPDiscount = 0.9
 
 	// DefaultBAMCPTerminalReward is the bonus a rollout step earns when its
-	// candidate's simulated outcome resolves true -- ADR-0026 decision 6's
-	// "terminal reward for a demonstrated finding" (ADR-0027 proof-of-
+	// candidate's simulated outcome resolves true -- ADR-0126's
+	// "terminal reward for a demonstrated finding" (ADR-0131 proof-of-
 	// demonstration, gibson repo numbering). It is set well above a typical
 	// one-step VoICandidate.Value (an entropy-bits-per-cost ratio, small and
 	// bounded in practice) so a rollout that actually resolves a finding
@@ -117,7 +117,7 @@ const (
 
 	// DefaultBAMCPInfoGainWeight heavily weights the one-step VoICandidate
 	// value (info gain + surprise, voi_score.go) as the rollout's per-step
-	// shaping reward -- ADR-0026 decision 6's "heavily-weighted info-gain /
+	// shaping reward -- ADR-0126's "heavily-weighted info-gain /
 	// novelty shaping." Paired with DefaultBAMCPTerminalReward so that
 	// resolving two or three above-average candidates in a row can rival one
 	// terminal bonus: exploration is rewarded richly at every step, but a
@@ -127,7 +127,7 @@ const (
 	// uninformativeBetaAlpha/uninformativeBetaBeta are the cold-start Beta
 	// prior parameters BAMCP Thompson-samples for an enablement-edge type
 	// braintrain (gibson#395, not yet built) has no fitted posterior for.
-	// ADR-0037 decision 3 names Beta(1,1) (uniform) or Jeffreys Beta(1/2,1/2)
+	// ADR-0137 names Beta(1,1) (uniform) or Jeffreys Beta(1/2,1/2)
 	// as the two defensible uninformative choices, both mean 0.5 -- the same
 	// mean UninformativePriorStrength already encodes for exact inference
 	// (belief_slice_native.go). Beta(1,1) is picked over Jeffreys here
@@ -135,17 +135,17 @@ const (
 	// than only reading its mean: Jeffreys is U-shaped (density concentrates
 	// near 0 and 1), which would make an untrained edge type's sampled
 	// strength swing to the extremes far more often than the flat uniform
-	// prior -- the same "no data yet, do not overclaim" caution ADR-0037
+	// prior -- the same "no data yet, do not overclaim" caution ADR-0137
 	// applies to the mean, extended to the SHAPE of what gets sampled.
 	uninformativeBetaAlpha = 1.0
 	uninformativeBetaBeta  = 1.0
 )
 
 // EdgeStrengthPosterior is the Beta(Alpha, Beta) posterior BAMCP Thompson-
-// samples for one enablement-edge TYPE's noisy-OR strength (ADR-0037
-// decision 4). Its mean (Alpha/(Alpha+Beta)) is what exact inference
+// samples for one enablement-edge TYPE's noisy-OR strength (ADR-0137).
+// Its mean (Alpha/(Alpha+Beta)) is what exact inference
 // consumes today via UninformativePriorStrength; BAMCP consumes the whole
-// distribution, which is exactly ADR-0037 decision 4's "one output, two
+// distribution, which is exactly ADR-0137's "one output, two
 // uses."
 type EdgeStrengthPosterior struct {
 	Alpha float64
@@ -163,7 +163,7 @@ func (p EdgeStrengthPosterior) sample(rng *rand.Rand) float64 {
 
 // Mean returns the posterior's mean, Alpha/(Alpha+Beta) -- the noisy-OR
 // strength EXACT inference consumes (belief_slice_native.go's
-// groundAttackGraph), the other of ADR-0037 decision 4's "one output, two
+// groundAttackGraph), the other of ADR-0137's "one output, two
 // uses" (sample is the Thompson-sampling use BAMCP's rollouts need). Both
 // methods read the SAME posterior; braintrain (gibson#395) fits the one
 // artifact both consume.
@@ -182,12 +182,12 @@ type EdgeStrengthPosteriorProvider interface {
 }
 
 // PinnedEdgeStrengthPosteriorProvider is an EdgeStrengthPosteriorProvider
-// fitted from a versioned artifact (ADR-0037 decisions 2 and 5, gibson#395):
+// fitted from a versioned artifact (ADR-0137, gibson#395):
 // braintrain's per-tenant edge-posterior artifact, versioned exactly like the
 // belief-CPT model (braintrain.NextVersion / braintrain.NextEdgePosteriorVersion).
 // NativeSliceBeliefProvider (belief_slice_native.go) accepts this richer
 // interface, not the plain EdgeStrengthPosteriorProvider BAMCP uses, because
-// it stamps Version() onto every scored node's Belief.Model -- ADR-0005 §5's
+// it stamps Version() onto every scored node's Belief.Model -- ADR-0134's
 // "it is a RECORD, not a selector" discipline, applied to the slice belief
 // path: a mission's recorded Timeline events, not a re-loaded file, are what
 // replay reproduces from. UninformativeEdgePosteriors does not implement
@@ -202,7 +202,7 @@ type PinnedEdgeStrengthPosteriorProvider interface {
 
 // UninformativeEdgePosteriors is the cold-start EdgeStrengthPosteriorProvider:
 // every edge type, known or not, gets the same uninformative Beta(1,1) prior
-// (ADR-0037 decision 3).
+// (ADR-0137).
 type UninformativeEdgePosteriors struct{}
 
 // Posterior implements EdgeStrengthPosteriorProvider.
@@ -210,7 +210,7 @@ func (UninformativeEdgePosteriors) Posterior(string) EdgeStrengthPosterior {
 	return EdgeStrengthPosterior{Alpha: uninformativeBetaAlpha, Beta: uninformativeBetaBeta}
 }
 
-// BAMCPConfig names every tunable of a BAMCP rollout (ADR-0026 decisions 4
+// BAMCPConfig names every tunable of a BAMCP rollout (ADR-0126
 // and 6). See the Default* constants above for each field's justification;
 // DefaultBAMCPConfig returns the values this package ships wired with
 // (internal/server/daemon/belief_provider.go).
@@ -266,7 +266,7 @@ func (cfg BAMCPConfig) sanitized() BAMCPConfig {
 	return cfg
 }
 
-// BAMCPPlanner is the native Go BAMCP implementation (ADR-0026 decision 4):
+// BAMCPPlanner is the native Go BAMCP implementation (ADR-0126):
 // it refines PlanVoI's one-step-exact candidate ranking into a multi-step,
 // model-uncertainty-aware one. gibson#396's scope is the planner itself,
 // seeded and deterministic; refusing dispatch outside its ranked top-k output
@@ -312,7 +312,7 @@ func BAMCPSeed(missionID string, cursor int) uint64 {
 // from seed so the same (in, seed) pair always reproduces the identical
 // rollouts and therefore an identical ranking. It returns the same
 // []VoICandidate shape voi_planner.go already Submits as VoIPlanned --
-// re-ranked and truncated to topK, which IS ADR-0026 decision 1's "the
+// re-ranked and truncated to topK, which IS ADR-0126's "the
 // planner computes the top-k" now that this planner exists.
 func (p *BAMCPPlanner) Plan(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, scorer VoIScorer, topK int, seed uint64) ([]VoICandidate, error) {
 	candidates, err := PlanVoI(ctx, in, substrate, scorer, 0)
@@ -413,7 +413,7 @@ func bamcpRolloutSequence(candidates []VoICandidate, root, depth int) []int {
 // bamcpRolloutReturn walks seq (bamcpRolloutSequence's fixed policy) over one
 // already-sampled possible world (realized, from bamcpSampleWorld), summing
 // discounted reward: InfoGainWeight * the candidate's one-step VoICandidate
-// value (ADR-0026 decision 6's heavily-weighted shaping term) plus
+// value (ADR-0126's heavily-weighted shaping term) plus
 // TerminalReward when this rollout's sampled outcome for that candidate
 // resolves true (the terminal, demonstrated-finding bonus).
 func bamcpRolloutReturn(
@@ -476,7 +476,7 @@ func bamcpOutcome(
 }
 
 // bamcpVar is one grounded belief variable, ready for ancestral (generative)
-// sampling: its ground name, its fixed-strength intra-node causes (ADR-0037
+// sampling: its ground name, its fixed-strength intra-node causes (ADR-0137
 // scopes the learned posterior to ENABLEMENT edges only, so an intra-node
 // DependsOn parent keeps UninformativePriorStrength here exactly as
 // groundAttackGraph already gives it for exact inference), and its cross-node
@@ -643,8 +643,8 @@ func bamcpTopoOrder(vars []bamcpVar) []string {
 	return order
 }
 
-// bamcpSampleWorld draws one Thompson-sampled possible world (ADR-0026
-// decision 4/5, ADR-0037 decision 4): every edge cause's strength is drawn
+// bamcpSampleWorld draws one Thompson-sampled possible world (ADR-0126,
+// ADR-0137): every edge cause's strength is drawn
 // fresh from posteriors (model uncertainty); every intra-node cause keeps its
 // fixed structural strength (see bamcpVar's doc comment). Each variable is
 // then sampled by the exact generative process noisy-OR factorizes into

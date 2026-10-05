@@ -79,7 +79,7 @@ func TestWorldView_EmptyWorldIsNotAnError(t *testing.T) {
 
 // TestWorldView_AttributionComesFromTheMissionRecord: the tenant and scope the
 // source is queried with are read off the daemon's mission record, never off the
-// request, so an agent cannot widen its slice (ADR-0012).
+// request, so an agent cannot widen its slice (ADR-0112).
 func TestWorldView_AttributionComesFromTheMissionRecord(t *testing.T) {
 	mid := types.NewID()
 	target := types.NewID()

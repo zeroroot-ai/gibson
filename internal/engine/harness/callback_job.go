@@ -3,7 +3,7 @@
 
 // Package harness — callback_job.go
 //
-// The member-facing half of the job surface (ADR-0019, gibson#1711).
+// The member-facing half of the job surface (ADR-0119, gibson#1711).
 //
 // A bank member never accepts an inbound connection. It pulls: it takes the
 // next queued job of its own bank, it follows its own inbox, and it reports
@@ -129,7 +129,7 @@ func (noBankSurface) Mint(capabilitygrant.MintRequest) (string, error) { return 
 func (noBankSurface) PublishMemberEvent(context.Context, string, string, []byte) {}
 
 // MemberEventSink carries the job lines the daemon emits onto a member's
-// console stream (ADR-0019 decision 13, gibson#1716): a console following a
+// console stream (ADR-0119, gibson#1716): a console following a
 // member sees the jobs it takes, the inputs it gets, the states it reports and
 // the deliverables it records, in order with the agent's own output.
 type MemberEventSink interface {
@@ -267,12 +267,12 @@ func (s *HarnessCallbackService) PullJob(ctx context.Context, req *harnesspb.Pul
 // the grant of the dispatch that sent it.
 //
 // The stream is outbound-only and the member pulls it: the sandbox never
-// accepts a connection (ADR-0019 decision 6). An input stays on the stream
+// accepts a connection (ADR-0119). An input stays on the stream
 // until the member reports the job state that acknowledges it, so a reconnect
 // replays exactly what was not run.
 //
 // One subscriber per member. The member driver is the one reader, and it hands
-// each turn's grant to the localhost MCP server itself (ADR-0019 decision 2).
+// each turn's grant to the localhost MCP server itself (ADR-0119).
 // A second reader would race the first: an input the driver acknowledged by
 // reporting the job state before the second reader's next poll would never
 // reach it, and a turn grant that reached only one of the two processes is a

@@ -469,7 +469,7 @@ func TestIngestLifecycleEntityProducesTheTypedEntity(t *testing.T) {
 // TestIngestLifecycleEntityOutsideTheTaxonomyStillLands: the gate is the reason
 // an unknown shape is never dropped. A label the Taxonomy does not admit is not
 // an error and not a silent loss — it becomes an Observation, exactly as a
-// novel shape from any other reporter does (ADR-0012).
+// novel shape from any other reporter does (ADR-0112).
 func TestIngestLifecycleEntityOutsideTheTaxonomyStillLands(t *testing.T) {
 	reg := brain.NewRegistry(context.Background())
 	sink := ingestObservation(reg)

@@ -10,7 +10,7 @@ import (
 )
 
 // calibration.go is gibson#284: the reliability/calibration metric
-// (ADR-0022, ADR-0006) — "does 0.8 mean 80% in reality?" — the number that
+// (ADR-0122, ADR-0106) — "does 0.8 mean 80% in reality?" — the number that
 // answers a skeptic. It is pure read-side aggregation over two views that
 // already exist and are independently owned:
 //
@@ -40,7 +40,7 @@ import (
 // bet's Hypothesis. So a FALSE- or HITL-settled bet is attributed to its
 // technique's own bucket here, not only to the tenant-wide Overall. A
 // settlement whose Hypothesis named no technique (or is unknown) still counts
-// toward Overall — a miss is real, recorded evidence (ADR-0023) — but falls
+// toward Overall — a miss is real, recorded evidence (ADR-0123) — but falls
 // into no per-technique bucket, since the grouping key
 // (BetSettlementSnapshot.Technique) is empty; that is surfaced, not hidden.
 //

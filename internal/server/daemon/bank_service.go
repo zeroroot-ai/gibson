@@ -4,7 +4,7 @@
 // Package daemon — bank_service.go
 //
 // bankServer implements gibson.bank.v1.BankService: the declarative resource
-// behind banks of always-on coding agents (ADR-0019, gibson#1708).
+// behind banks of always-on coding agents (ADR-0119, gibson#1708).
 //
 // A bank says how many members should run, who owns them, and how they
 // authenticate. Nothing here launches a sandbox. The reconciler reads these

@@ -160,11 +160,11 @@ type missionManager struct {
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
 	// graphWriter is the graph projector — the sole writer of the per-tenant
-	// knowledge graph (ADR-0012). The per-run graph bootstrap needs it to ensure
+	// knowledge graph (ADR-0112). The per-run graph bootstrap needs it to ensure
 	// the run's :Mission node; it used to MERGE its own (gibson#551).
 	graphWriter GraphWriter
 	// beliefVersion is the belief-model version the brain currently scores against
-	// (ADR-0005 §5). Stamped onto each mission at projection so the mission records
+	// (ADR-0134). Stamped onto each mission at projection so the mission records
 	// the model it ran under and replay reproduces. Empty → no pinned model.
 	beliefVersion string
 
@@ -1085,7 +1085,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// The brain is the engine: project the CUE mission into the tenant's World and
 	// let the scheduler (scripted graph) + Decider (goal-directed) drive it. Agents
 	// are dispatched via the mission harness; observations/findings flow back through
-	// the harness callback path into the same World (ADR-0001/0007).
+	// the harness callback path into the same World (ADR-0101/0107).
 	var finalStatus mission.MissionStatus
 	var errorMsg string
 	var missionDuration time.Duration
@@ -1103,7 +1103,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	})
 	defer m.brainExecutor.unregister(missionID)
 
-	// Pin the belief-model version onto the mission (ADR-0005 §5): the mission
+	// Pin the belief-model version onto the mission (ADR-0134): the mission
 	// records the model it ran under so replay re-loads the exact artifact.
 	proj.BeliefModel = m.beliefVersion
 	// Carry display metadata so the World is the single source of truth for

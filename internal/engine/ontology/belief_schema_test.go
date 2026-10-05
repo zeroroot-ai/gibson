@@ -111,7 +111,7 @@ func TestBeliefSchemaRegistry_EnablementEdgeTypes_Sorted(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// Multiple extensions merge additively (ADR-0024 discoverable ontology: a
+// Multiple extensions merge additively (ADR-0124 discoverable ontology: a
 // later Pack extends the schema without a code change to an earlier one).
 // -----------------------------------------------------------------------
 
@@ -353,7 +353,7 @@ func TestBeliefSchemaRegistry_EnablementEdgeTargetVariable_UnknownEdgeIsNotOK(t 
 }
 
 // -----------------------------------------------------------------------
-// Seed content (ADR-0029 §2, §7)
+// Seed content (ADR-0129)
 // -----------------------------------------------------------------------
 
 func TestSeedBeliefSchemaExtension_HostIsBeliefBearingWithThreeVariables(t *testing.T) {
@@ -393,7 +393,7 @@ func TestSeedBeliefSchemaExtension_EnablementEdgesAreValidTaxonomyRelationshipTy
 }
 
 func TestSeedBeliefSchemaExtension_EnablementEdgesTargetDeclaredHostVariables(t *testing.T) {
-	// ADR-0037 decision 1: every seed edge type must feed a variable Host
+	// ADR-0137: every seed edge type must feed a variable Host
 	// (the seed's only belief-bearing node type) actually declares — a
 	// target_variable dangling on nothing would ground to nothing.
 	seed := SeedBeliefSchemaExtension()

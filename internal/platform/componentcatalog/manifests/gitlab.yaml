@@ -1,4 +1,4 @@
-# GitLab connector — remote MCP proxied by ToolHive (ADR-0014/0015).
+# GitLab connector — remote MCP proxied by ToolHive (ADR-0114/0061).
 id: gitlab
 kind: connector
 displayName: GitLab

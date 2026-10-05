@@ -3,18 +3,18 @@
 
 // Package daemon — connector_token_materializer.go
 //
-// The daemon-side adapter for reconciler.Materializer (ADR-0015). The token
+// The daemon-side adapter for reconciler.Materializer (ADR-0061). The token
 // reconciler keeps each oauth connector's access token fresh in the tenant
 // secret store; this adapter publishes that token into the Kubernetes Secret
 // the ToolHive proxy mounts, so the proxy pod can start and the
 // ConnectorInstance leaves Provisioning and reaches Active.
 //
 // The daemon writes the Secret directly — no RPC ever returns the token, and
-// there is no ESO step (ADR-0015). The Secret VALUE is the full header
+// there is no ESO step (ADR-0061). The Secret VALUE is the full header
 // "Bearer <token>"; its ownerReference points at the ConnectorInstance CR so
 // Kubernetes garbage-collects it on connector delete.
 //
-// There is no fallback cache (ADR-0015 decision 4). The platform's own expiry
+// There is no fallback cache (ADR-0061). The platform's own expiry
 // bookkeeping decides whether a token may be published at all: past expiry the
 // adapter withdraws the Secret instead of leaving a dead bearer token mounted,
 // so a revoked grant or an unreachable tenant store fails closed. Recovery is
@@ -84,8 +84,8 @@ func (m *connectorTokenMaterializer) clock() time.Time {
 // with an ownerReference to the ConnectorInstance CR — or withdraws that
 // Secret when the stored token is past expiry.
 //
-// The expiry check comes first and it is the fail-closed rule (ADR-0015
-// decision 4): a token the refresher can no longer renew must stop being
+// The expiry check comes first and it is the fail-closed rule (ADR-0061):
+// a token the refresher can no longer renew must stop being
 // served, not linger in the Secret as a cache. So the adapter publishes a live
 // token, withdraws a dead one, and waits when the platform has no bookkeeping
 // to prove either.

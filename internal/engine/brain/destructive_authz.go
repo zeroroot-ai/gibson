@@ -3,34 +3,34 @@
 
 package brain
 
-// destructive_authz.go implements ADR-0028's per-action destructive-proof
-// authorization gate (gibson#336), wired the way ADR-0032 (gibson#390)
+// destructive_authz.go implements ADR-0132's per-action destructive-proof
+// authorization gate (gibson#336), wired the way ADR-0132 (gibson#390)
 // corrects it: the gate sits BEFORE the destructive act, not at settlement.
 //
-// Originally (ADR-0028's first wiring) Authorize queued a pending request
+// Originally (ADR-0132's first wiring) Authorize queued a pending request
 // and blocked the ONE goroutine attempting that one destructive settlement
 // until a human decision landed. That gated *accepting the proof*, which is
 // too late — the irreversible act had already happened by the time
-// SettleBetTrue ran. ADR-0032 splits the single blocking call into two
+// SettleBetTrue ran. ADR-0132 splits the single blocking call into two
 // non-blocking halves:
 //
 //   - Request (called from the RequestDestructiveAuthorization RPC,
 //     internal/engine/harness) enqueues the pending request and returns
 //     immediately, BEFORE the agent performs the destructive act. The fleet
-//     keeps working while the decision is pending (ADR-0028's own intent).
+//     keeps working while the decision is pending (ADR-0132's own intent).
 //   - Verify (SettleBetTrue's DestructiveProofAuthorizer, bet_settlement.go)
 //     reads back the recorded decision at settlement time — by then the
 //     agent has already performed the act and read back an approval, so
 //     this is a check of an existing fact, never a live ask.
 //
 // Decide (the dashboard's ApproveDestructiveAction/DenyDestructiveAction
-// backing call, gibson#342) is the one thing both halves share (ADR-0032
-// decision 4, "one authorization path"): it folds a DestructiveActionDecided
+// backing call, gibson#342) is the one thing both halves share (ADR-0132,
+// "one authorization path"): it folds a DestructiveActionDecided
 // fact that Verify later reads. There is no live in-memory hand-off left to
 // coordinate — nothing blocks anymore — so Decide operates purely off the
 // durable DestructiveAction World record (via DestructiveActionRequested /
 // DestructiveActionDecided, folded through the normal Reduce path,
-// ADR-0007): restart-durable, replayable, and the single source of truth
+// ADR-0107): restart-durable, replayable, and the single source of truth
 // for both Verify and ListPendingDestructiveActions.
 //
 // Identity is HypothesisID — the SAME identifier BetSettlement uses
@@ -50,7 +50,7 @@ import (
 )
 
 // DestructiveAction is the per-bet destructive-proof authorization record
-// (ADR-0028). Identity is HypothesisID.
+// (ADR-0132). Identity is HypothesisID.
 type DestructiveAction struct {
 	HypothesisID  string
 	Tenant        string
@@ -74,8 +74,8 @@ type DestructiveAction struct {
 }
 
 // DestructiveActionRequested records that a destructive proof-of-demonstration
-// attempt is awaiting human authorization (ADR-0028). It folds through the
-// normal Observe-shaped reducer path (ADR-0007), so it is replayable like any
+// attempt is awaiting human authorization (ADR-0132). It folds through the
+// normal Observe-shaped reducer path (ADR-0107), so it is replayable like any
 // other event.
 type DestructiveActionRequested struct {
 	HypothesisID      string
@@ -123,7 +123,7 @@ func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
 }
 
 // DestructiveActionDecided records a human's approve/deny verdict for one
-// pending destructive action (ADR-0028 decision 3). It folds through the
+// pending destructive action (ADR-0132). It folds through the
 // normal reducer path, so replay reproduces the decision exactly — replay
 // re-applies this already-decided fact, it never re-runs Request/Decide.
 type DestructiveActionDecided struct {
@@ -221,7 +221,7 @@ func (e *Engine) DestructiveActionSnapshot() []DestructiveActionSnapshot {
 // ErrDestructiveActionPending means Verify found no recorded human decision
 // yet for the named hypothesis — a pending request with no decision, or no
 // request at all. SubmitProof (internal/engine/harness/callback_submit_proof.go)
-// treats this specially (ADR-0032): it is the caller's routine cue that the
+// treats this specially (ADR-0132): it is the caller's routine cue that the
 // bet stays open, never a system failure.
 var ErrDestructiveActionPending = errors.New("brain: destructive proof authorization is still pending")
 
@@ -231,7 +231,7 @@ var ErrDestructiveActionPending = errors.New("brain: destructive proof authoriza
 // this way, and SubmitProof reports it in-band rather than retrying.
 var ErrDestructiveActionDenied = errors.New("brain: destructive proof authorization was denied")
 
-// DestructiveAuthorizationQueue is the concrete ADR-0028/ADR-0032
+// DestructiveAuthorizationQueue is the concrete ADR-0132
 // implementation split across three roles, all reading and writing the SAME
 // durable DestructiveAction World record (decision 4, "one authorization
 // path"):
@@ -291,7 +291,7 @@ func (e *Engine) DestructiveAuthorizationQueue() *DestructiveAuthorizationQueue 
 }
 
 // DestructiveAuthorizationRequest carries what Request (the
-// RequestDestructiveAuthorization RPC's backing call, ADR-0032 decision 1,
+// RequestDestructiveAuthorization RPC's backing call, ADR-0132,
 // gibson#390) needs to enqueue a pending destructive action BEFORE the agent
 // performs it — the same identifying facts DestructiveActionRequested folds.
 type DestructiveAuthorizationRequest struct {
@@ -303,7 +303,7 @@ type DestructiveAuthorizationRequest struct {
 }
 
 // Request enqueues req as a pending destructive action and returns
-// immediately (ADR-0032 decision 1): the fleet keeps working while a human
+// immediately (ADR-0132): the fleet keeps working while a human
 // decides, because by construction the agent has not yet performed the
 // destructive act — it asks first. This is the non-blocking replacement for
 // the superseded blocking Authorize: nothing here waits on a channel, and
@@ -338,13 +338,13 @@ func (q *DestructiveAuthorizationQueue) Request(tenant string, req DestructiveAu
 	return req.HypothesisID, nil
 }
 
-// Verify implements the ADR-0032 request-then-verify shape of
+// Verify implements the ADR-0132 request-then-verify shape of
 // DestructiveProofAuthorizer (bet_settlement.go). It reads the durable
 // DestructiveActionDecided fact recorded for req.HypothesisID and approves
 // settlement only when that decision was an approval; it never blocks and
 // never asks a human live — by the time SettleBetTrue calls this, the agent
 // has already performed the destructive act and read back an approval
-// (ADR-0032 decision 1), so this is a check of an existing fact.
+// (ADR-0132), so this is a check of an existing fact.
 //
 //   - No request was ever made, or one is pending with no decision yet:
 //     returns ErrDestructiveActionPending.
@@ -386,9 +386,9 @@ func (q *DestructiveAuthorizationQueue) Pending() []DestructiveActionSnapshot {
 	return out
 }
 
-// Decide records a human's approve/deny verdict for hypothesisID (ADR-0028
-// decision 3): ApproveDestructiveAction/DenyDestructiveAction's backing call.
-// It reads the durable World record directly: since ADR-0032 moved
+// Decide records a human's approve/deny verdict for hypothesisID (ADR-0132):
+// ApproveDestructiveAction/DenyDestructiveAction's backing call.
+// It reads the durable World record directly: since ADR-0132 moved
 // authorization to the non-blocking request-then-verify shape above, there
 // is no live goroutine left to unblock the way the superseded blocking
 // Authorize needed Decide to find. An unknown hypothesis id is refused, and

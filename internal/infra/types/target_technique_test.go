@@ -10,7 +10,7 @@ import (
 // This file tests TechniqueType directly, in the package that owns it.
 //
 // TechniqueType degraded from "the technique authority" to "the core pack's
-// category seed" under ADR-0035 (gibson#379/#385): the taxonomy
+// category seed" under ADR-0135 (gibson#379/#385): the taxonomy
 // (internal/engine/taxonomy, TechniqueHierarchy/GlobalTechniques) is the
 // authority now, and every consumer that used to key on this enum keys on a
 // taxonomy.CategoryID instead. The enum's eight values, String, and

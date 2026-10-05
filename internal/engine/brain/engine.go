@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// TickInterval is the clock-tick period (ADR-0004): ~one gRPC round-trip, the
+// TickInterval is the clock-tick period (ADR-0104): ~one gRPC round-trip, the
 // fastest an external result can arrive. Ticking faster polls for nothing.
 const TickInterval = 50 * time.Millisecond
 
@@ -28,12 +28,12 @@ const intakeBuffer = 4096
 // non-quiescent system that emits an event every call (a programming error).
 const maxSweeps = 1024
 
-// System is a unit of behavior over the World (ADR-0001): it reads the World and
+// System is a unit of behavior over the World (ADR-0101): it reads the World and
 // returns domain events to apply. Systems must be **quiescent** — once their work
 // is reflected in the World they return no events — so a tick settles.
 type System func(*World) []Event
 
-// Engine drives the brain as a clock-tick game loop (ADR-0004). Each Tick drains
+// Engine drives the brain as a clock-tick game loop (ADR-0104). Each Tick drains
 // the intake queue and runs the systems, sweeping to quiescence so an in-memory
 // cascade settles within one tick. The Engine owns the single-writer reducer:
 // only Tick/Run mutate the World, so concurrent producers Submit (enqueue) and
@@ -43,7 +43,7 @@ type Engine struct {
 	Timeline    *Timeline
 	intake      chan Event
 	systems     []System
-	subscribers []func(Event) // live-only event taps (ADR-0009); never fire on Replay
+	subscribers []func(Event) // live-only event taps (ADR-0109); never fire on Replay
 
 	// store is the durable-log seam (ADR-0011). Nil when no durable store is
 	// configured (in-memory only, backward-compatible). Set via WithStore.
@@ -64,7 +64,7 @@ type Engine struct {
 	mu sync.RWMutex
 
 	// destructiveAuthzOnce/destructiveAuthz lazily construct this engine's
-	// DestructiveAuthorizationQueue (ADR-0028, gibson#336) on first access via
+	// DestructiveAuthorizationQueue (ADR-0132, gibson#336) on first access via
 	// DestructiveAuthorizationQueue() — see destructive_authz.go. Lazy because
 	// most engines never see a destructive proof request.
 	destructiveAuthzOnce sync.Once
@@ -102,7 +102,7 @@ func (e *Engine) AddSystem(s System) { e.systems = append(e.systems, s) }
 
 // Subscribe registers a live-only event tap, invoked (in Timeline order, inside
 // the tick) for every event applied during Tick — but NEVER during Replay, since
-// Replay re-folds the Timeline without effects (ADR-0009). The tap must not block
+// Replay re-folds the Timeline without effects (ADR-0109). The tap must not block
 // or do I/O (it runs under the tick lock); buffer and act off the tick. Used by
 // the dispatch effect-handler.
 //
@@ -247,7 +247,7 @@ func (e *Engine) Run(ctx context.Context) {
 // Hydrate holds the write lock for the fold so concurrent reads (from gRPC
 // handlers that happen to race the hydration) see a consistent World. Effects
 // (subscribers) are intentionally NOT fired during the fold — they are live-only
-// by ADR-0009. In-flight work left `running` in the recovered World is failed
+// by ADR-0109. In-flight work left `running` in the recovered World is failed
 // via ResumeFailInFlight events, which ARE submitted to the live intake queue so
 // the retry system and mission-completion system run on the next tick.
 //
@@ -316,7 +316,7 @@ func (e *Engine) Hydrate(ctx context.Context) {
 	// Fail any work that was `running` when the daemon crashed — a crash IS a
 	// failure (ADR-0011 decision 5). Submit them to the live intake queue so the
 	// retry System / Decider re-engage on the next tick without re-firing the
-	// original dispatch (effects are live-only, ADR-0009).
+	// original dispatch (effects are live-only, ADR-0109).
 	for _, failEv := range ResumeFailInFlight(e.World) {
 		// Non-blocking: we are not yet running (called before go e.Run(ctx)), so
 		// the intake channel has no consumer. Use a direct append so these failure
@@ -333,7 +333,7 @@ func (e *Engine) Hydrate(ctx context.Context) {
 
 // RewindTo makes the frame after folding the first n Timeline events the new live
 // state: it truncates the Timeline to n events and rebuilds the World by replay
-// (ADR-0001: World == fold(Timeline)). Brain-native rewind — the durable record IS
+// (ADR-0101: World == fold(Timeline)). Brain-native rewind — the durable record IS
 // the Timeline, so rewinding is discarding the tail and re-folding; no checkpoint
 // store. n is clamped to [0, len(Timeline)].
 //
@@ -390,7 +390,7 @@ func (e *Engine) Findings() []FindingSnapshot {
 	return e.World.FindingSnapshot()
 }
 
-// Labels returns the tenant's pooled review labels (ADR-0006) in deterministic
+// Labels returns the tenant's pooled review labels (ADR-0106) in deterministic
 // order — the HITL training signal the offline trainer consumes.
 func (e *Engine) Labels() []LabelSnapshot {
 	e.mu.RLock()
@@ -436,7 +436,7 @@ func (e *Engine) Accounts() []AccountSnapshot {
 }
 
 // Observations returns the current out-of-taxonomy observation snapshots
-// (ADR-0012).
+// (ADR-0112).
 func (e *Engine) Observations() []ObservationSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -458,7 +458,7 @@ func (e *Engine) AgentRuns() []AgentRunSnapshot {
 	return e.World.AgentRunSnapshot()
 }
 
-// Hypotheses returns the current hypothesis snapshots (ADR-0021, gibson#265)
+// Hypotheses returns the current hypothesis snapshots (ADR-0121, gibson#265)
 // in deterministic (scope, claim) order — the Hypothesis provenance class,
 // distinct from both Evidence and Belief.
 func (e *Engine) Hypotheses() []HypothesisSnapshot {
@@ -468,7 +468,7 @@ func (e *Engine) Hypotheses() []HypothesisSnapshot {
 }
 
 // VoIPlanSnapshot returns every mission's current value-of-information
-// planning state (ADR-0026, gibson#283) in deterministic (MissionID) order —
+// planning state (ADR-0126, gibson#283) in deterministic (MissionID) order —
 // the read accessor a caller (a test, or a future admin surface) uses to
 // observe VoIGateSystem/VoIWorker's live output without reaching into World
 // directly.
@@ -487,7 +487,7 @@ func (e *Engine) LlmCalls() []LlmCallSnapshot {
 	return e.World.LlmCallSnapshot()
 }
 
-// AgentToolCalls returns the mission's captured tool I/O (ADR-0020, gibson#271)
+// AgentToolCalls returns the mission's captured tool I/O (ADR-0120, gibson#271)
 // in deterministic order — the flight recorder's tool-call counterpart to
 // LlmCalls.
 func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
@@ -497,14 +497,14 @@ func (e *Engine) AgentToolCalls() []AgentToolCallSnapshot {
 }
 
 // FlightRecorderPolicy returns the tenant's current retention/redaction policy
-// (ADR-0020, gibson#271).
+// (ADR-0120, gibson#271).
 func (e *Engine) FlightRecorderPolicy() FlightRecorderPolicy {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.FlightRecorderPolicy()
 }
 
-// DomainPacks returns the tenant's currently enabled Domain Packs (ADR-0033,
+// DomainPacks returns the tenant's currently enabled Domain Packs (ADR-0133,
 // gibson#381).
 func (e *Engine) DomainPacks() []DomainPackSnapshot {
 	e.mu.RLock()
@@ -520,7 +520,7 @@ func (e *Engine) Events() []Event {
 }
 
 // FrameAt returns the World as of folding the first n Timeline events — a replay
-// frame (ADR-0001: World == fold(Timeline)). It is a fresh, independent fold, so
+// frame (ADR-0101: World == fold(Timeline)). It is a fresh, independent fold, so
 // it never touches the live World and is safe to call concurrently with the tick.
 // n is clamped to [0, len(Timeline)]; FrameAt(len) reproduces the live World.
 func (e *Engine) FrameAt(n int) *World {

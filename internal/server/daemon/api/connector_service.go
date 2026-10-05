@@ -21,7 +21,7 @@ import (
 )
 
 // CatalogGate is the narrow authorizer slice the connector service needs for
-// the platform catalog gate (ADR-0067, closing the ADR-0014 TODO): is a
+// the platform catalog gate (ADR-0067, closing the ADR-0114 TODO): is a
 // catalog entry platform_enabled? The full authz.Authorizer satisfies it.
 type CatalogGate interface {
 	Check(ctx context.Context, user, relation, object string) (bool, error)
@@ -33,7 +33,7 @@ type CatalogGate interface {
 const systemTenantRef = "system_tenant:_system"
 
 // ConnectorService is the daemon API a person drives to enable and manage
-// third-party MCP connectors (ADR-0014). It serves the connector lifecycle:
+// third-party MCP connectors (ADR-0114). It serves the connector lifecycle:
 // catalog, enable, list, disable. The RPC is the source of truth; the gibson
 // CLI and the dashboard are thin clients of it.
 //

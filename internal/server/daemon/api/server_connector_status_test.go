@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // server_connector_status_test.go — the operator-scoped GetConnectorAuthStatus
-// (ADR-0015 decision 4): it delegates to the same status view the dashboard
+// (ADR-0061): it delegates to the same status view the dashboard
 // reads with the tenant carried explicitly, and answers Unavailable when no
 // reader is wired, so the controller never reports a health nobody checked.
 package api

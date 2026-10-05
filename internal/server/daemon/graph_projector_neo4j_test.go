@@ -30,7 +30,7 @@ func (s failingSession) ExecuteWrite(context.Context, neo4j.ManagedTransactionWo
 func (failingSession) Close(context.Context) error { return nil }
 
 // TestNeo4jGraphWriter_UpsertMission_NilNeo4j_NoError exercises UpsertMission
-// end to end (gibson#1254/ADR-0012): the mission MERGE moved here from the
+// end to end (gibson#1254/ADR-0112): the mission MERGE moved here from the
 // CreateMission RPC handler, which is now the projector's job to run through
 // the shared exec path like every other projection. When Neo4j is not
 // configured for the tenant, exec's nil guard must make this a no-op, not an

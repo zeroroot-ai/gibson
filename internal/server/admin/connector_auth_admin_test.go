@@ -866,7 +866,7 @@ func TestFinishAuthorization_RequiresAConfiguredStore(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// SetConnectorSecret (ADR-0015 — auth: secret connectors)
+// SetConnectorSecret (ADR-0061 — auth: secret connectors)
 // ---------------------------------------------------------------------------
 
 // A static credential lands in the connector's access secret — the same name
@@ -1076,7 +1076,7 @@ func (f *failingPutStore) Delete(ctx context.Context, name string) error {
 }
 
 // ---------------------------------------------------------------------------
-// Revoke (shared by the tenant RPC and the operator finalizer, ADR-0015 §5)
+// Revoke (shared by the tenant RPC and the operator finalizer, ADR-0061)
 // ---------------------------------------------------------------------------
 
 // A broker failure on the grant read is NOT the idempotent no-grant case: the
@@ -1128,7 +1128,7 @@ func (f *failingResolveStore) Resolve(_ context.Context, _ string) ([]byte, erro
 	return nil, errors.New("broker unavailable")
 }
 
-// --- ADR-0015 decision 4: the operator reads the same view as the dashboard
+// --- ADR-0061: the operator reads the same view as the dashboard
 
 // AuthStatus is the tenant-explicit half the connector-operator calls. It must
 // answer exactly what the tenant-scoped RPC answers, because two surfaces that

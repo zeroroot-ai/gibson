@@ -14,7 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
-// decider.go is the LLM decision loop (ADR-0001/0004, CONTEXT.md). It fits a slow
+// decider.go is the LLM decision loop (ADR-0101/0104, CONTEXT.md). It fits a slow
 // LLM call to the ~50ms tick by the async-by-observation pattern:
 //
 //   - DeciderGateSystem (mechanical, in-tick, quiescent) emits a DecisionRequested
@@ -35,8 +35,8 @@ type Capability struct {
 	Description string
 	InputSchema string // for tools/plugins (gibson#848); empty for agents
 
-	// Coverage is the capability's declared technique coverage (ADR-0035
-	// decision 4, gibson#386): the taxonomy categories and/or fine-grained
+	// Coverage is the capability's declared technique coverage (ADR-0135,
+	// gibson#386): the taxonomy categories and/or fine-grained
 	// techniques this capability can address. The zero value is empty
 	// coverage — a capability that has not declared any. #387 resolves a
 	// VoI candidate's technique to its category and matches it against
@@ -132,7 +132,7 @@ func (DecisionCompleted) Kind() string { return "decision.completed" }
 // dispatched is recorded as Dispatches, and a decision that ends the mission
 // carries the completion reason as Rationale. It introduces no new event kind —
 // it is a projection over the existing decision / dispatch / mission-done events,
-// so the read-only-projection invariant (ADR-0001) holds.
+// so the read-only-projection invariant (ADR-0101) holds.
 type DecisionRecord struct {
 	ID         string // deterministic per mission: "<MissionID>#d<ordinal>"
 	MissionID  string
@@ -406,8 +406,8 @@ func validateDispatch(d DeciderDispatch, catalog []Capability) bool {
 }
 
 // voiGatedDispatch reports whether d's target capability is covered by
-// missionID's current VoI top-k — gibson#397's hard enforcement of ADR-0026
-// decision 1 ("the LLM Decider picks from that set and cannot go outside it")
+// missionID's current VoI top-k — gibson#397's hard enforcement of ADR-0126
+// ("the LLM Decider picks from that set and cannot go outside it")
 // over gibson#387's technique -> capability bridge (VoICandidate.
 // CoveringCapabilities, voi_dispatch.go). This is a HARD gate (ADR-0027): there
 // is no flag to turn it off and no fallback path that lets a dispatch through

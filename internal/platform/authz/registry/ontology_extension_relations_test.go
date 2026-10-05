@@ -4,7 +4,7 @@
 package registry_test
 
 // ontology_extension_relations_test.go pins the tenant-owner approval gate
-// for OntologyExtensionService (ADR-0033 decisions 2-3, gibson#392): the
+// for OntologyExtensionService (ADR-0133, gibson#392): the
 // registry IS the deny contract ext-authz enforces (see
 // ownership_relations_test.go's own doc), so this is the "not-authorized"
 // test for a non-owner (e.g. a plain tenant Admin or a member/agent) caller
@@ -25,7 +25,7 @@ func TestApproveOntologyExtensionProposalRequiresOwnerRelation(t *testing.T) {
 		t.Fatalf("%s: missing from the generated registry", rpc)
 	}
 	if entry.Relation != "owner" {
-		t.Errorf("%s: relation = %q, want %q (ADR-0033 decision 3: explicit TENANT-OWNER approval, not a plain admin/member/agent)",
+		t.Errorf("%s: relation = %q, want %q (ADR-0133: explicit TENANT-OWNER approval, not a plain admin/member/agent)",
 			rpc, entry.Relation, "owner")
 	}
 	if entry.ObjectType != "tenant" {
@@ -45,14 +45,14 @@ func TestRejectOntologyExtensionProposalRequiresOwnerRelation(t *testing.T) {
 		t.Fatalf("%s: missing from the generated registry", rpc)
 	}
 	if entry.Relation != "owner" {
-		t.Errorf("%s: relation = %q, want %q (ADR-0033 decision 3: explicit TENANT-OWNER approval, not a plain admin/member/agent)",
+		t.Errorf("%s: relation = %q, want %q (ADR-0133: explicit TENANT-OWNER approval, not a plain admin/member/agent)",
 			rpc, entry.Relation, "owner")
 	}
 }
 
 // TestListOntologyExtensionProposalsStaysAdminGated pins that visibility into
 // the proposal queue is available to any tenant Admin (a broader relation
-// than the strict "owner" gate Approve/Reject require) — ADR-0033's "the
+// than the strict "owner" gate Approve/Reject require) — ADR-0133's "the
 // tenant owner seeing every proposal" does not preclude an admin assisting
 // them from also seeing the queue; only the DECISION is owner-exclusive.
 func TestListOntologyExtensionProposalsStaysAdminGated(t *testing.T) {

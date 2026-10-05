@@ -2,10 +2,10 @@
 // Copyright 2026 Zero Root AI
 
 // Package brain — ontology_extension_upstream.go: the tenant-owner "submit
-// upstream" action (ADR-0033 decision 2's final arrow, gibson#393, epic
+// upstream" action (ADR-0133's final arrow, gibson#393, epic
 // #376).
 //
-// ADR-0033's full lifecycle is "Agent captures -> proposal -> explicit
+// ADR-0133's full lifecycle is "Agent captures -> proposal -> explicit
 // tenant-owner approval -> tenant extension (live, per-tenant,
 // mission-pinned) -> owner 'submit upstream' -> contribution (a PR into the
 // SDK, which anyone may open) -> platform-owner review + merge + rollout ->
@@ -46,8 +46,8 @@ const upstreamContributionPackVersion = 1
 
 // OntologyProposalNotPromotedError is returned by SubmitOntologyExtensionUpstream
 // when (kind, label) names a proposal this tenant's World has observed, but
-// which is not yet promoted into a live tenant extension (ADR-0033 decision
-// 3: "Submit-upstream is available only from a live tenant extension — a
+// which is not yet promoted into a live tenant extension (ADR-0133:
+// "Submit-upstream is available only from a live tenant extension — a
 // tenant vouches for it by using it first"). Approved-but-not-yet-settled and
 // still-pending proposals both refuse this way; Status distinguishes them for
 // the caller's error message.
@@ -67,10 +67,10 @@ func (e *OntologyProposalNotPromotedError) Error() string {
 
 // SubmitOntologyExtensionUpstream is the entry point the tenant-owner-gated
 // OntologyExtensionService.SubmitOntologyExtensionUpstream RPC calls
-// (gibson#393, ADR-0033 decision 2): render a LIVE tenant extension — a
-// proposal that has already been promoted (state.Promoted, ADR-0033 decision
-// 3) — as an ontology.DomainPack contribution fragment: pure data (ADR-0033
-// decision 1), never code, in the exact JSON shape ExportDomainPack/Import
+// (gibson#393, ADR-0133): render a LIVE tenant extension — a
+// proposal that has already been promoted (state.Promoted, ADR-0133)
+// — as an ontology.DomainPack contribution fragment: pure data (ADR-0133),
+// never code, in the exact JSON shape ExportDomainPack/Import
 // already establish as this platform's one Domain Pack source format
 // (gibson#378).
 //
@@ -82,13 +82,13 @@ func (e *OntologyProposalNotPromotedError) Error() string {
 // structure for external review — it never itself changes this tenant's
 // World.
 //
-// The returned pack's Author identifies the submitting tenant (ADR-0033
-// decision 1: "the tenant that proposed a tenant extension"); Visibility is
+// The returned pack's Author identifies the submitting tenant (ADR-0133:
+// "the tenant that proposed a tenant extension"); Visibility is
 // deliberately left unclassified (the zero value) rather than "private" or
 // "public" — a contribution candidate is neither yet: DomainPack.Validate
 // documents the zero value as exactly this "not yet classified" case, and
 // classification as public is the platform owner's decision at PR-review time
-// (ADR-0033 decision 6), not this tenant's.
+// (ADR-0133), not this tenant's.
 func (e *Engine) SubmitOntologyExtensionUpstream(_ context.Context, kind taxonomy.ProposalKind, label string) (*ontology.DomainPack, error) {
 	if err := taxonomy.ValidIdentifier(label); err != nil {
 		return nil, &taxonomy.InvalidProposalError{Kind: kind, Label: label, Err: err}

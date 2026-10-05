@@ -6,14 +6,14 @@ package brain
 import "sort"
 
 // belief_slice.go extracts the bounded, per-node slice belief is actually
-// computed over (ADR-0029 §4-5, gibson#287): a target node's belief depends
+// computed over (ADR-0129-5, gibson#287): a target node's belief depends
 // on what enables reaching it, never the whole graph, so inference runs on a
 // bounded neighborhood "toward" the target rather than the full attack graph
 // DeriveAttackGraph derives (gibson#286).
 //
 // The whole-graph DAG is already acyclic, and any subgraph of a DAG is itself
 // acyclic — so, unlike DeriveAttackGraph, this file runs no cycle-breaking of
-// its own. ADR-0029 §4's "a back-edge dropped in one node's slice is a
+// its own. ADR-0129's "a back-edge dropped in one node's slice is a
 // forward edge in another's" describes cycle-breaking done per-slice directly
 // against a cyclic infra graph; this codebase instead derives one global DAG
 // once (gibson#286) and slices THAT, which is a strictly simpler, equally
@@ -23,17 +23,17 @@ import "sort"
 
 // SliceOptions bounds how far ExtractBoundedSlice expands from its target and
 // how large the result may grow before relevance-based pruning kicks in
-// (ADR-0029 §5). Both bounds are independent: MaxDepth is a hard cutoff on
+// (ADR-0129). Both bounds are independent: MaxDepth is a hard cutoff on
 // enablement-edge hops, evaluated first; NodeBudget then trims however many
 // nodes MaxDepth left, by relevance. A non-positive value means "no bound on
 // this dimension" (the sibling bound still applies) — the same convention
 // ambient.go's AmbientProjection budget uses.
 //
-// NodeBudget is a node-count budget, the practical stand-in ADR-0029 §5 names
+// NodeBudget is a node-count budget, the practical stand-in ADR-0129 names
 // alongside an actual treewidth bound: a literal tree-decomposition width
 // bound needs its own (NP-hard in general) decomposition step, which nothing
 // in this slice's acceptance criteria calls for — "the bound lives in the
-// scope" (ADR-0029 §5), and a node count is a simple, sufficient scope bound.
+// scope" (ADR-0129), and a node count is a simple, sufficient scope bound.
 type SliceOptions struct {
 	MaxDepth   int
 	NodeBudget int

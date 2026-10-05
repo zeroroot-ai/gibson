@@ -10,7 +10,7 @@ import (
 
 // TestAttention_SurpriseBoost: a surprised (contradiction) host gets the same
 // belief as its non-surprised twin but a higher attention — the surprise input
-// boosts it (ADR-0005/0006: attention = belief field + surprise).
+// boosts it (ADR-0129/0106: attention = belief field + surprise).
 func TestAttention_SurpriseBoost(t *testing.T) {
 	e, bw := beliefEngine(deterministicBelief{})
 

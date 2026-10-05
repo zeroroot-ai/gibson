@@ -20,7 +20,7 @@ import (
 
 // ErrMissionInputAmbiguous is returned when a caller names both a checked-in
 // mission and supplies its own graph, or neither. One RPC carries two ways of
-// saying what to run, and exactly one of them must be used (ADR-0018).
+// saying what to run, and exactly one of them must be used (ADR-0118).
 var ErrMissionInputAmbiguous = errors.New("mission origination needs exactly one of mission_definition_json or catalog_mission")
 
 // nullJSONBody is what a naive client sends when it marshals a nil mission
@@ -45,7 +45,7 @@ func suppliedGraph(body string) bool {
 // It is a pure function of the request so the rules below are testable without
 // a harness, a parent mission, or a daemon.
 //
-// The catalog path is what makes ADR-0018 true. Before it, the checked-in
+// The catalog path is what makes ADR-0118 true. Before it, the checked-in
 // definition was authoritative in prose only — nothing could reference it, so
 // the always-on agent kept a second copy of the graph, which is the duplicate
 // ADR-0027 forbids.

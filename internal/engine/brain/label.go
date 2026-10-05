@@ -11,7 +11,7 @@ import (
 )
 
 // LabelVerdict is the human judgement applied to a surfaced surprise or Finding
-// (ADR-0006: the HITL label source). It is the gold-signal companion to the
+// (ADR-0106: the HITL label source). It is the gold-signal companion to the
 // free-but-noisy AUTO outcomes the trainer also consumes.
 type LabelVerdict string
 
@@ -36,14 +36,14 @@ var validVerdicts = map[LabelVerdict]bool{
 func ValidVerdict(v LabelVerdict) bool { return validVerdicts[v] }
 
 // Label is a human review judgement on a surfaced item (a Finding or a
-// surprised host), recorded in the per-tenant World (ADR-0006).
+// surprised host), recorded in the per-tenant World (ADR-0106).
 //
 // Tenant isolation is structural, not a field check: a Label only ever exists in
-// one tenant's World/Timeline (one World per tenant — ADR-0001), so labels
+// one tenant's World/Timeline (one World per tenant — ADR-0101), so labels
 // **never** cross tenants and never feed the curated base model. WITHIN a tenant
 // they pool across all that tenant's users — UserID is provenance only, NOT a
 // partition key; the trainer reads every label in the tenant's log regardless of
-// which user applied it (ADR-0006 §6).
+// which user applied it (ADR-0106).
 type Label struct {
 	TargetID string       // the labelled item: a Finding id, or a surprise host id
 	Verdict  LabelVerdict // true_positive / false_positive / dismiss
@@ -64,7 +64,7 @@ type LabelSnapshot struct {
 // LabelApplied records a human review judgement as a Timeline event. Like every
 // brain write it flows through an event so it is logged, tenant-scoped, and
 // replay-reproducible. Applying a label is **never** a runtime gate: the event is
-// appended asynchronously and the mission never waits on it (ADR-0006 §2).
+// appended asynchronously and the mission never waits on it (ADR-0106).
 type LabelApplied struct {
 	TargetID string
 	Verdict  LabelVerdict
@@ -122,7 +122,7 @@ func (w *World) LabelSnapshot() []LabelSnapshot {
 
 // ReviewItem is one entry in the HITL review queue: a surfaced surprise or a
 // Finding awaiting (or carrying) a human label. The queue is a read-only
-// projection — it never blocks a mission (ADR-0006 §2).
+// projection — it never blocks a mission (ADR-0106).
 type ReviewItem struct {
 	TargetID string // Finding id or surprise host id (the label target)
 	Kind     string // "finding" or "surprise"

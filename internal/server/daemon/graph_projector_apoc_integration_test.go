@@ -21,7 +21,7 @@ import (
 )
 
 // Host projection against a real Neo4j provisioned the way the tenant operator
-// provisions one (ADR-0012, gibson#1257).
+// provisions one (ADR-0112, gibson#1257).
 //
 // The unit tests next door can only say the label is passed as a parameter.
 // Whether Neo4j then treats it as a label NAME rather than as Cypher, and

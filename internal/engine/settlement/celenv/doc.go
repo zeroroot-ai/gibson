@@ -2,11 +2,11 @@
 // Copyright 2026 Zero Root AI
 
 // Package celenv is the gibson-owned CEL environment a Domain Pack's
-// settlement predicate compiles and evaluates against (ADR-0031, gibson#388,
-// epic #376). ADR-0031 decision 1 makes a Pack's Predicates map
+// settlement predicate compiles and evaluates against (ADR-0131, gibson#388,
+// epic #376). ADR-0131 makes a Pack's Predicates map
 // (internal/engine/ontology.DomainPack.Predicates, gibson#398) the SOLE
 // binding source for a technique's success predicate: no Go evaluator is
-// ever registered per technique. ADR-0031 decision 2 makes the environment
+// ever registered per technique. ADR-0131 makes the environment
 // itself — the evidence schema plus a curated helper-function catalog — the
 // seam gibson owns and version-controls; a predicate that stays within it
 // compiles, type-checks, and evaluates with no gibson change at all.
@@ -19,7 +19,7 @@
 //     evidence.go), plus the helper-function catalog in functions.go
 //     (evidenceText, regexMatch, jsonPath, httpStatus, markerPresent).
 //   - [Compile] parses, type-checks, and builds an executable program from
-//     one predicate expression. It fails closed (ADR-0031 decision 2): a
+//     one predicate expression. It fails closed (ADR-0131): a
 //     reference to any variable or function the environment does not
 //     declare is a compile-time "undeclared reference" error, never a
 //     silently-wrong runtime answer, and a predicate whose checked result
@@ -33,8 +33,8 @@
 //
 // # Safety
 //
-// CEL is non-Turing-complete and terminating, with no side effects (ADR-0031
-// decision 4): evaluating an untrusted pack's expression is bounded and
+// CEL is non-Turing-complete and terminating, with no side effects (ADR-0131):
+// evaluating an untrusted pack's expression is bounded and
 // safe by construction. [EvaluationCostLimit] is a defense-in-depth ceiling
 // on top of that, not what makes evaluation safe to begin with — it mirrors
 // the same conservative limit internal/engine/brain/condition.go already

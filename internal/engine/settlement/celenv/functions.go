@@ -17,7 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 )
 
-// Function names in the curated helper catalog (ADR-0031 decision 2). A
+// Function names in the curated helper catalog (ADR-0131). A
 // pack predicate names exactly these; anything else fails Compile with an
 // "undeclared reference" error.
 const (
@@ -29,11 +29,11 @@ const (
 )
 
 // helperFunctionOptions returns the curated helper-function catalog
-// (ADR-0031 decision 2): the small, fixed set of operations a settlement
+// (ADR-0131): the small, fixed set of operations a settlement
 // predicate may use to read one evidence item, alongside the plain
 // type/title/content/timestamp field access [EvidenceMapType] already
 // allows. Extending this catalog is the only thing that ever needs gibson
-// code (ADR-0031 decision 3) — a pack predicate can never add its own
+// code (ADR-0131) — a pack predicate can never add its own
 // function.
 //
 //   - evidenceText(evidence_item) -> string: a plain-text rendering of one

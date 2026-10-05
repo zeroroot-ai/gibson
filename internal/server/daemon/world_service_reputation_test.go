@@ -26,7 +26,7 @@ func TestGetReputation_TenantScoped(t *testing.T) {
 	acme := reg.For("acme")
 	acme.Submit(brain.BetSettledTrue{HypothesisID: "h1", Technique: "T1190", ScopeID: "net-a"})
 
-	// Settlement folds asynchronously (ADR-0001): wait for it to land before
+	// Settlement folds asynchronously (ADR-0101): wait for it to land before
 	// aggregating it.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && len(acme.BetSettlements()) == 0 {

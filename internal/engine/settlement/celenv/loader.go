@@ -15,13 +15,13 @@ import (
 var ErrNilDomainPack = errors.New("celenv: domain pack must not be nil")
 
 // LoadDomainPack compiles and type-checks every predicate expression in
-// pack.Predicates (ADR-0031 decision 1, gibson#398) against the
+// pack.Predicates (ADR-0131, gibson#398) against the
 // gibson-owned CEL environment ([NewEnv]), returning them keyed by
 // technique name. It builds one environment and reuses it across every
 // predicate in the pack, rather than paying [NewEnv]'s declaration cost once
 // per technique.
 //
-// LoadDomainPack fails closed (ADR-0031 decisions 1 and 2), with no partial
+// LoadDomainPack fails closed (ADR-0131), with no partial
 // result:
 //   - pack.Validate() runs first, so a pack with a structurally malformed
 //     predicate (wrong technique-name shape, non-UTF-8 or over-length

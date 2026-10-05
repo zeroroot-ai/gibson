@@ -13,7 +13,7 @@ import (
 )
 
 // registerOntologyExtension registers gibson.tenant.v1.OntologyExtensionService
-// on srv (ADR-0024 §2, ADR-0033 decisions 2-3, gibson#392; decision 2's
+// on srv (ADR-0124, ADR-0133, gibson#392; the
 // "submit upstream" arrow, gibson#393): the tenant owner's review of
 // agent-proposed Taxonomy extensions, plus rendering an already-live one as
 // an SDK pack contribution. The service submits OntologyExtensionApproved/
@@ -35,5 +35,5 @@ func (d *daemonImpl) registerOntologyExtension(ctx context.Context, srv *grpc.Se
 		return
 	}
 	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry))
-	d.logger.Info(ctx, "OntologyExtensionService registered (ADR-0033, gibson#392)")
+	d.logger.Info(ctx, "OntologyExtensionService registered (ADR-0133, gibson#392)")
 }

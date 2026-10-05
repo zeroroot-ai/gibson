@@ -5,7 +5,7 @@ package connectorauth
 
 // authorize.go owns the FRONT half of a connector's OAuth grant: the daemon
 // runs the whole authorization-code flow itself so no human pastes a URL and
-// no local listener runs by hand (ADR-0014, "What ConnectorAuthService must
+// no local listener runs by hand (ADR-0114, "What ConnectorAuthService must
 // change").
 //
 // The daemon:
@@ -465,7 +465,7 @@ func ExchangeCode(ctx context.Context, client *http.Client, pa *PendingAuthoriza
 	}
 	if tr.RefreshToken == "" {
 		// Without a refresh token the daemon cannot own the rotation, which is
-		// the whole point (ADR-0014). Request offline access on the scope.
+		// the whole point (ADR-0114). Request offline access on the scope.
 		return nil, fmt.Errorf("connectorauth: connector %q code exchange returned no refresh_token", pa.Connector)
 	}
 

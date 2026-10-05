@@ -93,7 +93,7 @@ type DefaultAgentHarness struct {
 	metrics    MetricsRecorder
 	tokenUsage llm.TokenTracker
 
-	// delegationSink folds agent-delegation run-provenance into the World (ADR-0007).
+	// delegationSink folds agent-delegation run-provenance into the World (ADR-0107).
 	delegationSink DelegationSink
 
 	// Mission management (optional, nil = mission methods return error)
@@ -136,7 +136,7 @@ type DefaultAgentHarness struct {
 
 	// graphrag serves the knowledge-graph reads. The SAME querier the daemon
 	// hands to ComponentService — one implementation reached two ways, which is
-	// what sdk ADR-0001 promised and could not deliver until this field existed.
+	// what ADR-0161 promised and could not deliver until this field existed.
 	// Nil means the reads report ErrKnowledgeUnavailable.
 	graphrag component.GraphRAGQuerier
 
@@ -196,11 +196,11 @@ type DefaultAgentHarness struct {
 
 	// deploymentShape is the untrusted-execution isolation policy enforced by
 	// the dispatch-policy gate. Zero value (ShapeSetecOnly) is fail-closed.
-	// See ADR-0010 / gibson#994.
+	// See ADR-0110 / gibson#994.
 	deploymentShape dispatchpolicy.DeploymentShape
 
 	// agentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
-	// sandbox for one mission run (ADR-0016 / gibson#1596). When wired,
+	// sandbox for one mission run (ADR-0116 / gibson#1596). When wired,
 	// DelegateToAgent routes an untrusted agent to it instead of denying.
 	// Nil means no sandboxed agent dispatch, so an untrusted agent is denied
 	// fail-closed under setec-only. See delegate_sandbox.go.
@@ -221,7 +221,7 @@ type DefaultAgentHarness struct {
 
 	// agentDispatchMode reports the catalog dispatch mode for an agent name and
 	// whether that agent is listed in the component catalog. It is the injectable
-	// seam over componentcatalog.LookupAgent (gibson#1598 / ADR-0016): a catalog
+	// seam over componentcatalog.LookupAgent (gibson#1598 / ADR-0116): a catalog
 	// agent whose manifest declares dispatchMode==sandboxed must route to the
 	// sandbox regardless of registry content trust, because a platform agent is
 	// launched-on-dispatch, not a registered polling worker. Nil means "not
@@ -276,7 +276,7 @@ type DefaultAgentHarness struct {
 	nodeSlotOverrides map[string]*agent.SlotConfig
 
 	// emitCount bounds how many observations this task may emit
-	// (emitbounds.MaxObservationsPerTask, ADR-0012 "Write contract"). A
+	// (emitbounds.MaxObservationsPerTask, ADR-0112 "Write contract"). A
 	// harness instance is created per agent execution and unregistered when
 	// that execution ends, so the counter's lifetime is the task's — no
 	// keyed map, and therefore no unbounded bookkeeping introduced by the
@@ -747,7 +747,7 @@ func getToolMetadata(t tool.Tool) map[string]string {
 // CallToolProto executes a tool using proto message input/output.
 //
 // Dispatch order:
-//  1. Sandboxed manifest tool (ADR-0017) — when the tool has a kind:tool
+//  1. Sandboxed manifest tool (ADR-0117) — when the tool has a kind:tool
 //     catalog manifest, gate on the calling tenant's can_execute and dispatch
 //     it into a Setec microVM via gRPC. This is the one sandboxed-tool path.
 //  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
@@ -800,7 +800,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		"input_type", string(request.ProtoReflect().Descriptor().FullName()),
 		"output_type", string(response.ProtoReflect().Descriptor().FullName()))
 
-	// ── Manifest-sourced sandboxed tool (ADR-0017) ────────────────────────
+	// ── Manifest-sourced sandboxed tool (ADR-0117) ────────────────────────
 	// A kind:tool catalog manifest is the source of truth for a tool's runtime
 	// shape. When the tool is a sandboxed manifest tool, gate on the calling
 	// tenant's can_execute (per-tenant enablement, gibson#1638) and dispatch it
@@ -841,7 +841,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 			} else if len(instances) > 0 {
 				info := instances[0] // Use first live instance; load-balancing is a future concern.
 
-				// Dispatch-policy gate (ADR-0010 / gibson#994). We reach here
+				// Dispatch-policy gate (ADR-0110 / gibson#994). We reach here
 				// only when the tool has no SANDBOXED entry (the top block
 				// returned !found), so there is no sandboxed dispatch available.
 				// An UNTRUSTED component must not take a direct-gRPC or
@@ -2033,7 +2033,7 @@ func (h *DefaultAgentHarness) authorizeAgentDispatch(ctx context.Context, name s
 }
 
 // authorizeToolDispatch is the fail-closed can_execute gate for a manifest-seeded
-// TOOL (ADR-0017 / gibson#1638) — the tool analogue of authorizeAgentDispatch.
+// TOOL (ADR-0117 / gibson#1638) — the tool analogue of authorizeAgentDispatch.
 // A tool the calling tenant never enabled (no tenant_enabled → can_execute is
 // false) is denied and nothing is launched. This is what gives tools per-tenant
 // control, replacing the old ungated _system refresher path.
@@ -2095,13 +2095,13 @@ func (h *DefaultAgentHarness) authorizeComponentDispatch(ctx context.Context, ki
 }
 
 // sandboxedToolSpecFromManifest resolves a sandboxed tool's launch spec from the
-// embedded kind:tool catalog manifest (ADR-0017) — the source of truth for a
+// embedded kind:tool catalog manifest (ADR-0117) — the source of truth for a
 // tool's runtime shape now that the runtime refresher is retired. The tool is
 // selected inside the shared executor image by GIBSON_TOOL_NAME = the manifest
 // id; egress is bounded by the dispatching agent's ceiling. Returns false when
 // no sandboxed manifest tool of that name exists.
 // liveScope is the console scope stamped on every sandboxed dispatch
-// (ADR-0016 S11): the CUSTOMER tenant this call is served for and the mission
+// (ADR-0116 S11): the CUSTOMER tenant this call is served for and the mission
 // it belongs to, so the running sandbox is enumerable on the caller's own
 // console and nobody else's.
 //
@@ -2275,12 +2275,12 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		)
 	}
 
-	// ── Dispatch-policy gate (ADR-0010 / ADR-0016 / gibson#996 / gibson#1596) ─
+	// ── Dispatch-policy gate (ADR-0110 / ADR-0116 / gibson#996 / gibson#1596) ─
 	// Sub-agent delegation runs the delegated agent's own code. An untrusted
 	// agent must not run in-process under setec-only. Two outcomes now, not
 	// one:
 	//   - a sandboxed agent launcher is wired → launch the agent as an
-	//     ephemeral Setec sandbox for this one mission run (ADR-0016);
+	//     ephemeral Setec sandbox for this one mission run (ADR-0116);
 	//   - no launcher is wired → deny, fail-closed, exactly as before.
 	// Agents whose content trust is unknown / unspecified are treated as
 	// trusted, so delegation of first-party agents is unchanged. (Every tool
@@ -2293,7 +2293,7 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	// A catalog agent whose signed manifest declares dispatchMode==sandboxed
 	// must run sandboxed whatever the registry says its content trust is. A
 	// platform agent is launched-on-dispatch, not a registered polling worker,
-	// so its trust comes from the manifest, not the registry (ADR-0016 /
+	// so its trust comes from the manifest, not the registry (ADR-0116 /
 	// gibson#1598). Force UNTRUSTED here so the gate below routes it to the
 	// sandbox launch. The seam is nil-safe: a nil seam or an unlisted agent
 	// leaves agentTrust as the registry established it.
@@ -2461,7 +2461,7 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 	// Record that this run delegated to a child run. We do NOT write the graph
 	// directly: the fact is folded into the tenant World (as AgentRunObserved
 	// events for both parent and child) via the DelegationSink, and the graph
-	// projector — the sole writer (ADR-0007, #837) — materializes the :AgentRun
+	// projector — the sole writer (ADR-0107, #837) — materializes the :AgentRun
 	// nodes and the DELEGATED_TO edge.
 	//
 	// The child run ID is read from the child harness's mission context (not
@@ -2563,7 +2563,7 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 	defer span.End()
 
 	// Bounds first, before anything is classified, stamped, stored or
-	// emitted as an event (ADR-0012, "Write contract"). Over-limit input is
+	// emitted as an event (ADR-0112, "Write contract"). Over-limit input is
 	// rejected whole and never truncated, and rejecting here — ahead of
 	// every write on this path — is what makes "a rejected emit creates no
 	// partial state" a property of the ordering rather than of cleanup.
@@ -2676,7 +2676,7 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 
 	// Async store to GraphRAG knowledge graph (non-blocking)
 	// This happens after local store succeeds to ensure findings are never lost
-	// The finding reaches the knowledge graph via the World projection (ADR-0007):
+	// The finding reaches the knowledge graph via the World projection (ADR-0107):
 	// SubmitFinding emits an agent.finding_submitted event → the brain folds it
 	// into the tenant World as a Finding → the graph projector writes the :Finding
 	// node. The old direct StoreAsync write was removed so the projector is the
@@ -3081,7 +3081,7 @@ func (h *DefaultAgentHarness) Close(_ context.Context) error {
 
 // agentEgressCeiling returns the setec egress rules bounding the tool launches
 // of the dispatching agent, from its platform-catalog egressAllow ceiling
-// (ADR-0015). It returns nil — unrestricted, sandbox mode=full — when there is
+// (ADR-0136). It returns nil — unrestricted, sandbox mode=full — when there is
 // no dispatching agent, the agent is not a platform-catalog agent, or its
 // ceiling is "*". Tool sandbox isolation is unconditional regardless.
 func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
@@ -3098,7 +3098,7 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 // resolveAgentContentTrust returns the strictest content-trust classification
 // registered for an agent in the component registry (UNTRUSTED if any live
 // instance is untrusted), or CONTENT_TRUST_UNSPECIFIED when the agent has no
-// registry entry. Used by the DelegateToAgent dispatch-policy gate (ADR-0010 /
+// registry entry. Used by the DelegateToAgent dispatch-policy gate (ADR-0110 /
 // gibson#996).
 //
 // It returns an error — meaning DENY the delegation — whenever the trust of

@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package entitlements is the pluggable seam that decouples commercial
-// gating from the OSS brain (docs ADR-0003, CONTEXT.md "Entitlements
+// gating from the OSS brain (ADR-0089, CONTEXT.md "Entitlements
 // provider").
 //
 // The budget enforcer (internal/platform/budget) and the concurrency rate
@@ -17,7 +17,7 @@
 // pkg/billing/entitlements/v1 to implement the server side without violating
 // Go's internal/ import restriction.
 //
-// Runtime seam (ADR-0003 / ADR-0089 / gibson#1026 / gibson#1028 / gibson#1087):
+// Runtime seam (ADR-0089 / gibson#1026 / gibson#1028 / gibson#1087):
 //
 //   - When ENTITLEMENTS_ENDPOINT is set (hosted daemon build), New returns a
 //     caching gRPC client that calls the closed billing service's

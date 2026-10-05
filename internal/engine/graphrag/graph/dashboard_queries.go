@@ -1554,7 +1554,7 @@ type FindingRecord struct {
 }
 
 // The :Finding property contract (gibson#210). The graph projector is the sole
-// writer of :Finding nodes (ADR-0007). It merges a Finding on brain_id, the
+// writer of :Finding nodes (ADR-0107). It merges a Finding on brain_id, the
 // World entity id, the same way every first-class projection is keyed, and it
 // writes the World's Title as title. The reader maps exactly those two
 // properties. A :Vulnerability is the one other label this query returns. The

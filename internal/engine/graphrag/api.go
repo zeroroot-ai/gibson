@@ -14,7 +14,7 @@ import (
 // knowledge graph: vector search, graph traversal, and hybrid queries.
 //
 // It has no write methods. The projector is the graph's sole writer
-// (ADR-0012); the store/provider write half was removed in gibson#1322 once
+// (ADR-0112); the store/provider write half was removed in gibson#1322 once
 // sdk#451 took ComponentService/StoreNode off the wire.
 //
 // Thread-safety: All implementations must be safe for concurrent access.

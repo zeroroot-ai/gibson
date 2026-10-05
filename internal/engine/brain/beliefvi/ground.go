@@ -138,7 +138,7 @@ type VariableBelief struct {
 
 // SolveSlice grounds the slice and returns every declared variable's
 // posterior, keyed by node id then variable name, via exact variable
-// elimination (never sampling — ADR-0005 SS2 still holds), mirroring
+// elimination (never sampling — ADR-0134 still holds), mirroring
 // ground.solve_slice exactly.
 //
 // evidence maps a ground name (GroundName(nodeID, variable)) to an observed

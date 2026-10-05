@@ -60,7 +60,7 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	// The pending-authorization store is SHARED between this RPC handler
 	// (StartConnectorAuthorization writes it, CompleteConnectorAuthorization
 	// reads it) and the pre-auth OAuth callback (reads it). One store, keyed by
-	// state, TTL-bounded (ADR-0014).
+	// state, TTL-bounded (ADR-0114).
 	connectorPending := connectorauth.NewPendingStore(connectorauth.DefaultPendingTTL, time.Now)
 	connAuthSrv, caErr := admin.NewConnectorAuthAdminServer(admin.ConnectorAuthAdminConfig{
 		Secrets:         d.secretsService,
@@ -103,7 +103,7 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 				now:       time.Now,
 			},
 			// The daemon writes the connector-cred Secret directly from the loop
-			// (ADR-0015): no RPC returns the token, no ESO. The proxy mounts
+			// (ADR-0061): no RPC returns the token, no ESO. The proxy mounts
 			// this Secret, so without it the connector never leaves Provisioning.
 			Materializer: &connectorTokenMaterializer{
 				kube:    kube,

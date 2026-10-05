@@ -78,7 +78,7 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 }
 
 // SettleBetByHITL records a human review verdict on a bet (gibson#280,
-// ADR-0023 decision 3). true_positive/false_positive settle the bet through
+// ADR-0123). true_positive/false_positive settle the bet through
 // Engine.SettleBetByHITL. dismiss is label-only/no-settle: it applies the
 // ordinary label (the same channel SubmitLabel writes to) rather than
 // attempting settlement, matching Engine.SettleBetByHITL's own refusal
@@ -90,7 +90,7 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 // so a caller can never attribute a settlement to another user. Unlike
 // SubmitLabel, a missing acting user is refused rather than recorded as an
 // empty string: a HITL verdict is the accountability record for a bet's
-// settlement (ADR-0006 §6 provenance, ADR-0028's class of destructive/
+// settlement (ADR-0106 provenance, ADR-0132's class of destructive/
 // consequential action), so an unattributable verdict must fail closed, not
 // flow through as a zero-value identity.
 func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBetByHITLRequest) (*worldpb.SettleBetByHITLResponse, error) {

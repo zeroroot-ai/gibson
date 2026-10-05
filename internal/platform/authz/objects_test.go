@@ -126,7 +126,7 @@ func TestConnectorComponentObject(t *testing.T) {
 	if got := ConnectorComponentObject("gitlab"); got != "component:connector/gitlab" {
 		t.Fatalf("ConnectorComponentObject(gitlab) = %q", got)
 	}
-	// Idempotent under CanonicalComponentResource (ADR-0015): a kind-qualified
+	// Idempotent under CanonicalComponentResource (ADR-0136): a kind-qualified
 	// name round-trips to the canonical prefixed object.
 	got, err := CanonicalComponentResource("connector:gitlab")
 	if err != nil || got != "component:connector/gitlab" {
@@ -138,7 +138,7 @@ func TestDomainPackComponentObject(t *testing.T) {
 	if got := DomainPackComponentObject("main"); got != "component:domainpack/main" {
 		t.Fatalf("DomainPackComponentObject(main) = %q", got)
 	}
-	// Idempotent under CanonicalComponentResource (ADR-0015): a kind-qualified
+	// Idempotent under CanonicalComponentResource (ADR-0136): a kind-qualified
 	// name round-trips to the canonical prefixed object, same as connectors.
 	got, err := CanonicalComponentResource("domainpack:main")
 	if err != nil || got != "component:domainpack/main" {

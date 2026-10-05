@@ -1,7 +1,7 @@
 # ECS component catalog
 
-Derived from `taxonomy/v1` (the codegen source — [ADR-0001](../adr/0001-ecs-native-mission-brain.md))
-and the identity model ([ADR-0002](../adr/0002-scope-relative-entity-identity.md)). Each type
+Derived from `taxonomy/v1` (the codegen source — ADR-0101)
+and the identity model (ADR-0102). Each type
 becomes an ark component; relationships become ark relationships. Every type marks **identity**
 fields (used by scoped loop-compare) vs **volatile** fields (updated on match, time-bounded,
 never compared).
@@ -61,5 +61,5 @@ asset↔result links (`instance_of`, `ran_against`, `launched_by`, `produced`) t
 ## Confirmed additions to `taxonomy/v1` (decided)
 **Add `Scope`, `Credential`, `Account`** (marked ⚠️ above) — load-bearing in the design,
 absent from `taxonomy/v1` today — with identity/volatile markers. **Drop** the generic
-`GraphNode` / `CoreNodeType` / `Relationship` carriers (ADR-0002); keep `Value`/`MapValue`
+`GraphNode` / `CoreNodeType` / `Relationship` carriers (ADR-0102); keep `Value`/`MapValue`
 for `Observations` only.

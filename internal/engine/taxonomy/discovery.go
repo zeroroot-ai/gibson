@@ -9,7 +9,7 @@ import (
 	"sync"
 )
 
-// discovery.go implements taxonomy discovery (ADR-0024 §2, gibson#281): a
+// discovery.go implements taxonomy discovery (ADR-0124, gibson#281): a
 // fleet-proposed label lives as data — an Observation, per the package's
 // existing ClassifyNode/ClassifyRelationship fallback — until it is promoted
 // to actual Cypher query structure (a new Taxonomy Registry version). This
@@ -57,7 +57,7 @@ func (k ProposalKind) String() string {
 }
 
 // MinRecurrenceForSettlement is how many independent sightings of the same
-// proposed label are required before it can settle (ADR-0024 §2).
+// proposed label are required before it can settle (ADR-0124).
 const MinRecurrenceForSettlement = 3
 
 // DiscoveredNodeIdentityProperty is the Neo4j node property a runtime-promoted
@@ -224,7 +224,7 @@ type PromotionRecord struct {
 	IdentityProperty string
 }
 
-// PromotionGate is the taxonomy-discovery safety gate (ADR-0024 §2). A
+// PromotionGate is the taxonomy-discovery safety gate (ADR-0124). A
 // fleet-proposed label is held as data — recurrence-tracked, never Cypher
 // structure — until it passes BOTH the automated ValidIdentifier safety
 // check and settlement (recurrence + an explicit HITL confirmation).

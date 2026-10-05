@@ -6,7 +6,7 @@ package brain
 import "testing"
 
 // TestMission_PinsBeliefModelVersion proves a mission records the belief-model
-// version it ran under (ADR-0005 §5) and that replay reproduces the pin — the
+// version it ran under (ADR-0134) and that replay reproduces the pin — the
 // deterministic-replay guarantee for the belief field.
 func TestMission_PinsBeliefModelVersion(t *testing.T) {
 	e := NewEngine("t")

@@ -106,12 +106,12 @@ type HarnessCallbackService struct {
 	// eventBus publishes tool and LLM events for graph processing
 	eventBus EventBusPublisher
 
-	// observationSink receives typed agent observations (ADR-0007); the daemon
+	// observationSink receives typed agent observations (ADR-0107); the daemon
 	// wires it to the per-tenant brain. nil means observation ingest is disabled.
 	observationSink ObservationSink
 
 	// observeCounts bounds how many observations one task may emit through
-	// the Observe RPC (emitbounds.MaxObservationsPerTask, ADR-0012 "Write
+	// the Observe RPC (emitbounds.MaxObservationsPerTask, ADR-0112 "Write
 	// contract"). Observe has no per-task object to hang a counter on — the
 	// handler never resolves a harness — so this path uses the keyed,
 	// bounded pool. Lazily created by observeCounter.
@@ -125,7 +125,7 @@ type HarnessCallbackService struct {
 	toolValidator *ToolValidator
 
 	// worldViewSource projects the mission-Scope-limited World slice the
-	// WorldView RPC returns (ADR-0012 read half, gibson#1377); the daemon wires
+	// WorldView RPC returns (ADR-0112 read half, gibson#1377); the daemon wires
 	// it to the per-tenant brain. nil means the WorldView read is disabled and
 	// returns an empty slice, symmetric to observationSink's no-op default.
 	worldViewSource WorldViewSource
@@ -137,26 +137,26 @@ type HarnessCallbackService struct {
 	llmCallSink LLMCallSink
 
 	// toolCallSink receives completed tool calls observed on the callback
-	// CallToolProto path (ADR-0020, gibson#271); the daemon wires it to the
+	// CallToolProto path (ADR-0120, gibson#271); the daemon wires it to the
 	// per-tenant World's AgentToolCall capture — the flight recorder's tool-I/O
 	// half. nil means capture is disabled.
 	toolCallSink ToolCallSink
 
-	// beliefSubstrate backs the PlaceBet RPC (ADR-0022, ADR-0029 §3,
+	// beliefSubstrate backs the PlaceBet RPC (ADR-0122, ADR-0129,
 	// gibson#273/#278): a placed bet is persisted as belief on its
 	// hypothesis's claim-node. nil means PlaceBet returns Unavailable — the
 	// market view is not wired on this daemon. See callback_place_bet.go.
 	beliefSubstrate brain.BeliefSubstrate
 
-	// proofSettlement backs the SubmitProof RPC (ADR-0030, ADR-0031,
+	// proofSettlement backs the SubmitProof RPC (ADR-0131,
 	// gibson#389): resolving an enabled Domain Pack's CEL predicate binding
 	// and settling a bet true once it fires against submitted evidence. nil
 	// means SubmitProof returns Unavailable, the same staged-wiring default
 	// beliefSubstrate uses. See callback_submit_proof.go.
 	proofSettlement brain.ProofSettlementEngine
 
-	// ontologyDiscovery backs the ProposeOntologyExtension RPC (ADR-0024 §2,
-	// ADR-0033 decision 2, gibson#391): folding an agent-proposed Taxonomy
+	// ontologyDiscovery backs the ProposeOntologyExtension RPC (ADR-0124,
+	// ADR-0133, gibson#391): folding an agent-proposed Taxonomy
 	// node label or relationship type through the ValidIdentifier safety gate
 	// and PromotionGate.Observe's recurrence counting. nil means
 	// ProposeOntologyExtension returns Unavailable, the same staged-wiring
@@ -172,7 +172,7 @@ type HarnessCallbackService struct {
 	taskGrantVerifier func() TaskGrantVerifier
 
 	// jobs is the job store the member-facing callbacks read and write
-	// (ADR-0019, gibson#1711). Nil means this daemon serves no banks, and
+	// (ADR-0119, gibson#1711). Nil means this daemon serves no banks, and
 	// every member callback says so rather than failing obscurely.
 	jobs JobSurface
 
@@ -346,7 +346,7 @@ func observeTaskKey(info *harnesspb.ContextInfo) string {
 }
 
 // ObservationAttribution is the server-resolved provenance of an emitted
-// observation (ADR-0012). Every field is read off the mission record the daemon
+// observation (ADR-0112). Every field is read off the mission record the daemon
 // created — reached through the harness registered for the mission, whose tenant
 // getHarness has already checked against the caller's authenticated tenant.
 //
@@ -362,7 +362,7 @@ type ObservationAttribution struct {
 	Tenant string
 
 	// ScopeID is the mission's target — the network the observation was made
-	// on. Host identity is the (ScopeID, Address) coordinate (ADR-0002), so two
+	// on. Host identity is the (ScopeID, Address) coordinate (ADR-0102), so two
 	// hosts answering at the same address on two scanned networks stay distinct
 	// entities only because this is populated and per-target.
 	ScopeID string
@@ -381,7 +381,7 @@ type ObservationAttribution struct {
 	RunID string
 }
 
-// ObservationSink consumes a typed observation emitted by an agent (ADR-0007).
+// ObservationSink consumes a typed observation emitted by an agent (ADR-0107).
 // The daemon wires this to translate the observation into a brain Timeline event
 // and submit it to the per-tenant World; harness stays decoupled from the brain.
 //
@@ -398,7 +398,7 @@ func WithObservationSink(sink ObservationSink) CallbackServiceOption {
 }
 
 // WithBeliefSubstrate wires the belief substrate the PlaceBet RPC persists
-// staked bets to (ADR-0022, ADR-0029 §3). When unset, PlaceBet returns
+// staked bets to (ADR-0122, ADR-0129). When unset, PlaceBet returns
 // Unavailable.
 func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
@@ -407,7 +407,7 @@ func WithBeliefSubstrate(substrate brain.BeliefSubstrate) CallbackServiceOption 
 }
 
 // WithProofSettlement wires the tenant-scoped engine the SubmitProof RPC
-// resolves pack predicates and settles bets against (ADR-0030, ADR-0031,
+// resolves pack predicates and settles bets against (ADR-0131,
 // gibson#389). When unset, SubmitProof returns Unavailable.
 func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
@@ -417,7 +417,7 @@ func WithProofSettlement(engine brain.ProofSettlementEngine) CallbackServiceOpti
 
 // WithOntologyDiscovery wires the tenant-scoped engine the
 // ProposeOntologyExtension RPC folds an agent-proposed Taxonomy node label or
-// relationship type through (ADR-0024 §2, ADR-0033 decision 2, gibson#391).
+// relationship type through (ADR-0124, ADR-0133, gibson#391).
 // When unset, ProposeOntologyExtension returns Unavailable.
 func WithOntologyDiscovery(engine brain.OntologyDiscoveryEngine) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
@@ -442,7 +442,7 @@ type LLMCallRecord struct {
 	Model            string
 	PromptTokens     int
 	CompletionTokens int
-	// Messages + Completion are the full transcript (ADR-0020 flight recorder,
+	// Messages + Completion are the full transcript (ADR-0120 flight recorder,
 	// gibson#271: capture is ALWAYS ON, never optional). The folded frame
 	// metadata uses model + token counts; the transcript backs the dashboard
 	// conversation view and the flight recorder replay.
@@ -496,7 +496,7 @@ func WithLLMCallSink(sink LLMCallSink) CallbackServiceOption {
 }
 
 // ToolCallRecord captures a completed tool call observed on the callback
-// CallToolProto path — the tool-I/O half of the flight recorder (ADR-0020,
+// CallToolProto path — the tool-I/O half of the flight recorder (ADR-0120,
 // gibson#271), alongside LLMCallRecord's transcript half. It mirrors the
 // daemon's brain.AgentToolCallObserved but lives here so the harness package
 // stays decoupled from the brain package, same as LLMCallRecord.
@@ -531,7 +531,7 @@ type ToolCallRecord struct {
 type ToolCallSink func(ctx context.Context, tenant string, call ToolCallRecord)
 
 // WithToolCallSink sets the sink CallToolProto forwards completed tool calls
-// to for World capture (ADR-0020, gibson#271). When unset, capture is disabled.
+// to for World capture (ADR-0120, gibson#271). When unset, capture is disabled.
 func WithToolCallSink(sink ToolCallSink) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.toolCallSink = sink
@@ -832,7 +832,7 @@ func (s *HarnessCallbackService) validator() *ToolValidator {
 }
 
 // captureToolCall folds a completed CallToolProto invocation into the
-// per-tenant World via the wired toolCallSink (ADR-0020, gibson#271) — the
+// per-tenant World via the wired toolCallSink (ADR-0120, gibson#271) — the
 // tool-I/O half of the flight recorder, alongside captureLLMCall's transcript
 // half. Best-effort: a missing sink, context, or tenant is a silent no-op, the
 // same contract as captureLLMCall, so capture can never break a tool call.
@@ -1300,7 +1300,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"parent_span_id": req.Context.SpanId,
 		})
 
-		// Flight recorder (ADR-0020, gibson#271): capture the failed call too —
+		// Flight recorder (ADR-0120, gibson#271): capture the failed call too —
 		// the arguments the agent sent and why it failed, not just the ones
 		// that succeeded.
 		s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
@@ -1358,7 +1358,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	if err != nil {
 		s.logger.Error("failed to marshal proto response to JSON", "error", err, "tool", req.Name)
 
-		// Flight recorder completeness (ADR-0030 §3): the tool DID run — this
+		// Flight recorder completeness (ADR-0131): the tool DID run — this
 		// is a post-execution failure, not a pre-dispatch validation error —
 		// so it must still reach the sink. Without this, a tool that produced
 		// a real (unmarshalable) result leaves no independent record at all,
@@ -1396,7 +1396,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// indistinguishable from "nothing was ever skipped".
 	s.validator().ValidateDiscoveryCompliance(ctx, req.Name, responseMsg, req.Context.GetMissionRunId())
 
-	// Flight recorder (ADR-0020, gibson#271): capture the full arguments +
+	// Flight recorder (ADR-0120, gibson#271): capture the full arguments +
 	// result — the tool-I/O half of the flight recorder, alongside the LLM
 	// transcript half captureLLMCall already folds in. Before this, tool I/O
 	// only reached the daemon as bare tool.call.* pub/sub metadata (no
@@ -1743,7 +1743,7 @@ func (s *HarnessCallbackService) ListPlugins(ctx context.Context, req *harnesspb
 // DelegateToAgent implements the agent delegation RPC.
 func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harnesspb.DelegateToAgentRequest) (*harnesspb.DelegateToAgentResponse, error) {
 	// A delegation aimed at a bank or a job is a turn on a job, not a
-	// sandbox launch (ADR-0019 decision 15, gibson#1713).
+	// sandbox launch (ADR-0119, gibson#1713).
 	if resp, err := s.delegateToTarget(ctx, req); resp != nil || err != nil {
 		return resp, err
 	}
@@ -1879,7 +1879,7 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	if err := harness.SubmitFinding(ctx, finding); err != nil {
 		// An emit-bounds rejection is the caller's fault, not the daemon's,
 		// and it is the one failure here that guarantees nothing was
-		// written (ADR-0012, "Write contract"). Report it as invalid
+		// written (ADR-0112, "Write contract"). Report it as invalid
 		// argument so the emitter can tell "your payload is too big" from
 		// "the daemon broke".
 		if errors.Is(err, emitbounds.ErrLimitExceeded) {
@@ -2936,7 +2936,7 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 	}
 
 	// Identity is assigned by the daemon and never read from the payload
-	// (ADR-0012, "Entity references are generational handles"; gibson#1259).
+	// (ADR-0112, "Entity references are generational handles"; gibson#1259).
 	// The emitter is remote and untrusted, and a brain id is enumerable, so
 	// honouring pf.Id would let a compromised tool choose the identity its
 	// finding lands under — and so attach fabricated evidence to a name
@@ -3014,10 +3014,10 @@ func protoSeverityToAgentSeverity(severity typespb.FindingSeverity) agent.Findin
 }
 
 // Observe forwards a typed agent observation to the brain via the observation
-// sink (ADR-0007). The brain resolves identity and topology.
+// sink (ADR-0107). The brain resolves identity and topology.
 //
 // Tenant and scope are resolved here, server-side, from the mission record the
-// daemon created (ADR-0012). getHarness performs the lookup and refuses a caller
+// daemon created (ADR-0112). getHarness performs the lookup and refuses a caller
 // whose authenticated tenant is not the mission's, so from that point the tenant
 // is the mission's own; the scope is the mission's target. Neither is readable
 // from the payload — ObserveRequest has no field for either.
@@ -3032,7 +3032,7 @@ func (s *HarnessCallbackService) Observe(ctx context.Context, req *harnesspb.Obs
 
 	// Bounds before the sink, and before the no-op short-circuit below, so an
 	// over-limit observation is refused identically whether or not the brain
-	// is wired (ADR-0012, "Write contract"). The emitter is remote and
+	// is wired (ADR-0112, "Write contract"). The emitter is remote and
 	// untrusted; the wire size is the cap that bounds it, since the typed
 	// Observation carries no free-form property map — its unbounded surfaces
 	// are its repeated fields and string lengths, all of which the byte cap
@@ -3064,7 +3064,7 @@ func (s *HarnessCallbackService) Observe(ctx context.Context, req *harnesspb.Obs
 	// Resolve the mission record only after the bounds have passed. Attribution
 	// needs the harness registry; the bounds deliberately do not, so an
 	// over-limit observation is refused identically whether or not the brain is
-	// wired — the invariant the caps exist to hold (ADR-0012, "Write contract").
+	// wired — the invariant the caps exist to hold (ADR-0112, "Write contract").
 	harness, err := s.getHarness(ctx, req.Context)
 	if err != nil {
 		return nil, err
@@ -3230,7 +3230,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 	}
 
 	// Which graph runs: the caller's own, or the checked-in catalog mission it
-	// named (ADR-0018). Exactly one; an unknown parameter is refused rather
+	// named (ADR-0118). Exactly one; an unknown parameter is refused rather
 	// than dropped.
 	definitionJSON, defErr := resolveMissionDefinitionJSON(ctx, req)
 	if defErr != nil {

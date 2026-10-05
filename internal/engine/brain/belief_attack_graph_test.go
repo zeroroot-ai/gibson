@@ -77,7 +77,7 @@ func isAcyclic(nodes []AttackGraphNode, edges []InfraEdge) bool {
 
 // TestDeriveAttackGraph_DirectsOnlyDeclaredEnablementEdges is the first
 // acceptance criterion: an edge is part of the attack graph only when the
-// ontology flags its relationship type as belief-propagating (ADR-0029 §7);
+// ontology flags its relationship type as belief-propagating (ADR-0129);
 // every other edge type is left out entirely — not even reported as dropped,
 // since "dropped" means "cut to break a cycle" (see the next test), not
 // "never eligible in the first place".
@@ -122,7 +122,7 @@ func TestDeriveAttackGraph_ExcludesNonBeliefBearingNodes(t *testing.T) {
 // fixture the issue's acceptance criteria call for: a 3-cycle over Hosts, all
 // linked by the same enablement edge type, must yield a stable, acyclic
 // graph — the exact edge cut, not just "some" edge, since replay requires the
-// SAME cut every time (ADR-0029 §1/§4: topological potential, tiebroken by
+// SAME cut every time (ADR-0129: topological potential, tiebroken by
 // stable id).
 func TestDeriveAttackGraph_BreaksCyclesDeterministically(t *testing.T) {
 	reg := testBeliefRegistry(t)
@@ -239,7 +239,7 @@ func TestDeriveAttackGraph_ConsumesCoreSeedRegistry(t *testing.T) {
 	if len(got.Edges) != 1 || got.Edges[0].Type != "RESOLVES_TO" {
 		t.Fatalf("Edges = %+v, want the RESOLVES_TO edge (a seeded enablement type)", got.Edges)
 	}
-	// The seed's three-variable funnel (ADR-0005) travels with the node.
+	// The seed's three-variable funnel (ADR-0129) travels with the node.
 	names := make([]string, 0, len(got.Nodes[0].Variables))
 	for _, v := range got.Nodes[0].Variables {
 		names = append(names, v.Name)

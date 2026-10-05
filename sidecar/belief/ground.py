@@ -1,5 +1,5 @@
 """Ground a bounded slice (gibson#287) into one exact-VE solvable network and
-return per-node posteriors (gibson#288, ADR-0029 SS5).
+return per-node posteriors (gibson#288, ADR-0129).
 
 A slice is a set of nodes, each with its own declared belief variables (the
 ontology schema, gibson#296 — ``NodeSpec``/``VariableSpec`` mirror
@@ -14,8 +14,8 @@ DependsOn parent and a cross-node enablement cause alike — as just another
 independent noisy-OR cause of that variable (``noisy_or.py``): noisy-OR does
 not distinguish "this node's own upstream variable" from "another node's
 variable reached over an enablement edge", so ONE mechanism covers both the
-per-node funnel ADR-0005 hardcoded (reachable -> exploitable -> juicy) and the
-cross-node wiring ADR-0029 introduces. The result is one ground factor set;
+per-node funnel ADR-0129 hardcoded (reachable -> exploitable -> juicy) and the
+cross-node wiring ADR-0129 introduces. The result is one ground factor set;
 ``solve_slice`` runs ``infer.query`` (exact variable elimination, unchanged)
 against it once per (node, variable) and returns every posterior.
 
@@ -118,7 +118,7 @@ def solve_slice(
 ) -> Dict[str, Dict[str, Dict[str, float]]]:
     """Ground the slice and return {node_id: {variable: {"true": p, "false": 1-p}}}
     for every declared variable, via exact variable elimination (never
-    sampling — ADR-0005 SS2 still holds).
+    sampling — ADR-0134 still holds).
 
     ``evidence`` maps a ground name (``ground_name(node_id, variable)``) to an
     observed state ("true"/"false"); an observed variable reports probability

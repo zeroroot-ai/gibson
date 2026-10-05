@@ -16,12 +16,12 @@ import (
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
-// discovery.go implements ontology discovery (ADR-0024 §1, gibson#274): the
+// discovery.go implements ontology discovery (ADR-0124, gibson#274): the
 // fleet proposes new classes, relationships (equivalences), and
 // identifying-properties at runtime as structural hypotheses, registered
 // through the existing Reasoner.RegisterExtension seam.
 //
-// ADR-0024 §1 makes this explicitly DATA-LEVEL with a LIGHT gate: unlike
+// ADR-0124 makes this explicitly DATA-LEVEL with a LIGHT gate: unlike
 // taxonomy discovery (§2, gibson#281), a proposed ontology IRI never becomes
 // Cypher query structure — it stays a prefix:localname string the Reasoner
 // reasons over — so RegisterExtension's existing cycle and unknown-prefix
@@ -35,7 +35,7 @@ import (
 // is unauthenticated"). The two intentionally do not share a Go type: folding
 // a target-fact claim into the World's Evidence/Belief/Hypothesis provenance
 // classes is brain's concern; reasoning over ontology vocabulary is this
-// package's concern; ADR-0029 already draws exactly this line between the
+// package's concern; ADR-0129 already draws exactly this line between the
 // two engines. StructuralHypothesis mirrors brain.Hypothesis's Proposer/Claim
 // vocabulary so a future integration (e.g. a harness tool or daemon RPC that
 // accepts an agent-proposed ontology extension) has an obvious, low-friction
@@ -67,7 +67,7 @@ type StructuralHypothesis struct {
 }
 
 // DiscoveryOutcome records the result of putting a StructuralHypothesis to
-// the light ontology-discovery gate (ADR-0024 §1).
+// the light ontology-discovery gate (ADR-0124).
 type DiscoveryOutcome struct {
 	// Accepted reports whether the proposal was registered into the
 	// Reasoner.
@@ -89,7 +89,7 @@ type DiscoveryOutcome struct {
 }
 
 // ProposeExtension applies a fleet-proposed StructuralHypothesis to r. This
-// IS ADR-0024 §1's light gate: RegisterExtension's own cycle and
+// IS ADR-0124's light gate: RegisterExtension's own cycle and
 // unknown-prefix checks are the acceptance test. A rejected proposal changes
 // nothing in r.
 //

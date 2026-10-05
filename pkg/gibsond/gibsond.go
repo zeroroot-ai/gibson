@@ -4,7 +4,7 @@
 // Package gibsond is the gibson daemon bootstrap, exported so both the OSS
 // entrypoint (cmd/gibson) and hosted builds can drive the same daemon startup.
 //
-// The entitlements seam (ADR-0003/0054/gibson#1026/gibson#1028) is now a
+// The entitlements seam (ADR-0089/0054/gibson#1026/gibson#1028) is now a
 // runtime gRPC selection (Option B): when ENTITLEMENTS_ENDPOINT is set the
 // daemon calls the closed billing service's EntitlementsService over SPIFFE
 // mTLS; when unset it falls back to the OSS config-driven default. No

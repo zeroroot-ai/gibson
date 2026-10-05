@@ -4,11 +4,11 @@
 package brain
 
 // proof_settlement.go is the tenant-routing seam the SubmitProof RPC handler
-// (internal/engine/harness, gibson#389) is built against (ADR-0030, ADR-0031).
+// (internal/engine/harness, gibson#389) is built against (ADR-0131).
 // It mirrors belief_substrate.go's pattern exactly: PlaceBet is written
 // against brain.BeliefSubstrate rather than *Registry/*Engine directly so a
 // daemon-side tenant-routing adapter can sit between "one shared value on
-// HarnessCallbackService" and "one World per tenant" (ADR-0001); SubmitProof
+// HarnessCallbackService" and "one World per tenant" (ADR-0101); SubmitProof
 // needs the same seam for its two Engine operations (resolving an enabled
 // Domain Pack's CEL predicate binding, and settling a bet true).
 //
@@ -35,15 +35,15 @@ import (
 // *Registry.
 type ProofSettlementEngine interface {
 	// DomainPackPredicate resolves predicateName against ctx's tenant's
-	// currently-enabled Domain Packs (ADR-0033), returning the bound CEL
+	// currently-enabled Domain Packs (ADR-0133), returning the bound CEL
 	// expression text and whether one was found at all. Predicates are keyed
-	// by a technique-shaped identifier (ADR-0031 decision 1,
+	// by a technique-shaped identifier (ADR-0131,
 	// ontology.DomainPack.Predicates) — predicateName is that identifier
 	// from the agent's perspective, resolved the same way
 	// World.DomainPackPredicate already does for direct in-process readers.
 	// ok is false, never an error, for a predicate name no enabled pack
 	// binds: an unknown predicate is SubmitProof's fail-closed case
-	// (ADR-0030), not a system failure.
+	// (ADR-0131), not a system failure.
 	DomainPackPredicate(ctx context.Context, predicateName string) (expr string, ok bool, err error)
 
 	// SettleBetTrue resolves ctx's tenant's Engine and delegates to its own
@@ -54,7 +54,7 @@ type ProofSettlementEngine interface {
 
 	// RequestDestructiveAuthorization resolves ctx's tenant's Engine and
 	// enqueues req against that tenant's own DestructiveAuthorizationQueue
-	// (ADR-0032 decision 1, gibson#390), returning immediately with the
+	// (ADR-0132, gibson#390), returning immediately with the
 	// pending request's id: the RequestDestructiveAuthorization RPC
 	// handler's (internal/engine/harness) only dependency besides the two
 	// methods above. The fleet keeps working while the human decision is

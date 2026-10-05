@@ -37,7 +37,7 @@ func awaitBelief(ctx context.Context, t *testing.T, sub brain.BeliefSubstrate, r
 
 // TestTenantRoutedBeliefSubstrate_RoutesEachCallByContextTenant proves a
 // single adapter (the one value wired onto HarnessCallbackService for every
-// tenant's PlaceBet calls, ADR-0022) resolves the caller's tenant from ctx
+// tenant's PlaceBet calls, ADR-0122) resolves the caller's tenant from ctx
 // and writes/reads through that tenant's own WorldBeliefSubstrate — so two
 // tenants' PlaceBet calls never collide, and never reach the wrong World.
 func TestTenantRoutedBeliefSubstrate_RoutesEachCallByContextTenant(t *testing.T) {

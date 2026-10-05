@@ -24,7 +24,7 @@ import (
 // propagation. The two pipelines share one write path into one field; they
 // cannot race each other into an inconsistent state.
 //
-// Claim and TechniqueEnvironment (ADR-0029 §3's market/reputation views —
+// Claim and TechniqueEnvironment (ADR-0129's market/reputation views —
 // P(claim valid), P(technique works here)) are backed by node_belief.go's
 // NodeBeliefRecord store (gibson#331's follow-up: "the last prerequisite for
 // #333's reputation keying"): reads are a live view of that store, and writes
@@ -37,7 +37,7 @@ import (
 // on either kind returned an error and Belief always reported "not found".
 
 // HostNodeID is the InfraNode.ID / NodeRef.ID a Host's stable brain id maps
-// to (ADR-0029's graph and slice types use string ids; Host.ID is a uint64).
+// to (ADR-0129's graph and slice types use string ids; Host.ID is a uint64).
 // HostsToInfraGraph and WorldBeliefSubstrate both use this exact mapping, so
 // a slice-gate write can always find the host it means to.
 func HostNodeID(id uint64) string { return strconv.FormatUint(id, 10) }

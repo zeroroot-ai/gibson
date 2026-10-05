@@ -15,22 +15,22 @@ import (
 
 // belief_schema.go declares the belief-PRM SCHEMA SEAM between the ontology
 // (this package, and taxonomy) and the belief substrate (internal/engine/brain,
-// ADR-0029). It answers exactly two questions for the belief engine:
+// ADR-0129). It answers exactly two questions for the belief engine:
 //
 //  1. Which node types are belief-bearing, and what probabilistic variables
-//     (and intra-node dependencies) does each one declare? (ADR-0029 §2)
+//     (and intra-node dependencies) does each one declare? (ADR-0129)
 //  2. Which relationship types propagate belief — the enablement-edge flag?
-//     (ADR-0029 §7)
+//     (ADR-0129)
 //
 // This file does NOT instantiate a ground Bayesian attack graph, run
 // inference, or discover new schema at runtime — that is #275/#276 (belief
 // engine, owned by Lane B) and #274/#281 (ontology/taxonomy discovery and
 // promotion) respectively. It only publishes the declarative schema those
 // slices consume, plus the seed content that replaces today's hardcoded
-// three-variable per-Host belief field (ADR-0005, internal/engine/brain).
+// three-variable per-Host belief field (ADR-0129, internal/engine/brain).
 //
 // Registration follows the same named-extension, replace-on-name pattern as
-// Reasoner.RegisterExtension (ADR-0024's discoverable-ontology seam), so a
+// Reasoner.RegisterExtension (ADR-0124's discoverable-ontology seam), so a
 // Domain Pack registers its belief schema the same way it registers taxonomy
 // hierarchies: stage the merged view, validate it as a whole, then commit.
 // The type does not reuse sdkgraphrag.OntologyExtension because the belief-PRM
@@ -51,7 +51,7 @@ type BeliefVariable struct {
 }
 
 // NodeBeliefSchema is the belief-PRM schema for one node type: its declared
-// variables and their intra-node dependencies (ADR-0029 §2).
+// variables and their intra-node dependencies (ADR-0129).
 type NodeBeliefSchema struct {
 	// NodeType is the taxonomy node type this schema applies to (e.g. "Host").
 	// It must be a member of, or at least a well-formed identifier compatible
@@ -66,7 +66,7 @@ type NodeBeliefSchema struct {
 }
 
 // EnablementEdgeSpec declares one relationship type that propagates belief
-// (ADR-0029 §7) and the STRUCTURE of that propagation (ADR-0037 decision 1):
+// (ADR-0129) and the STRUCTURE of that propagation (ADR-0137):
 // "an edge of RelType feeds TargetVariable on its destination node" — the
 // node at the edge's To end, direction taken verbatim from the infra graph
 // the same way DeriveAttackGraph already does, so no separate direction
@@ -74,10 +74,10 @@ type NodeBeliefSchema struct {
 //
 // This is declarative structure only, authored like the rest of the
 // ontology. The noisy-OR STRENGTH that contribution carries is never
-// declared here: ADR-0037 decision 2 makes it a learned Beta posterior, fit
+// declared here: ADR-0137 makes it a learned Beta posterior, fit
 // offline by braintrain from recorded outcomes (#395), consumed as the
 // posterior mean; until a posterior exists, the belief runtime grounds this
-// edge type at the uninformative-prior mean instead (ADR-0037 decision 3,
+// edge type at the uninformative-prior mean instead (ADR-0137,
 // internal/engine/brain's UninformativePriorStrength) — never a
 // hand-authored number.
 type EnablementEdgeSpec struct {
@@ -94,7 +94,7 @@ type EnablementEdgeSpec struct {
 }
 
 // BeliefSchemaExtension is a named, Pack-contributed bundle of belief-bearing
-// node declarations and enablement-edge flags (ADR-0024 / ADR-0029 §2, §7).
+// node declarations and enablement-edge flags (ADR-0124 / ADR-0129).
 // Register it with a BeliefSchemaRegistry the same way an
 // sdkgraphrag.OntologyExtension is registered with a Reasoner.
 type BeliefSchemaExtension struct {
@@ -103,8 +103,8 @@ type BeliefSchemaExtension struct {
 	Nodes []NodeBeliefSchema
 
 	// EnablementEdges lists relationship types that propagate belief along
-	// them, and which target variable each feeds (ADR-0029 §7, ADR-0037
-	// decision 1). Order is insignificant; two extensions (or one extension,
+	// them, and which target variable each feeds (ADR-0129, ADR-0137).
+	// Order is insignificant; two extensions (or one extension,
 	// twice) declaring the SAME RelType with the SAME TargetVariable is
 	// benign and unioned; declaring it with a DIFFERENT TargetVariable is a
 	// hard conflict (see BeliefSchemaRegistry.RegisterExtension).
@@ -153,7 +153,7 @@ func (e *VariableCycleError) Error() string {
 
 // ConflictingEnablementEdgeTargetError is returned by RegisterExtension when
 // two extensions (or one extension, twice) declare the SAME enablement edge
-// RelType with DIFFERENT TargetVariable values (ADR-0037 decision 1). Unlike
+// RelType with DIFFERENT TargetVariable values (ADR-0137). Unlike
 // the plain enablement-edge flag, a target variable is a payload, not just a
 // flag, so two competing declarations cannot be silently unioned.
 type ConflictingEnablementEdgeTargetError struct {
@@ -186,7 +186,7 @@ type BeliefSchemaRegistry struct {
 	nodes map[string]map[string]BeliefVariable
 
 	// enablementEdges is the merged, live view: relationship type -> the
-	// target variable it feeds (ADR-0037 decision 1).
+	// target variable it feeds (ADR-0137).
 	enablementEdges map[string]string
 }
 
@@ -311,7 +311,7 @@ func (r *BeliefSchemaRegistry) BeliefBearingNodeTypes() []string {
 }
 
 // IsEnablementEdge reports whether belief propagates along relType — the
-// enablement-edge flag from ADR-0029 §7.
+// enablement-edge flag from ADR-0129.
 func (r *BeliefSchemaRegistry) IsEnablementEdge(relType string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -330,7 +330,7 @@ func (r *BeliefSchemaRegistry) EnablementEdgeTypes() []string {
 }
 
 // EnablementEdgeTargetVariable returns the belief variable relType feeds on
-// its destination node (ADR-0037 decision 1), and whether relType is a known
+// its destination node (ADR-0137), and whether relType is a known
 // enablement edge at all (equivalent to IsEnablementEdge) — a TargetVariable
 // is mandatory on every registered EnablementEdgeSpec (see
 // validateBeliefSchemaExtensionShape), so ok is false only when relType was

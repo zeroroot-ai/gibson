@@ -21,7 +21,7 @@ import (
 const tenantOperatorSVID = "spiffe://zeroroot.ai/platform/tenant-operator"
 
 // connectorOperatorSVID is the connector-operator's SPIFFE workload identity.
-// It is the second direct-dial peer (ADR-0015 §5, gibson#1566): it calls
+// It is the second direct-dial peer (ADR-0061, gibson#1566): it calls
 // RevokeConnectorGrant from the ConnectorInstance finalizer and
 // GetConnectorAuthStatus from the ConnectorInstance controller, so its policy
 // is exactly those two methods (least privilege).
@@ -142,12 +142,12 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 // connectorOperatorMethodPolicy classifies EVERY DaemonOperatorService method
 // for the connector-operator's direct-dial bypass, with the same guard tests
 // as operatorMethodPolicy. Its ConnectorInstance finalizer calls exactly one
-// RPC (ADR-0015 §5); every other method the descriptor carries is denied. The
+// RPC (ADR-0061); every other method the descriptor carries is denied. The
 // table is derived from operatorMethodPolicy's key set so the two peers can
 // never drift on which methods exist.
 var connectorOperatorMethodPolicy = denyAllExcept(operatorMethodPolicy, map[string]string{
-	daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName:   "the ConnectorInstance finalizer revokes the connector grant on delete (ADR-0015 §5, gibson#1566)",
-	daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName: "the ConnectorInstance controller reads the credential state so the CR reports Degraded, never a silent Active (ADR-0015 decision 4)",
+	daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName:   "the ConnectorInstance finalizer revokes the connector grant on delete (ADR-0061, gibson#1566)",
+	daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName: "the ConnectorInstance controller reads the credential state so the CR reports Degraded, never a silent Active (ADR-0061)",
 }, "tenant-operator surface; not a connector concern")
 
 // denyAllExcept builds a policy table over the same method set as base:

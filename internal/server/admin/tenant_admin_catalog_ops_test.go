@@ -380,7 +380,7 @@ func (f *fakeAuthorizerCatalog) ListUsersOfType(context.Context, string, string,
 
 // TestSetCatalogEnabled_Enable_AgentKind is the opt-in acceptance case: a tenant
 // admin enables an agent (e.g. zerocool) and the tenant_enabled tuple lands on
-// the canonical component:agent/<name> object for that tenant only (ADR-0015).
+// the canonical component:agent/<name> object for that tenant only (ADR-0136).
 func TestSetCatalogEnabled_Enable_AgentKind(t *testing.T) {
 	fga := &fakeAuthorizerCatalog{}
 	srv := newCatalogServer(fga)

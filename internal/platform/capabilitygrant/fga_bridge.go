@@ -156,7 +156,7 @@ func (b *FGABridge) ResolveCapabilities(ctx context.Context, userID, tenantID st
 			}
 
 			// The kind is carried by the object identity itself
-			// ("component:<kind>/<name>", ADR-0015), so it resolves even for a
+			// ("component:<kind>/<name>", ADR-0136), so it resolves even for a
 			// grant on a component not currently live in the registry. The
 			// registry lookup by name supplies the description when available.
 			meta := index[componentName]
@@ -337,7 +337,7 @@ func (b *FGABridge) ResolveComponentCapabilities(ctx context.Context, principalR
 }
 
 // parseComponentRef parses the canonical FGA component object
-// "component:<kind>/<name>" into its kind and name (ADR-0015). A bare,
+// "component:<kind>/<name>" into its kind and name (ADR-0136). A bare,
 // kind-less "component:<name>" is rejected (ok=false): the kind is part of the
 // object identity, so a kind-less reference is not a valid component object.
 func parseComponentRef(ref string) (kind, name string, ok bool) {
@@ -350,7 +350,7 @@ func parseComponentRef(ref string) (kind, name string, ok bool) {
 	if !hasSlash || name == "" || !authz.IsComponentKind(kind) {
 		// Fail closed on a kind-less ("component:nmap") or unknown-kind
 		// ("component:unknown/nmap") object — never authorize against an
-		// object whose kind is not one of the four canonical kinds (ADR-0015).
+		// object whose kind is not one of the four canonical kinds (ADR-0136).
 		return "", "", false
 	}
 	return kind, name, true

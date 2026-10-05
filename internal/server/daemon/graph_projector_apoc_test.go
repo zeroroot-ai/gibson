@@ -10,7 +10,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 )
 
-// The Host projection is the tracer bullet for ADR-0012's "shape via APOC, not
+// The Host projection is the tracer bullet for ADR-0112's "shape via APOC, not
 // string-building": labels reach Neo4j as a runtime argument, so a label is
 // data and cannot alter query structure.
 //
@@ -140,7 +140,7 @@ func TestHostMergeSemanticsAreUnchanged(t *testing.T) {
 // TestHostBeliefIsProjectedInFull is gibson#272: belief is a first-class
 // property on the graph node, not a single side-car score. Every field the
 // engine records for a host's Belief — and the evidence digest that gates its
-// recompute (ADR-0005 §8) — must reach the projected node, not just Juicy.
+// recompute (ADR-0129) — must reach the projected node, not just Juicy.
 func TestHostBeliefIsProjectedInFull(t *testing.T) {
 	t.Parallel()
 

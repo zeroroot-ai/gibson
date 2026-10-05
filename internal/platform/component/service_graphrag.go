@@ -31,7 +31,7 @@ func (s *ComponentServiceServer) QueryNodes(ctx context.Context, req *componentp
 }
 
 // StoreNode is gone: sdk#451 removed the generic graph-write RPC from
-// ComponentService (ADR-0012 — the projector is the sole graph writer), so
+// ComponentService (ADR-0112 — the projector is the sole graph writer), so
 // there is no request type left to implement against. The full unwind of the
 // now-callerless graphrag write surface is gibson#1265/gibson#1322.
 

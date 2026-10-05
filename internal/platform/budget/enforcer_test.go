@@ -267,7 +267,7 @@ func (s stubProvider) Limits(context.Context, string) (entitlements.Limits, erro
 }
 
 // When no explicit tenant budget is configured, the enforcer must take the
-// tenant-scope ceiling from the entitlements provider (ADR-0003 seam).
+// tenant-scope ceiling from the entitlements provider (ADR-0089 seam).
 func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})

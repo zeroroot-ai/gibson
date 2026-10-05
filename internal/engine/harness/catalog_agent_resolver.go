@@ -16,7 +16,7 @@ import (
 )
 
 // defaultCatalogAgentSandboxClass is the setec SandboxClass a catalog agent
-// launches under when the deployment config names none (ADR-0016 decision 4 —
+// launches under when the deployment config names none (ADR-0116 —
 // gibson must name the isolation posture, never inherit the cluster default,
 // ADR-0052). It matches config.DefaultAgentSandboxClass; the resolver keeps its
 // own copy so the harness does not import the daemon config package.
@@ -27,7 +27,7 @@ var _ AgentLaunchSpecResolver = (*CatalogAgentResolver)(nil)
 
 // ErrAgentNotInCatalog is returned when an agent name has no signed catalog
 // manifest. A sandboxed dispatch has no launch spec then, so the harness denies
-// it fail-closed rather than launching an unknown image (ADR-0016).
+// it fail-closed rather than launching an unknown image (ADR-0116).
 var ErrAgentNotInCatalog = errors.New("agent not in component catalog")
 
 // agentCatalogLookup is the catalog surface the resolver needs: find the
@@ -49,7 +49,7 @@ type CredentialSource interface {
 var ErrTenantCredentialMissing = errors.New("tenant provider credential missing")
 
 // ErrUnknownLoginShape is returned when a launch names a login shape the
-// platform does not have (ADR-0019 decision 4).
+// platform does not have (ADR-0119).
 var ErrUnknownLoginShape = errors.New("unknown login shape")
 
 // ErrUnknownInstanceMode is returned when a launch names an instance mode the
@@ -94,7 +94,7 @@ type TenantModelResolver interface {
 }
 
 // CatalogAgentResolver resolves a sandboxed agent's launch spec from the signed
-// component-catalog manifest (ADR-0015 / ADR-0016). It is the production
+// component-catalog manifest (ADR-0136 / ADR-0116). It is the production
 // AgentLaunchSpecResolver the daemon wires (gibson#1597): given an agent name it
 // reads that agent's manifest and returns the image, sandbox class, egress
 // ceiling and model the ephemeral launcher runs the agent under. An agent with
@@ -155,7 +155,7 @@ func (r *CatalogAgentResolver) WithTenantModelResolver(m TenantModelResolver) *C
 // the harness denies the dispatch fail-closed.
 //
 // The tenant is not used yet: this slice takes the model from the manifest.
-// ADR-0016 decision 7 resolves the newest tenant model at dispatch in a later
+// ADR-0116 resolves the newest tenant model at dispatch in a later
 // slice, which is why the interface already carries the tenant.
 func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req AgentLaunchRequest) (sandboxed.AgentLaunchSpec, error) {
 	agentName := req.AgentName
@@ -206,8 +206,8 @@ func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req A
 		spec.Model = model
 	}
 	// The manifest names the tenant credentials the sandbox needs. They come
-	// from the DISPATCHING tenant's own provider configuration (ADR-0019
-	// decision 4): the tenant pays, and no platform key enters a tenant
+	// from the DISPATCHING tenant's own provider configuration (ADR-0119):
+	// the tenant pays, and no platform key enters a tenant
 	// sandbox. A tenant without the provider is refused here, before launch.
 	env, err := r.resolveShapeEnv(ctx, tenant, agentName, shape, entry.Credentials)
 	if err != nil {

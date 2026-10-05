@@ -10,7 +10,7 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 
-// Grant scopes for a bank member (ADR-0019 decision 2, gibson#1711).
+// Grant scopes for a bank member (ADR-0119, gibson#1711).
 //
 // A one-shot dispatch holds ONE grant for its whole run, so the run's grant and
 // the run's authority are the same thing. A member is different: one sandbox

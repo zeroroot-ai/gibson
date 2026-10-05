@@ -18,7 +18,7 @@
 //
 // The success path exercises the full harness dispatch chain:
 //
-//	CallToolProto → sandboxedToolSpecFromManifest (kind:tool manifest, ADR-0017)
+//	CallToolProto → sandboxedToolSpecFromManifest (kind:tool manifest, ADR-0117)
 //	             → dispatch-policy gate (UNTRUSTED + sandbox available ⇒ RequireSetec)
 //	             → sandboxed.Executor.ExecuteWithSpec
 //	             → setec SandboxService Launch/Wait/StreamLogs over mTLS
@@ -141,7 +141,7 @@ func TestSetecRoundTrip_UntrustedToolExecutesViaSandbox(t *testing.T) {
 		t.Fatalf("build sandboxed executor: %v", err)
 	}
 
-	// nmap is a kind:tool manifest (ADR-0017): the harness resolves its launch
+	// nmap is a kind:tool manifest (ADR-0117): the harness resolves its launch
 	// spec (shared executor image, command, GIBSON_TOOL_NAME) straight from the
 	// embedded catalog — no runtime registry seeding. The tenant must have
 	// can_execute on component:tool/nmap; the allowing authorizer stands in for

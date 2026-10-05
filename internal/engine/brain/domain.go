@@ -9,7 +9,7 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// Domain is a registrable domain entity. Identity is (ScopeID, Name) — ADR-0002
+// Domain is a registrable domain entity. Identity is (ScopeID, Name) — ADR-0102
 // scope-relative. Placeholder shape; sdk#340 will codegen from taxonomy/v1.
 type Domain struct {
 	ID      uint64
@@ -48,7 +48,7 @@ type SubdomainObserved struct {
 func (SubdomainObserved) Kind() string { return "subdomain.observed" }
 
 // applyDomainObserved resolves a domain to an existing entity within its scope
-// (by name) or creates one — scope-relative identity (ADR-0002).
+// (by name) or creates one — scope-relative identity (ADR-0102).
 func applyDomainObserved(w *World, e DomainObserved) {
 	q := ecs.NewFilter1[Domain](w.ecs).Query()
 	for q.Next() {
@@ -63,7 +63,7 @@ func applyDomainObserved(w *World, e DomainObserved) {
 
 // applySubdomainObserved resolves a subdomain by (scope, fqdn) or creates one,
 // then enriches its parent domain and resolved addresses (union, never shrinks —
-// ADR-0002 associations are time-bounded/kept).
+// ADR-0102 associations are time-bounded/kept).
 func applySubdomainObserved(w *World, e SubdomainObserved) {
 	q := ecs.NewFilter1[Subdomain](w.ecs).Query()
 	var ent ecs.Entity

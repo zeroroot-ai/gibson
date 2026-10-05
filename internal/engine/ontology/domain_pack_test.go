@@ -334,7 +334,7 @@ func TestDomainPack_Import_WrapsATaxonomyConstructionFailure(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------
-// Phase 2 (gibson#378, ADR-0031 / ADR-0033): a Pack carries technique -> CEL
+// Phase 2 (gibson#378, ADR-0131 / ADR-0133): a Pack carries technique -> CEL
 // predicate bindings plus catalog metadata (author, visibility), and Validate
 // covers every new field. Every pack is free (gibson#384).
 // -----------------------------------------------------------------------
@@ -360,7 +360,7 @@ func TestDomainPack_Validate_AcceptsPredicatesAndCommercialMetadata(t *testing.T
 }
 
 func TestDomainPack_Validate_AcceptsUnclassifiedCommercialMetadata(t *testing.T) {
-	// A tenant extension (ADR-0033 decision 1) has no commercial metadata
+	// A tenant extension (ADR-0133) has no commercial metadata
 	// yet — the zero values must all validate.
 	pack := &DomainPack{Name: "k8s", Version: 1}
 	require.NoError(t, pack.Validate())

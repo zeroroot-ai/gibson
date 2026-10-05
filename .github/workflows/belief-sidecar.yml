@@ -1,9 +1,9 @@
 name: belief-sidecar
 # The belief-field inference algorithm's tests: the retained sidecar/belief
-# Python package (ADR-0034) and the native Go port it stays the parity oracle
+# Python package (ADR-0134) and the native Go port it stays the parity oracle
 # for (internal/engine/brain/beliefvi).
 #
-# ADR-0034 (gibson#377) retired the Python HTTP sidecar and its image
+# ADR-0134 (gibson#377) retired the Python HTTP sidecar and its image
 # (gibson-belief-sidecar) — inference now runs in-process in the daemon via
 # beliefvi, a line-for-line port of sidecar/belief's exact variable-elimination
 # engine. sidecar/belief itself is NOT gone: infer.py/noisy_or.py/ground.py/
@@ -13,7 +13,7 @@ name: belief-sidecar
 #
 # Why this is its own workflow rather than a job in gibson-images.yml: this
 # repo's default `pull_request` gate (go-ci.yml) compiles no Python, and (as
-# of ADR-0034) beliefvi's own Go tests skip their parity assertion unless a
+# of ADR-0134) beliefvi's own Go tests skip their parity assertion unless a
 # fixture path is handed to them — so without this workflow, a change to
 # sidecar/belief OR to beliefvi that broke their agreement would reach `main`
 # with no gate having run on the PR at all. That is the same invisible-gate
@@ -25,7 +25,7 @@ name: belief-sidecar
 # would install torch (the pgmpy reference implementation, ~3 GB) on every
 # queue entry in the repo rather than only on the rare PR that touches either
 # directory. Absence from the queue lane is made visible by the fact that
-# nothing publishes an image gated on this job any more (ADR-0034 removed
+# nothing publishes an image gated on this job any more (ADR-0134 removed
 # that coupling) — a regression here blocks the PR itself, not a downstream
 # publish step.
 
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           # Must track the OSS-shipped base model's training/parity toolchain.
-          # No runtime image reads this any more (ADR-0034), so there is no
+          # No runtime image reads this any more (ADR-0134), so there is no
           # "ship the same minor" constraint left — 3.13 is kept anyway so a
           # version-specific break in the reference implementation itself is
           # still caught here rather than downstream.
@@ -84,7 +84,7 @@ jobs:
         working-directory: sidecar/belief
         run: python -m pytest test_parity.py -q
 
-      # ADR-0034 decision 4's other half: the Go port must agree with the
+      # ADR-0134's other half: the Go port must agree with the
       # SAME reference to the SAME 1e-12 tolerance, so this generates the
       # fixture from the numpy reference (no pgmpy import needed here — that
       # agreement was just proven by test_parity.py above) and points the Go

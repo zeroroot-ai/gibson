@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package settlement provides the typed success-predicate framework behind
-// proof-of-demonstration (ADR-0027, gibson#278).
+// proof-of-demonstration (ADR-0131, gibson#278).
 //
 // # Overview
 //
@@ -11,7 +11,7 @@
 // free-form condition an agent invents for itself. A [PredicateType] is
 // scoped to a [TechniqueID]: only the technique's owner (the Domain Pack
 // loader) may register the predicate types that technique may use. This is
-// what keeps settlement un-gameable (ADR-0027, decision 3).
+// what keeps settlement un-gameable (ADR-0131).
 //
 // # Key types
 //
@@ -24,7 +24,7 @@
 //     against captured evidence. It never calls an LLM and never consults
 //     wall-clock time, randomness, or any other nondeterministic input:
 //     the same predicate and the same evidence always yield the same
-//     result, so replay reproduces settlement exactly (ADR-0027, decision 2).
+//     result, so replay reproduces settlement exactly (ADR-0131).
 //   - [Registry] is the technique -> predicate-type -> [Evaluator] table.
 //     A technique (via its Domain Pack) registers the predicate types it
 //     defines; nothing else may add one on its behalf.

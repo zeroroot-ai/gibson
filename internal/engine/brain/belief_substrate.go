@@ -5,35 +5,35 @@ package brain
 
 import "context"
 
-// belief_substrate.go is the stub/seam for ADR-0029: belief generalized to any
+// belief_substrate.go is the stub/seam for ADR-0129: belief generalized to any
 // node type the ontology declares belief variables for, not only Host.
 //
 // gibson#272 keeps the concrete work on the existing path — Host stays an ECS
 // component scored by a BeliefProvider (belief.go) and projected with the node
-// (graph_projector_neo4j.go). ADR-0029's full relational-PRM engine (a ground
+// (graph_projector_neo4j.go). ADR-0129's full relational-PRM engine (a ground
 // Bayesian attack graph, exact inference on a bounded slice) is out of scope
 // here. What IS in scope is publishing the shape of the seam now, so the
-// market and reputation views ADR-0029 §3 describes — a hypothesis/bet is
+// market and reputation views ADR-0129 describes — a hypothesis/bet is
 // belief on a claim-node, reputation is belief on a technique×environment
 // node — can be built against one substrate rather than a bespoke store each,
 // without waiting on the engine behind it.
 //
 // BeliefSubstrate is intentionally small and does not yet know about slices,
-// enablement edges, or CPTs (ADR-0029 §§1,4-7) — those live behind whichever
+// enablement edges, or CPTs (ADR-0129) — those live behind whichever
 // concrete implementation eventually backs it. Exactness is still the rule:
-// a substrate may never sample (ADR-0005 §2), and a Write is expected to be
+// a substrate may never sample (ADR-0134), and a Write is expected to be
 // logged as an event by its caller's engine, the same way BeliefScored is, so
 // replay reproduces it.
 
 // NodeKind identifies which ontology-declared node type a BeliefSubstrate call
 // addresses. Host is the seed kind that already carries belief (gibson#272);
-// Claim and TechniqueEnvironment are the two faces ADR-0029 §3 reframes as
+// Claim and TechniqueEnvironment are the two faces ADR-0129 reframes as
 // views over this substrate. Further kinds are declared by the ontology/Pack
-// (ADR-0029 §2) as it grows — this list is not meant to stay closed.
+// (ADR-0129) as it grows — this list is not meant to stay closed.
 type NodeKind string
 
 const (
-	// NodeKindHost is a Host entity (ADR-0005) — the belief seed content.
+	// NodeKindHost is a Host entity (ADR-0129) — the belief seed content.
 	// Capitalized to match the taxonomy/ontology node-type convention
 	// (taxonomy.go's hostLabels, ontology.NodeBeliefSchema.NodeType, every
 	// InfraNode.Kind gibson#286/#287 produce all use "Host", never "host") —
@@ -41,11 +41,11 @@ const (
 	// not with a second, differently-cased vocabulary.
 	NodeKindHost NodeKind = "Host"
 	// NodeKindClaim is a hypothesis/bet node: belief here is P(claim valid),
-	// the market view (ADR-0022, reframed by ADR-0029 §3).
+	// the market view (ADR-0122, reframed by ADR-0129).
 	NodeKindClaim NodeKind = "Claim"
 	// NodeKindTechniqueEnvironment is a technique×environment node: belief
 	// here is P(technique works in this environment), the reputation view
-	// (ADR-0029 §3).
+	// (ADR-0129).
 	NodeKindTechniqueEnvironment NodeKind = "TechniqueEnvironment"
 )
 
@@ -62,7 +62,7 @@ type NodeRef struct {
 // the same pairing Host carries today (Host.Belief / Host.EvidenceDigest,
 // belief.go), generalized to any node. The digest is what lets a caller decide
 // whether a recorded belief is still current for a node's evidence before
-// trusting it, the same evidence-digest gate ADR-0005 §8 describes for Host.
+// trusting it, the same evidence-digest gate ADR-0129 describes for Host.
 type NodeBelief struct {
 	Belief         Belief
 	EvidenceDigest string
@@ -71,9 +71,9 @@ type NodeBelief struct {
 	CauseEdgeTypes []string
 }
 
-// BeliefSubstrate is the seam ADR-0029 §3 describes: read and write belief on
+// BeliefSubstrate is the seam ADR-0129 describes: read and write belief on
 // any node the ontology declares belief variables for. It is synchronous and
-// exact — never sampling, mirroring ADR-0005 §2 — and returns an error only
+// exact — never sampling, mirroring ADR-0134 — and returns an error only
 // for a genuine failure to read or write, never to signal "no belief yet"
 // (that is the bool return).
 type BeliefSubstrate interface {
@@ -83,7 +83,7 @@ type BeliefSubstrate interface {
 
 	// SetBelief records nb as ref's current belief, replacing whatever was
 	// there before in full — belief is never blended or averaged across
-	// writes (ADR-0005 §2: exact and deterministic). A caller applying a
+	// writes (ADR-0134: exact and deterministic). A caller applying a
 	// possibly-stale score is responsible for its own staleness check before
 	// calling SetBelief, the same way applyBeliefScored checks
 	// Host.EvidenceDigest before accepting a BeliefScored event.
@@ -96,9 +96,9 @@ type BeliefSubstrate interface {
 // so shipping a stub impl now would either force a premature
 // .deadcode-baseline edit for code nothing uses, or force wiring it into a
 // live path ahead of the view that needs it. The interface above is the seam
-// gibson#272/ADR-0029 §3 asks for; whichever lane builds the market/reputation
+// gibson#272/ADR-0129 asks for; whichever lane builds the market/reputation
 // view supplies (and reaches) its own backing implementation — an in-memory
-// one initially, the relational-PRM engine (ADR-0029 §§1-2) eventually. See
+// one initially, the relational-PRM engine (ADR-0129) eventually. See
 // belief_substrate_test.go for a minimal implementation proving the interface
 // is satisfiable and its semantics (round-trip, kind independence, exact
 // overwrite) hold.

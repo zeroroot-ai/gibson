@@ -11,7 +11,7 @@
 //   - The Executor consumes a minimal SandboxClient interface so unit tests
 //     can mock the gRPC surface without importing the Setec module.
 //
-// Dispatch is driven by the embedded kind:tool catalog manifests (ADR-0017):
+// Dispatch is driven by the embedded kind:tool catalog manifests (ADR-0117):
 // harness.CallToolProto resolves a ToolSpec per call from componentcatalog,
 // gated per tenant by can_execute, before handing off to
 // Executor.ExecuteWithSpec.
@@ -21,7 +21,7 @@
 // ComponentRegistry entries under the _system tenant, and dispatch resolved
 // from those — which carried no per-tenant check at all, so any tenant could
 // run any discovered tool. That refresher is deleted, not disabled
-// (ADR-0017/ADR-0027); do not reintroduce a registry-sourced dispatch path.
+// (ADR-0117/ADR-0027); do not reintroduce a registry-sourced dispatch path.
 package sandboxed
 
 // ToolSpec is the resolved launch spec for one sandboxed tool call. Fields
@@ -35,7 +35,7 @@ type ToolSpec struct {
 	Memory  string
 
 	// Egress, when non-empty, confines the tool sandbox to exactly these
-	// targets — the dispatching agent's egressAllow ceiling (ADR-0015). Empty
+	// targets — the dispatching agent's egressAllow ceiling (ADR-0136). Empty
 	// means unrestricted: the sandbox keeps setec's default mode=full. Sandbox
 	// isolation is unconditional; this only bounds egress breadth.
 	Egress []EgressRule
@@ -49,7 +49,7 @@ type ToolSpec struct {
 }
 
 // LiveScope is the identity a sandbox run is enumerated under by the
-// read-only running-sandbox console (ADR-0016 S11).
+// read-only running-sandbox console (ADR-0116 S11).
 type LiveScope struct {
 	// Tenant is the CUSTOMER tenant that owns the run. Never the setec infra
 	// tenant the launcher itself authenticates as.

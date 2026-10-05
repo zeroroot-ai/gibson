@@ -10,7 +10,7 @@ import _ "embed"
 // duplicated here — go:embed cannot reach outside this package's directory
 // tree — rather than loaded from a runtime file path, so a self-hosted or
 // dev binary built from source needs no external model file to score belief
-// at all (ADR-0034: "no belief-sidecar container, no round-trip"). Two
+// at all (ADR-0134: "no belief-sidecar container, no round-trip"). Two
 // invariants keep the duplicate honest:
 //
 //  1. sidecar/belief/models/base-v1.json stays canonical — braintrain and

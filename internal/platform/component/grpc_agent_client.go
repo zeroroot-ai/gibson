@@ -142,7 +142,7 @@ func (c *GRPCAgentClient) TargetTypes() []TargetType {
 }
 
 // TechniqueTypes returns the taxonomy category ids of the techniques this
-// agent can execute (ADR-0035).
+// agent can execute (ADR-0135).
 //
 // The metadata should contain a "technique_types" key with comma-separated
 // values. For example: "prompt_injection,model_extraction,jailbreak"
@@ -458,7 +458,7 @@ func convertTargetTypes(protoTypes []string) []TargetType {
 }
 
 // convertTechniqueTypes converts proto technique type strings to taxonomy
-// category ids (ADR-0035).
+// category ids (ADR-0135).
 func convertTechniqueTypes(protoTypes []string) []taxonomy.CategoryID {
 	result := make([]taxonomy.CategoryID, len(protoTypes))
 	for i, t := range protoTypes {

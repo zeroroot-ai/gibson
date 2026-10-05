@@ -38,7 +38,7 @@ type neo4jGraphWriter struct {
 // writer's Cypher actually materializes. They are declared here so the Taxonomy
 // and the projector cannot drift apart unnoticed — which is the same failure
 // (Host / HOST / host_v2 diverging silently) that makes the Taxonomy global in
-// the first place (ADR-0012).
+// the first place (ADR-0112).
 var projectedNodeLabels = []string{
 	"Account", "AgentRun", "Credential", "Domain", "Finding", "Host",
 	"LlmCall", "Mission", taxonomy.ObservationLabel, "Port", "Service", "Subdomain",
@@ -128,7 +128,7 @@ var safeTaxonomyLabel = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 
 // taxonomyLabels validates a taxonomy label set at package initialisation and
 // returns it. An invalid label is a panic, not an error: the taxonomy is
-// global and versioned in code (ADR-0012), so an unsafe entry is a programming
+// global and versioned in code (ADR-0112), so an unsafe entry is a programming
 // error that must never reach a running daemon.
 //
 // # Why this guard exists on top of apoc.merge.node
@@ -175,7 +175,7 @@ var hostLabels = taxonomyLabels("Host")
 
 // upsertHostCypher materializes a Host and its ports/services. The Host node
 // itself goes through apoc.merge.node with $host_labels as a runtime argument
-// (ADR-0012, gibson#1257); the containment subquery below still uses constant
+// (ADR-0112, gibson#1257); the containment subquery below still uses constant
 // :Port / :Service labels and is converted separately.
 //
 // Merge semantics are unchanged from the plain `MERGE (h:Host {brain_id: $id})`
@@ -263,8 +263,8 @@ func hostUpsertParams(h brain.HostSnapshot) map[string]any {
 			"address":      h.Address,
 			"ssh_host_key": h.SSHHostKey,
 			"cloud_id":     h.CloudID,
-			// Belief is a first-class property of the node (gibson#272, amending
-			// ADR-0029 over ADR-0005), not a single side-car score: every
+			// Belief is a first-class property of the node (gibson#272,
+			// ADR-0129), not a single side-car score: every
 			// posterior the model reports travels with the node, plus the
 			// evidence digest it was scored against, so a reader of the graph
 			// can tell what a belief answers for without a round-trip to the
@@ -627,7 +627,7 @@ func (w *neo4jGraphWriter) UpsertAccount(ctx context.Context, tenant string, a b
 	}, "account", a.ID)
 }
 
-// upsertAgentRunCypher MERGEs an :AgentRun (run-provenance, ADR-0007) keyed by the
+// upsertAgentRunCypher MERGEs an :AgentRun (run-provenance, ADR-0107) keyed by the
 // harness run id, and — when its parent run is already projected — the DELEGATED_TO
 // edge from parent to child. The edge is conditional so the run node is always
 // created; a later pass links it once the parent lands (self-healing), mirroring
@@ -641,7 +641,7 @@ FOREACH (_ IN CASE WHEN $parent_run_id = '' OR parent IS NULL THEN [] ELSE [1] E
   MERGE (parent)-[:DELEGATED_TO]->(r))
 RETURN r.brain_id`
 
-// upsertLlmCallCypher MERGEs an :LlmCall (call provenance, ADR-0007/gibson#755)
+// upsertLlmCallCypher MERGEs an :LlmCall (call provenance, ADR-0107/gibson#755)
 // keyed by its brain_id (CallID) and conditionally links the issuing :AgentRun
 // via ISSUED — the edge appears once the run lands, self-healing on a later tick.
 const upsertLlmCallCypher = `
@@ -657,7 +657,7 @@ RETURN c.brain_id`
 
 // UpsertAgentRun idempotently projects one agent run and, when its parent run is
 // already projected, the DELEGATED_TO edge — replacing the old direct graph write
-// in DelegateToAgent so the projector is the sole writer (ADR-0007, #837).
+// in DelegateToAgent so the projector is the sole writer (ADR-0107, #837).
 func (w *neo4jGraphWriter) UpsertAgentRun(ctx context.Context, tenant string, r brain.AgentRunSnapshot) error {
 	pool := w.poolGetter()
 	if pool == nil {
@@ -904,7 +904,7 @@ func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f b
 }
 
 // upsertObservationCypher MERGEs an :Observation — the node every
-// out-of-taxonomy shape lands on (ADR-0012).
+// out-of-taxonomy shape lands on (ADR-0112).
 //
 // Three things are load-bearing here:
 //
@@ -917,7 +917,7 @@ func (w *neo4jGraphWriter) UpsertFinding(ctx context.Context, tenant string, f b
 //   - The residue is applied with `SET o += $payload`, Cypher's map-append. The
 //     keys arrive as map entries in a parameter, never spliced into the query
 //     text — which is what makes unbounded keys a schema-sprawl concern rather
-//     than an injection one (the caps in ADR-0012's "Bounded" paragraph are what
+//     than an injection one (the caps in ADR-0112's "Bounded" paragraph are what
 //     address the sprawl).
 //
 // Residue keys are prefixed by the caller so they can never collide with, or

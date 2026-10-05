@@ -5,7 +5,7 @@
 //
 // agentConsoleServer implements gibson.daemon.agentconsole.v1.AgentConsoleService:
 // the daemon's read-only, tenant-scoped view of the agents running right now and
-// their live structured events (ADR-0016 S11, gibson#1599). It reads from the
+// their live structured events (ADR-0116 S11, gibson#1599). It reads from the
 // in-memory liveagents.Registry that the sandboxed agent launcher tees each run
 // into. The dashboard's live agent console (S12) reads through here over
 // Envoy + ext-authz.
@@ -45,7 +45,7 @@ type agentConsoleServer struct {
 }
 
 // MemberSource resolves which bank member a running instance is, from the
-// member run id the instance was launched under (ADR-0019, gibson#1716). The
+// member run id the instance was launched under (ADR-0119, gibson#1716). The
 // daemon backs it with the bank store. bank.ErrNotFound means the instance is
 // not a member, which is what every one-shot dispatch answers.
 type MemberSource interface {

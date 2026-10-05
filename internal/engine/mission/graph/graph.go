@@ -447,7 +447,7 @@ func summarize(n *missionv1.MissionNode) string {
 		return strings.Join(n.GetJoinConfig().GetWaitFor(), ", ")
 	case n.GetJobConfig() != nil:
 		// The bank is what a reader needs to see: it says which pool of
-		// always-on agents this node drives (ADR-0019).
+		// always-on agents this node drives (ADR-0119).
 		return n.GetJobConfig().GetBankRef()
 	default:
 		return ""

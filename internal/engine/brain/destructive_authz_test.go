@@ -192,7 +192,7 @@ func awaitDestructiveActions(t *testing.T, e *Engine, want int) []DestructiveAct
 }
 
 // awaitDestructiveActionDecided polls until hypothesisID's DestructiveAction
-// shows Decided=true (the async Submit->fold path, ADR-0001), or fails the
+// shows Decided=true (the async Submit->fold path, ADR-0101), or fails the
 // test after 2s. A count-only wait (awaitDestructiveActions) is not enough
 // here: the pending entity already exists before a decision lands, so its
 // count never changes — only Decided does.
@@ -261,7 +261,7 @@ func TestDestructiveAuthorizationQueue_Request_EmptyHypothesisIDErrors(t *testin
 func TestDestructiveAuthorizationQueue_Request_IsIdempotent(t *testing.T) {
 	// A retried Request for a still-pending hypothesis (e.g. the agent's RPC
 	// call retried after a network hiccup) must never reset the original
-	// request's recorded timestamp or duplicate the record (ADR-0032): Request
+	// request's recorded timestamp or duplicate the record (ADR-0132): Request
 	// has no duplicate-detection of its own, it relies entirely on the
 	// reducer's idempotent fold (applyDestructiveActionRequested).
 	e := newDestructiveAuthzTestEngine(t)
@@ -438,7 +438,7 @@ func TestEngine_DestructiveAuthorizationQueue_IsMemoized(t *testing.T) {
 }
 
 func TestDestructiveAuthorizationQueue_DoesNotBlockUnrelatedSettlement(t *testing.T) {
-	// ADR-0028 decision 2 (still true under ADR-0032's non-blocking wiring):
+	// ADR-0132 (still true under the non-blocking wiring):
 	// the gate is per-action, not per-mission. A pending, undecided
 	// destructive request for hyp-1 must never affect an unrelated
 	// non-destructive settlement for hyp-2.
@@ -470,7 +470,7 @@ func TestDestructiveAuthorizationQueue_DoesNotBlockUnrelatedSettlement(t *testin
 // End-to-end: DestructiveAuthorizationQueue.Verify wired as SettleBetTrue's
 // DestructiveProofAuthorizer (proving the concrete type satisfies the
 // existing seam in bet_settlement.go without modifying that file's
-// signature, ADR-0032).
+// signature, ADR-0132).
 // -----------------------------------------------------------------------
 
 func TestSettleBetTrue_Destructive_VerifyApproved_Settles(t *testing.T) {
@@ -538,7 +538,7 @@ func TestSettleBetTrue_Destructive_VerifyDenied_Refused(t *testing.T) {
 }
 
 func TestSettleBetTrue_Destructive_VerifyNoDecision_Refused(t *testing.T) {
-	// The ADR-0032 case that matters most: an agent that calls SettleBetTrue
+	// The ADR-0132 case that matters most: an agent that calls SettleBetTrue
 	// (via SubmitProof) for a destructive proof it never got authorization
 	// for at all must be refused, never silently settled.
 	e := newDestructiveAuthzTestEngine(t)

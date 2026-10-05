@@ -347,7 +347,7 @@ func deletingInstance(ci *connectorv1alpha1.ConnectorInstance, deletedAt time.Ti
 	return ci
 }
 
-// TestReconcile_DeletionRevokesTheGrant is the ADR-0015 §5 regression: deleting
+// TestReconcile_DeletionRevokesTheGrant is the ADR-0061 regression: deleting
 // an oauth connector revokes its grant through the daemon with the tenant
 // recovered from the namespace, then releases the finalizer.
 func TestReconcile_DeletionRevokesTheGrant(t *testing.T) {
@@ -564,7 +564,7 @@ func TestReconcile_RemoteReadyBecomesReady(t *testing.T) {
 
 // secretInstance is a Remote connector with a customer-supplied static
 // credential (auth secret) — the shape the github connector uses. The daemon
-// writes its <name>-connector-cred Secret from the tenant store (ADR-0015); the
+// writes its <name>-connector-cred Secret from the tenant store (ADR-0061); the
 // operator only references it.
 func secretInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance {
 	return &connectorv1alpha1.ConnectorInstance{
@@ -578,11 +578,11 @@ func secretInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance
 	}
 }
 
-// TestReconcile_SecretAuthBecomesReady is the ADR-0015 regression for an
+// TestReconcile_SecretAuthBecomesReady is the ADR-0061 regression for an
 // auth-secret connector: the operator reconciles it without any ExternalSecret
 // step, wires the daemon-written credential Secret into the proxy's
 // Authorization header, and flips it to Ready once the proxy serves. Before
-// ADR-0015 this path emitted an ExternalSecret that fought the daemon for the
+// ADR-0061 this path emitted an ExternalSecret that fought the daemon for the
 // same Secret name and pulled a key nothing ever wrote.
 func TestReconcile_SecretAuthBecomesReady(t *testing.T) {
 	ci := secretInstance("github", "tenant-primary")
@@ -884,7 +884,7 @@ func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
 	}
 }
 
-// --- ADR-0015 decision 4: a dead credential is Degraded, never a silent Active
+// --- ADR-0061: a dead credential is Degraded, never a silent Active
 
 // TestReconcile_RevokedGrantIsDegradedNotReady is the fail-closed regression.
 // The vendor revokes the grant, the daemon's refresh starts failing, and

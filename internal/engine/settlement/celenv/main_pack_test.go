@@ -17,7 +17,7 @@ import (
 // TestLoadDomainPack_MainCatalogPackCompiles proves gibson#382's seed "main"
 // catalog pack is not just structurally valid (ontology.DomainPack.Validate)
 // but every one of its predicate expressions actually compiles and
-// type-checks against the gibson-owned CEL environment (ADR-0031 decision 2)
+// type-checks against the gibson-owned CEL environment (ADR-0131)
 // — the same LoadDomainPack path EnableDomainPack's downstream settlement
 // consumer (gibson#389) will run for any tenant that enables it.
 func TestLoadDomainPack_MainCatalogPackCompiles(t *testing.T) {

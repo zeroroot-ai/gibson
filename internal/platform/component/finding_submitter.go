@@ -24,7 +24,7 @@ import (
 )
 
 // WorldFindingSink routes a submitted finding into the per-tenant ECS brain World
-// (ADR-0007): the daemon wires this to fold the finding as a Timeline event so the
+// (ADR-0107): the daemon wires this to fold the finding as a Timeline event so the
 // graph projector — the sole writer of finding nodes — materializes it. Kept as a
 // plain callback so component stays decoupled from the brain package.
 //
@@ -168,7 +168,7 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	s.persistFinding(ctx, tenant, workID, enhanced)
 
 	// Step 7: route the finding into the World; the graph projector (sole writer)
-	// materializes the :Finding node from it (ADR-0007, gibson#837). The mission id
+	// materializes the :Finding node from it (ADR-0107, gibson#837). The mission id
 	// resolved in step 4 is carried so the brain can stamp FindingRaised.MissionID
 	// and the finding attaches to its mission's frame (gibson#1078); empty when the
 	// finding was submitted outside a formal mission (tenant-ambient).

@@ -10,7 +10,7 @@ import (
 
 // liveEventPublisher adapts the live-agents registry to the launcher's
 // EventPublisher seam. The launcher describes a run with its own
-// sandboxed.LiveInstance and never imports the registry (ADR-0016 S11); this
+// sandboxed.LiveInstance and never imports the registry (ADR-0116 S11); this
 // adapter is the one place the two shapes meet.
 type liveEventPublisher struct {
 	registry *liveagents.Registry

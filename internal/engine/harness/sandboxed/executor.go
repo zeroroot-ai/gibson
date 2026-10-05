@@ -218,7 +218,7 @@ func New(cfg Config) (*Executor, error) {
 // ExecuteWithSpec dispatches a single tool invocation using the provided
 // ToolSpec. Used by the unified dispatch path in harness.CallToolProto,
 // which resolves the spec from the tool's kind:tool catalog manifest
-// (ADR-0017) and supplies image, command, env and resources per call.
+// (ADR-0117) and supplies image, command, env and resources per call.
 func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec ToolSpec, request, response proto.Message) error {
 	ctx, span := e.tracer.Start(ctx, "harness.sandboxed.execute")
 	defer span.End()
@@ -275,7 +275,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	span.SetAttributes(attribute.String("setec.sandbox_id", launchResp.SandboxID))
 
 	// Register this call as a live instance so the read-only console can
-	// follow it, exactly as the agent launcher does (ADR-0016 S11). The key
+	// follow it, exactly as the agent launcher does (ADR-0116 S11). The key
 	// is the CUSTOMER tenant the caller supplied, never e.tenant — that is
 	// the setec infra tenant this launcher authenticates as, and keying by
 	// it would show every tenant's tool runs to everyone. No scope means no

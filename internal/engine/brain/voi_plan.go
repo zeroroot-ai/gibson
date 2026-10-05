@@ -12,7 +12,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
-// voi_plan.go gathers candidates (ADR-0026 §2: an open hypothesis to test, or
+// voi_plan.go gathers candidates (ADR-0126: an open hypothesis to test, or
 // an evidence move on a high-uncertainty node — both bounded to the ambient
 // slice), resolves each one's VoIScoreInput from the belief substrate, scores
 // them (voi_score.go), and ranks/truncates to the top-k. PlanVoI is a pure
@@ -20,24 +20,24 @@ import (
 // of its own, so it is directly testable and does not care whether its
 // caller is a live worker (voi_planner.go) or a test.
 //
-// Reputation (ADR-0026 §3, ADR-0029 §3's technique×environment view) is wired
+// Reputation (ADR-0126, ADR-0129's technique×environment view) is wired
 // end to end (gibson#267): resolveReputation reads NodeKindTechniqueEnvironment
 // belief through the SAME BeliefSubstrate the market view uses, keyed by each
 // hypothesis's own Technique × ScopeID (TechniqueEnvironmentRef) — the key the
 // reputation write loop (reputation_worker.go) updates when a bet settles. It
-// feeds BOTH places ADR-0022 names: a new hypothesis's prior P(claim valid)
+// feeds BOTH places ADR-0122 names: a new hypothesis's prior P(claim valid)
 // starts from its technique's track record (ReadReputation, AC3), and pursuit
 // priority is multiplied by that reputation (resolveReputation, AC4). A
 // hypothesis that names no technique, and a bare evidence move, both resolve to
 // the neutral prior exactly as before, so untracked candidates are unchanged.
 //
-// The technique -> capability bridge (ADR-0035 decision 4, gibson#387) IS
+// The technique -> capability bridge (ADR-0135, gibson#387) IS
 // wired here: each candidate's Technique (carried from Hypothesis.Technique,
 // gibson#353/sdk#88 — empty for an evidence move, which names none) is
 // resolved against in.Capabilities via CapabilitiesForTechnique
 // (voi_dispatch.go), which rolls the technique up to its taxonomy category
 // through in.Hierarchy (gibson#379's TechniqueHierarchy.CategoryOf) rather
-// than through any separate reconciliation table (ADR-0035 decision 2). This
+// than through any separate reconciliation table (ADR-0135). This
 // only RESOLVES the covering capabilities onto VoICandidate.
 // CoveringCapabilities — it does not gate or refuse a dispatch itself. Ranking
 // candidates by a deep multi-step plan is gibson#396's BAMCP planner
@@ -49,7 +49,7 @@ import (
 // gathered once by the caller (voi_planner.go's worker, or a test).
 type VoIPlanInput struct {
 	// Hosts should already be ambient-projected (AmbientHosts) — bounded to
-	// the ambient slice, per ADR-0026 §2.
+	// the ambient slice, per ADR-0126.
 	Hosts []HostSnapshot
 	// Hypotheses is the candidate hypothesis set — typically scope-filtered
 	// by the caller to the mission's own scope.
@@ -68,7 +68,7 @@ type VoIPlanInput struct {
 	// gate against" shape an empty catalog would produce.
 	Capabilities []Capability
 	// Hierarchy is the taxonomy technique hierarchy (gibson#379) used to roll
-	// a candidate's Technique up to its category (ADR-0035 decision 4). Nil
+	// a candidate's Technique up to its category (ADR-0135). Nil
 	// means no hierarchy was supplied: CapabilitiesForTechnique then resolves
 	// no covering capabilities at all for any candidate (see its own doc
 	// comment) — it still never panics.
@@ -152,8 +152,8 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 			HasStake:     ok,
 			Reputation:   reputation,
 		})
-		// VoI dispatch gating's technique -> capability bridge (ADR-0035
-		// decision 4, gibson#387): resolve this candidate's covering
+		// VoI dispatch gating's technique -> capability bridge (ADR-0135,
+		// gibson#387): resolve this candidate's covering
 		// capabilities from its source Hypothesis's technique. hyp.Technique
 		// is "" when the proposing agent never set one, which
 		// CapabilitiesForTechnique already treats as "nothing to resolve".
@@ -178,12 +178,12 @@ func hypothesisClaimRef(tenant, hypothesisID string) NodeRef {
 	return NodeRef{Kind: NodeKindClaim, ID: tenant + "/" + hypothesisID}
 }
 
-// resolveReputation reads technique×environment belief (ADR-0029 §3:
+// resolveReputation reads technique×environment belief (ADR-0129:
 // "P(technique works here)", the same Belief.Exploitable convention
 // harness.PlaceBet uses for a claim-node's P(claim valid)) through substrate,
 // as the pursuit-priority multiplier (gibson#267 AC4). An empty key or no
 // recorded belief both resolve to the neutral optimism-under-uncertainty prior
-// (ADR-0026 §6): a technique with a track record is weighted by it, while one
+// (ADR-0126): a technique with a track record is weighted by it, while one
 // without is neither rewarded nor penalized.
 func resolveReputation(ctx context.Context, substrate BeliefSubstrate, techniqueEnvKey string) (float64, error) {
 	if techniqueEnvKey == "" {
@@ -213,8 +213,8 @@ func sortVoICandidates(c []VoICandidate) {
 	})
 }
 
-// attackGraphDegree returns every node's degree (in + out) in g — ADR-0026
-// §3's "connectivity" input. A node absent from g has degree 0, the common
+// attackGraphDegree returns every node's degree (in + out) in g — ADR-0126's
+// "connectivity" input. A node absent from g has degree 0, the common
 // case while HostsToInfraGraph (gibson#275) still produces an edgeless graph.
 func attackGraphDegree(g AttackGraph) map[string]int {
 	degree := make(map[string]int, len(g.Nodes))

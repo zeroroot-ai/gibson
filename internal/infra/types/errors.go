@@ -72,7 +72,7 @@ const (
 	SANDBOX_STREAM_LOGS_FAILED  ErrorCode = "SANDBOX_STREAM_LOGS_FAILED"
 	// SANDBOX_POLICY_DENIED — the dispatch-policy gate refused execution: an
 	// untrusted component with no sandboxed dispatch under the setec-only
-	// deployment shape. See ADR-0010 / gibson#994.
+	// deployment shape. See ADR-0110 / gibson#994.
 	SANDBOX_POLICY_DENIED ErrorCode = "SANDBOX_POLICY_DENIED"
 )
 

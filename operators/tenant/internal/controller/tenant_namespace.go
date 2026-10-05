@@ -271,7 +271,7 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 		Spec: networkingv1.NetworkPolicySpec{
 			// Every pod in the tenant namespace EXCEPT the per-tenant
 			// Neo4j pod, which is governed solely by its own
-			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0012).
+			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0112).
 			//
 			// This exclusion is load-bearing, not cosmetic. Kubernetes
 			// unions the effect of every policy that selects a pod, so

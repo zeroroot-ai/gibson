@@ -16,7 +16,7 @@ import (
 )
 
 // memberEvents is where a member's console lines and its heartbeat land
-// (ADR-0019 decision 13, gibson#1716). One type serves both seams because both
+// (ADR-0119, gibson#1716). One type serves both seams because both
 // resolve the same thing: which live run a member id names.
 //
 // The bank store is read per call because the data-plane pool is built during

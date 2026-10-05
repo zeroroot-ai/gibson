@@ -41,7 +41,7 @@ func TestDispatchHandler_ReplayDoesNotActuate(t *testing.T) {
 	e.Tick()
 
 	// Now replay that Timeline into a fresh engine with a tap attached. Replay must
-	// NOT fire the tap (no effects re-fire on resume — ADR-0009).
+	// NOT fire the tap (no effects re-fire on resume — ADR-0109).
 	rec := &recordingDispatcher{}
 	h := NewDispatchHandler(rec)
 	re := NewEngine("t1")

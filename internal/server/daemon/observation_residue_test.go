@@ -44,7 +44,7 @@ func TestFlattenObservationKeepsScalarsAndNamesWhatItSkipped(t *testing.T) {
 
 // TestFlattenObservationStopsAtThePayloadCap proves the residue is bounded. The
 // cap exists so an unbounded key set cannot sprawl the graph schema one
-// property at a time (ADR-0012, "Bounded").
+// property at a time (ADR-0112, "Bounded").
 func TestFlattenObservationStopsAtThePayloadCap(t *testing.T) {
 	into := make(map[string]string, maxObservationPayloadEntries)
 	for i := range maxObservationPayloadEntries {

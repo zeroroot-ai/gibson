@@ -26,7 +26,7 @@ type AnthropicProvider struct {
 	// translation. Anthropic's models reach a tenant through four routes —
 	// the Anthropic API, Amazon Bedrock, Google Vertex and Microsoft Foundry
 	// — and three of them drive the same Claude client with a different
-	// credential (ADR-0019 decision 4). They are one provider with three
+	// credential (ADR-0119). They are one provider with three
 	// constructors, not three copies of the completion path. Empty means
 	// "anthropic".
 	name string
@@ -62,7 +62,7 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 }
 
 // NewVertexProvider creates a Claude provider that reaches the models through
-// Google Vertex (ADR-0019 decision 4, the third login shape). The credential is
+// Google Vertex (ADR-0119, the third login shape). The credential is
 // a Google service-account JSON the tenant configured, plus the project and the
 // region. It drives the same Claude client as the Anthropic route.
 //
@@ -119,7 +119,7 @@ func newVertexChatModel(ctx context.Context, project, region string, cfg llm.Pro
 }
 
 // NewFoundryProvider creates a Claude provider that reaches the models through
-// Microsoft Foundry (ADR-0019 decision 4). Foundry serves the Anthropic API
+// Microsoft Foundry (ADR-0119). Foundry serves the Anthropic API
 // shape at a per-resource endpoint, so it is the Anthropic client pointed at
 // that endpoint with the tenant's Foundry key.
 func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {

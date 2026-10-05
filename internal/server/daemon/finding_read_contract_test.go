@@ -6,7 +6,7 @@ package daemon
 // finding_read_contract_test.go holds the projector/reader pair test for the
 // :Finding property contract (gibson#210).
 //
-// The graph projector is the sole writer of :Finding nodes (ADR-0007) and the
+// The graph projector is the sole writer of :Finding nodes (ADR-0107) and the
 // dashboard reader (graph.DashboardQueries.Findings) is what every finding read
 // runs: ComponentService.GetFindings, GraphService.GetFindings and the export.
 // The two met only in a live Neo4j, and they disagreed: the projector merged on

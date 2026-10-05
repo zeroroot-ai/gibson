@@ -105,7 +105,7 @@ func hostDigest(w *World, id uint64) string {
 }
 
 // TestBeliefSystem_ConsultsProviderOnEvidenceChange proves the documented
-// invariant (ADR-0005, gibson#25): the provider is consulted once per host per
+// invariant (ADR-0134, gibson#25): the provider is consulted once per host per
 // evidence change, never once per tick.
 func TestBeliefSystem_ConsultsProviderOnEvidenceChange(t *testing.T) {
 	host := func(addr string, ports ...int) HostObserved {

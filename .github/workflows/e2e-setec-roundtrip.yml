@@ -6,7 +6,7 @@
 #   - roundtrip — E10/#999 plain-tool round-trip (untrusted-exec isolation
 #                 boundary).
 #
-# Proves the untrusted-execution-isolation boundary (ADR-0010) end-to-end: an
+# Proves the untrusted-execution-isolation boundary (ADR-0110) end-to-end: an
 # UNTRUSTED tool dispatched through the harness executes ONLY via a real setec
 # microVM round-trip, and is denied (typed error, no in-process fallback) when
 # no sandboxed dispatch is available under GIBSON_UNTRUSTED_EXEC=setec-only.

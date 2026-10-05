@@ -4,20 +4,20 @@
 package harness
 
 // callback_request_destructive_authorization.go implements
-// RequestDestructiveAuthorization (ADR-0032, gibson#390): an agent asks a
+// RequestDestructiveAuthorization (ADR-0132, gibson#390): an agent asks a
 // human to approve an irreversible demonstration BEFORE it performs the act.
 // The daemon enqueues the request on the caller's tenant's
-// DestructiveAuthorizationQueue (ADR-0028, gibson#336/#342, via
+// DestructiveAuthorizationQueue (ADR-0132, gibson#336/#342, via
 // brain.ProofSettlementEngine's tenant-routing adapter,
 // proof_settlement_adapter.go) and returns immediately with the pending
 // request's id — the fleet keeps working while the decision is pending
-// (ADR-0028). The agent performs the destructive act only after it reads
+// (ADR-0132). The agent performs the destructive act only after it reads
 // back an approval (the dashboard's ListPendingDestructiveActions/decision
 // surface), then calls SubmitProof with the SAME hypothesis_id
 // (callback_submit_proof.go), whose SettleBetTrue verifies that recorded
 // decision before ever evaluating the predicate.
 //
-// This RPC never blocks on the human decision (ADR-0032 decision 1): its
+// This RPC never blocks on the human decision (ADR-0132): its
 // only failure modes are structural — proof settlement not wired, a
 // malformed request, or an unresolvable harness/mission — the same split
 // SubmitProof uses.
@@ -34,7 +34,7 @@ import (
 
 // RequestDestructiveAuthorization implements
 // harnesspb.HarnessCallbackServiceServer.RequestDestructiveAuthorization
-// (ADR-0032 decision 1, gibson#390).
+// (ADR-0132, gibson#390).
 //
 // Malformed requests (nil request, empty hypothesis_id/predicate_name/
 // action_description — the proto's own min_len:1 fields) are refused as

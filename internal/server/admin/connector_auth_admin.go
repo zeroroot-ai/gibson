@@ -12,7 +12,7 @@
 // the customer's own vendor instance; this server receives the finished
 // grant, proves it by minting the first access token, and owns revocation.
 // For an `auth: secret` connector it receives the static credential instead
-// (SetConnectorSecret, ADR-0015) and records a static grant. A credential
+// (SetConnectorSecret, ADR-0061) and records a static grant. A credential
 // crosses the API exactly once, inbound, and no RPC ever returns credential
 // material.
 package admin
@@ -372,8 +372,8 @@ func (s *ConnectorAuthAdminServer) RevokeConnectorGrant(ctx context.Context, req
 
 // AuthStatus is the status view itself, shared by the tenant-scoped RPC above
 // and the operator-scoped DaemonOperatorService.GetConnectorAuthStatus the
-// ConnectorInstance controller calls on every reconcile pass (ADR-0015
-// decision 4). The tenant is explicit because the operator path carries no
+// ConnectorInstance controller calls on every reconcile pass (ADR-0061).
+// The tenant is explicit because the operator path carries no
 // tenant in its context; the store is scoped to it here. It never returns
 // credential material.
 func (s *ConnectorAuthAdminServer) AuthStatus(ctx context.Context, tenant auth.TenantID, connector string) *tenantv1.GetConnectorAuthStatusResponse {
@@ -382,7 +382,7 @@ func (s *ConnectorAuthAdminServer) AuthStatus(ctx context.Context, tenant auth.T
 
 // Revoke is the revocation itself, shared by the tenant-scoped RPC above and
 // the operator-scoped DaemonOperatorService.RevokeConnectorGrant the
-// ConnectorInstance finalizer calls on delete (ADR-0015 §5). The tenant is
+// ConnectorInstance finalizer calls on delete (ADR-0061). The tenant is
 // explicit because the finalizer path carries no tenant in its context; the
 // store is scoped to it here. Best-effort vendor revocation when the grant
 // recorded a revocation endpoint, then deletion of the grant and the published
@@ -427,7 +427,7 @@ func (s *ConnectorAuthAdminServer) Revoke(ctx context.Context, tenant auth.Tenan
 }
 
 // SetConnectorSecret stores a customer-supplied static credential for an
-// `auth: secret` connector (ADR-0015). The credential lands in the tenant's
+// `auth: secret` connector (ADR-0061). The credential lands in the tenant's
 // configured store as the connector's access secret — the same name an OAuth
 // access token lives under, so the token materializer publishes both modes
 // through one path — and a static grant records the accountable human. The

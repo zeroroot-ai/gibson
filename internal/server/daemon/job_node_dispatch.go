@@ -22,7 +22,7 @@ import (
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 )
 
-// dispatchJob runs one job node (ADR-0019 decisions 10, 12 and 15,
+// dispatchJob runs one job node (ADR-0119,
 // gibson#1713): the loop lives in jobnode, the store and the verifier are
 // the daemon's. The node's declared timeout bounds the whole loop.
 func (b *brainExecutor) dispatchJob(bind *missionBinding, req brain.DispatchRequest) (string, error) {
@@ -51,7 +51,7 @@ func (b *brainExecutor) dispatchJob(bind *missionBinding, req brain.DispatchRequ
 		BankID:       req.Target,
 		Spec:         cfg.GetSpec(),
 		// The mission is the opener and the scorer: it opened the job, so it
-		// may close it (ADR-0019 decision 3).
+		// may close it (ADR-0119).
 		Opener:   job.Principal{Kind: job.PrincipalService, ID: "mission:" + req.MissionID},
 		Ops:      store,
 		Verifier: &harnessVerifier{harness: bind.harness, timeout: req.Timeout},
@@ -78,7 +78,7 @@ func nodeIDOf(workID, missionID string) string {
 
 // harnessVerifier dispatches the acceptance verifier as a normal tool or
 // agent dispatch through the mission's harness, so the dispatch gate applies
-// to it as to any other component (ADR-0019 decision 12).
+// to it as to any other component (ADR-0119).
 //
 // The component ref is "kind/name". A bare name is an agent.
 type harnessVerifier struct {

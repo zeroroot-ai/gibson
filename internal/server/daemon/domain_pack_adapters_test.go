@@ -16,7 +16,7 @@ import (
 const domainPackServiceName = "gibson.tenant.v1.DomainPackService"
 
 // registerDomainPack requires both a brain registry and an authorizer
-// (ADR-0033, gibson#381), the same "don't register without a required
+// (ADR-0133, gibson#381), the same "don't register without a required
 // dependency" pattern registerConnector follows (ADR-0067).
 func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 	d := &daemonImpl{

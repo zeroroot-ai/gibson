@@ -11,7 +11,7 @@ package graphrag
 //   - store_attacks.go:  FindSimilarAttacks, GetAttackChains
 //
 // There are no write methods: the projector is the graph's sole writer
-// (ADR-0012) and the write half was removed in gibson#1322.
+// (ADR-0112) and the write half was removed in gibson#1322.
 //
 // The public GraphRAGStore interface lives in api.go.
 

@@ -3,7 +3,7 @@
 
 // Package integration — entitlements_seam_contract_test.go
 //
-// Contract / e2e test for the entitlements runtime seam (ADR-0003, ADR-0089,
+// Contract / e2e test for the entitlements runtime seam (ADR-0089,
 // gibson#1026, gibson#1029).
 //
 // Architecture background:
@@ -260,7 +260,7 @@ func TestEntitlementsSeam_QuotaManagerObservesProviderLimits(t *testing.T) {
 // enforcement path (budget.Enforcer.Check) end-to-end through the grpcProvider.
 //
 // No explicit admin-set budget is configured in Redis, so the enforcer falls
-// through to the entitlements provider's MonthlyTokens ceiling (ADR-0003 seam).
+// through to the entitlements provider's MonthlyTokens ceiling (ADR-0089 seam).
 // A call within the ceiling must pass; a call projecting beyond it must be
 // denied with ErrTokenBudgetExceededTenant.
 //
@@ -312,7 +312,7 @@ func TestEntitlementsSeam_BudgetEnforcerObservesProviderLimits(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestEntitlementsSeam_FailOpenOnServerStop validates the production fail-open
-// contract (ADR-0003 Req 5.4): when the billing service becomes unreachable the
+// contract (ADR-0089): when the billing service becomes unreachable the
 // provider must return zero Limits (unlimited) with a nil error rather than
 // propagating the connection failure to the daemon's enforcement path.
 //

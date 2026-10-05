@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // Package bank is the daemon's store for banks of always-on coding agents and
-// their members (ADR-0019, gibson#1706).
+// their members (ADR-0119, gibson#1706).
 //
 // A bank is declarative: it names an owner, a desired member count, a login
 // shape and a few policies. The reconciler makes the running member count match

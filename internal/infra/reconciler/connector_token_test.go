@@ -78,8 +78,8 @@ func TestConnectorTokenReconcile_IsolatesAFailingMaterialize(t *testing.T) {
 	}
 }
 
-// A refresh failure still runs materialize, and that is the point of ADR-0015
-// decision 4. Materialize publishes only a live token and withdraws an expired
+// A refresh failure still runs materialize, and that is the point of ADR-0061.
+// Materialize publishes only a live token and withdraws an expired
 // one, so the pass that cannot renew a credential is exactly the pass that must
 // take the dead one out of the Secret. Skipping it would leave the expired
 // token mounted, which is the fallback cache the ADR refuses.

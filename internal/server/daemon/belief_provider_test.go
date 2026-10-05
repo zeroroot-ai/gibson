@@ -15,7 +15,7 @@ import (
 
 // TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel proves that
 // without a GIBSON_BELIEF_MODEL_PATH override the daemon scores in-process
-// against the OSS-embedded base-v1 model (ADR-0034) — no sidecar, no
+// against the OSS-embedded base-v1 model (ADR-0134) — no sidecar, no
 // placeholder fallback, since the native engine has no deployment cost left
 // to opt out of.
 func TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel(t *testing.T) {
@@ -31,7 +31,7 @@ func TestResolveBeliefProvider_DefaultsToTheEmbeddedBaseModel(t *testing.T) {
 
 // TestResolveBeliefProvider_PinsAnOverrideModelPath proves GIBSON_BELIEF_MODEL_PATH
 // selects an alternate model artifact (e.g. a curated commercial base model
-// dropped in by the commercial layer), ADR-0005 §5.
+// dropped in by the commercial layer), ADR-0129.
 func TestResolveBeliefProvider_PinsAnOverrideModelPath(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "base-v3.json")
@@ -71,11 +71,11 @@ func TestResolveBeliefProvider_FailsLoudOnAnInvalidOverride(t *testing.T) {
 }
 
 // TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider pins today's
-// documented state (belief_provider.go, gibson#394/ADR-0037): the
+// documented state (belief_provider.go, gibson#394/ADR-0137): the
 // graph-coupled SliceBeliefProvider grounds the registry's declared belief-PRM
 // schema in-process via beliefvi (brain.NativeSliceBeliefProvider), never the
 // deterministic placeholder — the ontology's per-edge-type target-variable
-// declaration (ADR-0037 decision 1) is what unblocked the switch.
+// declaration (ADR-0137) is what unblocked the switch.
 func TestResolveSliceBeliefProvider_IsTheNativeGroundingProvider(t *testing.T) {
 	reg, err := newBeliefSchemaRegistry()
 	if err != nil {
@@ -105,7 +105,7 @@ func TestResolveEdgePosteriorProvider_DefaultsToNilWhenUnset(t *testing.T) {
 
 // TestResolveEdgePosteriorProvider_PinsAFittedArtifact proves
 // GIBSON_EDGE_POSTERIOR_PATH selects a braintrain-fitted edge-posterior
-// artifact (gibson#395, ADR-0037 decisions 2 and 5).
+// artifact (gibson#395, ADR-0137).
 func TestResolveEdgePosteriorProvider_PinsAFittedArtifact(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tenant-acme-edges-v3.json")
@@ -224,7 +224,7 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 }
 
 // TestWireBrainRegistry_InstallsVoIPlanner proves wireBrainRegistry also
-// installs value-of-information planning (ADR-0026, gibson#283) live: a
+// installs value-of-information planning (ADR-0126, gibson#283) live: a
 // running goal mission gets a completed VoI plan within a few ticks, the
 // same way TestWireBrainRegistry_InstallsBothBeliefPipelines proves the
 // belief pipelines. Before this wiring, VoIGateSystem/WireVoIPlanner were

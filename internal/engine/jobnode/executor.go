@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package jobnode runs a mission's job node (ADR-0019 decisions 10, 12 and
+// Package jobnode runs a mission's job node (ADR-0119 and
 // 15, gibson#1713): it opens a job on a bank, waits for each turn, has the
 // acceptance verifier judge the work, sends the verifier's report back as
 // the next turn while passes remain, and closes the job with a verdict.

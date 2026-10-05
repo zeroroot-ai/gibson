@@ -14,7 +14,7 @@ import (
 )
 
 // registerDomainPack registers gibson.tenant.v1.DomainPackService on srv
-// (ADR-0033, gibson#381). The service folds DomainPackEnabled/Disabled brain
+// (ADR-0133, gibson#381). The service folds DomainPackEnabled/Disabled brain
 // events into the caller's tenant World via d.brainRegistry — the same
 // per-tenant registry WorldService reads — gated by the platform catalog gate
 // (d.authorizer), mirroring registerConnector's ADR-0067 gate.
@@ -36,5 +36,5 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 		d.domainPackCatalog = ontology.NewDomainPackCatalog(ontology.MainDomainPack())
 	}
 	tenantv1.RegisterDomainPackServiceServer(srv, api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer))
-	d.logger.Info(ctx, "DomainPackService registered (ADR-0033)")
+	d.logger.Info(ctx, "DomainPackService registered (ADR-0133)")
 }

@@ -24,7 +24,7 @@ func (t TechniqueType) String() string {
 
 // AllTechniqueTypes returns a slice containing all valid TechniqueType values.
 // This is the seed coreCategories() (internal/engine/taxonomy/technique.go)
-// derives the taxonomy's core category ids from (ADR-0035): the taxonomy is
+// derives the taxonomy's core category ids from (ADR-0135): the taxonomy is
 // the authority now, and types.TechniqueType degraded to this seed list.
 func AllTechniqueTypes() []TechniqueType {
 	return []TechniqueType{

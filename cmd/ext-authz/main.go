@@ -19,7 +19,7 @@
 //     daemon's published JWKS and treats it as a constraint: it must be
 //     bound to the caller and cover the method, and FGA still decides.
 //   - When a daemon-minted task grant is the SOLE credential — a dispatched
-//     component holds nothing else (ADR-0016) — the verified grant is the
+//     component holds nothing else (ADR-0116) — the verified grant is the
 //     authorization, and the requested method must be in its allowed_rpcs
 //     (gibson#1605).
 //   - On allow, ext-authz emits the canonical x-gibson-identity-*

@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------
-# ADR-0016 sandboxed platform-agent dispatch — the exit test (epic gibson#1593,
+# ADR-0116 sandboxed platform-agent dispatch — the exit test (epic gibson#1593,
 # slice gibson#1600).
 #
 # In plain words: on a real gvisor cluster, an ENABLED tenant that dispatches

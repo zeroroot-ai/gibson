@@ -115,7 +115,7 @@ func (s *stubPrior) PriorFor(NovelNode) NodePrior {
 // TestNativeBelief_NovelNodeFeedsPrior proves that when the model reports a
 // novel node (no CPT for an observed evidence token), the provider asks the
 // PriorProvider (the LLM seam) and re-scores once with the injected priors
-// (ADR-0005 §6) — in-process now, so "re-score" is a second beliefvi.Score
+// (ADR-0134) — in-process now, so "re-score" is a second beliefvi.Score
 // call rather than a second HTTP round-trip.
 func TestNativeBelief_NovelNodeFeedsPrior(t *testing.T) {
 	m := buildTestModel(t, simpleNativeModel)

@@ -39,7 +39,7 @@ import (
 // slice adds a real enablement relationship between hosts, it flows through
 // unchanged.
 
-// Default bounds for the live graph-coupled round (ADR-0029 §5/§8: "the bound
+// Default bounds for the live graph-coupled round (ADR-0129: "the bound
 // lives in the scope", "propagate... bounded"). Exported so the daemon's
 // wiring site states them explicitly rather than relying on a zero value.
 const (
@@ -71,7 +71,7 @@ func DefaultSliceSchedule() (sliceOpts, propagateOpts SliceOptions) {
 // (settle()'s tick-drain-tick style in belief_test.go) instead of a real
 // timer.
 //
-// relevance for the deterministic over-budget prune (ADR-0029 §5) is each
+// relevance for the deterministic over-budget prune (ADR-0129) is each
 // host's OWN attention score (HostSnapshot.Attention — belief.Juicy +
 // belief.Exploitable + the surprise boost, attention.go) — reused, not
 // recomputed, matching the design

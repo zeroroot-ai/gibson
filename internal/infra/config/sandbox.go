@@ -80,7 +80,7 @@ type SandboxSetecConfig struct {
 
 	// AgentSandboxClass is the deployment-default setec SandboxClass an
 	// ephemeral agent launch names when the catalog manifest omits one
-	// (ADR-0016). It is distinct from the tool class: an agent runs a whole
+	// (ADR-0116). It is distinct from the tool class: an agent runs a whole
 	// mission and gets its own isolation and egress posture (gVisor by
 	// default in production). Defaults to DefaultAgentSandboxClass. The
 	// per-agent manifest (gibson#1597) overrides it per launch.
@@ -127,7 +127,7 @@ const (
 	DefaultDevboxSandboxClass = "devbox"
 
 	// DefaultAgentSandboxClass is the class an ephemeral agent launch names
-	// when the catalog manifest omits one (ADR-0016). It is deliberately
+	// when the catalog manifest omits one (ADR-0116). It is deliberately
 	// distinct from `tool` and `devbox`: a code-executing agent gets its own
 	// isolation backend (gVisor by default) and egress posture.
 	DefaultAgentSandboxClass = "agent"
@@ -140,7 +140,7 @@ const (
 // SandboxToolConfig / SandboxToolResources were removed under the
 // gibson-tool-runner spec (task 16). Per-tool dispatch metadata now lives
 // exclusively in the kind:tool catalog manifests embedded in the daemon
-// image (ADR-0017, internal/platform/componentcatalog/manifests). A tool is
+// image (ADR-0117, internal/platform/componentcatalog/manifests). A tool is
 // added by publishing a manifest, not by editing config: the manifest is the
 // single source of truth for the image digest, command and resources.
 

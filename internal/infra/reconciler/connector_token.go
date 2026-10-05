@@ -22,7 +22,7 @@ type TokenFreshener interface {
 
 // Materializer publishes one connector's fresh access token into the place the
 // ToolHive proxy reads it — the tenant-namespace Secret <connector>-connector-cred
-// whose "authorization" key is the full "Bearer <token>" header (ADR-0015). The
+// whose "authorization" key is the full "Bearer <token>" header (ADR-0061). The
 // daemon wiring adapts a kube client plus the tenant secret store to this shape;
 // the reconciler stays ignorant of Kubernetes, exactly as it does for the store
 // behind TokenFreshener.
@@ -32,7 +32,7 @@ type TokenFreshener interface {
 // written. It reports "no token stored yet" as a quiet success (nil), so an
 // authorized-but-not-yet-minted connector produces no log noise. It also owns
 // the fail-closed half: a token past its expiry is withdrawn rather than left
-// mounted as a cache (ADR-0015 decision 4).
+// mounted as a cache (ADR-0061).
 type Materializer interface {
 	Materialize(ctx context.Context, desired ConnectorSandbox) error
 }
@@ -45,7 +45,7 @@ type ConnectorTokenConfig struct {
 	Catalog   CatalogSource
 	Freshener TokenFreshener
 	// Materializer writes each connector's access token into its
-	// <connector>-connector-cred Secret (ADR-0015). Optional: a detached
+	// <connector>-connector-cred Secret (ADR-0061). Optional: a detached
 	// daemon with no kube client leaves it nil and the loop only refreshes.
 	Materializer Materializer
 	Logger       *slog.Logger
@@ -123,8 +123,8 @@ func (r *ConnectorTokenReconciler) reconcile(ctx context.Context) {
 		// started). Materialize is idempotent, so a healthy connector is a
 		// cheap no-op.
 		//
-		// A FAILED refresh runs it too, and that is the point of ADR-0015
-		// decision 4. Materialize publishes only a live token and withdraws an
+		// A FAILED refresh runs it too, and that is the point of ADR-0061.
+		// Materialize publishes only a live token and withdraws an
 		// expired one, so the pass that cannot renew a credential is exactly
 		// the pass that must take the dead one out of the Secret. Skipping it
 		// here would leave the expired token mounted, which is the fallback

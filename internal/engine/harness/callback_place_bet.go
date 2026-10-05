@@ -3,15 +3,15 @@
 
 package harness
 
-// callback_place_bet.go implements PlaceBet (ADR-0022, gibson#273/#278): an
+// callback_place_bet.go implements PlaceBet (ADR-0122, gibson#273/#278): an
 // agent stakes a calibrated confidence on a Hypothesis. This IS the bet
 // store — placing a bet is modeled as a write of belief on a claim-node
-// (ADR-0029 §3: "a hypothesis/bet is belief on a claim-node"), so the market
+// (ADR-0129: "a hypothesis/bet is belief on a claim-node"), so the market
 // is a VIEW over the same belief substrate Lane B's brain package publishes
 // (brain.BeliefSubstrate, gibson#276) rather than a bespoke store of its own.
 //
 // brain.Belief is currently shaped for its original Host use (Juicy /
-// Exploitable / Reachable, ADR-0005). ADR-0029 generalizes belief to any
+// Exploitable / Reachable). ADR-0129 generalizes belief to any
 // node kind but has not yet grown a Claim-specific shape, so until it does,
 // this file makes one explicit, documented choice: for a
 // brain.NodeKindClaim node, Belief.Exploitable holds P(claim valid) — the
@@ -51,7 +51,7 @@ import (
 const betConfidenceModelTag = "bet:v1"
 
 // PlaceBet implements harnesspb.HarnessCallbackServiceServer.PlaceBet
-// (ADR-0022): an agent stakes a calibrated confidence on a Hypothesis. The
+// (ADR-0122): an agent stakes a calibrated confidence on a Hypothesis. The
 // stake is persisted as belief on the hypothesis's claim-node, tenant-scoped
 // so two tenants' hypotheses never collide in the substrate's (Kind, ID)
 // keyspace even if they happen to reuse the same hypothesis id.

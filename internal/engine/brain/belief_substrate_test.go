@@ -62,7 +62,7 @@ func TestBeliefSubstrate_UnknownRefIsNotFound(t *testing.T) {
 
 // TestBeliefSubstrate_RoundTrip proves SetBelief/Belief round-trip exactly for
 // a claim-node and for a technique×environment node — the two faces
-// ADR-0029 §3 names (the market and reputation) as views over this substrate.
+// ADR-0129 names (the market and reputation) as views over this substrate.
 // The substrate itself stays generic: it does not know what a "claim" or a
 // "technique×environment" node is beyond the NodeKind tag.
 func TestBeliefSubstrate_RoundTrip(t *testing.T) {
@@ -72,7 +72,7 @@ func TestBeliefSubstrate_RoundTrip(t *testing.T) {
 		nb   NodeBelief
 	}{
 		{
-			name: "a claim-node (the market view, ADR-0029 §3)",
+			name: "a claim-node (the market view, ADR-0129)",
 			ref:  NodeRef{Kind: NodeKindClaim, ID: "claim-42"},
 			nb: NodeBelief{
 				Belief:         Belief{Juicy: 0.9, Exploitable: 0.8, Reachable: 1, Model: "prm-v1"},
@@ -80,7 +80,7 @@ func TestBeliefSubstrate_RoundTrip(t *testing.T) {
 			},
 		},
 		{
-			name: "a technique×environment node (the reputation view, ADR-0029 §3)",
+			name: "a technique×environment node (the reputation view, ADR-0129)",
 			ref:  NodeRef{Kind: NodeKindTechniqueEnvironment, ID: "t-ssh-brute:env-prod"},
 			nb: NodeBelief{
 				Belief:         Belief{Juicy: 0.3, Exploitable: 0.3, Reachable: 1, Model: "prm-v1"},
@@ -113,7 +113,7 @@ func TestBeliefSubstrate_RoundTrip(t *testing.T) {
 
 // TestBeliefSubstrate_KindsAreIndependent proves a substrate keys on
 // (Kind, ID) together: a claim and a host sharing the literal id string "1"
-// must not collide, because the ontology (ADR-0029 §2) is what tells two
+// must not collide, because the ontology (ADR-0129) is what tells two
 // otherwise-identical ids apart.
 func TestBeliefSubstrate_KindsAreIndependent(t *testing.T) {
 	s := newFakeBeliefSubstrate()
@@ -144,7 +144,7 @@ func TestBeliefSubstrate_KindsAreIndependent(t *testing.T) {
 
 // TestBeliefSubstrate_OverwriteReplacesExactly proves a later SetBelief for
 // the same ref fully replaces the earlier one — belief stays exact and
-// deterministic (ADR-0005 §2, still true under ADR-0029), never accumulated or
+// deterministic (ADR-0134, still true under ADR-0129), never accumulated or
 // averaged.
 func TestBeliefSubstrate_OverwriteReplacesExactly(t *testing.T) {
 	s := newFakeBeliefSubstrate()

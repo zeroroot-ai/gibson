@@ -177,7 +177,7 @@ type ComponentServiceServer struct {
 	componentAccess ComponentAccessStore
 
 	// memberStatus records what a bank member reports on its heartbeat
-	// (ADR-0019, gibson#1716). Nil means this daemon serves no banks, and a
+	// (ADR-0119, gibson#1716). Nil means this daemon serves no banks, and a
 	// member heartbeat is refused rather than dropped.
 	memberStatus MemberStatusSink
 
@@ -264,7 +264,7 @@ type ComponentServiceServer struct {
 	ontologyReasoner OntologyReasoner
 
 	// emitCounts bounds how many observations one work item may emit
-	// (emitbounds.MaxObservationsPerTask, ADR-0012 "Write contract"). Remote
+	// (emitbounds.MaxObservationsPerTask, ADR-0112 "Write contract"). Remote
 	// components have a work id on the wire but no per-task object here to
 	// hang a counter on, so this path uses the keyed, bounded pool. Lazily
 	// created by emitCounter so the zero-value server stays usable.
@@ -792,7 +792,7 @@ func (s *ComponentServiceServer) Heartbeat(
 		return nil, status.Error(codes.InvalidArgument, "instance_id is required")
 	}
 	// A bank member heartbeats with its status and is not a registered
-	// component instance (ADR-0019, gibson#1716).
+	// component instance (ADR-0119, gibson#1716).
 	if req.GetMember() != nil {
 		return s.memberHeartbeat(ctx, tenant, req)
 	}
@@ -880,7 +880,7 @@ func (s *ComponentServiceServer) Heartbeat(
 	}, nil
 }
 
-// MemberStatusSink records a bank member's heartbeat (ADR-0019 decision 13).
+// MemberStatusSink records a bank member's heartbeat (ADR-0119).
 // The daemon backs it with the bank store and the live console.
 type MemberStatusSink interface {
 	// ReportMemberStatus stores what the member reported and stamps its
@@ -1732,7 +1732,7 @@ func (s *ComponentServiceServer) QueryPlugin(
 //     the development phase.
 //
 // The finding reaches the knowledge graph through findingSubmitter's World sink
-// and the graph projector, never from here (ADR-0007/ADR-0012).
+// and the graph projector, never from here (ADR-0107/ADR-0112).
 func (s *ComponentServiceServer) SubmitFinding(
 	ctx context.Context,
 	req *componentpb.SubmitFindingRequest,
@@ -1751,7 +1751,7 @@ func (s *ComponentServiceServer) SubmitFinding(
 		return nil, status.Error(codes.InvalidArgument, "finding is required")
 	}
 
-	// Bounds before anything else touches the payload (ADR-0012, "Write
+	// Bounds before anything else touches the payload (ADR-0112, "Write
 	// contract"). The byte cap is checked ahead of the JSON parse, and both
 	// checks run ahead of every write below, so an over-limit emit is
 	// rejected whole and leaves no partial state. Nothing is truncated.
@@ -2279,7 +2279,7 @@ func componentAccessErrToStatus(err error, componentName string) error {
 // contentTrustFromMetadata maps the plugin:content_trust registration metadata
 // value (set by the SDK from the manifest's spec.policy.content_trust) to the
 // componentpb.ContentTrust enum. "untrusted" opts the component into
-// dispatch-policy gating (ADR-0010 / gibson#997); "trusted" is explicit-trusted;
+// dispatch-policy gating (ADR-0110 / gibson#997); "trusted" is explicit-trusted;
 // any other value (including empty, for registrants that predate the field)
 // maps to UNSPECIFIED, which the gate treats as trusted.
 func contentTrustFromMetadata(v string) componentpb.ContentTrust {

@@ -131,7 +131,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// Memory wrapper for tracing
 
 		// Run-provenance: agent delegations fold into the World; the graph
-		// projector (sole writer, ADR-0007) materializes :AgentRun + DELEGATED_TO.
+		// projector (sole writer, ADR-0107) materializes :AgentRun + DELEGATED_TO.
 		DelegationSink: ingestDelegation(d.brainRegistry),
 
 		// QuotaCounter maintains the per-tenant concurrent_agents Redis
@@ -152,7 +152,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 
 	// DeploymentShape is the untrusted-execution isolation policy
 	// (GIBSON_UNTRUSTED_EXEC). nil config or an unset value fail-closes to
-	// ShapeSetecOnly (the zero value). See ADR-0010 / gibson#994.
+	// ShapeSetecOnly (the zero value). See ADR-0110 / gibson#994.
 	if d.config != nil {
 		config.DeploymentShape = dispatchpolicy.ParseShape(d.config.UntrustedExecMode())
 	}
@@ -172,8 +172,8 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		}()
 		sandboxLogger := d.logger.WithComponent("sandboxed").Slog()
 		// Field-100 DiscoveryResult from a sandboxed tool response is folded into
-		// the tenant's World, which the graph projector materializes (ADR-0007 /
-		// ADR-0012). This used to be a permanently-nil variable with a comment
+		// the tenant's World, which the graph projector materializes (ADR-0107 /
+		// ADR-0112). This used to be a permanently-nil variable with a comment
 		// explaining why — the ingest path was imported everywhere and wired
 		// nowhere, so sandboxed discoveries were silently discarded (gibson#1266).
 		sbxDiscovery := d.newDiscoveryProcessor()
@@ -191,7 +191,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 				"catalog_source", "component_registry")
 		}
 
-		// Ephemeral agent launcher (ADR-0016 / gibson#1596). Same setec
+		// Ephemeral agent launcher (ADR-0116 / gibson#1596). Same setec
 		// frontend as the tool executor; an untrusted agent is launched as a
 		// per-mission-run sandbox instead of denied. The no-op constructor for
 		// the un-tagged build returns (nil, nil), so an untrusted agent stays
@@ -207,7 +207,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			config.AgentLauncher = launcher
 			// AgentLaunchSpecResolver reads a sandboxed agent's launch spec
 			// (image, sandbox class, egress ceiling, model) from its signed
-			// catalog manifest (gibson#1597, ADR-0015/0016). An agent with no
+			// catalog manifest (gibson#1597, ADR-0136/0116). An agent with no
 			// manifest is a clear error, so the harness denies the dispatch
 			// fail-closed rather than launching an unknown image.
 			// Tenant credentials a manifest declares (gibson#1621) come from the
@@ -349,7 +349,7 @@ func (d *daemonImpl) ensureDefaultModelGrants(ctx context.Context, tenantID stri
 // build-tag-independent outcomes — construction error, no-op disabled build
 // (nil launcher), and a real launcher — are unit-testable; the daemon init that
 // calls it is not. A nil launcher is the un-tagged build's fail-closed default
-// (ADR-0016 / gibson#1596): an untrusted agent is denied rather than run.
+// (ADR-0116 / gibson#1596): an untrusted agent is denied rather than run.
 func agentLauncherWiring(launcher *sandboxed.AgentLauncher, launchErr error) (wire bool, warn string) {
 	switch {
 	case launchErr != nil:

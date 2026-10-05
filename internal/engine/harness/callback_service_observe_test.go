@@ -231,7 +231,7 @@ func TestObserveRequest_CannotCarryTenantOrScope(t *testing.T) {
 			name := string(f.Name())
 			for _, bad := range forbidden {
 				assert.NotContains(t, name, bad,
-					"%s.%s: tenant and scope are resolved server-side and must have no field on the emit path (ADR-0012)",
+					"%s.%s: tenant and scope are resolved server-side and must have no field on the emit path (ADR-0112)",
 					path, name)
 			}
 			if f.Kind() == protoreflect.MessageKind && !f.IsMap() {

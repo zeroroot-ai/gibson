@@ -1,5 +1,5 @@
 """Unit tests for grounding a bounded slice (gibson#287) into one exact-VE
-solvable network and returning per-node posteriors (gibson#288, ADR-0029 SS5).
+solvable network and returning per-node posteriors (gibson#288, ADR-0129).
 
 Run:  python -m pytest sidecar/belief/test_ground.py
 """
@@ -29,7 +29,7 @@ def test_single_root_node_returns_its_leak_as_the_posterior():
 
 
 def test_intra_node_dependency_chain_matches_hand_computation():
-    """The real Host funnel (ADR-0005): reachable -> exploitable -> juicy,
+    """The real Host funnel (ADR-0129): reachable -> exploitable -> juicy,
     expressed as three noisy-OR variables instead of one explicit 8-column
     CPT — this is the same shape the pre-PRM per-host model hardcoded.
     """
@@ -63,7 +63,7 @@ def test_intra_node_dependency_chain_matches_hand_computation():
 
 
 def test_enablement_edge_contributes_as_an_additional_cause():
-    """Two nodes: compromising A's `juicy` enables reaching B (ADR-0029 SS1) —
+    """Two nodes: compromising A's `juicy` enables reaching B (ADR-0129) —
     an enablement cause on B's `reachable`, alongside B's own leak.
     """
     nodes = [

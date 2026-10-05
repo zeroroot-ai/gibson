@@ -9,7 +9,7 @@ import (
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
-// APOC Core provisioning for the per-tenant Neo4j pod (ADR-0012, gibson#1257).
+// APOC Core provisioning for the per-tenant Neo4j pod (ADR-0112, gibson#1257).
 //
 // The projector writes :Host through apoc.merge.node, so APOC Core is a
 // required plugin rather than an optional one — a tenant Neo4j without it

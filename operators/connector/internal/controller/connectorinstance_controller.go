@@ -2,11 +2,11 @@
 // Copyright 2026 Zero Root AI
 
 // Package controller reconciles a ConnectorInstance into ToolHive resources
-// (ADR-0014). The operator wraps ToolHive: it owns an MCPServer (a hosted
+// (ADR-0114). The operator wraps ToolHive: it owns an MCPServer (a hosted
 // container connector) or an MCPRemoteProxy (a vendor-hosted one), the
 // NetworkPolicy that confines it, and the egress-profile ConfigMap. The
 // connector's credential Secret is written by the daemon from the tenant
-// secret store (ADR-0015); the operator only references it. ToolHive is
+// secret store (ADR-0061); the operator only references it. ToolHive is
 // never a product surface.
 package controller
 
@@ -34,7 +34,7 @@ import (
 
 const (
 	// finalizer holds the ConnectorInstance until the connector's grant is
-	// revoked (ADR-0015 §5). The ToolHive resource and the daemon-written
+	// revoked (ADR-0061). The ToolHive resource and the daemon-written
 	// credential Secret carry owner references, so Kubernetes garbage-collects
 	// them; the vendor grant and the Grant/access secrets in the tenant store
 	// need an explicit revoke, which only the daemon can run.
@@ -53,7 +53,7 @@ const (
 	condRevoked = "GrantRevoked"
 
 	// toolhiveAPIVersion is the ToolHive CRD version this operator pins. The
-	// chart serves v1alpha1 as of ToolHive 0.12.1 (ADR-0014, Spike 1). The
+	// chart serves v1alpha1 as of ToolHive 0.12.1 (ADR-0114, Spike 1). The
 	// ConnectorInstance wrapper absorbs a future bump.
 	toolhiveAPIVersion = "toolhive.stacklok.dev/v1alpha1"
 
@@ -68,7 +68,7 @@ const (
 
 	// condDegraded reports that the connector's vendor credential is not
 	// usable: no grant, a refresh the daemon cannot complete, or a daemon that
-	// cannot answer. ADR-0015 decision 4 requires this to be visible on the
+	// cannot answer. ADR-0061 requires this to be visible on the
 	// CR, because a ToolHive proxy keeps serving a dead credential and would
 	// otherwise leave the connector reading Ready. Recovery is
 	// re-authorization; the operator never heals a grant by itself.
@@ -101,10 +101,10 @@ type ConnectorAuthReader interface {
 type ConnectorInstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-	// Revoker runs the finalizer's grant revoke on delete (ADR-0015 §5).
+	// Revoker runs the finalizer's grant revoke on delete (ADR-0061).
 	Revoker GrantRevoker
 	// AuthReader reads the connector's credential state so the CR reports
-	// Degraded rather than a silent Active (ADR-0015 decision 4). Required
+	// Degraded rather than a silent Active (ADR-0061). Required
 	// for a connector that presents a vendor credential.
 	AuthReader ConnectorAuthReader
 	// Now is the clock the revoke deadline is measured on. Nil means time.Now.
@@ -144,7 +144,7 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	// The tenant default-deny NetworkPolicy severs the connector; open exactly
-	// the paths it needs (ADR-0014, Slice 3).
+	// the paths it needs (ADR-0114, Slice 3).
 	if err := r.reconcileNetworkPolicy(ctx, &ci); err != nil {
 		return r.fail(ctx, &ci, "NetworkPolicy", err)
 	}
@@ -152,10 +152,10 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// The connector's credential is NOT reconciled here. For auth secret and
 	// auth oauth alike, the daemon reads the credential from the tenant's
 	// configured secret store and writes the <connector>-connector-cred Secret
-	// beside this CR, with an ownerReference to it (ADR-0015). The operator
+	// beside this CR, with an ownerReference to it (ADR-0061). The operator
 	// has no secret-store client by design; it only references the Secret.
 
-	// Confine egress to the vendor hosts, when declared (ADR-0014).
+	// Confine egress to the vendor hosts, when declared (ADR-0114).
 	if err := r.reconcileEgressProfile(ctx, &ci); err != nil {
 		return r.fail(ctx, &ci, "EgressProfile", err)
 	}
@@ -196,8 +196,8 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// ToolHive keeps serving either way — it presents the bytes it mounted and
 	// learns nothing from the vendor's 401. Only the daemon knows, so ask it,
 	// and let a dead credential outrank the ToolHive phase. Reporting Ready
-	// over a credential nobody can renew is the silent Active ADR-0015
-	// decision 4 refuses.
+	// over a credential nobody can renew is the silent Active ADR-0061
+	// refuses.
 	verdict := r.checkCredential(ctx, &ci)
 	if verdict.degraded {
 		ci.Status.Phase = verdict.phase
@@ -249,7 +249,7 @@ type credentialVerdict struct {
 }
 
 // checkCredential asks the daemon whether the connector's credential is
-// usable (ADR-0015 decision 4). A connector with no vendor credential
+// usable (ADR-0061). A connector with no vendor credential
 // (auth none) has no grant to judge and is never degraded.
 //
 // Every failure is degraded, including a daemon that cannot answer: an
@@ -330,7 +330,7 @@ func (r *ConnectorInstanceReconciler) checkCredential(
 }
 
 // finalize revokes the connector's grant through the daemon and releases the
-// finalizer (ADR-0015 §5). A failing revoke is retried with backoff until
+// finalizer (ADR-0061). A failing revoke is retried with backoff until
 // revokeDeadline has passed since the delete, then the finalizer releases
 // with a logged warning so the delete never wedges. A connector with no
 // vendor credential (auth none) has no grant and skips the revoke.
@@ -476,7 +476,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort": int64(proxyPort),
 			// oidcConfig is REQUIRED by the MCPRemoteProxy CRD. type kubernetes
 			// makes only the daemon's Kubernetes ServiceAccount token able to
-			// call the proxy — this IS the ADR-0014 decision "ToolHive OIDC
+			// call the proxy — this IS the ADR-0114 decision "ToolHive OIDC
 			// gates daemon access".
 			"oidcConfig": map[string]interface{}{
 				"type": "kubernetes",
@@ -484,7 +484,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		}
 		// A vendor connector presents a bearer token as the Authorization
 		// header. ToolHive forwards it from a Kubernetes Secret the daemon
-		// writes from the tenant secret store for both auth modes (ADR-0015):
+		// writes from the tenant secret store for both auth modes (ADR-0061):
 		// an oauth access token it rotates, or the static credential the
 		// tenant admin stored. The Secret VALUE is the full header
 		// "Bearer <token>". The Secret name follows the connector convention.
@@ -563,7 +563,7 @@ func setCondition(ci *connectorv1alpha1.ConnectorInstance, condType string, stat
 
 // credentialSecretName is the Kubernetes Secret the connector's credential
 // lands in. The daemon writes it from the tenant secret store for auth secret
-// and auth oauth alike (ADR-0015); it MUST match the daemon's
+// and auth oauth alike (ADR-0061); it MUST match the daemon's
 // connectorCredSecretName (internal/server/daemon/connector_token_materializer.go).
 // The Secret value is the full "Bearer <token>" header for a Remote connector.
 func credentialSecretName(connector string) string {

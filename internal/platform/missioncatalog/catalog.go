@@ -4,7 +4,7 @@
 // Package missioncatalog holds the first-party mission definitions gibson
 // ships, compiled into the signed binary.
 //
-// It is deliberately NOT the component catalog (ADR-0018). A component is the
+// It is deliberately NOT the component catalog (ADR-0118). A component is the
 // thing a mission dispatches — it has an image, an egress ceiling, and a
 // per-tenant `can_execute` gate. A Mission is the work-graph that does the
 // dispatching: no image, no egress of its own, never dispatched. Modelling one
@@ -142,7 +142,7 @@ func Source(name string) (string, error) {
 // Render returns the mission definition for a checked-in mission with its
 // parameters applied. The definition is authoritative: this is the single
 // place the graph is described, and the always-on agent references it rather
-// than rebuilding it (ADR-0018).
+// than rebuilding it (ADR-0118).
 //
 // params is validated against what this mission declares, so an unknown key is
 // refused rather than dropped and a missing one is refused rather than rendered

@@ -89,7 +89,7 @@ func TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID(t *testing.T) 
 }
 
 // TestWorldBeliefSubstrate_NonHostKindIsNotFound documents today's boundary:
-// Claim/TechniqueEnvironment (ADR-0029 §3) are not ECS entities yet, so this
+// Claim/TechniqueEnvironment (ADR-0129) are not ECS entities yet, so this
 // substrate — the ONE backing the live World — has nothing to read for them.
 // A different BeliefSubstrate implementation is what those views will need.
 // TestWorldBeliefSubstrate_UnwrittenNonHostKindIsNotFound proves a

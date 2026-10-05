@@ -5,8 +5,8 @@
 // that can be found in the LICENSE file in the repo root.
 
 // Package componentcatalog is the curated catalog of first-party components
-// gibson ships, for ALL four kinds — agent, tool, plugin, connector (ADR-0015,
-// generalizing the connector-only catalog of ADR-0014/0065). A component is one
+// gibson ships, for ALL four kinds — agent, tool, plugin, connector (ADR-0136,
+// generalizing the connector-only catalog of ADR-0114/0065). A component is one
 // declarative manifest — no Go, no rebuild. The manifests are embedded into the
 // gibson image; adding a first-party component is dropping in a manifest.
 //
@@ -57,7 +57,7 @@ type Manifest struct {
 	DisplayName string `yaml:"displayName"`
 	// Description is one sentence for the catalog UI.
 	Description string `yaml:"description"`
-	// EgressAllow is the egress ceiling for the component (ADR-0015). For an
+	// EgressAllow is the egress ceiling for the component (ADR-0136). For an
 	// agent it maps to the setec Launch.Egress of its tool dispatches; for a
 	// workload it maps to the L7 profile + L3 NetworkPolicy.
 	EgressAllow []string `yaml:"egressAllow"`
@@ -71,7 +71,7 @@ type Manifest struct {
 	agent     *AgentSpec
 }
 
-// ConnectorSpec embeds the ConnectorInstance-shaped fields (ADR-0014).
+// ConnectorSpec embeds the ConnectorInstance-shaped fields (ADR-0114).
 type ConnectorSpec struct {
 	Vendor             string                               `yaml:"vendor"`
 	Shape              connectorv1alpha1.ConnectorShape     `yaml:"shape"`
@@ -84,7 +84,7 @@ type ConnectorSpec struct {
 }
 
 // WorkloadSpec is the shared hosting shape for an external gRPC component
-// workload (ADR-0015 decision 6, ADR-0066): a runtime, a digest-pinned image,
+// workload (ADR-0136, ADR-0066): a runtime, a digest-pinned image,
 // and a SVID enrollment. Agents and plugins BOTH embed it — one workload code
 // path (ADR-0027), because an agent is an external gRPC component hosted exactly
 // like a plugin, not trusted in-image code.
@@ -99,10 +99,10 @@ type PluginSpec struct {
 	WorkloadSpec `yaml:",inline"`
 }
 
-// ToolSpec is the tool runtime block (ADR-0010/ADR-0017): content trust +
+// ToolSpec is the tool runtime block (ADR-0110/ADR-0117): content trust +
 // dispatch mode, a digest-pinned image, the launch command, and the sandbox
 // size. A manifest-seeded tool always carries a signed-digest image — the
-// runtime `--list-tools` refresher is retired (ADR-0017), so the manifest is
+// runtime `--list-tools` refresher is retired (ADR-0117), so the manifest is
 // the only source of a tool's runtime shape.
 type ToolSpec struct {
 	ContentTrust string `yaml:"contentTrust"` // trusted | untrusted
@@ -116,8 +116,8 @@ type ToolSpec struct {
 	Resources       AgentResources `yaml:"resources"`
 }
 
-// AgentSpec is an agent workload: the SAME hosting as a plugin (ADR-0015
-// decision 6 — agents are external gRPC components, not in-image), plus the
+// AgentSpec is an agent workload: the SAME hosting as a plugin (ADR-0136
+// — agents are external gRPC components, not in-image), plus the
 // agent's LLM/budget policy. It embeds WorkloadSpec so agent and plugin share
 // one workload code path.
 type AgentSpec struct {
@@ -126,7 +126,7 @@ type AgentSpec struct {
 	// "" is the default (route by the registry's content trust). "sandboxed"
 	// forces the ephemeral setec sandbox launch regardless of registry trust,
 	// because a platform agent is launched-on-dispatch, not a registered polling
-	// worker, so its trust comes from this manifest, not the registry (ADR-0016).
+	// worker, so its trust comes from this manifest, not the registry (ADR-0116).
 	// It mirrors ToolSpec.DispatchMode.
 	DispatchMode string `yaml:"dispatchMode"`
 	// Command is the sandbox launch command (argv as one shell-split string).
@@ -136,7 +136,7 @@ type AgentSpec struct {
 	// It is the ONE-SHOT command: the process that runs one dispatch and ends.
 	Command string `yaml:"command"`
 	// MemberCommand is the launch command for the member shape: a long-lived
-	// process that serves many dispatches over its life (ADR-0019). One image
+	// process that serves many dispatches over its life (ADR-0119). One image
 	// carries both shapes, so the difference is the command, not the image.
 	//
 	// An agent that declares none cannot run as a member, and a launch that
@@ -186,7 +186,7 @@ type AgentSpec struct {
 
 // DispatchModeSandboxed is the AgentSpec.DispatchMode value that forces a
 // catalog agent to launch in an ephemeral setec sandbox on dispatch, whatever
-// its registry content trust says (ADR-0016). An empty DispatchMode is the
+// its registry content trust says (ADR-0116). An empty DispatchMode is the
 // default and routes by registry trust.
 const DispatchModeSandboxed = "sandboxed"
 
@@ -234,7 +234,7 @@ func (m *Manifest) validate() error {
 		if err := m.Spec.Decode(&s); err != nil {
 			return fmt.Errorf("%s: decode agent spec: %w", m.ID, err)
 		}
-		// An agent is an external gRPC component workload (ADR-0015 decision 6),
+		// An agent is an external gRPC component workload (ADR-0136),
 		// hosted like a plugin: its image must be digest-pinned.
 		if !strings.Contains(s.Image, digestMarker) {
 			return fmt.Errorf("%s: an agent image must be digest-pinned (…%s…), got %q", m.ID, digestMarker, s.Image)
@@ -310,7 +310,7 @@ type AgentResources struct {
 // or several (envs), because a third-party inference route needs a whole set:
 // Bedrock wants a key id, a secret, an optional session token and a region.
 type CredentialRequirement struct {
-	// Shape restricts the block to one login shape (ADR-0019 decision 4). Empty
+	// Shape restricts the block to one login shape (ADR-0119). Empty
 	// means the block is injected whatever the shape — a credential the agent
 	// needs to do its job rather than to reach a model. A named shape is
 	// injected only when the launch asks for that shape, so one manifest
@@ -532,7 +532,7 @@ type ImageRef struct {
 }
 
 // ImageRefs returns every catalog component that names an image. The daemon
-// verifies these signatures before seeding platform_enabled (ADR-0015 runtime
+// verifies these signatures before seeding platform_enabled (ADR-0136 runtime
 // verification, gibson#1639): the platform must not offer a component it cannot
 // show was built by the release pipeline.
 func ImageRefs() []ImageRef {
@@ -609,7 +609,7 @@ func ListConnectors() []ConnectorEntry {
 // LookupEgress returns the egressAllow ceiling declared for the catalog
 // component of the given kind and id, and whether such a component is listed.
 // An agent's ceiling is applied to the setec egress of its tool dispatches
-// (ADR-0015).
+// (ADR-0136).
 func LookupEgress(kind, id string) ([]string, bool) {
 	for i := range catalog {
 		if catalog[i].Kind == kind && catalog[i].ID == id {
@@ -637,7 +637,7 @@ type AgentEntry struct {
 	ID          string
 	DisplayName string
 	Description string
-	// Image is the digest-pinned agent OCI image (ADR-0015 decision 9).
+	// Image is the digest-pinned agent OCI image (ADR-0136).
 	Image string
 	// Runtime is the workload hosting (process | pod | setec).
 	Runtime string
@@ -648,7 +648,7 @@ type AgentEntry struct {
 	MinContextWindow int
 	// BudgetLimit is the agent's budget ceiling.
 	BudgetLimit int
-	// EgressAllow is the agent's egress ceiling (ADR-0016 decision 2/5).
+	// EgressAllow is the agent's egress ceiling (ADR-0116).
 	EgressAllow []string
 	// Env is the static environment every launch carries (AgentSpec.Env).
 	Env map[string]string
@@ -670,7 +670,7 @@ type AgentEntry struct {
 	// DispatchMode is the manifest's launch policy: "" (route by registry
 	// trust) or DispatchModeSandboxed (force the sandbox launch). The harness
 	// reads it to route a launched-on-dispatch platform agent to the sandbox
-	// regardless of registry trust (ADR-0016).
+	// regardless of registry trust (ADR-0116).
 	DispatchMode string
 }
 
@@ -699,14 +699,14 @@ func (m Manifest) toAgentEntry() AgentEntry {
 // LookupAgent returns the agent-kind entry with the given id, and whether such
 // an agent is listed. The sandboxed-agent launch-spec resolver (gibson#1597)
 // reads Image, Model and EgressAllow from it to build one agent launch
-// (ADR-0016). A missing agent returns ok=false so the resolver fails closed and
+// (ADR-0116). A missing agent returns ok=false so the resolver fails closed and
 // the harness denies the dispatch.
 func LookupAgent(id string) (AgentEntry, bool) {
 	return lookupAgent(catalog, id)
 }
 
 // ToolEntry is a resolved `kind: tool` catalog manifest — everything a caller
-// needs to build the tool's setec launch (ADR-0017). It replaces what the
+// needs to build the tool's setec launch (ADR-0117). It replaces what the
 // retired refresher used to synthesise from `--list-tools`.
 type ToolEntry struct {
 	ID          string
@@ -716,7 +716,7 @@ type ToolEntry struct {
 	Image string
 	// Command is the launch command (the manifest `command`, shell-split).
 	Command []string
-	// ContentTrust is "trusted" | "untrusted" (ADR-0010).
+	// ContentTrust is "trusted" | "untrusted" (ADR-0110).
 	ContentTrust string
 	// DispatchMode is "sandboxed" | "agent" | "plugin".
 	DispatchMode string

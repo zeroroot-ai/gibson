@@ -36,7 +36,7 @@ type GraphClient interface {
 	// ingest loader (internal/engine/graphrag/loader, being unwound in
 	// gibson#1266). It is NOT a general knowledge-graph entity writer: entity
 	// nodes are written solely by the graph projector through the per-tenant
-	// datapool session (ADR-0012), never through this interface. Splitting Query
+	// datapool session (ADR-0112), never through this interface. Splitting Query
 	// into a read-only entry point plus an explicit DDL/loader write path is the
 	// tracked next step (gibson#1300); until then the `graphwrite` analyzer
 	// keeps the write transaction reachable only from the driver-adapter files

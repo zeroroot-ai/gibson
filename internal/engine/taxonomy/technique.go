@@ -13,14 +13,14 @@ import (
 )
 
 // technique.go represents the technique hierarchy inside the Taxonomy
-// (ADR-0035, gibson#379): coarse categories and fine-grained techniques are
+// (ADR-0135, gibson#379): coarse categories and fine-grained techniques are
 // both taxonomy nodes — "Category" and "Technique" are admitted into the
 // Global Registry's node vocabulary like any other materialised shape, and
 // RollsUpToRelationshipType is the admitted edge a technique uses to declare
 // its parent category. That edge is the whole bridge: there is no separate
 // reconciliation table between the two vocabularies.
 //
-// Categories and techniques are themselves pack-defined content (ADR-0033),
+// Categories and techniques are themselves pack-defined content (ADR-0133),
 // not schema, so their identifiers live in a TechniqueHierarchy rather than
 // in the Registry's label/relationship-type sets. The core pack seeds only
 // the coarse categories, one per types.TechniqueType value — the fixed Go
@@ -37,7 +37,7 @@ const CategoryLabel = "Category"
 const TechniqueLabel = "Technique"
 
 // RollsUpToRelationshipType is the taxonomy relationship a Technique node
-// uses to declare its parent Category node (ADR-0035 decision 2: "the
+// uses to declare its parent Category node (ADR-0135: "the
 // hierarchy *is* the bridge").
 const RollsUpToRelationshipType = "ROLLS_UP_TO"
 
@@ -47,7 +47,7 @@ type CategoryID string
 
 // TechniqueID identifies a fine-grained, pack-defined technique. Unlike
 // CategoryID, no core set is seeded — the core pack only fixes the
-// categories; techniques arrive from Domain Packs (ADR-0033).
+// categories; techniques arrive from Domain Packs (ADR-0133).
 type TechniqueID string
 
 // TechniqueHierarchy is the technique vocabulary's value authority: the
@@ -157,7 +157,7 @@ func (h *TechniqueHierarchy) HasTechnique(technique TechniqueID) bool {
 
 // CategoryOf is the technique -> category rollup lookup: the bridge VoI
 // dispatch gating needs to map a candidate's fine-grained technique to the
-// coarse category a capability declares coverage for (ADR-0035 decision 4).
+// coarse category a capability declares coverage for (ADR-0135).
 // ok is false when technique is not admitted.
 func (h *TechniqueHierarchy) CategoryOf(technique TechniqueID) (category CategoryID, ok bool) {
 	category, ok = h.rollup[technique]
@@ -180,7 +180,7 @@ func coreCategories() []CategoryID {
 // GlobalTechniques is the platform's core TechniqueHierarchy: the categories
 // seeded from types.TechniqueType, and no techniques yet — the core pack
 // fixes only the coarse level; fine-grained techniques are added by Domain
-// Packs (ADR-0033) via WithTechnique. Building it at init means a seed that
+// Packs (ADR-0133) via WithTechnique. Building it at init means a seed that
 // fails ValidIdentifier (it cannot, today — see TestCoreCategoriesAreValid —
 // but a future enum value might) fails the process at startup rather than
 // surfacing as a silently-missing category months later.

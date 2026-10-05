@@ -1,4 +1,4 @@
-"""Generate the Go-vs-pgmpy belief-runtime parity fixture (ADR-0034, gibson#377).
+"""Generate the Go-vs-pgmpy belief-runtime parity fixture (ADR-0134, gibson#377).
 
 `internal/engine/brain/beliefvi` is the native Go port of this package's exact
 variable-elimination engine (`infer.py`). `test_parity.py` already proves
@@ -7,7 +7,7 @@ generates the SAME evidence/query cases as JSON so a Go test
 (`beliefvi.TestPgmpyParity`) can assert its own answers agree with `infer.py`'s
 (and therefore, transitively, with pgmpy's) to the same 1e-12 tolerance —
 without either linking pgmpy into the Go binary or shipping it anywhere near a
-runtime image (ADR-0034 decision 4: pgmpy is the offline parity oracle only).
+runtime image (ADR-0134: pgmpy is the offline parity oracle only).
 
     python sidecar/belief/gen_parity_fixture.py > /tmp/belief-parity.json
     GIBSON_BELIEF_PARITY_FIXTURE=/tmp/belief-parity.json \\

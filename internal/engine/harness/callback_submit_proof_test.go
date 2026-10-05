@@ -72,7 +72,7 @@ func (e *testProofSettlementEngine) DomainPackPredicate(_ context.Context, predi
 	return expr, ok, nil
 }
 
-// SettleBetTrue mirrors tenantRoutedProofSettlement.SettleBetTrue's ADR-0032
+// SettleBetTrue mirrors tenantRoutedProofSettlement.SettleBetTrue's ADR-0132
 // wiring (proof_settlement_adapter.go): when the caller (the SubmitProof
 // handler) leaves authorize nil for a destructive request, the real tenant
 // routing wires in that tenant's own DestructiveAuthorizationQueue.Verify.
@@ -199,7 +199,7 @@ func TestSubmitProof_MissingFields_InvalidArgument(t *testing.T) {
 }
 
 // TestSubmitProof_UnknownPredicate_FailsClosed proves an unenabled-pack or
-// unknown-predicate name fails closed in-band (ADR-0030), never settling and
+// unknown-predicate name fails closed in-band (ADR-0131), never settling and
 // never reporting a gRPC-level error (the RPC itself is well-formed).
 func TestSubmitProof_UnknownPredicate_FailsClosed(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
@@ -218,7 +218,7 @@ func TestSubmitProof_UnknownPredicate_FailsClosed(t *testing.T) {
 
 // TestSubmitProof_Destructive_ReturnsPendingAuthorization proves a
 // destructive proof with no recorded authorization decision at all reports
-// PENDING_AUTHORIZATION and never settles (ADR-0032): SettleBetTrue's
+// PENDING_AUTHORIZATION and never settles (ADR-0132): SettleBetTrue's
 // verification refuses before the predicate ever evaluates.
 func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
@@ -239,7 +239,7 @@ func TestSubmitProof_Destructive_ReturnsPendingAuthorization(t *testing.T) {
 
 // awaitDestructivePending polls engine's DestructiveActionSnapshot until
 // hypothesisID's request has folded (the async Submit->fold path,
-// ADR-0001), or fails the test after 2s. Decide requires the request to have
+// ADR-0101), or fails the test after 2s. Decide requires the request to have
 // already landed, so a Request immediately followed by Decide must wait here
 // first to avoid racing the fold.
 func awaitDestructivePending(t *testing.T, e *brain.Engine, hypothesisID string) {
@@ -257,7 +257,7 @@ func awaitDestructivePending(t *testing.T, e *brain.Engine, hypothesisID string)
 }
 
 // awaitDestructiveDecided polls engine's DestructiveActionSnapshot until
-// hypothesisID shows Decided=true (the async Submit->fold path, ADR-0001),
+// hypothesisID shows Decided=true (the async Submit->fold path, ADR-0101),
 // or fails the test after 2s. Mirrors brain's own private test helper of the
 // same shape (destructive_authz_test.go), reimplemented here since it is
 // unexported across packages.
@@ -275,7 +275,7 @@ func awaitDestructiveDecided(t *testing.T, e *brain.Engine, hypothesisID string)
 	t.Fatalf("destructive action %q was not decided within the deadline", hypothesisID)
 }
 
-// TestSubmitProof_DestructiveApproved_SettlesTrue proves the ADR-0032
+// TestSubmitProof_DestructiveApproved_SettlesTrue proves the ADR-0132
 // end-to-end path this file exists for: once a human approves a hypothesis's
 // destructive authorization request (RequestDestructiveAuthorization +
 // Decide, both reading/writing the same DestructiveAuthorizationQueue
@@ -292,8 +292,8 @@ func TestSubmitProof_DestructiveApproved_SettlesTrue(t *testing.T) {
 	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	// The agent asks BEFORE performing the destructive act (ADR-0032
-	// decision 1), a human approves, and only then does the agent submit the
+	// The agent asks BEFORE performing the destructive act (ADR-0132),
+	// a human approves, and only then does the agent submit the
 	// proof of having performed it.
 	_, err := engine.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{
 		HypothesisID: "hyp-1", Technique: "T1190", PredicateType: "T1190",
@@ -358,7 +358,7 @@ func TestSubmitProof_DestructiveDenied_PermissionDenied(t *testing.T) {
 }
 
 // TestSubmitProof_PredicateFires_SettlesTrue proves the full non-destructive
-// path (ADR-0030, ADR-0031): a pack CEL predicate evaluated over the raw
+// path (ADR-0131): a pack CEL predicate evaluated over the raw
 // evidence the agent posted fires true, and Engine.SettleBetTrue folds
 // BetSettledTrue for real (this exercises the actual Timeline, not a mock).
 func TestSubmitProof_PredicateFires_SettlesTrue(t *testing.T) {
@@ -435,7 +435,7 @@ func TestSubmitProof_NoStakedBet_FailsClosed(t *testing.T) {
 
 // TestSubmitProof_PredicateDoesNotCompile_FailsClosed proves a pack predicate
 // that is well-formed text but not valid CEL against the gibson-owned
-// environment (ADR-0031) is refused in-band rather than crashing the RPC.
+// environment (ADR-0131) is refused in-band rather than crashing the RPC.
 func TestSubmitProof_PredicateDoesNotCompile_FailsClosed(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
 	engine := newTestProofSettlementEngine(t, "acme", map[string]string{

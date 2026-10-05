@@ -6,7 +6,7 @@ package brain
 import "testing"
 
 // A label applied to a Finding is folded into the World and surfaces in the
-// pooled label set (ADR-0006).
+// pooled label set (ADR-0106).
 func TestLabelApplied_FoldsIntoWorld(t *testing.T) {
 	e := NewEngine("t1")
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, Severity: "high", Category: "rce", UserID: "alice"})
@@ -39,7 +39,7 @@ func TestLabelApplied_LatestWriteWins(t *testing.T) {
 }
 
 // Labels pool ACROSS USERS within a tenant: two users labelling two items both
-// land in the one tenant-wide pool (ADR-0006 §6 — UserID is provenance, not a
+// land in the one tenant-wide pool (ADR-0106 — UserID is provenance, not a
 // partition key).
 func TestLabels_PoolAcrossUsersWithinTenant(t *testing.T) {
 	e := NewEngine("t1")
@@ -58,7 +58,7 @@ func TestLabels_PoolAcrossUsersWithinTenant(t *testing.T) {
 }
 
 // Labels NEVER cross tenants: a label in t1's World is invisible in t2's World
-// (structural isolation — one World per tenant, ADR-0001).
+// (structural isolation — one World per tenant, ADR-0101).
 func TestLabels_NeverCrossTenant(t *testing.T) {
 	t1 := NewEngine("t1")
 	t2 := NewEngine("t2")
@@ -75,7 +75,7 @@ func TestLabels_NeverCrossTenant(t *testing.T) {
 }
 
 // Labelling is replay-reproducible: folding the Timeline into a fresh World
-// reproduces the label set exactly (labels are events — ADR-0006 §3).
+// reproduces the label set exactly (labels are events — ADR-0106).
 func TestLabelApplied_ReplayReproduces(t *testing.T) {
 	e := NewEngine("t1")
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, UserID: "alice"})

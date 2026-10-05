@@ -16,7 +16,7 @@ const ontologyExtensionServiceName = "gibson.tenant.v1.OntologyExtensionService"
 
 // TestRegisterOntologyExtension_ServesWithBrainRegistry proves
 // OntologyExtensionService is wired into the real service-registration path
-// (ADR-0033 decisions 2-3, gibson#392) — no flag, no parallel path (ADR-0027):
+// (ADR-0133, gibson#392) — no flag, no parallel path (ADR-0027):
 // a daemon with a brain registry registers the service.
 func TestRegisterOntologyExtension_ServesWithBrainRegistry(t *testing.T) {
 	d := &daemonImpl{

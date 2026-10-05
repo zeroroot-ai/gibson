@@ -123,7 +123,7 @@ func TestHypothesisObserved_HypothesisIDAndRunIDKeepFirstNonEmpty(t *testing.T) 
 
 // TestHypothesisObserved_DistinctScopesStayDistinct proves identity is the
 // (ScopeID, Claim) pair: identical claim text in two different scopes (two
-// different target networks) is two hypotheses, never one (ADR-0002).
+// different target networks) is two hypotheses, never one (ADR-0102).
 func TestHypothesisObserved_DistinctScopesStayDistinct(t *testing.T) {
 	w := NewWorld("t")
 
@@ -171,7 +171,7 @@ func TestHypothesisObserved_EmptyClaimIsIgnored(t *testing.T) {
 // (belief.go): applying HypothesisObserved events creates or enriches
 // Hypothesis entities only, never a Host, and never anything belief.go's math
 // reads. This is gibson#265's "no change to existing belief math" criterion,
-// and the ADR-0021 rule that a Hypothesis never sets a Belief.
+// and the ADR-0121 rule that a Hypothesis never sets a Belief.
 func TestHypothesisObserved_NeverTouchesBelief(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, HypothesisObserved{ScopeID: "s1", Claim: "a claim about a host", Confidence: 0.8})

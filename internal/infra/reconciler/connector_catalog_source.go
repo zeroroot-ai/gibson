@@ -32,11 +32,11 @@ type ConnectorInstanceLister interface {
 
 // ConnectorInstanceCatalogSource derives the desired per-tenant connector set
 // from ConnectorInstance CRs (the ToolHive path, group gibson.zeroroot.ai,
-// ADR-0014), NOT from connector_manifest-row presence. Each ConnectorInstance
+// ADR-0114), NOT from connector_manifest-row presence. Each ConnectorInstance
 // is one connector enabled for one tenant; its namespace is tenant-<id> and
 // Spec.Connector is the grant key. An oauth connector carries a vendor token
 // the freshener keeps warm; a secret connector carries a customer-supplied
-// static credential (ADR-0015). Both are published to the connector-cred
+// static credential (ADR-0061). Both are published to the connector-cred
 // Secret by the materializer, so both are in the set the token loop walks. A
 // connector with auth none has nothing to publish and is skipped.
 //
@@ -113,7 +113,7 @@ func (s *ConnectorInstanceCatalogSource) DesiredConnectors(ctx context.Context) 
 			Tenant:    tid,
 			Connector: connector,
 			// The CR identity the materializer needs for the connector-cred
-			// Secret's ownerReference (ADR-0015). Name and UID come straight
+			// Secret's ownerReference (ADR-0061). Name and UID come straight
 			// from the listed CR; the namespace is the tenant namespace above.
 			Namespace:    ns,
 			InstanceName: ci.GetName(),

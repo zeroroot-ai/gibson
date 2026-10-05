@@ -102,7 +102,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	}
 }
 
-// TestMetaInvoke_FeedsToolCallSink_OnSuccess is the gibson#380 / ADR-0030 §3
+// TestMetaInvoke_FeedsToolCallSink_OnSuccess is the gibson#380 / ADR-0131
 // flight-recorder unit for the metatool dispatch path: invoke_tool runs a
 // real catalog tool through the same trust boundary as a native CallToolProto
 // call, so a successful invocation must reach the sink exactly like the

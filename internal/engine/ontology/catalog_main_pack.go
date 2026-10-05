@@ -3,8 +3,8 @@
 
 package ontology
 
-// catalog_main_pack.go: the platform's seed "main" Domain Pack (ADR-0033
-// decision 4's "the seed main pack is default-off", gibson#382, epic #376).
+// catalog_main_pack.go: the platform's seed "main" Domain Pack (ADR-0133's
+// "the seed main pack is default-off", gibson#382, epic #376).
 //
 // MainDomainPack is a skeleton, not a fully-fleshed vertical: a small,
 // representative set of technique -> CEL predicate bindings, plus the
@@ -14,7 +14,7 @@ package ontology
 // daemon that ships it, and so EnableDomainPack has real, compiling content
 // to fold into a tenant's World end to end.
 //
-// The pack ships default-off (ADR-0033 decision 4): registering it in
+// The pack ships default-off (ADR-0133): registering it in
 // DomainPackCatalog makes it visible and enable-able, never enabled. A
 // fresh tenant's brain.Engine.DomainPacks() starts empty regardless of what
 // the catalog carries — DomainPackEnabled is the only thing that ever adds
@@ -31,7 +31,7 @@ const MainDomainPackName = "main"
 // extraction), plus the small taxonomy structure they assume. Every
 // predicate expression is plain CEL text, valid against the gibson-owned
 // environment (internal/engine/settlement/celenv.NewEnv) — this package
-// never compiles or type-checks it (ADR-0031 decision 2 draws that line at
+// never compiles or type-checks it (ADR-0131 draws that line at
 // celenv, strictly after DomainPack.Validate has already accepted the text
 // here as well-formed).
 //
@@ -46,7 +46,7 @@ func MainDomainPack() DomainPack {
 		Visibility: PackVisibilityPublic,
 
 		// A minimal structural seed on top of the platform's own core
-		// taxonomy (ADR-0025 §"Importing a Pack layers these onto the
+		// taxonomy (ADR-0133: "Importing a Pack layers these onto the
 		// receiving install's own core, never replacing it"): the node/edge
 		// shape the reconnaissance predicate below assumes evidence was
 		// gathered about.
@@ -61,7 +61,7 @@ func MainDomainPack() DomainPack {
 		// A skeleton, representative set of technique -> CEL bindings —
 		// enough to prove the enable path end to end, not a fully-fleshed
 		// vertical (gibson#382 scope). Keyed by ValidIdentifier-shaped
-		// technique names (ADR-0035); each references only the "evidence"
+		// technique names (ADR-0135); each references only the "evidence"
 		// variable and the curated helper catalog celenv.NewEnv declares.
 		Predicates: map[string]string{
 			// reconnaissance: proof that some recorded HTTP exchange reached

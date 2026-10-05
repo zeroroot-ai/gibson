@@ -87,7 +87,7 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 	unimplemented := map[string]bool{
 		harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName:  true,
 		harnesspb.HarnessCallbackService_ReportStepHints_FullMethodName: true,
-		// RequestDestructiveAuthorization (ADR-0032, gibson#390) landed:
+		// RequestDestructiveAuthorization (ADR-0132, gibson#390) landed:
 		// callback_request_destructive_authorization.go serves it, and
 		// SubmitProof's SettleBetTrue now verifies the recorded decision — no
 		// longer absent here, and carries agentSurface: true.

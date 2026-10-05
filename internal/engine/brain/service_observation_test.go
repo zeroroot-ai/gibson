@@ -9,7 +9,7 @@ import (
 )
 
 // TestServiceObservation_FoldEnrichReplay proves that per-port service detail
-// (ADR-0007 observation vocabulary) folds into the host as port sub-state, is
+// (ADR-0107 observation vocabulary) folds into the host as port sub-state, is
 // enriched progressively across observations (never erased by a barer scan), and
 // survives replay — World == fold(Timeline).
 func TestServiceObservation_FoldEnrichReplay(t *testing.T) {
@@ -57,7 +57,7 @@ func TestServiceObservation_FoldEnrichReplay(t *testing.T) {
 }
 
 // TestServiceObservation_EndpointTechCert folds endpoint/technology/certificate
-// sub-state (ADR-0007) and proves progressive enrichment (union, never erased).
+// sub-state (ADR-0107) and proves progressive enrichment (union, never erased).
 func TestServiceObservation_EndpointTechCert(t *testing.T) {
 	w := NewWorld("t")
 	Reduce(w, HostObserved{
@@ -91,7 +91,7 @@ func TestServiceObservation_EndpointTechCert(t *testing.T) {
 }
 
 // TestServiceObservation_ClosedPortKeepsService proves a port that goes closed
-// retains its service sub-state (ADR-0002: associations are time-bounded, kept not
+// retains its service sub-state (ADR-0102: associations are time-bounded, kept not
 // deleted) — so the closed port carries no service in the open-only snapshot but is
 // not lost from the entity.
 func TestServiceObservation_ClosedPortKeepsService(t *testing.T) {

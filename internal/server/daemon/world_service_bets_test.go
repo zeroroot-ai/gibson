@@ -196,8 +196,8 @@ func TestSettleBetByHITL_TruePositive_Settles(t *testing.T) {
 // TestSettleBetByHITL_MissingActingUser_Errors proves a settlement attempt
 // with no acting user resolvable from context is refused with
 // codes.Unauthenticated (fail closed) and the bet stays unsettled — the
-// reviewer is the accountability record for a HITL verdict (ADR-0006 §6
-// provenance, ADR-0028's class of consequential action), so an
+// reviewer is the accountability record for a HITL verdict (ADR-0106
+// provenance, ADR-0132's class of consequential action), so an
 // unattributable verdict must never flow through as a zero-value identity.
 func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

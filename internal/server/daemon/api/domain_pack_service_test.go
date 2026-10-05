@@ -134,7 +134,7 @@ func TestEnableDomainPack_MakesItLiveInTenantOnly(t *testing.T) {
 	assert.Equal(t, "main", got.GetPacks()[0].GetName())
 	assert.Equal(t, []string{"privilege_escalation"}, got.GetPacks()[0].GetTechniques())
 
-	// ADR-0033 decision 1: "per-tenant, not per-install" — another tenant
+	// ADR-0133: "per-tenant, not per-install" — another tenant
 	// must never see acme's enabled pack.
 	other, err := s.ListDomainPacks(tenantCtx("other"), &tenantv1.ListDomainPacksRequest{})
 	require.NoError(t, err)

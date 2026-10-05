@@ -7,11 +7,11 @@ released). This inventories what rips and what the new surface is. Touches `zero
 ## Removed entirely
 - **`zeroroot-ai/sdk` `memory/`** — the whole package. `Store`, `WorkingMemory`, `MissionMemory`,
   `LongTermMemory`, `Item`, `Result`. (Memory is now the World; nobody calls read/write —
-  [ADR-0001](../adr/0001-ecs-native-mission-brain.md).)
+  ADR-0101.)
 - **Harness recall methods** — `GetFindings`, `FindSimilarFindings`, `GetRelatedFindings`,
   `GetPreviousRunFindings` (replaced by ambient projection).
 - **taxonomy/v1 generic carriers** — `GraphNode`, `CoreNodeType`, `Relationship`
-  ([ADR-0002](../adr/0002-scope-relative-entity-identity.md)).
+  (ADR-0102).
 
 ## Changed
 - **`agent.Agent`**: `Execute(ctx, harness, task) (Result, error)` → `Execute(ctx, harness, task) error`.
@@ -28,12 +28,12 @@ released). This inventories what rips and what the new surface is. Touches `zero
 ## Added
 - **taxonomy/v1**: `Scope`, `Credential`, `Account` entities; per-type **identity vs. volatile**
   field markers (drives the resolution loop-compare).
-- A **label event** type (HITL labels — [ADR-0006](../adr/0006-closed-loop-learning.md)).
+- A **label event** type (HITL labels — ADR-0106).
 
 ## Unchanged (deliberately)
 - The agent/tool/plugin **dispatch** path (capability-grant, gRPC) and the manifest facility.
 - Tools/plugins still run in sandboxes / tool-runner; `ToolExecution` tracks long runs
-  ([ADR-0004](../adr/0004-clock-tick-runtime-engine.md)).
+  (ADR-0104).
 
 ## Consumer ripple
 `adk` (scaffolding + `gibson-cli`), `examples/`, `debug-plugin`, `gibson-tool-runner` — update

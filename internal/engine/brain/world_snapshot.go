@@ -27,17 +27,17 @@ type worldSnapshotData struct {
 	Decisions    []DecisionSnapshot    `json:"decisions"`
 	Observations []ObservationSnapshot `json:"observations"`
 	Entities     []EntitySnapshot      `json:"entities"`
-	// Hypotheses is the Hypothesis provenance class (ADR-0021, gibson#265):
+	// Hypotheses is the Hypothesis provenance class (ADR-0121, gibson#265):
 	// an agent's proposed, unproven claim. Snapshotted separately from every
 	// Evidence store and from Belief — the three provenance classes stay
 	// distinct across a snapshot round trip too.
 	Hypotheses []HypothesisSnapshot `json:"hypotheses"`
-	// BetSettlements is the proof-of-demonstration outcome store (ADR-0027,
+	// BetSettlements is the proof-of-demonstration outcome store (ADR-0131,
 	// gibson#278). Snapshotted like AgentRuns — an externally-keyed record
 	// with no monotonic id counter of its own.
 	BetSettlements []BetSettlementSnapshot `json:"bet_settlements"`
 	// NodeBeliefs backs BeliefSubstrate for every non-Host node kind
-	// (NodeKindClaim, NodeKindTechniqueEnvironment — ADR-0029 §3, gibson#272's
+	// (NodeKindClaim, NodeKindTechniqueEnvironment — ADR-0129, gibson#272's
 	// substrate seam). Externally-keyed by NodeRef, like BetSettlements — no
 	// monotonic id counter of its own.
 	NodeBeliefs []NodeBeliefSnapshot `json:"node_beliefs"`
@@ -45,25 +45,25 @@ type worldSnapshotData struct {
 	// (gibson#613), keyed by edge type like NodeBeliefs is keyed by ref.
 	EdgeOutcomes []EdgeOutcomeSnapshot `json:"edge_outcomes"`
 	// DestructiveActions is the destructive-proof authorization queue
-	// (ADR-0028, gibson#336), pending and decided alike. Snapshotted like
+	// (ADR-0132, gibson#336), pending and decided alike. Snapshotted like
 	// BetSettlements — an externally-keyed record with no monotonic id
 	// counter of its own.
 	DestructiveActions []DestructiveActionSnapshot `json:"destructive_actions"`
-	// VoIPlans is the per-mission VoI planning state (ADR-0026, gibson#283),
+	// VoIPlans is the per-mission VoI planning state (ADR-0126, gibson#283),
 	// pending and completed alike. Snapshotted like BetSettlements — an
 	// externally-keyed (MissionID) record with no monotonic id counter of
 	// its own. Missing this field silently dropped in-flight VoI planning
 	// state across a snapshot-and-trim cycle (gibson#341).
 	VoIPlans []VoIPlanSnapshot `json:"voi_plans"`
 	// AgentToolCalls + FlightRecorderPolicy: the flight recorder's captured
-	// tool I/O and the tenant's retention/redaction policy (ADR-0020,
+	// tool I/O and the tenant's retention/redaction policy (ADR-0120,
 	// gibson#271). The policy must be snapshotted too, or a tenant's
 	// opt-in redaction/retention setting would silently reset to the
 	// capture-everything default across a snapshot+trim cycle.
 	AgentToolCalls       []AgentToolCallSnapshot `json:"agent_tool_calls"`
 	FlightRecorderPolicy FlightRecorderPolicy    `json:"flight_recorder_policy"`
 
-	// DomainPacks is the tenant's currently enabled Domain Packs (ADR-0033,
+	// DomainPacks is the tenant's currently enabled Domain Packs (ADR-0133,
 	// gibson#381). Must be snapshotted like FlightRecorderPolicy above, or a
 	// tenant's enabled packs would silently vanish across a snapshot+trim
 	// cycle even though the World fold never disabled them.
@@ -295,7 +295,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay bet settlements (ADR-0027/0023, gibson#278/#279/#280). Order
+	// Replay bet settlements (ADR-0131/0123, gibson#278/#279/#280). Order
 	// does not matter: identity is HypothesisID, not a world-assigned
 	// counter, so there is no id-renumbering hazard the way there is for
 	// observations/entities. Dispatch on the recorded Method, not Verdict:
@@ -340,7 +340,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		}
 	}
 
-	// Replay non-Host node beliefs (ADR-0029 §3, gibson#272's substrate
+	// Replay non-Host node beliefs (ADR-0129, gibson#272's substrate
 	// seam). Order does not matter: identity is NodeRef, not a
 	// world-assigned counter, same as BetSettlements above.
 	for _, nb := range data.NodeBeliefs {
@@ -353,7 +353,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		w.edgeOutcomes[eo.EdgeType] = EdgeOutcomeCount{Alpha: eo.Alpha, Beta: eo.Beta}
 	}
 
-	// Replay destructive-proof authorization actions (ADR-0028, gibson#336):
+	// Replay destructive-proof authorization actions (ADR-0132, gibson#336):
 	// always replay the request first, then the decision if one landed —
 	// applyDestructiveActionDecided is a no-op without a matching request, so
 	// order here matters, unlike the order-independent BetSettlements loop
@@ -379,7 +379,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		}
 	}
 
-	// Replay VoI plan state (ADR-0026, gibson#283/#341): always replay the
+	// Replay VoI plan state (ADR-0126, gibson#283/#341): always replay the
 	// request first, then the completed round if one landed —
 	// applyVoIPlanned's defensive branch would otherwise create a second,
 	// duplicate entity when findVoIPlanState's lookup runs before the
@@ -395,7 +395,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		}
 	}
 
-	// Replay enabled Domain Packs (ADR-0033, gibson#381). Order does not
+	// Replay enabled Domain Packs (ADR-0133, gibson#381). Order does not
 	// matter: identity is Name, not a world-assigned counter, same as
 	// BetSettlements above — a disabled pack is simply absent from
 	// data.DomainPacks, so only currently-enabled packs replay here.
@@ -425,7 +425,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay tool calls (ADR-0020, gibson#271). AgentToolCallSnapshot and
+	// Replay tool calls (ADR-0120, gibson#271). AgentToolCallSnapshot and
 	// AgentToolCallObserved share identical fields, so a direct conversion
 	// replaces the field-by-field literal.
 	for _, c := range data.AgentToolCalls {
@@ -443,7 +443,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 
 	// Replay observations in their original assignment order (by world id).
 	// Identity is the Timeline event id, so any deterministic order reproduces
-	// the same Neo4j nodes (ADR-0012) — but the world id rides along to the
+	// the same Neo4j nodes (ADR-0112) — but the world id rides along to the
 	// graph as :Observation.brain_id, and replaying in event-id order would
 	// renumber it whenever the two orders disagree. Restoring in id order keeps
 	// that property stable across a snapshot round trip.

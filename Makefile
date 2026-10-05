@@ -419,7 +419,7 @@ check-no-skipped-tests:
 
 # check-no-mcp-bridge asserts the legacy connector-launcher path stays removed
 # (ADR-0065, gibson#1524): MCP lives only in the connector domain via ToolHive
-# (ADR-0014); the plugin domain has no MCP. The guard script names the exact
+# (ADR-0114); the plugin domain has no MCP. The guard script names the exact
 # tokens it forbids. Self-test first so a broken guard cannot pass by finding
 # nothing.
 check-no-mcp-bridge:
@@ -819,7 +819,7 @@ proto: proto-deps authz-registry
 	@echo "Proto generation complete"
 
 # tool-manifests: regenerate the kind:tool catalog manifests from the captured
-# executor catalog (ADR-0017). Reads internal/platform/componentcatalog/
+# executor catalog (ADR-0117). Reads internal/platform/componentcatalog/
 # executor-catalog.json — the verbatim `gibson-runner --list-tools` output of one
 # digest-pinned executor image — and writes one manifest per tool. CI drift-gates
 # the result, so a manifest can never disagree with the image it names.

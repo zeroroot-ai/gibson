@@ -19,7 +19,7 @@ import (
 // dispatches more), then scheduler/condition (advance the scripted graph), retry
 // (re-arm failures before completion judges them), the Decider gate (request
 // decisions on current state), the VoI gate (request a fresh value-of-
-// information plan on the same evidence-change signal, ADR-0026/gibson#283 —
+// information plan on the same evidence-change signal, ADR-0126/gibson#283 —
 // mechanical and quiescent like the Decider gate, so it runs alongside it),
 // completion (mechanical no-goal finish), and finally rescan reconciliation,
 // which can only judge what a scan did not see once that scan is terminal.
@@ -53,7 +53,7 @@ type ExecutorDeps struct {
 // WireExecutor subscribes the dispatch + decider taps to eng and starts a single
 // drain goroutine (bound to ctx) that actuates buffered work off the tick. The
 // taps run in-tick and only buffer; Drain does the I/O (LLM calls, agent
-// dispatch) so the ~50ms tick never blocks (ADR-0004/0009).
+// dispatch) so the ~50ms tick never blocks (ADR-0104/0109).
 func WireExecutor(ctx context.Context, eng *Engine, deps ExecutorDeps) {
 	interval := deps.DrainInterval
 	if interval <= 0 {

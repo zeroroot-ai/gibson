@@ -2,8 +2,8 @@
 
 The decision table for how each taxonomy node type (`zeroroot-ai/sdk` `taxonomy/core.yaml`)
 is represented in the Tenant World and projected to the per-tenant Neo4j graph.
-Grounds [ADR-0007](../adr/0007-world-sourced-graph-projection.md) (graph = projection of
-the World) and [ADR-0002](../adr/0002-scope-relative-entity-identity.md) (scope-relative
+Grounds ADR-0107 (graph = projection of
+the World) and ADR-0102 (scope-relative
 identity). The graph is a **read-model**: every node/edge below is *materialized by the
 projector from the World*, never written by an agent.
 
@@ -12,14 +12,14 @@ projector from the World*, never written by an agent.
 - **Entity** — a first-class ECS entity in the World: own component, observation event,
   reducer, and scope-relative identity resolution. Projects to a graph node.
 - **Sub-state** — folded into a parent entity's component (no independent identity per
-  ADR-0002). Projects to a graph node + containment edge derived from the parent.
+  ADR-0102). Projects to a graph node + containment edge derived from the parent.
 - **Lifecycle** — execution provenance already modeled by the brain's Mission / WorkItem
   (fed by the daemon event stream, not by agent observations). Projects from lifecycle.
 - **Marker** — a derived flag on an entity (not its own node).
 
 ## The table
 
-| Node type | Kind | Identity (ADR-0002) | Parent / projection edge | Status |
+| Node type | Kind | Identity (ADR-0102) | Parent / projection edge | Status |
 |---|---|---|---|---|
 | `scope` | partition key | the partition itself | top-level `ScopeID` on every entity | **done** (field) |
 | `host` | **entity** | `(scope, address)` + ssh-key / cloud-id strong signals | — → `:Host` | **done** |
@@ -43,7 +43,7 @@ projector from the World*, never written by an agent.
 
 ## Why service/endpoint/certificate/technology are sub-state, not entities
 
-Per ADR-0002 an entity's identity is `parent + one local discriminator`. A service has no
+Per ADR-0102 an entity's identity is `parent + one local discriminator`. A service has no
 meaning without its `(host, port)`; an endpoint none without its service; a certificate is
 identified by its own fingerprint but is always *served by* a service. Folding them into
 the parent entity keeps identity resolution a single scope-partitioned loop over **hosts**
@@ -58,5 +58,5 @@ so the **graph** is fully normalized even though the **World** keeps them as par
 `reconcilePorts` with progressive enrichment (a richer scan refines detail; a barer
 re-scan never erases it), exposed on `HostSnapshot.Services`, and replay-deterministic.
 Remaining rows are added as their observation events + reducers land (tracked under the
-S1 follow-ups of the ADR-0007 epic).
+S1 follow-ups of the ADR-0107 epic).
 

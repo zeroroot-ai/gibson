@@ -10,7 +10,7 @@ import (
 
 // TestAgentRun_FoldDedupEnrichReplay proves agent runs fold idempotently by RunID,
 // the parent link + agent name enrich progressively (learned later, never clobbered),
-// and the World survives replay (ADR-0007 run-provenance).
+// and the World survives replay (ADR-0107 run-provenance).
 func TestAgentRun_FoldDedupEnrichReplay(t *testing.T) {
 	tl := &Timeline{}
 	w := NewWorld("t")
