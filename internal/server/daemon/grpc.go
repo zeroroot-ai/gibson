@@ -1811,9 +1811,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				llmCompleterIface,   // LLMRegistryAdapter or nil
-				findingSubmitter,    // GraphRAGFindingSubmitter or nil
-				d.pluginAccessStore, // nil when no KeyProvider configured
+				llmCompleterIface,      // LLMRegistryAdapter or nil
+				findingSubmitter,       // GraphRAGFindingSubmitter or nil
+				d.componentAccessStore, // nil when no KeyProvider configured
 				auditLogger,
 			)
 

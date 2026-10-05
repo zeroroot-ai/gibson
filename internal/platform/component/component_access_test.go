@@ -82,10 +82,10 @@ func (s *stubComponentRegistry) DiscoverSystemOnly(_ context.Context, _, _ strin
 	return nil, nil
 }
 
-// newTestPluginAccessStore creates a RedisComponentAccessStore backed by a fresh
+// newTestComponentAccessStore creates a RedisComponentAccessStore backed by a fresh
 // miniredis instance with a real AES-GCM encryptor and a static key provider.
 // Cleanup is registered on t so callers do not need to manage it.
-func newTestPluginAccessStore(t *testing.T) (*RedisComponentAccessStore, *miniredis.Miniredis) {
+func newTestComponentAccessStore(t *testing.T) (*RedisComponentAccessStore, *miniredis.Miniredis) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -99,7 +99,7 @@ func newTestPluginAccessStore(t *testing.T) (*RedisComponentAccessStore, *minire
 		Level: slog.LevelError, // suppress noise in tests
 	}))
 
-	store := NewRedisPluginAccessStore(
+	store := NewRedisComponentAccessStore(
 		client,
 		crypto.NewAESGCMEncryptor(),
 		newStaticKeyProvider(),
@@ -115,7 +115,7 @@ func newTestPluginAccessStore(t *testing.T) (*RedisComponentAccessStore, *minire
 func pluginAccessNames(records []ComponentAccess) []string {
 	names := make([]string, 0, len(records))
 	for _, r := range records {
-		names = append(names, r.PluginName)
+		names = append(names, r.ComponentName)
 	}
 	sort.Strings(names)
 	return names
@@ -125,8 +125,8 @@ func pluginAccessNames(records []ComponentAccess) []string {
 // Enable / GetAccess / Disable lifecycle
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_Enable_GetAccess(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_Enable_GetAccess(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	err := store.Enable(ctx, "tenant-a", "gitlab", map[string]any{"url": "https://gitlab.example.com"}, "admin")
@@ -136,7 +136,7 @@ func TestPluginAccessStore_Enable_GetAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "tenant-a", access.TenantID)
-	assert.Equal(t, "gitlab", access.PluginName)
+	assert.Equal(t, "gitlab", access.ComponentName)
 	assert.True(t, access.Enabled)
 	assert.Equal(t, "platform", access.Source)
 	assert.Equal(t, "admin", access.ConfiguredBy)
@@ -144,8 +144,8 @@ func TestPluginAccessStore_Enable_GetAccess(t *testing.T) {
 	assert.NotEmpty(t, access.ConfiguredAt)
 }
 
-func TestPluginAccessStore_Enable_WithoutConfig(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_Enable_WithoutConfig(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	err := store.Enable(ctx, "tenant-a", "gitlab", nil, "admin")
@@ -157,8 +157,8 @@ func TestPluginAccessStore_Enable_WithoutConfig(t *testing.T) {
 	assert.False(t, access.HasConfig)
 }
 
-func TestPluginAccessStore_Disable_RemovesRecord(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_Disable_RemovesRecord(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -174,8 +174,8 @@ func TestPluginAccessStore_Disable_RemovesRecord(t *testing.T) {
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_Disable_RemovesConfig(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_Disable_RemovesConfig(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	cfg := map[string]any{"token": "super-secret-token-value"}
@@ -196,8 +196,8 @@ func TestPluginAccessStore_Disable_RemovesConfig(t *testing.T) {
 // Config encryption round-trip
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_EncryptionRoundTrip(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_EncryptionRoundTrip(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	originalCfg := map[string]any{
@@ -217,8 +217,8 @@ func TestPluginAccessStore_EncryptionRoundTrip(t *testing.T) {
 }
 
 // Encrypting the same config twice produces different ciphertexts (random IV/salt).
-func TestPluginAccessStore_EncryptionProducesUniqueCiphertexts(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_EncryptionProducesUniqueCiphertexts(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	cfg := map[string]any{"token": "my-token"}
@@ -239,8 +239,8 @@ func TestPluginAccessStore_EncryptionProducesUniqueCiphertexts(t *testing.T) {
 // GetMaskedConfig
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_GetMaskedConfig_MasksSecretFields(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetMaskedConfig_MasksSecretFields(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Register a schema that marks "token" as a secret field.
@@ -267,8 +267,8 @@ func TestPluginAccessStore_GetMaskedConfig_MasksSecretFields(t *testing.T) {
 	assert.Equal(t, cfg["url"], masked["url"], "non-secret field must be unmasked")
 }
 
-func TestPluginAccessStore_GetMaskedConfig_NoSchema_MasksAllStrings(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetMaskedConfig_NoSchema_MasksAllStrings(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Do NOT store a schema — fallback masking should apply.
@@ -287,8 +287,8 @@ func TestPluginAccessStore_GetMaskedConfig_NoSchema_MasksAllStrings(t *testing.T
 	assert.Equal(t, float64(3), masked["retries"], "non-string field must not be masked")
 }
 
-func TestPluginAccessStore_GetMaskedConfig_ShortSecret_FullyMasked(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetMaskedConfig_ShortSecret_FullyMasked(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	schema := `{
@@ -312,8 +312,8 @@ func TestPluginAccessStore_GetMaskedConfig_ShortSecret_FullyMasked(t *testing.T)
 // UpdateConfig
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_UpdateConfig_ReplacesStoredConfig(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_UpdateConfig_ReplacesStoredConfig(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	initial := map[string]any{"token": "old-token", "url": "https://old.example.com"}
@@ -329,8 +329,8 @@ func TestPluginAccessStore_UpdateConfig_ReplacesStoredConfig(t *testing.T) {
 	assert.Equal(t, "https://new.example.com", got["url"])
 }
 
-func TestPluginAccessStore_UpdateConfig_SetsHasConfigAndConfiguredBy(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_UpdateConfig_SetsHasConfigAndConfiguredBy(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Enable without initial config.
@@ -348,8 +348,8 @@ func TestPluginAccessStore_UpdateConfig_SetsHasConfigAndConfiguredBy(t *testing.
 	assert.Equal(t, "operator", access.ConfiguredBy)
 }
 
-func TestPluginAccessStore_UpdateConfig_FailsWhenNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_UpdateConfig_FailsWhenNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	err := store.UpdateConfig(ctx, "tenant-a", "gitlab", map[string]any{"token": "tok"}, "admin")
@@ -357,41 +357,41 @@ func TestPluginAccessStore_UpdateConfig_FailsWhenNotEnabled(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ListTenantPlugins
+// ListTenantAccess
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_ListTenantPlugins_ReturnsAll(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_ListTenantAccess_ReturnsAll(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-a", "jira", nil, "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-a", "pagerduty", nil, "admin"))
 
-	records, err := store.ListTenantPlugins(ctx, "tenant-a")
+	records, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"gitlab", "jira", "pagerduty"}, pluginAccessNames(records))
 }
 
-func TestPluginAccessStore_ListTenantPlugins_EmptyForNewTenant(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_ListTenantAccess_EmptyForNewTenant(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
-	records, err := store.ListTenantPlugins(ctx, "new-tenant")
+	records, err := store.ListTenantAccess(ctx, "new-tenant")
 	require.NoError(t, err)
 	assert.Empty(t, records)
 }
 
-func TestPluginAccessStore_ListTenantPlugins_ReflectsDisable(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_ListTenantAccess_ReflectsDisable(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-a", "jira", nil, "admin"))
 	require.NoError(t, store.Disable(ctx, "tenant-a", "gitlab"))
 
-	records, err := store.ListTenantPlugins(ctx, "tenant-a")
+	records, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"jira"}, pluginAccessNames(records))
@@ -401,8 +401,8 @@ func TestPluginAccessStore_ListTenantPlugins_ReflectsDisable(t *testing.T) {
 // EnableSelfHosted
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_EnableSelfHosted_CreatesRecord(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_EnableSelfHosted_CreatesRecord(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.EnableSelfHosted(ctx, "tenant-a", "custom-plugin"))
@@ -411,14 +411,14 @@ func TestPluginAccessStore_EnableSelfHosted_CreatesRecord(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "tenant-a", access.TenantID)
-	assert.Equal(t, "custom-plugin", access.PluginName)
+	assert.Equal(t, "custom-plugin", access.ComponentName)
 	assert.True(t, access.Enabled)
 	assert.Equal(t, "self-hosted", access.Source)
 	assert.False(t, access.HasConfig)
 }
 
-func TestPluginAccessStore_EnableSelfHosted_DoesNotOverwriteExisting(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_EnableSelfHosted_DoesNotOverwriteExisting(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Establish an initial platform record with config.
@@ -442,15 +442,15 @@ func TestPluginAccessStore_EnableSelfHosted_DoesNotOverwriteExisting(t *testing.
 	assert.Equal(t, "original-token", got["token"])
 }
 
-func TestPluginAccessStore_EnableSelfHosted_IdempotentWhenCalledTwice(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_EnableSelfHosted_IdempotentWhenCalledTwice(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.EnableSelfHosted(ctx, "tenant-a", "custom-plugin"))
 	require.NoError(t, store.EnableSelfHosted(ctx, "tenant-a", "custom-plugin"))
 
 	// Only one record should exist.
-	records, err := store.ListTenantPlugins(ctx, "tenant-a")
+	records, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 	assert.Len(t, records, 1)
 }
@@ -459,8 +459,8 @@ func TestPluginAccessStore_EnableSelfHosted_IdempotentWhenCalledTwice(t *testing
 // Cross-tenant isolation
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_CrossTenantIsolation_GetAccess(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CrossTenantIsolation_GetAccess(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Tenant A enables gitlab.
@@ -471,8 +471,8 @@ func TestPluginAccessStore_CrossTenantIsolation_GetAccess(t *testing.T) {
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_CrossTenantIsolation_Config(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CrossTenantIsolation_Config(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	cfgA := map[string]any{"token": "tenant-a-secret"}
@@ -490,19 +490,19 @@ func TestPluginAccessStore_CrossTenantIsolation_Config(t *testing.T) {
 	assert.Equal(t, "tenant-b-secret", gotB["token"])
 }
 
-func TestPluginAccessStore_CrossTenantIsolation_ListTenantPlugins(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CrossTenantIsolation_ListTenantAccess(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-a", "jira", nil, "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-b", "pagerduty", nil, "admin"))
 
-	aRecords, err := store.ListTenantPlugins(ctx, "tenant-a")
+	aRecords, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"gitlab", "jira"}, pluginAccessNames(aRecords))
 
-	bRecords, err := store.ListTenantPlugins(ctx, "tenant-b")
+	bRecords, err := store.ListTenantAccess(ctx, "tenant-b")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"pagerduty"}, pluginAccessNames(bRecords))
 }
@@ -511,24 +511,24 @@ func TestPluginAccessStore_CrossTenantIsolation_ListTenantPlugins(t *testing.T) 
 // Error paths
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_GetAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	_, err := store.GetAccess(ctx, "tenant-a", "nonexistent-plugin")
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_GetDecryptedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetDecryptedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	_, err := store.GetDecryptedConfig(ctx, "tenant-a", "nonexistent-plugin")
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_GetDecryptedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetDecryptedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Enable without any config.
@@ -538,16 +538,16 @@ func TestPluginAccessStore_GetDecryptedConfig_EnabledWithoutConfig_ReturnsErrPlu
 	assert.ErrorIs(t, err, ErrComponentNotConfigured)
 }
 
-func TestPluginAccessStore_GetMaskedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetMaskedConfig_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	_, err := store.GetMaskedConfig(ctx, "tenant-a", "nonexistent-plugin")
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_GetMaskedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetMaskedConfig_EnabledWithoutConfig_ReturnsErrPluginNotConfigured(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -560,8 +560,8 @@ func TestPluginAccessStore_GetMaskedConfig_EnabledWithoutConfig_ReturnsErrPlugin
 // StoreConfigSchema / GetConfigSchema
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_ConfigSchema_RoundTrip(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_ConfigSchema_RoundTrip(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	schema := `{"type":"object","properties":{"token":{"type":"string","secret":true}}}`
@@ -572,8 +572,8 @@ func TestPluginAccessStore_ConfigSchema_RoundTrip(t *testing.T) {
 	assert.Equal(t, schema, got)
 }
 
-func TestPluginAccessStore_GetConfigSchema_Missing_ReturnsEmptyString(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_GetConfigSchema_Missing_ReturnsEmptyString(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	got, err := store.GetConfigSchema(ctx, "no-such-plugin")
@@ -581,8 +581,8 @@ func TestPluginAccessStore_GetConfigSchema_Missing_ReturnsEmptyString(t *testing
 	assert.Empty(t, got)
 }
 
-func TestPluginAccessStore_StoreConfigSchema_EmptyString_IsNoOp(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_StoreConfigSchema_EmptyString_IsNoOp(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Storing an empty schema must not error and must not persist anything.
@@ -593,8 +593,8 @@ func TestPluginAccessStore_StoreConfigSchema_EmptyString_IsNoOp(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-func TestPluginAccessStore_StoreConfigSchema_OverwritesPrevious(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_StoreConfigSchema_OverwritesPrevious(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	first := `{"type":"object","properties":{"token":{"type":"string"}}}`
@@ -612,7 +612,7 @@ func TestPluginAccessStore_StoreConfigSchema_OverwritesPrevious(t *testing.T) {
 // Key scheme helpers (unit tests — no Redis needed)
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStoreKeyHelpers(t *testing.T) {
+func TestComponentAccessStoreKeyHelpers(t *testing.T) {
 	tests := []struct {
 		name string
 		fn   func() string
@@ -722,8 +722,8 @@ func TestMaskString(t *testing.T) {
 // ListAvailablePlugins (minimal smoke test via stub registry)
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_ListAvailablePlugins_EmptyWhenNoSystemPlugins(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_ListAvailablePlugins_EmptyWhenNoSystemPlugins(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// The stubComponentRegistry returns nothing, so the catalog must be empty.
@@ -740,11 +740,11 @@ func TestPluginAccess_EffectiveAccess_LegacyEnabledRecord(t *testing.T) {
 	// A record with Enabled=true and both granular flags false must be treated
 	// as full read+write for backward compatibility.
 	access := &ComponentAccess{
-		TenantID:     "t",
-		PluginName:   "p",
-		Enabled:      true,
-		ReadEnabled:  false,
-		WriteEnabled: false,
+		TenantID:      "t",
+		ComponentName: "p",
+		Enabled:       true,
+		ReadEnabled:   false,
+		WriteEnabled:  false,
 	}
 
 	assert.True(t, access.EffectiveReadEnabled(), "legacy record must grant read")
@@ -753,11 +753,11 @@ func TestPluginAccess_EffectiveAccess_LegacyEnabledRecord(t *testing.T) {
 
 func TestPluginAccess_EffectiveAccess_ReadOnly(t *testing.T) {
 	access := &ComponentAccess{
-		TenantID:     "t",
-		PluginName:   "p",
-		Enabled:      true,
-		ReadEnabled:  true,
-		WriteEnabled: false,
+		TenantID:      "t",
+		ComponentName: "p",
+		Enabled:       true,
+		ReadEnabled:   true,
+		WriteEnabled:  false,
 	}
 
 	assert.True(t, access.EffectiveReadEnabled())
@@ -766,11 +766,11 @@ func TestPluginAccess_EffectiveAccess_ReadOnly(t *testing.T) {
 
 func TestPluginAccess_EffectiveAccess_WriteOnly(t *testing.T) {
 	access := &ComponentAccess{
-		TenantID:     "t",
-		PluginName:   "p",
-		Enabled:      true,
-		ReadEnabled:  false,
-		WriteEnabled: true,
+		TenantID:      "t",
+		ComponentName: "p",
+		Enabled:       true,
+		ReadEnabled:   false,
+		WriteEnabled:  true,
 	}
 
 	assert.False(t, access.EffectiveReadEnabled())
@@ -779,11 +779,11 @@ func TestPluginAccess_EffectiveAccess_WriteOnly(t *testing.T) {
 
 func TestPluginAccess_EffectiveAccess_DisabledRecordGrantsNothing(t *testing.T) {
 	access := &ComponentAccess{
-		TenantID:     "t",
-		PluginName:   "p",
-		Enabled:      false,
-		ReadEnabled:  true,
-		WriteEnabled: true,
+		TenantID:      "t",
+		ComponentName: "p",
+		Enabled:       false,
+		ReadEnabled:   true,
+		WriteEnabled:  true,
 	}
 
 	assert.False(t, access.EffectiveReadEnabled(), "disabled record must not grant read even if flag is set")
@@ -794,8 +794,8 @@ func TestPluginAccess_EffectiveAccess_DisabledRecordGrantsNothing(t *testing.T) 
 // SetAccessGranularity
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_SetAccessGranularity_ReadOnly(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_SetAccessGranularity_ReadOnly(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -810,8 +810,8 @@ func TestPluginAccessStore_SetAccessGranularity_ReadOnly(t *testing.T) {
 	assert.False(t, access.EffectiveWriteEnabled())
 }
 
-func TestPluginAccessStore_SetAccessGranularity_WriteOnly(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_SetAccessGranularity_WriteOnly(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -824,8 +824,8 @@ func TestPluginAccessStore_SetAccessGranularity_WriteOnly(t *testing.T) {
 	assert.True(t, access.WriteEnabled)
 }
 
-func TestPluginAccessStore_SetAccessGranularity_BothEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_SetAccessGranularity_BothEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -838,16 +838,16 @@ func TestPluginAccessStore_SetAccessGranularity_BothEnabled(t *testing.T) {
 	assert.True(t, access.WriteEnabled)
 }
 
-func TestPluginAccessStore_SetAccessGranularity_FailsWhenNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_SetAccessGranularity_FailsWhenNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	err := store.SetAccessGranularity(ctx, "tenant-a", "nonexistent", true, false)
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_SetAccessGranularity_PreservesConfig(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_SetAccessGranularity_PreservesConfig(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	cfg := map[string]any{"token": "secret-token-value-here"}
@@ -865,8 +865,8 @@ func TestPluginAccessStore_SetAccessGranularity_PreservesConfig(t *testing.T) {
 // CheckAccess
 // ---------------------------------------------------------------------------
 
-func TestPluginAccessStore_CheckAccess_LegacyRecord_GrantsReadAndWrite(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_LegacyRecord_GrantsReadAndWrite(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	// Enable without granular flags — legacy full-access semantics.
@@ -876,8 +876,8 @@ func TestPluginAccessStore_CheckAccess_LegacyRecord_GrantsReadAndWrite(t *testin
 	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), "write must be allowed")
 }
 
-func TestPluginAccessStore_CheckAccess_ReadOnlyRecord_DeniesWrite(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_ReadOnlyRecord_DeniesWrite(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -887,8 +887,8 @@ func TestPluginAccessStore_CheckAccess_ReadOnlyRecord_DeniesWrite(t *testing.T) 
 	assert.ErrorIs(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), ErrComponentAccessDenied, "write must be denied")
 }
 
-func TestPluginAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -898,16 +898,16 @@ func TestPluginAccessStore_CheckAccess_WriteOnlyRecord_DeniesRead(t *testing.T) 
 	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true), "write must be allowed")
 }
 
-func TestPluginAccessStore_CheckAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_NotEnabled_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	err := store.CheckAccess(ctx, "tenant-a", "nonexistent", false)
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
 
-func TestPluginAccessStore_CheckAccess_BothGranted_GrantsReadAndWrite(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_BothGranted_GrantsReadAndWrite(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))
@@ -917,8 +917,8 @@ func TestPluginAccessStore_CheckAccess_BothGranted_GrantsReadAndWrite(t *testing
 	assert.NoError(t, store.CheckAccess(ctx, "tenant-a", "gitlab", true))
 }
 
-func TestPluginAccessStore_CheckAccess_AfterDisable_ReturnsErrPluginNotEnabled(t *testing.T) {
-	store, _ := newTestPluginAccessStore(t)
+func TestComponentAccessStore_CheckAccess_AfterDisable_ReturnsErrPluginNotEnabled(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
 	ctx := context.Background()
 
 	require.NoError(t, store.Enable(ctx, "tenant-a", "gitlab", nil, "admin"))

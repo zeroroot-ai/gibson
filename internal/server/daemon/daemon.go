@@ -360,10 +360,10 @@ type daemonImpl struct {
 	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
 	llmConfigHandler *api.LLMConfigHandler
 
-	// pluginAccessStore manages tenant opt-in and encrypted configuration for platform plugins.
+	// componentAccessStore manages tenant opt-in and encrypted configuration for components of each kind.
 	// Initialized alongside credentialStore when a KeyProvider is configured.
-	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
-	pluginAccessStore component.ComponentAccessStore
+	// May be nil when no key provider is set (component access RPCs will return Unimplemented).
+	componentAccessStore component.ComponentAccessStore
 
 	// toolAccessStore manages tenant opt-in for tools.
 	// Initialized when a standalone Redis client is available.
@@ -1454,7 +1454,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 			// Plugin access store still uses Redis (plugin store migration is Phase D).
 			if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-				d.pluginAccessStore = component.NewRedisPluginAccessStore(
+				d.componentAccessStore = component.NewRedisComponentAccessStore(
 					redisClient,
 					crypto.NewAESGCMEncryptor(),
 					keyProvider,
@@ -1468,7 +1468,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// to inject the store without rebuilding the entire factory.
 				if d.infrastructure != nil && d.infrastructure.harnessFactory != nil {
 					if df, ok := d.infrastructure.harnessFactory.(*harness.DefaultHarnessFactory); ok {
-						df.SetPluginAccess(d.pluginAccessStore)
+						df.SetPluginAccess(d.componentAccessStore)
 						d.logger.Info(ctx, "wired plugin access store into harness factory")
 					}
 				}
