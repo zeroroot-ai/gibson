@@ -160,3 +160,71 @@ func wantMainPack() DomainPack {
 		},
 	}
 }
+
+// TestLoadCatalog_RulesFile: a rules file adds its mapping rules to the pack
+// of the same name.
+func TestLoadCatalog_RulesFile(t *testing.T) {
+	pack := `{"name":"fw","controls":[{"id":"ac-2","title":"Account Management","family":"ac","family_title":"Access Control"}]}`
+	rules := `{"mapping_rules":[{"control_id":"ac-2","expression":"true"}]}`
+	t.Run("rules join the pack", func(t *testing.T) {
+		c, err := LoadCatalog(fstest.MapFS{
+			"packs/fw.json":       {Data: []byte(pack)},
+			"packs/fw.rules.json": {Data: []byte(rules)},
+		})
+		require.NoError(t, err)
+		p, ok := c.Get("fw")
+		require.True(t, ok)
+		require.Len(t, p.MappingRules, 1)
+		withRule, total := p.RuleCoverage()
+		assert.Equal(t, 1, withRule)
+		assert.Equal(t, 1, total)
+	})
+	refusals := map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"a rules file with no pack": {map[string]string{
+			"packs/fw.json": pack, "packs/other.rules.json": rules,
+		}, "has no pack file"},
+		"rules in two places": {map[string]string{
+			"packs/fw.json": `{"name":"fw","controls":[{"id":"ac-2","title":"t","family":"ac","family_title":"t"}],` +
+				`"mapping_rules":[{"control_id":"ac-2","expression":"true"}]}`,
+			"packs/fw.rules.json": rules,
+		}, "in its pack file and in"},
+		"an unknown field": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json": `{"rules":[]}`,
+		}, "unknown field"},
+		"a rule for a control that the pack does not have": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json": `{"mapping_rules":[{"control_id":"ac-3","expression":"true"}]}`,
+		}, "not a control of the pack"},
+		"only a rules file": {map[string]string{"packs/fw.rules.json": rules}, "no catalog pack file"},
+	}
+	for name, tc := range refusals {
+		t.Run(name, func(t *testing.T) {
+			fsys := fstest.MapFS{}
+			for f, body := range tc.files {
+				fsys[f] = &fstest.MapFile{Data: []byte(body)}
+			}
+			_, err := LoadCatalog(fsys)
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+func TestValidate_Controls(t *testing.T) {
+	ok := Control{ID: "ac-2", Title: "Account Management", Family: "ac", FamilyTitle: "Access Control"}
+	require.NoError(t, (&DomainPack{Name: "p", Controls: []Control{ok}}).Validate())
+	bad := map[string][]Control{
+		"duplicate id":       {ok, ok},
+		"bad id":             {{ID: "ac 2", Title: "t", Family: "ac", FamilyTitle: "t"}},
+		"bad family":         {{ID: "ac-2", Title: "t", Family: "", FamilyTitle: "t"}},
+		"empty title":        {{ID: "ac-2", Title: " ", Family: "ac", FamilyTitle: "t"}},
+		"empty family title": {{ID: "ac-2", Title: "t", Family: "ac", FamilyTitle: ""}},
+		"long title":         {{ID: "ac-2", Title: strings.Repeat("a", MaxControlTitleBytes+1), Family: "ac", FamilyTitle: "t"}},
+	}
+	for name, controls := range bad {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, (&DomainPack{Name: "p", Controls: controls}).Validate())
+		})
+	}
+}

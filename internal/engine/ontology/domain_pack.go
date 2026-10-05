@@ -174,6 +174,78 @@ type DomainPack struct {
 	// shape of each rule. The package internal/engine/settlement/auditcel
 	// compiles the expressions against the audit event environment.
 	MappingRules []MappingRule `json:"mapping_rules,omitempty"`
+
+	// Controls is the control list of a compliance framework pack, for
+	// example the controls of NIST SP 800-53 rev 5 (ADR-0113). A generator
+	// writes it from the published catalog of the framework (tools/oscalgen).
+	// When a pack has controls, each mapping rule must name one of them.
+	Controls []Control `json:"controls,omitempty"`
+}
+
+// Control is one control of a compliance framework.
+type Control struct {
+	// ID is the id of the control in its framework, for example "ac-2".
+	ID string `json:"id"`
+	// Title is the title that the framework gives the control.
+	Title string `json:"title"`
+	// Family is the id of the control family, for example "ac".
+	Family string `json:"family"`
+	// FamilyTitle is the title of the family, for example
+	// "Access Control".
+	FamilyTitle string `json:"family_title"`
+}
+
+// MaxControlTitleBytes bounds the title of a control and of a family.
+const MaxControlTitleBytes = 512
+
+// RuleCoverage returns how many controls of the pack have a mapping rule,
+// and how many controls the pack has. A report shows the two numbers.
+func (p *DomainPack) RuleCoverage() (withRule, total int) {
+	rules := make(map[string]struct{}, len(p.MappingRules))
+	for _, r := range p.MappingRules {
+		rules[r.ControlID] = struct{}{}
+	}
+	for _, c := range p.Controls {
+		if _, ok := rules[c.ID]; ok {
+			withRule++
+		}
+	}
+	return withRule, len(p.Controls)
+}
+
+// validateControls checks the control list: each id and family is a plain
+// control id, each id is there once, each title is valid bounded text, and
+// each mapping rule names a control of the list when the list is not empty.
+func (p *DomainPack) validateControls() error {
+	if len(p.Controls) == 0 {
+		return nil
+	}
+	ids := make(map[string]struct{}, len(p.Controls))
+	for i, c := range p.Controls {
+		if err := validControlID(c.ID); err != nil {
+			return fmt.Errorf("domain pack %q: control %d: %w", p.Name, i, err)
+		}
+		if err := validControlID(c.Family); err != nil {
+			return fmt.Errorf("domain pack %q: control %q: family: %w", p.Name, c.ID, err)
+		}
+		if _, dup := ids[c.ID]; dup {
+			return fmt.Errorf("domain pack %q: control %q is listed twice", p.Name, c.ID)
+		}
+		ids[c.ID] = struct{}{}
+		for _, title := range []string{c.Title, c.FamilyTitle} {
+			if strings.TrimSpace(title) == "" || !utf8.ValidString(title) || len(title) > MaxControlTitleBytes {
+				return fmt.Errorf("domain pack %q: control %q: a title must be valid UTF-8 text of 1 to %d bytes",
+					p.Name, c.ID, MaxControlTitleBytes)
+			}
+		}
+	}
+	for _, r := range p.MappingRules {
+		if _, ok := ids[r.ControlID]; !ok {
+			return fmt.Errorf("domain pack %q: mapping rule names control %q, which is not a control of the pack",
+				p.Name, r.ControlID)
+		}
+	}
+	return nil
 }
 
 // MappingRule maps audit events onto one control of a framework.
@@ -367,7 +439,10 @@ func (p *DomainPack) Validate() error {
 	if err := p.Visibility.Validate(); err != nil {
 		return fmt.Errorf("domain pack %q: %w", p.Name, err)
 	}
-	return p.validateMappingRules()
+	if err := p.validateMappingRules(); err != nil {
+		return err
+	}
+	return p.validateControls()
 }
 
 // beliefSchemaExtensionName is the name under which the belief schema of a

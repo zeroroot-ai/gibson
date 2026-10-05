@@ -31,6 +31,13 @@ const MainDomainPackName = "main"
 // packFileExt is the extension of a catalog pack file.
 const packFileExt = ".json"
 
+// rulesFileExt is the extension of the mapping rules file of a pack:
+// packs/<name>.rules.json. A person writes it. It holds one JSON object
+// with the one field "mapping_rules". It is separate from the pack file,
+// because a generator writes the pack file of a compliance framework, and a
+// generator never writes a rule (gibson#766).
+const rulesFileExt = ".rules.json"
+
 //go:embed packs/*.json
 var embeddedPackFiles embed.FS
 
@@ -53,14 +60,60 @@ func LoadCatalog(fsys fs.FS) (*DomainPackCatalog, error) {
 	sort.Strings(names)
 
 	packs := make([]DomainPack, 0, len(names))
+	rulesFiles := make(map[string]string)
 	for _, name := range names {
+		if strings.HasSuffix(name, rulesFileExt) {
+			rulesFiles[strings.TrimSuffix(path.Base(name), rulesFileExt)] = name
+			continue
+		}
 		pack, err := decodePackFile(fsys, name)
 		if err != nil {
 			return nil, err
 		}
 		packs = append(packs, pack)
 	}
+	if len(packs) == 0 {
+		return nil, errors.New("ontology: no catalog pack file in packs/")
+	}
+	for i := range packs {
+		file, ok := rulesFiles[packs[i].Name]
+		if !ok {
+			continue
+		}
+		delete(rulesFiles, packs[i].Name)
+		if err := addRulesFile(fsys, file, &packs[i]); err != nil {
+			return nil, err
+		}
+	}
+	for name, file := range rulesFiles {
+		return nil, fmt.Errorf("ontology: rules file %s has no pack file %s%s", file, name, packFileExt)
+	}
 	return newCheckedCatalog(packs)
+}
+
+// addRulesFile reads a mapping rules file into pack. A pack that has rules
+// in its own file and in a rules file is refused: one place holds the rules.
+func addRulesFile(fsys fs.FS, name string, pack *DomainPack) error {
+	raw, err := fs.ReadFile(fsys, name)
+	if err != nil {
+		return fmt.Errorf("ontology: read rules file %s: %w", name, err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var rules struct {
+		MappingRules []MappingRule `json:"mapping_rules"`
+	}
+	if err := dec.Decode(&rules); err != nil {
+		return fmt.Errorf("ontology: rules file %s: %w", name, err)
+	}
+	if dec.More() {
+		return fmt.Errorf("ontology: rules file %s: more than one JSON document", name)
+	}
+	if len(pack.MappingRules) > 0 {
+		return fmt.Errorf("ontology: pack %q has mapping rules in its pack file and in %s", pack.Name, name)
+	}
+	pack.MappingRules = rules.MappingRules
+	return nil
 }
 
 // decodePackFile reads one pack file and checks its name.

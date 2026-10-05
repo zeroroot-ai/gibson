@@ -116,3 +116,37 @@ func TestLoadMappingRules(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+// TestEmbeddedCatalog_EveryMappingRuleCompiles: each mapping rule of each
+// embedded pack compiles against the audit event environment.
+func TestEmbeddedCatalog_EveryMappingRuleCompiles(t *testing.T) {
+	packs := ontology.EmbeddedCatalog().List()
+	for i := range packs {
+		t.Run(packs[i].Name, func(t *testing.T) {
+			_, err := LoadMappingRules(&packs[i])
+			require.NoError(t, err)
+		})
+	}
+}
+
+// TestNISTPack: the pack nist-800-53-r5 is in the catalog, with its 300
+// active base controls and its first-party rules. It states its coverage.
+func TestNISTPack(t *testing.T) {
+	pack, ok := ontology.EmbeddedPack("nist-800-53-r5")
+	require.True(t, ok)
+	withRule, total := pack.RuleCoverage()
+	assert.Equal(t, 300, total)
+	assert.Equal(t, len(pack.MappingRules), withRule, "each rule names one control of the pack")
+	assert.Positive(t, withRule)
+
+	rules, err := LoadMappingRules(&pack)
+	require.NoError(t, err)
+	grant := sampleEvent
+	grant.Action = "agent_grant_added"
+	matched, err := rules["ac-6"].Match(context.Background(), grant)
+	require.NoError(t, err)
+	assert.True(t, matched, "a grant change is evidence for ac-6")
+	matched, err = rules["ac-2"].Match(context.Background(), grant)
+	require.NoError(t, err)
+	assert.False(t, matched)
+}
