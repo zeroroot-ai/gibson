@@ -575,6 +575,15 @@ check-crd-field-consumers:
 		-exempt scripts/crd-field-consumers-exempt.txt \
 		-min-served 50 \
 		-tags setec_integration
+# env-readers — refresh configs/env-readers.txt, the env reader set that
+# zeroroot-ai/charts vendors (ADR-0094 layer 2, charts#303).
+# check-env-readers — fail when the file is stale. The same check runs in the
+# unit lane as tools/envreaders TestCommittedArtifactMatchesTheSource.
+.PHONY: env-readers check-env-readers
+env-readers:
+	@$(GOCMD) run ./tools/envreaders -dir . -write
+check-env-readers:
+	@$(GOCMD) run ./tools/envreaders -dir . -check
 # check-proto-field-consumers — every daemon-owned proto field has a consumer
 # in one of seven repositories (gibson#502, ADR-0094 layer 5). The fixture runs
 # on every PR; the measurement needs the six other checkouts and runs nightly
