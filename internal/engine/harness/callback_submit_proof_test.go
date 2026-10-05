@@ -461,12 +461,12 @@ func TestSubmitProof_PredicateDoesNotCompile_FailsClosed(t *testing.T) {
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_UNSPECIFIED, resp.GetOutcome())
 }
 
-// TestSubmitProof_PackStatesDestructive_AgentFlagIsNotRead is the failing
-// fixture for the rule that the pack, never the agent, states whether a
-// predicate is destructive (ADR-0132). The request says destructive=false.
-// The pack does not name the predicate as non-destructive, so the proof
-// waits for a human decision and never settles.
-func TestSubmitProof_PackStatesDestructive_AgentFlagIsNotRead(t *testing.T) {
+// TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman is the fixture
+// for the rule that the pack states whether a predicate is destructive
+// (ADR-0132). The request has no say: it carries no destructive field the
+// handler reads. The pack does not name the predicate as non-destructive, so
+// the proof waits for a human decision and never settles.
+func TestSubmitProof_PackStatesDestructive_ProofWaitsForAHuman(t *testing.T) {
 	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
 	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
 	engine.packDestructive = true
@@ -476,29 +476,8 @@ func TestSubmitProof_PackStatesDestructive_AgentFlagIsNotRead(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
-	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence)
-	req.Destructive = false
-	resp, err := svc.SubmitProof(ctx, req)
+	resp, err := svc.SubmitProof(ctx, submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence))
 	require.NoError(t, err)
 	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_AUTHORIZATION, resp.GetOutcome())
 	assert.Empty(t, engine.engine.BetSettlements())
-}
-
-// TestSubmitProof_PackStatesNonDestructive_AgentFlagIsNotRead proves the
-// other direction: a request that says destructive=true does not make the
-// daemon queue a proof the pack states as non-destructive.
-func TestSubmitProof_PackStatesNonDestructive_AgentFlagIsNotRead(t *testing.T) {
-	h := &submitProofMockHarness{missionID: "mission-A", tenantID: "acme"}
-	engine := newTestProofSettlementEngine(t, "acme", map[string]string{"T1190": `markerPresent(evidence, "tok")`})
-	substrate := newFakeBeliefSubstrate()
-	require.NoError(t, substrate.SetBelief(context.Background(), claimNodeRef("acme", "hyp-1"), brain.NodeBelief{Belief: brain.Belief{Exploitable: 0.6}}))
-	svc := newSubmitProofService(t, h, "recon-agent", substrate, engine)
-	ctx := auth.ContextWithTenantString(context.Background(), "acme")
-
-	evidence := &typespb.Evidence{Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Title: "proof", Content: "tok observed"}
-	req := submitProofRequest("mission-A", "recon-agent", "hyp-1", "T1190", "T1190", evidence)
-	req.Destructive = true
-	resp, err := svc.SubmitProof(ctx, req)
-	require.NoError(t, err)
-	assert.Equal(t, harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_SETTLED_TRUE, resp.GetOutcome())
 }
