@@ -92,7 +92,7 @@ func TestToolDispatchHasTwoPaths(t *testing.T) {
 		if strings.HasSuffix(f, "_test.go") {
 			continue
 		}
-		src, rerr := os.ReadFile(f)
+		src, rerr := os.ReadFile(f) //nolint:gosec // G304: f comes from a glob of this package directory
 		if rerr != nil {
 			t.Fatalf("read %s: %v", f, rerr)
 		}

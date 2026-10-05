@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"fmt"
 	"time"
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -56,7 +57,7 @@ func (s *HarnessCallbackService) CallToolProtoStream(req *harnesspb.CallToolProt
 	event.TimestampMs = time.Now().UnixMilli()
 	if sendErr := stream.Send(event); sendErr != nil {
 		s.logger.Error("failed to send the terminal tool event", "error", sendErr, "tool", req.GetName())
-		return sendErr
+		return fmt.Errorf("send the terminal tool event: %w", sendErr)
 	}
 	return nil
 }
