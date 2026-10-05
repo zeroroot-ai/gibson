@@ -32,6 +32,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -168,10 +169,17 @@ type auditWrite struct {
 // concurrent use.
 type AuditLogger struct {
 	client     *state.StateClient
-	durable    Emitter
+	durable    DurableWriter
 	logger     *slog.Logger
 	writeQueue chan auditWrite
 	done       chan struct{}
+}
+
+// DurableWriter is the part of *Writer that the logger uses: the queued
+// write that never drops, and the synchronous write that returns its error.
+type DurableWriter interface {
+	Emitter
+	WriteSync(ctx context.Context, event Event) error
 }
 
 // NewAuditLogger constructs an AuditLogger and starts the goroutine that
@@ -181,7 +189,7 @@ type AuditLogger struct {
 // platform database. All three of client, durable and logger must be
 // non-nil: a logger with no durable writer would keep the audit record only
 // in a stream that Redis trims.
-func NewAuditLogger(ctx context.Context, client *state.StateClient, durable Emitter, logger *slog.Logger) *AuditLogger {
+func NewAuditLogger(ctx context.Context, client *state.StateClient, durable DurableWriter, logger *slog.Logger) *AuditLogger {
 	if client == nil {
 		panic("audit.NewAuditLogger: client must not be nil")
 	}
@@ -268,6 +276,59 @@ func (a *AuditLogger) LogWithResult(
 	action, resource, resourceID, result string,
 	details map[string]any,
 ) {
+	rec, ok := a.build(ctx, action, resource, resourceID, result, details)
+	if !ok {
+		return
+	}
+	// The durable copy first. This call blocks while the queue of the
+	// writer is full.
+	a.durable.Log(rec.event)
+	a.tail(rec)
+}
+
+// Record writes an audit entry for an action that changes state, and
+// returns after Postgres has it. Call it BEFORE the action takes effect,
+// and fail the action when it returns an error: then no state change
+// exists without its durable audit record (D15, gibson#676).
+//
+// When the action then fails, record the failure with LogWithResult and
+// the result "failure".
+//
+// Record returns ErrNoActor when the context carries no actor identity,
+// and the error of the durable write when Postgres does not accept it.
+func (a *AuditLogger) Record(
+	ctx context.Context,
+	action, resource, resourceID string,
+	details map[string]any,
+) error {
+	rec, ok := a.build(ctx, action, resource, resourceID, resultSuccess, details)
+	if !ok {
+		return ErrNoActor
+	}
+	if err := a.durable.WriteSync(ctx, rec.event); err != nil {
+		return fmt.Errorf("audit: record %q: %w", action, err)
+	}
+	a.tail(rec)
+	return nil
+}
+
+// ErrNoActor is returned by Record for a context with no actor identity.
+var ErrNoActor = errors.New("audit: the context carries no actor identity")
+
+// built is one entry that the logger built from a context.
+type built struct {
+	entry       AuditEntry
+	event       Event
+	detailsJSON []byte
+}
+
+// build makes the entry and its audit_log row from the context. It reports
+// false, and logs the refusal, when the context carries no actor.
+func (a *AuditLogger) build(
+	ctx context.Context,
+	action, resource, resourceID, result string,
+	details map[string]any,
+) (built, bool) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
 		tenantID = "unknown"
@@ -286,18 +347,15 @@ func (a *AuditLogger) LogWithResult(
 			slog.String("resource_id", resourceID),
 			slog.String("tenant_id", tenantID),
 		)
-		return
+		return built{}, false
 	}
-	actorID := id.Subject
-	actorEmail := id.Subject
 
-	now := time.Now().UTC()
 	entry := AuditEntry{
 		ID:         uuid.New().String(),
-		Timestamp:  now,
+		Timestamp:  time.Now().UTC(),
 		TenantID:   tenantID,
-		ActorID:    actorID,
-		ActorEmail: actorEmail,
+		ActorID:    id.Subject,
+		ActorEmail: id.Subject,
 		Action:     action,
 		Resource:   resource,
 		ResourceID: resourceID,
@@ -315,13 +373,20 @@ func (a *AuditLogger) LogWithResult(
 		)
 		detailsJSON = []byte("{}")
 	}
+	return built{
+		entry:       entry,
+		event:       durableEvent(entry, actorTypeFor(id.CredentialType), detailsJSON),
+		detailsJSON: detailsJSON,
+	}, true
+}
 
-	// The durable copy first. This call blocks while the queue of the
-	// writer is full.
-	a.durable.Log(durableEvent(entry, actorTypeFor(id.CredentialType), detailsJSON))
-
+// tail puts a copy of the entry on the live tail. The record is already
+// with the durable writer, so a tail that cannot take the copy does not
+// hold the caller.
+func (a *AuditLogger) tail(rec built) {
+	entry := rec.entry
 	item := auditWrite{
-		streamKey: a.streamKey(tenantID),
+		streamKey: a.streamKey(entry.TenantID),
 		entry:     entry,
 		values: map[string]any{
 			"id":          entry.ID,
@@ -332,21 +397,18 @@ func (a *AuditLogger) LogWithResult(
 			"action":      entry.Action,
 			"resource":    entry.Resource,
 			"resource_id": entry.ResourceID,
-			"details":     string(detailsJSON),
+			"details":     string(rec.detailsJSON),
 			"result":      entry.Result,
 		},
 	}
-
-	// The copy for the live tail. The record is already with the durable
-	// writer, so a tail that cannot take the copy does not hold the caller.
 	select {
 	case a.writeQueue <- item:
 	default:
 		auditTailErrorsTotal.Inc()
 		a.logger.Warn("audit: the live tail queue is full, the record is not in the tail, Postgres holds it",
 			slog.String("entry_id", entry.ID),
-			slog.String("tenant_id", tenantID),
-			slog.String("action", action),
+			slog.String("tenant_id", entry.TenantID),
+			slog.String("action", entry.Action),
 		)
 	}
 }
