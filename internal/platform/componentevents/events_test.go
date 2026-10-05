@@ -164,14 +164,25 @@ func TestHub_ReconnectsAfterRedisDrops(t *testing.T) {
 	defer hub2.Stop()
 	ch2, unsub2 := hub2.Subscribe("t", "p")
 	defer unsub2()
-	time.Sleep(50 * time.Millisecond)
-	if err := NewPublisher(rdb2).Publish(ctx, "t", "p", Event{Type: TypeSecretRotated}); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-ch2:
-	case <-time.After(2 * time.Second):
-		t.Fatal("no delivery on the healthy hub")
+	// Redis pub/sub keeps nothing for a subscriber that is not there yet, and
+	// the hub subscribes on its own goroutine. A single publish after a fixed
+	// sleep is lost when the runner is slow. So publish until one event
+	// arrives: the first one after the hub's PSUBSCRIBE is in place.
+	deadline := time.After(10 * time.Second)
+	tick := time.NewTicker(25 * time.Millisecond)
+	defer tick.Stop()
+	delivered := false
+	for !delivered {
+		if err := NewPublisher(rdb2).Publish(ctx, "t", "p", Event{Type: TypeSecretRotated}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-ch2:
+			delivered = true
+		case <-tick.C:
+		case <-deadline:
+			t.Fatal("no delivery on the healthy hub")
+		}
 	}
 	hub.Stop() // ends the first hub inside its backoff
 	select {
