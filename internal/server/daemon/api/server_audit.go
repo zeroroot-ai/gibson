@@ -193,17 +193,33 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 		}
 
 		events = append(events, &tenantv1.AuditEvent{
-			EventType:  e.Action,
-			Timestamp:  e.Timestamp.Format(time.RFC3339),
-			ActorEmail: e.ActorEmail,
-			TenantId:   e.TenantID,
-			Details:    details,
-			TraceId:    e.ID,
+			EventType:    e.Action,
+			Timestamp:    e.Timestamp.Format(time.RFC3339),
+			ActorId:      e.ActorID,
+			ActorEmail:   e.ActorEmail,
+			ActorSource:  e.ActorSource,
+			TenantId:     e.TenantID,
+			TargetObject: auditTargetObject(e.Resource, e.ResourceID),
+			Details:      details,
+			TraceId:      e.ID,
 		})
 	}
 	return &tenantv1.ListAuditEventsResponse{
 		Events:     events,
 		NextCursor: nextCursor,
+	}
+}
+
+// auditTargetObject names the object of an audit entry as "<type>:<id>",
+// the form of an FGA object. An entry with no id names only its type.
+func auditTargetObject(resource, resourceID string) string {
+	switch {
+	case resourceID == "":
+		return resource
+	case resource == "":
+		return resourceID
+	default:
+		return resource + ":" + resourceID
 	}
 }
 

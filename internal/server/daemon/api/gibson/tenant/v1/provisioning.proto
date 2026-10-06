@@ -96,16 +96,12 @@ message GetTenantProvisioningStatusResponse {
   // stores carries the per-store provisioning state for the onboarding UI.
   TenantDataPlaneStoreStatus stores = 4;
 
-  // zitadel_org_slug mirrors status.zitadelOrgSlug (the per-tenant org login
-  // slug). RETAINED for wire compatibility but NO LONGER POPULATED by this
-  // unauthenticated RPC (gibson#1339). Use zitadel_org_ready (field 8) for the
-  // org-created edge.
-  string zitadel_org_slug = 5;
-
-  // Fields 6 (stripe_customer_id) and 7 (billing_active) were removed
-  // (ADR-0060, D54).
-  reserved 6, 7;
-  reserved "stripe_customer_id", "billing_active";
+  // Field 5 (zitadel_org_slug) was removed: this unauthenticated RPC never
+  // serves the org slug (gibson#1339), so the field was never filled. Use
+  // zitadel_org_ready (field 8) for the org-created edge. Fields 6
+  // (stripe_customer_id) and 7 (billing_active) were removed (ADR-0060, D54).
+  reserved 5, 6, 7;
+  reserved "zitadel_org_slug", "stripe_customer_id", "billing_active";
 
   // zitadel_org_ready reports WHETHER the per-tenant Zitadel org exists, without
   // disclosing its slug. It is the readiness edge the signup poller waits on:
@@ -119,6 +115,6 @@ message GetTenantProvisioningStatusResponse {
   // caller — a bare "has this step completed" bit. What was withheld in
   // gibson#1230 was the cross-tenant IDENTIFIERS and the billing state, and a
   // boolean carries neither: it names nothing and cannot be replayed into any
-  // other system. zitadel_org_slug itself stays redacted.
+  // other system. The response has no field for the slug itself.
   bool zitadel_org_ready = 8;
 }

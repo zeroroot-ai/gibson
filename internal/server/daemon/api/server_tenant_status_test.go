@@ -212,9 +212,6 @@ func TestGetTenantProvisioningStatus_ReturnsSnapshot(t *testing.T) {
 	if !resp.GetZitadelOrgReady() {
 		t.Errorf("expected zitadel_org_ready=true when the operator reported an org slug")
 	}
-	if resp.GetZitadelOrgSlug() != "" {
-		t.Errorf("the org slug must not be served by this RPC: %+v", resp)
-	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
 	}

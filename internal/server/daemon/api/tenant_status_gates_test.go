@@ -77,10 +77,7 @@ func TestGetTenantProvisioningStatus_ServesCoarseToEveryCaller(t *testing.T) {
 				t.Errorf("phase = %q, want the coarse progress to survive redaction", resp.GetPhase())
 			}
 
-			// The identifier must not.
-			if resp.GetZitadelOrgSlug() != "" {
-				t.Errorf("zitadel_org_slug leaked cross-tenant: %q", resp.GetZitadelOrgSlug())
-			}
+			// The identifier has no field in the response (field 5 is reserved).
 		})
 	}
 }
@@ -179,10 +176,6 @@ func TestGetTenantProvisioningStatus_OrgReadyReflectsOrgCreation(t *testing.T) {
 
 			if got := resp.GetZitadelOrgReady(); got != tc.wantReady {
 				t.Errorf("zitadel_org_ready = %v, want %v — the signup poller reads this edge", got, tc.wantReady)
-			}
-			// The slug is never served by this coarse RPC, for any caller.
-			if got := resp.GetZitadelOrgSlug(); got != "" {
-				t.Errorf("zitadel_org_slug = %q, want empty — this RPC does not serve the slug", got)
 			}
 		})
 	}
