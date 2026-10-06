@@ -41,9 +41,9 @@ anywhere in this seam.
 `server.py`, `test_server.py`, the `/score` / `/healthz` / `/version` HTTP
 wire protocol, and `Dockerfile` (the `gibson-belief-sidecar` image and its
 `gibson-images.yml` publish job). Nothing calls `resolveBeliefProvider`'s old
-`GIBSON_BELIEF_SIDECAR_URL` env var any more; the daemon now takes an
-optional `GIBSON_BELIEF_MODEL_PATH` file path (e.g. for a curated commercial
-base model) and otherwise uses the embedded `base-v1` model.
+`GIBSON_BELIEF_SIDECAR_URL` env var any more. The daemon reads the current
+belief version of each tenant from the platform Postgres (gibson#615), and a
+tenant with no version uses the embedded `base-v1` model.
 
 ## Ground-slice inference (ADR-0129, gibson#288)
 
@@ -87,7 +87,7 @@ base model and `model.py` for the schema.
 
 OSS ships the minimal `base-v1`; the curated commercial base model (vendor
 red-team + public CVE/MITRE ATT&CK, never tenant data — ADR-0089/0129) is
-served by the commercial layer via `GIBSON_BELIEF_MODEL_PATH`.
+stored as a belief version of a tenant through the trainer RPCs (gibson#788).
 
 ## Dependencies: numpy, and nothing else
 

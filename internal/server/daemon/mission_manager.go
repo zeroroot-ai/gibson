@@ -162,10 +162,10 @@ type missionManager struct {
 	// knowledge graph (ADR-0112). The per-run graph bootstrap needs it to ensure
 	// the run's :Mission node; it used to MERGE its own (gibson#551).
 	graphWriter GraphWriter
-	// beliefVersion is the belief-model version the brain currently scores against
-	// (ADR-0134). Stamped onto each mission at projection so the mission records
-	// the model it ran under and replay reproduces. Empty → no pinned model.
-	beliefVersion string
+	// beliefs pins the belief version of the tenant of each mission at its
+	// start (ADR-0106, gibson#615). The mission records the version, and the
+	// tenant keeps it active until the mission ends.
+	beliefs beliefPinner
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -1086,6 +1086,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	var errorMsg string
 	var missionDuration time.Duration
 
+	// Pin the belief version of the tenant (ADR-0106, gibson#615): the mission
+	// records it, and every score of this mission comes from it.
+	beliefVersion, releaseBelief, pinErr := m.beliefs.Pin(ctx, active.tenantID.String())
+	if pinErr != nil {
+		m.logger.Error("failed to pin the belief version", "error", pinErr, "mission_id", missionID)
+		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to pin the belief version: %v", pinErr))
+		return
+	}
+	defer releaseBelief()
+
 	eng := m.brainRegistry.For(active.tenantID.String())
 
 	// Register the per-mission binding so the brain executor can dispatch this
@@ -1099,9 +1109,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	})
 	defer m.brainExecutor.unregister(missionID)
 
-	// Pin the belief-model version onto the mission (ADR-0134): the mission
-	// records the model it ran under so replay re-loads the exact artifact.
-	proj.BeliefModel = m.beliefVersion
+	// Record the pinned belief version on the mission (ADR-0134): a replay
+	// reads this record, never the current version.
+	proj.BeliefModel = beliefVersion
 	// Carry display metadata so the World is the single source of truth for
 	// mission status + identity (ADR-0163/gibson#1118).
 	proj.Name = active.mission.Name
@@ -1123,7 +1133,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// path has the full mission identity in the World (gibson#1118).
 	eng.Submit(brain.MissionStarted{
 		ID:          missionID,
-		BeliefModel: m.beliefVersion,
+		BeliefModel: beliefVersion,
 		Name:        active.mission.Name,
 		Description: active.mission.Description,
 		TargetID:    active.mission.TargetID.String(),

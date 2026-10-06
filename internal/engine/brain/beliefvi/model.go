@@ -6,7 +6,6 @@ package beliefvi
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 )
@@ -30,17 +29,6 @@ type ModelArtifact struct {
 	Variables []string           `json:"variables"`
 	Edges     [][2]string        `json:"edges"`
 	CPDs      map[string]CPDSpec `json:"cpds"`
-}
-
-// LoadModelArtifact reads and parses a model artifact JSON file.
-func LoadModelArtifact(path string) (ModelArtifact, error) {
-	// #nosec G304 -- path is an operator-supplied config path (daemon startup
-	// flag / GIBSON_BELIEF_MODEL_PATH), never end-user input.
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return ModelArtifact{}, fmt.Errorf("beliefvi: load model artifact: %w", err)
-	}
-	return ParseModelArtifact(raw)
 }
 
 // ParseModelArtifact parses a model artifact JSON document, mirroring

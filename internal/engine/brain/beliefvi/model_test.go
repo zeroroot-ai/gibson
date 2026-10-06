@@ -5,15 +5,26 @@ package beliefvi
 
 import (
 	"math"
+	"os"
 	"reflect"
 	"testing"
 )
 
 // basePath reads the canonical Python-side copy directly (the same path
 // embed_test.go's TestDefaultArtifact_MatchesTheCanonicalPythonSource
-// guards), so this exercises LoadModelArtifact's actual file-reading code
-// path without needing a third duplicate of base-v1.json in this package.
+// guards), so these tests parse the real file without a third duplicate of
+// base-v1.json in this package.
 const basePath = canonicalBaseV1Path
+
+// loadBase reads and parses the canonical base model.
+func loadBase(t *testing.T) (ModelArtifact, error) {
+	t.Helper()
+	raw, err := os.ReadFile(basePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ParseModelArtifact(raw)
+}
 
 func TestEvidenceToObservations_MapsKnownAndFlagsNovel(t *testing.T) {
 	known := map[string]struct{}{"reachable": {}, "port_22": {}, "svc_ssh": {}}
@@ -73,7 +84,7 @@ func TestPosteriorsFromMarginals_DefaultsMissingToZero(t *testing.T) {
 }
 
 func TestModelArtifact_LoadsAndHasQueryVars(t *testing.T) {
-	art, err := LoadModelArtifact(basePath)
+	art, err := loadBase(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +154,7 @@ func TestBeliefModel_AcceptsTheConsistentArtifact(t *testing.T) {
 }
 
 func TestBeliefModel_BaseModelExactInferenceIsDeterministic(t *testing.T) {
-	art, err := LoadModelArtifact(basePath)
+	art, err := loadBase(t)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +187,7 @@ func TestBeliefModel_BaseModelExactInferenceIsDeterministic(t *testing.T) {
 }
 
 func TestBeliefModel_BaseModelReachableRaisesBelief(t *testing.T) {
-	art, err := LoadModelArtifact(basePath)
+	art, err := loadBase(t)
 	if err != nil {
 		t.Fatal(err)
 	}

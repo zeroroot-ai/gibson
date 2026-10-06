@@ -94,6 +94,52 @@ WHERE  tenant_id = $1 AND state = 'current'`
 	return []byte(model), version, true, nil
 }
 
+// CurrentVersions returns the current version of each tenant that has one.
+// The daemon polls it to find a tenant whose current version changed
+// (gibson#615). It reads no artifact.
+func (s *Store) CurrentVersions(ctx context.Context) (map[string]int64, error) {
+	const query = `
+SELECT tenant_id, version
+FROM   tenant_belief_artifacts
+WHERE  state = 'current'`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("beliefartifact: CurrentVersions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make(map[string]int64)
+	for rows.Next() {
+		var tenant string
+		var version int64
+		if err := rows.Scan(&tenant, &version); err != nil {
+			return nil, fmt.Errorf("beliefartifact: CurrentVersions: scan: %w", err)
+		}
+		out[tenant] = version
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("beliefartifact: CurrentVersions: %w", err)
+	}
+	return out, nil
+}
+
+// Version returns both artifacts of one version of the tenant, in any state.
+// found is false when the tenant has no such version.
+func (s *Store) Version(ctx context.Context, tenantID string, version int64) (beliefModel, edgePosteriors []byte, found bool, err error) {
+	const query = `
+SELECT belief_model, edge_posteriors
+FROM   tenant_belief_artifacts
+WHERE  tenant_id = $1 AND version = $2`
+	var model, edges string
+	err = s.db.QueryRowContext(ctx, query, tenantID, version).Scan(&model, &edges)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil, false, nil
+	case err != nil:
+		return nil, nil, false, fmt.Errorf("beliefartifact: Version %s v%d: %w", tenantID, version, err)
+	}
+	return []byte(model), []byte(edges), true, nil
+}
+
 // Verdict is the decision of the quality gate on one candidate version.
 type Verdict struct {
 	// Accepted makes the candidate current. Otherwise it is rejected.

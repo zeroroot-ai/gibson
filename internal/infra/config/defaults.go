@@ -80,6 +80,9 @@ func DefaultConfig() *Config {
 			ClockSkew: 30 * time.Second,
 		},
 		Checkpoint: *DefaultCheckpointConfig(),
+		Belief: BeliefConfig{
+			ReloadInterval: DefaultBeliefReloadInterval,
+		},
 		Authz: AuthzConfig{
 			// One-code-path slice deploy#195: FGA is always required.
 			// No more `enabled` or `require_ready` toggles.

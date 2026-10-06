@@ -4,10 +4,6 @@
 package braintrain
 
 import (
-	"fmt"
-	"os"
-	"path/filepath"
-
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit"
 )
@@ -21,23 +17,6 @@ import (
 // brain.PinnedEdgeStrengthPosteriorProvider that brain.NativeSliceBeliefProvider
 // consumes via the posterior MEAN for exact inference, and that
 // brain.NewBAMCPPlanner Thompson-samples for model-uncertainty planning.
-
-// LoadEdgePosteriorArtifact reads a fitted edge-posterior artifact JSON file
-// (e.g. one GIBSON_EDGE_POSTERIOR_PATH names, internal/server/daemon/belief_provider.go).
-func LoadEdgePosteriorArtifact(path string) (*fit.EdgePosteriorArtifact, error) {
-	//nolint:gosec // G304: path is an operator-supplied config path
-	// (GIBSON_EDGE_POSTERIOR_PATH), never end-user input, mirroring
-	// beliefvi.LoadModelArtifact's identical seam.
-	b, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("braintrain: read edge posterior artifact: %w", err)
-	}
-	a, err := fit.ParseEdgePosteriorArtifact(b)
-	if err != nil {
-		return nil, fmt.Errorf("braintrain: %w", err)
-	}
-	return a, nil
-}
 
 // EdgePosteriorProvider returns a brain.PinnedEdgeStrengthPosteriorProvider
 // backed by the fitted posteriors of a, identified by a.Version: each

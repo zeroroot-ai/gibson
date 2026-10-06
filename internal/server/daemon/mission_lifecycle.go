@@ -80,12 +80,10 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
 			d.graphWriter,       // sole writer of the knowledge graph (ADR-0012, gibson#551)
 		)
-		// Pin the active belief-model version so each mission records the model it
-		// ran under (ADR-0134, gibson#750). Resolved here (after the provider is
-		// chosen at brain-registry init) rather than threaded through the ctor.
-		if d.beliefProvider != nil {
-			missionManagerInstance.mgr.beliefVersion = d.beliefProvider.Version()
-		}
+		// Each mission pins the belief version of its tenant at its start
+		// (ADR-0106, gibson#615). Set here, after the brain registry init built
+		// the per-tenant belief source, rather than threaded through the ctor.
+		missionManagerInstance.mgr.beliefs = d.tenantBeliefs
 
 		d.logger.Info(context.Background(), "mission manager initialized")
 	})
