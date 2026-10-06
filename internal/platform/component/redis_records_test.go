@@ -2,7 +2,6 @@ package component
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -58,7 +57,7 @@ func TestScanJSONRecords_NoMatch_ReturnsEmpty(t *testing.T) {
 // ListTenantTools returns the tools of one tenant only.
 func TestToolAccessStore_ListTenantTools_ReturnsTheToolsOfTheTenant(t *testing.T) {
 	client, _ := newScanClient(t)
-	store := NewRedisToolAccessStore(client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	store := NewRedisToolAccessStore(client, slog.New(slog.DiscardHandler))
 	ctx := context.Background()
 	require.NoError(t, store.Enable(ctx, "tenant-a", "nmap", "admin"))
 	require.NoError(t, store.Enable(ctx, "tenant-b", "nuclei", "admin"))
