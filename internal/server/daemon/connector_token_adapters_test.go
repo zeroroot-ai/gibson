@@ -7,6 +7,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -298,7 +299,7 @@ func (*actorAuditWriter) Audit(context.Context, secrets.AuditEvent) {}
 func (a *actorAuditWriter) Record(ctx context.Context, _ secrets.AuditEvent) error {
 	id, err := auth.IdentityFromContext(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("record: %w", err)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
