@@ -75,7 +75,7 @@ func ParseEdgePosteriorArtifact(raw []byte) (*EdgePosteriorArtifact, error) {
 		return nil, fmt.Errorf("fit: decode edge posterior artifact: %w", err)
 	}
 	if err := a.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("fit: invalid edge posterior artifact: %w", err)
 	}
 	return &a, nil
 }
