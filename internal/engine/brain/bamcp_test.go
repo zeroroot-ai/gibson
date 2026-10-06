@@ -184,7 +184,7 @@ func TestBamcpGround_EnablementEdgeKeepsItsType(t *testing.T) {
 	reg := bamcpTestRegistry(t)
 	graph := bamcpTestInput(reg).Graph
 
-	vars := bamcpGround(graph, reg)
+	vars := bamcpGround(graph, reg, UninformativeEdgePosteriors{})
 
 	var found bool
 	for _, v := range vars {
@@ -204,7 +204,7 @@ func TestBamcpGround_EnablementEdgeKeepsItsType(t *testing.T) {
 func TestBamcpTopoOrder_ParentsComeBeforeChildren(t *testing.T) {
 	reg := bamcpTestRegistry(t)
 	graph := bamcpTestInput(reg).Graph
-	vars := bamcpGround(graph, reg)
+	vars := bamcpGround(graph, reg, UninformativeEdgePosteriors{})
 
 	order := bamcpTopoOrder(vars)
 	require.Len(t, order, len(vars))
@@ -235,7 +235,7 @@ func TestBamcpTopoOrder_ParentsComeBeforeChildren(t *testing.T) {
 func TestBamcpTopoOrder_IsIndependentOfInputOrder(t *testing.T) {
 	reg := bamcpTestRegistry(t)
 	graph := bamcpTestInput(reg).Graph
-	vars := bamcpGround(graph, reg)
+	vars := bamcpGround(graph, reg, UninformativeEdgePosteriors{})
 
 	reversed := make([]bamcpVar, len(vars))
 	for i, v := range vars {
@@ -256,7 +256,7 @@ func TestBamcpTopoOrder_IsIndependentOfInputOrder(t *testing.T) {
 func TestBamcpSampleWorld_ThompsonSamplesTheEdgePosterior(t *testing.T) {
 	reg := bamcpTestRegistry(t)
 	graph := bamcpTestInput(reg).Graph
-	vars := bamcpGround(graph, reg)
+	vars := bamcpGround(graph, reg, UninformativeEdgePosteriors{})
 	order := bamcpTopoOrder(vars)
 
 	strongPosteriors := constantEdgePosteriors{p: EdgeStrengthPosterior{Alpha: 200, Beta: 1}}
@@ -283,7 +283,10 @@ func TestBamcpSampleWorld_ThompsonSamplesTheEdgePosterior(t *testing.T) {
 // constantEdgePosteriors is a test-only EdgeStrengthPosteriorProvider that
 // returns the same posterior for every edge type, so tests can isolate the
 // effect of the posterior's shape independent of edge-type lookup.
-type constantEdgePosteriors struct{ p EdgeStrengthPosterior }
+type constantEdgePosteriors struct {
+	UninformativeEdgePosteriors
+	p EdgeStrengthPosterior
+}
 
 func (c constantEdgePosteriors) Posterior(string) EdgeStrengthPosterior { return c.p }
 
@@ -430,4 +433,66 @@ func TestBAMCPConfig_SanitizedSetsTheExplorationDefault(t *testing.T) {
 	assert.InDelta(t, DefaultBAMCPExploration, BAMCPConfig{}.sanitized().Exploration, 1e-12)
 	assert.InDelta(t, DefaultBAMCPExploration, DefaultBAMCPConfig().Exploration, 1e-12)
 	assert.InDelta(t, 2.5, BAMCPConfig{Exploration: 2.5}.sanitized().Exploration, 1e-12)
+}
+
+// constantNodePosteriors gives the same posterior for each in-node strength
+// and each leak, and the uninformative prior for each edge type.
+type constantNodePosteriors struct {
+	UninformativeEdgePosteriors
+	p EdgeStrengthPosterior
+}
+
+func (c constantNodePosteriors) InNodeStrength(string, string, string) EdgeStrengthPosterior {
+	return c.p
+}
+
+func (c constantNodePosteriors) Leak(string, string) EdgeStrengthPosterior { return c.p }
+
+// gibson#931: the planner grounds the leak and each in-node strength at the
+// posterior of the provider, not at a constant.
+func TestBamcpGround_InNodeStrengthAndLeakComeFromThePosteriors(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	fitted := EdgeStrengthPosterior{Alpha: 9, Beta: 1}
+	vars := bamcpGround(bamcpTestInput(reg).Graph, reg, constantNodePosteriors{p: fitted})
+	require.NotEmpty(t, vars)
+	intra := 0
+	for _, v := range vars {
+		assert.Equal(t, fitted, v.Leak, v.Name)
+		for _, c := range v.IntraCauses {
+			assert.Equal(t, fitted, c.Strength, v.Name)
+			intra++
+		}
+	}
+	assert.Positive(t, intra, "the Host chain has intra-node causes")
+}
+
+// gibson#931: a fitted leak and in-node strength near 1 realize the host
+// variables far more often than ones near 0, and one seed gives one world.
+func TestBamcpSampleWorld_ThompsonSamplesTheInNodeStrengthAndLeak(t *testing.T) {
+	reg := bamcpTestRegistry(t)
+	graph := bamcpTestInput(reg).Graph
+	strong := bamcpGround(graph, reg, constantNodePosteriors{p: EdgeStrengthPosterior{Alpha: 200, Beta: 1}})
+	weak := bamcpGround(graph, reg, constantNodePosteriors{p: EdgeStrengthPosterior{Alpha: 1, Beta: 200}})
+	order := bamcpTopoOrder(strong)
+	edges := UninformativeEdgePosteriors{}
+	target := HostNodeID(1) + "::juicy"
+
+	const trials = 300
+	var strongTrue, weakTrue int
+	for seed := uint64(1); seed <= trials; seed++ {
+		rngStrong := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG for a reproducible statistical test, not security-sensitive
+		if bamcpSampleWorld(strong, order, edges, rngStrong)[target] {
+			strongTrue++
+		}
+		rngWeak := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG for a reproducible statistical test, not security-sensitive
+		if bamcpSampleWorld(weak, order, edges, rngWeak)[target] {
+			weakTrue++
+		}
+	}
+	assert.Greater(t, strongTrue, trials*9/10, "a near-1 leak and strength realize %s almost always", target)
+	assert.Less(t, weakTrue, trials/10, "a near-0 leak and strength realize %s almost never", target)
+
+	first := bamcpSampleWorld(strong, order, edges, rand.New(rand.NewPCG(7, 7)))  //nolint:gosec // deterministic seeded PRNG, not security-sensitive
+	second := bamcpSampleWorld(strong, order, edges, rand.New(rand.NewPCG(7, 7))) //nolint:gosec // deterministic seeded PRNG, not security-sensitive
+	assert.Equal(t, first, second, "the same seed gives the same world")
 }
