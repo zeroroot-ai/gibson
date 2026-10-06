@@ -73,6 +73,11 @@ spec:
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: ${RELEASE}
         app.kubernetes.io/component: e2e-runner
+        # The Cilium policy of the chart (D76, charts#394) admits a pod by its
+        # network labels. The runner dials the daemon (net-role platform) and
+        # Redis (client-redis), nothing else.
+        gibson.zeroroot.ai/net-role: platform
+        gibson.zeroroot.ai/client-redis: "true"
     spec:
       restartPolicy: Never
       serviceAccountName: ${RELEASE}-e2e-runner
