@@ -1967,12 +1967,17 @@ func (s *ComponentServiceServer) EnablePlugin(
 		}
 	}
 
+	if err := s.recordPluginChange(ctx, "plugin.enable", req.PluginName); err != nil {
+		return nil, err
+	}
+
 	if err := s.componentAccess.Enable(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
 		s.logger.ErrorContext(ctx, "enable plugin: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
+		s.recordPluginFailure(ctx, "plugin.enable", req.PluginName, err)
 		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
@@ -1980,10 +1985,6 @@ func (s *ComponentServiceServer) EnablePlugin(
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 	)
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, "plugin.enable", "plugin", req.PluginName, nil)
-	}
 
 	return &componentpb.EnablePluginResponse{
 		Success: true,
@@ -2010,12 +2011,17 @@ func (s *ComponentServiceServer) DisablePlugin(
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
 
+	if err := s.recordPluginChange(ctx, "plugin.disable", req.PluginName); err != nil {
+		return nil, err
+	}
+
 	if err := s.componentAccess.Disable(ctx, tenant, req.PluginName); err != nil {
 		s.logger.ErrorContext(ctx, "disable plugin: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
+		s.recordPluginFailure(ctx, "plugin.disable", req.PluginName, err)
 		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
@@ -2023,10 +2029,6 @@ func (s *ComponentServiceServer) DisablePlugin(
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 	)
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, "plugin.disable", "plugin", req.PluginName, nil)
-	}
 
 	return &componentpb.DisablePluginResponse{
 		Success: true,
@@ -2061,12 +2063,17 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 		return nil, status.Errorf(codes.InvalidArgument, "config_json is not valid JSON: %v", err)
 	}
 
+	if err := s.recordPluginChange(ctx, "plugin.config.update", req.PluginName); err != nil {
+		return nil, err
+	}
+
 	if err := s.componentAccess.UpdateConfig(ctx, tenant, req.PluginName, cfg, tenant); err != nil {
 		s.logger.ErrorContext(ctx, "update plugin config: failed",
 			slog.String("tenant", tenant),
 			slog.String("plugin_name", req.PluginName),
 			slog.String("error", err.Error()),
 		)
+		s.recordPluginFailure(ctx, "plugin.config.update", req.PluginName, err)
 		return nil, componentAccessErrToStatus(err, req.PluginName)
 	}
 
@@ -2074,10 +2081,6 @@ func (s *ComponentServiceServer) UpdatePluginConfig(
 		slog.String("tenant", tenant),
 		slog.String("plugin_name", req.PluginName),
 	)
-
-	if s.auditLog != nil {
-		s.auditLog.Log(ctx, "plugin.config.update", "plugin", req.PluginName, nil)
-	}
 
 	return &componentpb.UpdatePluginConfigResponse{
 		Success: true,
@@ -2364,4 +2367,31 @@ func checkInMetadata(md map[string]string) map[string]string {
 		delete(out, k)
 	}
 	return out
+}
+
+// recordPluginChange writes the audit record of a plugin change before the
+// change takes effect (ADR-0113, gibson#676). A failed write fails the
+// change. A server with no audit logger records nothing.
+func (s *ComponentServiceServer) recordPluginChange(ctx context.Context, action, plugin string) error {
+	if s.auditLog == nil {
+		return nil
+	}
+	if err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
+		s.logger.ErrorContext(ctx, "plugin change refused: the audit record is not durable",
+			slog.String("action", action),
+			slog.String("plugin_name", plugin),
+			slog.String("error", err.Error()),
+		)
+		return status.Errorf(codes.Unavailable, "%s %q: the audit record could not be written", action, plugin)
+	}
+	return nil
+}
+
+// recordPluginFailure writes the second audit record of a plugin change
+// whose action failed after its first record was durable.
+func (s *ComponentServiceServer) recordPluginFailure(ctx context.Context, action, plugin string, cause error) {
+	if s.auditLog == nil {
+		return
+	}
+	s.auditLog.LogWithResult(ctx, action, "plugin", plugin, "failure", map[string]any{"error": cause.Error()})
 }

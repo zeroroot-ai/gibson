@@ -111,6 +111,20 @@ func newMockedService(t *testing.T) *mockedService {
 	return &mockedService{svc: svc, mock: mock, rec: rec, fga: fga}
 }
 
+// expectAuditRecord queues the synchronous audit write that a state change
+// makes before its action (gibson#676): the chain lock, the chain head, the
+// INSERT into audit_log and the commit.
+func (m *mockedService) expectAuditRecord() {
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.mock.ExpectQuery("ORDER BY chain_seq DESC").
+		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
+	m.mock.ExpectQuery("audit_chain_anchor").
+		WillReturnRows(sqlmock.NewRows([]string{"first_seq", "prev_hash"}))
+	m.mock.ExpectExec("INSERT INTO audit_log").WillReturnResult(sqlmock.NewResult(1, 1))
+	m.mock.ExpectCommit()
+}
+
 // register drives a first registration with the given credential.
 func (m *mockedService) register(ctx context.Context, tenant, credential string) (*RegisterCapabilityGrantResult, error) {
 	return m.svc.RegisterCapabilityGrant(ctx,
@@ -145,6 +159,7 @@ func credentialHash(credential string) string {
 func TestRegisterCapabilityGrant_SpendsTheCredentialWithTheIdentity(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WithArgs(credentialHash("cred-abc"), "acme", sqlmock.AnyArg(), sqlmock.AnyArg()).
@@ -165,11 +180,13 @@ func TestRegisterCapabilityGrant_SpendsTheCredentialWithTheIdentity(t *testing.T
 		"the credential itself must never reach the database")
 }
 
-// A credential already exchanged for an identity buys nothing the second time,
-// and nothing is written on the way to finding that out.
+// A credential already exchanged for an identity buys nothing the second time.
+// Only the audit record of the attempt is written on the way to finding that
+// out.
 func TestRegisterCapabilityGrant_RefusesAReplayedCredential(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	// Zero rows affected is how Postgres reports the ON CONFLICT DO NOTHING.
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
@@ -201,6 +218,7 @@ func TestRegisterCapabilityGrant_RefusesAnAbsentCredential(t *testing.T) {
 func TestRegisterCapabilityGrant_UnknownBootstrapTypeIsStillConsumed(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -223,6 +241,7 @@ func TestRegisterCapabilityGrant_UnknownBootstrapTypeIsStillConsumed(t *testing.
 func TestRegisterCapabilityGrant_HostKeyReRegistrationSpendsNothing(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.expectEnrollmentWrites()
 	m.mock.ExpectCommit()
@@ -246,6 +265,7 @@ func TestRegisterCapabilityGrant_HostKeyReRegistrationSpendsNothing(t *testing.T
 func TestRegisterCapabilityGrant_HostUpsertGuardsTenantAndRevocation(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -271,6 +291,7 @@ func TestRegisterCapabilityGrant_HostUpsertGuardsTenantAndRevocation(t *testing.
 func TestRegisterCapabilityGrant_RefusesAHostItMayNotClaim(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -290,6 +311,7 @@ func TestRegisterCapabilityGrant_RefusesAHostItMayNotClaim(t *testing.T) {
 func TestRegisterCapabilityGrant_AgentInsertRequiresALiveHostInTenant(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -360,6 +382,7 @@ func TestGetCapabilityGrantStatus_GrantsReadJoinsTheOwningAgentsTenant(t *testin
 func TestRevokeCapabilityGrant_RefusesAnotherTenantsAgent(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("UPDATE capability_grant_agents SET status = 'revoked' WHERE id = $1 AND tenant_id = $2").
 		WithArgs("agt_deadbeef", "acme").
@@ -1118,6 +1141,7 @@ func TestRegisterCapabilityGrant_CredentialCeilingNarrowsTheResolvedGrants(t *te
 	m := newMockedService(t)
 	m.grantFGA("nmap", "zap")
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1147,6 +1171,7 @@ func TestRegisterCapabilityGrant_CredentialCeilingCannotWiden(t *testing.T) {
 	m := newMockedService(t)
 	m.grantFGA("nmap")
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1182,6 +1207,7 @@ func TestRegisterCapabilityGrant_CeilingGrantsMissionDelegate(t *testing.T) {
 	// Deliberately NO m.grantFGA call: FGA resolves zero capabilities for this
 	// principal, proving mission:delegate does not depend on any FGA grant.
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1211,6 +1237,7 @@ func TestRegisterCapabilityGrant_CeilingGrantsMissionDelegate(t *testing.T) {
 func TestRegisterCapabilityGrant_UnreservedUnresolvedCeilingEntryGrantsNothing(t *testing.T) {
 	m := newMockedService(t)
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1236,6 +1263,7 @@ func TestRegisterCapabilityGrant_AnAbsentCeilingLeavesTheResolutionAlone(t *test
 	m := newMockedService(t)
 	m.grantFGA("nmap", "zap")
 
+	m.expectAuditRecord()
 	m.mock.ExpectBegin()
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -1252,4 +1280,37 @@ func TestRegisterCapabilityGrant_AnAbsentCeilingLeavesTheResolutionAlone(t *test
 	require.NoError(t, err)
 	require.NoError(t, m.mock.ExpectationsWereMet())
 	assert.Len(t, res.Capabilities, 2)
+}
+
+// A failed audit write fails the registration before any identity exists
+// (gibson#676).
+func TestRegisterCapabilityGrant_AuditFailureRegistersNothing(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectBegin().WillReturnError(errors.New("audit database down"))
+
+	_, err := m.register(context.Background(), "acme", "cred-abc")
+	require.ErrorContains(t, err, "audit")
+	require.NoError(t, m.mock.ExpectationsWereMet())
+	assert.NotContains(t, m.rec.all(), "capability_grant_bootstrap_consumptions",
+		"no credential is spent when the audit record is not durable")
+}
+
+// A failed audit write fails the revocation before the agent changes
+// (gibson#676).
+func TestRevokeCapabilityGrant_AuditFailureRevokesNothing(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectBegin().WillReturnError(errors.New("audit database down"))
+
+	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
+	require.ErrorContains(t, err, "audit")
+	require.NoError(t, m.mock.ExpectationsWereMet())
+	assert.NotContains(t, m.rec.all(), "UPDATE capability_grant_agents")
+}
+
+// The failure record names the action and the cause, with the decision deny.
+func TestFailedAction_NamesTheCause(t *testing.T) {
+	ev := failedAction(audit.Event{Action: "agent_revoked", TargetID: "agt_1"}, errors.New("not in tenant"))
+	assert.Equal(t, "deny", ev.Decision)
+	assert.Equal(t, "agent_revoked", ev.Action)
+	assert.JSONEq(t, `{"result":"failure","error":"not in tenant"}`, string(ev.Metadata))
 }
