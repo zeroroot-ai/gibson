@@ -5,7 +5,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -83,5 +85,51 @@ func TestPingGetAndPort(t *testing.T) {
 	}
 	if got := newServer(func(string) string { return "9090" }).Addr; got != ":9090" {
 		t.Errorf("MCP_PORT addr = %q", got)
+	}
+}
+
+// probe_egress answers reachable or unreachable with the reason, and only
+// probe_egress can be called (gibson#758).
+func TestToolsCall_ProbeEgress(t *testing.T) {
+	saved := dialer
+	t.Cleanup(func() { dialer = saved })
+	dialer = func(_ context.Context, address string) error {
+		if address == "open.example:443" {
+			return nil
+		}
+		return errors.New("i/o timeout")
+	}
+	text := func(body string) string {
+		t.Helper()
+		var resp struct {
+			Result struct {
+				Content []struct {
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"result"`
+			Error *struct{ Code int } `json:"error"`
+		}
+		if err := json.NewDecoder(call(t, body).Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Error != nil {
+			return "error"
+		}
+		return resp.Result.Content[0].Text
+	}
+	probe := func(address string) string {
+		return text(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"probe_egress","arguments":{"address":"` + address + `"}}}`)
+	}
+	if got := probe("open.example:443"); got != "reachable" {
+		t.Errorf("open host: %q", got)
+	}
+	if got := probe("closed.example:443"); got != "unreachable: i/o timeout" {
+		t.Errorf("closed host: %q", got)
+	}
+	if got := probe(""); got != "unreachable: no address" {
+		t.Errorf("no address: %q", got)
+	}
+	if got := text(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"echo"}}`); got != "error" {
+		t.Errorf("echo call: %q, want an error", got)
 	}
 }

@@ -368,6 +368,14 @@ jobs:
           done
           status=0
           bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18080/mcp || status=$?
+          # The egress of the connector follows its host list (ADR-0114,
+          # gibson#758): the operator wrote its CiliumNetworkPolicy, the listed
+          # host opens, and a public host outside the list does not.
+          if [ "$status" -eq 0 ]; then
+            kubectl -n tenant-connector-e2e get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
+          fi
           kill "$pf" || true
           exit "$status"
 

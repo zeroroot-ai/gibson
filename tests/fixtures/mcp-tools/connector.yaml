@@ -14,3 +14,8 @@ spec:
   image: ghcr.io/zeroroot-ai/gibson-fixture-mcp-tools:e2e
   transport: streamable-http
   auth: none
+  # The one host that the connector may reach (gibson#758). The exit test
+  # proves that a connection to it opens and a connection to any other
+  # public host does not.
+  egressAllow:
+    - example.com:443
