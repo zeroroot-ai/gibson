@@ -1,0 +1,32 @@
+apiVersion: plugin.gibson.zeroroot.ai/v1
+kind: Plugin
+metadata:
+  name: gitlab
+  version: 0.1.0
+  description: "GitLab plugin — curated read/write over the GitLab REST API (client-go)."
+  author: "ZeroRoot"
+spec:
+  workload_class: plugin
+  runtime: process
+  # Go-first (ADR-0065 R4): a method declares only its name and description.
+  # Its request/response contract is derived by the SDK from the typed Go
+  # structs registered with plugin.WithHandler — there is no request_proto or
+  # response_proto here.
+  methods:
+  - name: GetProject
+    description: "Fetch a project by numeric ID or namespace/path."
+  - name: ListIssues
+    description: "List issues for a project, optionally filtered by state."
+  - name: CreateIssue
+    description: "Open a new issue in a project (write)."
+  # The only credential channel is the secrets broker — never env vars. The
+  # broker resolves this GitLab personal or project access token and the SDK
+  # hands it to every handler via the context.
+  secrets:
+  - name: cred:gitlab_token
+    scope: startup
+    rotation: live
+    required: true
+  health:
+    startup_timeout: 30s
+    liveness_interval: 10s

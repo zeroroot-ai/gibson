@@ -9,6 +9,8 @@ updates:
       - "/build"
       - "/sidecar/belief"
       - "/tools/gibson-bootstrap"
+      - "/plugins/github"
+      - "/plugins/gitlab"
     schedule:
       interval: weekly
       day: monday
@@ -25,7 +27,11 @@ updates:
           - minor
           - patch
   - package-ecosystem: "gomod"
-    directory: "/"
+    # The root module and each plugin module (gibson#790).
+    directories:
+      - "/"
+      - "/plugins/github"
+      - "/plugins/gitlab"
     schedule:
       interval: weekly
       day: monday

@@ -127,6 +127,17 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # gibson#790: each plugin under plugins/ is its own Go module, so the
+      # root `go test ./...` does not reach it. Test and vet each module here.
+      - name: Test the plugin modules
+        run: |
+          set -euo pipefail
+          for d in plugins/*/; do
+            echo "::group::$d"
+            (cd "$d" && go vet ./... && go test ./...)
+            echo "::endgroup::"
+          done
+
       - name: Run gibsoncheck against the daemon
         run: |
           set -e
@@ -233,6 +244,12 @@ jobs:
       # dumper is caught on a PR and not on the one run that needed it.
       - name: Check the bringup diagnostics dumper
         run: bash scripts/ci/dump-bringup-diagnostics.sh --selftest
+
+      # gibson#790: a plugin depends on the public SDK only, never on gibson.
+      - name: Check the plugin modules
+        run: |
+          bash scripts/check-plugin-modules.sh --selftest
+          bash scripts/check-plugin-modules.sh
 
       # attic#15: on 2026-09-05 the tree tracked four ELF executables (92 MB).
       # Keyed by file magic, so a binary under any new name fails the same way.

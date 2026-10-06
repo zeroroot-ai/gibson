@@ -1,0 +1,32 @@
+apiVersion: plugin.gibson.zeroroot.ai/v1
+kind: Plugin
+metadata:
+  name: github
+  version: 0.1.0
+  description: "GitHub plugin — curated read/write over the GitHub REST API (go-github)."
+  author: "ZeroRoot"
+spec:
+  workload_class: plugin
+  runtime: process
+  # Go-first (ADR-0065 R4): a method declares only its name and description.
+  # Its request/response contract is derived by the SDK from the typed Go
+  # structs registered with plugin.WithHandler — there is no request_proto or
+  # response_proto here.
+  methods:
+  - name: GetRepository
+    description: "Fetch a repository by owner and name."
+  - name: ListIssues
+    description: "List issues for a repository, optionally filtered by state."
+  - name: CreateIssue
+    description: "Open a new issue in a repository (write)."
+  # The only credential channel is the secrets broker — never env vars. The
+  # broker resolves this GitHub token (a PAT or GitHub App installation token)
+  # and the SDK hands it to every handler via the context.
+  secrets:
+  - name: cred:github_token
+    scope: startup
+    rotation: live
+    required: true
+  health:
+    startup_timeout: 30s
+    liveness_interval: 10s

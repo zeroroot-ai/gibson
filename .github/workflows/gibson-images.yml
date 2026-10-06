@@ -174,6 +174,134 @@ jobs:
       tag_pattern: gibson-bootstrap-runner-v(.*)
       build_args: ""
 
+  # ---- the plugin images (ADR-0065, gibson#790) ----------------------------
+  # Each plugin under plugins/<name>/ is its own Go module and its own signed
+  # image, built by the same reusable workflow as the daemon. A plugin image
+  # builds only when its source tree differs from the tree that its catalog
+  # entry records (`# plugin-source-tree:`), so an unchanged plugin is not
+  # rebuilt and opens no pin pull request. Then pin-plugin-images writes the
+  # digest into the catalog through a pull request. No person copies a digest.
+  plugin-sources:
+    name: plugin sources
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      github: ${{ steps.diff.outputs.github }}
+      gitlab: ${{ steps.diff.outputs.gitlab }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare each plugin tree with the tree its catalog entry records
+        id: diff
+        run: |
+          set -euo pipefail
+          for p in github gitlab; do
+            tree=$(git rev-parse "HEAD:plugins/$p")
+            pinned=$(bash scripts/pin-plugin-image.sh --tree "$p")
+            if [ "$tree" != "$pinned" ]; then
+              echo "$p: tree $tree, catalog records '${pinned:-none}': build"
+              echo "$p=$tree" >> "$GITHUB_OUTPUT"
+            else
+              echo "$p: unchanged ($tree)"
+            fi
+          done
+
+  plugin-github:
+    name: gibson-plugin-github
+    needs: plugin-sources
+    if: needs.plugin-sources.outputs.github != ''
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: gibson-plugin-github
+      component_path: .
+      dockerfile_path: plugins/github/Dockerfile
+      image_name: ghcr.io/zeroroot-ai/gibson-plugin-github
+      tag_pattern: (v.*)
+      build_args: ""
+      go_toolchain_local: true
+
+  plugin-gitlab:
+    name: gibson-plugin-gitlab
+    needs: plugin-sources
+    if: needs.plugin-sources.outputs.gitlab != ''
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+      actions: read
+    with:
+      component_name: gibson-plugin-gitlab
+      component_path: .
+      dockerfile_path: plugins/gitlab/Dockerfile
+      image_name: ghcr.io/zeroroot-ai/gibson-plugin-gitlab
+      tag_pattern: (v.*)
+      build_args: ""
+      go_toolchain_local: true
+
+  pin-plugin-images:
+    name: pin plugin images
+    needs: [plugin-sources, plugin-github, plugin-gitlab]
+    # Run when at least one plugin built, and none failed.
+    if: >-
+      always() && !failure() && !cancelled() &&
+      (needs.plugin-github.result == 'success' || needs.plugin-gitlab.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        with:
+          app-id: ${{ secrets.SDK_FANOUT_APP_ID }}
+          private-key: ${{ secrets.SDK_FANOUT_APP_PRIVATE_KEY }}
+          owner: zeroroot-ai
+          repositories: gibson
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Write each built digest into the catalog
+        env:
+          GITHUB_TREE: ${{ needs.plugin-sources.outputs.github }}
+          GITHUB_DIGEST: ${{ needs.plugin-github.outputs.digest }}
+          GITLAB_TREE: ${{ needs.plugin-sources.outputs.gitlab }}
+          GITLAB_DIGEST: ${{ needs.plugin-gitlab.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -n "$GITHUB_DIGEST" ]; then
+            bash scripts/pin-plugin-image.sh github "ghcr.io/zeroroot-ai/gibson-plugin-github@${GITHUB_DIGEST}" "$GITHUB_TREE"
+          fi
+          if [ -n "$GITLAB_DIGEST" ]; then
+            bash scripts/pin-plugin-image.sh gitlab "ghcr.io/zeroroot-ai/gibson-plugin-gitlab@${GITLAB_DIGEST}" "$GITLAB_TREE"
+          fi
+      - name: Open the pin pull request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- internal/platform/componentcatalog/manifests; then
+            echo "No catalog entry changed."
+            exit 0
+          fi
+          branch="chore/pin-plugin-images-${GITHUB_SHA::12}"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git checkout -b "$branch"
+          git add internal/platform/componentcatalog/manifests
+          git commit -m "chore(catalog): pin the plugin images built from ${GITHUB_SHA::12}"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore(catalog): pin the plugin images built from ${GITHUB_SHA::12}" \
+            --body "The image workflow built and signed the plugin images from ${GITHUB_SHA}. This pull request writes their digests into the catalog (gibson#790). No person copied a digest."
+          gh pr merge "$branch" --auto || echo "::warning::auto-merge was not set on $branch"
+
   # ---- gibson-belief-sidecar: RETIRED (ADR-0134, gibson#377) ----
   # The Python belief sidecar and its image are gone: belief inference runs
   # in-process in the `gibson` daemon image via internal/engine/brain/beliefvi,
