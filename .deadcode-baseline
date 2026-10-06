@@ -174,6 +174,7 @@ internal/infra/datapool/kek.go	DeriveTenantKEK
 internal/infra/datapool/metrics/metrics.go	IncAdminPoolAcquire
 internal/infra/datapool/recovery_hook.go	NewNoopRecoveryHook
 internal/infra/datapool/recovery_hook.go	runRecoveryHook.Run
+internal/infra/observability/config.go	ContentLoggingConfig.Validate
 internal/infra/observability/logging.go	NewLogger
 internal/infra/otelinit/observability.go	Observability.MeterProvider
 internal/infra/otelinit/observability.go	Observability.TracerProvider
@@ -214,6 +215,10 @@ internal/infra/types/structured.go	StructuredOutputUnmarshalError.Error
 internal/infra/types/structured.go	StructuredOutputUnmarshalError.Unwrap
 internal/infra/types/target.go	NewTarget
 internal/infra/types/target.go	NewTargetWithConnection
+internal/infra/types/target.go	TargetType.IsValid
+internal/infra/types/target.go	TargetType.MarshalJSON
+internal/infra/types/target.go	TargetType.String
+internal/infra/types/target.go	TargetType.UnmarshalJSON
 internal/platform/audit/loki_client.go	LokiClient.QueryAuditEvents
 internal/platform/audit/loki_client.go	LokiClient.buildQuery
 internal/platform/audit/loki_client.go	LokiClient.parseEntries
@@ -259,7 +264,6 @@ internal/server/daemon/liveagents/registry.go	WithSubscriberBuffer
 internal/server/daemon/options.go	WithMetricsRegisterer
 internal/server/daemon/shutdown.go	ShutdownCoordinator.Metrics
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.DelegateToAgent
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.DiscoverAgent
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.DiscoverTool
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListAgents
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListPlugins
