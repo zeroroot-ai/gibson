@@ -19,7 +19,7 @@ func TestDispatchHandler_CarriesTheNetworkScopeOfTheNode(t *testing.T) {
 
 	rec := &recordingDispatcher{}
 	h := NewDispatchHandler(rec)
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.Subscribe(h.Tap)
 	e.Submit(MissionProjected{ID: "m1", Nodes: []WorkNode{

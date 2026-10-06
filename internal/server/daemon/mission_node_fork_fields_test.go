@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -80,7 +81,7 @@ func TestForkFields_ReachTheDispatchRequest(t *testing.T) {
 
 	rec := &recordingForkDispatcher{}
 	h := brain.NewDispatchHandler(rec)
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	eng.AddSystem(brain.SchedulerSystem)
 	eng.Subscribe(h.Tap)
 	eng.Submit(proj)
