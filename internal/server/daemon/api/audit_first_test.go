@@ -6,13 +6,23 @@ package api
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
+
+	"github.com/alicebob/miniredis/v2"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 var errAuditDown = errors.New("audit store down")
@@ -66,5 +76,142 @@ func TestRewindMission_NoRecordNoRun(t *testing.T) {
 	}
 	if started {
 		t.Error("a run started with no record")
+	}
+}
+
+// failingDurable is a durable audit writer that refuses each write.
+type failingDurable struct{}
+
+func (failingDurable) Log(audit.Event)                              {}
+func (failingDurable) WriteSync(context.Context, audit.Event) error { return errAuditDown }
+
+// auditLoggerOver is an AuditLogger over miniredis whose durable writer is d.
+func auditLoggerOver(t *testing.T, d audit.DurableWriter) *audit.AuditLogger {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return audit.NewAuditLogger(ctx, sc, d, slog.Default())
+}
+
+// Each provider change writes its record first. With no durable record the
+// store is not called, and a store failure gets a failure record.
+func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
+	input := &tenantv1.ProviderConfigInput{Name: "p1", Type: "openai", DefaultModel: "gpt-4o-mini", Credentials: map[string]string{"api_key": "k"}}
+
+	rec := &audittest.Recorder{}
+	store := &mockProviderStore{createOut: fakeProviderRecord("p1"), getOut: fakeProviderRecord("p1")}
+	srv := serverWithStore(store)
+	srv.auditLogger = auditLoggerOver(t, rec)
+	if _, err := srv.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: input}); err != nil {
+		t.Fatalf("CreateProvider: %v", err)
+	}
+	if _, err := srv.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{Name: "p1"}); err != nil {
+		t.Fatalf("DeleteProvider: %v", err)
+	}
+	if _, err := srv.SetDefaultProvider(ctx, &tenantv1.SetDefaultProviderRequest{Name: "p1"}); err != nil {
+		t.Fatalf("SetDefaultProvider: %v", err)
+	}
+	if n := len(rec.Events()); n != 3 {
+		t.Errorf("durable records = %d, want 3", n)
+	}
+
+	downStore := &mockProviderStore{}
+	down := serverWithStore(downStore)
+	down.auditLogger = auditLoggerOver(t, failingDurable{})
+	for name, call := range map[string]func() error{
+		"create": func() error {
+			_, err := down.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: input})
+			return err
+		},
+		"update": func() error {
+			_, err := down.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{Name: "p1", Input: input})
+			return err
+		},
+		"delete": func() error {
+			_, err := down.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{Name: "p1"})
+			return err
+		},
+		"set default": func() error {
+			_, err := down.SetDefaultProvider(ctx, &tenantv1.SetDefaultProviderRequest{Name: "p1"})
+			return err
+		},
+	} {
+		if status.Code(call()) != codes.Unavailable {
+			t.Errorf("%s with no record: want Unavailable", name)
+		}
+	}
+	if downStore.capturedCreateInput != nil || downStore.capturedDeleteName != "" || downStore.capturedDefaultName != "" || downStore.capturedUpdateName != "" {
+		t.Error("the store was called with no audit record")
+	}
+
+	failing := serverWithStore(&mockProviderStore{
+		createErr: errAuditDown, deleteErr: errAuditDown, updateErr: errAuditDown, setDefErr: errAuditDown,
+	})
+	failing.auditLogger = auditLoggerOver(t, &audittest.Recorder{})
+	_, _ = failing.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: input})
+	_, _ = failing.UpdateProvider(ctx, &tenantv1.UpdateProviderRequest{Name: "p1", Input: input})
+	_, _ = failing.DeleteProvider(ctx, &tenantv1.DeleteProviderRequest{Name: "p1"})
+	_, _ = failing.SetDefaultProvider(ctx, &tenantv1.SetDefaultProviderRequest{Name: "p1"})
+}
+
+// An operator event that cannot be written durably is Unavailable.
+func TestEmitAuditEvent_NoRecordIsUnavailable(t *testing.T) {
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, failingDurable{})
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/tenant-operator", Issuer: "spiffe"})
+	_, err := srv.EmitAuditEvent(ctx, &daemonoperatorv1.EmitAuditEventRequest{Event: &daemonoperatorv1.AuditEventMessage{Type: "tenant.created"}})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v (%v), want Unavailable", status.Code(err), err)
+	}
+}
+
+// An approval with no durable record returns the registration to the queue,
+// and a rejection with no record fails the call.
+func TestRegistrationDecisions_NoRecord(t *testing.T) {
+	h, aw := newApprovalHarness(t)
+	reg, err := h.srv.Register(context.Background(), registerRequest())
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	aw.syncErr = errAuditDown
+	_, err = h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("approve code = %v, want Unavailable", status.Code(err))
+	}
+	if len(h.store.releaseCalls) != 1 || len(h.idp.reactivated) != 0 {
+		t.Fatalf("release calls %v, reactivated %v: want the claim back and no owner", h.store.releaseCalls, h.idp.reactivated)
+	}
+	_, err = h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: reg.GetRegistrationId(), Reason: "x"})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("reject code = %v, want Unavailable", status.Code(err))
+	}
+}
+
+// A failed approval after its record gets a second record with deny.
+func TestAdminApproveRegistration_FailureIsRecorded(t *testing.T) {
+	h, aw := newApprovalHarness(t)
+	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	h.idp.reactivateErr = errAuditDown
+	_, _ = h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+	var deny bool
+	for _, ev := range aw.events {
+		if ev.Action == "signup_registration.approved" && ev.Decision == "deny" {
+			deny = true
+		}
+	}
+	if !deny {
+		t.Errorf("events = %+v, want a deny record of the failed approval", aw.events)
 	}
 }

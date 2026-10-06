@@ -83,7 +83,7 @@ type GrantsAdminServer struct {
 	// auditWriter emits agent_grant_added / agent_grant_removed events.
 	// May be nil; writes succeed without an audit trail when not wired
 	// (a warning is logged so the lack-of-audit is observable).
-	auditWriter *audit.Writer
+	auditWriter audit.DurableWriter
 
 	logger *slog.Logger
 	now    func() time.Time
@@ -105,7 +105,7 @@ type GrantsAdminConfig struct {
 
 	// AuditWriter, when set, receives one event per successful grant
 	// write or delete. When nil, writes proceed but audit is logged-only.
-	AuditWriter *audit.Writer
+	AuditWriter audit.DurableWriter
 
 	Logger *slog.Logger
 	Now    func() time.Time
