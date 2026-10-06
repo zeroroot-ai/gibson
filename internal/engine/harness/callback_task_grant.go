@@ -175,6 +175,9 @@ func tokenType(token string) string {
 // source sandbox, by the verified sandbox identity (checkForkGrant).
 func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks *forkGuard, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
 	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if err := checkSandboxIdentityCredential(ctx, info.FullMethod, logger); err != nil {
+			return nil, err
+		}
 		scoped, err := checkTaskGrantScope(ctx, req, get, info.FullMethod, logger)
 		if err != nil {
 			return nil, err
@@ -185,6 +188,9 @@ func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks *forkGuard, 
 		return handler(scoped, req)
 	}
 	stream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if err := checkSandboxIdentityCredential(ss.Context(), info.FullMethod, logger); err != nil {
+			return err
+		}
 		return handler(srv, &taskGrantScopedStream{ServerStream: ss, get: get, forks: forks, method: info.FullMethod, logger: logger})
 	}
 	return unary, stream
@@ -226,4 +232,20 @@ func (s *taskGrantScopedStream) RecvMsg(m any) error {
 	}
 	s.scoped = scoped
 	return nil
+}
+
+// credentialSandboxIdentity is the credential type that the edge asserts for
+// a ClaimFork call that carries only a sandbox identity token (D80).
+const credentialSandboxIdentity = "sandbox-identity"
+
+// checkSandboxIdentityCredential refuses the sandbox identity credential on
+// each method but ClaimFork. The edge asserts it for ClaimFork only, with no
+// verified subject and the system tenant, so no other handler may see it.
+func checkSandboxIdentityCredential(ctx context.Context, method string, logger *slog.Logger) error {
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || string(id.CredentialType) != credentialSandboxIdentity || method == claimForkMethod {
+		return nil
+	}
+	return deny(ctx, logger, method, "sandbox identity credential on another method than ClaimFork",
+		status.Error(codes.PermissionDenied, "a sandbox identity credential is valid for ClaimFork only"))
 }

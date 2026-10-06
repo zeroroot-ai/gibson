@@ -380,3 +380,21 @@ func TestClaimFork_AnExpiredSourceGrantIsRefused(t *testing.T) {
 		t.Fatalf("code = %v, called = %v; want Unauthenticated and no handler", status.Code(err), called)
 	}
 }
+
+// TestSandboxIdentityCredential_ClaimForkOnly: the credential that the edge
+// asserts for ClaimFork is refused on each other method (D80).
+func TestSandboxIdentityCredential_ClaimForkOnly(t *testing.T) {
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Subject: "sandbox-identity-claim", Issuer: auth.IssuerCapabilityGrant,
+		CredentialType: auth.CredentialType(credentialSandboxIdentity), Tenant: auth.SystemTenant,
+	})
+	if err := checkSandboxIdentityCredential(ctx, claimForkMethod, nil); err != nil {
+		t.Errorf("ClaimFork: %v", err)
+	}
+	if err := checkSandboxIdentityCredential(ctx, scopeMethod, nil); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("other method: code = %v, want PermissionDenied", status.Code(err))
+	}
+	if err := checkSandboxIdentityCredential(context.Background(), scopeMethod, nil); err != nil {
+		t.Errorf("no identity: %v", err)
+	}
+}
