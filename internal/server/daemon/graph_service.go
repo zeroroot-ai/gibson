@@ -549,8 +549,8 @@ func (s *graphServer) GetFindings(
 	if pageErr != nil {
 		return nil, status.Error(codes.InvalidArgument, pageErr.Error())
 	}
-	limit := uint32(min(pageLimit, int(graph.MaxFindingsLimit)))
-	offset := uint32(pageOffset)
+	limit := pagetoken.Uint32(min(pageLimit, int(graph.MaxFindingsLimit)))
+	offset := pagetoken.Uint32(pageOffset)
 
 	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
 	defer cancel()
@@ -599,7 +599,7 @@ func (s *graphServer) GetFindings(
 		Findings:      pbFindings,
 		Total:         total,
 		Truncated:     truncated,
-		NextPageToken: pagetoken.Next(int(offset), int(limit), len(pbFindings), int(total)),
+		NextPageToken: pagetoken.Next(pageOffset, int(limit), len(pbFindings), pagetoken.Int(total)),
 	}, nil
 }
 

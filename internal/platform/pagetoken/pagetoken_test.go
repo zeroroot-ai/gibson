@@ -5,6 +5,7 @@ package pagetoken
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -75,5 +76,17 @@ func TestNext_WithNoTotalAFullPageHasAToken(t *testing.T) {
 	off, _, err := Window(2, Next(0, 2, 2, -1))
 	if err != nil || off != 2 {
 		t.Errorf("round trip offset = %d, %v; want 2", off, err)
+	}
+}
+
+func TestConversionsClampAndNeverWrap(t *testing.T) {
+	if Int32(-1) != 0 || Int32(7) != 7 || Int32(math.MaxInt32+1) != math.MaxInt32 {
+		t.Error("Int32 does not clamp")
+	}
+	if Uint32(-1) != 0 || Uint32(7) != 7 || Uint32(math.MaxUint32+1) != math.MaxUint32 {
+		t.Error("Uint32 does not clamp")
+	}
+	if Int(7) != 7 || Int(math.MaxUint64) != math.MaxInt32 {
+		t.Error("Int does not clamp")
 	}
 }

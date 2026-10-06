@@ -10,6 +10,7 @@ package pagetoken
 import (
 	"encoding/base64"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -71,4 +72,37 @@ func Slice[T any](items []T, offset, limit int) (page []T, next string) {
 	}
 	end := min(offset+limit, len(items))
 	return items[offset:end], Next(offset, limit, end-offset, len(items))
+}
+
+// Int32 returns n for a total field of a list response. A value outside the
+// int32 range is clamped, never wrapped.
+func Int32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 0 {
+		return 0
+	}
+	return int32(n)
+}
+
+// Uint32 returns n for a uint32 limit or offset. A value outside the range is
+// clamped, never wrapped.
+func Uint32(n int) uint32 {
+	if n < 0 {
+		return 0
+	}
+	if uint64(n) > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
+}
+
+// Int returns n for a total that a store counts as uint64. A value above
+// MaxInt32 is clamped: no list holds that many items.
+func Int(n uint64) int {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int(n)
 }

@@ -1503,7 +1503,7 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 
 	return &daemonpb.ListMissionsResponse{
 		Missions:      protoMissions,
-		Total:         int32(total),
+		Total:         pagetoken.Int32(total),
 		NextPageToken: pagetoken.Next(offset, limit, len(protoMissions), total),
 	}, nil
 }
@@ -2136,7 +2136,7 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 
 	return &daemonpb.GetMissionHistoryResponse{
 		Runs:          protoRuns,
-		Total:         int32(total),
+		Total:         pagetoken.Int32(total),
 		NextPageToken: pagetoken.Next(offset, limit, len(protoRuns), total),
 	}, nil
 }
@@ -2243,7 +2243,7 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 
 	return &daemonpb.ListMissionDefinitionsResponse{
 		Missions:      protoDefinitions,
-		Total:         int32(total),
+		Total:         pagetoken.Int32(total),
 		NextPageToken: pagetoken.Next(offset, limit, len(protoDefinitions), total),
 	}, nil
 }

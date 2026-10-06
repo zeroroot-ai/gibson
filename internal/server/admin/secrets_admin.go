@@ -199,7 +199,7 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.Lis
 
 	return &secretsv1.ListSecretsResponse{
 		Secrets:       out,
-		Total:         int32(len(out) + offset),
+		Total:         pagetoken.Int32(len(out) + offset),
 		NextPageToken: pagetoken.Next(offset, limit, len(out), -1),
 	}, nil
 }
