@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package fga: internal/infra/authz adapter.
+// Package fga holds the adapter of the internal/infra/authz FGAClient.
 //
 // This file wires the internal/infra/authz FGAClient into the existing
 // fga.FGAClient interface so the cache + checker code in this package is
