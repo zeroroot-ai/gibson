@@ -5,6 +5,7 @@ package gibson.daemon.logs.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1;logsv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // LogsService is the daemon-mediated read path into tenant-scoped mission logs
 // and events stored in Loki (E9, gibson#811). The daemon resolves the caller's
@@ -70,7 +71,7 @@ message LogEntry {
 // end_unix_nanos bound the time range (0 means "use the server default
 // window"); limit caps the number of returned entries (0 means server default).
 message QueryMissionLogsRequest {
-  string mission_id = 1;        // required
+  string mission_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }]; // required
   int64 start_unix_nanos = 2;   // optional time-range start
   int64 end_unix_nanos = 3;     // optional time-range end
   int32 limit = 4;              // optional cap on entries
@@ -80,8 +81,8 @@ message QueryMissionLogsResponse { repeated LogEntry entries = 1; }
 // QueryDaemonLogsRequest asks for the tenant's daemon logs, optionally filtered
 // by level and/or a mission_id substring.
 message QueryDaemonLogsRequest {
-  LogLevel level = 1;           // optional level filter
-  string mission_id = 2;        // optional mission-id substring filter
+  LogLevel level = 1 [(buf.validate.field).enum = { defined_only: true }]; // optional level filter
+  string mission_id = 2 [(buf.validate.field).string = { max_len: 1024 }]; // optional mission-id substring filter
   int64 start_unix_nanos = 3;   // optional time-range start
   int64 end_unix_nanos = 4;     // optional time-range end
   int32 limit = 5;              // optional cap on entries

@@ -16,6 +16,7 @@ package gibson.tenant.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
+import "buf/validate/validate.proto";
 import "gibson/auth/v1/options.proto";
 import "google/protobuf/timestamp.proto";
 
@@ -37,7 +38,7 @@ service ComplianceService {
 message ListComplianceEvidenceRequest {
   // pack is the catalog name of an enabled framework pack, for example
   // "nist-800-53-r5".
-  string pack = 1;
+  string pack = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // start_time is the start of the range. Unset means 90 days before
   // end_time.
   google.protobuf.Timestamp start_time = 2;
@@ -48,7 +49,7 @@ message ListComplianceEvidenceRequest {
   int32 page_size = 4;
   // page_token is the next_page_token of the previous page of the same
   // query. Empty for the first page.
-  string page_token = 5;
+  string page_token = 5 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListComplianceEvidenceResponse {

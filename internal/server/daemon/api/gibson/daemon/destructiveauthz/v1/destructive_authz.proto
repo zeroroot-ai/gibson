@@ -5,6 +5,7 @@ package gibson.daemon.destructiveauthz.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1;destructiveauthzv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // DestructiveAuthorizationService is the daemon API backing the dashboard's
 // destructive-action authorization queue (dashboard#99, gibson#336). Per
@@ -106,11 +107,11 @@ message ListPendingDestructiveActionsResponse {
 }
 
 message ApproveDestructiveActionRequest {
-  string action_id = 1;
+  string action_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 message ApproveDestructiveActionResponse {}
 
 message DenyDestructiveActionRequest {
-  string action_id = 1;
+  string action_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 message DenyDestructiveActionResponse {}

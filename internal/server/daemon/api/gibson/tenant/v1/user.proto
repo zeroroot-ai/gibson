@@ -11,6 +11,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // UserService provides user self-service operations scoped to a tenant member.
 service UserService {
@@ -355,8 +356,8 @@ service UserService {
 // ---------------------------------------------------------------------------
 
 message GetUserProfileRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message UserProfileData {
@@ -374,10 +375,10 @@ message GetUserProfileResponse {
 }
 
 message UpdateUserProfileRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-  string display_name = 3;
-  string preferred_locale = 4;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  string display_name = 3 [(buf.validate.field).string = { max_len: 1024 }];
+  string preferred_locale = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message UpdateUserProfileResponse {
@@ -402,8 +403,8 @@ message Alert {
 }
 
 message ListAlertsRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   bool unread_only = 3;
   int32 limit = 4;
 }
@@ -413,15 +414,15 @@ message ListAlertsResponse {
 }
 
 message MarkAlertReadRequest {
-  string tenant_id = 1;
-  string alert_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string alert_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message MarkAlertReadResponse {}
 
 message MarkAllAlertsReadRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message MarkAllAlertsReadResponse {
@@ -492,8 +493,8 @@ message ConversationMessage {
 }
 
 message ListConversationsRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   int32 limit = 3;
 }
 
@@ -502,8 +503,8 @@ message ListConversationsResponse {
 }
 
 message GetConversationRequest {
-  string conversation_id = 1;
-  string tenant_id = 2;
+  string conversation_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  string tenant_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetConversationResponse {
@@ -512,27 +513,27 @@ message GetConversationResponse {
 }
 
 message SaveConversationRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-  string conversation_id = 3;
-  string title = 4;
-  string agent_id = 5;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  string conversation_id = 3 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  string title = 4 [(buf.validate.field).string = { max_len: 4096 }];
+  string agent_id = 5 [(buf.validate.field).string = { max_len: 1024 }];
   repeated ConversationMessage messages = 6;
 }
 
 message SaveConversationResponse {}
 
 message RenameConversationRequest {
-  string tenant_id = 1;
-  string conversation_id = 2;
-  string title = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string conversation_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  string title = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
 }
 
 message RenameConversationResponse {}
 
 message DeleteConversationRequest {
-  string tenant_id = 1;
-  string conversation_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string conversation_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message DeleteConversationResponse {}
@@ -568,8 +569,8 @@ message UserOnboardingState {
 }
 
 message GetUserOnboardingStateRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetUserOnboardingStateResponse {
@@ -577,8 +578,8 @@ message GetUserOnboardingStateResponse {
 }
 
 message UpdateUserOnboardingStateRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   UserOnboardingState state = 3;
 }
 
@@ -587,8 +588,8 @@ message UpdateUserOnboardingStateResponse {
 }
 
 message ResetUserOnboardingStateRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ResetUserOnboardingStateResponse {
@@ -623,8 +624,8 @@ message UserLayoutPreferences {
 }
 
 message GetUserLayoutRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetUserLayoutResponse {
@@ -633,8 +634,8 @@ message GetUserLayoutResponse {
 }
 
 message SaveUserLayoutRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   UserLayoutPreferences layout = 3;
 }
 
@@ -643,8 +644,8 @@ message SaveUserLayoutResponse {
 }
 
 message ResetUserLayoutRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ResetUserLayoutResponse {}
@@ -674,8 +675,8 @@ enum ActivityKind {
 }
 
 message GetUserActivityRequest {
-  string tenant_id = 1;
-  string user_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetUserActivityResponse {
@@ -683,9 +684,9 @@ message GetUserActivityResponse {
 }
 
 message RecordUserActivityRequest {
-  string tenant_id = 1;
-  string user_id = 2;
-  ActivityKind kind = 3;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  ActivityKind kind = 3 [(buf.validate.field).enum = { defined_only: true }];
   ActivityItem item = 4;
 }
 
@@ -704,7 +705,7 @@ message SignupProgressState {
 }
 
 message GetSignupProgressRequest {
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetSignupProgressResponse {
@@ -713,7 +714,7 @@ message GetSignupProgressResponse {
 }
 
 message SetSignupProgressRequest {
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   SignupProgressState progress = 2;
   int32 ttl_seconds = 3;
 }
@@ -725,7 +726,7 @@ message SetSignupProgressResponse {}
 // ---------------------------------------------------------------------------
 
 message InvalidateMembershipCacheRequest {
-  string user_id = 1;
+  string user_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message InvalidateMembershipCacheResponse {}
@@ -735,8 +736,8 @@ message InvalidateMembershipCacheResponse {}
 // ---------------------------------------------------------------------------
 
 message StageAttachmentRequest {
-  string tenant_id = 1;
-  string text = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string text = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   int32 ttl_seconds = 3;
 }
 
@@ -745,8 +746,8 @@ message StageAttachmentResponse {
 }
 
 message ConsumeAttachmentRequest {
-  string tenant_id = 1;
-  string attachment_id = 2;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string attachment_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ConsumeAttachmentResponse {
@@ -762,7 +763,7 @@ message RevokeUserSessionsRequest {
   // "user:" type prefix) whose sessions and refresh-token grants are revoked.
   // Pass your own user id to revoke your own sessions (the `gibson logout`
   // path). Required.
-  string target_user_id = 1;
+  string target_user_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message RevokeUserSessionsResponse {
@@ -782,7 +783,7 @@ message ResetUserMFARequest {
   // target_user_id is the FGA user id (the Zitadel numeric sub, without the
   // "user:" type prefix) of the tenant member whose MFA is reset. Required.
   // Must be a member of the caller's own tenant, including the tenant Owner.
-  string target_user_id = 1;
+  string target_user_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ResetUserMFAResponse {

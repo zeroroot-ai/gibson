@@ -20,6 +20,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // ProviderService manages LLM provider configurations for a tenant.
 service ProviderService {
@@ -353,7 +354,7 @@ message ListProvidersResponse {
 }
 
 message GetProviderRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetProviderResponse {
@@ -369,7 +370,7 @@ message CreateProviderResponse {
 }
 
 message UpdateProviderRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
   ProviderConfigInput input = 2;
 }
 
@@ -378,7 +379,7 @@ message UpdateProviderResponse {
 }
 
 message DeleteProviderRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message DeleteProviderResponse {}
@@ -419,7 +420,7 @@ message GetSupportedProvidersResponse {
 // Source: previously ProbeProviderRequest in gibson.admin.v1 (platform-sdk).
 message ProbeProviderRequest {
   // Provider type identifier (matches SupportedProvider.type).
-  string type = 1;
+  string type = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // Credential map. Keys come from the provider's CredentialField.key entries;
   // values are plaintext (used once, discarded).
   map<string, string> credentials = 2;
@@ -427,7 +428,7 @@ message ProbeProviderRequest {
   // Required when the provider type serves embeddings and the caller wants an
   // embedding probe (e.g. voyage, openai-compatible, tei). Optional for
   // chat-only providers — if supplied, an embedding probe is also run.
-  string default_embedding_model = 3;
+  string default_embedding_model = 3 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // ProbeProviderResponse carries the structured probe outcome.
@@ -452,7 +453,7 @@ message ProbeProviderResponse {
 }
 
 message ListProviderModelsRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListProviderModelsResponse {
@@ -464,7 +465,7 @@ message ListProviderModelsResponse {
 }
 
 message GetProviderHealthRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetProviderHealthResponse {
@@ -480,7 +481,7 @@ message GetDefaultProviderResponse {
 }
 
 message SetDefaultProviderRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message SetDefaultProviderResponse {
@@ -488,8 +489,8 @@ message SetDefaultProviderResponse {
 }
 
 message ExecuteLLMRequest {
-  string provider_name = 1;
-  string model = 2;
+  string provider_name = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  string model = 2 [(buf.validate.field).string = { max_len: 4096 }];
   repeated LLMMessageContent messages = 3;
   repeated LLMToolDef tools = 4;
   optional ResponseFormat response_format = 5;
@@ -502,7 +503,7 @@ message ExecuteLLMRequest {
   // gibson#1075/#1078). Mission-aware callers (an agent harness / Decider issuing
   // LLM calls during a mission run) populate it; non-mission callers (e.g. the
   // dashboard chat client) leave it unset and the call stays tenant-ambient.
-  optional string mission_id = 10;
+  optional string mission_id = 10 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ExecuteLLMResponse {

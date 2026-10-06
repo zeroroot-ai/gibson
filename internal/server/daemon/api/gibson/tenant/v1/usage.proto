@@ -16,6 +16,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // UsageService provides cost and token usage aggregation for a tenant.
 // Admin callers can query any subject; non-admins are narrowed server-side
@@ -60,12 +61,12 @@ message UsageRow {
 // ---------------------------------------------------------------------------
 
 message ListUsageRequest {
-  UsageScope scope = 1;
+  UsageScope scope = 1 [(buf.validate.field).enum = { defined_only: true }];
   int64 start_time_unix = 2;
   int64 end_time_unix = 3;
   // Optional filter: narrow to a single subject. Non-admins are narrowed
   // to themselves regardless of this field.
-  string subject_filter = 4;
+  string subject_filter = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message ListUsageResponse {

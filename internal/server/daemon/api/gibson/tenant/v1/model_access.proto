@@ -12,6 +12,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // ModelAccessService manages provider/model grants and the audit trail of
 // slot resolutions. Admin callers can query any subject; non-admins are
@@ -122,10 +123,10 @@ message GrantAccessResponse {
 }
 
 message RevokeAccessRequest {
-  GrantSubjectKind subject_kind = 1;
-  string subject_id = 2;
-  GrantTargetKind target_kind = 3;
-  string target_id = 4;
+  GrantSubjectKind subject_kind = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string subject_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  GrantTargetKind target_kind = 3 [(buf.validate.field).enum = { defined_only: true }];
+  string target_id = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message RevokeAccessResponse {
@@ -135,8 +136,8 @@ message RevokeAccessResponse {
 }
 
 message ListAccessRequest {
-  GrantSubjectKind subject_kind = 1;
-  string subject_id = 2;
+  GrantSubjectKind subject_kind = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string subject_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListAccessResponse {
@@ -146,8 +147,8 @@ message ListAccessResponse {
 message ListModelResolutionEventsRequest {
   int64 start_time_unix = 1;
   int64 end_time_unix = 2;
-  string user_id = 3;
-  string slot_name = 4;
+  string user_id = 3 [(buf.validate.field).string = { max_len: 1024 }];
+  string slot_name = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListModelResolutionEventsResponse {
