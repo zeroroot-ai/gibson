@@ -77,7 +77,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// ComponentInstallRegistry field was removed in plugin-runtime Spec 2 Phase 7;
 		// plugin dispatch goes through ComponentRegistry + WorkQueue
 		// (PluginInvokeService, see internal/platform/component/plugin_dispatch.go).
-		ComponentAccess: d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
+		ComponentAccess: d.componentAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 
 		// ComponentAuthorizer gates AGENT dispatch on can_execute (gibson#1595).
 		// The SAME FGA authorizer the callback service gets (daemon.go

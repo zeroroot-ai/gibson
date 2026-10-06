@@ -133,36 +133,5 @@ func (s *RedisToolAccessStore) CheckAccess(ctx context.Context, tenant, toolName
 
 // ListTenantTools returns all tools the tenant has access to.
 func (s *RedisToolAccessStore) ListTenantTools(ctx context.Context, tenant string) ([]ToolAccess, error) {
-	var results []ToolAccess
-	var cursor uint64
-
-	for {
-		keys, next, err := s.client.Scan(ctx, cursor, toolAccessPattern(tenant), 100).Result()
-		if err != nil {
-			return nil, fmt.Errorf("scan tenant tools: %w", err)
-		}
-
-		for _, key := range keys {
-			data, err := s.client.Get(ctx, key).Bytes()
-			if err != nil {
-				if errors.Is(err, redis.Nil) {
-					continue
-				}
-				return nil, fmt.Errorf("get tool access record %s: %w", key, err)
-			}
-
-			var access ToolAccess
-			if err := json.Unmarshal(data, &access); err != nil {
-				continue
-			}
-			results = append(results, access)
-		}
-
-		cursor = next
-		if cursor == 0 {
-			break
-		}
-	}
-
-	return results, nil
+	return scanJSONRecords[ToolAccess](ctx, s.client, toolAccessPattern(tenant), "tool access record")
 }

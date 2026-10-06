@@ -2259,7 +2259,7 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 		return nil, status.Error(codes.Unimplemented, "plugin access store not yet wired on this server")
 	}
 
-	records, err := s.componentAccess.ListTenantPlugins(ctx, tenant)
+	records, err := s.componentAccess.ListTenantAccess(ctx, tenant)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "list tenant plugins: failed",
 			slog.String("tenant", tenant),
@@ -2272,7 +2272,7 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	for _, r := range records {
 		protos = append(protos, &componentpb.PluginAccessProto{
 			TenantId:     r.TenantID,
-			PluginName:   r.PluginName,
+			PluginName:   r.ComponentName,
 			Enabled:      r.Enabled,
 			Source:       r.Source,
 			ConfiguredAt: r.ConfiguredAt,
