@@ -24,7 +24,11 @@
 // any other per-tenant World state today.
 package brain
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
+)
 
 // DomainPackState is the taxonomy/ontology/predicate content of one Domain
 // Pack currently enabled for a tenant — the "live registry" ADR-0133
@@ -50,6 +54,10 @@ type DomainPackState struct {
 	// NonDestructivePredicates names the Predicates keys the pack states as
 	// non-destructive (ADR-0132). A predicate it does not name is destructive.
 	NonDestructivePredicates []string
+	// Techniques is the technique -> core category list of the pack
+	// (ADR-0135). With the core hierarchy it is the hierarchy that the
+	// predicates of the pack must name.
+	Techniques map[string]string
 }
 
 // DomainPackEnabled records that a tenant enabled the named catalog Domain
@@ -68,6 +76,11 @@ type DomainPackEnabled struct {
 	// pack format carried it. Replay then treats every predicate of that
 	// pack as destructive until the tenant enables the pack again.
 	NonDestructivePredicates []string
+	// Techniques is absent on an event recorded before the event carried
+	// it. Replay then holds only the core hierarchy for that pack, so a
+	// proof under a technique of the pack is refused until the tenant
+	// enables the pack again.
+	Techniques map[string]string
 }
 
 // Kind identifies this event on the Timeline.
@@ -89,6 +102,7 @@ func applyDomainPackEnabled(w *World, e DomainPackEnabled) {
 		TaxonomyRelationshipTypes: append([]string(nil), e.TaxonomyRelationshipTypes...),
 		Predicates:                clonePredicateMap(e.Predicates),
 		NonDestructivePredicates:  append([]string(nil), e.NonDestructivePredicates...),
+		Techniques:                clonePredicateMap(e.Techniques),
 	}
 }
 
@@ -116,11 +130,32 @@ type DomainPackSnapshot struct {
 	TaxonomyRelationshipTypes []string
 	Predicates                map[string]string
 	NonDestructivePredicates  []string
+	Techniques                map[string]string
 }
 
 // PredicateIsDestructive reports whether the pack treats the named predicate
 // as destructive (ADR-0132). Every predicate is destructive unless the pack
 // names it in NonDestructivePredicates.
+// HoldsTechnique reports whether the hierarchy of the pack holds technique:
+// the core hierarchy (taxonomy.GlobalTechniques) with the techniques of the
+// pack. The hierarchy is the authority for technique names (ADR-0135).
+func (s DomainPackSnapshot) HoldsTechnique(technique string) bool {
+	techniques := make([]string, 0, len(s.Techniques))
+	for t := range s.Techniques {
+		techniques = append(techniques, t)
+	}
+	sort.Strings(techniques)
+	h := taxonomy.GlobalTechniques
+	for _, t := range techniques {
+		next, err := h.WithTechnique(taxonomy.TechniqueID(t), taxonomy.CategoryID(s.Techniques[t]))
+		if err != nil {
+			return false
+		}
+		h = next
+	}
+	return h.HasTechnique(taxonomy.TechniqueID(technique))
+}
+
 func (s DomainPackSnapshot) PredicateIsDestructive(technique string) bool {
 	for _, name := range s.NonDestructivePredicates {
 		if name == technique {
@@ -145,6 +180,7 @@ func (w *World) DomainPackSnapshot() []DomainPackSnapshot {
 			TaxonomyRelationshipTypes: append([]string(nil), s.TaxonomyRelationshipTypes...),
 			Predicates:                clonePredicateMap(s.Predicates),
 			NonDestructivePredicates:  append([]string(nil), s.NonDestructivePredicates...),
+			Techniques:                clonePredicateMap(s.Techniques),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
