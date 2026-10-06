@@ -56,6 +56,14 @@ func missionDefinitionToProjected(
 		return brain.MissionProjected{}, nil, errors.New("nil mission definition")
 	}
 
+	// 0. Each target of the run must be resolved. The network scope of each
+	// node reads the address of its bound target (gibson#865).
+	for _, t := range targets {
+		if t.Target == nil {
+			return brain.MissionProjected{}, nil, fmt.Errorf("mission %q: target %q did not resolve", def.GetId(), t.ID)
+		}
+	}
+
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
 	allNodes, err := flattenParallel(def)
 	if err != nil {
@@ -427,9 +435,10 @@ func nodeNetwork(n *missionpb.MissionNode, targets []string) *agent.NodeNetwork 
 
 // boundTargets returns the address of each target bound to the node id. A
 // for_each instance is bound to its one target. Each other node is bound to
-// the primary target of the run, which is the target that submit binds. A
-// target with no address is left out: the scope never widens on a missing
-// value.
+// the primary target of the run, which is the target that submit binds. Each
+// target is resolved: missionDefinitionToProjected refuses a run with a target
+// that did not resolve. A target with no address is left out: the scope never
+// widens on a missing value.
 func boundTargets(id string, targets []forEachTarget, origins fanOutOrigins) []string {
 	if len(targets) == 0 {
 		return nil
@@ -442,9 +451,6 @@ func boundTargets(id string, targets []forEachTarget, origins fanOutOrigins) []s
 				break
 			}
 		}
-	}
-	if bound.Target == nil {
-		return nil
 	}
 	if addr := targetbind.URLOf(bound.Target); addr != "" {
 		return []string{addr}
