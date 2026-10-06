@@ -74,7 +74,7 @@ func TestPingGetAndPort(t *testing.T) {
 		t.Errorf("ping = %s", rec.Body)
 	}
 	rec := httptest.NewRecorder()
-	handle(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	handle(rec, httptest.NewRequest(http.MethodGet, "/mcp", http.NoBody))
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("GET code = %d", rec.Code)
 	}
