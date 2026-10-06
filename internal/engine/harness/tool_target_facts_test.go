@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -111,8 +112,7 @@ func TestAddTargetFacts_FailsClosedAndTotally(t *testing.T) {
 	id := types.NewID()
 
 	cases := map[string]*DefaultAgentHarness{
-		"no lookup wired": harnessWithFacts(TargetInfo{ID: id}, nil),
-		"no target id":    harnessWithFacts(TargetInfo{}, &stubTargetFacts{}),
+		"no target id": harnessWithFacts(TargetInfo{}, &stubTargetFacts{}),
 		"store errors": harnessWithFacts(TargetInfo{ID: id},
 			&stubTargetFacts{err: errors.New("redis is down")}),
 		"target is gone": harnessWithFacts(TargetInfo{ID: id},
@@ -149,22 +149,45 @@ func TestAddTargetFacts_AllocatesANilEnv(t *testing.T) {
 	}
 }
 
-// resolveTargetFacts tolerates an unset provider, like resolveGraphRAG: a
-// daemon that wires no target store must build a harness, not fail.
-func TestResolveTargetFacts(t *testing.T) {
-	if got := resolveTargetFacts(nil); got != nil {
-		t.Errorf("a nil provider returned %T, want nil", got)
+// testTargetFacts is the target lookup of a test that does not read target
+// facts. The harness factory requires one (gibson#681).
+func testTargetFacts() TargetFactsLookup { return &stubTargetFacts{} }
+
+// The target lookup is required (gibson#681): the factory refuses a config
+// with no provider, and Create refuses a provider that answers nil. The daemon
+// sets its target store during start, so either case is a wiring defect.
+func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
+	slots := llm.NewSlotManager(llm.NewLLMRegistry())
+
+	if f, err := NewHarnessFactory(HarnessConfig{SlotManager: slots}); err == nil {
+		t.Fatalf("NewHarnessFactory with no TargetFacts = %v, nil; want an error", f)
+	}
+
+	f, err := NewHarnessFactory(HarnessConfig{
+		SlotManager: slots,
+		TargetFacts: func() TargetFactsLookup { return nil },
+	})
+	if err != nil {
+		t.Fatalf("NewHarnessFactory: %v", err)
+	}
+	if h, err := f.Create("agent", MissionContext{ID: types.NewID()}, TargetInfo{}); err == nil {
+		t.Fatalf("Create with a nil lookup = %v, nil; want an error", h)
 	}
 
 	stub := &stubTargetFacts{}
-	if got := resolveTargetFacts(func() TargetFactsLookup { return stub }); got != stub {
-		t.Error("the provider's value was not used")
+	f, err = NewHarnessFactory(HarnessConfig{
+		SlotManager: slots,
+		TargetFacts: func() TargetFactsLookup { return stub },
+	})
+	if err != nil {
+		t.Fatalf("NewHarnessFactory: %v", err)
 	}
-
-	// A provider that itself returns nil is the daemon's no-Redis case and must
-	// stay nil, or the harness nil check passes and dispatch panics.
-	if got := resolveTargetFacts(func() TargetFactsLookup { return nil }); got != nil {
-		t.Errorf("a provider returning nil produced %T, want nil", got)
+	h, err := f.Create("agent", MissionContext{ID: types.NewID()}, TargetInfo{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if got := h.(*DefaultAgentHarness).targetFacts; got != stub {
+		t.Errorf("the harness holds %T, want the provider's lookup", got)
 	}
 }
 

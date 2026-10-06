@@ -140,6 +140,13 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		)
 	}
 
+	// The target store is required (gibson#681). The daemon sets it during
+	// start, before any dispatch, so a nil here is a wiring defect.
+	targetFacts := f.config.TargetFacts()
+	if targetFacts == nil {
+		return nil, types.NewError(ErrHarnessInvalidConfig, "TargetFacts provider returned no lookup")
+	}
+
 	// Update mission context to reflect current agent
 	updatedMissionCtx := missionCtx
 	updatedMissionCtx.CurrentAgent = agentName
@@ -248,7 +255,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		categoryClassifier:      categoryClassifier,
 		componentRegistry:       f.config.ComponentRegistry,
 		graphrag:                resolveGraphRAG(f.config.GraphRAGQuerier),
-		targetFacts:             resolveTargetFacts(f.config.TargetFacts),
+		targetFacts:             targetFacts,
 		missionSecrets:          resolveMissionSecrets(f.config.MissionSecrets),
 		workQueue:               f.config.WorkQueue,
 		callbackManager:         f.config.CallbackManager,
@@ -375,18 +382,9 @@ func resolveGraphRAG(provide func() component.GraphRAGQuerier) component.GraphRA
 	return provide()
 }
 
-// resolveTargetFacts calls the target-lookup provider, tolerating an unset one.
-// Same reason resolveGraphRAG exists: the daemon wires the store after the
-// factory is built.
-func resolveTargetFacts(provide func() TargetFactsLookup) TargetFactsLookup {
-	if provide == nil {
-		return nil
-	}
-	return provide()
-}
-
 // resolveMissionSecrets calls the credential-store provider, tolerating an
-// unset one. Same reason resolveTargetFacts exists.
+// unset one. Same reason resolveGraphRAG exists: the daemon wires the store
+// after the factory is built.
 func resolveMissionSecrets(provide func() CredentialStore) CredentialStore {
 	if provide == nil {
 		return nil

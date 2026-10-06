@@ -1756,15 +1756,13 @@ func (h *DefaultAgentHarness) liveScope(ctx context.Context) sandboxed.LiveScope
 // a mission author and the tool it dispatches cannot disagree about which host
 // was scanned.
 //
-// Every failure is silent and total: no lookup wired, no target id, a store that
-// errors, a target that has gone. The tool then receives no GIBSON_TARGET_* at
+// The factory refuses a harness with no lookup (gibson#681). Every other
+// failure is silent and total: no target id, a store that errors, a target
+// that has gone. The tool then receives no GIBSON_TARGET_* at
 // all, which is what it received before this existed. An EMPTY or PARTIAL set
 // would be worse than none — a tool cannot tell "this target has no host" from
 // "the platform did not tell me", and the two call for opposite behaviour.
 func (h *DefaultAgentHarness) addTargetFacts(ctx context.Context, spec *sandboxed.ToolSpec) {
-	if h.targetFacts == nil {
-		return
-	}
 	id := h.Target().ID
 	if id.IsZero() {
 		return
