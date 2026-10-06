@@ -9,19 +9,47 @@ updates:
       - "/build"
       - "/sidecar/belief"
       - "/tools/gibson-bootstrap"
-    schedule: { interval: "weekly" }
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
     labels: ["dependencies", "docker"]
-    commit-message: { prefix: "chore(deps)" }
+    commit-message:
+      prefix: chore(deps)
+    open-pull-requests-limit: 3
+    groups:
+      docker-deps:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: "gomod"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
     labels: ["dependencies", "go"]
-    commit-message: { prefix: "chore(deps)" }
+    commit-message:
+      prefix: chore(deps)
+    open-pull-requests-limit: 5
+    groups:
+      go-deps:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule: { interval: "weekly" }
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
     labels: ["dependencies", "github-actions"]
-    commit-message: { prefix: "chore(deps)" }
+    commit-message:
+      prefix: chore(deps)
     # github/codeql-action is one action with several sub-actions (init,
     # autobuild, analyze, upload-sarif). Dependabot sees each sub-action as
     # its own dependency and bumps them in separate PRs. One of those PRs
@@ -31,4 +59,13 @@ updates:
     groups:
       codeql-action:
         patterns:
-          - "github/codeql-action*"
+          - github/codeql-action*
+      actions-deps:
+        patterns:
+          - '*'
+        exclude-patterns:
+          - github/codeql-action*
+        update-types:
+          - minor
+          - patch
+    open-pull-requests-limit: 5
