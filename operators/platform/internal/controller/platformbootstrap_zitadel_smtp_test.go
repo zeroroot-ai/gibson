@@ -5,8 +5,11 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -537,5 +540,35 @@ func TestReconcileZitadelSMTP_NoAuth(t *testing.T) {
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionSMTPProviderReady)
 	if cond == nil || cond.Status != metav1.ConditionTrue {
 		t.Fatalf("condition = %+v, want True", cond)
+	}
+}
+
+// TestSMTPSettingsHash_IsStableAndChangesWithEachField: the fingerprint is the
+// same for the same settings, changes when the password or any other field
+// changes, and never holds the password or a fast hash of it.
+func TestSMTPSettingsHash_IsStableAndChangesWithEachField(t *testing.T) {
+	base := zitadel.SMTPProviderConfig{
+		SenderAddress: "noreply@example.com", SenderName: "Gibson", TLS: true,
+		Host: "smtp.example.com:587", User: "smtp-user", Password: "smtp-pass",
+	}
+	got := smtpSettingsHash(base)
+	if got != smtpSettingsHash(base) {
+		t.Fatal("the fingerprint of one set of settings must be stable")
+	}
+	for name, change := range map[string]func(*zitadel.SMTPProviderConfig){
+		"password": func(c *zitadel.SMTPProviderConfig) { c.Password = "other-pass" },
+		"host":     func(c *zitadel.SMTPProviderConfig) { c.Host = "smtp.other.com:587" },
+		"user":     func(c *zitadel.SMTPProviderConfig) { c.User = "other-user" },
+		"tls":      func(c *zitadel.SMTPProviderConfig) { c.TLS = false },
+	} {
+		c := base
+		change(&c)
+		if smtpSettingsHash(c) == got {
+			t.Errorf("a change of the %s must change the fingerprint", name)
+		}
+	}
+	fast := sha256.Sum256([]byte(base.Password))
+	if strings.Contains(got, base.Password) || strings.Contains(got, hex.EncodeToString(fast[:])) {
+		t.Fatal("the fingerprint must hold neither the password nor a fast hash of it")
 	}
 }

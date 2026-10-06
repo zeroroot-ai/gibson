@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/crypto/argon2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -174,16 +175,35 @@ func desiredSMTPProviderConfig(spec *gibsonv1alpha1.ZitadelSMTPSpec, user, passw
 	}
 }
 
-// smtpSettingsHash hashes every field of cfg, including the password.
-// Zitadel never returns a stored password on read, so this hash — not a
-// live comparison — is the only way the reconciler can tell a password
-// changed and needs re-applying.
+// smtpSettingsHash is the fingerprint of every field of cfg, including the
+// password. Zitadel never returns a stored password on read, so this
+// fingerprint, not a live comparison, is the only way the reconciler can
+// tell a password changed and needs re-applying.
+//
+// The fingerprint lives in the status of the PlatformBootstrap, where each
+// reader of the object sees it. A fast hash of the password would let such a
+// reader test password guesses offline at full speed. So the password goes
+// through Argon2id, a slow key derivation function. The salt is a SHA-256 of
+// the fields that are not secret, so the fingerprint is stable for one set of
+// settings and changes when any field changes.
 func smtpSettingsHash(cfg zitadel.SMTPProviderConfig) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{
-		cfg.SenderAddress, cfg.SenderName, strconv.FormatBool(cfg.TLS), cfg.Host, cfg.User, cfg.Password,
+	salt := sha256.Sum256([]byte(strings.Join([]string{
+		cfg.SenderAddress, cfg.SenderName, strconv.FormatBool(cfg.TLS), cfg.Host, cfg.User,
 	}, "\x00")))
-	return hex.EncodeToString(sum[:])
+	key := argon2.IDKey([]byte(cfg.Password), salt[:],
+		smtpFingerprintTime, smtpFingerprintMemoryKiB, smtpFingerprintThreads, smtpFingerprintKeyLen)
+	return hex.EncodeToString(salt[:]) + hex.EncodeToString(key)
 }
+
+// The Argon2id parameters of the SMTP fingerprint: the OWASP minimum for
+// Argon2id (19 MiB, two passes, one lane). One derivation runs per
+// reconcile of the SMTP step.
+const (
+	smtpFingerprintTime      = 2
+	smtpFingerprintMemoryKiB = 19 * 1024
+	smtpFingerprintThreads   = 1
+	smtpFingerprintKeyLen    = 32
+)
 
 // smtpProviderLookup is resolveSMTPProvider's result: found reports whether
 // an existing provider was located, in which case id and state are
