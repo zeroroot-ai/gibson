@@ -162,6 +162,17 @@ func (p *NamespaceProvisioner) Provision(ctx context.Context, obj saga.Condition
 	return true, nil
 }
 
+// Pod Security admission enforces the restricted standard in each tenant
+// namespace (ADR-0165, gibson#767). The operator sets the label on a new
+// namespace and adds it to an existing one on its next reconcile. Each pod
+// that runs there meets the standard: the tenant Neo4j pod (#829), the
+// ToolHive proxies (hosted#503), and the MCP server pod, which the connector
+// operator configures through spec.podTemplateSpec of each MCPServer.
+const (
+	podSecurityEnforceLabel = "pod-security.kubernetes.io/enforce"
+	podSecurityRestricted   = "restricted"
+)
+
 func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1alpha1.Tenant, nsName string) error {
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -170,6 +181,7 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 				"gibson.zeroroot.ai/tenant":     t.Name,
 				"gibson.zeroroot.ai/managed-by": "tenant-operator",
 				"gibson.zeroroot.ai/tier":       string(t.Spec.Tier),
+				podSecurityEnforceLabel:         podSecurityRestricted,
 			},
 			Annotations: map[string]string{
 				"gibson.zeroroot.ai/tenant-display-name": t.Spec.DisplayName,
@@ -187,7 +199,14 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 	if err != nil {
 		return err
 	}
-	// Merge labels/annotations without clobbering user additions.
+	// Merge labels/annotations without clobbering user additions. A namespace
+	// with no labels still gets the operator labels, the restricted one too.
+	if existing.Labels == nil {
+		existing.Labels = map[string]string{}
+	}
+	if existing.Annotations == nil {
+		existing.Annotations = map[string]string{}
+	}
 	changed := mergeMap(existing.Labels, ns.Labels)
 	if mergeMap(existing.Annotations, ns.Annotations) {
 		changed = true
