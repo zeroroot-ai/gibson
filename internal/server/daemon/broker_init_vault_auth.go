@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/vault/api"
+	api "github.com/openbao/openbao/api/v2"
 	sdkvault "github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
 )
