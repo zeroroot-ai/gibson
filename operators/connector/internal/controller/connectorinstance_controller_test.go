@@ -604,7 +604,7 @@ func TestReconcile_SecretAuthBecomesReady(t *testing.T) {
 	}
 	ref, _, _ := unstructured.NestedString(headers[0].(map[string]interface{}), "valueSecretRef", "name")
 	if ref != "github-connector-cred" {
-		t.Errorf("proxy reads Secret %q, want github-connector-cred (the daemon's connectorCredSecretName)", ref)
+		t.Errorf("proxy reads Secret %q, want github-connector-cred (the name this operator writes)", ref)
 	}
 }
 

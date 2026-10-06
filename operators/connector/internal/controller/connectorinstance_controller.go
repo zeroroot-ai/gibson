@@ -568,9 +568,8 @@ func setCondition(ci *connectorv1alpha1.ConnectorInstance, condType string, stat
 }
 
 // credentialSecretName is the Kubernetes Secret the connector's credential
-// lands in. The daemon writes it from the tenant secret store for auth secret
-// and auth oauth alike (ADR-0061); it MUST match the daemon's
-// connectorCredSecretName (internal/server/daemon/connector_token_materializer.go).
+// lands in. This operator writes it from GetConnectorCredential for auth
+// secret and auth oauth alike (ADR-0061, gibson#663).
 // The Secret value is the full "Bearer <token>" header for a Remote connector.
 func credentialSecretName(connector string) string {
 	return connector + "-connector-cred"

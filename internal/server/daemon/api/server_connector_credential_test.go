@@ -29,8 +29,8 @@ import (
 const (
 	testConnectorOperatorSVID = "spiffe://install.example/platform/connector-operator"
 	testTenantOperatorSVID    = "spiffe://install.example/platform/tenant-operator"
-	testCredEnvoySVID         = "spiffe://install.example/platform/envoy"
-	testAccessToken           = "vendor-access-token-do-not-log"
+	testEdgeSVID              = "spiffe://install.example/platform/envoy"
+	testVendorValue           = "vendor-access-token-do-not-log"
 )
 
 var credNow = time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
@@ -71,7 +71,7 @@ func liveTokenStore(t *testing.T) *fakeCredStore {
 	t.Helper()
 	return &fakeCredStore{data: map[string][]byte{
 		connectorauth.AccessMetaSecretName("gitlab"): credMeta(t, time.Hour),
-		connectorauth.AccessSecretName("gitlab"):     []byte(testAccessToken),
+		connectorauth.AccessSecretName("gitlab"):     []byte(testVendorValue),
 	}}
 }
 
@@ -111,7 +111,7 @@ func TestGetConnectorCredential_OnlyTheConnectorOperator(t *testing.T) {
 	srv := credServer(liveTokenStore(t))
 
 	refused := map[string]context.Context{
-		"through the edge with a platform_operator token": auth.WithIdentity(peerCtx(t, testCredEnvoySVID), auth.Identity{
+		"through the edge with a platform_operator token": auth.WithIdentity(peerCtx(t, testEdgeSVID), auth.Identity{
 			Subject: "platform-admin", CredentialType: auth.CredentialType("client-credentials"),
 		}),
 		"another operator SVID":         peerCtx(t, testTenantOperatorSVID),
@@ -135,7 +135,7 @@ func TestGetConnectorCredential_OnlyTheConnectorOperator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the connector operator was refused: %v", err)
 	}
-	if got := string(resp.GetData()["authorization"]); got != "Bearer "+testAccessToken {
+	if got := string(resp.GetData()["authorization"]); got != "Bearer "+testVendorValue {
 		t.Fatalf("authorization = %q", got)
 	}
 }
@@ -217,7 +217,7 @@ func TestGetConnectorCredential_ErrorsCarryNoSecret(t *testing.T) {
 	}{
 		"store down": {store: &fakeCredStore{err: errors.New("broker down")}, req: gitlabCredReq()},
 		"corrupt metadata": {store: &fakeCredStore{data: map[string][]byte{
-			connectorauth.AccessMetaSecretName("gitlab"): []byte("{not json " + testAccessToken),
+			connectorauth.AccessMetaSecretName("gitlab"): []byte("{not json " + testVendorValue),
 		}}, req: gitlabCredReq()},
 		"missing property": {store: func() *fakeCredStore {
 			s := liveTokenStore(t)
@@ -242,14 +242,14 @@ func TestGetConnectorCredential_ErrorsCarryNoSecret(t *testing.T) {
 			if status.Code(err) != codes.Internal {
 				t.Fatalf("code = %v, want Internal", status.Code(err))
 			}
-			for _, secret := range []string{testAccessToken, "static-value"} {
+			for _, secret := range []string{testVendorValue, "static-value"} {
 				if strings.Contains(err.Error(), secret) {
 					t.Fatalf("the error holds a secret: %v", err)
 				}
 			}
 		})
 	}
-	for _, secret := range []string{testAccessToken, "static-value"} {
+	for _, secret := range []string{testVendorValue, "static-value"} {
 		if strings.Contains(logs.String(), secret) {
 			t.Fatalf("the log holds a secret:\n%s", logs.String())
 		}
