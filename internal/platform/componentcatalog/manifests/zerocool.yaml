@@ -9,8 +9,8 @@ displayName: Zerocool
 description: >-
   The flagship agent — plans and runs a security mission end to end in an
   ephemeral sandbox, calling tools and connectors back through the daemon.
-egressAllow:
-  - "*"
+# No egress ceiling: the network scope of the mission node decides (owner
+# decision S6, gibson#865). The catalog holds no "*".
 spec:
   runtime: setec
   image: ghcr.io/zeroroot-ai/zerocool-agent@sha256:37f6fecc5577de79c7632e03361d23f98cbe16abe7855f0913c5b35dcaf877ab

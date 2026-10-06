@@ -204,13 +204,11 @@ func TestLookupAgentEmbedded(t *testing.T) {
 // projects its owner-locked policy, and seeds platform_enabled for its ref.
 // Model and budget are resolved at dispatch, so the manifest pins neither
 // (empty Model, zero BudgetLimit).
-// TestClaudeManifestEgressIsUnconfined pins the posture the claude agent is
-// dispatched under. "*" means gibson imposes no allow-list, so the sandbox
-// takes its SandboxClass default (external-only: the public internet, never
-// the operator's reserved ranges). A pinned destination list here cannot
-// work for a coding agent, whose mission names hosts no manifest can know
-// in advance, and re-pinning it silently breaks every such mission.
-func TestClaudeManifestEgressIsUnconfined(t *testing.T) {
+// TestClaudeManifestStatesNoEgressCeiling pins the posture of the claude
+// agent. The manifest states no ceiling: the network scope of its mission
+// node decides (owner decision S6, gibson#865). A coding agent runs in a node
+// that the mission author marks research.
+func TestClaudeManifestStatesNoEgressCeiling(t *testing.T) {
 	e, ok := LookupAgent("claude")
 	if !ok {
 		t.Fatal("LookupAgent(claude): not listed in the embedded catalog")
@@ -218,8 +216,27 @@ func TestClaudeManifestEgressIsUnconfined(t *testing.T) {
 	if e.DispatchMode != DispatchModeSandboxed {
 		t.Errorf("dispatchMode = %q, want %q", e.DispatchMode, DispatchModeSandboxed)
 	}
-	if len(e.EgressAllow) != 1 || e.EgressAllow[0] != "*" {
-		t.Errorf("egressAllow = %+v, want [*] so the SandboxClass posture applies", e.EgressAllow)
+	if len(e.EgressAllow) != 0 {
+		t.Errorf("egressAllow = %+v, want none: the node decides", e.EgressAllow)
+	}
+}
+
+// TestLoad_RefusesAWildcardEgress is the failing fixture of the rule that the
+// catalog holds no "*" (owner decision S6).
+func TestLoad_RefusesAWildcardEgress(t *testing.T) {
+	body := "id: t\nkind: tool\negressAllow:\n  - api.example.com\n  - \" * \"\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: t\n  image: ghcr.io/x/t@sha256:abc\n"
+	_, err := load(manifestFSWith(map[string]string{"m.yaml": body}))
+	if err == nil || !strings.Contains(err.Error(), `egressAllow holds "*"`) {
+		t.Fatalf("load error = %v, want the wildcard refused", err)
+	}
+}
+
+// The shipped catalog holds no "*".
+func TestCatalog_HoldsNoWildcardEgress(t *testing.T) {
+	for _, m := range catalog {
+		if err := validateEgressAllow(m.ID, m.EgressAllow); err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -243,8 +260,8 @@ func TestZerocoolManifest(t *testing.T) {
 	if e.DispatchMode != DispatchModeSandboxed {
 		t.Errorf("dispatchMode = %q, want %q", e.DispatchMode, DispatchModeSandboxed)
 	}
-	if len(e.EgressAllow) != 1 || e.EgressAllow[0] != "*" {
-		t.Errorf("egressAllow = %+v, want [*]", e.EgressAllow)
+	if len(e.EgressAllow) != 0 {
+		t.Errorf("egressAllow = %+v, want none: the node decides", e.EgressAllow)
 	}
 	if e.Model != "" {
 		t.Errorf("model must not be pinned (resolved newest at dispatch), got %q", e.Model)

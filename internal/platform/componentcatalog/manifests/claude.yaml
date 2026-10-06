@@ -5,17 +5,13 @@ description: >-
   Claude Code headless in an ephemeral sandbox: pursues a mission goal with
   the Gibson tools, records findings and memories into the tenant World, and
   runs on the tenant's own Anthropic key.
-# "*" declares no gibson-side confinement, so the sandbox takes its
-# SandboxClass posture instead: the agent class defaults to setec's
-# external-only mode, which permits the public internet and still denies
-# the operator's reserved ranges. A pinned list here was the tighter
-# posture, but it is wrong for a coding agent: the work it is dispatched
-# to do (read a repository, fetch a package index, follow a CVE link)
-# names destinations no manifest can enumerate ahead of the mission.
-# Matches the zerocool agent. Per-tenant egress policy is the follow-up
-# that replaces this with something a tenant can narrow.
-egressAllow:
-  - "*"
+# The manifest states no egress ceiling. The network scope of the mission
+# node decides the egress of the sandbox (owner decision S6, gibson#865): a
+# coding agent runs in a node that the mission author marks research, because
+# its work (read a repository, fetch a package index, follow a CVE link) names
+# destinations that no manifest can list ahead of the mission. With no node
+# scope, the sandbox takes the default of its SandboxClass. The catalog holds
+# no "*".
 spec:
   runtime: setec
   # Tag 0.4.3 from the zerocool-plugins release claude-member v0.4.3

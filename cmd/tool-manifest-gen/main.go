@@ -242,10 +242,9 @@ func manifest(image string, t tool) []byte {
 	for _, line := range wrap(t.Description, 74) {
 		fmt.Fprintf(&b, "  %s\n", line)
 	}
-	fmt.Fprintf(&b, "# A scanner reaches the mission's targets. The effective egress of a tool\n")
-	fmt.Fprintf(&b, "# launch is bounded by the dispatching agent's ceiling (ADR-0116), so this\n")
-	fmt.Fprintf(&b, "# is a ceiling, not a grant.\n")
-	fmt.Fprintf(&b, "egressAllow:\n  - \"*\"\n")
+	fmt.Fprintf(&b, "# A scanner reaches the targets of its mission node. The network scope of\n")
+	fmt.Fprintf(&b, "# the node decides the egress of the tool sandbox (owner decision S6,\n")
+	fmt.Fprintf(&b, "# gibson#865), so the manifest states no ceiling. The catalog holds no \"*\".\n")
 	fmt.Fprintf(&b, "spec:\n")
 	// Third-party scanners parsing attacker-influenced output: untrusted, and
 	// therefore always sandboxed (ADR-0110).

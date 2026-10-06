@@ -15,9 +15,6 @@ func TestEgressRulesFromAllow(t *testing.T) {
 	if EgressRulesFromAllow(nil) != nil {
 		t.Error("empty ceiling must be unrestricted (nil)")
 	}
-	if EgressRulesFromAllow([]string{"a.com:80", "*", "b.com"}) != nil {
-		t.Error(`a "*" entry must mean unrestricted (nil)`)
-	}
 	if EgressRulesFromAllow([]string{"", "  "}) != nil {
 		t.Error("only-blank entries must be unrestricted (nil)")
 	}

@@ -573,10 +573,10 @@ func (r *ring) tail(nLines int) string {
 }
 
 // EgressRulesFromAllow converts a manifest egressAllow ceiling into setec egress
-// rules. An empty list, or any entry equal to "*", returns nil: the launch then
-// sends no network message and the sandbox takes the defaultNetworkMode of its
-// SandboxClass. Every other entry is "host[:port]"; a missing port defaults to
-// 443.
+// rules. An empty list returns nil: the launch then sends no network message
+// and the sandbox takes the defaultNetworkMode of its SandboxClass. Each entry
+// is "host[:port]"; a missing port defaults to 443. The catalog loader refuses
+// the value "*" (gibson#865), so it never reaches this function.
 func EgressRulesFromAllow(allow []string) []EgressRule {
 	if len(allow) == 0 {
 		return nil
@@ -586,9 +586,6 @@ func EgressRulesFromAllow(allow []string) []EgressRule {
 		a = strings.TrimSpace(a)
 		if a == "" {
 			continue
-		}
-		if a == "*" {
-			return nil
 		}
 		host, port := a, uint32(443)
 		if i := strings.LastIndex(a, ":"); i >= 0 {
