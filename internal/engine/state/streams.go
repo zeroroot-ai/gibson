@@ -877,8 +877,8 @@ func (c *StateClient) StreamSubscribe(ctx context.Context, stream, lastID string
 				}
 
 				// Log and continue to next iteration. Per-command retries are
-				// handled by go-redis's native MaxRetries (wired in
-				// platform-clients v0.10.0 via RedisOptions.MaxRetries).
+				// handled by go-redis's native MaxRetries (wired through
+				// RedisOptions.MaxRetries in internal/infra/pools).
 				continue
 			}
 

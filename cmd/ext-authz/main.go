@@ -212,7 +212,7 @@ func main() {
 	}
 	log.Info("FGA registry loaded", "entries", reg.Len(), "source", registrySrc)
 
-	// FGA client + cached checker. The platform-clients FGAClient
+	// FGA client + cached checker. The internal/infra/authz FGAClient
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
 	checker, fgaClient := buildChecker(log, reg)
@@ -398,7 +398,7 @@ func intOr(key string, fallback int) int {
 	return n
 }
 
-// buildChecker constructs the FGA Checker over a platform-clients
+// buildChecker constructs the FGA Checker over an internal/infra/authz
 // FGAClient. The PerCallTimeout floor here is THE fix for the audit
 // finding "no per-call FGA timeout floor (so slow OpenFGA consumes
 // Envoy's full 5s ext_authz budget)" — 1500ms sits comfortably under
@@ -441,7 +441,7 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 		os.Exit(1)
 	}
 
-	// Startup self-check (ext-authz#24). The platform-clients constructor
+	// Startup self-check (ext-authz#24). The internal/infra/authz constructor
 	// does NOT dial; an explicit round-trip catches port/protocol
 	// mismatches the way deploy#140 did. Fail-fast on transport-class
 	// errors so kubelet's CrashLoopBackoff + container log surface the

@@ -3,14 +3,14 @@
 
 package daemon
 
-// readiness.go wires platform-clients/readiness probes for the daemon's
+// readiness.go wires internal/infra/readiness probes for the daemon's
 // /readyz endpoint.
 //
 // The daemon already exposes /readyz via sdk/health/http.Server (which
 // evaluates the checks registered via RegisterReadinessCheck). This file
-// adds platform-clients/readiness.Probe implementations that are registered
+// adds internal/infra/readiness.Probe implementations that are registered
 // alongside the existing probes with the "pc_" prefix, providing the
-// canonical platform-clients format for tooling that expects it.
+// canonical internal/infra/readiness format for tooling that expects it.
 //
 // Probe coverage (P1 audit finding, zeroroot-ai/.github#101):
 //   - "postgres"   — dashboard shared Postgres reachability
@@ -21,7 +21,7 @@ package daemon
 // already covered by the existing "redis" RegisterReadinessCheck.
 //
 // Spec: zeroroot-ai/.github#101 (P1 — /readyz distinct from /healthz,
-// platform-clients/readiness probes).
+// internal/infra/readiness probes).
 
 import (
 	"context"
@@ -83,7 +83,7 @@ type platformReadinessProbe struct {
 func (p *platformReadinessProbe) Name() string                    { return p.name }
 func (p *platformReadinessProbe) Check(ctx context.Context) error { return p.check(ctx) }
 
-// newPlatformReadinessProbes returns a slice of platform-clients Probe
+// newPlatformReadinessProbes returns a slice of internal/infra/readiness Probe
 // implementations for the daemon's infrastructure dependencies.
 // The caller registers each probe via healthServer.RegisterReadinessCheck.
 func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {

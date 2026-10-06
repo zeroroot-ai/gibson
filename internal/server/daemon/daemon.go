@@ -1892,7 +1892,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered authz FGA readiness check")
 	}
 
-	// Wire platform-clients/readiness probe implementations into the existing
+	// Wire internal/infra/readiness probe implementations into the existing
 	// /readyz handler (audit P1 finding, zeroroot-ai/.github#101).
 	//
 	// Each probe produced by newPlatformReadinessProbes() is registered with
@@ -1900,7 +1900,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// conflicting with the existing "authz_fga" SDK probe.
 	//
 	// The local readinessProber interface matches pcreadiness.Probe without
-	// requiring daemon.go to import platform-clients/readiness directly.
+	// requiring daemon.go to import internal/infra/readiness directly.
 	type readinessProber interface {
 		Name() string
 		Check(ctx context.Context) error

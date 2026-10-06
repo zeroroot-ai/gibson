@@ -29,7 +29,7 @@ var ErrCircuitOpen = fmt.Errorf("secrets circuit open: %w", sdksecrets.ErrUnavai
 
 // Prometheus metrics for gobreakerExecutor state transitions.
 //
-// NOTE: platform-clients/secrets also registers gibson_secrets_circuit_open_total
+// NOTE: internal/infra/secrets also registers gibson_secrets_circuit_open_total
 // and gibson_secrets_circuit_state (for its own gobreaker-backed circuit).
 // This daemon-local executor uses _svc_ names to avoid a duplicate-
 // registration panic when both packages are linked into the same binary.

@@ -17,7 +17,7 @@ import (
 )
 
 // neo4jProductionOpts are the required connection lifecycle settings for
-// per-tenant Neo4j drivers, enforced via platform-clients/pools so that
+// per-tenant Neo4j drivers, enforced via internal/infra/pools so that
 // the daemon uses the same validated defaults as every other platform service.
 //
 // Values:
@@ -119,7 +119,7 @@ func (n *neo4jPerTenant) driverForTenant(ctx context.Context, tenant auth.Tenant
 		return nil, fmt.Errorf("datapool: neo4j: resolving endpoint for tenant %s: %w", tenant, err)
 	}
 
-	// Apply required connection lifecycle settings enforced by platform-clients/pools.
+	// Apply required connection lifecycle settings enforced by internal/infra/pools.
 	// MaxConnectionLifetime is required; omitting it leaves connections open
 	// indefinitely (audit finding P1, zeroroot-ai/.github#101).
 	driver, err = neo4j.NewDriverWithContext(ep.BoltURI, neo4j.BasicAuth(ep.Username, ep.Password, ""),

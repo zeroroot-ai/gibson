@@ -299,7 +299,7 @@ func jwtRoleName(tenantID string) string         { return "gibson-plugin-" + ten
 // Note: sys/internal/ui/mounts/* is intentionally absent. In OpenBao/Vault
 // child namespaces that path is root-restricted and cannot be granted via
 // a regular policy (tested on OpenBao v2.5.3 — explicit grants return 403).
-// The platform-clients vault Provider skips detectKVVersion when
+// The internal/infra/secrets/vault Provider skips detectKVVersion when
 // Config.Namespace != "" for exactly this reason; the operator always
 // provisions KV v2 in namespace mode.
 //
