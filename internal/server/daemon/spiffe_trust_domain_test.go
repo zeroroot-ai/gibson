@@ -4,10 +4,11 @@
 package daemon
 
 import (
-	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"testing"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
 // testTD is the trust domain of the policy tests. It is not zeroroot.ai on
