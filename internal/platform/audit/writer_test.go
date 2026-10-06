@@ -90,7 +90,7 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 // reads id, ..., decision (COALESCE'd), metadata, created_at and orders by
 // created_at DESC. audit_chain_anchor mirrors 035_audit_retention.up.sql, and
 // audit_export_cursor mirrors 037_audit_export_cursor.up.sql, and
-// audit_retention_tenant mirrors 041_audit_retention_tenant.up.sql.
+// audit_retention_tenant mirrors 043_audit_retention_tenant.up.sql.
 func createAuditSchema(ctx context.Context, db *sql.DB) error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS audit_log (
