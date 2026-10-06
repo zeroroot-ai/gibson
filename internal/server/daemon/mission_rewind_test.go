@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -134,7 +135,7 @@ func (r *startRecorder) start(_ context.Context, id string) (string, error) {
 // A rewind of one mission leaves a second mission of the same tenant World as
 // it was, and it deletes no Timeline event (ADR-0170).
 func TestRewind_TheSecondMissionDoesNotChange(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	first, second := storedChain(t), storedChain(t)
 	runChain(eng, first.ID.String())
 	runChain(eng, second.ID.String())
@@ -171,7 +172,7 @@ func TestRewind_TheSecondMissionDoesNotChange(t *testing.T) {
 
 // A second request with the same idempotency key starts no second run.
 func TestRewind_TheSameKeyStartsNoSecondRun(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	first := storedChain(t)
 	runChain(eng, first.ID.String())
 
@@ -257,7 +258,7 @@ func TestRewindDefinition_RefusesANodeNotInTheDefinition(t *testing.T) {
 }
 
 func TestRewind_RefusesAnUnknownCheckpoint(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	first := storedChain(t)
 	runChain(eng, first.ID.String())
 	starts := &startRecorder{}
@@ -274,7 +275,7 @@ func TestRewind_RefusesAnUnknownCheckpoint(t *testing.T) {
 }
 
 func TestMissionCheckpoints_ListsTheNodeEndsInOrder(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	runChain(eng, "m-1")
 	runChain(eng, "m-2")
 

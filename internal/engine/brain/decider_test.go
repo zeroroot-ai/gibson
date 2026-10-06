@@ -29,7 +29,7 @@ func (s *scriptedLLM) Decide(_ context.Context, _ MissionContext) (DeciderOutput
 // retry, and the no-goal completion System (harmless for goal missions). The
 // DeciderWorker is returned for off-tick draining.
 func goalEngine(llm DeciderLLM) (*Engine, *DeciderWorker) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, llm, func(string) []Capability {
 		return []Capability{{Kind: "agent", Name: "exploit", Description: "exploit a host"}}
 	})

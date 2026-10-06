@@ -18,7 +18,7 @@ import (
 func TestEngine_InMemoryTimelineStaysBounded(t *testing.T) {
 	const cadence = 10
 	store := &memTimelineStore{}
-	e := NewEngine("t").WithStore(store).WithSnapshotCadence(cadence)
+	e := NewEngine("t", store).WithSnapshotCadence(cadence)
 
 	const events = 1000
 	for i := range events {
@@ -44,21 +44,11 @@ func (*trimFailStore) TrimTo(context.Context, string, string) error {
 // When the store trim fails, the in-memory Timeline keeps its events.
 func TestEngine_FailedTrimKeepsTheInMemoryTimeline(t *testing.T) {
 	store := &trimFailStore{}
-	e := NewEngine("t").WithStore(store).WithSnapshotCadence(2)
+	e := NewEngine("t", store).WithSnapshotCadence(2)
 	for i := range 5 {
 		e.Submit(HostObserved{ScopeID: "s", Address: fmt.Sprintf("10.0.0.%d", i)})
 	}
 	require.Equal(t, 5, e.Tick())
 	require.Equal(t, 5, e.Timeline.Len())
 	require.Equal(t, 5, store.remaining())
-}
-
-// An engine with no store never trims: its Timeline is its full history.
-func TestEngine_WithNoStoreKeepsEachEvent(t *testing.T) {
-	e := NewEngine("t").WithSnapshotCadence(2)
-	for i := range 7 {
-		e.Submit(HostObserved{ScopeID: "s", Address: fmt.Sprintf("10.0.0.%d", i)})
-	}
-	e.Tick()
-	require.Equal(t, 7, e.Timeline.Len())
 }

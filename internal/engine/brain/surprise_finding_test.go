@@ -8,7 +8,7 @@ import "testing"
 // A strong-signal identity contradiction (same address, different SSH host key)
 // raises a Surprise, which the surprise→Finding pipeline promotes to a Finding.
 func TestSurpriseFindingSystem_PromotesIdentityAnomaly(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SurpriseFindingSystem)
 
 	// First host at 10.0.0.5 with host key A.
@@ -43,7 +43,7 @@ func TestSurpriseFindingSystem_PromotesIdentityAnomaly(t *testing.T) {
 
 // The pipeline is idempotent + quiescent: re-ticking raises no duplicate finding.
 func TestSurpriseFindingSystem_Idempotent(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SurpriseFindingSystem)
 	e.Submit(HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "AAAA"})
 	e.Submit(HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "BBBB"})
@@ -61,7 +61,7 @@ func TestSurpriseFindingSystem_Idempotent(t *testing.T) {
 
 // No surprise → no anomaly finding.
 func TestSurpriseFindingSystem_NoSurpriseNoFinding(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SurpriseFindingSystem)
 	e.Submit(HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "AAAA"})
 	e.Tick()

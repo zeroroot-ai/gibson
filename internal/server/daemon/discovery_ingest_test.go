@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 )
@@ -49,7 +50,7 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 	defer cancel()
 
 	const tenant = "acme"
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	// Build the processor exactly the way the daemon does at startup, so this
 	// test is exercising the production wiring rather than a parallel one.
@@ -113,7 +114,7 @@ func TestDiscoveryIngestFallsBackToTheRegistryTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: "fallback-tenant"}
 
 	_, err := d.newDiscoveryProcessor().Process(ctx, ingest.ExecContext{MissionID: "m"}, discoveryFixture())
@@ -135,7 +136,7 @@ func TestDiscoveryProcessorIsAlwaysConstructed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d := &daemonImpl{logger: testObsLogger(), brainRegistry: brain.NewRegistry(ctx), registryTenant: "t"}
+	d := &daemonImpl{logger: testObsLogger(), brainRegistry: brain.NewRegistry(ctx, braintest.StoreFactory()), registryTenant: "t"}
 	assert.NotNil(t, d.newDiscoveryProcessor())
 }
 
@@ -146,7 +147,7 @@ func TestDiscoverySinkDropsEventsWithNoTenantToRouteThem(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestDiscovery(reg, "")
 	sink("", brain.HostObserved{ScopeID: "s", Address: "192.0.2.99"})
 

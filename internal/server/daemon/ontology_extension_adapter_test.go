@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 const ontologyExtensionServiceName = "gibson.tenant.v1.OntologyExtensionService"
@@ -21,7 +22,7 @@ const ontologyExtensionServiceName = "gibson.tenant.v1.OntologyExtensionService"
 func TestRegisterOntologyExtension_ServesWithBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
-		brainRegistry: brain.NewRegistry(context.Background()),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()

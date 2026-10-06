@@ -239,7 +239,7 @@ func TestComputeCalibration_PropagatesSubstrateError(t *testing.T) {
 func TestEngine_Calibration_ReadsLiveSettledBets(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	e := NewRegistry(ctx).For("acme")
+	e := NewRegistry(ctx, memStoreFactory()).For("acme")
 
 	substrate := newFakeBeliefSubstrate()
 	setClaimBelief(t, substrate, "acme", "h1", 0.7)

@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -29,7 +30,7 @@ func newDomainPackServiceWithGate(t *testing.T, catalog *ontology.DomainPackCata
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	return NewDomainPackService(reg, catalog, gate, &memImportStore{}), reg
 }
 

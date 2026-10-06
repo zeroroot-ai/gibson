@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
@@ -47,7 +48,7 @@ func TestDecide_CapturesLLMCallOntoTimeline(t *testing.T) {
 			CompletionTokens: 17,
 		},
 	}
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	b := newBrainExecutor(nil, slog.Default())
 	b.register("m1", &missionBinding{ctx: context.Background(), eng: eng, harness: h})
 
@@ -92,7 +93,7 @@ func TestDecide_CapturesLLMCallOntoTimeline(t *testing.T) {
 // callback LLM RPCs: a failed Decide call is not folded into the Timeline.
 func TestDecide_LLMErrorNeverCaptured(t *testing.T) {
 	h := &deciderLLMHarness{err: context.DeadlineExceeded}
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	b := newBrainExecutor(nil, slog.Default())
 	b.register("m1", &missionBinding{ctx: context.Background(), eng: eng, harness: h})
 

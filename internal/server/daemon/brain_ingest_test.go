@@ -10,6 +10,7 @@ import (
 
 	gibsonagent "github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -22,7 +23,7 @@ import (
 func TestIngestToBrain_FeedsWorld(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	ingestToBrain(reg, "acme", api.EventData{
 		EventType:    "mission.started",
@@ -60,7 +61,7 @@ func TestIngestToBrain_FeedsWorld(t *testing.T) {
 func TestIngestLLMCall_FeedsWorld(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestLLMCall(reg)
 
 	sink(ctx, "acme", api.LLMCallRecord{
@@ -88,7 +89,7 @@ func TestIngestLLMCall_NilSafe(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	ingestLLMCall(reg)(ctx, "acme", api.LLMCallRecord{CallID: ""}) // empty id ignored
 	time.Sleep(50 * time.Millisecond)
 	if got := reg.For("acme").LlmCalls(); len(got) != 0 {
@@ -103,7 +104,7 @@ func TestIngestLLMCall_NilSafe(t *testing.T) {
 func TestIngestToBrain_AgentFindingSubmitted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	ingestToBrain(reg, "acme", api.EventData{
 		EventType: "agent.finding_submitted",
@@ -128,7 +129,7 @@ func TestIngestToBrain_AgentFindingSubmitted(t *testing.T) {
 func TestIngestComponentFinding(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	sink := ingestComponentFinding(reg)
 	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
@@ -161,7 +162,7 @@ func TestIngestComponentFinding(t *testing.T) {
 func TestIngestComponentFinding_MissionStamped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	sink := ingestComponentFinding(reg)
 	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh}, "m-7", ""))
@@ -198,7 +199,7 @@ func TestIngestComponentFinding_MissionStamped(t *testing.T) {
 func TestIngestLLMCall_MissionStamped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestLLMCall(reg)
 
 	sink(ctx, "acme", api.LLMCallRecord{CallID: "c-mission", MissionID: "m-9", Model: "m", PromptTokens: 10, CompletionTokens: 5})
@@ -233,7 +234,7 @@ func TestIngestLLMCall_MissionStamped(t *testing.T) {
 func TestIngestLLMCall_CarriesToolCallsFullFidelity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestLLMCall(reg)
 
 	sink(ctx, "acme", api.LLMCallRecord{
@@ -325,7 +326,7 @@ func TestToAPIToolCalls_PreservesFullFidelity(t *testing.T) {
 func TestIngestToolCall_FeedsWorld(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestToolCall(reg)
 
 	sink(ctx, "acme", harness.ToolCallRecord{
@@ -354,7 +355,7 @@ func TestIngestToolCall_NilSafe(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: ""})
 	time.Sleep(50 * time.Millisecond)
 	if got := reg.For("acme").AgentToolCalls(); len(got) != 0 {
@@ -368,7 +369,7 @@ func TestIngestToolCall_NilSafe(t *testing.T) {
 func TestIngestDelegation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	sink := ingestDelegation(reg)
 	sink(ctx, harness.DelegationObserved{

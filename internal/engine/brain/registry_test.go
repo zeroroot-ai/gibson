@@ -29,7 +29,7 @@ func waitFor(t *testing.T, cond func() bool) {
 func TestRegistry_PerTenantIsolation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	r := NewRegistry(ctx)
+	r := NewRegistry(ctx, memStoreFactory())
 
 	if r.For("a") != r.For("a") {
 		t.Fatal("For(a) returned different engines")
@@ -62,7 +62,7 @@ func TestRegistry_PerTenantIsolation(t *testing.T) {
 func TestRegistry_LiveSystemsRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	r := NewRegistry(ctx, BeliefSystem)
+	r := NewRegistry(ctx, memStoreFactory(), BeliefSystem)
 	r.OnEngine(func(e *Engine) { WireBelief(ctx, e, deterministicBelief{}, 0) })
 
 	r.For("a").Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22, 80}})

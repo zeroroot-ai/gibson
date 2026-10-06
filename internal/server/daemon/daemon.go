@@ -1016,11 +1016,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to resolve edge posterior provider: %w", err)
 	}
 	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
-	d.brainRegistry = brain.NewRegistry(ctx, append(
+	d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	d.brainRegistry.WithStoreFactory(timelineStoreFactory(lazyTimelinePool{pool: func() timelinePoolForer { return d.pool }}, d.logger.Slog()))
 	// Belief inference runs in-process (ADR-0134) but still off the tick, since
 	// exact variable elimination is not free: BeliefSystem asks for a score when
 	// a host's evidence changes, and the worker WireBelief installs answers with

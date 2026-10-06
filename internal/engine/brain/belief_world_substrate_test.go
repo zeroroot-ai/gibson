@@ -61,7 +61,7 @@ func TestWorldBeliefSubstrate_BeliefReadsCurrentHostState(t *testing.T) {
 }
 
 func TestWorldBeliefSubstrate_UnknownHostIsNotFound(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 	_, ok, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindHost, ID: HostNodeID(999)})
 	if err != nil {
@@ -77,7 +77,7 @@ func TestWorldBeliefSubstrate_UnknownHostIsNotFound(t *testing.T) {
 // "not found" — a malformed ref is a caller bug, not a legitimately unknown
 // host, and nilerr-style swallowing would hide it.
 func TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 	_, ok, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindHost, ID: "not-a-number"})
 	if err == nil {
@@ -97,7 +97,7 @@ func TestWorldBeliefSubstrate_BeliefPropagatesAnUnparseableHostID(t *testing.T) 
 // not an error and not a zero-value belief mistaken for a real one — the
 // same contract fakeBeliefSubstrate holds for an unscored node.
 func TestWorldBeliefSubstrate_UnwrittenNonHostKindIsNotFound(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 	_, ok, err := sub.Belief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: "acme/hyp-1"})
 	if err != nil {
@@ -114,7 +114,7 @@ func TestWorldBeliefSubstrate_UnwrittenNonHostKindIsNotFound(t *testing.T) {
 // gap that previously left calibration reading every settled bet as
 // Unscored and VoI's reputation resolving to the neutral prior.
 func TestWorldBeliefSubstrate_ClaimAndTechniqueEnvironmentRoundTrip(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 
 	claim := NodeRef{Kind: NodeKindClaim, ID: "acme/hyp-1"}
@@ -147,7 +147,7 @@ func TestWorldBeliefSubstrate_ClaimAndTechniqueEnvironmentRoundTrip(t *testing.T
 // TestWorldBeliefSubstrate_SetBeliefRejectsAnUnaddressableNonHostRef proves a
 // non-Host ref with no Kind or ID is a caller error, not a silent no-op.
 func TestWorldBeliefSubstrate_SetBeliefRejectsAnUnaddressableNonHostRef(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 	if err := sub.SetBelief(context.Background(), NodeRef{Kind: NodeKindClaim, ID: ""}, NodeBelief{}); err == nil {
 		t.Fatalf("SetBelief accepted a Claim ref with no id")
@@ -158,7 +158,7 @@ func TestWorldBeliefSubstrate_SetBeliefRejectsAnUnaddressableNonHostRef(t *testi
 }
 
 func TestWorldBeliefSubstrate_SetBeliefRejectsAnUnparseableHostID(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	sub := NewWorldBeliefSubstrate(e)
 	err := sub.SetBelief(context.Background(), NodeRef{Kind: NodeKindHost, ID: "not-a-number"}, NodeBelief{})
 	if err == nil {

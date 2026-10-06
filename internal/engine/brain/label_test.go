@@ -8,7 +8,7 @@ import "testing"
 // A label applied to a Finding is folded into the World and surfaces in the
 // pooled label set (ADR-0106).
 func TestLabelApplied_FoldsIntoWorld(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, Severity: "high", Category: "rce", UserID: "alice"})
 	e.Tick()
 
@@ -24,7 +24,7 @@ func TestLabelApplied_FoldsIntoWorld(t *testing.T) {
 // Re-labelling the same target replaces the prior judgement (latest-write-wins,
 // one current label per target) — the trainer reads the tenant's settled opinion.
 func TestLabelApplied_LatestWriteWins(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, UserID: "alice"})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictFalsePositive, UserID: "bob"})
 	e.Tick()
@@ -42,7 +42,7 @@ func TestLabelApplied_LatestWriteWins(t *testing.T) {
 // land in the one tenant-wide pool (ADR-0106 — UserID is provenance, not a
 // partition key).
 func TestLabels_PoolAcrossUsersWithinTenant(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, UserID: "alice"})
 	e.Submit(LabelApplied{TargetID: "finding-2", Verdict: VerdictDismiss, UserID: "bob"})
 	e.Tick()
@@ -60,8 +60,8 @@ func TestLabels_PoolAcrossUsersWithinTenant(t *testing.T) {
 // Labels NEVER cross tenants: a label in t1's World is invisible in t2's World
 // (structural isolation — one World per tenant, ADR-0101).
 func TestLabels_NeverCrossTenant(t *testing.T) {
-	t1 := NewEngine("t1")
-	t2 := NewEngine("t2")
+	t1 := NewEngine("t1", &memTimelineStore{})
+	t2 := NewEngine("t2", &memTimelineStore{})
 	t1.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, UserID: "alice"})
 	t1.Tick()
 	t2.Tick()
@@ -77,7 +77,7 @@ func TestLabels_NeverCrossTenant(t *testing.T) {
 // Labelling is replay-reproducible: folding the Timeline into a fresh World
 // reproduces the label set exactly (labels are events — ADR-0106).
 func TestLabelApplied_ReplayReproduces(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictTruePositive, UserID: "alice"})
 	e.Submit(LabelApplied{TargetID: "finding-1", Verdict: VerdictFalsePositive, UserID: "bob"})
 	e.Tick()
@@ -96,7 +96,7 @@ func TestLabelApplied_ReplayReproduces(t *testing.T) {
 // The review queue projects Findings (and surfaced surprises), attaching any
 // applied label — and never mutates the World (read-only; non-blocking).
 func TestReviewQueue_ProjectsFindingsWithLabels(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SurpriseFindingSystem)
 	// Raise a Finding via an identity contradiction.
 	e.Submit(HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "AAAA"})

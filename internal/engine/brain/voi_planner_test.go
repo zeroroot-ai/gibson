@@ -34,7 +34,7 @@ func voiEngineWithCatalog(
 	catalog func(missionID string) []Capability,
 	hierarchy *taxonomy.TechniqueHierarchy,
 ) (*Engine, *VoIWorker) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.AddSystem(VoIGateSystem)
 	e.SetCapabilityCatalog(catalog)
 	w := NewVoIWorker(e, substrate, registry, scorer, topK, hierarchy, testBAMCPPlanner(registry))
@@ -166,7 +166,7 @@ func TestVoIWorker_FailedPlanClearsInFlightWithNoCandidates(t *testing.T) {
 // that cancelling ctx stops the goroutine cleanly (the ctx.Done() drain path).
 func TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick(t *testing.T) {
 	registry := liveBeliefRegistry(t)
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.AddSystem(VoIGateSystem)
 	ctx, cancel := context.WithCancel(context.Background())
 	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, testBAMCPPlanner(registry))

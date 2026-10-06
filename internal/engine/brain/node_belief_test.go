@@ -99,7 +99,7 @@ func TestNodeBeliefSnapshot_DeterministicOrder(t *testing.T) {
 // identically — the same World==fold(Timeline) discipline every other
 // belief-engine event in this package holds to.
 func TestNodeBeliefSet_ReplayReproducesExactly(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(NodeBeliefSet{Ref: NodeRef{Kind: NodeKindClaim, ID: "acme/1"}, Belief: Belief{Exploitable: 0.42}, EvidenceDigest: "d"})
 	e.Tick()
 
@@ -120,7 +120,7 @@ func TestNodeBeliefSet_Kind(t *testing.T) {
 // TestEngine_NodeBeliefs_ReadsLiveState proves the Engine-level accessor
 // mirrors BetSettlements()'s own read-locked, tick-driven convention.
 func TestEngine_NodeBeliefs_ReadsLiveState(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(NodeBeliefSet{Ref: NodeRef{Kind: NodeKindClaim, ID: "acme/1"}, Belief: Belief{Exploitable: 0.5}})
 	e.Tick()
 

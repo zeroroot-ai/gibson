@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 
@@ -92,7 +93,7 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 	pool := &mockPool{conn: &datapool.Conn{Redis: rdb}}
 	writer := newFakeGraphWriter()
 
-	reg := brain.NewRegistry(ctx, brain.BeliefSystem)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.BeliefSystem)
 	d := &daemonImpl{
 		logger:        testObsLogger(),
 		targetStore:   targets,

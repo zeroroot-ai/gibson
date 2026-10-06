@@ -57,8 +57,7 @@ type Engine struct {
 	systems     []System
 	subscribers []func(Event) // live-only event taps (ADR-0109); never fire on Replay
 
-	// store is the durable-log seam (ADR-0163). Nil when no durable store is
-	// configured (in-memory only, backward-compatible). Set via WithStore.
+	// store is the durable log of the tenant (ADR-0163). Each engine has one.
 	store TimelineStore
 
 	// Snapshot-cadence bookkeeping (ADR-0163). After every
@@ -96,11 +95,14 @@ type Engine struct {
 	capabilityCatalog func(missionID string) []Capability
 }
 
-// NewEngine creates an Engine with an empty Tenant World and Timeline.
-func NewEngine(tenant string) *Engine {
+// NewEngine creates an Engine with an empty Tenant World and Timeline. store is
+// the durable Timeline of the tenant (ADR-0163). It is required: a tenant has no
+// engine without its durable Timeline.
+func NewEngine(tenant string, store TimelineStore) *Engine {
 	return &Engine{
 		World:           NewWorld(tenant),
 		Timeline:        &Timeline{},
+		store:           store,
 		intake:          make(chan Event, intakeBuffer),
 		snapshotCadence: defaultSnapshotCadence,
 		stopped:         make(chan struct{}),
@@ -141,14 +143,6 @@ func (e *Engine) stop(err error) {
 // snapshots. Returns the receiver for chaining. Call before Run.
 func (e *Engine) WithSnapshotCadence(n int) *Engine {
 	e.snapshotCadence = n
-	return e
-}
-
-// WithStore wires a TimelineStore for durable event persistence (ADR-0163).
-// Returns the receiver for chaining. Call before the first Submit or Run.
-// A nil store (the default) is safe — the engine operates in-memory only.
-func (e *Engine) WithStore(s TimelineStore) *Engine {
-	e.store = s
 	return e
 }
 
@@ -255,20 +249,18 @@ func (e *Engine) appendDurable(ev Event) (string, error) {
 // tick goroutine) holds the write lock. The append uses context.Background()
 // because the tick has no caller context.
 func (e *Engine) apply(ev Event) bool {
+	seq, err := e.appendDurable(ev)
+	if err != nil {
+		e.stop(err)
+		return false
+	}
+	e.lastAppendedSeq = seq
 	snapshotDue := false
-	if e.store != nil {
-		seq, err := e.appendDurable(ev)
-		if err != nil {
-			e.stop(err)
-			return false
-		}
-		e.lastAppendedSeq = seq
-		if e.snapshotCadence > 0 {
-			e.snapshotEventCount++
-			if e.snapshotEventCount >= e.snapshotCadence {
-				e.snapshotEventCount = 0
-				snapshotDue = true
-			}
+	if e.snapshotCadence > 0 {
+		e.snapshotEventCount++
+		if e.snapshotEventCount >= e.snapshotCadence {
+			e.snapshotEventCount = 0
+			snapshotDue = true
 		}
 	}
 	e.Timeline.Append(ev)
@@ -396,16 +388,11 @@ func (e *Engine) Run(ctx context.Context) {
 // via ResumeFailInFlight events, which ARE submitted to the live intake queue so
 // the retry system and mission-completion system run on the next tick.
 //
-// A nil store is a no-op (the Engine operates in-memory only).
-//
 // Hydrate returns an error when the snapshot or the Timeline tail does not load
 // or the snapshot does not restore. The engine then keeps its empty World and
 // the caller must not serve from it: after a trim, a replay without the
 // snapshot gives a partial World (ADR-0163).
 func (e *Engine) Hydrate(ctx context.Context) error {
-	if e.store == nil {
-		return nil
-	}
 	tenant := e.World.Tenant
 
 	// A snapshot covers the events up to its AtSeq. The replay then reads only
@@ -633,14 +620,10 @@ func (e *Engine) ReadWorld(fn func(*World)) {
 	fn(e.World)
 }
 
-// History returns the full ordered history of the tenant (ADR-0163). An engine
-// with a durable store reads it from the store: the events that a trim moved
-// to the durable history, then the live stream. An engine with no store never
-// trims, so its in-memory Timeline is the full history.
+// History returns the full ordered history of the tenant (ADR-0163). It reads
+// the durable store: the events that a trim moved to the durable history, then
+// the live stream.
 func (e *Engine) History(ctx context.Context) ([]Event, error) {
-	if e.store == nil {
-		return e.Events(), nil
-	}
 	evs, err := e.store.LoadHistory(ctx, e.World.Tenant)
 	if err != nil {
 		return nil, fmt.Errorf("brain/engine: history of tenant %q: %w", e.World.Tenant, err)
@@ -651,9 +634,6 @@ func (e *Engine) History(ctx context.Context) ([]Event, error) {
 // MissionHistory returns the mission's slice of the full history
 // (gibson#1060), in order. An empty missionID returns the whole history.
 func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event, error) {
-	if e.store == nil {
-		return e.MissionEvents(missionID), nil
-	}
 	evs, err := e.History(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("brain/engine: history of mission %q: %w", missionID, err)
@@ -667,14 +647,6 @@ func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event,
 // [0, total]. It returns the frame, the clamped n and the total. The fold is
 // new and independent, so it never touches the live World.
 func (e *Engine) HistoryFrameAt(ctx context.Context, missionID string, n int) (frame *World, seq, total int, err error) {
-	if e.store == nil {
-		total = len(e.MissionEvents(missionID))
-		seq = min(max(n, 0), total)
-		if missionID == "" {
-			return e.FrameAt(seq), seq, total, nil
-		}
-		return e.MissionFrameAt(missionID, seq), seq, total, nil
-	}
 	evs, err := e.MissionHistory(ctx, missionID)
 	if err != nil {
 		return nil, 0, 0, err

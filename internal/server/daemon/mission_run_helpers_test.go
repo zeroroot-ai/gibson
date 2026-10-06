@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -415,7 +416,7 @@ func TestFailBeforeStart_ProjectsStartedThenFailed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mm := helperMM()
-	mm.brainRegistry = brain.NewRegistry(ctx)
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
 	acme := auth.MustNewTenantID("acme")
 
 	mm.failBeforeStart(acme, "m-preflight", "recon", "pool not configured")
@@ -430,7 +431,7 @@ func TestFailBeforeStart_ProjectsStartedThenFailed(t *testing.T) {
 func execMissionTestManager(ctx context.Context, t *testing.T) (*missionManager, auth.TenantID) {
 	t.Helper()
 	mm := helperMM()
-	mm.brainRegistry = brain.NewRegistry(ctx)
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
 	mm.activeMissions = make(map[auth.TenantID]map[string]*activeMission)
 	return mm, auth.MustNewTenantID("acme")
 }

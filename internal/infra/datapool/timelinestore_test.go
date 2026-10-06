@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // waitForCondition polls cond until true or 2 s (used by hydration tests to
@@ -293,8 +294,7 @@ func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	_, rdb := newTestRedis(t)
 	store := NewTimelineStore(staticAcquire(rdb))
 
-	eng := brain.NewEngine("t1")
-	eng.WithStore(store)
+	eng := brain.NewEngine("t1", store)
 
 	ev1 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
 	ev2 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.2"}
@@ -308,18 +308,6 @@ func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	require.Len(t, loaded, 2, "both submitted events should be persisted")
 	assert.Equal(t, ev1, loaded[0], "first event should match")
 	assert.Equal(t, ev2, loaded[1], "second event should match")
-}
-
-// TestEngine_WithStore_NilSafe verifies that an Engine without a store does
-// not panic on Submit + Tick.
-func TestEngine_WithStore_NilSafe(t *testing.T) {
-	eng := brain.NewEngine("t1")
-	// No store wired — should operate in-memory only.
-
-	eng.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
-	require.NotPanics(t, func() {
-		eng.Tick()
-	}, "Tick should not panic without a store")
 }
 
 // TestHydrate_EquivalenceAfterRestart is the primary correctness test for
@@ -361,7 +349,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	}
 
 	// Compute the "expected" World by folding the same events into a fresh engine.
-	expected := brain.NewEngine(tenant)
+	expected := brain.NewEngine(tenant, braintest.NewMemTimelineStore())
 	for _, ev := range events {
 		expected.Submit(ev)
 	}
@@ -377,8 +365,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	// --- Phase 2: simulate restart via a fresh Registry ---
 	// Count subscribers fired during Hydrate (must be 0 — ADR-0109).
 	replayDispatchCount := 0
-	r := brain.NewRegistry(ctx)
-	r.WithStoreFactory(func(_ context.Context, _ string) (brain.TimelineStore, error) {
+	r := brain.NewRegistry(ctx, func(_ context.Context, _ string) (brain.TimelineStore, error) {
 		return store, nil
 	})
 	// Subscribe BEFORE For() so the hook is installed before hydration.
@@ -445,8 +432,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 
 	// Hydrate: Registry.For creates a fresh engine, calls Hydrate which replays
 	// the timeline and submits ResumeFailInFlight events to the intake queue.
-	r := brain.NewRegistry(ctx)
-	r.WithStoreFactory(func(_ context.Context, _ string) (brain.TimelineStore, error) {
+	r := brain.NewRegistry(ctx, func(_ context.Context, _ string) (brain.TimelineStore, error) {
 		return store, nil
 	})
 	eng := r.For(tenant) // hydrates; intake queue now has a WorkCompleted{Err:"interrupted:..."}
@@ -471,21 +457,6 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 				"orphaned in-flight work must not remain Running after hydration + tick")
 		}
 	}
-}
-
-// TestRegistry_WithStoreFactory_NoopWhenFactoryNil verifies that a Registry
-// without a StoreFactory creates engines that operate in-memory only (no panic,
-// backward-compatible with pre-#1113 behavior).
-func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	r := brain.NewRegistry(ctx)
-	// No WithStoreFactory call — should be safe.
-	eng := r.For("tenant-noop")
-	eng.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
-	require.NotPanics(t, func() { eng.Tick() }, "in-memory engine must not panic without a store factory")
-	require.Len(t, eng.Hosts(), 1, "event should still be processed in-memory")
 }
 
 // TestSnapshot_RoundTrip verifies that WriteSnapshot / LoadSnapshot are inverse:
@@ -572,7 +543,7 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 
 	// Build the "expected" World by folding all events from scratch.
 	all := append(append([]brain.Event(nil), prefix...), tail...)
-	expEng := brain.NewEngine(tenant)
+	expEng := brain.NewEngine(tenant, braintest.NewMemTimelineStore())
 	for _, ev := range all {
 		expEng.Submit(ev)
 	}
@@ -616,8 +587,7 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with
 	// 5 events at least two snapshots fire and the boundary event (the one that
 	// triggers the snapshot) is exercised.
-	live := brain.NewEngine(tenant)
-	live.WithStore(store).WithSnapshotCadence(2)
+	live := brain.NewEngine(tenant, store).WithSnapshotCadence(2)
 
 	events := []brain.Event{
 		brain.MissionStarted{ID: "m1", Goal: "scan", BeliefModel: "test"},
@@ -632,8 +602,7 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	live.Tick() // drains all events through apply(); snapshots fire at the cadence
 
 	// Hydrate a fresh engine from the same store (snapshot + tail).
-	fresh := brain.NewEngine(tenant)
-	fresh.WithStore(store)
+	fresh := brain.NewEngine(tenant, store)
 	require.NoError(t, fresh.Hydrate(context.Background()))
 
 	// The rehydrated World must equal the live World — no event lost at the

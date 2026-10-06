@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 )
 
@@ -23,7 +24,7 @@ const domainPackServiceName = "gibson.tenant.v1.DomainPackService"
 func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
-		brainRegistry: brain.NewRegistry(context.Background()),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		authorizer:    wiringAuthorizer{},
 		platformDB:    testPlatformDB(t),
 	}
@@ -44,7 +45,7 @@ func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
-		brainRegistry: brain.NewRegistry(context.Background()),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		authorizer:    wiringAuthorizer{},
 		platformDB:    testPlatformDB(t),
 	}
@@ -69,7 +70,7 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 	want := ontology.NewDomainPackCatalog(ontology.DomainPack{Name: "main", Version: 1})
 	d := &daemonImpl{
 		logger:            testObservabilityLogger(),
-		brainRegistry:     brain.NewRegistry(context.Background()),
+		brainRegistry:     brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		authorizer:        wiringAuthorizer{},
 		platformDB:        testPlatformDB(t),
 		domainPackCatalog: want,
@@ -86,7 +87,7 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 func TestRegisterDomainPack_SkipsWithoutAuthorizer(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
-		brainRegistry: brain.NewRegistry(context.Background()),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 	}
 	srv := grpc.NewServer()
 
@@ -130,7 +131,7 @@ func testPlatformDB(t *testing.T) *sql.DB {
 func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
-		brainRegistry: brain.NewRegistry(context.Background()),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		authorizer:    wiringAuthorizer{},
 		platformDB:    testPlatformDB(t),
 	}

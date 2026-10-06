@@ -117,7 +117,7 @@ var wantTwoBetCounts = map[string]EdgeOutcomeCount{
 // bets on one slice and asserts the counts per edge type, then proves the
 // same Timeline re-folds to the same counts.
 func TestEdgeOutcomes_TwoBetsOnOneSlice_CountPerEdgeTypeAndReplay(t *testing.T) {
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	settleTwoBetsOnOneSlice(t, e)
 
 	if got := e.EdgeOutcomeCounts(); !reflect.DeepEqual(got, wantTwoBetCounts) {
@@ -141,7 +141,7 @@ func TestEdgeOutcomes_TwoBetsOnOneSlice_CountPerEdgeTypeAndReplay(t *testing.T) 
 // hypothesis the World does not know, or one whose host carries no cause
 // edge types, records a settlement and no outcome.
 func TestEdgeOutcomes_UnknownHypothesisEmitsNothing(t *testing.T) {
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	_, err := e.SettleBetFalse(context.Background(), BetExhaustionRequest{HypothesisID: "ghost", AttemptBudget: 1, AttemptsMade: 1, Reason: "budget"})
 	require.NoError(t, err)
 	e.Tick()
@@ -266,11 +266,11 @@ func parseSeq(s string) int {
 // counts with no outcome event left to replay.
 func TestEdgeOutcomes_SurviveWriteSnapshotTrimToLoadSnapshot(t *testing.T) {
 	store := &memTimelineStore{}
-	e := NewEngine("acme").WithStore(store).WithSnapshotCadence(1)
+	e := NewEngine("acme", store).WithSnapshotCadence(1)
 	settleTwoBetsOnOneSlice(t, e)
 	require.Equal(t, 0, store.remaining(), "a cadence of one trims every event behind the snapshot")
 
-	fresh := NewEngine("acme").WithStore(store)
+	fresh := NewEngine("acme", store)
 	require.NoError(t, fresh.Hydrate(context.Background()))
 	if got := fresh.EdgeOutcomeCounts(); !reflect.DeepEqual(got, wantTwoBetCounts) {
 		t.Fatalf("hydrated counts:\n got %+v\nwant %+v", got, wantTwoBetCounts)
@@ -283,4 +283,21 @@ func TestEdgeOutcomes_SurviveWriteSnapshotTrimToLoadSnapshot(t *testing.T) {
 		types = append(types, s.EdgeType)
 	}
 	require.True(t, sort.StringsAreSorted(types))
+}
+
+// memStoreFactory gives each tenant its own in-memory store. A second call for
+// one tenant returns the same store, so a rebuilt engine hydrates from it.
+func memStoreFactory() StoreFactory {
+	var mu sync.Mutex
+	stores := map[string]*memTimelineStore{}
+	return func(_ context.Context, tenant string) (TimelineStore, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		s, ok := stores[tenant]
+		if !ok {
+			s = &memTimelineStore{}
+			stores[tenant] = s
+		}
+		return s, nil
+	}
 }
