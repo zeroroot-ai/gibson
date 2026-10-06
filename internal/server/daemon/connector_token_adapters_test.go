@@ -86,7 +86,8 @@ func (r memRegistry) For(context.Context, auth.TenantID) (sdksecrets.Broker, err
 
 type nopAuditWriter struct{}
 
-func (nopAuditWriter) Audit(context.Context, secrets.AuditEvent) {}
+func (nopAuditWriter) Audit(context.Context, secrets.AuditEvent)        {}
+func (nopAuditWriter) Record(context.Context, secrets.AuditEvent) error { return nil }
 
 func newTestSecretsService(t *testing.T, broker *memBroker) *secrets.Service {
 	t.Helper()
@@ -284,5 +285,61 @@ func TestConnectorTokenFreshener_NotFoundMappingHolds(t *testing.T) {
 	_, err := svc.Resolve(ctx, connectorauth.GrantSecretName("connector-gitlab"))
 	if status.Code(err) != codes.NotFound {
 		t.Fatalf("secrets.Service must map an absent secret to NotFound, got %v", err)
+	}
+}
+
+// actorAuditWriter keeps the subject of each Record call.
+type actorAuditWriter struct {
+	mu       sync.Mutex
+	subjects []string
+}
+
+func (*actorAuditWriter) Audit(context.Context, secrets.AuditEvent) {}
+func (a *actorAuditWriter) Record(ctx context.Context, _ secrets.AuditEvent) error {
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.subjects = append(a.subjects, id.Subject)
+	return nil
+}
+
+// TestConnectorTokenFreshener_WritesAsTheDaemon: the background refresh has
+// no caller, so each secret write records the daemon as its actor
+// (gibson#676). Without an actor the durable record, and so the write, fails.
+func TestConnectorTokenFreshener_WritesAsTheDaemon(t *testing.T) {
+	vendor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "at-1", "expires_in": 7200})
+	}))
+	defer vendor.Close()
+	broker := newMemBroker()
+	seedBrokerGrant(t, broker, "connector-gitlab", vendor.URL)
+
+	writer := &actorAuditWriter{}
+	svc, err := secrets.NewService(memRegistry{broker: broker},
+		secrets.NewGobreakerExecutor(resilience.CircuitConfig{}), writer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresher, err := connectorauth.NewRefresher(svc, vendor.Client(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &connectorTokenFreshener{refresher: refresher, book: connectorauth.NewStatusBook(), now: time.Now}
+
+	refreshed, err := f.EnsureFresh(context.Background(), auth.MustNewTenantID("acme"), "connector-gitlab")
+	if err != nil || !refreshed {
+		t.Fatalf("EnsureFresh = (%v, %v), want a refresh", refreshed, err)
+	}
+	if len(writer.subjects) == 0 {
+		t.Fatal("the refresh wrote no secret")
+	}
+	for _, s := range writer.subjects {
+		if s != connectorTokenFreshenerActor {
+			t.Fatalf("actor = %q, want %q", s, connectorTokenFreshenerActor)
+		}
 	}
 }

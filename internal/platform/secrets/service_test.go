@@ -293,3 +293,49 @@ func TestService_ResourceURIContainsTenantAndName(t *testing.T) {
 	assert.Contains(t, aud.events[0].ResourceURI, svcTenant.String())
 	assert.Contains(t, aud.events[0].ResourceURI, "cred:db-password")
 }
+
+// TestService_ChangesRecordBeforeTheBrokerWrite: Put and Delete write the
+// allow record through Record, before the broker call (gibson#676).
+func TestService_ChangesRecordBeforeTheBrokerWrite(t *testing.T) {
+	ctx := ctxWithTestTenant(svcTenant)
+	for name, call := range map[string]func(*Service) error{
+		"put":    func(s *Service) error { return s.Put(ctx, "cred:foo", []byte("val")) },
+		"delete": func(s *Service) error { return s.Delete(ctx, "cred:foo") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			aud := &fakeAuditCapture{}
+			require.NoError(t, call(buildService(&serviceFakeBroker{}, &fakeCircuit{}, aud)))
+			assert.Equal(t, []bool{true}, aud.recorded, "the allow record is durable")
+		})
+	}
+}
+
+// TestService_AFailedRecordStopsTheChange: when the audit record cannot be
+// written, the broker is never called and the caller gets Unavailable.
+func TestService_AFailedRecordStopsTheChange(t *testing.T) {
+	ctx := ctxWithTestTenant(svcTenant)
+	for name, call := range map[string]func(*Service) error{
+		"put":    func(s *Service) error { return s.Put(ctx, "cred:foo", []byte("val")) },
+		"delete": func(s *Service) error { return s.Delete(ctx, "cred:foo") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			circuit := &fakeCircuit{}
+			aud := &fakeAuditCapture{recordErr: errors.New("postgres down")}
+			err := call(buildService(&serviceFakeBroker{}, circuit, aud))
+			st, _ := status.FromError(err)
+			assert.Equal(t, codes.Unavailable, st.Code())
+			assert.Zero(t, circuit.fnCalls, "no broker write without its record")
+		})
+	}
+}
+
+// TestService_AFailedChangeAddsADenyRecord: the record of the attempt
+// stays, and a second record states the failure.
+func TestService_AFailedChangeAddsADenyRecord(t *testing.T) {
+	aud := &fakeAuditCapture{}
+	svc := buildService(&serviceFakeBroker{delErr: errors.New("backend refused")}, &fakeCircuit{}, aud)
+	require.Error(t, svc.Delete(ctxWithTestTenant(svcTenant), "cred:foo"))
+	require.Len(t, aud.events, 2)
+	assert.Equal(t, EffectAllow, aud.events[0].Effect)
+	assert.Equal(t, EffectDeny, aud.events[1].Effect)
+}

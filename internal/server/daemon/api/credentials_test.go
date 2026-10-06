@@ -65,7 +65,8 @@ func (c *apiTestCircuit) Execute(_, _ string, fn func() error) error { return fn
 
 type apiTestAuditor struct{}
 
-func (a *apiTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent) {}
+func (a *apiTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent)        {}
+func (a *apiTestAuditor) Record(_ context.Context, _ secrets.AuditEvent) error { return nil }
 
 func buildAPITestService(t *testing.T, broker *apiTestBroker) *secrets.Service {
 	t.Helper()

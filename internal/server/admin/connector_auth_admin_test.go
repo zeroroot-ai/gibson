@@ -39,6 +39,9 @@ type fakeConnectorSecrets struct {
 	// resolveErr, when set, fails every Resolve — a tenant store the daemon
 	// cannot reach (a BYO Vault that is down).
 	resolveErr error
+	// putActors keeps the identity subject of each Put. The production
+	// secrets service records it as the audit actor (gibson#676).
+	putActors []string
 }
 
 func newFakeConnectorSecrets() *fakeConnectorSecrets {
@@ -58,9 +61,14 @@ func (f *fakeConnectorSecrets) Resolve(_ context.Context, name string) ([]byte, 
 	return v, nil
 }
 
-func (f *fakeConnectorSecrets) Put(_ context.Context, name string, value []byte) error {
+func (f *fakeConnectorSecrets) Put(ctx context.Context, name string, value []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
+		f.putActors = append(f.putActors, id.Subject)
+	} else {
+		f.putActors = append(f.putActors, "")
+	}
 	f.data[name] = append([]byte(nil), value...)
 	return nil
 }
@@ -536,6 +544,10 @@ func TestFinishAuthorization_CompletesUnderThePendingTenant(t *testing.T) {
 	}
 	if !store.has(connectorauth.GrantSecretName("connector-gitlab")) {
 		t.Error("the grant must be stored under the pending's connector")
+	}
+	// The grant write names the human who started the flow as its actor.
+	if len(store.putActors) == 0 || store.putActors[0] != "user-1" {
+		t.Errorf("put actors = %v, want the first to be user-1", store.putActors)
 	}
 }
 

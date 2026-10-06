@@ -97,6 +97,12 @@ func (f *fakeAuditor) Audit(_ context.Context, e secrets.AuditEvent) {
 	f.events = append(f.events, e)
 }
 
+// Record captures the event, as the durable write would keep it.
+func (f *fakeAuditor) Record(_ context.Context, e secrets.AuditEvent) error {
+	f.events = append(f.events, e)
+	return nil
+}
+
 // fakePluginAssocs returns a fixed install ID list per secret.
 type fakePluginAssocs struct{ byName map[string][]string }
 

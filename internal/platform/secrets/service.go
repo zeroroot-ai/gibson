@@ -23,9 +23,12 @@ type ServiceRegistry interface {
 }
 
 // ServiceAuditWriter is the narrow interface Service needs to emit audit
-// events. The concrete implementation is *AuditWriter.
+// events. The concrete implementation is *AuditWriter. Record writes the
+// event durably before a change (Put, Delete). Audit writes a read, a
+// refusal or a failure.
 type ServiceAuditWriter interface {
 	Audit(ctx context.Context, event AuditEvent)
+	Record(ctx context.Context, event AuditEvent) error
 }
 
 // Service is the single entry point that gRPC handlers call for all secrets
@@ -123,6 +126,12 @@ func (s *Service) Put(ctx context.Context, name string, value []byte) error {
 		return toGRPCError(err, "put registry")
 	}
 
+	// The audit record goes to Postgres before the change, so no change
+	// exists without its record (D15, gibson#676).
+	if err := s.recordChange(ctx, tenant, name, ActionSecretWrite, start); err != nil {
+		return status.Error(codes.Unavailable, "put: audit record: "+err.Error())
+	}
+
 	pname := providerName(broker)
 	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
 		return broker.Put(ctx, tenant, name, value)
@@ -139,7 +148,6 @@ func (s *Service) Put(ctx context.Context, name string, value []byte) error {
 		return toGRPCError(execErr, "put")
 	}
 
-	s.emitAudit(ctx, tenant, name, ActionSecretWrite, EffectAllow, true, "", start)
 	return nil
 }
 
@@ -159,6 +167,12 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 		return toGRPCError(err, "delete registry")
 	}
 
+	// The audit record goes to Postgres before the change, so no change
+	// exists without its record (D15, gibson#676).
+	if err := s.recordChange(ctx, tenant, name, ActionSecretDelete, start); err != nil {
+		return status.Error(codes.Unavailable, "delete: audit record: "+err.Error())
+	}
+
 	pname := providerName(broker)
 	execErr := s.circuit.Execute(tenant.String(), pname, func() error {
 		return broker.Delete(ctx, tenant, name)
@@ -175,7 +189,6 @@ func (s *Service) Delete(ctx context.Context, name string) error {
 		return toGRPCError(execErr, "delete")
 	}
 
-	s.emitAudit(ctx, tenant, name, ActionSecretDelete, EffectAllow, true, "", start)
 	return nil
 }
 
@@ -261,6 +274,25 @@ func (s *Service) emitAuditWithReason(
 		LatencyMS:      time.Since(start).Milliseconds(),
 		OccurredAt:     time.Now().UTC(),
 	})
+}
+
+// recordChange writes the allow record of a change durably, before the
+// change.
+func (s *Service) recordChange(ctx context.Context, tenant auth.TenantID, name, action string, start time.Time) error {
+	if err := s.auditor.Record(ctx, AuditEvent{
+		ActorTenantID: tenant.String(),
+		Action:        action,
+		Effect:        EffectAllow,
+		ResourceType:  "secret",
+		ResourceURI:   fmt.Sprintf("secret:tenant-%s/%s", tenant, name),
+		Decision:      "allow",
+		Success:       true,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		OccurredAt:    time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("secrets service: %w", err)
+	}
+	return nil
 }
 
 // providerName returns a stable string identifying the provider type for use
