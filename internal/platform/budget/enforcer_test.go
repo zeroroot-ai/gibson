@@ -29,7 +29,7 @@ func newEnforcer(t *testing.T, tenantID, userID string) (Enforcer, context.Conte
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	// All assertions use the default clock (time.Now) unless noted.
-	e := mustEnforcer(t, rdb, noTeams, nil, nil)
+	e := NewEnforcer(rdb, nil, nil, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
 	ctx = auth.ContextWithActingUser(ctx, userID)
@@ -164,7 +164,7 @@ func TestEnforcer_TeamResolver_EnforcesTeamBudget(t *testing.T) {
 	resolver := func(ctx context.Context, tenantID, userID string) ([]string, error) {
 		return []string{"team-a"}, nil
 	}
-	e := mustEnforcer(t, rdb, resolver, nil, nil)
+	e := NewEnforcer(rdb, nil, resolver, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -195,7 +195,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	march31 := time.Date(2026, 3, 31, 23, 0, 0, 0, time.UTC)
-	e := mustEnforcer(t, rdb, noTeams, fixedClock(march31), nil)
+	e := NewEnforcer(rdb, nil, nil, fixedClock(march31), nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -211,7 +211,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	// Roll the clock forward to April 1 — period ID changes, counter
 	// is fresh (no usage recorded in April).
 	april1 := time.Date(2026, 4, 1, 0, 30, 0, 0, time.UTC)
-	e = mustEnforcer(t, rdb, noTeams, fixedClock(april1), nil)
+	e = NewEnforcer(rdb, nil, nil, fixedClock(april1), nil)
 	ctx = auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
 
@@ -244,7 +244,7 @@ func TestEnforcer_ListStatusByScope_ReturnsConfiguredUsers(t *testing.T) {
 func TestEnforcer_Check_WithoutUserContext_FallsBackToTenantOnly(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := mustEnforcer(t, rdb, noTeams, nil, nil)
+	e := NewEnforcer(rdb, nil, nil, nil, nil)
 
 	// Tenant-only context — no ActingUser / InitiatorUser.
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -271,7 +271,7 @@ func (s stubProvider) Limits(context.Context, string) (entitlements.Limits, erro
 func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := mustEnforcer(t, rdb, noTeams, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 1000}})
+	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 1000}})
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -289,7 +289,7 @@ func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
 func TestEnforcer_Check_ExplicitTenantBudgetWinsOverProvider(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := mustEnforcer(t, rdb, noTeams, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 100}})
+	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 100}})
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -321,27 +321,4 @@ func TestEnforcer_Concurrent_Records_DontLose(t *testing.T) {
 	period := PeriodID(time.Now())
 	key := counterKey("acme", ScopeUser, "user-1", period)
 	assert.Equal(t, "1000", mr.HGet(key, "tokens"), "100 concurrent records of 10 tokens each should sum to 1000 with no loss")
-}
-
-// noTeams is a team resolver for a user in no team.
-func noTeams(context.Context, string, string) ([]string, error) { return nil, nil }
-
-func mustEnforcer(t *testing.T, rdb redis.UniversalClient, teams TeamMembershipResolver, clock Clock, p entitlements.Provider) Enforcer {
-	t.Helper()
-	e, err := NewEnforcer(rdb, nil, teams, clock, p)
-	if err != nil {
-		t.Fatalf("NewEnforcer: %v", err)
-	}
-	return e
-}
-
-// The enforcer does not start without its Redis client or its team resolver.
-func TestNewEnforcer_RequiresItsDependencies(t *testing.T) {
-	rdb := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
-	if _, err := NewEnforcer(nil, nil, noTeams, nil, nil); err == nil {
-		t.Error("a nil Redis client was accepted")
-	}
-	if _, err := NewEnforcer(rdb, nil, nil, nil, nil); err == nil {
-		t.Error("a nil team resolver was accepted")
-	}
 }

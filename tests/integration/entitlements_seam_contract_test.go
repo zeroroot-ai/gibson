@@ -289,17 +289,13 @@ func TestEntitlementsSeam_BudgetEnforcerObservesProviderLimits(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	p := newSeamProvider(t, addr, 60*time.Second)
-	noTeams := func(context.Context, string, string) ([]string, error) { return nil, nil }
-	enf, err := budget.NewEnforcer(rdb, logger, noTeams, nil, p)
-	if err != nil {
-		t.Fatalf("NewEnforcer: %v", err)
-	}
+	enf := budget.NewEnforcer(rdb, logger, nil, nil, p)
 
 	ctx := auth.ContextWithTenantString(context.Background(), tenant)
 	ctx = auth.ContextWithActingUser(ctx, user)
 
 	// A call within the provider ceiling must be allowed.
-	_, err = enf.Check(ctx, tokenCeiling/2)
+	_, err := enf.Check(ctx, tokenCeiling/2)
 	require.NoError(t, err,
 		"a call within the provider's MonthlyTokens ceiling must not be denied")
 

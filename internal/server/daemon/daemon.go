@@ -1644,10 +1644,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.logger.Info(ctx, "configured callback service with per-tenant session-context store")
 
 	// Wire the OTel metrics recorder into the Authorize handler so that each
-	// component authz decision increments gibson_component_authz_total. The
-	// recorder exists only when OTel observability is on in the config.
-	if d.infrastructure != nil && d.infrastructure.otelStack != nil && d.infrastructure.otelStack.MetricsRecorder != nil {
-		d.callback.SetComponentAuthzMetrics(d.infrastructure.otelStack.MetricsRecorder)
+	// component authz decision increments gibson_component_authz_total.
+	if rec := d.GetOTelMetricsRecorder(); rec != nil {
+		d.callback.SetComponentAuthzMetrics(rec)
 		d.logger.Info(ctx, "configured callback service with component authz metrics recorder")
 	}
 

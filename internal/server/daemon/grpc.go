@@ -838,19 +838,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// budgets via the dashboard.
 		//
 		// TeamMembershipResolver is wired against FGA: `team#member@user`
-		// tuples are the source of truth for team membership. FGA is
-		// required at start, so the resolver is always set. A transient
-		// error falls back to tenant+user scopes (no teams).
+		// tuples are the source of truth for team membership. Calls fall
+		// back to tenant+user scopes (no teams) on authorizer absence or
+		// transient error — the enforcer itself downgrades to no team
+		// check when the resolver returns nil.
 		// Spec: llm-user-attribution-governance (Requirement 3).
-		teamResolver := newBudgetTeamResolver(d.authorizer, d.logger.Slog())
+		var teamResolver budget.TeamMembershipResolver
+		if d.authorizer != nil {
+			teamResolver = newBudgetTeamResolver(d.authorizer, d.logger.Slog())
+		}
 		// The budget enforcer consumes tenant-default ceilings through the
 		// entitlements seam (ADR-0089): explicit admin budgets win, else the
 		// provider supplies the tenant default. OSS = config/unlimited. A nil
 		// provider is resolved to UnlimitedProvider inside NewEnforcer.
-		budgetEnforcer, err := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
-		if err != nil {
-			return nil, fmt.Errorf("budget enforcer: %w", err)
-		}
+		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")
