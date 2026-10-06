@@ -122,9 +122,9 @@ func (p *CloudflareProvider) CredentialSchema() []llm.CredentialField {
 
 func CloudflareCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "cloudflare_account_id", Label: "Cloudflare Account ID", Required: true, Secret: true, Placeholder: "ab12..."},
-		{Key: "api_key", Label: "Cloudflare API Token", Required: true, Secret: true, Help: "API token with Workers AI permission."},
-		{Key: "base_url", Label: "Server URL (optional)", Placeholder: "https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1"},
+		{Key: "cloudflare_account_id", Label: "Cloudflare Account ID", Required: true, Secret: true, Placeholder: "ab12...", Type: llm.FieldPassword},
+		{Key: "api_key", Label: "Cloudflare API Token", Required: true, Secret: true, Help: "API token with Workers AI permission.", Type: llm.FieldPassword},
+		{Key: "base_url", Label: "Server URL (optional)", Placeholder: "https://api.cloudflare.com/client/v4/accounts/<id>/ai/v1", Type: llm.FieldURL},
 	}
 }
 

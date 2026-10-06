@@ -24,6 +24,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 service DomainPackService {
   // ListDomainPackCatalog returns the curated Domain Packs this tenant may
@@ -151,7 +152,7 @@ message ListDomainPacksResponse {
 
 message EnableDomainPackRequest {
   // name is the catalog entry to enable (e.g. "main").
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message EnableDomainPackResponse {
@@ -160,14 +161,14 @@ message EnableDomainPackResponse {
 }
 
 message DisableDomainPackRequest {
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message DisableDomainPackResponse {}
 
 message ExportDomainPackRequest {
   // name is the name of the exported pack, a plain identifier.
-  string name = 1;
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // version is the version of the exported pack, 1 or more.
   int32 version = 2;
 }

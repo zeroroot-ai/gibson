@@ -9,6 +9,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // CatalogPluginService is the API a tenant uses to enable a plugin of the
 // platform catalog (gibson#815). The platform then runs one instance of the
@@ -78,7 +79,7 @@ message ListPluginCatalogResponse {
 
 message EnableCatalogPluginRequest {
   // plugin_id is the catalog id of the plugin to enable.
-  string plugin_id = 1;
+  string plugin_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message EnableCatalogPluginResponse {
@@ -102,7 +103,7 @@ message ListCatalogPluginsResponse {
 }
 
 message DisableCatalogPluginRequest {
-  string plugin_id = 1;
+  string plugin_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message DisableCatalogPluginResponse {}

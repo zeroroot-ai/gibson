@@ -6,6 +6,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
 
 // SessionService is the daemon-mediated, self-service view of a user's own
 // login sessions (browser / CLI logins) held by the identity provider. It
@@ -84,7 +85,7 @@ message ListMySessionsResponse {
 message RevokeMySessionRequest {
   // session_id is the id of a session returned by ListMySessions. Must belong
   // to the calling user.
-  string session_id = 1;
+  string session_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // RevokeMySessionResponse is empty: success is the absence of an error

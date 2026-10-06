@@ -18,6 +18,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "gibson/budget_status/v1/budget_status.proto";
+import "buf/validate/validate.proto";
 
 // BudgetService is the customer-callable API for configuring budgets and
 // reading current usage. Admin callers can query any subject; non-admins are
@@ -120,8 +121,8 @@ message BudgetStatus {
 // ---------------------------------------------------------------------------
 
 message GetBudgetRequest {
-  gibson.budget_status.v1.BudgetScope scope = 1;
-  string subject_id = 2;
+  gibson.budget_status.v1.BudgetScope scope = 1 [(buf.validate.field).enum = { defined_only: true }];
+  string subject_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetBudgetResponse {
@@ -140,7 +141,7 @@ message SetBudgetResponse {
 }
 
 message ListBudgetsRequest {
-  gibson.budget_status.v1.BudgetScope scope = 1;
+  gibson.budget_status.v1.BudgetScope scope = 1 [(buf.validate.field).enum = { defined_only: true }];
 }
 
 message ListBudgetsResponse {
@@ -148,7 +149,7 @@ message ListBudgetsResponse {
 }
 
 message ListBudgetStatusRequest {
-  gibson.budget_status.v1.BudgetScope scope = 1;
+  gibson.budget_status.v1.BudgetScope scope = 1 [(buf.validate.field).enum = { defined_only: true }];
 }
 
 message ListBudgetStatusResponse {

@@ -243,11 +243,11 @@ func (p *BedrockProvider) CredentialSchema() []llm.CredentialField { return Bedr
 // instantiating a provider.
 func BedrockCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "aws_region", Label: "AWS Region", Placeholder: "us-east-1", Help: "Defaults to AWS_REGION env or us-east-1."},
-		{Key: "use_irsa", Label: "Use IAM role / IRSA", Secret: false, Help: "Select when the daemon runs in EKS with a service-account IAM role annotation. Leave static key fields blank."},
-		{Key: "aws_access_key_id", Label: "AWS Access Key ID", Secret: true, Help: "Leave blank to use the AWS SDK default credential chain (IAM role, IRSA, instance profile)."},
-		{Key: "aws_secret_access_key", Label: "AWS Secret Access Key", Secret: true},
-		{Key: "aws_session_token", Label: "AWS Session Token", Secret: true, Help: "Only required for temporary credentials."},
+		{Key: "aws_region", Label: "AWS Region", Placeholder: "us-east-1", Help: "Defaults to AWS_REGION env or us-east-1.", Type: llm.FieldRegion},
+		{Key: "use_irsa", Label: "Use IAM role / IRSA", Secret: false, Help: "Select when the daemon runs in EKS with a service-account IAM role annotation. Leave static key fields blank.", Type: llm.FieldBool},
+		{Key: "aws_access_key_id", Label: "AWS Access Key ID", Secret: true, Help: "Leave blank to use the AWS SDK default credential chain (IAM role, IRSA, instance profile).", Type: llm.FieldPassword},
+		{Key: "aws_secret_access_key", Label: "AWS Secret Access Key", Secret: true, Type: llm.FieldPassword},
+		{Key: "aws_session_token", Label: "AWS Session Token", Secret: true, Help: "Only required for temporary credentials.", Type: llm.FieldPassword},
 	}
 }
 

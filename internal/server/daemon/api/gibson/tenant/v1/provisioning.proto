@@ -31,6 +31,7 @@ package gibson.tenant.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // TenantProvisioningService is the dashboard-facing read side of operator-pull
 // tenant provisioning. The write side (enqueue on Signup, operator drain) lives
@@ -74,7 +75,7 @@ message TenantDataPlaneStoreStatus {
 // GetTenantProvisioningStatusRequest queries one tenant's provisioning status.
 message GetTenantProvisioningStatusRequest {
   // tenant_id is the deterministic tenant slug (Tenant CR name).
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // GetTenantProvisioningStatusResponse carries the operator-reported snapshot.

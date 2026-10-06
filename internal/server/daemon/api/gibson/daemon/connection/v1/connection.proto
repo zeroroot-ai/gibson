@@ -18,6 +18,7 @@ package gibson.daemon.connection.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1;connectionv1";
 
+import "buf/validate/validate.proto";
 import "gibson/auth/v1/options.proto";
 
 // ConnectionPointService holds the neutral connection points.
@@ -78,9 +79,9 @@ enum SignupStepOutcome {
 // CompleteSignupStepRequest carries the opaque token and the outcome.
 message CompleteSignupStepRequest {
   // step_token is the token that SignupResponse.step_token returned.
-  string step_token = 1;
+  string step_token = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // outcome is the result of the step.
-  SignupStepOutcome outcome = 2;
+  SignupStepOutcome outcome = 2 [(buf.validate.field).enum = { defined_only: true }];
 }
 
 // CompleteSignupStepResponse is empty.
@@ -99,9 +100,9 @@ enum TenantActivationState {
 // SetTenantActivationRequest names a tenant and its new state.
 message SetTenantActivationRequest {
   // tenant_id is the tenant slug.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // state is the new activation state.
-  TenantActivationState state = 2;
+  TenantActivationState state = 2 [(buf.validate.field).enum = { defined_only: true }];
 }
 
 // SetTenantActivationResponse reports whether the state changed.

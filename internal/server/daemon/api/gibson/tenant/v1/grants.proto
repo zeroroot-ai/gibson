@@ -12,6 +12,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "gibson/capability/v1/capability.proto";
+import "buf/validate/validate.proto";
 
 // GrantsService is the grants surface — both the CG-JWT inspector
 // (ListActiveGrants) and the per-agent FGA-grant editor
@@ -60,10 +61,10 @@ service GrantsService {
 message ListActiveGrantsRequest {
   // recipient_class_filter restricts to one recipient class.
   // RECIPIENT_CLASS_UNSPECIFIED means all.
-  gibson.capability.v1.RecipientClass recipient_class_filter = 1;
+  gibson.capability.v1.RecipientClass recipient_class_filter = 1 [(buf.validate.field).enum = { defined_only: true }];
   // rpc_filter restricts to grants whose allowed_rpcs includes this method
   // name. Empty means no filter.
-  string rpc_filter = 2;
+  string rpc_filter = 2 [(buf.validate.field).string = { max_len: 4096 }];
   // include_near_expiry_only, when true, returns only grants that expire
   // within 5 minutes.
   bool include_near_expiry_only = 3;
@@ -92,7 +93,7 @@ message GrantTuple {
 message WriteAgentGrantsRequest {
   // target_principal_id is the FGA principal to grant tuples to.
   // Format: "agent_principal:<uuid>" or "tool_principal:<uuid>".
-  string target_principal_id = 1;
+  string target_principal_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   repeated GrantTuple grants = 2;
 }
 
@@ -102,7 +103,7 @@ message WriteAgentGrantsResponse {
 }
 
 message DeleteAgentGrantsRequest {
-  string target_principal_id = 1;
+  string target_principal_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   repeated GrantTuple grants = 2;
 }
 

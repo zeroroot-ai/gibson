@@ -15,6 +15,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
 
 // ConnectorAuthService manages the OAuth grant behind a connector.
 //
@@ -120,18 +121,18 @@ enum ConnectorAuthState {
 
 message GetConnectorAuthStatusRequest {
   // connector is the bare component name, e.g. "connector-gitlab".
-  string connector = 1;
+  string connector = 1 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message StartConnectorAuthorizationRequest {
   // connector is the bare component name the grant belongs to, e.g.
   // "connector-gitlab".
-  string connector = 1;
+  string connector = 1 [(buf.validate.field).string = { max_len: 4096 }];
   // instance_url is the base URL of the customer's own vendor instance, e.g.
   // "https://gitlab.com" or "https://gitlab.example.com". The daemon derives
   // the OAuth authorization-server metadata from it (RFC 8414), and also tries
   // the RFC 9728 protected-resource document off it.
-  string instance_url = 2;
+  string instance_url = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message StartConnectorAuthorizationResponse {
@@ -172,15 +173,15 @@ message CompleteConnectorAuthorizationRequest {
   // connector is the bare component name the grant belongs to. It is optional
   // and cross-checked against the connector recorded when the authorization
   // was started; the state alone identifies the pending authorization.
-  string connector = 1;
+  string connector = 1 [(buf.validate.field).string = { max_len: 4096 }];
   // code is the authorization code the vendor returned to the daemon callback.
   // The daemon exchanges it for the grant, so the refresh token is minted and
   // kept daemon-side and never transits this API.
-  string code = 2;
+  string code = 2 [(buf.validate.field).string = { max_len: 16777216 }];
   // state is the value StartConnectorAuthorization returned. It binds the code
   // to that authorization (the CSRF binding) and selects the stored PKCE
   // verifier, token endpoint and client id. Single-use and short-lived.
-  string state = 3;
+  string state = 3 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message CompleteConnectorAuthorizationResponse {
@@ -189,7 +190,7 @@ message CompleteConnectorAuthorizationResponse {
 }
 
 message RevokeConnectorGrantRequest {
-  string connector = 1;
+  string connector = 1 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message RevokeConnectorGrantResponse {
@@ -201,7 +202,7 @@ message RevokeConnectorGrantResponse {
 message SetConnectorSecretRequest {
   // connector is the bare connector id the credential belongs to, e.g.
   // "github".
-  string connector = 1;
+  string connector = 1 [(buf.validate.field).string = { max_len: 4096 }];
   // secret is the static credential the connector presents to the vendor,
   // verbatim. The proxy sends it as "Authorization: Bearer <secret>". TLS in
   // transit; never logged; never returned by any RPC.

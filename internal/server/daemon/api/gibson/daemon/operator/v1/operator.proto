@@ -6,6 +6,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 
 import "gibson/auth/v1/options.proto";
 import "gibson/tenant/v1/connector_auth.proto";
+import "buf/validate/validate.proto";
 
 // DaemonOperatorService provides strictly ZD-internal operator operations on
 // the Gibson daemon. It is the post-ADR-0058 successor to the deleted
@@ -310,7 +311,7 @@ message AccessTuple {
 message WriteAccessTuplesRequest {
   repeated AccessTuple add = 1;
   repeated AccessTuple delete = 2;
-  string reason = 3;
+  string reason = 3 [(buf.validate.field).string = { max_len: 16777216 }];
 }
 
 // WriteAccessTuplesResponse reports how many tuples were written/deleted.
@@ -324,7 +325,7 @@ message WriteAccessTuplesResponse {
 // concurrent_missions and concurrent_agents are enforced; 0 means
 // "unlimited" on either dimension.
 message UpsertTenantQuotaRequest {
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // concurrent_missions is the cap on missions in non-terminal execution
   // state at any moment. 0 = unlimited.
   int32 concurrent_missions = 7;
@@ -334,7 +335,7 @@ message UpsertTenantQuotaRequest {
   // plan_id is the canonical plan identifier for this tenant
   // ("team", "org", "enterprise", "enterprise-deploy").
   // Written to the tenant_quotas.plan_id column.
-  string plan_id = 8;
+  string plan_id = 8 [(buf.validate.field).string = { max_len: 1024 }];
   // concurrent_connectors is the cap on hosted MCP connector instances a
   // tenant may have running at any moment. 0 = unlimited. Per ADR-0065
   // facet 3 (plan-tier connector-instance budget).
@@ -353,7 +354,7 @@ message UpsertTenantQuotaResponse {
 
 // ListFeatureTuplesRequest queries the feature tuples for a tenant.
 message ListFeatureTuplesRequest {
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // ListFeatureTuplesResponse returns the set of has_* feature tuples present.
@@ -363,7 +364,7 @@ message ListFeatureTuplesResponse {
 
 // SeedCatalogTenantEnabledRequest triggers seeding of tenant_enabled tuples.
 message SeedCatalogTenantEnabledRequest {
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // SeedCatalogTenantEnabledResponse reports how many tuples were written.
@@ -407,11 +408,11 @@ message EmitAuditEventResponse {}
 message SetTenantZitadelOrgRequest {
   // tenant_id is the tenant slug (the FGA tenant id without the "tenant:"
   // prefix, e.g. "acme"). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // zitadel_org_id is the Zitadel organization id provisioned for this tenant
   // (Tenant.Status.ZitadelOrgID). Required and non-empty — the daemon rejects
   // an empty value rather than persisting a half-mapping.
-  string zitadel_org_id = 2;
+  string zitadel_org_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // SetTenantZitadelOrgResponse confirms the mapping was persisted.
@@ -458,7 +459,7 @@ message ListPendingTenantProvisioningResponse {
 // operator has ensured its Tenant CR exists.
 message AckTenantProvisionedRequest {
   // tenant_id identifies the pending record to mark done. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // AckTenantProvisionedResponse confirms the ack.
@@ -473,13 +474,13 @@ message AckTenantProvisionedResponse {
 message EnqueueTenantProvisioningRequest {
   // tenant_id is the deterministic tenant slug — becomes the Tenant CR's
   // metadata.name. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // display_name becomes Tenant.spec.displayName.
-  string display_name = 2;
+  string display_name = 2 [(buf.validate.field).string = { max_len: 1024 }];
   // owner_email becomes Tenant.spec.owner. Required.
-  string owner_email = 3;
+  string owner_email = 3 [(buf.validate.field).string = { min_len: 1, max_len: 4096 }];
   // tier becomes Tenant.spec.tier.
-  string tier = 4;
+  string tier = 4 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // EnqueueTenantProvisioningResponse reports the enqueue outcome.
@@ -496,18 +497,18 @@ message EnqueueTenantProvisioningResponse {
 // mirrors the subset of Tenant.Status the dashboard's getTenant reads consumed.
 message ReportTenantStatusRequest {
   // tenant_id is the tenant slug (Tenant CR name). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // phase is status.phase (Pending/Provisioning/Ready/Failed/...).
-  string phase = 2;
+  string phase = 2 [(buf.validate.field).string = { max_len: 4096 }];
   // data_plane_ready mirrors status.dataPlane.ready.
   bool data_plane_ready = 3;
   // store_postgres / store_redis / store_neo4j are the per-store state strings
   // from status.dataPlane.stores (the onboarding-progress summary).
-  string store_postgres = 4;
-  string store_redis = 5;
-  string store_neo4j = 6;
+  string store_postgres = 4 [(buf.validate.field).string = { max_len: 4096 }];
+  string store_redis = 5 [(buf.validate.field).string = { max_len: 4096 }];
+  string store_neo4j = 6 [(buf.validate.field).string = { max_len: 4096 }];
   // zitadel_org_slug mirrors status.zitadelOrgSlug.
-  string zitadel_org_slug = 7;
+  string zitadel_org_slug = 7 [(buf.validate.field).string = { max_len: 1024 }];
   // Field 8 (stripe_customer_id) was removed (ADR-0060, D54).
   reserved 8;
   reserved "stripe_customer_id";
@@ -516,9 +517,9 @@ message ReportTenantStatusRequest {
 // SetAgentEnrollmentLimitsRequest carries one enrollment's runtime cap.
 message SetAgentEnrollmentLimitsRequest {
   // tenant_id is the tenant slug (Tenant CR name). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // agent_name is the enrolled agent's catalog id (spec.agentName). Required.
-  string agent_name = 2;
+  string agent_name = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // max_runtime_seconds bounds one sandboxed run of this agent. Zero clears
   // the cap, so the launcher default applies again.
   int64 max_runtime_seconds = 3;
@@ -578,7 +579,7 @@ message ListPendingTenantOpsResponse {
 // AckTenantOpRequest marks an admin-op record done after the operator applied it.
 message AckTenantOpRequest {
   // op_id identifies the pending record to mark done. Required.
-  string op_id = 1;
+  string op_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // AckTenantOpResponse confirms the ack.
@@ -593,9 +594,9 @@ message AckTenantOpResponse {
 message RevokeConnectorGrantRequest {
   // tenant_id is the tenant the ConnectorInstance lives in (its namespace is
   // tenant-<tenant_id>). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // connector is the connector id (Spec.Connector, the grant key). Required.
-  string connector = 2;
+  string connector = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // GetConnectorAuthStatusRequest names the tenant connector whose credential
@@ -603,9 +604,9 @@ message RevokeConnectorGrantRequest {
 message GetConnectorAuthStatusRequest {
   // tenant_id is the tenant the ConnectorInstance lives in (its namespace is
   // tenant-<tenant_id>). Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // connector is the connector id (Spec.Connector, the grant key). Required.
-  string connector = 2;
+  string connector = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 // GetConnectorAuthStatusResponse carries the connector's credential state.
@@ -621,7 +622,7 @@ message GetConnectorAuthStatusResponse {
 
 message GetBeliefTrainingDataRequest {
   // tenant_id is the tenant slug. It must be the tenant of the caller.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // BeliefTrainingRow is one training example: each belief variable of one
@@ -645,7 +646,7 @@ message GetBeliefTrainingDataResponse {
 
 message StoreBeliefArtifactRequest {
   // tenant_id is the tenant slug. It must be the tenant of the caller.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // belief_model is the belief-CPT artifact, a JSON object.
   bytes belief_model = 2;
   // edge_posteriors is the edge-posterior artifact, a JSON object.

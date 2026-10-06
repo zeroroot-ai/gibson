@@ -5,6 +5,7 @@ package gibson.world.v1;
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1;worldv1";
 
 import "gibson/auth/v1/options.proto";
+import "buf/validate/validate.proto";
 
 // WorldService is the daemon-mediated read path into the ECS brain (epic
 // ecs-brain, gibson#752). The daemon resolves the caller's tenant server-side
@@ -323,10 +324,14 @@ message LlmCallDetail {
   string completion = 8;
 }
 
-message GetLlmCallRequest { string call_id = 1; }
+message GetLlmCallRequest {
+  string call_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+}
 message GetLlmCallResponse { LlmCallDetail call = 1; }
 
-message GetTimelineRequest { string mission_id = 1; }
+message GetTimelineRequest {
+  string mission_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+}
 message GetTimelineResponse { repeated TimelineEvent events = 1; }
 
 // GetFrameAtRequest scrubs to a Timeline position: fold the first `seq` events.
@@ -337,7 +342,7 @@ message GetTimelineResponse { repeated TimelineEvent events = 1; }
 // (tenant-wide behavior unchanged).
 message GetFrameAtRequest {
   uint64 seq = 1;
-  string mission_id = 2;
+  string mission_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // GetFrameAtResponse is the World materialized at frame `seq` (a server-side fold).
@@ -399,10 +404,10 @@ message ListReviewQueueResponse { repeated ReviewItem items = 1; }
 // caller's user id server-side from context — the client does not supply it, so a
 // caller can never attribute a label to another user.
 message SubmitLabelRequest {
-  string target_id = 1; // required: the finding id / surprise host id to label
-  string verdict = 2;   // required: "true_positive" | "false_positive" | "dismiss"
-  string severity = 3;  // optional corrected severity
-  string category = 4;  // optional taxonomy tag
+  string target_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }]; // required: the finding id / surprise host id to label
+  string verdict = 2 [(buf.validate.field).string = { max_len: 4096 }]; // required: "true_positive" | "false_positive" | "dismiss"
+  string severity = 3 [(buf.validate.field).string = { max_len: 4096 }]; // optional corrected severity
+  string category = 4 [(buf.validate.field).string = { max_len: 4096 }]; // optional taxonomy tag
 }
 message SubmitLabelResponse {}
 
@@ -498,11 +503,11 @@ message ListOpenBetsResponse {
 // rule SubmitLabel already follows, so a caller can never attribute a
 // settlement to another user.
 message SettleBetByHITLRequest {
-  string hypothesis_id = 1;
+  string hypothesis_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   // verdict is true_positive, false_positive, or dismiss (the same
   // vocabulary SubmitLabel uses). dismiss applies a label only; it never
   // settles the bet.
-  string verdict = 2;
+  string verdict = 2 [(buf.validate.field).string = { max_len: 4096 }];
 }
 
 message SettleBetByHITLResponse {
@@ -518,8 +523,8 @@ message SettleBetByHITLResponse {
 // "T1190"); scope_id is the "environment" — the same ScopeID coordinate
 // every other observation in this brain partitions identity by.
 message GetReputationRequest {
-  string technique = 1;
-  string scope_id = 2;
+  string technique = 1 [(buf.validate.field).string = { max_len: 4096 }];
+  string scope_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message GetReputationResponse {
