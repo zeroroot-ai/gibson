@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-const (
-	// defaultNeo4jIdlePingInterval is the interval at which the driver pings
-	// idle connections to keep them alive. 30 s is the production-safe default
-	// (Neo4j server-side default idle timeout is typically 5–10 minutes).
-	defaultNeo4jIdlePingInterval = 30 * time.Second
-)
-
 // Neo4jOptions carries required and optional tuning for NewNeo4j.
 // Required fields must be non-zero; NewNeo4j returns an error otherwise.
 type Neo4jOptions struct {

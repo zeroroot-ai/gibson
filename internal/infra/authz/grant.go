@@ -4,7 +4,6 @@
 package authz
 
 import (
-	"errors"
 	"time"
 )
 
@@ -39,22 +38,3 @@ type Grant struct {
 	// the daemon to revoke individual grants.
 	ID string
 }
-
-// Sentinel errors for VerifyCapabilityGrant. Callers distinguish
-// expired from not-yet-valid for telemetry and from signature failures
-// for security alerting.
-var (
-	// ErrGrantExpired fires when exp <= now.
-	ErrGrantExpired = errors.New("authz: capability grant expired")
-
-	// ErrGrantNotYetValid fires when nbf > now.
-	ErrGrantNotYetValid = errors.New("authz: capability grant not yet valid")
-
-	// ErrGrantSignature fires for a signature mismatch or unknown
-	// kid.
-	ErrGrantSignature = errors.New("authz: capability grant signature invalid")
-
-	// ErrGrantMalformed fires for any other parse / structural
-	// failure.
-	ErrGrantMalformed = errors.New("authz: capability grant malformed")
-)

@@ -5,10 +5,8 @@ package observability
 
 import (
 	"context"
-	"sync"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -26,16 +24,4 @@ type componentState struct {
 	checker       HealthChecker
 	lastStatus    types.HealthStatus
 	lastCheckedAt time.Time
-}
-
-// HealthMonitor coordinates health checking across multiple system components.
-// It tracks component health, emits metrics, logs state changes, and supports
-// both on-demand and periodic health checks.
-//
-// The monitor is safe for concurrent use and supports dynamic component registration.
-type HealthMonitor struct {
-	metrics    harness.MetricsRecorder
-	logger     *Logger
-	components map[string]*componentState
-	mu         sync.RWMutex
 }

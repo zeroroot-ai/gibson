@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -31,13 +30,6 @@ var pgxPoolProductionOpts = pcpools.PgxPoolOptions{
 	MaxConnLifetime: 1 * time.Hour,
 	MaxConnIdleTime: 30 * time.Minute,
 }
-
-// pgSanitizeRE matches only characters that are safe in a Postgres database
-// or role name. The auth package already enforces the tenant ID character set
-// (lowercase letter start, [a-z0-9_-] body) but hyphens are legal in tenant
-// IDs yet illegal in bare Postgres identifiers, so we additionally replace
-// hyphens with underscores here.
-var pgSanitizeRE = regexp.MustCompile(`[^a-z0-9_]`)
 
 // pgPerTenant manages a per-tenant cache of *pgxpool.Pool. Each tenant's
 // pool is connected to the tenant's dedicated Postgres database.
