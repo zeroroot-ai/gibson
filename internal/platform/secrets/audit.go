@@ -5,6 +5,8 @@ package secrets
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -166,11 +168,55 @@ func (w *AuditWriter) Audit(ctx context.Context, event AuditEvent) {
 	w.write(ctx, event)
 }
 
+// ErrAuditRejected is returned by Record when the plaintext guard rejects
+// the event. The caller must not make the change.
+var ErrAuditRejected = errors.New("secrets audit writer: the plaintext guard rejected the event")
+
+// Record writes the event to Postgres before the change that it describes,
+// and returns after Postgres has it (D15, gibson#676). The caller makes the
+// change only when Record returns nil. When the change then fails, the
+// caller writes a second event with Audit and Success false.
+//
+// Record returns ErrAuditRejected when the plaintext guard rejects the
+// event, and the error of the durable write otherwise.
+func (w *AuditWriter) Record(ctx context.Context, event AuditEvent) error {
+	if w.rejectOnPlaintextGuard(ctx, event) {
+		return ErrAuditRejected
+	}
+	if err := w.logger.Record(ctx, event.Action, event.ResourceType, event.ResourceURI, w.details(event)); err != nil {
+		auditFailuresTotal.WithLabelValues(event.ActorTenantID).Inc()
+		return fmt.Errorf("secrets audit writer: %w", err)
+	}
+	return nil
+}
+
 // write hands the event to the audit logger. It maps AuditEvent fields to
 // the AuditLogger.LogWithResult API. The logger puts the record into the
 // queue of the Postgres writer, which drops nothing, so write returns no
 // error.
 func (w *AuditWriter) write(ctx context.Context, event AuditEvent) {
+	result := "success"
+	if !event.Success {
+		result = "failure"
+	}
+
+	// AuditLogger.LogWithResult extracts the tenant from context; when the
+	// ctx lacks an identity (e.g. background flush), it falls back to
+	// "unknown". For correctness we always use LogWithResult with the event's
+	// actor tenant as the canonical audit row owner.
+	w.logger.LogWithResult(
+		ctx,
+		event.Action,
+		event.ResourceType,
+		event.ResourceURI,
+		result,
+		w.details(event),
+	)
+}
+
+// details builds the details map of the audit record from the structured
+// AuditEvent fields. It omits each field that could carry plaintext.
+func (w *AuditWriter) details(event AuditEvent) map[string]any {
 	now := event.OccurredAt
 	if now.IsZero() {
 		if w.clock != nil {
@@ -180,14 +226,6 @@ func (w *AuditWriter) write(ctx context.Context, event AuditEvent) {
 		}
 	}
 
-	result := "success"
-	if !event.Success {
-		result = "failure"
-	}
-
-	// Build a details map from the structured AuditEvent fields. The
-	// audit.AuditLogger stores these as JSON in the stream "details" field.
-	// We intentionally omit any field that could carry plaintext.
 	details := map[string]any{
 		"effect":        event.Effect,
 		"resource_type": event.ResourceType,
@@ -209,19 +247,7 @@ func (w *AuditWriter) write(ctx context.Context, event AuditEvent) {
 	if event.AgentRunID != "" {
 		details["agent_run_id"] = event.AgentRunID
 	}
-
-	// AuditLogger.LogWithResult extracts the tenant from context; when the
-	// ctx lacks an identity (e.g. background flush), it falls back to
-	// "unknown". For correctness we always use LogWithResult with the event's
-	// actor tenant as the canonical audit row owner.
-	w.logger.LogWithResult(
-		ctx,
-		event.Action,
-		event.ResourceType,
-		event.ResourceURI,
-		result,
-		details,
-	)
+	return details
 }
 
 // rejectOnPlaintextGuard checks all string fields of event that exceed

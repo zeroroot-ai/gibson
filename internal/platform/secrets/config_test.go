@@ -52,13 +52,34 @@ func (f *fakeRowStore) DeleteRaw(_ context.Context, tenant auth.TenantID) error 
 	return nil
 }
 
-// fakeAuditCapture records emitted audit events.
+// fakeAuditCapture records emitted audit events. recorded marks each event
+// that came through Record. recordErr makes Record fail.
 type fakeAuditCapture struct {
-	events []AuditEvent
+	events    []AuditEvent
+	recorded  []bool
+	recordErr error
 }
 
 func (f *fakeAuditCapture) Audit(_ context.Context, event AuditEvent) {
 	f.events = append(f.events, event)
+	f.recorded = append(f.recorded, false)
+}
+
+func (f *fakeAuditCapture) Record(_ context.Context, event AuditEvent) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
+	f.events = append(f.events, event)
+	f.recorded = append(f.recorded, true)
+	return nil
+}
+
+// newTestConfigStore builds the production ConfigStore over the fakes.
+func newTestConfigStore(t *testing.T, rows configRows, factories map[string]ProviderFactory, aud ConfigStoreAuditWriter) *ConfigStore {
+	t.Helper()
+	cs, err := newConfigStore(rows, factories, aud)
+	require.NoError(t, err)
+	return cs
 }
 
 // fakeSecretsBroker is a minimal sdksecrets.Broker used for probe
@@ -85,97 +106,6 @@ func (f *fakeSecretsBroker) Capabilities() sdksecrets.Capabilities {
 	return sdksecrets.Capabilities{CanPut: true, CanDelete: true, CanList: true}
 }
 
-// configRowStoreI is the testability interface mirroring TenantConfigStore's
-// methods. ConfigStore accepts the concrete *TenantConfigStore in production;
-// tests use this interface via configStoreT.
-type configRowStoreI interface {
-	GetRaw(ctx context.Context, tenant auth.TenantID) (provider string, configJSON []byte, err error)
-	SetRaw(ctx context.Context, tenant auth.TenantID, provider string, configJSON []byte, actor string) error
-	DeleteRaw(ctx context.Context, tenant auth.TenantID) error
-}
-
-// configStoreT mirrors ConfigStore but accepts the interface for testing.
-type configStoreT struct {
-	store     configRowStoreI
-	factories map[string]ProviderFactory
-	auditor   ConfigStoreAuditWriter
-}
-
-func newConfigStoreT(store configRowStoreI, factories map[string]ProviderFactory, aud ConfigStoreAuditWriter) *configStoreT {
-	if factories == nil {
-		factories = make(map[string]ProviderFactory)
-	}
-	return &configStoreT{store: store, factories: factories, auditor: aud}
-}
-
-func (cs *configStoreT) Get(ctx context.Context, tenant auth.TenantID) (BrokerConfig, error) {
-	provider, blob, err := cs.store.GetRaw(ctx, tenant)
-	if err != nil {
-		return BrokerConfig{}, err
-	}
-	return BrokerConfig{Provider: provider, ConfigBlob: blob}, nil
-}
-
-func (cs *configStoreT) Set(ctx context.Context, tenant auth.TenantID, cfg BrokerConfig, actor string) error {
-	// Reuse the production ConfigStore logic by delegating through a thin
-	// adapter that satisfies *TenantConfigStore calls.
-	factory, ok := cs.factories[cfg.Provider]
-	if !ok {
-		return errors.New("unknown provider: " + cfg.Provider)
-	}
-	candidate, err := factory(cfg.ConfigBlob)
-	if err != nil {
-		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID: actor, ActorTenantID: tenant.String(),
-			Action: ActionSecretConfigSet, Effect: EffectDeny,
-			Decision: "deny", DecisionReason: "provider_construct_failed",
-			Success: false, ErrorCode: "provider_construct_failed",
-		})
-		return err
-	}
-	if probeErr := candidate.Probe(ctx); probeErr != nil {
-		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID: actor, ActorTenantID: tenant.String(),
-			Action: ActionSecretConfigSet, Effect: EffectDeny,
-			Decision: "deny", DecisionReason: "probe_failed",
-			Success: false, ErrorCode: "probe_failed",
-		})
-		return errors.New("probe failed: " + probeErr.Error())
-	}
-	if writeErr := cs.store.SetRaw(ctx, tenant, cfg.Provider, cfg.ConfigBlob, actor); writeErr != nil {
-		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID: actor, ActorTenantID: tenant.String(),
-			Action: ActionSecretConfigSet, Effect: EffectDeny,
-			Decision: "deny", DecisionReason: "db_write_failed",
-			Success: false, ErrorCode: "db_write_failed",
-		})
-		return writeErr
-	}
-	cs.auditor.Audit(ctx, AuditEvent{
-		ActorID: actor, ActorTenantID: tenant.String(),
-		Action: ActionSecretConfigSet, Effect: EffectAllow,
-		Decision: "allow", Success: true,
-	})
-	return nil
-}
-
-func (cs *configStoreT) Delete(ctx context.Context, tenant auth.TenantID, actor string) error {
-	if err := cs.store.DeleteRaw(ctx, tenant); err != nil {
-		cs.auditor.Audit(ctx, AuditEvent{
-			ActorID: actor, ActorTenantID: tenant.String(),
-			Action: ActionSecretConfigSet, Effect: EffectDeny,
-			Decision: "deny", DecisionReason: "db_delete_failed",
-		})
-		return err
-	}
-	cs.auditor.Audit(ctx, AuditEvent{
-		ActorID: actor, ActorTenantID: tenant.String(),
-		Action: ActionSecretConfigSet, Effect: EffectAllow,
-		Decision: "allow", Success: true,
-	})
-	return nil
-}
-
 // --- tests ---
 
 var cfgTestTenant = auth.MustNewTenantID("acme-corp")
@@ -183,7 +113,7 @@ var cfgTestTenant = auth.MustNewTenantID("acme-corp")
 func TestConfigStore_GetNotFound(t *testing.T) {
 	row := newFakeRowStore()
 	aud := &fakeAuditCapture{}
-	cs := newConfigStoreT(row, nil, aud)
+	cs := newTestConfigStore(t, row, nil, aud)
 
 	_, err := cs.Get(context.Background(), cfgTestTenant)
 	require.ErrorIs(t, err, ErrBrokerConfigNotFound)
@@ -197,7 +127,7 @@ func TestConfigStore_SetProbeSuccess_PersistsRow(t *testing.T) {
 			return &fakeSecretsBroker{}, nil
 		},
 	}
-	cs := newConfigStoreT(row, factories, aud)
+	cs := newTestConfigStore(t, row, factories, aud)
 
 	cfg := BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"address":"https://vault.example.com"}`)}
 	require.NoError(t, cs.Set(context.Background(), cfgTestTenant, cfg, "operator-1"))
@@ -221,12 +151,12 @@ func TestConfigStore_SetProbeFailure_BlocksWrite(t *testing.T) {
 			return &fakeSecretsBroker{probeErr: probeErr}, nil
 		},
 	}
-	cs := newConfigStoreT(row, factories, aud)
+	cs := newTestConfigStore(t, row, factories, aud)
 
 	cfg := BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"provider":"vault"}`)}
 	err := cs.Set(context.Background(), cfgTestTenant, cfg, "operator-1")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "probe failed")
+	assert.Contains(t, err.Error(), "probe provider")
 
 	// No row written.
 	_, getErr := cs.Get(context.Background(), cfgTestTenant)
@@ -240,7 +170,7 @@ func TestConfigStore_SetProbeFailure_BlocksWrite(t *testing.T) {
 func TestConfigStore_SetUnknownProvider(t *testing.T) {
 	row := newFakeRowStore()
 	aud := &fakeAuditCapture{}
-	cs := newConfigStoreT(row, map[string]ProviderFactory{}, aud)
+	cs := newTestConfigStore(t, row, map[string]ProviderFactory{}, aud)
 
 	cfg := BrokerConfig{Provider: "unknown", ConfigBlob: []byte(`{}`)}
 	err := cs.Set(context.Background(), cfgTestTenant, cfg, "op")
@@ -253,7 +183,7 @@ func TestConfigStore_DeleteEmitsAllowAudit(t *testing.T) {
 	row := newFakeRowStore()
 	row.rows[cfgTestTenant.String()] = fakeRowEntry{provider: "vault", blob: []byte(`{}`)}
 	aud := &fakeAuditCapture{}
-	cs := newConfigStoreT(row, nil, aud)
+	cs := newTestConfigStore(t, row, nil, aud)
 
 	require.NoError(t, cs.Delete(context.Background(), cfgTestTenant, "operator-1"))
 
@@ -273,7 +203,7 @@ func TestConfigStore_ConstructorFailBlocksWrite(t *testing.T) {
 			return nil, constructErr
 		},
 	}
-	cs := newConfigStoreT(row, factories, aud)
+	cs := newTestConfigStore(t, row, factories, aud)
 
 	cfg := BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{"invalid":true}`)}
 	err := cs.Set(context.Background(), cfgTestTenant, cfg, "op")
@@ -282,4 +212,72 @@ func TestConfigStore_ConstructorFailBlocksWrite(t *testing.T) {
 	require.Len(t, aud.events, 1)
 	assert.Equal(t, EffectDeny, aud.events[0].Effect)
 	assert.Equal(t, "provider_construct_failed", aud.events[0].DecisionReason)
+}
+
+// TestConfigStore_SetRecordsBeforeTheWrite: the allow record comes through
+// Record, before the row exists.
+func TestConfigStore_SetRecordsBeforeTheWrite(t *testing.T) {
+	row := newFakeRowStore()
+	aud := &fakeAuditCapture{}
+	factories := map[string]ProviderFactory{
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return &fakeSecretsBroker{}, nil },
+	}
+	cs := newTestConfigStore(t, row, factories, aud)
+
+	require.NoError(t, cs.Set(context.Background(), cfgTestTenant, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)}, "op"))
+	require.Equal(t, []bool{true}, aud.recorded, "the allow record is durable")
+}
+
+// TestConfigStore_SetFailsWhenTheRecordFails: no row is written when the
+// audit record cannot be written.
+func TestConfigStore_SetFailsWhenTheRecordFails(t *testing.T) {
+	row := newFakeRowStore()
+	aud := &fakeAuditCapture{recordErr: errors.New("postgres down")}
+	factories := map[string]ProviderFactory{
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return &fakeSecretsBroker{}, nil },
+	}
+	cs := newTestConfigStore(t, row, factories, aud)
+
+	err := cs.Set(context.Background(), cfgTestTenant, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)}, "op")
+	require.ErrorContains(t, err, "audit record")
+	_, getErr := cs.Get(context.Background(), cfgTestTenant)
+	require.ErrorIs(t, getErr, ErrBrokerConfigNotFound, "no row without its audit record")
+}
+
+// TestConfigStore_SetWriteFailureAddsADenyRecord: the record of the attempt
+// stays, and a second record states the failure.
+func TestConfigStore_SetWriteFailureAddsADenyRecord(t *testing.T) {
+	row := newFakeRowStore()
+	row.setErr = errors.New("db down")
+	aud := &fakeAuditCapture{}
+	factories := map[string]ProviderFactory{
+		"vault": func(_ []byte) (sdksecrets.Broker, error) { return &fakeSecretsBroker{}, nil },
+	}
+	cs := newTestConfigStore(t, row, factories, aud)
+
+	err := cs.Set(context.Background(), cfgTestTenant, BrokerConfig{Provider: "vault", ConfigBlob: []byte(`{}`)}, "op")
+	require.ErrorContains(t, err, "persist")
+	require.Len(t, aud.events, 2)
+	assert.Equal(t, EffectAllow, aud.events[0].Effect)
+	assert.Equal(t, "db_write_failed", aud.events[1].DecisionReason)
+}
+
+// TestConfigStore_DeleteFailsWhenTheRecordFails: the row stays when the
+// audit record cannot be written.
+func TestConfigStore_DeleteFailsWhenTheRecordFails(t *testing.T) {
+	row := newFakeRowStore()
+	row.rows[cfgTestTenant.String()] = fakeRowEntry{provider: "vault", blob: []byte(`{}`)}
+	aud := &fakeAuditCapture{recordErr: errors.New("postgres down")}
+	cs := newTestConfigStore(t, row, nil, aud)
+
+	require.ErrorContains(t, cs.Delete(context.Background(), cfgTestTenant, "op"), "audit record")
+	_, err := cs.Get(context.Background(), cfgTestTenant)
+	require.NoError(t, err, "the row stays")
+}
+
+func TestNewConfigStore_RefusesNilInputs(t *testing.T) {
+	_, err := NewConfigStore(nil, nil, &fakeAuditCapture{})
+	require.Error(t, err)
+	_, err = newConfigStore(newFakeRowStore(), nil, nil)
+	require.Error(t, err)
 }
