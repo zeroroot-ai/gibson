@@ -170,6 +170,41 @@ func (l *memberLauncher) StopMember(ctx context.Context, tenantID string, m *ban
 	return nil
 }
 
+// SuspendMember asks setec to checkpoint the sandbox of an idle member.
+func (l *memberLauncher) SuspendMember(ctx context.Context, tenantID string, m *bank.Member) error {
+	s, err := l.suspender(m)
+	if err != nil {
+		return err
+	}
+	if err := s.Suspend(ctx, tenantID, m.SandboxID); err != nil {
+		return fmt.Errorf("suspend member %s: %w", m.ID, err)
+	}
+	return nil
+}
+
+// ResumeMember asks setec to bring a suspended member back.
+func (l *memberLauncher) ResumeMember(ctx context.Context, tenantID string, m *bank.Member) error {
+	s, err := l.suspender(m)
+	if err != nil {
+		return err
+	}
+	if err := s.Resume(ctx, tenantID, m.SandboxID); err != nil {
+		return fmt.Errorf("resume member %s: %w", m.ID, err)
+	}
+	return nil
+}
+
+// suspender returns the setec suspender for a member with a sandbox.
+func (l *memberLauncher) suspender(m *bank.Member) (sandboxSuspender, error) {
+	if l.daemon.sandboxSuspender == nil {
+		return nil, errors.New("the daemon has no setec suspender, so it cannot suspend or resume a member")
+	}
+	if m.SandboxID == "" {
+		return nil, fmt.Errorf("member %s names no sandbox", m.ID)
+	}
+	return l.daemon.sandboxSuspender, nil
+}
+
 // startBankRunner builds the bank reconciler over the daemon's seams and starts
 // it. A daemon that cannot launch a member (no data-plane pool, no sandboxed
 // dispatch, no signing key) logs why and serves everything

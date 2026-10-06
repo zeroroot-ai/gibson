@@ -54,3 +54,9 @@ func NewSetecSessionClient(_ config.SandboxConfig) (sandboxed.SessionClient, err
 func NewSetecAgentLauncher(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher, _ string) (*sandboxed.AgentLauncher, error) {
 	return nil, nil
 }
+
+// NewSetecSuspender returns (nil, nil) in a build without setec: a bank member
+// is never launched there, so none is suspended.
+func NewSetecSuspender(_ config.SandboxConfig) (sandboxSuspender, error) {
+	return nil, nil
+}

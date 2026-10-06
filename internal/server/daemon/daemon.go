@@ -244,7 +244,10 @@ type daemonImpl struct {
 	// (ADR-0119, gibson#1709). Captured when newHarnessFactory wires them so
 	// the bank reconciler can launch a member outside any mission harness.
 	// Nil when setec dispatch is not built or not enabled.
-	agentLauncher           *sandboxed.AgentLauncher
+	agentLauncher *sandboxed.AgentLauncher
+	// sandboxSuspender suspends and resumes an idle bank member through setec
+	// (gibson#809). Nil in a build without setec.
+	sandboxSuspender        sandboxSuspender
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 
