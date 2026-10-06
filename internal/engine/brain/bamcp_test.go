@@ -36,7 +36,7 @@ func bamcpTestRegistry(t *testing.T) *ontology.BeliefSchemaRegistry {
 // edge between them (host "1"'s compromise feeds host "2"'s "reachable"),
 // mirroring belief_slice_native_test.go's own fixture shape
 // (TestGroundAttackGraph_*). Node ids are HostNodeID(h.ID) exactly the way
-// VoIWorker.buildInput's own HostsToInfraGraph call produces them
+// VoIWorker.buildInput's own LiveAttackGraph call produces them
 // (belief_world_substrate.go) — a real PlanVoI candidate's RefID must match a
 // real graph node id for bamcpOutcome's lookup to ever fire, so this fixture
 // deliberately does not use arbitrary host-a/host-b names.

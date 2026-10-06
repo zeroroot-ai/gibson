@@ -228,7 +228,7 @@ func sortVoICandidates(c []VoICandidate) {
 
 // attackGraphDegree returns every node's degree (in + out) in g — ADR-0126's
 // "connectivity" input. A node absent from g has degree 0, the common
-// case while HostsToInfraGraph (gibson#275) still produces an edgeless graph.
+// case for a host that no relationship of the World links to a second host.
 func attackGraphDegree(g AttackGraph) map[string]int {
 	degree := make(map[string]int, len(g.Nodes))
 	for _, e := range g.Edges {

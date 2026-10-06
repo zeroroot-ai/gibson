@@ -10,7 +10,7 @@ import (
 
 // TestHostNodeID_RoundTrips proves the string<->uint64 host-id mapping
 // InfraNode.ID / NodeRef.ID use for a Host is stable and reversible — the
-// live graph construction (HostsToInfraGraph) and WorldBeliefSubstrate must
+// live graph construction (the infra graph) and WorldBeliefSubstrate must
 // agree on it, or a slice-gate write can never find the host it means to.
 func TestHostNodeID_RoundTrips(t *testing.T) {
 	for _, id := range []uint64{0, 1, 42, 1 << 40} {
@@ -234,29 +234,5 @@ func TestWorldBeliefSubstrate_StaleEvidenceDigestIsDropped(t *testing.T) {
 	got, _, _ := sub.Belief(ctx, NodeRef{Kind: NodeKindHost, ID: HostNodeID(hostID)})
 	if got.Belief.Model == "stale-write" {
 		t.Fatalf("a stale-digest write was applied: %+v", got.Belief)
-	}
-}
-
-// TestHostsToInfraGraph_MapsEveryHostToAHostKindNode proves the live-graph
-// construction uses the SAME id/kind convention WorldBeliefSubstrate reads
-// and writes, end to end.
-func TestHostsToInfraGraph_MapsEveryHostToAHostKindNode(t *testing.T) {
-	hosts := []HostSnapshot{{ID: 1}, {ID: 42}}
-	nodes := HostsToInfraGraph(hosts)
-	if len(nodes) != 2 {
-		t.Fatalf("got %d nodes, want 2", len(nodes))
-	}
-	want := map[string]bool{HostNodeID(1): true, HostNodeID(42): true}
-	for _, n := range nodes {
-		if n.Kind != "Host" {
-			t.Errorf("node %+v has Kind %q, want Host", n, n.Kind)
-		}
-		if !want[n.ID] {
-			t.Errorf("unexpected node id %q", n.ID)
-		}
-		delete(want, n.ID)
-	}
-	if len(want) != 0 {
-		t.Errorf("missing node ids: %v", want)
 	}
 }
