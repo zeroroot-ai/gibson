@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,6 +132,7 @@ func newOIDCClientRenameFixture(t *testing.T, specName, liveName, statusAppID st
 		"APP-OLD": {AppID: "APP-OLD", ClientID: "CID-OLD", Name: liveName},
 	}}
 	r := &OIDCClientReconciler{
+		Audit:          (&audittest.Sink{}).Emitter(t),
 		Client:         b.Build(),
 		Scheme:         s,
 		Recorder:       record.NewFakeRecorder(16),

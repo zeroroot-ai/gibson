@@ -26,6 +26,7 @@ import (
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 // wireReconciler registers the ConnectorInstance controller on the manager
@@ -33,13 +34,14 @@ import (
 // (ADR-0061) and the controller reads the credential state so the CR
 // reports Degraded rather than a silent Active (ADR-0061). One
 // client serves both, because both are the same SPIFFE-mTLS dial.
-func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth) error {
+func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth, auditEmitter *audit.SagaEmitter) error {
 	if err := (&controller.ConnectorInstanceReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Revoker:    daemon,
 		AuthReader: daemon,
 		ProxyAuth:  proxyAuth,
+		Audit:      auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("connectorinstance controller: %w", err)
 	}
@@ -160,7 +162,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := wireReconciler(mgr, daemon, proxyAuth); err != nil {
+	// Each change of the operator is recorded through the daemon before it
+	// happens (gibson#583). No emitter, no start.
+	auditEmitter, err := audit.NewSagaEmitter(daemon)
+	if err != nil {
+		setupLog.Error(err, "audit emitter")
+		os.Exit(1)
+	}
+
+	if err := wireReconciler(mgr, daemon, proxyAuth, auditEmitter); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConnectorInstance")
 		os.Exit(1)
 	}
@@ -171,6 +181,7 @@ func main() {
 	if err := (&controller.DesiredConnectorsRunnable{
 		Client: mgr.GetClient(),
 		Daemon: daemon,
+		Audit:  auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to add the desired connectors loop")
 		os.Exit(1)

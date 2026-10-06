@@ -41,13 +41,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
 	"github.com/zeroroot-ai/gibson/internal/platform/plans"
@@ -495,6 +499,16 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// silent enqueue miss would strand a tenant that has an owner identity, no
 	// provisioning record and no proof left to retry with. Better to fail the
 	// call and leave the session spendable (the attempt cap bounds retries).
+	// The request is recorded before the tenant is queued, with the owner
+	// who proved the mailbox as its actor. The queue entry carries the record
+	// id, so the operator records of the new tenant name this owner
+	// (gibson#583). With no record, nothing is queued.
+	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, row.WorkspaceName, plan.ID)
+	if rerr != nil {
+		s.logger.ErrorContext(ctx, "Signup: durable audit write failed",
+			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
+		return nil, status.Error(codes.Unavailable, "failed to complete signup; try again")
+	}
 	if _, eerr := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      slug,
 		OwnerUserId:   result.UserID,
@@ -502,7 +516,8 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		WorkspaceName: row.WorkspaceName,
 		// Enqueue the RESOLVED canonical plan id, not the raw verification-row
 		// string, so nothing downstream sees an id the plan gate did not accept.
-		Tier: plan.ID,
+		Tier:          plan.ID,
+		AuditRecordId: recordID,
 	}, hold, true); eerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
 			"attempt_id", req.GetAttemptId(),
@@ -589,4 +604,40 @@ func (s *DaemonServer) resolveSignupPlan(tier string, stepConfigured bool) (plan
 			plan.ID)
 	}
 	return plan, nil
+}
+
+// auditActionSignupTenantRequested is the record of a self-serve signup that
+// asks for a new tenant (gibson#583).
+const auditActionSignupTenantRequested = "signup.tenant_requested"
+
+// recordSignupRequest writes the durable audit record of a signup that asks
+// for a tenant, and returns its id. The actor is the owner user the signup
+// created: that person proved control of the mailbox. With no audit writer,
+// no record is written and the id is empty, as for a registration decision.
+func (s *DaemonServer) recordSignupRequest(ctx context.Context, ownerUserID, tenantID, workspaceName, tier string) (string, error) {
+	if s.tenantAdminAuditWriter == nil {
+		return "", nil
+	}
+	recordID := uuid.NewString()
+	metadata, err := json.Marshal(map[string]string{
+		"entry_id":       recordID,
+		"workspace_name": workspaceName,
+		"tier":           tier,
+	})
+	if err != nil {
+		return "", fmt.Errorf("signup request record: %w", err)
+	}
+	if err := s.tenantAdminAuditWriter.WriteSync(ctx, audit.Event{
+		TenantID:   tenantID,
+		ActorID:    ownerUserID,
+		ActorType:  "user",
+		Action:     auditActionSignupTenantRequested,
+		TargetType: "tenant",
+		TargetID:   tenantID,
+		Decision:   "allow",
+		Metadata:   metadata,
+	}); err != nil {
+		return "", fmt.Errorf("signup request record: %w", err)
+	}
+	return recordID, nil
 }

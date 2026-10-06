@@ -10,8 +10,8 @@ import (
 
 // FinalBackupFailures counts each delete pass in which the last backup of a
 // tenant did not complete. While it grows, a tenant delete is stopped and has
-// removed nothing. The reason label is one of: read_namespace, create, read,
-// backup_failed, timeout.
+// removed nothing. The reason label is one of: read_namespace, audit, create,
+// read, backup_failed, timeout.
 var FinalBackupFailures = prometheus.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "gibson_tenant_operator_final_backup_failures_total",

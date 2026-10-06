@@ -38,6 +38,12 @@ func tenantOperatorSVID(td spiffeid.TrustDomain) string { return platformSVID(td
 // RevokeConnectorGrant from the ConnectorInstance finalizer and
 // GetConnectorAuthStatus from the ConnectorInstance controller, so its policy
 // is exactly those two methods (least privilege).
+// platformOperatorSVID is the identity of the platform operator, which sends
+// only its audit records to the daemon (gibson#583).
+func platformOperatorSVID(td spiffeid.TrustDomain) string {
+	return platformSVID(td, "platform-operator")
+}
+
 func connectorOperatorSVID(td spiffeid.TrustDomain) string {
 	return platformSVID(td, "connector-operator")
 }
@@ -142,13 +148,13 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		allowed: true,
 		reason:  "operator acks each drained tenant_admin_ops entry (migration 018)",
 	},
+	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName: {
+		allowed: true,
+		reason:  "operator records each saga step and the last backup before the change (gibson#583)",
+	},
 
 	// --- operator-denied: least privilege, no caller wired ---
 	daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName: {
-		allowed: false,
-		reason:  "no current caller; re-add when wired",
-	},
-	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName: {
 		allowed: false,
 		reason:  "no current caller; re-add when wired",
 	},
@@ -227,7 +233,15 @@ var connectorOperatorMethodPolicy = denyAllExcept(operatorMethodPolicy, map[stri
 	daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName:  "the connector loop reports the state of each ConnectorInstance (gibson#662)",
 	daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName:         "the connector loop records a ConnectorInstance from before the table (gibson#662)",
 	daemonoperatorv1.DaemonOperatorService_GetConnectorCredential_FullMethodName: "the connector loop reads the content of the connector-cred Secret (gibson#663); the handler also checks the TLS peer",
+	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName:         "the connector operator records each runtime, network, grant and credential change before it (gibson#583)",
 }, "tenant-operator surface; not a connector concern")
+
+// platformOperatorMethodPolicy classifies EVERY DaemonOperatorService method
+// for the platform operator's direct-dial bypass. It records its own changes
+// and calls nothing else (gibson#583).
+var platformOperatorMethodPolicy = denyAllExcept(operatorMethodPolicy, map[string]string{
+	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName: "the platform operator records each Zitadel, FGA, OpenBao and Postgres change it made (gibson#583)",
+}, "not a platform-operator concern")
 
 // denyAllExcept builds a policy table over the same method set as base:
 // allowed carries the permitted methods with their reasons, everything else is
@@ -257,6 +271,12 @@ func connectorOperatorAllowedMethods() map[string]bool {
 	return allowedMethodsOf(connectorOperatorMethodPolicy)
 }
 
+// platformOperatorAllowedMethods is the platform operator's allowed set,
+// derived from platformOperatorMethodPolicy.
+func platformOperatorAllowedMethods() map[string]bool {
+	return allowedMethodsOf(platformOperatorMethodPolicy)
+}
+
 // allowedMethodsOf projects a classified policy table to its allowed set.
 func allowedMethodsOf(policy map[string]operatorMethodDecision) map[string]bool {
 	allowed := make(map[string]bool, len(policy))
@@ -274,7 +294,8 @@ func allowedMethodsOf(policy map[string]operatorMethodDecision) map[string]bool 
 // policy and is therefore DENIED at request time AND rejected at startup
 // (fail-closed, gibson#1052): there is no implicit "allow all" fall-through.
 //
-// The policed peers are the tenant-operator and the connector-operator.
+// The policed peers are the tenant-operator, the connector-operator and the
+// platform operator.
 // EnvoyID is deliberately absent: browser-path traffic transits Envoy +
 // ext-authz and never uses this bypass, so it must never appear here or in
 // AllowedPeerIDs. A new direct-dial peer must be given an explicit method
@@ -283,6 +304,7 @@ func spiffePeerMethodPolicies(td spiffeid.TrustDomain, callers api.ConnectionPoi
 	policies := map[string]map[string]bool{
 		tenantOperatorSVID(td):    operatorAllowedMethods(),
 		connectorOperatorSVID(td): connectorOperatorAllowedMethods(),
+		platformOperatorSVID(td):  platformOperatorAllowedMethods(),
 	}
 	policies = mergePeerPolicies(policies, connectionPointPeerPolicies(callers))
 	// The exit-test runner is a direct-dial peer that exists ONLY in binaries

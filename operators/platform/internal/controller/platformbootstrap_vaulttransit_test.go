@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,6 +52,7 @@ func TestReconcileVaultTransit_VaultClientInitFailureRequeues(t *testing.T) {
 
 	wantErr := errors.New("boom: invalid apiURL")
 	r := &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
@@ -130,6 +133,7 @@ func TestReconcileVaultTransit_MountFailureRequeuesAndSetsCondition(t *testing.T
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(tokenSecret).Build()
 
 	r := &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
@@ -171,6 +175,7 @@ func TestReconcileVaultTransit_UsesVaultTokenSourceAndRequeuesOnTokenError(t *te
 
 	tokenErr := errors.New("vault admin token renewal failed: verify token: permission denied")
 	r := &PlatformBootstrapReconciler{
+		Audit:      (&audittest.Sink{}).Emitter(t),
 		Client:     cli,
 		Scheme:     s,
 		Recorder:   record.NewFakeRecorder(8),

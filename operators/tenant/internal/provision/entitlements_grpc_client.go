@@ -28,6 +28,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
@@ -198,6 +199,9 @@ type PendingTenant struct {
 	OwnerEmail    string
 	WorkspaceName string
 	Tier          string
+	// AuditRecordID is the daemon audit record of the human request that
+	// queued this tenant, or "" when no human request is behind it (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
@@ -221,6 +225,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 			OwnerEmail:    p.GetOwnerEmail(),
 			WorkspaceName: p.GetWorkspaceName(),
 			Tier:          p.GetTier(),
+			AuditRecordID: p.GetAuditRecordId(),
 		})
 	}
 	return out, nil
@@ -310,6 +315,9 @@ type TenantAdminOp struct {
 	OwnerEmail     string
 	Tier           string
 	TierSet        bool
+	// AuditRecordID is the daemon audit record of the admin request behind
+	// this op (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantOps returns the daemon's queue of admin tenant CRUD ops
@@ -336,6 +344,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]Te
 			OwnerEmail:     op.GetOwnerEmail(),
 			Tier:           op.GetTier(),
 			TierSet:        op.GetTierSet(),
+			AuditRecordID:  op.GetAuditRecordId(),
 		})
 	}
 	return out, nil
@@ -353,9 +362,19 @@ func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) e
 	return translateGRPCError("ack-tenant-op", err)
 }
 
-// EmitReconcileSummary maps the controller's strongly-typed summary onto
-// the daemon's generic AuditEventMessage. The daemon's audit emitter
-// stores the event in the platform Postgres + Redis stream.
+// EmitAuditEvent sends one audit record of an operator change to the daemon
+// (DaemonOperatorService.EmitAuditEvent, gibson#583). The daemon writes it to
+// Postgres before it answers, with the SPIFFE identity of the operator as the
+// actor. It implements audit.Sink.
+func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.EmitAuditEvent(authedCtx, audit.MessageOf(ev))
+	return translateGRPCError("emit-audit-event", err)
+}
+
 // parseAccessTuples splits "user#relation@object" into the gRPC
 // AccessTuple message. Mirrors EntitlementsHTTPClient's tuplesFromStrings
 // so the operator's caller surface is unchanged.

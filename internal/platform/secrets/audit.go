@@ -183,7 +183,7 @@ func (w *AuditWriter) Record(ctx context.Context, event AuditEvent) error {
 	if w.rejectOnPlaintextGuard(ctx, event) {
 		return ErrAuditRejected
 	}
-	if err := w.logger.Record(ctx, event.Action, event.ResourceType, event.ResourceURI, w.details(event)); err != nil {
+	if _, err := w.logger.Record(ctx, event.Action, event.ResourceType, event.ResourceURI, w.details(event)); err != nil {
 		auditFailuresTotal.WithLabelValues(event.ActorTenantID).Inc()
 		return fmt.Errorf("secrets audit writer: %w", err)
 	}

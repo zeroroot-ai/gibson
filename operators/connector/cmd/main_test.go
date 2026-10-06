@@ -15,6 +15,7 @@ import (
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 )
 
 // TestSchemeRegistersConnectorInstance asserts init() wired the ConnectorInstance
@@ -88,8 +89,12 @@ func TestWireReconciler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.New: %v", err)
 	}
-	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}); err != nil {
+	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, (&audittest.Sink{}).Emitter(t)); err != nil {
 		t.Fatalf("wireReconciler: %v", err)
+	}
+	// The controller does not start without the audit emitter (gibson#583).
+	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}, nil); err == nil {
+		t.Fatal("wireReconciler accepted no audit emitter")
 	}
 }
 

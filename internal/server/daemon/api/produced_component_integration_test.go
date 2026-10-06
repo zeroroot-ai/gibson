@@ -7,7 +7,7 @@
 package api
 
 // The record of produced components against a real Postgres, with the shipped
-// migration 041 (gibson#33). It proves the quota holds under concurrent
+// migration 042 (gibson#33). It proves the quota holds under concurrent
 // enrollments of one tenant.
 
 import (

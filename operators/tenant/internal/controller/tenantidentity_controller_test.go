@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
@@ -90,7 +91,7 @@ func TestTenantIdentity_ProvisionsAndMarksReady(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	// Pass 1: finalizer added, requeue.
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
@@ -154,7 +155,7 @@ func TestTenantIdentity_OIDCClientComponentReported(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -186,7 +187,7 @@ func TestTenantIdentity_ProvisionFailureSetsFailed(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{provisionErr: errors.New("zitadel create org failed")}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	_, err := reconcileTI(t, r, "acme-identity")
 	if err == nil {
@@ -224,7 +225,7 @@ func TestTenantIdentity_FinalizerTeardown(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile delete: %v", err)
@@ -267,7 +268,7 @@ func TestTenantIdentity_SteadyStateNoPhaseFlip(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	// Steady-state resync: Provision still runs (drift-correction) but phase
 	// must NOT flip to Provisioning.
@@ -318,7 +319,7 @@ func TestTenantIdentity_TeardownNotFoundIsSuccess(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{deprovisionErr: clients.ErrNotFound}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("NotFound from deprovision must not error: %v", err)
@@ -350,7 +351,7 @@ func TestTenantIdentity_SeedsOrgMapping(t *testing.T) {
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
 	orgMapping := &stubOrgMapping{}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: orgMapping}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: orgMapping}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -385,7 +386,7 @@ func TestTenantIdentity_SeedFailureKeepsNotReady(t *testing.T) {
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
 	orgMapping := &stubOrgMapping{err: errors.New("daemon unreachable")}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: orgMapping}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: orgMapping}
 
 	_, err := reconcileTI(t, r, "acme-identity")
 	if err == nil {
@@ -420,7 +421,7 @@ func TestTenantIdentity_NilOrgMappingFailsLoud(t *testing.T) {
 		Build()
 
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: nil}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: nil}
 
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatalf("reconcile: %v", err)

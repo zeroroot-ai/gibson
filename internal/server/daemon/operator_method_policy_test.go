@@ -116,7 +116,8 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_GetConnectorCredential_FullMethodName,
-	}, got, "connector-operator may call exactly its revoke, its status read and its connector loop RPCs")
+		daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName,
+	}, got, "connector-operator may call exactly its revoke, its status read, its connector loop RPCs and the audit record")
 	for _, m := range []string{
 		daemonoperatorv1.DaemonOperatorService_ListDesiredConnectors_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
@@ -135,17 +136,17 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 // reconciliation: the operator-allowed set must equal EXACTLY the set of RPCs
 // the tenant-operator actually dials. It fails on BOTH a missing grant (the
 // recurring provisioning-breaking bug) and a surplus grant (a standing
-// over-grant such as the UpsertTenantQuota / EmitAuditEvent ones removed here).
+// over-grant such as the UpsertTenantQuota one removed here).
 //
 // operatorActualCallSet is a curated, human-maintained list. When the operator
 // starts (or stops) calling an RPC, update this list AND the allowed/denied
 // classification in operatorMethodPolicy together — this test is the tripwire
 // that forces both edits.
 func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
-	// The 13 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
-	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota and
-	// EmitAuditEvent are deliberately ABSENT: no caller is wired, so granting
-	// them would be an over-grant (least privilege).
+	// The 14 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
+	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota is
+	// deliberately ABSENT: no caller is wired, so granting it would be an
+	// over-grant (least privilege).
 	operatorActualCallSet := []string{
 		daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ListFeatureTuples_FullMethodName,
@@ -160,6 +161,7 @@ func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
 		daemonoperatorv1.DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName,
 	}
 
 	want := append([]string(nil), operatorActualCallSet...)
@@ -191,18 +193,18 @@ func deniedMethod() string {
 }
 
 // TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced asserts the policed
-// peer set is exactly the two operators: EnvoyID and any browser-path SVID
+// peer set is exactly the three operators: EnvoyID and any browser-path SVID
 // are deliberately absent (they transit Envoy + ext-authz, never this bypass).
 func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
-	// In a PRODUCTION build exactly two peers are policed. A test_fixtures
+	// In a PRODUCTION build exactly three peers are policed. A test_fixtures
 	// build adds the exit-test runner and nothing else — that identity does not
 	// exist in the production binary at all (e2e_peer_policy_stub.go), which is
 	// what keeps this invariant meaningful where it matters. Assert the exact
 	// membership rather than only the count, so a future extra peer in either
 	// build has to be added here deliberately.
-	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD)}
+	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD), platformOperatorSVID(testTD)}
 	if isTestFixturesBuild {
 		want = append(want, "spiffe://example.org/platform/e2e-runner")
 	}
@@ -310,4 +312,17 @@ func TestSpiffeBypassDecision(t *testing.T) {
 		assert.False(t, ok, "a non-allow-listed peer is not bypassed")
 		assert.NoError(t, err, "a non-allow-listed peer must fall through, NOT be denied")
 	})
+}
+
+// TestPlatformOperatorMethodPolicy_OnlyTheAuditRecord pins the platform
+// operator to the one RPC it calls: it sends the audit records of its own
+// changes and nothing else (gibson#583).
+func TestPlatformOperatorMethodPolicy_OnlyTheAuditRecord(t *testing.T) {
+	got := make([]string, 0, 1)
+	for method := range platformOperatorAllowedMethods() {
+		got = append(got, method)
+	}
+	assert.ElementsMatch(t, []string{daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName}, got)
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
+	assert.Equal(t, platformOperatorAllowedMethods(), policies[platformOperatorSVID(testTD)])
 }

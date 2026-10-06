@@ -26,6 +26,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 )
@@ -83,7 +84,7 @@ func newAuthzReconciler(t *testing.T, fgaClient fga.Client, seed ...client.Objec
 		WithScheme(s).
 		WithObjects(seed...).
 		Build()
-	return &ConnectorInstanceAuthzReconciler{Client: cl, Scheme: s, FGA: fgaClient}
+	return &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: fgaClient}
 }
 
 func connectorCR(name, namespace string, finalizers ...string) *connectorv1alpha1.ConnectorInstance {
@@ -254,7 +255,7 @@ func TestConnectorAuthz_GetAndUpdateErrorsPropagate(t *testing.T) {
 					return boom
 				},
 			}).Build()
-		r := &ConnectorInstanceAuthzReconciler{Client: cl, Scheme: s, FGA: &authzStubFGA{}}
+		r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: &authzStubFGA{}}
 		if _, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"},
 		}); !errors.Is(err, boom) {
@@ -270,7 +271,7 @@ func TestConnectorAuthz_GetAndUpdateErrorsPropagate(t *testing.T) {
 					return boom
 				},
 			}).Build()
-		r := &ConnectorInstanceAuthzReconciler{Client: cl, Scheme: s, FGA: &authzStubFGA{}}
+		r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: &authzStubFGA{}}
 		if _, err := r.Reconcile(context.Background(), ctrl.Request{
 			NamespacedName: types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"},
 		}); !errors.Is(err, boom) {
@@ -286,7 +287,7 @@ func TestConnectorAuthz_GetAndUpdateErrorsPropagate(t *testing.T) {
 					return boom
 				},
 			}).Build()
-		r := &ConnectorInstanceAuthzReconciler{Client: cl, Scheme: s, FGA: &authzStubFGA{}}
+		r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, FGA: &authzStubFGA{}}
 		var ci connectorv1alpha1.ConnectorInstance
 		if err := r.Get(context.Background(), types.NamespacedName{Name: "gitlab", Namespace: "tenant-acme"}, &ci); err != nil {
 			t.Fatalf("get: %v", err)
@@ -311,7 +312,7 @@ func TestConnectorAuthz_SetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	r := &ConnectorInstanceAuthzReconciler{Client: mgr.GetClient(), Scheme: s, FGA: &authzStubFGA{}}
+	r := &ConnectorInstanceAuthzReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient(), Scheme: s, FGA: &authzStubFGA{}}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
 	}

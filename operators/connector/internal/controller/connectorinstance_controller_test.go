@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -110,7 +112,7 @@ func newReconcilerWithAuth(t *testing.T, reader ConnectorAuthReader, seed ...cli
 		WithStatusSubresource(&connectorv1alpha1.ConnectorInstance{}).
 		WithObjects(seed...).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader, ProxyAuth: testProxyAuth}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader, ProxyAuth: testProxyAuth}
 }
 
 // conditionOf returns the named condition, or nil.
@@ -708,7 +710,7 @@ func failingReconciler(t *testing.T, seed ...client.Object) *ConnectorInstanceRe
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 var errReconcileBoom = reconcileBoom("kube write refused")
@@ -781,7 +783,7 @@ func failCreateOfKind(t *testing.T, kind string, seed ...client.Object) *Connect
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 // TestReconcile_EgressErrorIsFailed fails the egress-profile step.
@@ -836,7 +838,7 @@ func failGetReconciler(t *testing.T) *ConnectorInstanceReconciler {
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 // TestReconcileHelpers_GetErrorsAreWrapped checks that a non-NotFound read
@@ -867,7 +869,7 @@ func TestSetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.New: %v", err)
 	}
-	r := &ConnectorInstanceReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
+	r := &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
 	}
@@ -938,7 +940,7 @@ func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
 			},
 		}).
 		Build()
-	r := &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
+	r := &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}})
 	if err == nil || !strings.Contains(err.Error(), "remove finalizer") {
 		t.Fatalf("err = %v, want a wrapped remove-finalizer error", err)

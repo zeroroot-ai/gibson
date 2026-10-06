@@ -90,11 +90,11 @@ func startPostgres(t *testing.T) (*pgxpool.Pool, *sql.DB) {
 		require.NoError(t, err, "apply %s", name)
 	}
 	// The audit retention period of a tenant lives in the platform table of
-	// migration 041. The archive reads it through audit.RetentionSettings.
-	platformUp, err := os.ReadFile(filepath.Join("..", "..", "..", "pkg", "platform", "migrations", "postgres", "platform", "041_audit_retention_tenant.up.sql"))
+	// migration 043. The archive reads it through audit.RetentionSettings.
+	platformUp, err := os.ReadFile(filepath.Join("..", "..", "..", "pkg", "platform", "migrations", "postgres", "platform", "043_audit_retention_tenant.up.sql"))
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, string(platformUp))
-	require.NoError(t, err, "apply 041_audit_retention_tenant")
+	require.NoError(t, err, "apply 043_audit_retention_tenant")
 	_, err = pool.Exec(ctx, `CREATE TABLE tenant_secrets_broker_config (tenant_id TEXT PRIMARY KEY)`)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO tenant_secrets_broker_config (tenant_id) VALUES ($1)`, tenantName)

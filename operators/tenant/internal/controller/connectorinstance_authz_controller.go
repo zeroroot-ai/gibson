@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -16,7 +17,9 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // connectorAuthzFinalizer blocks ConnectorInstance deletion until the
@@ -30,6 +33,11 @@ const connectorAuthzFinalizer = "gibson.zeroroot.ai/connector-authz"
 // internal/infra/reconciler's catalog source).
 const connectorTenantNamespacePrefix = "tenant-"
 
+// annotationAuthzGeneration holds the generation of the ConnectorInstance
+// whose grants this controller last wrote. A pass at the same generation is
+// an idempotent re-check and writes no new audit record (gibson#583).
+const annotationAuthzGeneration = "gibson.zeroroot.ai/authz-observed-generation"
+
 // ConnectorInstanceAuthzReconciler converges the FGA component tuples for a
 // ConnectorInstance (ADR-0067, gibson#1548). The connector-operator owns the
 // runtime (ToolHive, NetworkPolicy, secrets); this controller owns the authz
@@ -41,6 +49,10 @@ type ConnectorInstanceAuthzReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	FGA    fga.Client
+
+	// Audit writes the record of each FGA grant change before the change
+	// (gibson#583). Required.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;update
@@ -58,6 +70,9 @@ func (r *ConnectorInstanceAuthzReconciler) Reconcile(ctx context.Context, req ct
 		}
 		return ctrl.Result{}, fmt.Errorf("connector authz: get %s: %w", req.NamespacedName, err)
 	}
+	if r.Audit == nil {
+		return ctrl.Result{}, fmt.Errorf("connector authz: %w", saga.ErrNoAudit)
+	}
 
 	tenantID, ok := strings.CutPrefix(ci.Namespace, connectorTenantNamespacePrefix)
 	if !ok || tenantID == "" {
@@ -71,7 +86,10 @@ func (r *ConnectorInstanceAuthzReconciler) Reconcile(ctx context.Context, req ct
 		if controllerutil.ContainsFinalizer(&ci, connectorAuthzFinalizer) {
 			// Tuples must be gone before the CR may go — returning the error
 			// requeues with backoff and keeps the finalizer in place.
-			if err := fga.DeleteConnectorComponentGrants(ctx, r.FGA, catalogID, tenantID); err != nil {
+			ev := audit.ObjectEvent(audit.ActionConnectorGrantsDelete, &ci, map[string]string{"connector": catalogID})
+			if err := r.Audit.Change(ctx, ev, func() error {
+				return fga.DeleteConnectorComponentGrants(ctx, r.FGA, catalogID, tenantID)
+			}); err != nil {
 				return ctrl.Result{}, fmt.Errorf("connector authz: remove tuples for %s: %w", catalogID, err)
 			}
 			controllerutil.RemoveFinalizer(&ci, connectorAuthzFinalizer)
@@ -91,13 +109,32 @@ func (r *ConnectorInstanceAuthzReconciler) Reconcile(ctx context.Context, req ct
 		}
 	}
 
-	if err := fga.WriteConnectorComponentGrants(ctx, r.FGA, catalogID, tenantID); err != nil {
-		return ctrl.Result{}, fmt.Errorf("connector authz: seed tuples for %s: %w", catalogID, err)
+	write := func() error {
+		if err := fga.WriteConnectorComponentGrants(ctx, r.FGA, catalogID, tenantID); err != nil {
+			return fmt.Errorf("connector authz: seed tuples for %s: %w", catalogID, err)
+		}
+		// Reseed away the retired plugin-object borrow (ADR-0067): stale
+		// pre-cutover stores may still carry it, and nothing writes it any more.
+		if err := fga.DeleteLegacyConnectorInvokeTuple(ctx, r.FGA, catalogID, tenantID); err != nil {
+			return fmt.Errorf("connector authz: drop legacy invoke tuple for %s: %w", catalogID, err)
+		}
+		return nil
 	}
-	// Reseed away the retired plugin-object borrow (ADR-0067): stale
-	// pre-cutover stores may still carry it, and nothing writes it any more.
-	if err := fga.DeleteLegacyConnectorInvokeTuple(ctx, r.FGA, catalogID, tenantID); err != nil {
-		return ctrl.Result{}, fmt.Errorf("connector authz: drop legacy invoke tuple for %s: %w", catalogID, err)
+	generation := strconv.FormatInt(ci.Generation, 10)
+	if ci.Annotations[annotationAuthzGeneration] == generation {
+		// Settled at this generation: an idempotent re-check, no new record.
+		return ctrl.Result{}, write()
+	}
+	ev := audit.ObjectEvent(audit.ActionConnectorGrantsWrite, &ci, map[string]string{"connector": catalogID, "generation": generation})
+	if err := r.Audit.Change(ctx, ev, write); err != nil {
+		return ctrl.Result{}, err
+	}
+	if ci.Annotations == nil {
+		ci.Annotations = map[string]string{}
+	}
+	ci.Annotations[annotationAuthzGeneration] = generation
+	if err := r.Update(ctx, &ci); err != nil {
+		return ctrl.Result{}, fmt.Errorf("connector authz: mark generation on %s: %w", catalogID, err)
 	}
 	return ctrl.Result{}, nil
 }
@@ -105,6 +142,9 @@ func (r *ConnectorInstanceAuthzReconciler) Reconcile(ctx context.Context, req ct
 // SetupWithManager registers the controller under its own name so it never
 // collides with the connector-operator's runtime controller for the same CRD.
 func (r *ConnectorInstanceAuthzReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("connector authz: %w", saga.ErrNoAudit)
+	}
 	if err := ctrl.NewControllerManagedBy(mgr).
 		Named("connectorinstance-authz").
 		For(&connectorv1alpha1.ConnectorInstance{}).

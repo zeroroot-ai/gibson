@@ -13,6 +13,7 @@ import (
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
 
@@ -44,6 +45,7 @@ func (s *stubEnqueuer) callCount() int {
 func TestFirstTenantSeed_EnqueuesOnceThenReturns(t *testing.T) {
 	enq := &stubEnqueuer{}
 	r := &FirstTenantSeedRunnable{
+		Audit:       (&audittest.Sink{}).Emitter(t),
 		Daemon:      enq,
 		TenantID:    "founding",
 		DisplayName: "Founding Org",
@@ -66,6 +68,7 @@ func TestFirstTenantSeed_EnqueuesOnceThenReturns(t *testing.T) {
 func TestFirstTenantSeed_RetriesUntilAccepted(t *testing.T) {
 	enq := &stubEnqueuer{failFirstN: 2}
 	r := &FirstTenantSeedRunnable{
+		Audit:      (&audittest.Sink{}).Emitter(t),
 		Daemon:     enq,
 		TenantID:   "founding",
 		OwnerEmail: "admin@localhost.zeroroot.ai",
@@ -82,6 +85,7 @@ func TestFirstTenantSeed_RetriesUntilAccepted(t *testing.T) {
 func TestFirstTenantSeed_AlreadyExisted_ReturnsNoRetry(t *testing.T) {
 	enq := &stubEnqueuer{alreadyExisted: true}
 	r := &FirstTenantSeedRunnable{
+		Audit:      (&audittest.Sink{}).Emitter(t),
 		Daemon:     enq,
 		TenantID:   "founding",
 		OwnerEmail: "admin@localhost.zeroroot.ai",
@@ -96,7 +100,7 @@ func TestFirstTenantSeed_AlreadyExisted_ReturnsNoRetry(t *testing.T) {
 
 func TestFirstTenantSeed_MisconfiguredMissingOwner_Errors(t *testing.T) {
 	enq := &stubEnqueuer{}
-	r := &FirstTenantSeedRunnable{Daemon: enq, TenantID: "founding"}
+	r := &FirstTenantSeedRunnable{Daemon: enq, TenantID: "founding", Audit: (&audittest.Sink{}).Emitter(t)}
 	if err := r.Start(context.Background()); err == nil {
 		t.Fatal("want error when owner_email is empty")
 	}
@@ -108,6 +112,7 @@ func TestFirstTenantSeed_MisconfiguredMissingOwner_Errors(t *testing.T) {
 func TestFirstTenantSeed_ContextCancelledDuringRetry(t *testing.T) {
 	enq := &stubEnqueuer{failFirstN: 1000} // never succeeds
 	r := &FirstTenantSeedRunnable{
+		Audit:      (&audittest.Sink{}).Emitter(t),
 		Daemon:     enq,
 		TenantID:   "founding",
 		OwnerEmail: "admin@localhost.zeroroot.ai",
@@ -196,7 +201,7 @@ func TestRegisterFirstTenantSeed(t *testing.T) {
 
 	t.Run("disabled: no runnable added, no error", func(t *testing.T) {
 		mgr := &fakeManager{}
-		if err := RegisterFirstTenantSeed(mgr, func(string) string { return "" }, enq, logr.Discard()); err != nil {
+		if err := RegisterFirstTenantSeed(mgr, func(string) string { return "" }, enq, (&audittest.Sink{}).Emitter(t), logr.Discard()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(mgr.added) != 0 {
@@ -206,7 +211,7 @@ func TestRegisterFirstTenantSeed(t *testing.T) {
 
 	t.Run("enabled: registers the seed runnable", func(t *testing.T) {
 		mgr := &fakeManager{}
-		if err := RegisterFirstTenantSeed(mgr, enabledEnv, enq, logr.Discard()); err != nil {
+		if err := RegisterFirstTenantSeed(mgr, enabledEnv, enq, (&audittest.Sink{}).Emitter(t), logr.Discard()); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if len(mgr.added) != 1 {
@@ -222,14 +227,14 @@ func TestRegisterFirstTenantSeed(t *testing.T) {
 		env := func(k string) string {
 			return map[string]string{"FIRST_TENANT_ENABLED": "true"}[k] // no id/email
 		}
-		if err := RegisterFirstTenantSeed(mgr, env, enq, logr.Discard()); err == nil {
+		if err := RegisterFirstTenantSeed(mgr, env, enq, (&audittest.Sink{}).Emitter(t), logr.Discard()); err == nil {
 			t.Fatal("want error for missing identity")
 		}
 	})
 
 	t.Run("manager rejects the runnable: propagates error", func(t *testing.T) {
 		mgr := &fakeManager{addErr: errors.New("manager stopped")}
-		if err := RegisterFirstTenantSeed(mgr, enabledEnv, enq, logr.Discard()); err == nil {
+		if err := RegisterFirstTenantSeed(mgr, enabledEnv, enq, (&audittest.Sink{}).Emitter(t), logr.Discard()); err == nil {
 			t.Fatal("want error when mgr.Add fails")
 		}
 	})

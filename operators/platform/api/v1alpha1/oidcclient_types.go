@@ -146,6 +146,12 @@ type OIDCClientSpec struct {
 
 // OIDCClientStatus is the observed state.
 type OIDCClientStatus struct {
+	// PendingAuditRecords are the audit records of changes the daemon has not
+	// accepted yet (gibson#583). The operator sends them when the daemon
+	// answers, then removes them.
+	// +optional
+	PendingAuditRecords []PendingAuditRecord `json:"pendingAuditRecords,omitempty"`
+
 	// ObservedGeneration mirrors metadata.generation.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`

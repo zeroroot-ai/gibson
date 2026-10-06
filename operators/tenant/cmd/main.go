@@ -43,6 +43,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -678,6 +679,9 @@ func main() {
 	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
 	var agentLimits flows.AgentLimitsReporter
+	// The audit record of each saga step and of the last backup goes to the
+	// daemon before the change (gibson#583). Required: no emitter, no start.
+	var sagaAudit *audit.SagaEmitter
 	// One block for the wiring of the daemon client and of each loop that
 	// needs it.
 	{
@@ -690,6 +694,10 @@ func main() {
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
 		agentLimits = grpcClient
+		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
+			setupLog.Error(gerr, "saga audit emitter init failed")
+			os.Exit(1)
+		}
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -742,7 +750,7 @@ func main() {
 		// then drains it exactly as a signup-originated tenant, and
 		// bootstrap-tenant-owner creates the owner user. Idempotent on
 		// tenant_id, so it is a no-op on every restart after the first.
-		if err := controller.RegisterFirstTenantSeed(mgr, os.Getenv, grpcClient, setupLog); err != nil {
+		if err := controller.RegisterFirstTenantSeed(mgr, os.Getenv, grpcClient, sagaAudit, setupLog); err != nil {
 			setupLog.Error(err, "first-tenant seed registration failed")
 			os.Exit(1)
 		}
@@ -781,7 +789,7 @@ func main() {
 	// The last backup of a tenant delete (ADR-0075). VELERO_NAMESPACE is
 	// required: no switch turns the backup off, so an operator with no Velero
 	// namespace must not start.
-	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"))
+	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"), sagaAudit)
 	if err != nil {
 		setupLog.Error(err, "VELERO_NAMESPACE is required: the tenant delete flow takes a last Velero backup")
 		os.Exit(1)
@@ -792,6 +800,7 @@ func main() {
 		Scheme:            mgr.GetScheme(),
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
 		FinalBackup:       finalBackup,
+		Audit:             sagaAudit,
 		ProvisionSteps:    provisionSteps,
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,
@@ -817,6 +826,7 @@ func main() {
 		// above, for the same reason: the invitation accept link must reach
 		// a human's browser, not an in-cluster address (hosted#203).
 		BaseAcceptURL: os.Getenv("GIBSON_APP_URL"),
+		Audit:         sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)
@@ -835,6 +845,7 @@ func main() {
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Deps:            enrollmentDeps,
+		Audit:           sagaAudit,
 		IssuanceSteps:   flows.EnrollmentIssuanceSteps(enrollmentDeps),
 		RevocationSteps: flows.EnrollmentRevocationSteps(enrollmentDeps),
 	}).SetupWithManager(mgr); err != nil {
@@ -851,6 +862,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		FGA:    fgaClient,
+		Audit:  sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ConnectorInstanceAuthz")
 		os.Exit(1)
@@ -864,6 +876,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: dataPlaneProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantDataPlane")
 		os.Exit(1)
@@ -878,6 +891,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: secretsProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantSecretsBackend")
 		os.Exit(1)
@@ -894,6 +908,7 @@ func main() {
 		ZitadelURL:  zw.endpoint.BaseURL(),
 		Provisioner: identityProvisioner,
 		OrgMapping:  orgMappingSeeder,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
 		os.Exit(1)
@@ -907,6 +922,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Syncer:   tenantRoleSyncer,
 		Interval: tenantRoleSyncInterval,
+		Audit:    sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantRoleSync")
 		os.Exit(1)
@@ -922,6 +938,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: grantsProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantGrants")
 		os.Exit(1)
@@ -941,6 +958,7 @@ func main() {
 		Recorder:           mgr.GetEventRecorder("orphan-reaper"),
 		GracePeriodSeconds: reaperGraceSeconds,
 		Enabled:            reaperEnabled,
+		Audit:              sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "OrphanReaper")
 		os.Exit(1)
@@ -989,7 +1007,7 @@ func main() {
 	// Tenant once after leader election and ensures per-tenant RBAC
 	// exists. Replaces the chart's tenant-rbac-backfill Helm Job (which
 	// Phase 8 deletes).
-	if err := startup.Register(mgr, dataPlaneProvisioner); err != nil {
+	if err := startup.Register(mgr, sagaAudit); err != nil {
 		setupLog.Error(err, "Failed to register startup backfills")
 		os.Exit(1)
 	}

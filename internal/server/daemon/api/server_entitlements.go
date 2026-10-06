@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // entitlementsDB returns the *sql.DB used for tenant_quotas writes. The
@@ -180,12 +181,23 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
-// EmitAuditEvent records a caller-supplied audit event onto the daemon's
-// emitter. Only operator / platform actors are permitted to emit events
-// with arbitrary subjects; all other callers (users, agents) are forbidden
-// from this RPC entirely so they cannot forge an audit trail. The handler
-// ignores the request's actor_subject field: the actor is always the
-// SPIFFE identity already attached to ctx by the auth interceptor.
+// auditResultFailure is the result of the second record of a change that
+// failed after its first record was written.
+const auditResultFailure = "failure"
+
+// EmitAuditEvent writes the audit record of a change that an operator
+// workload makes outside the daemon (gibson#583). Only operator and platform
+// workloads may call it, so a user or an agent cannot forge an audit trail.
+// The actor is always the identity on ctx, never a request field.
+//
+// A record with no result is the record written before the change. It is
+// durable in Postgres before the RPC answers, so the caller makes the change
+// only after the record exists (D15, gibson#676). A record with the result
+// "failure" is the second record of a change that failed.
+//
+// gibsoncheck:allow tenant-from-request — DaemonOperatorService: gated at
+// ext-authz on relation platform_operator / object_deriver system_tenant, plus
+// the SPIFFE peer allowlist. The operator records changes for every tenant.
 func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1.EmitAuditEventRequest) (*daemonoperatorv1.EmitAuditEventResponse, error) {
 	if s.auditLogger == nil {
 		return nil, status.Error(codes.Unavailable, "audit emitter not configured")
@@ -194,66 +206,49 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1
 	if ev == nil {
 		return nil, status.Error(codes.InvalidArgument, "event required")
 	}
+	if ev.GetType() == "" || ev.GetTargetType() == "" || ev.GetTargetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "type, target_type and target_id are required")
+	}
+	if ev.GetResult() != "" && ev.GetResult() != auditResultFailure {
+		return nil, status.Errorf(codes.InvalidArgument, "result must be empty or %q", auditResultFailure)
+	}
+	// A platform change (the platform operator) belongs to the system tenant.
+	tenant := auth.SystemTenant
+	if ev.GetTenantId() != auth.SystemTenantString {
+		t, err := auth.NewTenantID(ev.GetTenantId())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
+		}
+		tenant = t
+	}
 	actorSource := classifyActorSource(ctx)
 	if actorSource != "operator" && actorSource != "platform" && actorSource != "system" {
 		return nil, status.Error(codes.PermissionDenied, "only operator/platform workloads may emit audit events")
 	}
 
-	details := make(map[string]any, len(ev.GetFields())+6)
+	details := make(map[string]any, len(ev.GetFields())+2)
 	for k, v := range ev.GetFields() {
 		details[k] = v
 	}
-	if ev.GetTuple() != "" {
-		details["tuple"] = ev.GetTuple()
-	}
-	if ev.GetActionClass() != "" {
-		details["action_class"] = ev.GetActionClass()
-	}
-	if ev.GetScopeType() != "" {
-		details["scope_type"] = ev.GetScopeType()
-	}
-	if ev.GetOperation() != "" {
-		details["operation"] = ev.GetOperation()
-	}
+	details["actor_source"] = actorSource
 	if ev.GetReason() != "" {
 		details["reason"] = ev.GetReason()
 	}
-	details["actor_source"] = actorSource
-	if ev.GetTimestamp() != "" {
-		details["timestamp"] = ev.GetTimestamp()
-	} else {
-		details["timestamp"] = time.Now().UTC().Format(time.RFC3339Nano)
-	}
 
-	resource := ev.GetScopeType()
-	if resource == "" {
-		resource = "event"
+	// The record belongs to the tenant of the target, so the tenant's own
+	// ListAuditEvents and the compliance reader return it.
+	ctx = auth.ContextWithTenant(ctx, tenant)
+	if ev.GetResult() == auditResultFailure {
+		s.auditLogger.LogWithResult(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), auditResultFailure, details)
+		return &daemonoperatorv1.EmitAuditEventResponse{}, nil
 	}
-	resourceID := ""
-	if ev.GetTuple() != "" {
-		// For tuple events the object side is the resource id.
-		if i := indexByte(ev.GetTuple(), '@'); i >= 0 {
-			resourceID = ev.GetTuple()[i+1:]
-		}
-	}
-
 	// The record is durable before the RPC answers, so the caller learns
-	// when its audit record is lost and can retry (gibson#676).
-	if err := s.auditLogger.Record(ctx, ev.GetType(), resource, resourceID, details); err != nil {
+	// when its audit record is lost and makes no change (gibson#676).
+	if _, err := s.auditLogger.Record(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), details); err != nil {
 		s.logger.ErrorContext(ctx, "EmitAuditEvent: durable write failed", "error", err.Error())
 		return nil, status.Error(codes.Unavailable, "the audit record could not be written; try again")
 	}
 	return &daemonoperatorv1.EmitAuditEventResponse{}, nil
-}
-
-// indexByte returns the first index of c in s, or -1.
-func indexByte(s string, c byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == c {
-			return i
-		}
-	}
-	return -1
 }
 
 // ensureTenantQuotasTable is an idempotent CREATE TABLE IF NOT EXISTS for

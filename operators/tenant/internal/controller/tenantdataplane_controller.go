@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,9 +20,11 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // dataPlaneResyncInterval re-reconciles a Ready TenantDataPlane periodically
@@ -47,6 +51,10 @@ type TenantDataPlaneReconciler struct {
 	// dataplane.New(cfg)); a nil here fails loud so a misconfigured operator
 	// crash-loops rather than silently no-op'ing provisioning.
 	Provisioner dataplane.Provisioner
+
+	// Audit writes the record of each data-plane change before the change
+	// (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantdataplanes,verbs=get;list;watch;create;update;patch;delete
@@ -79,6 +87,13 @@ func (r *TenantDataPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, &tdp, "data-plane provisioner unset (operator misconfigured)")
 	}
 
+	if r.Audit == nil {
+		// Fail loud, same as a nil Provisioner: no data-plane change happens
+		// without its audit record (gibson#583).
+		log.Error(clients.ErrInvalidInput, "audit emitter unset (operator misconfigured)")
+		return r.fail(ctx, &tdp, "audit emitter unset (operator misconfigured)")
+	}
+
 	// Deletion path: run teardown, then drop the finalizer.
 	if !tdp.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &tdp)
@@ -107,7 +122,31 @@ func (r *TenantDataPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
-	if err := r.Provisioner.Provision(ctx, tdp.Spec.TenantID, dataplane.LimitsFrom(tdp.Spec.Resources)); err != nil {
+	// The data-plane change is recorded first (gibson#583). A drift-check
+	// pass (already Ready at this generation) writes no new record.
+	provisioned := false
+	change := func() error {
+		provisioned = true
+		return r.Provisioner.Provision(ctx, tdp.Spec.TenantID, dataplane.LimitsFrom(tdp.Spec.Resources))
+	}
+	var err error
+	if alreadyReady {
+		err = change()
+	} else {
+		err = r.Audit.Change(ctx, audit.ObjectEvent(audit.ActionDataPlaneProvision, &tdp, map[string]string{
+			"generation": strconv.FormatInt(tdp.Generation, 10),
+		}), change)
+	}
+	if err != nil && !provisioned {
+		// The audit record was not written, so nothing changed.
+		log.Error(err, "data-plane audit record failed; nothing changed", "tenant", tdp.Spec.TenantID)
+		r.emit(&tdp, "Warning", "AuditRecordFailed", err.Error())
+		if _, ferr := r.fail(ctx, &tdp, "audit record: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		return ctrl.Result{}, err
+	}
+	if err != nil {
 		log.Error(err, "data-plane provision failed", "tenant", tdp.Spec.TenantID)
 		r.emit(&tdp, "Warning", "ProvisionFailed", err.Error())
 		if _, ferr := r.fail(ctx, &tdp, err.Error()); ferr != nil {
@@ -141,7 +180,13 @@ func (r *TenantDataPlaneReconciler) reconcileDelete(ctx context.Context, tdp *gi
 	_ = r.patchStatus(ctx, tdp, base)
 
 	if r.Provisioner != nil {
-		if err := r.Provisioner.Deprovision(ctx, tdp.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+		ev := audit.ObjectEvent(audit.ActionDataPlaneDeprovision, tdp, nil)
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Provisioner.Deprovision(ctx, tdp.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+				return err
+			}
+			return nil
+		}); err != nil {
 			log.Error(err, "data-plane deprovision failed; keeping finalizer for retry", "tenant", tdp.Spec.TenantID)
 			r.emit(tdp, "Warning", "DeprovisionFailed", err.Error())
 			return ctrl.Result{}, err
@@ -273,6 +318,9 @@ func setReadyCondition(tdp *gibsonv1alpha1.TenantDataPlane, status metav1.Condit
 // Spec changes (generation bump), creates, and deletes still reconcile
 // immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantDataPlaneReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant data plane reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantdataplane-controller")
 	}

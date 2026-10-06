@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,10 +23,12 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // identityResyncInterval re-reconciles a Ready TenantIdentity periodically so
@@ -72,6 +75,10 @@ type TenantIdentityReconciler struct {
 	// ext-authz reads to find a signed-in person's tenant (ADR-0093 decision
 	// 4). Required. TenantIdentity is Ready only once the mapping exists.
 	OrgMapping TenantOrgSeeder
+
+	// Audit writes the record of each Zitadel change before the change
+	// (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantidentities,verbs=get;list;watch;create;update;patch;delete
@@ -115,6 +122,13 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return r.failIdentity(ctx, &ti, "org mapping seeder unset (operator misconfigured)")
 	}
 
+	if r.Audit == nil {
+		// Fail loud, same as a nil Provisioner: no Zitadel change happens
+		// without its audit record (gibson#583).
+		log.Error(clients.ErrInvalidInput, "audit emitter unset (operator misconfigured)")
+		return r.failIdentity(ctx, &ti, "audit emitter unset (operator misconfigured)")
+	}
+
 	// Deletion path: run teardown, then drop the finalizer.
 	if !ti.DeletionTimestamp.IsZero() {
 		return r.reconcileIdentityDelete(ctx, &ti)
@@ -143,12 +157,43 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	res, err := r.Provisioner.Provision(ctx, identity.Request{
-		TenantID:    ti.Spec.TenantID,
-		DisplayName: ti.Spec.DisplayName,
-		KnownOrgID:  ti.Status.ZitadelOrgID,
-	})
-	if err != nil {
+	// The Zitadel organization and the daemon org mapping change together,
+	// under one audit record written first (gibson#583). A drift-check pass
+	// (already Ready at this generation) writes no new record.
+	var res identity.Result
+	failedStage := ""
+	change := func() error {
+		var perr error
+		res, perr = r.Provisioner.Provision(ctx, identity.Request{
+			TenantID:    ti.Spec.TenantID,
+			DisplayName: ti.Spec.DisplayName,
+			KnownOrgID:  ti.Status.ZitadelOrgID,
+		})
+		if perr != nil {
+			failedStage = "provision"
+			return perr
+		}
+		// Seed the daemon's tenant -> Zitadel org mapping (ADR-0093 decision
+		// 4). TenantIdentity is Ready only once this write succeeds. It runs
+		// on every resync (identityResyncInterval), so a lost row is repaired
+		// without a spec change.
+		if perr = r.OrgMapping.SetTenantZitadelOrg(ctx, ti.Spec.TenantID, res.OrgID); perr != nil {
+			failedStage = "org_mapping"
+			return perr
+		}
+		return nil
+	}
+	var err error
+	if alreadyReady {
+		err = change()
+	} else {
+		err = r.Audit.Change(ctx, audit.ObjectEvent(audit.ActionIdentityProvision, &ti, map[string]string{
+			"generation": strconv.FormatInt(ti.Generation, 10),
+		}), change)
+	}
+	switch {
+	case err == nil:
+	case failedStage == "provision":
 		log.Error(err, "identity provision failed", "tenant", ti.Spec.TenantID)
 		r.emitIdentity(&ti, "Warning", "ProvisionFailed", err.Error())
 		if _, ferr := r.failIdentity(ctx, &ti, err.Error()); ferr != nil {
@@ -156,22 +201,23 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		// Return the provision error so controller-runtime backs off.
 		return ctrl.Result{}, err
-	}
-
-	// Seed the daemon's tenant -> Zitadel org mapping (ADR-0093 decision 4).
-	// TenantIdentity is Ready only once this write succeeds. It runs on every
-	// resync (identityResyncInterval), so a lost row is repaired without a
-	// spec change.
-	if err := r.OrgMapping.SetTenantZitadelOrg(ctx, ti.Spec.TenantID, res.OrgID); err != nil {
+	case failedStage == "org_mapping":
 		log.Error(err, "seed tenant org mapping failed", "tenant", ti.Spec.TenantID)
 		r.emitIdentity(&ti, "Warning", "OrgMappingFailed", err.Error())
 		if _, ferr := r.failIdentity(ctx, &ti, "seed tenant org mapping: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		// Mirrors the Provision-failure return above: the raw error drives
-		// controller-runtime's backoff, and is already logged and recorded
-		// on status, so it is returned unwrapped rather than double-wrapped.
-		return ctrl.Result{}, err //nolint:wrapcheck // see comment
+		// The raw error drives controller-runtime's backoff, and is already
+		// logged and recorded on status, so it is returned unwrapped.
+		return ctrl.Result{}, err
+	default:
+		// The audit record was not written, so nothing changed.
+		log.Error(err, "identity audit record failed; nothing changed", "tenant", ti.Spec.TenantID)
+		r.emitIdentity(&ti, "Warning", "AuditRecordFailed", err.Error())
+		if _, ferr := r.failIdentity(ctx, &ti, "audit record: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		return ctrl.Result{}, err
 	}
 
 	// The declared OIDC clients (spec.oidcClients, gibson#597) are minted
@@ -216,7 +262,13 @@ func (r *TenantIdentityReconciler) reconcileIdentityDelete(ctx context.Context, 
 	_ = r.patchIdentityStatus(ctx, ti, base)
 
 	if r.Provisioner != nil {
-		if err := r.Provisioner.Deprovision(ctx, ti.Status.ZitadelOrgID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+		ev := audit.ObjectEvent(audit.ActionIdentityDeprovision, ti, map[string]string{"zitadel_org_id": ti.Status.ZitadelOrgID})
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Provisioner.Deprovision(ctx, ti.Status.ZitadelOrgID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+				return err
+			}
+			return nil
+		}); err != nil {
 			log.Error(err, "identity deprovision failed; keeping finalizer for retry", "tenant", ti.Spec.TenantID)
 			r.emitIdentity(ti, "Warning", "DeprovisionFailed", err.Error())
 			return ctrl.Result{}, err
@@ -448,6 +500,9 @@ func setIdentityReadyCondition(ti *gibsonv1alpha1.TenantIdentity, status metav1.
 // Spec changes (generation bump), creates, and deletes still reconcile
 // immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantIdentityReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant identity reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantidentity-controller")
 	}

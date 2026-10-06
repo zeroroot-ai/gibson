@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,10 +20,12 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // grantsResyncInterval re-reconciles a Ready TenantGrants periodically so drift
@@ -50,6 +54,10 @@ type TenantGrantsReconciler struct {
 	// loud so a misconfigured operator crash-loops rather than silently
 	// no-op'ing grant provisioning.
 	Provisioner grants.Provisioner
+
+	// Audit writes the record of each FGA change before the change
+	// (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantgrants,verbs=get;list;watch;create;update;patch;delete
@@ -82,6 +90,13 @@ func (r *TenantGrantsReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return r.failGrants(ctx, &tg, "grants provisioner unset (operator misconfigured)")
 	}
 
+	if r.Audit == nil {
+		// Fail loud, same as a nil Provisioner: no FGA change happens
+		// without its audit record (gibson#583).
+		log.Error(clients.ErrInvalidInput, "audit emitter unset (operator misconfigured)")
+		return r.failGrants(ctx, &tg, "audit emitter unset (operator misconfigured)")
+	}
+
 	// Deletion path: run teardown, then drop the finalizer.
 	if !tg.DeletionTimestamp.IsZero() {
 		return r.reconcileGrantsDelete(ctx, &tg)
@@ -111,7 +126,32 @@ func (r *TenantGrantsReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	tuples := desiredTuples(&tg)
-	if err := r.Provisioner.Provision(ctx, tuples); err != nil {
+	// The FGA change is recorded first (gibson#583). A drift-check pass
+	// (already Ready at this generation) writes no new record.
+	provisioned := false
+	change := func() error {
+		provisioned = true
+		return r.Provisioner.Provision(ctx, tuples)
+	}
+	var err error
+	if alreadyReady {
+		err = change()
+	} else {
+		err = r.Audit.Change(ctx, audit.ObjectEvent(audit.ActionGrantsProvision, &tg, map[string]string{
+			"generation": strconv.FormatInt(tg.Generation, 10),
+			"tuples":     strconv.Itoa(len(tuples)),
+		}), change)
+	}
+	if err != nil && !provisioned {
+		// The audit record was not written, so nothing changed.
+		log.Error(err, "tenant grants audit record failed; nothing changed", "tenant", tg.Spec.TenantID)
+		r.emitGrants(&tg, "Warning", "AuditRecordFailed", err.Error())
+		if _, ferr := r.failGrants(ctx, &tg, "audit record: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		return ctrl.Result{}, err
+	}
+	if err != nil {
 		log.Error(err, "tenant grants provision failed", "tenant", tg.Spec.TenantID)
 		r.emitGrants(&tg, "Warning", "ProvisionFailed", err.Error())
 		if _, ferr := r.failGrants(ctx, &tg, err.Error()); ferr != nil {
@@ -145,7 +185,13 @@ func (r *TenantGrantsReconciler) reconcileGrantsDelete(ctx context.Context, tg *
 	_ = r.patchGrantsStatus(ctx, tg, base)
 
 	if r.Provisioner != nil {
-		if err := r.Provisioner.Deprovision(ctx, desiredTuples(tg)); err != nil && !errors.Is(err, clients.ErrNotFound) {
+		ev := audit.ObjectEvent(audit.ActionGrantsDeprovision, tg, nil)
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Provisioner.Deprovision(ctx, desiredTuples(tg)); err != nil && !errors.Is(err, clients.ErrNotFound) {
+				return err
+			}
+			return nil
+		}); err != nil {
 			log.Error(err, "tenant grants deprovision failed; keeping finalizer for retry", "tenant", tg.Spec.TenantID)
 			r.emitGrants(tg, "Warning", "DeprovisionFailed", err.Error())
 			return ctrl.Result{}, err
@@ -285,6 +331,9 @@ func setGrantsReadyCondition(tg *gibsonv1alpha1.TenantGrants, status metav1.Cond
 // Spec changes (generation bump), creates, and deletes still reconcile
 // immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantGrantsReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant grants reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantgrants-controller")
 	}

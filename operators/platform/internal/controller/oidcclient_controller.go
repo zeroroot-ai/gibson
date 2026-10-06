@@ -7,11 +7,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -23,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -82,10 +85,17 @@ type OIDCClientReconciler struct {
 	Scheme         *runtime.Scheme
 	Recorder       record.EventRecorder
 	ZitadelFactory ZitadelClientFactory
+	// Audit sends the records of the changes of this reconciler to the daemon
+	// (gibson#583). Required. The records wait in the status until the
+	// daemon answers; see pending_audit.go.
+	Audit *audit.SagaEmitter
 }
 
 // SetupWithManager wires the reconciler to the manager.
 func (r *OIDCClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return errNoAuditEmitter
+	}
 	if r.ZitadelFactory == nil {
 		r.ZitadelFactory = DefaultZitadelClientFactory
 	}
@@ -108,6 +118,72 @@ func (r *OIDCClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // Reconcile runs the OIDCClient state machine.
 func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	var oc gibsonv1alpha1.OIDCClient
+	if err := r.Get(ctx, req.NamespacedName, &oc); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if r.Audit == nil {
+		return ctrl.Result{}, errNoAuditEmitter
+	}
+	// A pass at a generation not yet applied changes a Zitadel client,
+	// machine user, secret or membership, so it keeps an audit record first
+	// (gibson#583). The record waits in the status until the daemon answers.
+	fields := map[string]string{"client": oc.Spec.ClientName, "generation": strconv.FormatInt(oc.Generation, 10)}
+	recording := oc.DeletionTimestamp.IsZero() && controllerutil.ContainsFinalizer(&oc, oidcClientFinalizer) && !oidcClientSettled(&oc)
+	if recording {
+		before := len(oc.Status.PendingAuditRecords)
+		keepPending(&oc.Status.PendingAuditRecords, pendingRecord(audit.ActionOIDCClientApply, &oc, "", "", fields))
+		if len(oc.Status.PendingAuditRecords) != before {
+			if err := r.statusUpdate(ctx, &oc); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+	}
+	result, err := r.reconcileOnce(ctx, req)
+	return r.settlePending(ctx, req, recording, fields, result, err)
+}
+
+// settlePending keeps the failure record of a failed pass, sends the pending
+// records when the daemon answers, and comes back soon while any wait.
+func (r *OIDCClientReconciler) settlePending(
+	ctx context.Context, req ctrl.Request, recording bool, fields map[string]string, result ctrl.Result, err error,
+) (ctrl.Result, error) {
+	var oc gibsonv1alpha1.OIDCClient
+	if gerr := r.Get(ctx, req.NamespacedName, &oc); gerr != nil {
+		// Gone: a deleted client parks its record on the parent (see
+		// reconcileDeletion).
+		return result, err
+	}
+	pending := append([]gibsonv1alpha1.PendingAuditRecord(nil), oc.Status.PendingAuditRecords...)
+	if err != nil && recording {
+		keepPending(&oc.Status.PendingAuditRecords, pendingRecord(audit.ActionOIDCClientApply, &oc, audit.ResultFailure, err.Error(), fields))
+	}
+	if ferr := flushPending(ctx, r.Audit, &oc.Status.PendingAuditRecords); ferr != nil {
+		log.FromContext(ctx).V(1).Info("audit records stay pending; the daemon did not accept them",
+			"pending", len(oc.Status.PendingAuditRecords), "err", ferr.Error())
+	}
+	if !equality.Semantic.DeepEqual(pending, oc.Status.PendingAuditRecords) {
+		if serr := r.statusUpdate(ctx, &oc); serr != nil && err == nil {
+			err = serr
+		}
+	}
+	if len(oc.Status.PendingAuditRecords) > 0 && err == nil && (result.RequeueAfter == 0 || result.RequeueAfter > pendingRequeue) {
+		result.RequeueAfter = pendingRequeue
+	}
+	return result, err
+}
+
+// oidcClientSettled reports an OIDCClient already applied at its generation.
+func oidcClientSettled(oc *gibsonv1alpha1.OIDCClient) bool {
+	if oc.Status.ObservedGeneration != oc.Generation {
+		return false
+	}
+	c := findCondition(oc.Status.Conditions, gibsonv1alpha1.ConditionReady)
+	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+// reconcileOnce is one pass of the OIDCClient reconcile.
+func (r *OIDCClientReconciler) reconcileOnce(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("oidcclient", req.NamespacedName)
 
 	var oc gibsonv1alpha1.OIDCClient
@@ -362,6 +438,13 @@ func (r *OIDCClientReconciler) reconcileSteadyState(
 	// Either Secret was missing OR Zitadel rejected the stored secret.
 	// Rotate server-side and rewrite the K8s Secret. RotateClientSecret
 	// hits the management URL keyed on appID (NOT clientID).
+	// A rotation changes a credential also on a settled pass, so it keeps
+	// its own audit record (gibson#583).
+	keepPending(&oc.Status.PendingAuditRecords, pendingRecord(audit.ActionOIDCClientApply, oc, "", "",
+		map[string]string{"client": oc.Spec.ClientName, "op": "rotate_secret"}))
+	if err := r.statusUpdate(ctx, oc); err != nil {
+		return ctrl.Result{}, err
+	}
 	newSecret, err := zc.RotateClientSecret(ctx, projectID, appID)
 	if err != nil {
 		return r.handleTransientOrPermanent(ctx, oc, "RotateClientSecret", err, logger)
@@ -559,6 +642,13 @@ func (r *OIDCClientReconciler) reconcileMachineUser(
 
 	// Secret missing or incomplete — re-mint client_secret (Zitadel's
 	// PUT semantics regenerate it) and write the full key set.
+	// A re-mint changes a credential also on a settled pass, so it keeps its
+	// own audit record (gibson#583).
+	keepPending(&oc.Status.PendingAuditRecords, pendingRecord(audit.ActionOIDCClientApply, oc, "", "",
+		map[string]string{"client": oc.Spec.ClientName, "op": "rotate_secret"}))
+	if err := r.statusUpdate(ctx, oc); err != nil {
+		return ctrl.Result{}, err
+	}
 	clientID, clientSecret, err := zc.AddMachineUserClientSecret(ctx, oc.Status.ClientID)
 	if err != nil {
 		return r.handleTransientOrPermanent(ctx, oc, "AddMachineUserClientSecret", err, logger)
@@ -708,6 +798,7 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 					// Nothing to delete (drift cleanup path).
 					return ctrl.Result{}, nil
 				}
+				r.recordDeletion(ctx, oc, appID)
 				if derr := zc.DeleteOIDCClient(ctx, projectID, appID); derr != nil {
 					// Transient errors at deletion time: cap retries at 3,
 					// then proceed (don't block deletion indefinitely).
@@ -1028,4 +1119,40 @@ func setTransientRetryAnnotation(oc *gibsonv1alpha1.OIDCClient, retries int) {
 		oc.Annotations = map[string]string{}
 	}
 	oc.Annotations[transientRetryAnnotation] = fmt.Sprintf("%d", retries)
+}
+
+// recordDeletion keeps the audit record of the delete of a Zitadel OIDC
+// client (gibson#583). The OIDCClient is about to go, so its own status
+// cannot hold a pending record. The record goes to the daemon when it
+// answers in time, else it waits in the status of the parent
+// PlatformBootstrap, which sends it later. The delete never waits for the
+// daemon.
+func (r *OIDCClientReconciler) recordDeletion(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, appID string) {
+	rec := pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
+		"client": oc.Spec.ClientName, "client_id": oc.Status.ClientID, "app_id": appID,
+	})
+	fctx, cancel := context.WithTimeout(ctx, flushTimeout)
+	err := r.Audit.Record(fctx, eventOf(rec))
+	cancel()
+	if err == nil {
+		return
+	}
+	logger := log.FromContext(ctx)
+	for _, ref := range oc.GetOwnerReferences() {
+		if ref.Kind != "PlatformBootstrap" {
+			continue
+		}
+		var pb gibsonv1alpha1.PlatformBootstrap
+		if gerr := r.Get(ctx, client.ObjectKey{Name: ref.Name}, &pb); gerr != nil {
+			break
+		}
+		keepPending(&pb.Status.PendingAuditRecords, rec)
+		if uerr := r.Status().Update(ctx, &pb); uerr == nil {
+			return
+		}
+		break
+	}
+	// No daemon and no parent to hold the record: the operator log keeps it.
+	logger.Error(err, "audit record of an OIDC client delete was not kept; it is in this log line",
+		"action", rec.Action, "target", rec.TargetID, "client_id", oc.Status.ClientID, "app_id", appID)
 }

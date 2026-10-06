@@ -22,6 +22,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 )
@@ -65,7 +67,12 @@ func backupWithPhase(phase string, age time.Duration) *unstructured.Unstructured
 
 func newTaker(t *testing.T, c client.Client) *Taker {
 	t.Helper()
-	taker, err := New(c, testVeleroNS)
+	return newTakerWithSink(t, c, &audittest.Sink{})
+}
+
+func newTakerWithSink(t *testing.T, c client.Client, sink *audittest.Sink) *Taker {
+	t.Helper()
+	taker, err := New(c, testVeleroNS, sink.Emitter(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -88,13 +95,70 @@ func getBackup(t *testing.T, c client.Client) (*unstructured.Unstructured, bool)
 	return b, true
 }
 
-func TestNew_RequiresBothArguments(t *testing.T) {
+func TestNew_RequiresEachArgument(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).Build()
-	if _, err := New(nil, testVeleroNS); err == nil {
+	em := (&audittest.Sink{}).Emitter(t)
+	if _, err := New(nil, testVeleroNS, em); err == nil {
 		t.Error("New accepted a nil client")
 	}
-	if _, err := New(c, ""); err == nil {
+	if _, err := New(c, "", em); err == nil {
 		t.Error("New accepted an empty Velero namespace")
+	}
+	if _, err := New(c, testVeleroNS, nil); !errors.Is(err, audit.ErrNoSink) {
+		t.Errorf("New with no audit emitter = %v, want ErrNoSink", err)
+	}
+}
+
+// The audit record of the backup is written before the Backup exists
+// (gibson#583).
+func TestEnsure_RecordsBeforeTheBackup(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	existedAtRecord := true
+	sink := &audittest.Sink{OnEmit: func(audit.Event) { _, existedAtRecord = getBackup(t, c) }}
+	if _, err := newTakerWithSink(t, c, sink).Ensure(context.Background(), tenantFixture()); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if existedAtRecord {
+		t.Error("the Backup existed when its audit record was written")
+	}
+	got := sink.Events()
+	if len(got) != 1 || got[0].Action != audit.ActionLastBackup || got[0].TenantID != tenantFixture().Name ||
+		got[0].TargetType != "tenant" || got[0].TargetID != tenantFixture().Name || got[0].Result != "" {
+		t.Fatalf("records = %+v", got)
+	}
+	if _, ok := getBackup(t, c); !ok {
+		t.Fatal("no Backup after the record")
+	}
+}
+
+// With no audit record there is no Backup, and the delete flow stops.
+func TestEnsure_NoRecordNoBackup(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	sink := &audittest.Sink{Err: errors.New("daemon down")}
+	done, err := newTakerWithSink(t, c, sink).Ensure(context.Background(), tenantFixture())
+	if done || err == nil {
+		t.Fatalf("done=%v err=%v, want an error and not done", done, err)
+	}
+	if _, ok := getBackup(t, c); ok {
+		t.Fatal("a Backup was created with no audit record")
+	}
+}
+
+// A create that fails after its record gets a second record with the reason.
+func TestEnsure_FailedCreateIsRecorded(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+				return errors.New("the API server is not reachable")
+			},
+		}).Build()
+	sink := &audittest.Sink{}
+	if _, err := newTakerWithSink(t, c, sink).Ensure(context.Background(), tenantFixture()); err == nil {
+		t.Fatal("Ensure returned no error for a failed create")
+	}
+	got := sink.Events()
+	if len(got) != 2 || got[0].Result != "" || got[1].Result != audit.ResultFailure || got[1].Reason == "" {
+		t.Fatalf("records = %+v, want the record and then the failure", got)
 	}
 }
 

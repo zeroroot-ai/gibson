@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -344,6 +346,7 @@ func brandingReconciler(t *testing.T, zitadelURL string, withPAT bool, cms ...*c
 		b = b.WithObjects(cm)
 	}
 	return &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   b.Build(),
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),
@@ -434,7 +437,7 @@ func TestMapBrandingConfigMap(t *testing.T) {
 	elsewhere := brandedPlatformBootstrap()
 	elsewhere.Name = "elsewhere"
 	elsewhere.Spec.Zitadel.LoginBranding.Namespace = "branding"
-	r := &PlatformBootstrapReconciler{Client: fake.NewClientBuilder().WithScheme(s).WithObjects(named, other, elsewhere).Build()}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: fake.NewClientBuilder().WithScheme(s).WithObjects(named, other, elsewhere).Build()}
 
 	got := r.mapBrandingConfigMap(context.Background(), brandingConfigMap(nil))
 	if len(got) != 1 || got[0].Name != "named" {

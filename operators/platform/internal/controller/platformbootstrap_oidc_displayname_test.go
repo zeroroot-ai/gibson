@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +26,7 @@ func TestReconcileOIDCChildren_DisplayName(t *testing.T) {
 	s := mustScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(s).
 		WithStatusSubresource(&gibsonv1alpha1.OIDCClient{}).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "pb", UID: "uid-1"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{

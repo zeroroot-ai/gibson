@@ -61,8 +61,11 @@ service DaemonOperatorService {
     };
   }
 
-  // EmitAuditEvent lets an operator/platform workload forward a structured
-  // audit event onto the daemon's emitter.
+  // EmitAuditEvent writes the audit record of a change that an operator
+  // workload makes outside the daemon, for example a tenant namespace, a
+  // Velero backup or an FGA grant of the tenant-operator. The daemon writes
+  // the record to Postgres before it answers, so the caller makes the change
+  // only after the record exists (ADR-0113, gibson#583).
   rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
@@ -455,22 +458,38 @@ message SeedCatalogTenantEnabledResponse {
   reserved "tuples_written";
 }
 
-// AuditEventMessage is the wire shape for EmitAuditEvent.
+// AuditEventMessage is the wire shape for EmitAuditEvent. The actor is never
+// a field: the daemon takes it from the identity of the caller, so a caller
+// cannot write a record in the name of another subject.
 message AuditEventMessage {
+  // The action, for example "operator.saga_step".
   string type = 1;
-  string actor_subject = 2;
+  // Field 2 was actor_subject. The daemon never read it: the actor is the
+  // identity of the caller (gibson#583).
+  reserved 2;
+  reserved "actor_subject";
   // Field 3 was actor_source. The daemon derives the source from the caller's
   // identity (classifyActorSource) and never read the wire value, so a caller
   // cannot claim a source it does not have (gibson#544).
   reserved 3;
   reserved "actor_source";
-  string tuple = 4;
-  string action_class = 5;
-  string scope_type = 6;
-  string operation = 7;
+  // Fields 4 to 7 and 9 had no producer and were removed (gibson#583). The
+  // daemon stamps its own time on each record.
+  reserved 4, 5, 6, 7, 9;
+  reserved "tuple", "action_class", "scope_type", "operation", "timestamp";
+  // Why the change failed. Set only when result is "failure".
   string reason = 8;
-  string timestamp = 9;
   map<string, string> fields = 10;
+  // The tenant that owns the target. Required. A platform change names the
+  // system tenant.
+  string tenant_id = 11;
+  // The kind of the changed object, for example "tenant". Required.
+  string target_type = 12;
+  // The id of the changed object, for example the tenant name. Required.
+  string target_id = 13;
+  // Empty for the record written before the change. "failure" for the
+  // second record of a change that failed after its first record.
+  string result = 14;
 }
 
 // EmitAuditEventRequest carries the audit event to emit.
@@ -525,6 +544,11 @@ message PendingTenant {
   // Field 6 (stripe_customer_id) was removed (ADR-0060, D54).
   reserved 6;
   reserved "stripe_customer_id";
+  // audit_record_id is the id of the daemon audit record of the human request
+  // that queued this tenant. The operator stamps it on the Tenant as the
+  // gibson.zeroroot.ai/correlation-id annotation. Empty when no human request
+  // is behind the entry, for example the first-tenant seed (gibson#583).
+  string audit_record_id = 7;
 }
 
 // ListPendingTenantProvisioningRequest queries the pending queue. No filters
@@ -645,6 +669,10 @@ message TenantOp {
   // tier_set marks tier for application on an update op (always true for
   // provision).
   bool tier_set = 8;
+  // audit_record_id is the id of the daemon audit record of the admin request
+  // behind this op. The operator stamps it on the Tenant as the
+  // gibson.zeroroot.ai/correlation-id annotation (gibson#583).
+  string audit_record_id = 9;
 }
 
 // ListPendingTenantOpsRequest queries the pending admin-op queue. No filters

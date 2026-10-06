@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -34,7 +36,7 @@ func TestStatusUpdate_RetriesAConflictWithTheComputedStatus(t *testing.T) {
 			return c.Status().Update(ctx, obj, opts...)
 		},
 	})
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s}
 
 	got := &gibsonv1alpha1.PlatformBootstrap{}
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "platform"}, got); err != nil {

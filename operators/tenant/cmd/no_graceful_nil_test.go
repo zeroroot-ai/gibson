@@ -71,7 +71,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		ctorGuard   = "client constructor guard; reassert with the constructor-inversion slice"
 		k8sShape    = "the Kubernetes API may return a nil map or slice; a shape guard, not a dependency"
 		applyShim   = "the ApplyOpts helper accepts a nil dst as a no-op"
-		emitterOpt  = "the emitter is optional in early boot; emitter-required follow-up"
 		recorderOpt = "SetupWithManager always sets the event recorder; nil only in unit tests (best-effort observability)"
 	)
 	entry := func(c astchecks.Category, reason string) astchecks.Entry {
@@ -98,14 +97,10 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenantgrants_controller.go :: if r.Recorder == nil { ... }":         entry(astchecks.CategoryLegacyOptional, recorderOpt),
 		"internal/controller/tenantrolesync_controller.go :: if r.Recorder == nil { ... }":       entry(astchecks.CategoryLegacyOptional, recorderOpt),
 
-		// Audit emitter.
-		"internal/audit/emitter.go :: if e.cfg.RedisClient == nil { ... }": entry(astchecks.CategoryLegacyOptional, emitterOpt),
-
 		// Saga runner: the Kubernetes API may return nil maps or conditions
 		// from a new object.
-		"internal/saga/runner.go :: if conditions == nil { ... }":            entry(astchecks.CategoryDefensiveGuard, k8sShape),
-		"internal/saga/runner.go :: if annotations == nil { ... }":           entry(astchecks.CategoryDefensiveGuard, k8sShape),
-		"internal/saga/runner.go :: if a == nil || a.emitter == nil { ... }": entry(astchecks.CategoryLegacyOptional, emitterOpt),
+		"internal/saga/runner.go :: if conditions == nil { ... }":  entry(astchecks.CategoryDefensiveGuard, k8sShape),
+		"internal/saga/runner.go :: if annotations == nil { ... }": entry(astchecks.CategoryDefensiveGuard, k8sShape),
 	}
 
 	// Real-code subtest: walk internal/ and fail on each new finding.

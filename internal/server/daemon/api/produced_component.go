@@ -104,7 +104,7 @@ type producedComponentStore interface {
 }
 
 // sqlProducedComponentStore is the producedComponentStore on the platform
-// Postgres (migration 041).
+// Postgres (migration 042).
 type sqlProducedComponentStore struct{ db *sql.DB }
 
 func (st sqlProducedComponentStore) Reserve(ctx context.Context, tenantID, ownerUserID, producer string, c ProducedComponent, limit int) (err error) {

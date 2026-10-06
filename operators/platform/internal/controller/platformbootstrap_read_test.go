@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -52,7 +54,7 @@ func TestReconcile_ReadsThePlatformBootstrapUncached(t *testing.T) {
 	cached := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
 	uncached := &countingReader{Reader: fake.NewClientBuilder().WithScheme(s).WithObjects(pb).Build()}
 	cachedReads := &countingClient{Client: cached}
-	r := &PlatformBootstrapReconciler{Client: cachedReads, APIReader: uncached, Scheme: s}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cachedReads, APIReader: uncached, Scheme: s}
 
 	// A PlatformBootstrap with no finalizer yet: Reconcile reads it, adds the
 	// finalizer and returns. That is enough to see which reader served it.
@@ -68,7 +70,7 @@ func TestReconcile_ReadsThePlatformBootstrapUncached(t *testing.T) {
 
 	// Without an API reader (tests, and any manager that gives none) the
 	// client itself serves the read.
-	r2 := &PlatformBootstrapReconciler{Client: cachedReads, Scheme: s}
+	r2 := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cachedReads, Scheme: s}
 	if got, ok := r2.reader().(*countingClient); !ok || got != cachedReads {
 		t.Fatalf("reader() without APIReader = %T, want the Client", got)
 	}
@@ -86,7 +88,7 @@ func TestFinish_SurfacesAFailedStatusWrite(t *testing.T) {
 				return boom
 			},
 		}).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s}
 
 	res, err := r.finish(context.Background(), pb, ctrl.Result{RequeueAfter: 30}, nil)
 	if err == nil || !errors.Is(err, boom) {
@@ -104,7 +106,7 @@ func TestFinish_SurfacesAFailedStatusWrite(t *testing.T) {
 
 	// A working write returns the step's result and error unchanged.
 	ok := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
-	r = &PlatformBootstrapReconciler{Client: ok, Scheme: s}
+	r = &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: ok, Scheme: s}
 	if _, err := r.finish(context.Background(), pb, ctrl.Result{}, nil); err != nil {
 		t.Fatalf("a working status write must not fail the pass: %v", err)
 	}
@@ -122,7 +124,7 @@ func TestReconcile_RunsStepsInOrderAndPersistsStatus(t *testing.T) {
 	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform", Finalizers: []string{platformBootstrapFinalizer}}}
 	pb.Spec.Zitadel.AdminTokenRef = gibsonv1alpha1.SecretKeyRef{Name: "zitadel-admin-pat", Key: "pat"}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s}
 
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pb)})
 	if err != nil {
@@ -154,7 +156,7 @@ func TestReconcile_RunsStepsInOrderAndPersistsStatus(t *testing.T) {
 				return boom
 			},
 		}).Build()
-	r = &PlatformBootstrapReconciler{Client: failing, Scheme: s}
+	r = &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: failing, Scheme: s}
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pb)}); !errors.Is(err, boom) {
 		t.Fatalf("a failed status write must fail the pass, got %v", err)
 	}

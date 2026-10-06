@@ -69,8 +69,11 @@ type DaemonOperatorServiceClient interface {
 	ListFeatureTuples(ctx context.Context, in *ListFeatureTuplesRequest, opts ...grpc.CallOption) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(ctx context.Context, in *SeedCatalogTenantEnabledRequest, opts ...grpc.CallOption) (*SeedCatalogTenantEnabledResponse, error)
-	// EmitAuditEvent lets an operator/platform workload forward a structured
-	// audit event onto the daemon's emitter.
+	// EmitAuditEvent writes the audit record of a change that an operator
+	// workload makes outside the daemon, for example a tenant namespace, a
+	// Velero backup or an FGA grant of the tenant-operator. The daemon writes
+	// the record to Postgres before it answers, so the caller makes the change
+	// only after the record exists (ADR-0113, gibson#583).
 	EmitAuditEvent(ctx context.Context, in *EmitAuditEventRequest, opts ...grpc.CallOption) (*EmitAuditEventResponse, error)
 	// SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-organization-id
 	// mapping. Called by the tenant-operator (the lifecycle coordinator) when it
@@ -475,8 +478,11 @@ type DaemonOperatorServiceServer interface {
 	ListFeatureTuples(context.Context, *ListFeatureTuplesRequest) (*ListFeatureTuplesResponse, error)
 	// SeedCatalogTenantEnabled writes tenant_enabled tuples for all platform-enabled items.
 	SeedCatalogTenantEnabled(context.Context, *SeedCatalogTenantEnabledRequest) (*SeedCatalogTenantEnabledResponse, error)
-	// EmitAuditEvent lets an operator/platform workload forward a structured
-	// audit event onto the daemon's emitter.
+	// EmitAuditEvent writes the audit record of a change that an operator
+	// workload makes outside the daemon, for example a tenant namespace, a
+	// Velero backup or an FGA grant of the tenant-operator. The daemon writes
+	// the record to Postgres before it answers, so the caller makes the change
+	// only after the record exists (ADR-0113, gibson#583).
 	EmitAuditEvent(context.Context, *EmitAuditEventRequest) (*EmitAuditEventResponse, error)
 	// SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-organization-id
 	// mapping. Called by the tenant-operator (the lifecycle coordinator) when it

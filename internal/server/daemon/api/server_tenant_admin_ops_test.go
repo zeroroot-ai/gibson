@@ -7,15 +7,18 @@ package api
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -33,13 +36,21 @@ func (f *fakeOwnerInviter) InviteProvisionedOwner(_ context.Context, tenantID, o
 	return f.err
 }
 
-func newAdminOpsServer() *DaemonServer {
+func newAdminOpsServer(t *testing.T) *DaemonServer {
+	t.Helper()
 	srv := &DaemonServer{
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
+	// Each admin request is recorded before it is queued (gibson#583).
+	srv.auditLogger = auditLoggerOver(t, &audittest.Recorder{})
 	// Through the setter, as grpc.go wires it.
 	srv.WithProvisionedOwnerInviter(&fakeOwnerInviter{})
 	return srv
+}
+
+// adminOpsCtx is the context of a platform administrator.
+func adminOpsCtx() context.Context {
+	return ctxWithTenantAdmin(context.Background(), "_system", "platform-owner-1")
 }
 
 func expectEnsureAdminOpsTable(mock sqlmock.Sqlmock) {
@@ -50,9 +61,9 @@ func expectEnsureAdminOpsTable(mock sqlmock.Sqlmock) {
 // --- AdminProvisionTenant ---
 
 func TestAdminProvisionTenant_NilDB_Unavailable(t *testing.T) {
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = nil
-	_, err := srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	_, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme", OwnerEmail: "o@acme.test",
 	})
 	requireGRPCStatus(t, err, codes.Unavailable)
@@ -64,7 +75,7 @@ func TestAdminProvisionTenant_MissingFields_InvalidArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	for _, req := range []*tenantv1.AdminProvisionTenantRequest{
@@ -72,7 +83,7 @@ func TestAdminProvisionTenant_MissingFields_InvalidArgument(t *testing.T) {
 		{TenantId: "acme", OwnerEmail: "o@acme.test"},    // no display_name
 		{TenantId: "acme", DisplayName: "Acme"},          // no owner_email
 	} {
-		_, err := srv.AdminProvisionTenant(context.Background(), req)
+		_, err := srv.AdminProvisionTenant(adminOpsCtx(), req)
 		requireGRPCStatus(t, err, codes.InvalidArgument)
 	}
 }
@@ -83,13 +94,13 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
 	// Empty tier defaults to "team"; op_id is a generated UUID (any value).
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	resp, err := srv.AdminProvisionTenant(ctxWithTenantAdmin(context.Background(), "_system", "platform-owner-1"), &tenantv1.AdminProvisionTenantRequest{
@@ -123,15 +134,15 @@ func TestAdminProvisionTenant_PlainInviteErrorIsInternal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	srv.WithProvisionedOwnerInviter(&fakeOwnerInviter{err: errors.New("boom")})
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if status.Code(err) != codes.Internal {
@@ -147,11 +158,11 @@ func TestAdminProvisionTenant_RefusesWithoutOwnerInviter(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	srv.ownerInviter = nil
 
-	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if status.Code(err) != codes.Unavailable {
@@ -171,16 +182,16 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	inv := &fakeOwnerInviter{err: status.Error(codes.Internal, "send invitation email: smtp down")}
 	srv.ownerInviter = inv
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	_, err = srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	_, err = srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if status.Code(err) != codes.Internal {
@@ -190,10 +201,10 @@ func TestAdminProvisionTenant_OwnerInviteFailureIsReturned(t *testing.T) {
 	// The retry: the op is already pending (0 rows), the owner is invited again.
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "team", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	inv.err = nil
-	resp, err := srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	resp, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test",
 	})
 	if err != nil {
@@ -216,16 +227,16 @@ func TestAdminProvisionTenant_IdempotentDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
 	// WHERE NOT EXISTS matched an already-pending provision → 0 rows affected.
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "org").
+		WithArgs(sqlmock.AnyArg(), "acme", "Acme Inc", "owner@acme.test", "org", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
-	resp, err := srv.AdminProvisionTenant(context.Background(), &tenantv1.AdminProvisionTenantRequest{
+	resp, err := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
 		TenantId: "acme", DisplayName: "Acme Inc", OwnerEmail: "owner@acme.test", Tier: "org",
 	})
 	if err != nil {
@@ -247,9 +258,9 @@ func TestAdminUpdateTenant_NoFieldsSet_InvalidArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
-	_, err = srv.AdminUpdateTenant(context.Background(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme"})
+	_, err = srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme"})
 	requireGRPCStatus(t, err, codes.InvalidArgument)
 }
 
@@ -259,16 +270,16 @@ func TestAdminUpdateTenant_RecordsOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
 	// tier-only update: tier="org" tier_set=true, display_name="" display_name_set=false.
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme", "", false, "org", true).
+		WithArgs(sqlmock.AnyArg(), "acme", "", false, "org", true, sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	resp, err := srv.AdminUpdateTenant(context.Background(), &tenantv1.AdminUpdateTenantRequest{
+	resp, err := srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{
 		TenantId: "acme", Tier: "org", TierSet: true,
 	})
 	if err != nil {
@@ -290,9 +301,9 @@ func TestAdminDeleteTenant_MissingTenantID_InvalidArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
-	_, err = srv.AdminDeleteTenant(context.Background(), &tenantv1.AdminDeleteTenantRequest{TenantId: ""})
+	_, err = srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: ""})
 	requireGRPCStatus(t, err, codes.InvalidArgument)
 }
 
@@ -302,15 +313,15 @@ func TestAdminDeleteTenant_RecordsOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
 	mock.ExpectExec("INSERT INTO tenant_admin_ops").
-		WithArgs(sqlmock.AnyArg(), "acme").
+		WithArgs(sqlmock.AnyArg(), "acme", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	resp, err := srv.AdminDeleteTenant(context.Background(), &tenantv1.AdminDeleteTenantRequest{TenantId: "acme"})
+	resp, err := srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: "acme"})
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -325,7 +336,7 @@ func TestAdminDeleteTenant_RecordsOp(t *testing.T) {
 // --- ListPendingTenantOps ---
 
 func TestListPendingTenantOps_NilDB_Unavailable(t *testing.T) {
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = nil
 	_, err := srv.ListPendingTenantOps(context.Background(), &daemonoperatorv1.ListPendingTenantOpsRequest{})
 	requireGRPCStatus(t, err, codes.Unavailable)
@@ -337,14 +348,14 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set"}).
-		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "team", true).
-		AddRow("op-2", "globex", "delete", "", false, "", "", false)
-	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set\\s+FROM tenant_admin_ops").
+	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set", "audit_record_id"}).
+		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "team", true, "rec-1").
+		AddRow("op-2", "globex", "delete", "", false, "", "", false, "")
+	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,\\s+audit_record_id\\s+FROM tenant_admin_ops").
 		WillReturnRows(rows)
 
 	resp, err := srv.ListPendingTenantOps(context.Background(), &daemonoperatorv1.ListPendingTenantOpsRequest{})
@@ -355,7 +366,8 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 		t.Fatalf("expected 2 ops, got %d", len(resp.GetOps()))
 	}
 	first := resp.GetOps()[0]
-	if first.GetOpId() != "op-1" || first.GetOpType() != "provision" || first.GetTier() != "team" || !first.GetTierSet() {
+	if first.GetOpId() != "op-1" || first.GetOpType() != "provision" || first.GetTier() != "team" || !first.GetTierSet() ||
+		first.GetAuditRecordId() != "rec-1" {
 		t.Errorf("unexpected first op: %+v", first)
 	}
 	if resp.GetOps()[1].GetOpType() != "delete" || resp.GetOps()[1].GetDisplayNameSet() {
@@ -374,7 +386,7 @@ func TestAckTenantOp_MissingOpID_InvalidArgument(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	_, err = srv.AckTenantOp(context.Background(), &daemonoperatorv1.AckTenantOpRequest{OpId: ""})
 	requireGRPCStatus(t, err, codes.InvalidArgument)
@@ -386,7 +398,7 @@ func TestAckTenantOp_MarksDone(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
@@ -408,7 +420,7 @@ func TestAckTenantOp_UnknownOrAlreadyDone_NoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	srv := newAdminOpsServer()
+	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
@@ -421,5 +433,80 @@ func TestAckTenantOp_UnknownOrAlreadyDone_NoOp(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
+	}
+}
+
+// captureArg is a sqlmock argument that keeps the value it was given.
+type captureArg struct{ got string }
+
+func (c *captureArg) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	c.got = s
+	return ok
+}
+
+// An admin request is recorded with the admin as actor under the tenant it
+// names, before it is queued, and the queue entry carries the record id that
+// the operator stamps on the Tenant (gibson#583).
+func TestAdminDeleteTenant_RecordsTheAdminFirst(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newAdminOpsServer(t)
+	rec := &audittest.Recorder{}
+	srv.auditLogger = auditLoggerOver(t, rec)
+	srv.platformDB = db
+
+	expectEnsureAdminOpsTable(mock)
+	recordID := &captureArg{}
+	mock.ExpectExec("INSERT INTO tenant_admin_ops").
+		WithArgs(sqlmock.AnyArg(), "acme", recordID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if _, err := srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: "acme"}); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got := rec.Events()
+	if len(got) != 1 || got[0].ActorID != "platform-owner-1" || got[0].TenantID != "acme" ||
+		got[0].Action != auditActionTenantAdminDelete || got[0].TargetID != "acme" {
+		t.Fatalf("records = %+v", got)
+	}
+	if recordID.got == "" || !strings.Contains(string(got[0].Metadata), `"entry_id":"`+recordID.got+`"`) {
+		t.Fatalf("queued audit_record_id %q is not the entry_id of the record %s", recordID.got, got[0].Metadata)
+	}
+}
+
+// With no audit record, the admin request is refused and nothing is queued.
+func TestAdminTenantRequests_NoRecordNoOp(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	srv := newAdminOpsServer(t)
+	srv.auditLogger = auditLoggerOver(t, failingDurable{})
+	srv.platformDB = db
+
+	expectEnsureAdminOpsTable(mock)
+	expectEnsureAdminOpsTable(mock)
+	expectEnsureAdminOpsTable(mock)
+	_, perr := srv.AdminProvisionTenant(adminOpsCtx(), &tenantv1.AdminProvisionTenantRequest{
+		TenantId: "acme", DisplayName: "Acme", OwnerEmail: "o@acme.test",
+	})
+	_, uerr := srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme", Tier: "org", TierSet: true})
+	_, derr := srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: "acme"})
+	for name, err := range map[string]error{"provision": perr, "update": uerr, "delete": derr} {
+		if status.Code(err) != codes.Unavailable {
+			t.Errorf("%s: code = %v (%v), want Unavailable", name, status.Code(err), err)
+		}
+	}
+	// No INSERT was expected, so an insert fails ExpectationsWereMet.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+	if inv := srv.ownerInviter.(*fakeOwnerInviter); len(inv.calls) != 0 {
+		t.Errorf("the owner was invited with no record: %+v", inv.calls)
 	}
 }
