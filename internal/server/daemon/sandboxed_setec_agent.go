@@ -27,15 +27,10 @@ import (
 )
 
 // NewSetecAgentLauncher constructs a sandboxed.AgentLauncher backed by a real
-// Setec gRPC client. Returns (nil, nil) when sandbox dispatch is disabled so
-// the daemon can call it unconditionally; on that nil the harness denies an
-// untrusted agent fail-closed under setec-only. On a dial/TLS failure it
-// returns (nil, err) — the caller logs the warning and continues, matching the
-// tool executor's Requirement 5.4 behavior.
+// Setec gRPC client. On a TLS build failure it returns (nil, err), and the
+// caller logs the warning; the harness then denies an untrusted agent
+// fail-closed under setec-only.
 func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, events sandboxed.EventPublisher, platformCA string) (*sandboxed.AgentLauncher, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
 	client, err := NewSetecSandboxClient(cfg)
 	if err != nil {
 		return nil, err

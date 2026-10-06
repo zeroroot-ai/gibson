@@ -54,7 +54,7 @@ func TestValidator_RefusesASandboxWithoutItsMTLSFiles(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("no base config")
 	}
-	cfg.Sandbox = SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:50051"}}
+	cfg.Sandbox = SandboxConfig{Setec: SandboxSetecConfig{Address: "setec:50051"}}
 	cfg.Sandbox.Setec.MTLS.Enabled = true
 	// The section's own check refuses unbound files.
 	if err := cfg.Sandbox.Validate(); err == nil || !strings.Contains(err.Error(), "sandbox.setec.mtls") {

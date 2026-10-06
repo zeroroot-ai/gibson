@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
-	"github.com/zeroroot-ai/gibson/internal/infra/config"
 )
 
 func TestAgentLauncherWiring(t *testing.T) {
@@ -23,15 +22,5 @@ func TestAgentLauncherWiring(t *testing.T) {
 	}
 	if wire, warn := agentLauncherWiring(&sandboxed.AgentLauncher{}, nil); !wire || warn != "" {
 		t.Errorf("real launcher: got (wire=%v, warn=%q), want (true, empty)", wire, warn)
-	}
-}
-
-// TestNewSetecAgentLauncher_DisabledBuild pins the default (un-tagged) build's
-// fail-closed behavior: no setec client is compiled in, so the constructor
-// returns (nil, nil) and an untrusted agent is denied rather than run.
-func TestNewSetecAgentLauncher_DisabledBuild(t *testing.T) {
-	l, err := NewSetecAgentLauncher(config.SandboxConfig{}, nil, nil, nil, "")
-	if l != nil || err != nil {
-		t.Fatalf("disabled build: got (%v, %v), want (nil, nil)", l, err)
 	}
 }

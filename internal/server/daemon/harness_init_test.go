@@ -29,6 +29,7 @@ func TestNewHarnessFactory(t *testing.T) {
 	// Create test daemon with minimal config
 	cfg := &config.Config{
 		Registry: config.RegistryConfig{},
+		Sandbox:  config.SandboxConfig{Setec: config.SandboxSetecConfig{Address: "setec:50051"}},
 	}
 
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
@@ -163,3 +164,22 @@ func (f fixedKeyProvider) Health(context.Context) types.HealthStatus {
 	return types.HealthStatus{State: types.HealthStateHealthy}
 }
 func (f fixedKeyProvider) Close() error { return nil }
+
+// The daemon does not start without a setec address (ADR-0142, gibson#756).
+func TestNewHarnessFactory_RequiresTheSetecAddress(t *testing.T) {
+	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
+	newDaemon := func(addr string) *daemonImpl {
+		cfg := config.DefaultConfig()
+		cfg.Sandbox.Setec.Address = addr
+		return &daemonImpl{
+			config: cfg,
+			logger: logger,
+			infrastructure: &Infrastructure{
+				llmRegistry: llm.NewLLMRegistry(),
+				slotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+			},
+		}
+	}
+	_, err := newDaemon("").newHarnessFactory(context.Background())
+	require.ErrorIs(t, err, config.ErrNoSetecAddress)
+}

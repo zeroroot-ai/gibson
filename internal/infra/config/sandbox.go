@@ -4,6 +4,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -15,15 +16,14 @@ import (
 // backend, which dispatches tool calls into Setec microVM sandboxes via
 // gRPC instead of the default local/Redis-queue paths.
 //
-// When Enabled is false, the daemon does not construct a sandboxed executor
-// and all tool calls take the existing paths unchanged. When Enabled is true
-// but the Setec frontend is unreachable at startup, the daemon logs a warning
-// and continues; individual sandboxed tool calls will fail at invocation time
-// rather than at startup — per the design's Requirement 5.4.
+// The sandbox fleet is required (ADR-0142): the daemon refuses to start with
+// no setec address, and no code path runs with a nil sandbox executor. When
+// the Setec frontend is unreachable at startup, the daemon logs a warning and
+// continues; individual sandboxed tool calls fail at invocation time rather
+// than at startup — per the design's Requirement 5.4.
 type SandboxConfig struct {
-	Enabled bool                `mapstructure:"enabled" yaml:"enabled"`
-	Setec   SandboxSetecConfig  `mapstructure:"setec" yaml:"setec"`
-	Devbox  SandboxDevboxConfig `mapstructure:"devbox" yaml:"devbox"`
+	Setec  SandboxSetecConfig  `mapstructure:"setec" yaml:"setec"`
+	Devbox SandboxDevboxConfig `mapstructure:"devbox" yaml:"devbox"`
 }
 
 // SandboxDevboxConfig configures the SESSION sandbox a component's DevboxExec
@@ -143,15 +143,27 @@ const (
 // added by publishing a manifest, not by editing config: the manifest is the
 // single source of truth for the image digest, command and resources.
 
-// Validate checks that a SandboxConfig with Enabled=true has every required
-// field populated and references existing cert/key/ca files. Disabled configs
-// skip all validation — the zero value is a valid disabled configuration.
-func (c *SandboxConfig) Validate() error {
-	if !c.Enabled {
-		return nil
-	}
+// ErrNoSetecAddress is the refusal of a daemon start with no setec address.
+// The sandbox fleet is required (ADR-0142): each install names it.
+var ErrNoSetecAddress = errors.New("sandbox.setec.address is required: each install names its setec fleet (ADR-0142)")
+
+// RequireSetec refuses an empty setec address. The daemon start calls it;
+// the loader does not, because a loaded config is also read by tools and
+// tests that start no daemon.
+func (c *SandboxConfig) RequireSetec() error {
 	if c.Setec.Address == "" {
-		return fmt.Errorf("sandbox.setec.address is required when sandbox.enabled=true")
+		return ErrNoSetecAddress
+	}
+	return nil
+}
+
+// Validate checks the shape of a configured sandbox section: with an
+// address set, every required field is populated and the cert/key/ca files
+// exist. An empty address passes here; RequireSetec refuses it at the
+// daemon start.
+func (c *SandboxConfig) Validate() error {
+	if c.Setec.Address == "" {
+		return nil
 	}
 	if c.Setec.CallTimeout <= 0 {
 		c.Setec.CallTimeout = 5 * time.Minute
@@ -191,7 +203,7 @@ func (c *SandboxConfig) Validate() error {
 		{"ca_file", c.Setec.MTLS.CAFile},
 	} {
 		if f.path == "" {
-			return fmt.Errorf("sandbox.setec.mtls.%s is required when sandbox.enabled=true", f.name)
+			return fmt.Errorf("sandbox.setec.mtls.%s is required", f.name)
 		}
 		if _, err := os.Stat(f.path); err != nil {
 			return fmt.Errorf("sandbox.setec.mtls.%s (%s): %w", f.name, f.path, err)
