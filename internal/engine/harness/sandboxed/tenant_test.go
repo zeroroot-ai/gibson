@@ -131,3 +131,7 @@ func TestLaunchMember_NoTenantDoesNotLaunch(t *testing.T) {
 func (c *tenantClient) Fork(context.Context, ForkRequest) (ForkResponse, error) {
 	return ForkResponse{}, errors.New("tenantClient: fork is not used here")
 }
+
+func (c *tenantClient) Recovery(context.Context, string, string) (SessionRecovery, bool, error) {
+	return SessionRecovery{}, false, nil
+}

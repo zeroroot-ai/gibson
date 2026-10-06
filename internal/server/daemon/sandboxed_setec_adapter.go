@@ -433,3 +433,28 @@ func newSetecSuspender(cfg config.SandboxConfig, src setecSVIDSource) (sandboxSu
 	}
 	return c.(*setecClient), nil
 }
+
+// Recovery reads the last recovery of a sandbox of the tenant through Attach
+// (setec#237). recovered is false when the sandbox never recovered.
+func (c *setecClient) Recovery(ctx context.Context, tenant, sandboxID string) (sandboxed.SessionRecovery, bool, error) {
+	if tenant == "" {
+		return sandboxed.SessionRecovery{}, false, errNoTenant
+	}
+	resp, err := c.inner.Attach(ctx, &setecv1.AttachRequest{Tenant: tenant, SandboxId: sandboxID})
+	if err != nil {
+		return sandboxed.SessionRecovery{}, false, fmt.Errorf("setec: attach %s: %w", sandboxID, err)
+	}
+	r := resp.GetLastRecovery()
+	if r.GetCount() == 0 {
+		return sandboxed.SessionRecovery{}, false, nil
+	}
+	out := sandboxed.SessionRecovery{
+		Kind:      r.GetKind(),
+		Recovered: time.Unix(0, r.GetRecoveredUnixNano()).UTC(),
+		Count:     r.GetCount(),
+	}
+	if ns := r.GetStateTakenUnixNano(); ns != 0 {
+		out.StateTaken = time.Unix(0, ns).UTC()
+	}
+	return out, true, nil
+}

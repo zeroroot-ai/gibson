@@ -346,3 +346,7 @@ func (s *setecRoundtripLogStream) Close() error { return nil }
 func (c *setecRoundtripClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
 	return sandboxed.ForkResponse{}, errors.New("setecRoundtripClient: fork is not used here")
 }
+
+func (c *setecRoundtripClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
+	return sandboxed.SessionRecovery{}, false, nil
+}

@@ -78,3 +78,34 @@ func TestSetecClient_ForkRefusals(t *testing.T) {
 		t.Error("a setec error must return")
 	}
 }
+
+// attachingSetec answers Attach with one recovery.
+type attachingSetec struct {
+	setecv1.SandboxServiceClient
+	resp *setecv1.AttachResponse
+}
+
+func (a *attachingSetec) Attach(context.Context, *setecv1.AttachRequest, ...grpc.CallOption) (*setecv1.AttachResponse, error) {
+	return a.resp, nil
+}
+
+// Recovery maps the last recovery of setec, and reports none for a sandbox
+// that never recovered.
+func TestSetecClient_Recovery(t *testing.T) {
+	ctx := context.Background()
+	taken := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	c := &setecClient{inner: &attachingSetec{resp: &setecv1.AttachResponse{LastRecovery: &setecv1.SessionRecovery{
+		Kind: sandboxed.RecoveryResumed, StateTakenUnixNano: taken.UnixNano(), RecoveredUnixNano: taken.Add(time.Minute).UnixNano(), Count: 3,
+	}}}}
+	r, ok, err := c.Recovery(ctx, "acme", "sbx-1")
+	if err != nil || !ok || r.Count != 3 || !r.StateTaken.Equal(taken) || r.Kind != sandboxed.RecoveryResumed {
+		t.Fatalf("Recovery = %+v %v %v", r, ok, err)
+	}
+	c = &setecClient{inner: &attachingSetec{resp: &setecv1.AttachResponse{}}}
+	if _, ok, err := c.Recovery(ctx, "acme", "sbx-1"); ok || err != nil {
+		t.Fatalf("no recovery: ok = %v, err = %v", ok, err)
+	}
+	if _, _, err := c.Recovery(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
+		t.Fatalf("no tenant: err = %v", err)
+	}
+}

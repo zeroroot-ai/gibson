@@ -276,3 +276,7 @@ func TestBuildBankRunner_NeedsThePoolAndTheSeams(t *testing.T) {
 func (c *memberSandboxClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
 	return sandboxed.ForkResponse{}, errors.New("memberSandboxClient: fork is not used here")
 }
+
+func (c *memberSandboxClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
+	return sandboxed.SessionRecovery{}, false, nil
+}

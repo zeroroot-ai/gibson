@@ -34,6 +34,14 @@ type mockClient struct {
 	wait      func(context.Context, string) (WaitResponse, error)
 	kill      func(context.Context, string) error
 	fork      func(context.Context, ForkRequest) (ForkResponse, error)
+	recovery  func(context.Context, string) (SessionRecovery, bool, error)
+}
+
+func (m *mockClient) Recovery(ctx context.Context, _, id string) (SessionRecovery, bool, error) {
+	if m.recovery == nil {
+		return SessionRecovery{}, false, nil
+	}
+	return m.recovery(ctx, id)
 }
 
 func (m *mockClient) Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error) {

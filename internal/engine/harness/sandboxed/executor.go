@@ -90,7 +90,31 @@ type SandboxClient interface {
 	// the forks from it (ADR-0169, setec#195). Each fork gets the network
 	// of the request, never the network of the source.
 	Fork(ctx context.Context, req ForkRequest) (ForkResponse, error)
+
+	// Recovery returns the most recent recovery of a sandbox of the tenant
+	// (setec#237). recovered is false for a sandbox that never recovered.
+	Recovery(ctx context.Context, tenant, sandboxID string) (r SessionRecovery, recovered bool, err error)
 }
+
+// SessionRecovery is one recovery of a sandbox (setec#237).
+type SessionRecovery struct {
+	// Kind is RecoveryResumed or RecoveryRestarted.
+	Kind string
+	// StateTaken is the time of the state that the sandbox resumed from.
+	// It is zero for a restart from the workspace.
+	StateTaken time.Time
+	// Recovered is the time of the recovery.
+	Recovered time.Time
+	// Count counts the recoveries of the sandbox. A higher count is a new
+	// recovery.
+	Count int64
+}
+
+// The recovery kinds of setec.
+const (
+	RecoveryResumed   = "ResumedFromCheckpoint"
+	RecoveryRestarted = "RestartedFromWorkspace"
+)
 
 // LaunchRequest is the data the executor passes to Setec's Launch RPC.
 // Adapters map it onto Setec's generated proto.
