@@ -711,7 +711,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 				HostID:             req.Metadata["plugin:host_id"],
 				RuntimeMode:        req.Metadata["plugin:runtime_mode"],
 				SetecRequired:      req.Metadata["plugin:setec_required"] == "true",
-				ContentTrust:       contentTrustFromMetadata(req.Metadata["plugin:content_trust"]),
+				ContentTrust:       catalogContentTrust(req.Kind, req.Name),
 				PrincipalRef:       principalRef,
 			}
 			if install.RuntimeMode == "" {
@@ -2353,21 +2353,4 @@ func checkInMetadata(md map[string]string) map[string]string {
 		delete(out, k)
 	}
 	return out
-}
-
-// contentTrustFromMetadata maps the plugin:content_trust registration metadata
-// value (set by the SDK from the manifest's spec.policy.content_trust) to the
-// componentpb.ContentTrust enum. "untrusted" opts the component into
-// dispatch-policy gating (ADR-0110 / gibson#997); "trusted" is explicit-trusted;
-// any other value (including empty, for registrants that predate the field)
-// maps to UNSPECIFIED, which the gate treats as trusted.
-func contentTrustFromMetadata(v string) componentpb.ContentTrust {
-	switch v {
-	case "untrusted":
-		return componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
-	case "trusted":
-		return componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
-	default:
-		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
-	}
 }

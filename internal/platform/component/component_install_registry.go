@@ -93,10 +93,11 @@ type ComponentInstall struct {
 	RuntimeMode string
 	// SetecRequired is true when the manifest declares spec.policy.setec_required.
 	SetecRequired bool
-	// ContentTrust classifies the trust level of input this component processes
-	// at call time (ADR-0110 / gibson#997). Sourced from the plugin:content_trust
-	// registration metadata key. Consumed by the PluginInvoke dispatch-policy
-	// gate. Zero value (UNSPECIFIED) is treated as trusted.
+	// ContentTrust is the trust that the signed catalog states for this kind
+	// and name at registration (ADR-0136, S4). A value that the component
+	// reports about itself is not recorded. The dispatch gate reads the
+	// catalog itself (DispatchStanding); this field is the record of what the
+	// catalog stated. UNSPECIFIED means the catalog does not list the entry.
 	ContentTrust componentpb.ContentTrust
 	// PrincipalRef is the FGA user the component registered as, the caller's
 	// signed identity in componentFGAUser shape (plugin_principal:<id> for a
