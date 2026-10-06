@@ -12,7 +12,8 @@ import (
 // carries no token.
 func TestConnectorMCPClient_OneClientAndNoTokenWithNoSource(t *testing.T) {
 	d := testDaemonForRegistry(t)
-	if d.connectorMCPClient() == nil || d.connectorMCPClient() != d.connectorMCPClient() {
+	first, second := d.connectorMCPClient(), d.connectorMCPClient()
+	if first == nil || first != second {
 		t.Fatal("the daemon must build exactly one MCP client")
 	}
 	tok, err := d.connectorProxyToken(context.Background())
