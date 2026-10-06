@@ -333,6 +333,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
 /gibson.tenant.v1.TenantService/DeleteMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ExportFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
+/gibson.tenant.v1.TenantService/GetAuditRetention,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantQuota,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
@@ -340,6 +341,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.TenantService/ListAuditEvents,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ListMissionDrafts,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/SaveMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
+/gibson.tenant.v1.TenantService/SetAuditRetention,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/UpdateOnboardingState,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.UsageService/ListUsage,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/usage.proto,rule
 /gibson.tenant.v1.UserService/ConsumeAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule

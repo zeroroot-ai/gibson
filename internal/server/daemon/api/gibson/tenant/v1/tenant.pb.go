@@ -788,6 +788,263 @@ func (x *ListAuditEventsResponse) GetNextCursor() string {
 	return ""
 }
 
+// GetAuditRetentionRequest reads the audit retention period of the caller's
+// tenant. The tenant comes from the identity of the caller.
+type GetAuditRetentionRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+}
+
+func (x *GetAuditRetentionRequest) Reset() {
+	*x = GetAuditRetentionRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[11]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetAuditRetentionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuditRetentionRequest) ProtoMessage() {}
+
+func (x *GetAuditRetentionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[11]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuditRetentionRequest.ProtoReflect.Descriptor instead.
+func (*GetAuditRetentionRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{11}
+}
+
+// AuditRetention is the audit retention period of one tenant, in months.
+type AuditRetention struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// install_months is the period of the install (13 months or more).
+	InstallMonths int32 `protobuf:"varint,1,opt,name=install_months,json=installMonths,proto3" json:"install_months,omitempty"`
+	// tenant_months is the period that a tenant admin set. Zero means that the
+	// tenant uses the period of the install.
+	TenantMonths int32 `protobuf:"varint,2,opt,name=tenant_months,json=tenantMonths,proto3" json:"tenant_months,omitempty"`
+	// effective_months is the period that retention uses: the longer of the
+	// two.
+	EffectiveMonths int32 `protobuf:"varint,3,opt,name=effective_months,json=effectiveMonths,proto3" json:"effective_months,omitempty"`
+}
+
+func (x *AuditRetention) Reset() {
+	*x = AuditRetention{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[12]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *AuditRetention) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuditRetention) ProtoMessage() {}
+
+func (x *AuditRetention) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[12]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuditRetention.ProtoReflect.Descriptor instead.
+func (*AuditRetention) Descriptor() ([]byte, []int) {
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *AuditRetention) GetInstallMonths() int32 {
+	if x != nil {
+		return x.InstallMonths
+	}
+	return 0
+}
+
+func (x *AuditRetention) GetTenantMonths() int32 {
+	if x != nil {
+		return x.TenantMonths
+	}
+	return 0
+}
+
+func (x *AuditRetention) GetEffectiveMonths() int32 {
+	if x != nil {
+		return x.EffectiveMonths
+	}
+	return 0
+}
+
+// GetAuditRetentionResponse carries the audit retention period.
+type GetAuditRetentionResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Retention *AuditRetention `protobuf:"bytes,1,opt,name=retention,proto3" json:"retention,omitempty"`
+}
+
+func (x *GetAuditRetentionResponse) Reset() {
+	*x = GetAuditRetentionResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[13]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *GetAuditRetentionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAuditRetentionResponse) ProtoMessage() {}
+
+func (x *GetAuditRetentionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[13]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAuditRetentionResponse.ProtoReflect.Descriptor instead.
+func (*GetAuditRetentionResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetAuditRetentionResponse) GetRetention() *AuditRetention {
+	if x != nil {
+		return x.Retention
+	}
+	return nil
+}
+
+// SetAuditRetentionRequest sets the audit retention period of the caller's
+// tenant.
+type SetAuditRetentionRequest struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// months is the new period. It must not be shorter than the period of the
+	// install. Zero removes the setting. 1200 months is the upper limit.
+	Months int32 `protobuf:"varint,1,opt,name=months,proto3" json:"months,omitempty"`
+}
+
+func (x *SetAuditRetentionRequest) Reset() {
+	*x = SetAuditRetentionRequest{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[14]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SetAuditRetentionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAuditRetentionRequest) ProtoMessage() {}
+
+func (x *SetAuditRetentionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[14]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAuditRetentionRequest.ProtoReflect.Descriptor instead.
+func (*SetAuditRetentionRequest) Descriptor() ([]byte, []int) {
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *SetAuditRetentionRequest) GetMonths() int32 {
+	if x != nil {
+		return x.Months
+	}
+	return 0
+}
+
+// SetAuditRetentionResponse carries the audit retention period after the
+// change.
+type SetAuditRetentionResponse struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	Retention *AuditRetention `protobuf:"bytes,1,opt,name=retention,proto3" json:"retention,omitempty"`
+}
+
+func (x *SetAuditRetentionResponse) Reset() {
+	*x = SetAuditRetentionResponse{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[15]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *SetAuditRetentionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetAuditRetentionResponse) ProtoMessage() {}
+
+func (x *SetAuditRetentionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[15]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetAuditRetentionResponse.ProtoReflect.Descriptor instead.
+func (*SetAuditRetentionResponse) Descriptor() ([]byte, []int) {
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *SetAuditRetentionResponse) GetRetention() *AuditRetention {
+	if x != nil {
+		return x.Retention
+	}
+	return nil
+}
+
 // FindingFilters allows filtering the findings included in an export.
 type FindingFilters struct {
 	state         protoimpl.MessageState
@@ -803,7 +1060,7 @@ type FindingFilters struct {
 func (x *FindingFilters) Reset() {
 	*x = FindingFilters{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[11]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[16]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -816,7 +1073,7 @@ func (x *FindingFilters) String() string {
 func (*FindingFilters) ProtoMessage() {}
 
 func (x *FindingFilters) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[11]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[16]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +1086,7 @@ func (x *FindingFilters) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FindingFilters.ProtoReflect.Descriptor instead.
 func (*FindingFilters) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{11}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *FindingFilters) GetSeverity() []string {
@@ -877,7 +1134,7 @@ type ExportFindingsRequest struct {
 func (x *ExportFindingsRequest) Reset() {
 	*x = ExportFindingsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[12]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[17]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -890,7 +1147,7 @@ func (x *ExportFindingsRequest) String() string {
 func (*ExportFindingsRequest) ProtoMessage() {}
 
 func (x *ExportFindingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[12]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[17]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -903,7 +1160,7 @@ func (x *ExportFindingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportFindingsRequest.ProtoReflect.Descriptor instead.
 func (*ExportFindingsRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{12}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ExportFindingsRequest) GetTenantId() string {
@@ -963,7 +1220,7 @@ type ExportFindingsResponse struct {
 func (x *ExportFindingsResponse) Reset() {
 	*x = ExportFindingsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[13]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[18]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -976,7 +1233,7 @@ func (x *ExportFindingsResponse) String() string {
 func (*ExportFindingsResponse) ProtoMessage() {}
 
 func (x *ExportFindingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[13]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[18]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -989,7 +1246,7 @@ func (x *ExportFindingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExportFindingsResponse.ProtoReflect.Descriptor instead.
 func (*ExportFindingsResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{13}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *ExportFindingsResponse) GetData() []byte {
@@ -1036,7 +1293,7 @@ type SaveMissionDraftRequest struct {
 func (x *SaveMissionDraftRequest) Reset() {
 	*x = SaveMissionDraftRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[14]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[19]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1049,7 +1306,7 @@ func (x *SaveMissionDraftRequest) String() string {
 func (*SaveMissionDraftRequest) ProtoMessage() {}
 
 func (x *SaveMissionDraftRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[14]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[19]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1062,7 +1319,7 @@ func (x *SaveMissionDraftRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveMissionDraftRequest.ProtoReflect.Descriptor instead.
 func (*SaveMissionDraftRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{14}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SaveMissionDraftRequest) GetTenantId() string {
@@ -1112,7 +1369,7 @@ type SaveMissionDraftResponse struct {
 func (x *SaveMissionDraftResponse) Reset() {
 	*x = SaveMissionDraftResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[15]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[20]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1125,7 +1382,7 @@ func (x *SaveMissionDraftResponse) String() string {
 func (*SaveMissionDraftResponse) ProtoMessage() {}
 
 func (x *SaveMissionDraftResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[15]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[20]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1138,7 +1395,7 @@ func (x *SaveMissionDraftResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SaveMissionDraftResponse.ProtoReflect.Descriptor instead.
 func (*SaveMissionDraftResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{15}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SaveMissionDraftResponse) GetDraftId() string {
@@ -1160,7 +1417,7 @@ type ListMissionDraftsRequest struct {
 func (x *ListMissionDraftsRequest) Reset() {
 	*x = ListMissionDraftsRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[16]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[21]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1173,7 +1430,7 @@ func (x *ListMissionDraftsRequest) String() string {
 func (*ListMissionDraftsRequest) ProtoMessage() {}
 
 func (x *ListMissionDraftsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[16]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[21]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1186,7 +1443,7 @@ func (x *ListMissionDraftsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMissionDraftsRequest.ProtoReflect.Descriptor instead.
 func (*ListMissionDraftsRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{16}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ListMissionDraftsRequest) GetTenantId() string {
@@ -1212,7 +1469,7 @@ type MissionDraft struct {
 func (x *MissionDraft) Reset() {
 	*x = MissionDraft{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[17]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[22]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1225,7 +1482,7 @@ func (x *MissionDraft) String() string {
 func (*MissionDraft) ProtoMessage() {}
 
 func (x *MissionDraft) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[17]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[22]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1238,7 +1495,7 @@ func (x *MissionDraft) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionDraft.ProtoReflect.Descriptor instead.
 func (*MissionDraft) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{17}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *MissionDraft) GetId() string {
@@ -1288,7 +1545,7 @@ type ListMissionDraftsResponse struct {
 func (x *ListMissionDraftsResponse) Reset() {
 	*x = ListMissionDraftsResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[18]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[23]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1301,7 +1558,7 @@ func (x *ListMissionDraftsResponse) String() string {
 func (*ListMissionDraftsResponse) ProtoMessage() {}
 
 func (x *ListMissionDraftsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[18]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[23]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1314,7 +1571,7 @@ func (x *ListMissionDraftsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMissionDraftsResponse.ProtoReflect.Descriptor instead.
 func (*ListMissionDraftsResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{18}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ListMissionDraftsResponse) GetDrafts() []*MissionDraft {
@@ -1337,7 +1594,7 @@ type GetMissionDraftRequest struct {
 func (x *GetMissionDraftRequest) Reset() {
 	*x = GetMissionDraftRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[19]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[24]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1350,7 +1607,7 @@ func (x *GetMissionDraftRequest) String() string {
 func (*GetMissionDraftRequest) ProtoMessage() {}
 
 func (x *GetMissionDraftRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[19]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[24]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1363,7 +1620,7 @@ func (x *GetMissionDraftRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionDraftRequest.ProtoReflect.Descriptor instead.
 func (*GetMissionDraftRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{19}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *GetMissionDraftRequest) GetTenantId() string {
@@ -1392,7 +1649,7 @@ type GetMissionDraftResponse struct {
 func (x *GetMissionDraftResponse) Reset() {
 	*x = GetMissionDraftResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[20]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[25]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1405,7 +1662,7 @@ func (x *GetMissionDraftResponse) String() string {
 func (*GetMissionDraftResponse) ProtoMessage() {}
 
 func (x *GetMissionDraftResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[20]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[25]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1418,7 +1675,7 @@ func (x *GetMissionDraftResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMissionDraftResponse.ProtoReflect.Descriptor instead.
 func (*GetMissionDraftResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{20}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *GetMissionDraftResponse) GetDraft() *MissionDraftFull {
@@ -1445,7 +1702,7 @@ type MissionDraftFull struct {
 func (x *MissionDraftFull) Reset() {
 	*x = MissionDraftFull{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[21]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[26]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1458,7 +1715,7 @@ func (x *MissionDraftFull) String() string {
 func (*MissionDraftFull) ProtoMessage() {}
 
 func (x *MissionDraftFull) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[21]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[26]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1471,7 +1728,7 @@ func (x *MissionDraftFull) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionDraftFull.ProtoReflect.Descriptor instead.
 func (*MissionDraftFull) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{21}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *MissionDraftFull) GetId() string {
@@ -1529,7 +1786,7 @@ type DeleteMissionDraftRequest struct {
 func (x *DeleteMissionDraftRequest) Reset() {
 	*x = DeleteMissionDraftRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[22]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[27]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1542,7 +1799,7 @@ func (x *DeleteMissionDraftRequest) String() string {
 func (*DeleteMissionDraftRequest) ProtoMessage() {}
 
 func (x *DeleteMissionDraftRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[22]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[27]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1555,7 +1812,7 @@ func (x *DeleteMissionDraftRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMissionDraftRequest.ProtoReflect.Descriptor instead.
 func (*DeleteMissionDraftRequest) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{22}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *DeleteMissionDraftRequest) GetTenantId() string {
@@ -1582,7 +1839,7 @@ type DeleteMissionDraftResponse struct {
 func (x *DeleteMissionDraftResponse) Reset() {
 	*x = DeleteMissionDraftResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[23]
+		mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[28]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -1595,7 +1852,7 @@ func (x *DeleteMissionDraftResponse) String() string {
 func (*DeleteMissionDraftResponse) ProtoMessage() {}
 
 func (x *DeleteMissionDraftResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[23]
+	mi := &file_gibson_tenant_v1_tenant_proto_msgTypes[28]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1608,7 +1865,7 @@ func (x *DeleteMissionDraftResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteMissionDraftResponse.ProtoReflect.Descriptor instead.
 func (*DeleteMissionDraftResponse) Descriptor() ([]byte, []int) {
-	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{23}
+	return file_gibson_tenant_v1_tenant_proto_rawDescGZIP(), []int{28}
 }
 
 var File_gibson_tenant_v1_tenant_proto protoreflect.FileDescriptor
@@ -1765,7 +2022,33 @@ var file_gibson_tenant_v1_tenant_proto_rawDesc = []byte{
 	0x64, 0x69, 0x74, 0x45, 0x76, 0x65, 0x6e, 0x74, 0x52, 0x06, 0x65, 0x76, 0x65, 0x6e, 0x74, 0x73,
 	0x12, 0x1f, 0x0a, 0x0b, 0x6e, 0x65, 0x78, 0x74, 0x5f, 0x63, 0x75, 0x72, 0x73, 0x6f, 0x72, 0x18,
 	0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x0a, 0x6e, 0x65, 0x78, 0x74, 0x43, 0x75, 0x72, 0x73, 0x6f,
-	0x72, 0x22, 0x77, 0x0a, 0x0e, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x46, 0x69, 0x6c, 0x74,
+	0x72, 0x22, 0x1a, 0x0a, 0x18, 0x47, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74,
+	0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x22, 0x87, 0x01,
+	0x0a, 0x0e, 0x41, 0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e,
+	0x12, 0x25, 0x0a, 0x0e, 0x69, 0x6e, 0x73, 0x74, 0x61, 0x6c, 0x6c, 0x5f, 0x6d, 0x6f, 0x6e, 0x74,
+	0x68, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0d, 0x69, 0x6e, 0x73, 0x74, 0x61, 0x6c,
+	0x6c, 0x4d, 0x6f, 0x6e, 0x74, 0x68, 0x73, 0x12, 0x23, 0x0a, 0x0d, 0x74, 0x65, 0x6e, 0x61, 0x6e,
+	0x74, 0x5f, 0x6d, 0x6f, 0x6e, 0x74, 0x68, 0x73, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0c,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x4d, 0x6f, 0x6e, 0x74, 0x68, 0x73, 0x12, 0x29, 0x0a, 0x10,
+	0x65, 0x66, 0x66, 0x65, 0x63, 0x74, 0x69, 0x76, 0x65, 0x5f, 0x6d, 0x6f, 0x6e, 0x74, 0x68, 0x73,
+	0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52, 0x0f, 0x65, 0x66, 0x66, 0x65, 0x63, 0x74, 0x69, 0x76,
+	0x65, 0x4d, 0x6f, 0x6e, 0x74, 0x68, 0x73, 0x22, 0x5b, 0x0a, 0x19, 0x47, 0x65, 0x74, 0x41, 0x75,
+	0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x12, 0x3e, 0x0a, 0x09, 0x72, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f,
+	0x6e, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x75, 0x64, 0x69, 0x74,
+	0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x09, 0x72, 0x65, 0x74, 0x65, 0x6e,
+	0x74, 0x69, 0x6f, 0x6e, 0x22, 0x3e, 0x0a, 0x18, 0x53, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74,
+	0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
+	0x12, 0x22, 0x0a, 0x06, 0x6d, 0x6f, 0x6e, 0x74, 0x68, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x05,
+	0x42, 0x0a, 0xba, 0x48, 0x07, 0x1a, 0x05, 0x18, 0xb0, 0x09, 0x28, 0x00, 0x52, 0x06, 0x6d, 0x6f,
+	0x6e, 0x74, 0x68, 0x73, 0x22, 0x5b, 0x0a, 0x19, 0x53, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74,
+	0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x12, 0x3e, 0x0a, 0x09, 0x72, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x18, 0x01,
+	0x20, 0x01, 0x28, 0x0b, 0x32, 0x20, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x41, 0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74,
+	0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x09, 0x72, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f,
+	0x6e, 0x22, 0x77, 0x0a, 0x0e, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x46, 0x69, 0x6c, 0x74,
 	0x65, 0x72, 0x73, 0x12, 0x1a, 0x0a, 0x08, 0x73, 0x65, 0x76, 0x65, 0x72, 0x69, 0x74, 0x79, 0x18,
 	0x01, 0x20, 0x03, 0x28, 0x09, 0x52, 0x08, 0x73, 0x65, 0x76, 0x65, 0x72, 0x69, 0x74, 0x79, 0x12,
 	0x12, 0x0a, 0x04, 0x74, 0x79, 0x70, 0x65, 0x18, 0x02, 0x20, 0x03, 0x28, 0x09, 0x52, 0x04, 0x74,
@@ -1870,7 +2153,7 @@ var file_gibson_tenant_v1_tenant_proto_rawDesc = []byte{
 	0x07, 0x72, 0x05, 0x10, 0x01, 0x18, 0x80, 0x08, 0x52, 0x07, 0x64, 0x72, 0x61, 0x66, 0x74, 0x49,
 	0x64, 0x22, 0x1c, 0x0a, 0x1a, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69,
 	0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x32,
-	0xa6, 0x0c, 0x0a, 0x0d, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63,
+	0xde, 0x0e, 0x0a, 0x0d, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x53, 0x65, 0x72, 0x76, 0x69, 0x63,
 	0x65, 0x12, 0x9d, 0x01, 0x0a, 0x12, 0x47, 0x65, 0x74, 0x4f, 0x6e, 0x62, 0x6f, 0x61, 0x72, 0x64,
 	0x69, 0x6e, 0x67, 0x53, 0x74, 0x61, 0x74, 0x65, 0x12, 0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
 	0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4f,
@@ -1920,69 +2203,89 @@ var file_gibson_tenant_v1_tenant_proto_rawDesc = []byte{
 	0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2b, 0x8a, 0xb5, 0x18, 0x27, 0x0a,
 	0x05, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14,
 	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e,
-	0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x91, 0x01, 0x0a, 0x0e, 0x45, 0x78, 0x70, 0x6f, 0x72,
-	0x74, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x73, 0x12, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73,
-	0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x78, 0x70,
-	0x6f, 0x72, 0x74, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65,
-	0x73, 0x74, 0x1a, 0x28, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61,
-	0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x78, 0x70, 0x6f, 0x72, 0x74, 0x46, 0x69, 0x6e, 0x64,
-	0x69, 0x6e, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5,
-	0x18, 0x28, 0x0a, 0x06, 0x6d, 0x65, 0x6d, 0x62, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61,
-	0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f,
-	0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x97, 0x01, 0x0a, 0x10, 0x53,
-	0x61, 0x76, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x12,
-	0x29, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e,
-	0x76, 0x31, 0x2e, 0x53, 0x61, 0x76, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72,
-	0x61, 0x66, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x67, 0x69, 0x62,
-	0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x61,
-	0x76, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65,
-	0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x77, 0x72,
-	0x69, 0x74, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65,
-	0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69,
-	0x74, 0x79, 0x20, 0x03, 0x12, 0x9a, 0x01, 0x0a, 0x11, 0x4c, 0x69, 0x73, 0x74, 0x4d, 0x69, 0x73,
-	0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x73, 0x12, 0x2a, 0x2e, 0x67, 0x69, 0x62,
-	0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69,
-	0x73, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x73, 0x52,
-	0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
-	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x4d, 0x69,
-	0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f,
-	0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65,
-	0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e,
-	0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20,
-	0x03, 0x12, 0x94, 0x01, 0x0a, 0x0f, 0x47, 0x65, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e,
-	0x44, 0x72, 0x61, 0x66, 0x74, 0x12, 0x28, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74,
-	0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x69, 0x73, 0x73,
-	0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a,
-	0x29, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e,
-	0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61,
-	0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28,
-	0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
-	0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64,
-	0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x9d, 0x01, 0x0a, 0x12, 0x44, 0x65, 0x6c,
-	0x65, 0x74, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x12,
-	0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e,
-	0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e,
-	0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x67,
+	0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x99, 0x01, 0x0a, 0x11, 0x47, 0x65, 0x74, 0x41, 0x75,
+	0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2a, 0x2e, 0x67,
 	0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e,
-	0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61,
-	0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28,
-	0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
-	0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64,
-	0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x42, 0xd9, 0x01, 0x0a, 0x14, 0x63, 0x6f, 0x6d,
+	0x47, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f,
+	0x6e, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x41,
+	0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73,
+	0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2b, 0x8a, 0xb5, 0x18, 0x27, 0x0a, 0x05, 0x61, 0x64, 0x6d,
+	0x69, 0x6e, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61,
+	0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79,
+	0x20, 0x03, 0x12, 0x99, 0x01, 0x0a, 0x11, 0x53, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74, 0x52,
+	0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x12, 0x2a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x65, 0x74, 0x41,
+	0x75, 0x64, 0x69, 0x74, 0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x65, 0x74, 0x41, 0x75, 0x64, 0x69, 0x74,
+	0x52, 0x65, 0x74, 0x65, 0x6e, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73,
+	0x65, 0x22, 0x2b, 0x8a, 0xb5, 0x18, 0x27, 0x0a, 0x05, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0x12, 0x06,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66,
+	0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x91,
+	0x01, 0x0a, 0x0e, 0x45, 0x78, 0x70, 0x6f, 0x72, 0x74, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67,
+	0x73, 0x12, 0x27, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e,
+	0x74, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x78, 0x70, 0x6f, 0x72, 0x74, 0x46, 0x69, 0x6e, 0x64, 0x69,
+	0x6e, 0x67, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x28, 0x2e, 0x67, 0x69, 0x62,
+	0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x45, 0x78,
+	0x70, 0x6f, 0x72, 0x74, 0x46, 0x69, 0x6e, 0x64, 0x69, 0x6e, 0x67, 0x73, 0x52, 0x65, 0x73, 0x70,
+	0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x6d, 0x65, 0x6d, 0x62,
+	0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61,
+	0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79,
+	0x20, 0x03, 0x12, 0x97, 0x01, 0x0a, 0x10, 0x53, 0x61, 0x76, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69,
+	0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x12, 0x29, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x61, 0x76, 0x65, 0x4d,
+	0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x71, 0x75, 0x65,
+	0x73, 0x74, 0x1a, 0x2a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61,
+	0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x53, 0x61, 0x76, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f,
+	0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c,
+	0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f,
+	0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x9a, 0x01, 0x0a,
+	0x11, 0x4c, 0x69, 0x73, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66,
+	0x74, 0x73, 0x12, 0x2a, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61,
+	0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f,
+	0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x73, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x2b,
 	0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76,
-	0x31, 0x42, 0x0b, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01,
-	0x5a, 0x52, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x65, 0x72,
-	0x6f, 0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x61, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f,
-	0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2f,
-	0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f,
-	0x6e, 0x2f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2f, 0x76, 0x31, 0x3b, 0x74, 0x65, 0x6e, 0x61,
-	0x6e, 0x74, 0x76, 0x31, 0xa2, 0x02, 0x03, 0x47, 0x54, 0x58, 0xaa, 0x02, 0x10, 0x47, 0x69, 0x62,
-	0x73, 0x6f, 0x6e, 0x2e, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x10,
-	0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5c, 0x56, 0x31,
-	0xe2, 0x02, 0x1c, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74,
-	0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea,
-	0x02, 0x12, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x3a, 0x3a, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74,
-	0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x33,
+	0x31, 0x2e, 0x4c, 0x69, 0x73, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61,
+	0x66, 0x74, 0x73, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18,
+	0x28, 0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72, 0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e,
+	0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69,
+	0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03, 0x12, 0x94, 0x01, 0x0a, 0x0f, 0x47, 0x65,
+	0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x12, 0x28, 0x2e,
+	0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31,
+	0x2e, 0x47, 0x65, 0x74, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74,
+	0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x1a, 0x29, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x47, 0x65, 0x74, 0x4d, 0x69,
+	0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72,
+	0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03,
+	0x12, 0x9d, 0x01, 0x0a, 0x12, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4d, 0x69, 0x73, 0x73, 0x69,
+	0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x12, 0x2b, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x2e, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74,
+	0x65, 0x4d, 0x69, 0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x71,
+	0x75, 0x65, 0x73, 0x74, 0x1a, 0x2c, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x74, 0x65,
+	0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x2e, 0x44, 0x65, 0x6c, 0x65, 0x74, 0x65, 0x4d, 0x69,
+	0x73, 0x73, 0x69, 0x6f, 0x6e, 0x44, 0x72, 0x61, 0x66, 0x74, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e,
+	0x73, 0x65, 0x22, 0x2c, 0x8a, 0xb5, 0x18, 0x28, 0x0a, 0x06, 0x77, 0x72, 0x69, 0x74, 0x65, 0x72,
+	0x12, 0x06, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x1a, 0x14, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x5f, 0x66, 0x72, 0x6f, 0x6d, 0x5f, 0x69, 0x64, 0x65, 0x6e, 0x74, 0x69, 0x74, 0x79, 0x20, 0x03,
+	0x42, 0xd9, 0x01, 0x0a, 0x14, 0x63, 0x6f, 0x6d, 0x2e, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e,
+	0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x2e, 0x76, 0x31, 0x42, 0x0b, 0x54, 0x65, 0x6e, 0x61, 0x6e,
+	0x74, 0x50, 0x72, 0x6f, 0x74, 0x6f, 0x50, 0x01, 0x5a, 0x52, 0x67, 0x69, 0x74, 0x68, 0x75, 0x62,
+	0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x7a, 0x65, 0x72, 0x6f, 0x72, 0x6f, 0x6f, 0x74, 0x2d, 0x61, 0x69,
+	0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c,
+	0x2f, 0x73, 0x65, 0x72, 0x76, 0x65, 0x72, 0x2f, 0x64, 0x61, 0x65, 0x6d, 0x6f, 0x6e, 0x2f, 0x61,
+	0x70, 0x69, 0x2f, 0x67, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2f, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74,
+	0x2f, 0x76, 0x31, 0x3b, 0x74, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x76, 0x31, 0xa2, 0x02, 0x03, 0x47,
+	0x54, 0x58, 0xaa, 0x02, 0x10, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x2e, 0x54, 0x65, 0x6e, 0x61,
+	0x6e, 0x74, 0x2e, 0x56, 0x31, 0xca, 0x02, 0x10, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e, 0x5c, 0x54,
+	0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5c, 0x56, 0x31, 0xe2, 0x02, 0x1c, 0x47, 0x69, 0x62, 0x73, 0x6f,
+	0x6e, 0x5c, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x5c, 0x56, 0x31, 0x5c, 0x47, 0x50, 0x42, 0x4d,
+	0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0xea, 0x02, 0x12, 0x47, 0x69, 0x62, 0x73, 0x6f, 0x6e,
+	0x3a, 0x3a, 0x54, 0x65, 0x6e, 0x61, 0x6e, 0x74, 0x3a, 0x3a, 0x56, 0x31, 0x62, 0x06, 0x70, 0x72,
+	0x6f, 0x74, 0x6f, 0x33,
 }
 
 var (
@@ -1997,7 +2300,7 @@ func file_gibson_tenant_v1_tenant_proto_rawDescGZIP() []byte {
 	return file_gibson_tenant_v1_tenant_proto_rawDescData
 }
 
-var file_gibson_tenant_v1_tenant_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
+var file_gibson_tenant_v1_tenant_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_gibson_tenant_v1_tenant_proto_goTypes = []any{
 	(*GetOnboardingStateRequest)(nil),     // 0: gibson.tenant.v1.GetOnboardingStateRequest
 	(*GetOnboardingStateResponse)(nil),    // 1: gibson.tenant.v1.GetOnboardingStateResponse
@@ -2010,56 +2313,67 @@ var file_gibson_tenant_v1_tenant_proto_goTypes = []any{
 	(*AuditEvent)(nil),                    // 8: gibson.tenant.v1.AuditEvent
 	(*ListAuditEventsRequest)(nil),        // 9: gibson.tenant.v1.ListAuditEventsRequest
 	(*ListAuditEventsResponse)(nil),       // 10: gibson.tenant.v1.ListAuditEventsResponse
-	(*FindingFilters)(nil),                // 11: gibson.tenant.v1.FindingFilters
-	(*ExportFindingsRequest)(nil),         // 12: gibson.tenant.v1.ExportFindingsRequest
-	(*ExportFindingsResponse)(nil),        // 13: gibson.tenant.v1.ExportFindingsResponse
-	(*SaveMissionDraftRequest)(nil),       // 14: gibson.tenant.v1.SaveMissionDraftRequest
-	(*SaveMissionDraftResponse)(nil),      // 15: gibson.tenant.v1.SaveMissionDraftResponse
-	(*ListMissionDraftsRequest)(nil),      // 16: gibson.tenant.v1.ListMissionDraftsRequest
-	(*MissionDraft)(nil),                  // 17: gibson.tenant.v1.MissionDraft
-	(*ListMissionDraftsResponse)(nil),     // 18: gibson.tenant.v1.ListMissionDraftsResponse
-	(*GetMissionDraftRequest)(nil),        // 19: gibson.tenant.v1.GetMissionDraftRequest
-	(*GetMissionDraftResponse)(nil),       // 20: gibson.tenant.v1.GetMissionDraftResponse
-	(*MissionDraftFull)(nil),              // 21: gibson.tenant.v1.MissionDraftFull
-	(*DeleteMissionDraftRequest)(nil),     // 22: gibson.tenant.v1.DeleteMissionDraftRequest
-	(*DeleteMissionDraftResponse)(nil),    // 23: gibson.tenant.v1.DeleteMissionDraftResponse
-	nil,                                   // 24: gibson.tenant.v1.GetOnboardingStateResponse.SetupTasksEntry
-	nil,                                   // 25: gibson.tenant.v1.UpdateOnboardingStateRequest.SetupTasksEntry
-	nil,                                   // 26: gibson.tenant.v1.AuditEvent.DetailsEntry
+	(*GetAuditRetentionRequest)(nil),      // 11: gibson.tenant.v1.GetAuditRetentionRequest
+	(*AuditRetention)(nil),                // 12: gibson.tenant.v1.AuditRetention
+	(*GetAuditRetentionResponse)(nil),     // 13: gibson.tenant.v1.GetAuditRetentionResponse
+	(*SetAuditRetentionRequest)(nil),      // 14: gibson.tenant.v1.SetAuditRetentionRequest
+	(*SetAuditRetentionResponse)(nil),     // 15: gibson.tenant.v1.SetAuditRetentionResponse
+	(*FindingFilters)(nil),                // 16: gibson.tenant.v1.FindingFilters
+	(*ExportFindingsRequest)(nil),         // 17: gibson.tenant.v1.ExportFindingsRequest
+	(*ExportFindingsResponse)(nil),        // 18: gibson.tenant.v1.ExportFindingsResponse
+	(*SaveMissionDraftRequest)(nil),       // 19: gibson.tenant.v1.SaveMissionDraftRequest
+	(*SaveMissionDraftResponse)(nil),      // 20: gibson.tenant.v1.SaveMissionDraftResponse
+	(*ListMissionDraftsRequest)(nil),      // 21: gibson.tenant.v1.ListMissionDraftsRequest
+	(*MissionDraft)(nil),                  // 22: gibson.tenant.v1.MissionDraft
+	(*ListMissionDraftsResponse)(nil),     // 23: gibson.tenant.v1.ListMissionDraftsResponse
+	(*GetMissionDraftRequest)(nil),        // 24: gibson.tenant.v1.GetMissionDraftRequest
+	(*GetMissionDraftResponse)(nil),       // 25: gibson.tenant.v1.GetMissionDraftResponse
+	(*MissionDraftFull)(nil),              // 26: gibson.tenant.v1.MissionDraftFull
+	(*DeleteMissionDraftRequest)(nil),     // 27: gibson.tenant.v1.DeleteMissionDraftRequest
+	(*DeleteMissionDraftResponse)(nil),    // 28: gibson.tenant.v1.DeleteMissionDraftResponse
+	nil,                                   // 29: gibson.tenant.v1.GetOnboardingStateResponse.SetupTasksEntry
+	nil,                                   // 30: gibson.tenant.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	nil,                                   // 31: gibson.tenant.v1.AuditEvent.DetailsEntry
 }
 var file_gibson_tenant_v1_tenant_proto_depIdxs = []int32{
-	24, // 0: gibson.tenant.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.tenant.v1.GetOnboardingStateResponse.SetupTasksEntry
-	25, // 1: gibson.tenant.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.tenant.v1.UpdateOnboardingStateRequest.SetupTasksEntry
-	26, // 2: gibson.tenant.v1.AuditEvent.details:type_name -> gibson.tenant.v1.AuditEvent.DetailsEntry
+	29, // 0: gibson.tenant.v1.GetOnboardingStateResponse.setup_tasks:type_name -> gibson.tenant.v1.GetOnboardingStateResponse.SetupTasksEntry
+	30, // 1: gibson.tenant.v1.UpdateOnboardingStateRequest.setup_tasks:type_name -> gibson.tenant.v1.UpdateOnboardingStateRequest.SetupTasksEntry
+	31, // 2: gibson.tenant.v1.AuditEvent.details:type_name -> gibson.tenant.v1.AuditEvent.DetailsEntry
 	8,  // 3: gibson.tenant.v1.ListAuditEventsResponse.events:type_name -> gibson.tenant.v1.AuditEvent
-	11, // 4: gibson.tenant.v1.ExportFindingsRequest.filters:type_name -> gibson.tenant.v1.FindingFilters
-	17, // 5: gibson.tenant.v1.ListMissionDraftsResponse.drafts:type_name -> gibson.tenant.v1.MissionDraft
-	21, // 6: gibson.tenant.v1.GetMissionDraftResponse.draft:type_name -> gibson.tenant.v1.MissionDraftFull
-	0,  // 7: gibson.tenant.v1.TenantService.GetOnboardingState:input_type -> gibson.tenant.v1.GetOnboardingStateRequest
-	2,  // 8: gibson.tenant.v1.TenantService.UpdateOnboardingState:input_type -> gibson.tenant.v1.UpdateOnboardingStateRequest
-	4,  // 9: gibson.tenant.v1.TenantService.GetTenantQuota:input_type -> gibson.tenant.v1.GetTenantQuotaRequest
-	6,  // 10: gibson.tenant.v1.TenantService.GetTenantQuotaUsage:input_type -> gibson.tenant.v1.GetTenantQuotaUsageRequest
-	9,  // 11: gibson.tenant.v1.TenantService.ListAuditEvents:input_type -> gibson.tenant.v1.ListAuditEventsRequest
-	12, // 12: gibson.tenant.v1.TenantService.ExportFindings:input_type -> gibson.tenant.v1.ExportFindingsRequest
-	14, // 13: gibson.tenant.v1.TenantService.SaveMissionDraft:input_type -> gibson.tenant.v1.SaveMissionDraftRequest
-	16, // 14: gibson.tenant.v1.TenantService.ListMissionDrafts:input_type -> gibson.tenant.v1.ListMissionDraftsRequest
-	19, // 15: gibson.tenant.v1.TenantService.GetMissionDraft:input_type -> gibson.tenant.v1.GetMissionDraftRequest
-	22, // 16: gibson.tenant.v1.TenantService.DeleteMissionDraft:input_type -> gibson.tenant.v1.DeleteMissionDraftRequest
-	1,  // 17: gibson.tenant.v1.TenantService.GetOnboardingState:output_type -> gibson.tenant.v1.GetOnboardingStateResponse
-	3,  // 18: gibson.tenant.v1.TenantService.UpdateOnboardingState:output_type -> gibson.tenant.v1.UpdateOnboardingStateResponse
-	5,  // 19: gibson.tenant.v1.TenantService.GetTenantQuota:output_type -> gibson.tenant.v1.GetTenantQuotaResponse
-	7,  // 20: gibson.tenant.v1.TenantService.GetTenantQuotaUsage:output_type -> gibson.tenant.v1.GetTenantQuotaUsageResponse
-	10, // 21: gibson.tenant.v1.TenantService.ListAuditEvents:output_type -> gibson.tenant.v1.ListAuditEventsResponse
-	13, // 22: gibson.tenant.v1.TenantService.ExportFindings:output_type -> gibson.tenant.v1.ExportFindingsResponse
-	15, // 23: gibson.tenant.v1.TenantService.SaveMissionDraft:output_type -> gibson.tenant.v1.SaveMissionDraftResponse
-	18, // 24: gibson.tenant.v1.TenantService.ListMissionDrafts:output_type -> gibson.tenant.v1.ListMissionDraftsResponse
-	20, // 25: gibson.tenant.v1.TenantService.GetMissionDraft:output_type -> gibson.tenant.v1.GetMissionDraftResponse
-	23, // 26: gibson.tenant.v1.TenantService.DeleteMissionDraft:output_type -> gibson.tenant.v1.DeleteMissionDraftResponse
-	17, // [17:27] is the sub-list for method output_type
-	7,  // [7:17] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	12, // 4: gibson.tenant.v1.GetAuditRetentionResponse.retention:type_name -> gibson.tenant.v1.AuditRetention
+	12, // 5: gibson.tenant.v1.SetAuditRetentionResponse.retention:type_name -> gibson.tenant.v1.AuditRetention
+	16, // 6: gibson.tenant.v1.ExportFindingsRequest.filters:type_name -> gibson.tenant.v1.FindingFilters
+	22, // 7: gibson.tenant.v1.ListMissionDraftsResponse.drafts:type_name -> gibson.tenant.v1.MissionDraft
+	26, // 8: gibson.tenant.v1.GetMissionDraftResponse.draft:type_name -> gibson.tenant.v1.MissionDraftFull
+	0,  // 9: gibson.tenant.v1.TenantService.GetOnboardingState:input_type -> gibson.tenant.v1.GetOnboardingStateRequest
+	2,  // 10: gibson.tenant.v1.TenantService.UpdateOnboardingState:input_type -> gibson.tenant.v1.UpdateOnboardingStateRequest
+	4,  // 11: gibson.tenant.v1.TenantService.GetTenantQuota:input_type -> gibson.tenant.v1.GetTenantQuotaRequest
+	6,  // 12: gibson.tenant.v1.TenantService.GetTenantQuotaUsage:input_type -> gibson.tenant.v1.GetTenantQuotaUsageRequest
+	9,  // 13: gibson.tenant.v1.TenantService.ListAuditEvents:input_type -> gibson.tenant.v1.ListAuditEventsRequest
+	11, // 14: gibson.tenant.v1.TenantService.GetAuditRetention:input_type -> gibson.tenant.v1.GetAuditRetentionRequest
+	14, // 15: gibson.tenant.v1.TenantService.SetAuditRetention:input_type -> gibson.tenant.v1.SetAuditRetentionRequest
+	17, // 16: gibson.tenant.v1.TenantService.ExportFindings:input_type -> gibson.tenant.v1.ExportFindingsRequest
+	19, // 17: gibson.tenant.v1.TenantService.SaveMissionDraft:input_type -> gibson.tenant.v1.SaveMissionDraftRequest
+	21, // 18: gibson.tenant.v1.TenantService.ListMissionDrafts:input_type -> gibson.tenant.v1.ListMissionDraftsRequest
+	24, // 19: gibson.tenant.v1.TenantService.GetMissionDraft:input_type -> gibson.tenant.v1.GetMissionDraftRequest
+	27, // 20: gibson.tenant.v1.TenantService.DeleteMissionDraft:input_type -> gibson.tenant.v1.DeleteMissionDraftRequest
+	1,  // 21: gibson.tenant.v1.TenantService.GetOnboardingState:output_type -> gibson.tenant.v1.GetOnboardingStateResponse
+	3,  // 22: gibson.tenant.v1.TenantService.UpdateOnboardingState:output_type -> gibson.tenant.v1.UpdateOnboardingStateResponse
+	5,  // 23: gibson.tenant.v1.TenantService.GetTenantQuota:output_type -> gibson.tenant.v1.GetTenantQuotaResponse
+	7,  // 24: gibson.tenant.v1.TenantService.GetTenantQuotaUsage:output_type -> gibson.tenant.v1.GetTenantQuotaUsageResponse
+	10, // 25: gibson.tenant.v1.TenantService.ListAuditEvents:output_type -> gibson.tenant.v1.ListAuditEventsResponse
+	13, // 26: gibson.tenant.v1.TenantService.GetAuditRetention:output_type -> gibson.tenant.v1.GetAuditRetentionResponse
+	15, // 27: gibson.tenant.v1.TenantService.SetAuditRetention:output_type -> gibson.tenant.v1.SetAuditRetentionResponse
+	18, // 28: gibson.tenant.v1.TenantService.ExportFindings:output_type -> gibson.tenant.v1.ExportFindingsResponse
+	20, // 29: gibson.tenant.v1.TenantService.SaveMissionDraft:output_type -> gibson.tenant.v1.SaveMissionDraftResponse
+	23, // 30: gibson.tenant.v1.TenantService.ListMissionDrafts:output_type -> gibson.tenant.v1.ListMissionDraftsResponse
+	25, // 31: gibson.tenant.v1.TenantService.GetMissionDraft:output_type -> gibson.tenant.v1.GetMissionDraftResponse
+	28, // 32: gibson.tenant.v1.TenantService.DeleteMissionDraft:output_type -> gibson.tenant.v1.DeleteMissionDraftResponse
+	21, // [21:33] is the sub-list for method output_type
+	9,  // [9:21] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_gibson_tenant_v1_tenant_proto_init() }
@@ -2201,7 +2515,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[11].Exporter = func(v any, i int) any {
-			switch v := v.(*FindingFilters); i {
+			switch v := v.(*GetAuditRetentionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2213,7 +2527,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[12].Exporter = func(v any, i int) any {
-			switch v := v.(*ExportFindingsRequest); i {
+			switch v := v.(*AuditRetention); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2225,7 +2539,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[13].Exporter = func(v any, i int) any {
-			switch v := v.(*ExportFindingsResponse); i {
+			switch v := v.(*GetAuditRetentionResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2237,7 +2551,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[14].Exporter = func(v any, i int) any {
-			switch v := v.(*SaveMissionDraftRequest); i {
+			switch v := v.(*SetAuditRetentionRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2249,7 +2563,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[15].Exporter = func(v any, i int) any {
-			switch v := v.(*SaveMissionDraftResponse); i {
+			switch v := v.(*SetAuditRetentionResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2261,7 +2575,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[16].Exporter = func(v any, i int) any {
-			switch v := v.(*ListMissionDraftsRequest); i {
+			switch v := v.(*FindingFilters); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2273,7 +2587,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[17].Exporter = func(v any, i int) any {
-			switch v := v.(*MissionDraft); i {
+			switch v := v.(*ExportFindingsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2285,7 +2599,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[18].Exporter = func(v any, i int) any {
-			switch v := v.(*ListMissionDraftsResponse); i {
+			switch v := v.(*ExportFindingsResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2297,7 +2611,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[19].Exporter = func(v any, i int) any {
-			switch v := v.(*GetMissionDraftRequest); i {
+			switch v := v.(*SaveMissionDraftRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2309,7 +2623,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[20].Exporter = func(v any, i int) any {
-			switch v := v.(*GetMissionDraftResponse); i {
+			switch v := v.(*SaveMissionDraftResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2321,7 +2635,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[21].Exporter = func(v any, i int) any {
-			switch v := v.(*MissionDraftFull); i {
+			switch v := v.(*ListMissionDraftsRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2333,7 +2647,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[22].Exporter = func(v any, i int) any {
-			switch v := v.(*DeleteMissionDraftRequest); i {
+			switch v := v.(*MissionDraft); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -2345,6 +2659,66 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			}
 		}
 		file_gibson_tenant_v1_tenant_proto_msgTypes[23].Exporter = func(v any, i int) any {
+			switch v := v.(*ListMissionDraftsResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_tenant_v1_tenant_proto_msgTypes[24].Exporter = func(v any, i int) any {
+			switch v := v.(*GetMissionDraftRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_tenant_v1_tenant_proto_msgTypes[25].Exporter = func(v any, i int) any {
+			switch v := v.(*GetMissionDraftResponse); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_tenant_v1_tenant_proto_msgTypes[26].Exporter = func(v any, i int) any {
+			switch v := v.(*MissionDraftFull); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_tenant_v1_tenant_proto_msgTypes[27].Exporter = func(v any, i int) any {
+			switch v := v.(*DeleteMissionDraftRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_gibson_tenant_v1_tenant_proto_msgTypes[28].Exporter = func(v any, i int) any {
 			switch v := v.(*DeleteMissionDraftResponse); i {
 			case 0:
 				return &v.state
@@ -2363,7 +2737,7 @@ func file_gibson_tenant_v1_tenant_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_gibson_tenant_v1_tenant_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   27,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

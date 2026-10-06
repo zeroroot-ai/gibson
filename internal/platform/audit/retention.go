@@ -83,6 +83,112 @@ func RetentionMonthsFromEnv() (int, error) {
 	return months, nil
 }
 
+// ErrRetentionUnderInstall is returned when a tenant asks for a period
+// shorter than the period of the install.
+var ErrRetentionUnderInstall = errors.New("audit: the retention period of a tenant is shorter than the period of the install")
+
+// queryRower is the one method of *sql.DB and *sql.Tx that periodOfTenant
+// uses.
+type queryRower interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// tenantPeriodQuery reads the period that a tenant admin set.
+const tenantPeriodQuery = `SELECT months FROM audit_retention_tenant WHERE tenant_id = $1`
+
+// periodOfTenant returns the retention period of a tenant: the longer of the
+// install period and the period that a tenant admin set (gibson#676).
+func periodOfTenant(ctx context.Context, q queryRower, installMonths int, tenantID string) (int, error) {
+	var months int
+	switch err := q.QueryRowContext(ctx, tenantPeriodQuery, tenantID).Scan(&months); {
+	case errors.Is(err, sql.ErrNoRows):
+		return installMonths, nil
+	case err != nil:
+		return 0, fmt.Errorf("read the retention period of tenant %q: %w", tenantID, err)
+	}
+	return max(months, installMonths), nil
+}
+
+// RetentionSettings reads and sets the retention period of one tenant. A
+// tenant admin can set a period longer than the period of the install. The
+// settings refuse a shorter period.
+type RetentionSettings struct {
+	db            *sql.DB
+	installMonths int
+}
+
+// RetentionPeriod is the retention period of one tenant.
+type RetentionPeriod struct {
+	// InstallMonths is the period of the install.
+	InstallMonths int
+	// TenantMonths is the period that a tenant admin set. Zero means that
+	// the tenant uses the period of the install.
+	TenantMonths int
+	// EffectiveMonths is the period that retention uses: the longer of the
+	// two.
+	EffectiveMonths int
+}
+
+// NewRetentionSettings constructs RetentionSettings. installMonths is the
+// period of the install, and it must not be under MinRetentionMonths.
+func NewRetentionSettings(db *sql.DB, installMonths int) (*RetentionSettings, error) {
+	if db == nil {
+		return nil, errors.New("audit.NewRetentionSettings: db must not be nil")
+	}
+	if err := ValidateRetentionMonths(installMonths); err != nil {
+		return nil, fmt.Errorf("audit.NewRetentionSettings: %w", err)
+	}
+	return &RetentionSettings{db: db, installMonths: installMonths}, nil
+}
+
+// Period returns the retention period of a tenant.
+func (s *RetentionSettings) Period(ctx context.Context, tenantID string) (RetentionPeriod, error) {
+	if tenantID == "" {
+		return RetentionPeriod{}, errors.New("audit.RetentionSettings.Period: tenantID must not be empty")
+	}
+	var tenantMonths int
+	switch err := s.db.QueryRowContext(ctx, tenantPeriodQuery, tenantID).Scan(&tenantMonths); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return RetentionPeriod{}, fmt.Errorf("audit.RetentionSettings.Period: tenant %q: %w", tenantID, err)
+	}
+	return RetentionPeriod{
+		InstallMonths:   s.installMonths,
+		TenantMonths:    tenantMonths,
+		EffectiveMonths: max(tenantMonths, s.installMonths),
+	}, nil
+}
+
+// SetTenantMonths sets the retention period of a tenant. Zero removes the
+// setting, and the tenant then uses the period of the install. A period
+// under the period of the install is refused with ErrRetentionUnderInstall.
+func (s *RetentionSettings) SetTenantMonths(ctx context.Context, tenantID string, months int, updatedBy string) error {
+	if tenantID == "" {
+		return errors.New("audit.RetentionSettings.SetTenantMonths: tenantID must not be empty")
+	}
+	if months == 0 {
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM audit_retention_tenant WHERE tenant_id = $1`, tenantID); err != nil {
+			return fmt.Errorf("audit.RetentionSettings.SetTenantMonths: clear tenant %q: %w", tenantID, err)
+		}
+		return nil
+	}
+	if months < s.installMonths {
+		return fmt.Errorf("%w: got %d months, the install keeps %d", ErrRetentionUnderInstall, months, s.installMonths)
+	}
+	if updatedBy == "" {
+		return errors.New("audit.RetentionSettings.SetTenantMonths: updatedBy must not be empty")
+	}
+	const upsert = `
+INSERT INTO audit_retention_tenant (tenant_id, months, updated_by, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (tenant_id) DO UPDATE
+SET months = EXCLUDED.months, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at`
+	if _, err := s.db.ExecContext(ctx, upsert, tenantID, months, updatedBy); err != nil {
+		return fmt.Errorf("audit.RetentionSettings.SetTenantMonths: tenant %q: %w", tenantID, err)
+	}
+	return nil
+}
+
 // Retention removes audit_log rows that are older than the retention period.
 type Retention struct {
 	db     *sql.DB
@@ -207,8 +313,12 @@ func (r *Retention) PruneTenant(ctx context.Context, tenantID string) (int64, er
 		return 0, fmt.Errorf("audit.Retention.PruneTenant: lock chain for tenant %q: %w", tenantID, err)
 	}
 
+	months, err := periodOfTenant(ctx, tx, r.months, tenantID)
+	if err != nil {
+		return 0, fmt.Errorf("audit.Retention.PruneTenant: %w", err)
+	}
 	now := r.now().UTC()
-	cutoff := now.AddDate(0, -r.months, 0)
+	cutoff := now.AddDate(0, -months, 0)
 
 	// The last chained row that retention removes: the row with the highest
 	// position among the rows before the oldest row inside the period. With

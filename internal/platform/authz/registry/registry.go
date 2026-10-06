@@ -3044,6 +3044,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.TenantService/GetAuditRetention": {
+		Service:           "gibson.tenant.v1.TenantService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.TenantService/GetMissionDraft": {
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
@@ -3101,6 +3110,15 @@ var Registry = map[string]Entry{
 	"/gibson.tenant.v1.TenantService/SaveMissionDraft": {
 		Service:           "gibson.tenant.v1.TenantService",
 		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.tenant.v1.TenantService/SetAuditRetention": {
+		Service:           "gibson.tenant.v1.TenantService",
+		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

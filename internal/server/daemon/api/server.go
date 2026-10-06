@@ -169,6 +169,10 @@ type DaemonServer struct {
 	// tenant is not queued when its owner has no way in (hosted#205).
 	ownerInviter ProvisionedOwnerInviter
 
+	// auditRetention reads and sets the audit retention period of a tenant
+	// (gibson#676). The audit wiring sets it at start.
+	auditRetention *audit.RetentionSettings
+
 	// lokiQuerier is the Loki HTTP query client for audit events.
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
 	lokiQuerier audit.LokiQuerier
