@@ -30,6 +30,9 @@ func (s *DaemonServer) UpdateMissionDefinition(ctx context.Context, req *daemonp
 	if req.GetDefinition().GetName() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "definition name is required")
 	}
+	if err := checkCueSourceCompilesTo(ctx, req.GetCueSource(), req.GetDefinition()); err != nil {
+		return nil, err
+	}
 
 	result, err := s.daemon.UpdateMissionDefinition(ctx, UpdateMissionDefinitionData{
 		Definition: req.GetDefinition(),

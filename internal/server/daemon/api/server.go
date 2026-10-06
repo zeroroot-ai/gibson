@@ -2396,6 +2396,9 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	if err := graph.Validate(def); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: %v", err)
 	}
+	if err := checkCueSourceCompilesTo(ctx, req.GetCueSource(), def); err != nil {
+		return nil, err
+	}
 
 	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{
 		Definition: def,
