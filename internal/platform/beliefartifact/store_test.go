@@ -5,6 +5,7 @@ package beliefartifact
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -36,6 +37,100 @@ func TestStore_Put(t *testing.T) {
 	}
 	if _, err := store.Put(ctx, "", []byte(`{}`), []byte(`{}`)); err == nil {
 		t.Error("an empty tenant was accepted")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+func TestStore_Current(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewStore(db)
+	ctx := context.Background()
+
+	mock.ExpectQuery("state = 'current'").WithArgs("acme").
+		WillReturnRows(sqlmock.NewRows([]string{"belief_model", "version"}).AddRow(`{"a":1}`, int64(2)))
+	raw, v, found, err := store.Current(ctx, "acme")
+	if err != nil || !found || v != 2 || string(raw) != `{"a":1}` {
+		t.Fatalf("Current = %s, %d, %v, %v; want version 2", raw, v, found, err)
+	}
+	mock.ExpectQuery("state = 'current'").WillReturnError(sql.ErrNoRows)
+	if _, _, found, err := store.Current(ctx, "acme"); err != nil || found {
+		t.Fatalf("no current version: found %v, err %v", found, err)
+	}
+	mock.ExpectQuery("state = 'current'").WillReturnError(errors.New("db down"))
+	if _, _, _, err := store.Current(ctx, "acme"); err == nil {
+		t.Fatal("a database error was not returned")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+func TestStore_Decide(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewStore(db)
+	ctx := context.Background()
+	accept := Verdict{Accepted: true, BrierCandidate: 0.1, BrierCurrent: 0.2, ScoredBets: 3}
+	reject := Verdict{BrierCandidate: 0.3, BrierCurrent: 0.2, ScoredBets: 3}
+
+	// Accepted: the current version is retired, then the candidate becomes current.
+	mock.ExpectBegin()
+	mock.ExpectExec("SET state = \\$2").WithArgs("acme", StateRetired, StateCurrent).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("SET    state = \\$3").WithArgs("acme", int64(2), StateCurrent, 0.1, 0.2, 3, StateCandidate).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := store.Decide(ctx, "acme", 2, accept); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	// Rejected: the current version is not touched.
+	mock.ExpectBegin()
+	mock.ExpectExec("SET    state = \\$3").WithArgs("acme", int64(3), StateRejected, 0.3, 0.2, 3, StateCandidate).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := store.Decide(ctx, "acme", 3, reject); err != nil {
+		t.Fatalf("reject: %v", err)
+	}
+
+	// A version that is not a candidate is refused.
+	mock.ExpectBegin()
+	mock.ExpectExec("SET    state = \\$3").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+	if err := store.Decide(ctx, "acme", 3, reject); !errors.Is(err, ErrNotACandidate) {
+		t.Fatalf("second verdict: err %v, want ErrNotACandidate", err)
+	}
+
+	// Each database error is returned.
+	mock.ExpectBegin().WillReturnError(errors.New("db down"))
+	if err := store.Decide(ctx, "acme", 4, reject); err == nil {
+		t.Fatal("begin error was not returned")
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec("SET state = \\$2").WillReturnError(errors.New("db down"))
+	mock.ExpectRollback()
+	if err := store.Decide(ctx, "acme", 4, accept); err == nil {
+		t.Fatal("retire error was not returned")
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec("SET    state = \\$3").WillReturnError(errors.New("db down"))
+	mock.ExpectRollback()
+	if err := store.Decide(ctx, "acme", 4, reject); err == nil {
+		t.Fatal("update error was not returned")
+	}
+	mock.ExpectBegin()
+	mock.ExpectExec("SET    state = \\$3").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit().WillReturnError(errors.New("db down"))
+	if err := store.Decide(ctx, "acme", 4, reject); err == nil {
+		t.Fatal("commit error was not returned")
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
