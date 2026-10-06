@@ -29,7 +29,7 @@ func newEnforcer(t *testing.T, tenantID, userID string) (Enforcer, context.Conte
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	// All assertions use the default clock (time.Now) unless noted.
-	e := NewEnforcer(rdb, nil, nil, nil, nil)
+	e := NewEnforcer(rdb, nil, noTeams, nil, nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
 	ctx = auth.ContextWithActingUser(ctx, userID)
@@ -195,7 +195,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
 	march31 := time.Date(2026, 3, 31, 23, 0, 0, 0, time.UTC)
-	e := NewEnforcer(rdb, nil, nil, fixedClock(march31), nil)
+	e := NewEnforcer(rdb, nil, noTeams, fixedClock(march31), nil)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -211,7 +211,7 @@ func TestEnforcer_PeriodRollover_ResetsCounters(t *testing.T) {
 	// Roll the clock forward to April 1 — period ID changes, counter
 	// is fresh (no usage recorded in April).
 	april1 := time.Date(2026, 4, 1, 0, 30, 0, 0, time.UTC)
-	e = NewEnforcer(rdb, nil, nil, fixedClock(april1), nil)
+	e = NewEnforcer(rdb, nil, noTeams, fixedClock(april1), nil)
 	ctx = auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
 
@@ -244,7 +244,7 @@ func TestEnforcer_ListStatusByScope_ReturnsConfiguredUsers(t *testing.T) {
 func TestEnforcer_Check_WithoutUserContext_FallsBackToTenantOnly(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := NewEnforcer(rdb, nil, nil, nil, nil)
+	e := NewEnforcer(rdb, nil, noTeams, nil, nil)
 
 	// Tenant-only context — no ActingUser / InitiatorUser.
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -271,7 +271,7 @@ func (s stubProvider) Limits(context.Context, string) (entitlements.Limits, erro
 func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 1000}})
+	e := NewEnforcer(rdb, nil, noTeams, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 1000}})
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -289,7 +289,7 @@ func TestEnforcer_Check_ProviderSuppliesTenantDefault(t *testing.T) {
 func TestEnforcer_Check_ExplicitTenantBudgetWinsOverProvider(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	e := NewEnforcer(rdb, nil, nil, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 100}})
+	e := NewEnforcer(rdb, nil, noTeams, nil, stubProvider{lim: entitlements.Limits{MonthlyTokens: 100}})
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	ctx = auth.ContextWithActingUser(ctx, "user-1")
@@ -322,3 +322,6 @@ func TestEnforcer_Concurrent_Records_DontLose(t *testing.T) {
 	key := counterKey("acme", ScopeUser, "user-1", period)
 	assert.Equal(t, "1000", mr.HGet(key, "tokens"), "100 concurrent records of 10 tokens each should sum to 1000 with no loss")
 }
+
+// noTeams is the team resolver of a user in no team.
+func noTeams(context.Context, string, string) ([]string, error) { return nil, nil }
