@@ -175,6 +175,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.component.v1.ComponentService/EnrollComponent":
+    relation: "can_execute"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.component.v1.ComponentService/FindSimilarAttacks":
     relation: "can_execute"
     object_type: "component"
