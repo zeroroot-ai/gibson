@@ -17,7 +17,7 @@
 # runtime but with a TEST-MODE daemon (authz disabled, GIBSON_TEST_FIXTURES,
 # built `-tags="setec_integration test_fixtures"`) so the suite can dial the
 # daemon directly — the test-mode model every cluster-bound e2e suite uses.
-# Authentication itself is covered by login_full_chain / auth e2e, not here.
+# Authentication itself is covered by the dashboard staging lane, not here.
 #
 # ADR-0080: NEVER on pull_request. An exit test measures state on `main` for the
 # launch scorecard; it needs a live cluster, so it cannot gate a PR. The merge
