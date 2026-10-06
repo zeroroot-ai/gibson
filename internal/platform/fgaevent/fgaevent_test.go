@@ -40,6 +40,12 @@ func stateClient(t *testing.T, mr *miniredis.Miniredis) *state.StateClient {
 // subscriber, it is a test that did not wait long enough. This used to be a
 // fixed 5s and the resubscribe case flaked on a loaded runner, where two
 // retries were burned while miniredis was restarting and the third was 2s out.
+//
+// gibson#944: the 15s wait still failed once. The state client read the
+// subscription through the go-redis channel, which hides a drop and
+// reconnects on its own schedule, so Subscribe never saw the drop and never
+// retried. SubscribeMessages now returns on a drop, and the retry below is
+// the one in fgaevent.Subscribe.
 func waitSubscribed(t *testing.T, mr *miniredis.Miniredis, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
