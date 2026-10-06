@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # check-airgap-build.sh — CI gate (gibson#818, E14 / ADR-0089): a clean-room
 # clone of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
-# integrations, gibson) builds air-gapped with zero undeclared external fetch.
+# gibson) builds air-gapped with zero undeclared external fetch.
 # This is the self-hostable/defense promise: mirror the public modules once,
 # build forever offline. gibson is in the list because it is public and its
 # image is the product: a stranger who clones it must reach every module
@@ -33,9 +33,9 @@
 
 set -euo pipefail
 
-OSS_REPOS=(sdk adk setec gibson-executor cve-triage integrations gibson)
+OSS_REPOS=(sdk adk setec gibson-executor cve-triage gibson)
 # Space-separated module directories per repo. A repo with several modules
-# (integrations, gibson-executor's tools/recon) lists each one: every module
+# (gibson's plugins, gibson-executor's tools/recon) lists each one: every module
 # a shipped image builds from must pass, not only the root.
 declare -A MODULE_DIRS=(
   [sdk]="."
@@ -43,8 +43,7 @@ declare -A MODULE_DIRS=(
   [setec]="."
   [gibson-executor]=". tools/recon"
   [cve-triage]="."
-  [integrations]="plugins/github plugins/gitlab plugins/example"
-  [gibson]="."
+  [gibson]=". plugins/github plugins/gitlab"
 )
 
 workdir="${1:-$(mktemp -d)}"
