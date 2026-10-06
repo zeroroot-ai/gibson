@@ -425,7 +425,7 @@ func (r *OIDCClientReconciler) readClientSecretFromK8s(
 // State machine:
 //  1. EnsureMachineUser(clientName)   → userID (idempotent; 409 → lookup)
 //  2. status.ClientID = userID, persist
-//  3. AddIAMMember(userID, IAM_OWNER) → grants admin access (idempotent)
+//  3. reconcileMachineUserRoles → grants exactly the roles in Spec.Roles (idempotent)
 //  4. AddMachineUserClientSecret(userID) → {clientID, clientSecret}
 //     where clientID is the user's loginName, NOT the userID.
 //  5. writeSecret(clientID, clientSecret) → idp-admin-credentials
