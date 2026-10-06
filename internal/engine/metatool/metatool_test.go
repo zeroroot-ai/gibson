@@ -116,16 +116,40 @@ func TestInvoke_ToleratesFlattenedForm(t *testing.T) {
 	}
 }
 
-// native:<tool> primitives are not PluginInvoke targets — declined before any
-// authz or dispatch.
-func TestInvoke_NativeToolDeclined(t *testing.T) {
+// Authorize decodes a native id and checks can_execute on the tool object.
+// Dispatch refuses it: the harness sends a native id to its tool call handler.
+func TestAuthorize_NativeToolThenDispatchRefusesIt(t *testing.T) {
 	q := &fakeQuerier{}
 	h := NewHandler(nil, allowAll("native:nmap"), q)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "native:nmap", nil); err == nil {
-		t.Fatal("want error for native tool, got nil")
+
+	tid, err := h.Authorize(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "native:nmap")
+	if err != nil {
+		t.Fatalf("Authorize: %v", err)
+	}
+	if tid.Source != toolid.SourceNative || tid.Tool != "nmap" {
+		t.Fatalf("tid = %+v; want native nmap", tid)
+	}
+	if _, err := h.Dispatch(context.Background(), tid, nil); !errors.Is(err, ErrNativeID) {
+		t.Fatalf("Dispatch err = %v; want ErrNativeID", err)
 	}
 	if q.gotName != "" {
 		t.Fatalf("querier should not be called for native tool, got %s.%s", q.gotName, q.gotMethod)
+	}
+}
+
+// A native tool that the tenant did not enable is refused.
+func TestAuthorize_NativeToolNotEnabledIsRefused(t *testing.T) {
+	h := NewHandler(nil, allowAll( /* nothing allowed */ ), &fakeQuerier{})
+	if _, err := h.Authorize(context.Background(), catalog.Caller{Subject: "user:alice"}, "native:nmap"); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+}
+
+// With no connector dispatch wired, an mcp id fails closed.
+func TestInvoke_ConnectorToolWithNoDispatchFailsClosed(t *testing.T) {
+	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), nil)
+	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
+		t.Fatal("want a configuration error, got nil")
 	}
 }
 
