@@ -6,11 +6,9 @@ package daemon
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -19,50 +17,6 @@ import (
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-// recordingGraphClient captures every Cypher statement and its parameters, so a
-// test can assert what the bootstrap WROTE rather than that it did not error.
-// Every query returns one record, which is what the queries package reads to
-// confirm the Mission exists.
-type recordingGraphClient struct {
-	graph.GraphClient
-	writes []recordedWrite
-}
-
-type recordedWrite struct {
-	cypher string
-	params map[string]any
-}
-
-func (c *recordingGraphClient) Query(_ context.Context, cypher string, params map[string]any) (graph.QueryResult, error) {
-	c.writes = append(c.writes, recordedWrite{cypher: cypher, params: params})
-	return graph.QueryResult{Records: []map[string]any{{"id": params["id"]}}}, nil
-}
-
-// missionNodeWrites returns the parameters of every :MissionNode write, keyed by
-// the node name the bootstrap recorded.
-func (c *recordingGraphClient) missionNodeWrites() map[string]map[string]any {
-	out := map[string]map[string]any{}
-	for _, w := range c.writes {
-		if !strings.Contains(w.cypher, "MERGE (n:MissionNode") {
-			continue
-		}
-		name, _ := w.params["name"].(string)
-		out[name] = w.params
-	}
-	return out
-}
-
-// dependencyWriteCount counts the DEPENDS_ON edge writes.
-func (c *recordingGraphClient) dependencyWriteCount() int {
-	n := 0
-	for _, w := range c.writes {
-		if strings.Contains(w.cypher, "DEPENDS_ON") {
-			n++
-		}
-	}
-	return n
-}
 
 func bootstrapFixture(t *testing.T) (*mission.Mission, *mission.MissionRun) {
 	t.Helper()
@@ -97,13 +51,13 @@ func TestBootstrap_WritesOneNodePerFanOutInstanceWithItsTarget(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	client := &recordingGraphClient{}
-	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
+	writer := newFakeGraphWriter()
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	nodes := client.missionNodeWrites()
+	nodes := writer.missionNodeWrites(m.TenantID)
 	for _, tgt := range targets {
 		name := "scan#" + tgt.ID
 		params, ok := nodes[name]
@@ -149,13 +103,13 @@ func TestBootstrap_NodeIdentityIsStableAcrossRuns(t *testing.T) {
 	}
 
 	ids := func() map[string]any {
-		client := &recordingGraphClient{}
-		b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
+		writer := newFakeGraphWriter()
+		b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 		if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 			t.Fatalf("bootstrap: %v", err)
 		}
 		out := map[string]any{}
-		for name, params := range client.missionNodeWrites() {
+		for name, params := range writer.missionNodeWrites(m.TenantID) {
 			out[name] = params["id"]
 		}
 		return out
@@ -210,14 +164,14 @@ func TestBootstrap_DependenciesComeFromTheResolvedProjection(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	client := &recordingGraphClient{}
-	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
+	writer := newFakeGraphWriter()
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
 	// after → report, plus report → one edge per fan-out instance.
-	if got := client.dependencyWriteCount(); got != 3 {
+	if got := writer.dependencyWriteCount(m.TenantID); got != 3 {
 		t.Errorf("wrote %d dependency edges, want 3 (after → join, join → each of two instances)", got)
 	}
 }
@@ -239,13 +193,13 @@ func TestBootstrap_AMissionWithoutFanOutIsUnchangedInShape(t *testing.T) {
 		t.Fatalf("a mission with no for_each produced %d fan-out origins", len(origins))
 	}
 
-	client := &recordingGraphClient{}
-	b := NewGraphBootstrapper(client, newFakeGraphWriter(), slog.New(slog.DiscardHandler))
+	writer := newFakeGraphWriter()
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, nil); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	nodes := client.missionNodeWrites()
+	nodes := writer.missionNodeWrites(m.TenantID)
 	if _, ok := nodes["scan"]; !ok {
 		t.Fatalf("the ordinary node was not written; wrote %v", nodeNames(nodes))
 	}

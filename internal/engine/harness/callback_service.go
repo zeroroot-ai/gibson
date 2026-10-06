@@ -25,6 +25,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -176,6 +177,11 @@ type HarnessCallbackService struct {
 	// every member callback says so rather than failing obscurely.
 	jobs JobSurface
 
+	// jobDriver is the JobService implementation behind OpenJob, SendInput
+	// and CloseJob, the callbacks that a dispatched agent uses to drive a
+	// bank (callback_job_driver.go).
+	jobDriver JobDriver
+
 	// turnGrants mints the per-turn grant each delivered input carries.
 	turnGrants TurnGrantMinter
 
@@ -228,6 +234,12 @@ type HarnessCallbackService struct {
 	// RPC enumerates to build the connector catalog. Wired by the daemon; when
 	// nil, SearchTools returns Unavailable.
 	componentRegistry component.ComponentRegistry
+
+	// connectors is the one MCP client of the daemon (ADR-0065). search_tools
+	// lists the tools of the connectors of a tenant through it, and
+	// invoke_tool calls an mcp:<connector>:<tool> id through it. Nil lists no
+	// connector tool, and an mcp: call fails closed.
+	connectors ConnectorClient
 
 	// componentAuthzMetrics emits counters for every component Authorize decision.
 	// When nil, metrics are not emitted (no-op).
@@ -597,6 +609,7 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		// The member seams are never nil. A daemon that serves no banks
 		// answers ErrNoBankSurface on each, and the callbacks fail closed.
 		jobs:          noBankSurface{},
+		jobDriver:     noBankSurface{},
 		members:       noBankSurface{},
 		turnGrants:    noBankSurface{},
 		memberEvents:  noBankSurface{},
@@ -638,6 +651,7 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		logger:           logger.With("component", "harness_callback_service"),
 		metadataInjector: NewMetadataInjector(),
 		jobs:             noBankSurface{},
+		jobDriver:        noBankSurface{},
 		members:          noBankSurface{},
 		turnGrants:       noBankSurface{},
 		memberEvents:     noBankSurface{},
@@ -3201,16 +3215,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
-	// Convert proto constraints to internal type
-	var constraints *MissionConstraints
-	if req.Constraints != nil {
-		constraints = &MissionConstraints{
-			MaxDuration: time.Duration(req.Constraints.MaxDurationMs) * time.Millisecond,
-			MaxTokens:   req.Constraints.MaxTokens,
-			MaxCost:     req.Constraints.MaxCost,
-			MaxFindings: int(req.Constraints.MaxFindings),
-		}
-	}
+	constraints := requestedMissionConstraints(req)
 
 	// Convert metadata
 	metadata := make(map[string]any)
@@ -3476,10 +3481,19 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 		}, nil
 	}
 
-	filter := &MissionFilter{}
+	// Window returns ErrBadToken only. The harness reports a refusal in the
+	// response, as for every other refusal of this service.
+	offset, limit, pageErr := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if errors.Is(pageErr, pagetoken.ErrBadToken) {
+		return &harnesspb.ListMissionsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: pagetoken.ErrBadToken.Error(),
+			},
+		}, nil
+	}
+	filter := &MissionFilter{Limit: limit, Offset: offset}
 	if req.Filter != nil {
-		filter.Limit = int(req.Filter.Limit)
-		filter.Offset = int(req.Filter.Offset)
 		if req.Filter.Status != harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED {
 			// Map proto MissionStatus enum back to internal string representation.
 			st := MissionStatus(strings.ToLower(strings.TrimPrefix(req.Filter.Status.String(), "MISSION_STATUS_")))
@@ -3507,7 +3521,10 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 	}
 
 	s.logger.Info("ListMissions: listed missions", "count", len(missions))
-	return &harnesspb.ListMissionsResponse{Missions: missions}, nil
+	return &harnesspb.ListMissionsResponse{
+		Missions:      missions,
+		NextPageToken: pagetoken.Next(offset, limit, len(missions), -1),
+	}, nil
 }
 
 // CancelMission implements the mission cancellation RPC by delegating to the MissionOperator.

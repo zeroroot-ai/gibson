@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"log/slog"
 	"sync"
 	"time"
+
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
@@ -19,7 +20,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	sdkqueue "github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -37,11 +37,9 @@ import (
 	"github.com/zeroroot-ai/sdk/secretenv"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/attribute"
-	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // defaultMaxDelegationDepth is the default cap on the number of nested DelegateToAgent
@@ -142,7 +140,7 @@ type DefaultAgentHarness struct {
 
 	// workQueue provides pull-based work dispatch over Redis Streams.
 	// When non-nil, remote components discovered via componentRegistry (those without
-	// a direct grpc_endpoint in their metadata) receive work items via this queue
+	// an address of their own) receive work items via this queue
 	// rather than a direct gRPC call. Nil means use the existing path.
 	workQueue component.WorkQueue
 	// callbackManager registers the child harness for a queue-dispatched agent
@@ -194,16 +192,11 @@ type DefaultAgentHarness struct {
 	// CallToolProto; nil disables sandboxed dispatch entirely.
 	sandboxedExecutor *sandboxed.Executor
 
-	// deploymentShape is the untrusted-execution isolation policy enforced by
-	// the dispatch-policy gate. Zero value (ShapeSetecOnly) is fail-closed.
-	// See ADR-0110 / gibson#994.
-	deploymentShape dispatchpolicy.DeploymentShape
-
 	// agentLauncher launches an untrusted/sandboxed agent as an ephemeral Setec
 	// sandbox for one mission run (ADR-0116 / gibson#1596). When wired,
 	// DelegateToAgent routes an untrusted agent to it instead of denying.
 	// Nil means no sandboxed agent dispatch, so an untrusted agent is denied
-	// fail-closed under setec-only. See delegate_sandbox.go.
+	// fail-closed. See delegate_sandbox.go.
 	agentLauncher AgentSandboxLauncher
 
 	// agentLaunchSpecResolver resolves the launch spec (image, sandbox class,
@@ -732,60 +725,17 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // Tool Execution Methods
 // ────────────────────────────────────────────────────────────────────────────
 
-// getToolMetadata extracts metadata (including FileDescriptorSet) from a tool.
-// Currently only the remote gRPC tool client carries metadata; in-process
-// tools return nil.
-func getToolMetadata(t tool.Tool) map[string]string {
-	if grpcClient, ok := t.(*component.GRPCToolClient); ok {
-		if md := grpcClient.Metadata(); md != nil {
-			return md
-		}
-	}
-	return nil
-}
-
 // CallToolProto executes a tool using proto message input/output.
 //
-// Dispatch order:
-//  1. Sandboxed manifest tool (ADR-0117) — when the tool has a kind:tool
-//     catalog manifest, gate on the calling tenant's can_execute and dispatch
-//     it into a Setec microVM via gRPC. This is the one sandboxed-tool path.
-//  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
-//     a. Component has grpc_endpoint metadata → call directly via registryAdapter
-//     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
-//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured
-//     or returned no instances (e.g. tools registered directly without
-//     ComponentService).
+// A tool has two dispatch paths (ADR-0110):
+//  1. The sandbox: a tool with a kind:tool catalog manifest runs in a setec
+//     sandbox (ADR-0117).
+//  2. The work queue: a tool that registered through ComponentService pulls
+//     its work.
 //
-// All dispatch paths route to out-of-process tool implementations. Tools are
-// never compiled into the Gibson daemon.
-
-// mergeToolResponse copies the tool's output message into the caller-supplied
-// response message. proto.Merge requires dst and src to share the same message
-// descriptor *instance*. A tool adapter cannot guarantee that: a
-// dynamicpb.Message rebuilt from a re-parsed FileDescriptorSet is name-equal to
-// the response type (so the type-name check upstream passes) but is a distinct
-// descriptor instance, and proto.Merge then panics with "descriptor mismatch".
-// When the descriptors differ, the two messages are still wire-compatible by
-// construction (identical field numbers/types), so bridge them through the wire
-// format instead of panicking. Spec: gibson#963.
-func mergeToolResponse(response, outputMsg proto.Message) error {
-	if response.ProtoReflect().Descriptor() == outputMsg.ProtoReflect().Descriptor() {
-		proto.Merge(response, outputMsg)
-		return nil
-	}
-	wire, err := proto.Marshal(outputMsg)
-	if err != nil {
-		return fmt.Errorf("marshal tool output: %w", err)
-	}
-	if err := proto.Unmarshal(wire, response); err != nil {
-		return fmt.Errorf("unmarshal into response: %w", err)
-	}
-	return nil
-}
-
+// A tool with neither gets ErrHarnessToolNotFound. Tools are never compiled
+// into the Gibson daemon, and the daemon dials no address that a tool reports.
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
-	callStart := time.Now()
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
 	defer span.End()
 
@@ -827,396 +777,48 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		return h.sandboxedExecutor.ExecuteWithSpec(ctx, name, spec, request, response)
 	}
 
-	var t tool.Tool
+	// ── Path 2: the work queue ───────────────────────────────────────────────
+	// A tool that a developer or a customer runs registered through
+	// ComponentService. It pulls its work from the work queue. The daemon
+	// dials no address that a tool reports, and no third path exists
+	// (ADR-0110).
+	notFound := types.NewError(ErrHarnessToolNotFound,
+		fmt.Sprintf("tool %q has no sandbox manifest and no work queue instance", name))
+	if h.componentRegistry == nil {
+		return notFound
+	}
+	// authorizeToolDispatch refused a call with no tenant before this point.
+	tenant := auth.TenantStringFromContext(ctx)
+	instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
+	if discErr != nil {
+		return types.WrapError(ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool %q: component registry discovery failed", name), discErr)
+	}
+	if len(instances) == 0 {
+		return notFound
+	}
+	info := instances[0] // Use first live instance; load-balancing is a future concern.
 
-	// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────────
-	if h.componentRegistry != nil {
-		tenant := auth.TenantStringFromContext(ctx)
-		if tenant == "" {
-			h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
-				"tool", name)
-		} else {
-			instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
-			if discErr != nil {
-				h.logger.Warn("component registry discovery failed, falling back to registry adapter",
-					"tool", name,
-					"tenant", tenant,
-					"error", discErr)
-			} else if len(instances) > 0 {
-				info := instances[0] // Use first live instance; load-balancing is a future concern.
-
-				// Dispatch-policy gate (ADR-0110 / gibson#994). We reach here
-				// only when the tool has no SANDBOXED entry (the top block
-				// returned !found), so there is no sandboxed dispatch available.
-				// The gate reads where the instance runs and, for code in the
-				// platform's cluster, the trust the catalog states. What the
-				// instance reported about itself is not an input.
-				placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
-				if dispatchpolicy.Decide(placement, trust, false, h.deploymentShape) == dispatchpolicy.Deny {
-					return types.WrapError(types.SANDBOX_POLICY_DENIED,
-						fmt.Sprintf("tool %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", name), nil)
-				}
-
-				// Determine routing: does this instance expose a direct gRPC endpoint?
-				grpcEndpoint := info.Metadata["grpc_endpoint"]
-				if grpcEndpoint != "" && h.registryAdapter != nil {
-					// In-cluster tool with a direct gRPC endpoint — use the existing gRPC pool path.
-					h.logger.Debug("component registry: routing tool call via direct gRPC endpoint",
-						"tool", name,
-						"tenant", tenant,
-						"endpoint", grpcEndpoint,
-						"instance_id", info.InstanceID,
-						"discovery", "component_registry")
-
-					remoteTool, adapterErr := h.registryAdapter.DiscoverTool(ctx, name)
-					if adapterErr != nil {
-						h.logger.Warn("component registry directed to gRPC but adapter discovery failed, falling through",
-							"tool", name,
-							"endpoint", grpcEndpoint,
-							"error", adapterErr)
-						// Fall through to the legacy adapter path below.
-					} else {
-						t = remoteTool
-						goto executeProto
-					}
-				} else if h.workQueue != nil {
-					// Remote component registered via ComponentService — dispatch via WorkQueue.
-					h.logger.Debug("component registry: routing tool call via work queue",
-						"tool", name,
-						"tenant", tenant,
-						"instance_id", info.InstanceID,
-						"discovery", "component_registry")
-
-					return h.callToolViaWorkQueue(ctx, tenant, name, request, response, info)
-				} else {
-					h.logger.Warn("component registry found tool but no work queue configured, falling back",
-						"tool", name,
-						"tenant", tenant,
-						"instance_id", info.InstanceID)
-					// Fall through to legacy adapter path.
-				}
-			}
-		}
+	// Dispatch gate (ADR-0110). We reach here only when the tool has no
+	// sandbox manifest, so there is no sandboxed dispatch available. The gate
+	// reads where the instance runs and, for code in the platform's cluster,
+	// the trust the catalog states. What the instance reported about itself
+	// is not an input.
+	placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
+	if dispatchpolicy.Decide(placement, trust, false) == dispatchpolicy.Deny {
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("tool %q runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", name), nil)
 	}
 
-	// ── Path 3: RegistryAdapter fallback ─────────────────────────────────────
-	// Reached when ComponentRegistry is not configured, returned no instances,
-	// or had no work queue available. RegistryAdapter is Redis-backed and covers
-	// tools that registered directly (e.g. in-cluster gRPC tools with grpc_endpoint
-	// but no ComponentService registration).
-	{
-		if h.registryAdapter != nil {
-			h.logger.Debug("tool not found locally or via component registry, attempting registry adapter discovery",
-				"tool", name,
-				"discovery", "registry_adapter")
-
-			remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, name)
-			if discErr != nil {
-				h.logger.Error("tool not found (component registry or registry adapter)",
-					"tool", name,
-					"discovery_error", discErr)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("tool not found: %s (%v)", name, discErr),
-					discErr,
-				)
-			}
-
-			t = remoteTool
-			h.logger.Debug("discovered tool via registry adapter",
-				"tool", name,
-				"version", remoteTool.Version(),
-				"discovery", "registry_adapter")
-		} else {
-			h.logger.Error("tool not found and no discovery path available", "tool", name)
-			return types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("tool not found: %s (no discovery path)", name),
-				nil,
-			)
-		}
+	if h.workQueue == nil {
+		return notFound
 	}
 
-executeProto:
-
-	// Check if tool supports proto execution by type assertion
-	// The SDK tool.Tool interface has proto methods, but internal tool.Tool does not
-	type protoTool interface {
-		InputMessageType() string
-		OutputMessageType() string
-		ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error)
-	}
-
-	protoT, ok := t.(protoTool)
-	if !ok {
-		// Tool doesn't support proto - this is an error
-		h.logger.Error("tool does not support proto execution",
-			"tool", name)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool %s does not support proto execution (use CallTool instead)", name),
-			nil,
-		)
-	}
-
-	inputType := protoT.InputMessageType()
-	outputType := protoT.OutputMessageType()
-
-	if inputType == "" || outputType == "" {
-		// Tool doesn't support proto - this is an error
-		h.logger.Error("tool does not support proto execution",
-			"tool", name,
-			"input_type", inputType,
-			"output_type", outputType)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool %s does not support proto execution (use CallTool instead)", name),
-			nil,
-		)
-	}
-
-	// Verify message types match
-	expectedInputType := string(request.ProtoReflect().Descriptor().FullName())
-	expectedOutputType := string(response.ProtoReflect().Descriptor().FullName())
-
-	// Note: inputType and outputType from tool might be in format "package.Message"
-	// while proto reflection gives "package.Message" - they should match
-	//
-	// However, agents using the SDK structpb fallback will send google.protobuf.Struct
-	// when the tool expects a specific proto type. In this case, we need to convert
-	// the Struct to the tool's expected type using the ProtoResolver.
-	actualRequest := request
-	if inputType != expectedInputType {
-		// Check if the request is a structpb.Struct that needs conversion
-		if structInput, ok := request.(*structpb.Struct); ok && expectedInputType == "google.protobuf.Struct" {
-			h.logger.Debug("converting structpb.Struct input to typed message",
-				"tool", name,
-				"target_type", inputType)
-
-			// Get tool metadata for resolver
-			toolMetadata := getToolMetadata(t)
-			if toolMetadata == nil {
-				h.logger.Error("tool has no metadata for input conversion",
-					"tool", name,
-					"expected", inputType)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("cannot convert input: tool %s has no metadata", name),
-					nil,
-				)
-			}
-
-			// Convert Struct to JSON
-			marshaler := protojson.MarshalOptions{
-				UseProtoNames:   true,
-				EmitUnpopulated: false,
-			}
-			jsonBytes, err := marshaler.Marshal(structInput)
-			if err != nil {
-				h.logger.Error("failed to marshal struct input",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert input: %v", err),
-					err,
-				)
-			}
-
-			// Log the JSON being converted (INFO level for debugging)
-			h.logger.Info("converting structpb.Struct to typed message via resolver",
-				"tool", name,
-				"target_type", inputType,
-				"json", string(jsonBytes))
-
-			// Use resolver to unmarshal JSON into typed proto message
-			dynamicMsg, err := h.resolver.UnmarshalProtoJSON(ctx, inputType, jsonBytes, toolMetadata)
-			if err != nil {
-				h.logger.Error("failed to unmarshal input to typed message via resolver",
-					"tool", name,
-					"target_type", inputType,
-					"json", string(jsonBytes),
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert input to %s: %v", inputType, err),
-					err,
-				)
-			}
-
-			h.logger.Debug("successfully converted structpb.Struct to typed message via resolver",
-				"tool", name,
-				"target_type", inputType)
-
-			// Use the converted message
-			actualRequest = dynamicMsg
-		} else {
-			h.logger.Error("input message type mismatch",
-				"tool", name,
-				"expected", inputType,
-				"provided", expectedInputType)
-			return types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("input message type mismatch: tool expects %s, got %s", inputType, expectedInputType),
-				nil,
-			)
-		}
-	}
-
-	// Determine if tool is local or remote for logging
-	isRemote := false
-	if h.registryAdapter != nil {
-		// Check if tool implements registry gRPC client (remote)
-		if _, ok := t.(*component.GRPCToolClient); ok {
-			isRemote = true
-		}
-	}
-
-	// Emit tool call event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventToolCall, "tool call", ToolCallEventData{
-			ToolName: name,
-		})
-	}
-
-	// Execute tool with proto messages (using actualRequest which may be converted)
-	outputMsg, err := protoT.ExecuteProto(ctx, actualRequest)
-
-	if err != nil {
-		h.logger.Error("tool execution failed",
-			"tool", name,
-			"remote", isRemote,
-			"error", err)
-
-		// Record failure metrics
-		h.metrics.RecordCounter("tools.executions", 1, map[string]string{
-			"tool":   name,
-			"remote": fmt.Sprintf("%t", isRemote),
-			"status": "failed",
-			"mode":   "proto",
-		})
-
-		durationMs := time.Since(callStart).Milliseconds()
-		span.SetAttributes(
-			attribute.Int64("tool.duration_ms", durationMs),
-			attribute.String("tool.status", "error"),
-		)
-		span.RecordError(err)
-		span.SetStatus(otelcodes.Error, "tool execution failed")
-
-		// Emit tool result event (failure)
-		if h.eventLogger != nil {
-			h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
-				ToolName: name,
-				Success:  false,
-				Error:    err.Error(),
-			})
-		}
-
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool execution failed: %s", name),
-			err,
-		)
-	}
-
-	// Verify output type matches - or convert if necessary
-	actualOutputType := string(outputMsg.ProtoReflect().Descriptor().FullName())
-	if actualOutputType != expectedOutputType {
-		// Check if the output is a structpb.Struct that needs conversion to typed message
-		// This happens when tools return generic JSON via subprocess execution
-		if structOutput, ok := outputMsg.(*structpb.Struct); ok && actualOutputType == "google.protobuf.Struct" {
-			h.logger.Debug("converting structpb.Struct output to typed message",
-				"tool", name,
-				"target_type", expectedOutputType)
-
-			// Convert Struct to JSON, then unmarshal into the response message
-			marshaler := protojson.MarshalOptions{
-				UseProtoNames:   true,
-				EmitUnpopulated: false,
-			}
-			jsonBytes, err := marshaler.Marshal(structOutput)
-			if err != nil {
-				h.logger.Error("failed to marshal struct output",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert tool output: %v", err),
-					err,
-				)
-			}
-
-			// Unmarshal JSON into the typed response message
-			unmarshaler := protojson.UnmarshalOptions{
-				DiscardUnknown: true,
-			}
-			if err := unmarshaler.Unmarshal(jsonBytes, response); err != nil {
-				h.logger.Error("failed to unmarshal output to typed message",
-					"tool", name,
-					"target_type", expectedOutputType,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert tool output to %s: %v", expectedOutputType, err),
-					err,
-				)
-			}
-
-			// Skip the normal merge since we've directly populated the response
-			goto metricsSuccess
-		}
-
-		h.logger.Error("output message type mismatch",
-			"tool", name,
-			"expected", expectedOutputType,
-			"actual", actualOutputType)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("output message type mismatch: expected %s, got %s", expectedOutputType, actualOutputType),
-			nil,
-		)
-	}
-
-	// Merge the tool output into the caller-supplied response message.
-	if err := mergeToolResponse(response, outputMsg); err != nil {
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("failed to merge tool output %s into response: %v", expectedOutputType, err),
-			nil,
-		)
-	}
-
-metricsSuccess:
-
-	// Record success metrics
-	h.metrics.RecordCounter("tools.executions", 1, map[string]string{
-		"tool":   name,
-		"remote": fmt.Sprintf("%t", isRemote),
-		"status": "success",
-		"mode":   "proto",
-	})
-
-	h.logger.Debug("tool execution successful with proto",
+	h.logger.Debug("routing tool call via work queue",
 		"tool", name,
-		"remote", isRemote)
-
-	durationMs := time.Since(callStart).Milliseconds()
-	span.SetAttributes(
-		attribute.Int64("tool.duration_ms", durationMs),
-		attribute.String("tool.status", "success"),
-	)
-	span.SetStatus(otelcodes.Ok, "tool execution successful")
-
-	// Emit tool result event (success)
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
-			ToolName: name,
-			Success:  true,
-		})
-	}
-
-	return nil
+		"tenant", tenant,
+		"instance_id", info.InstanceID)
+	return h.callToolViaWorkQueue(ctx, tenant, name, request, response, info)
 }
 
 // workQueueWaitTimeout returns the configured wait timeout or the 5-minute default.
@@ -1233,34 +835,25 @@ func (h *DefaultAgentHarness) workQueueWaitTimeout() time.Duration {
 //
 // This path is taken when:
 //   - A component is found in the ComponentRegistry (Redis), AND
-//   - The component has no grpc_endpoint metadata (pull-based remote component), AND
 //   - A WorkQueue is configured on the harness.
 //
-// remoteAgentInstance resolves a live kind=agent component for this tenant that
-// should be driven over the work queue.
-//
-// Mirrors the tool path's ordering: an instance advertising a direct gRPC
-// endpoint is left to the registry-adapter path, which dials it; only a
-// component with no reachable endpoint of its own — the off-cluster case — is
-// dispatched by queue.
+// remoteAgentInstance resolves a live kind=agent component for this tenant.
+// The work queue drives it. The daemon dials no address that an instance
+// reports, so the metadata of the instance selects nothing.
 func (h *DefaultAgentHarness) remoteAgentInstance(ctx context.Context, tenant, name string) (component.ComponentInfo, bool) {
 	if h.componentRegistry == nil || h.workQueue == nil || tenant == "" {
 		return component.ComponentInfo{}, false
 	}
 	instances, err := h.componentRegistry.Discover(ctx, tenant, "agent", name)
 	if err != nil {
-		h.logger.Warn("component registry agent discovery failed, falling back to registry adapter",
+		h.logger.Warn("component registry agent discovery failed",
 			"agent", name, "tenant", tenant, "error", err)
 		return component.ComponentInfo{}, false
 	}
 	if len(instances) == 0 {
 		return component.ComponentInfo{}, false
 	}
-	info := instances[0] // First live instance; load-balancing is a future concern.
-	if info.Metadata["grpc_endpoint"] != "" {
-		return component.ComponentInfo{}, false
-	}
-	return info, true
+	return instances[0], true // First live instance; load-balancing is a future concern.
 }
 
 // delegateToAgentViaWorkQueue runs a mission node's agent on a remote component
@@ -1299,15 +892,15 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 
 	// The remote agent calls back over HarnessCallbackService with
 	// (mission, agent) in its context; those calls resolve through the
-	// callback registry to a harness. The direct-gRPC path registers the
-	// child harness for the agent (RegistryAdapter.DelegateToAgent); the
-	// queue path must do the same or every Observe/SubmitFinding from an
+	// callback registry to a harness. The queue path registers the child
+	// harness for the agent, or every Observe/SubmitFinding from an
 	// off-cluster agent answers "no active harness" (gibson#1633).
 	if h.callbackManager != nil && h.factory != nil {
 		childMissionCtx := h.missionCtx
 		childMissionCtx.CurrentAgent = name
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeNetwork = task.Network
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -1317,12 +910,13 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		if key != "" {
 			defer h.callbackManager.UnregisterHarness(key)
 		}
+		h.observeDelegation(ctx, name, childHarness)
 	}
 	// An agent node is the one dispatch that may legitimately outlive any clock
 	// the harness would pick: a live coding-agent session runs for hours. Its
 	// own declared timeout bounds it, and when it declares none the worker's
 	// heartbeat does (gibson#1602).
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, "agent_execute", payload, nil, info,
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil, info,
 		waitPolicy{bound: task.Timeout, livenessBounded: true})
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
@@ -1358,10 +952,31 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	return result, nil
 }
 
+// observeDelegation records that this run delegated to a child run. It does
+// NOT write the graph: the fact is folded into the tenant World through the
+// DelegationSink, and the graph projector, the sole writer (ADR-0107),
+// materializes the :AgentRun nodes and the DELEGATED_TO edge.
+func (h *DefaultAgentHarness) observeDelegation(ctx context.Context, name string, childHarness AgentHarness) {
+	parentRunID := h.missionCtx.AgentRunID
+	var childRunID string
+	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
+		childRunID = dah.missionCtx.AgentRunID
+	}
+	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
+		h.delegationSink(ctx, DelegationObserved{
+			Tenant:      h.missionCtx.TenantID,
+			Scope:       h.missionCtx.ID.String(),
+			ParentRunID: parentRunID,
+			ParentAgent: h.missionCtx.CurrentAgent,
+			ChildRunID:  childRunID,
+			ChildAgent:  name,
+		})
+	}
+}
+
 // trackInFlightAgent does the concurrent_agents quota bookkeeping for one
-// delegation and returns the release function. Shared by the in-process and
-// work-queue paths so a remote agent counts against the tenant's quota exactly
-// like a local one.
+// delegation and returns the release function. Shared by the sandbox and
+// work-queue paths so each agent counts against the tenant's quota.
 func (h *DefaultAgentHarness) trackInFlightAgent(ctx context.Context, name string) func() {
 	if h.quotaCounter == nil {
 		return func() {}
@@ -2250,14 +1865,19 @@ func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandbo
 	if !ok || entry.DispatchMode != componentcatalog.DispatchModeSandboxed {
 		return sandboxed.ToolSpec{}, false
 	}
-	return sandboxed.ToolSpec{
+	spec := sandboxed.ToolSpec{
 		Image:   entry.Image,
 		Command: append([]string(nil), entry.Command...),
 		Env:     map[string]string{"GIBSON_TOOL_NAME": name},
 		VCPU:    entry.Resources.VCPU,
 		Memory:  entry.Resources.Memory,
 		Egress:  agentEgressCeiling(h.missionCtx.CurrentAgent),
-	}, true
+	}
+	// A tool that runs inside a node gets the network of that node (S6).
+	if n := h.missionCtx.NodeNetwork; n != nil {
+		spec.NetworkMode, spec.Egress = nodeNetworkScope(n)
+	}
+	return spec, true
 }
 
 func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error) {
@@ -2281,66 +1901,61 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		)
 	}
 
-	// ── Dispatch-policy gate (ADR-0110 / ADR-0116 / gibson#996 / gibson#1596) ─
-	// Sub-agent delegation runs the delegated agent's own code. An untrusted
-	// agent must not run in-process under setec-only. Two outcomes now, not
-	// one:
-	//   - a sandboxed agent launcher is wired → launch the agent as an
-	//     ephemeral Setec sandbox for this one mission run (ADR-0116);
-	//   - no launcher is wired → deny, fail-closed, exactly as before.
-	// The gate inputs come from where the agent runs and from the catalog,
-	// never from what an instance reported (resolveAgentStanding). (Every
-	// tool the delegated agent calls is independently gated by CallToolProto.)
-	agentPlacement, agentTrust, trustErr := h.resolveAgentStanding(ctx, name)
+	// ── Dispatch gate (ADR-0110 / ADR-0116) ──────────────────────────────────
+	// An agent has two dispatch paths and no third one:
+	//   - the platform starts the agent, and it starts it in a setec sandbox;
+	//   - a developer or a customer started the agent, and it pulls its work
+	//     from the work queue.
+	// The daemon runs no agent code in its own process, and it dials no
+	// address that an agent reports. The gate inputs come from where the
+	// agent runs and from the catalog, never from what an instance reported
+	// (resolveAgentStanding). Each tool that the agent calls passes its own
+	// gate in CallToolProto.
+	agentPlacement, agentTrust, registered, trustErr := h.resolveAgentStanding(ctx, name)
 	if trustErr != nil {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
-			fmt.Sprintf("agent %q: content trust could not be established; refusing in-process delegation", name), trustErr)
+			fmt.Sprintf("agent %q: the placement could not be established; refusing the delegation", name), trustErr)
 	}
 	// A catalog agent whose signed manifest declares dispatchMode==sandboxed
-	// must run sandboxed whatever the registry says its content trust is. A
-	// platform agent is launched-on-dispatch, not a registered polling worker,
-	// so its trust comes from the manifest, not the registry (ADR-0116 /
-	// gibson#1598). Force UNTRUSTED here so the gate below routes it to the
-	// sandbox launch. The seam is nil-safe: a nil seam or an unlisted agent
-	// leaves agentTrust as the registry established it.
+	// is an agent that the platform starts. It is launched on dispatch and is
+	// not a registered worker, so its standing comes from the manifest and
+	// not from the registry (ADR-0116). The seam is nil-safe: a nil seam or
+	// an unlisted agent leaves the standing as the registry established it.
+	platformStarts := false
 	if h.agentDispatchMode != nil {
 		if mode, listed := h.agentDispatchMode(name); listed && mode == componentcatalog.DispatchModeSandboxed {
+			platformStarts = true
 			agentPlacement = dispatchpolicy.PlacementCluster
 			agentTrust = componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 		}
 	}
-	// sandboxAgent is true when this agent must run sandboxed rather than
-	// in-process. That is "untrusted content" OR a catalog manifest that
-	// declares dispatchMode==sandboxed (forced UNTRUSTED just above), so a
-	// trusted first-party agent still routes to the sandbox launch.
+	if !platformStarts && !registered {
+		return agent.Result{}, types.NewError(ErrHarnessAgentNotFound,
+			fmt.Sprintf("agent %q has no sandbox manifest and no work queue instance", name))
+	}
+	// The platform starts an agent that runs in the cluster and that the
+	// catalog does not state as trusted. With no launcher, the gate denies.
 	sandboxAgent := agentPlacement == dispatchpolicy.PlacementCluster &&
 		agentTrust == componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 	hasSandboxedAgentDispatch := sandboxAgent && h.agentLauncher != nil
-	switch dispatchpolicy.Decide(agentPlacement, agentTrust, hasSandboxedAgentDispatch, h.deploymentShape) {
-	case dispatchpolicy.Deny:
+	decision := dispatchpolicy.Decide(agentPlacement, agentTrust, hasSandboxedAgentDispatch)
+	if decision == dispatchpolicy.Deny {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
-			fmt.Sprintf("agent %q is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process delegation", name), nil)
-	case dispatchpolicy.RequireSetec:
-		// Tenant-enablement gate runs here too (same choke point as the
-		// in-process path below), so a sandboxed launch is authorized exactly
-		// like an in-process delegation before any sandbox starts.
-		if err := h.authorizeAgentDispatch(ctx, name); err != nil {
-			return agent.Result{}, err
-		}
-		defer h.trackInFlightAgent(ctx, name)()
-		return h.delegateToAgentViaSandbox(ctx, name, task, agentTrust)
-	case dispatchpolicy.AllowInProcess:
-		// Fall through to the existing remote / in-process delegation path.
+			fmt.Sprintf("agent %q has no sandboxed dispatch and no work queue instance that may take the work", name), nil)
 	}
 
 	// ── Tenant-enablement gate (gibson#1595) ─────────────────────────────────
 	// A mission may dispatch to an agent only when the calling tenant has that
 	// agent enabled. This is the single choke point for BOTH mission→agent and
-	// agent→sub-agent dispatch (remote work-queue and in-process child-harness
-	// paths both flow through here), so the check runs before any work item is
-	// enqueued or any child harness is built. Fail-closed on every axis.
+	// agent→sub-agent dispatch, so the check runs before a sandbox starts and
+	// before a work item is enqueued. Fail-closed on every axis.
 	if err := h.authorizeAgentDispatch(ctx, name); err != nil {
 		return agent.Result{}, err
+	}
+
+	if decision == dispatchpolicy.RequireSetec {
+		defer h.trackInFlightAgent(ctx, name)()
+		return h.delegateToAgentViaSandbox(ctx, name, task, agentTrust)
 	}
 
 	// ── Parent-chain push ────────────────────────────────────────────────────
@@ -2377,154 +1992,22 @@ func (h *DefaultAgentHarness) DelegateToAgent(ctx context.Context, name string, 
 		"delegation_depth", currentDepth+1,
 		"caller_chain_len", len(newChain))
 
-	// ── Remote component dispatch (gibson#1197) ──────────────────────────────
-	// An agent registered through ComponentService lives outside this process,
-	// so there is no child harness to build and no in-process registry entry to
-	// find. It runs over the same work queue tools and plugins already use, and
-	// calls harness operations back over HarnessCallbackService.
-	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
-		if info, found := h.remoteAgentInstance(ctx, tenant, name); found {
-			defer h.trackInFlightAgent(ctx, name)()
-			return h.delegateToAgentViaWorkQueue(ctx, tenant, name, task, info)
-		}
-	}
-
-	// ── Child mission context ────────────────────────────────────────────────
-	// Copy the parent mission context, then update the fields that are
-	// child-specific. CurrentAgent is updated (existing behaviour preserved).
-	childMissionCtx := h.missionCtx
-	childMissionCtx.CurrentAgent = name
-	childMissionCtx.DelegationDepth = currentDepth + 1
-	// Per-node slot overrides are node-specific — do NOT inherit the parent's
-	// overrides. Instead, apply the overrides carried by this task (set by the
-	// orchestrator for the executing agent node). Nil means no override for this
-	// execution, which preserves pre-#539 fall-through behavior.
-	// Spec: per-node-slot-override (gibson#539).
-	childMissionCtx.NodeSlotOverrides = task.SlotOverrides
-
-	// Create child harness for the sub-agent
-	childHarness, err := h.factory(ctx, childMissionCtx, h.targetInfo)
-	if err != nil {
-		h.logger.Error("failed to create child harness",
-			"agent", name,
-			"error", err)
-		return agent.Result{}, types.WrapError(
-			ErrHarnessDelegationFailed,
-			"failed to create child harness",
-			err,
-		)
-	}
-
-	// Convert harness.AgentHarness to agent.AgentHarness
-	// DefaultAgentHarness implements both interfaces, so this is a type assertion
-	agentHarness, ok := childHarness.(agent.AgentHarness)
-	if !ok {
-		h.logger.Error("child harness does not implement agent.AgentHarness",
-			"agent", name)
-		return agent.Result{}, types.NewError(
-			ErrHarnessDelegationFailed,
-			"child harness does not implement agent.AgentHarness",
-		)
-	}
-
-	// Use registry adapter for delegation
-	if h.registryAdapter == nil {
-		h.logger.Error("no registry adapter available for delegation", "agent", name)
-		return agent.Result{}, types.NewError(
-			ErrHarnessDelegationFailed,
-			"registry adapter not configured for agent delegation",
-		)
-	}
-
-	h.logger.Debug("using registry adapter for delegation", "agent", name)
-
-	// Concurrent_agents quota: per-agent inFlightTasks bookkeeping.
-	// 0 → 1 transition fires INCR; the deferred 1 → 0 transition fires
-	// DECR. nil quotaCounter disables the path entirely. Spec
-	// plans-and-quotas-simplification.
-	defer h.trackInFlightAgent(ctx, name)()
-
-	result, err := h.registryAdapter.DelegateToAgent(ctx, name, task, agentHarness)
-
-	if err != nil {
-		h.logger.Error("agent execution failed",
-			"agent", name,
-			"task_id", task.ID.String(),
-			"error", err)
-
-		// Record failure metrics
+	// ── Work queue dispatch (gibson#1197) ────────────────────────────────────
+	// An agent registered through ComponentService lives outside this process.
+	// It pulls its work from the same work queue that tools and plugins use,
+	// and it calls harness operations back over HarnessCallbackService.
+	tenant := auth.TenantStringFromContext(ctx)
+	info, found := h.remoteAgentInstance(ctx, tenant, name)
+	if !found {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent":  name,
 			"status": "failed",
 		})
-
-		return result, types.WrapError(
-			ErrHarnessDelegationFailed,
-			fmt.Sprintf("agent execution failed: %s", name),
-			err,
-		)
+		return agent.Result{}, types.NewError(ErrHarnessAgentNotFound,
+			fmt.Sprintf("agent %q has no sandbox manifest and no work queue instance", name))
 	}
-
-	// ── DELEGATED_TO run-provenance ──────────────────────────────────────────
-	// Record that this run delegated to a child run. We do NOT write the graph
-	// directly: the fact is folded into the tenant World (as AgentRunObserved
-	// events for both parent and child) via the DelegationSink, and the graph
-	// projector — the sole writer (ADR-0107, #837) — materializes the :AgentRun
-	// nodes and the DELEGATED_TO edge.
-	//
-	// The child run ID is read from the child harness's mission context (not
-	// childMissionCtx, which is a value copy). The factory may assign a new
-	// AgentRunID inside the child; we retrieve it via a type assertion.
-	var childRunID string
-	if dah, ok := childHarness.(*DefaultAgentHarness); ok {
-		childRunID = dah.missionCtx.AgentRunID
-	} else {
-		// If childHarness is wrapped by middleware, fall back to the ID that
-		// was in childMissionCtx before the factory ran.
-		childRunID = childMissionCtx.AgentRunID
-	}
-	if h.delegationSink != nil && parentRunID != "" && childRunID != "" {
-		h.delegationSink(ctx, DelegationObserved{
-			Tenant:      h.missionCtx.TenantID,
-			Scope:       h.missionCtx.ID.String(),
-			ParentRunID: parentRunID,
-			ParentAgent: h.missionCtx.CurrentAgent,
-			ChildRunID:  childRunID,
-			ChildAgent:  name,
-		})
-	} else if parentRunID != "" && childRunID == "" {
-		h.logger.Debug("skipping DELEGATED_TO edge: child agent_run_id not set on mission context",
-			"parent_run_id", parentRunID,
-			"agent", name)
-	}
-
-	// Submit findings from sub-agent to our finding store
-	for _, finding := range result.Findings {
-		err := h.SubmitFinding(ctx, finding)
-		if err != nil {
-			h.logger.Warn("failed to submit sub-agent finding",
-				"agent", name,
-				"finding", finding.Title,
-				"error", err)
-		}
-	}
-
-	// Record success metrics
-	h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
-		"agent":  name,
-		"status": "success",
-	})
-	h.metrics.RecordCounter("agents.findings_from_delegation", int64(len(result.Findings)), map[string]string{
-		"agent": name,
-	})
-
-	h.logger.Info("agent execution completed",
-		"agent", name,
-		"task_id", task.ID.String(),
-		"status", result.Status,
-		"findings_count", len(result.Findings))
-
-	return result, nil
+	defer h.trackInFlightAgent(ctx, name)()
+	return h.delegateToAgentViaWorkQueue(ctx, tenant, name, task, info)
 }
 
 // ListAgents returns descriptors for all registered agents.
@@ -3090,7 +2573,7 @@ func (h *DefaultAgentHarness) Close(_ context.Context) error {
 // agentEgressCeiling returns the setec egress rules bounding the tool launches
 // of the dispatching agent, from its platform-catalog egressAllow ceiling
 // (ADR-0136). It returns nil when there is no dispatching agent, the agent is
-// not a platform-catalog agent, or its ceiling is "*". The tool sandbox then
+// not a platform-catalog agent, or its manifest states no ceiling. The tool sandbox then
 // takes the defaultNetworkMode of its SandboxClass. Tool sandbox isolation is
 // unconditional regardless.
 func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
@@ -3105,8 +2588,9 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 }
 
 // resolveAgentStanding returns the dispatch gate inputs for delegating to the
-// named agent (ADR-0110 / gibson#996): where its code runs and how far the
-// platform trusts it. Neither comes from what a registered instance reported.
+// named agent (ADR-0110): where its code runs and how far the platform trusts
+// it. Neither comes from what a registered instance reported. The third
+// result reports whether a live instance is registered for the tenant.
 //
 //   - An instance whose principal enrolled with an attested identity runs in
 //     the platform's cluster. If any live instance is attested, the agent
@@ -3114,32 +2598,28 @@ func agentEgressCeiling(agentName string) []sandboxed.EgressRule {
 //     means untrusted to the gate.
 //   - If instances exist and none is attested, the agent runs on the tenant's
 //     own machine and gets its work through the queue.
-//   - With no registered instance the delegation can only reach an agent
-//     built into the daemon, which is the platform's own code: trusted.
+//   - With no registered instance, or with no component registry, the agent
+//     has no standing here. Only a catalog manifest can then give it a
+//     sandbox launch.
 //
 // It returns an error — meaning DENY the delegation — whenever the standing
 // could not be established: a request carrying no tenant, or a registry
 // lookup that failed. "We could not tell" has to deny.
-//
-// A harness with no component registry at all is a different case: no agent
-// is registered either way, and only built-in agents can run.
-func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name string) (dispatchpolicy.Placement, componentpb.ContentTrust, error) {
-	const builtInTrust = componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
+func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name string) (dispatchpolicy.Placement, componentpb.ContentTrust, bool, error) {
+	const noTrust = componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 	if h.componentRegistry == nil {
-		return dispatchpolicy.PlacementCluster, builtInTrust, nil
+		return dispatchpolicy.PlacementCluster, noTrust, false, nil
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
-			fmt.Errorf("no tenant in context")
+		return dispatchpolicy.PlacementCluster, noTrust, false, errors.New("no tenant in context")
 	}
 	instances, err := h.componentRegistry.Discover(ctx, tenant, authz.KindAgent, name)
 	if err != nil {
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED,
-			fmt.Errorf("component registry discover: %w", err)
+		return dispatchpolicy.PlacementCluster, noTrust, false, fmt.Errorf("component registry discover: %w", err)
 	}
 	if len(instances) == 0 {
-		return dispatchpolicy.PlacementCluster, builtInTrust, nil
+		return dispatchpolicy.PlacementCluster, noTrust, false, nil
 	}
 	attested := false
 	for _, info := range instances {
@@ -3149,7 +2629,7 @@ func (h *DefaultAgentHarness) resolveAgentStanding(ctx context.Context, name str
 		}
 	}
 	placement, trust := component.DispatchStanding(attested, authz.KindAgent, name)
-	return placement, trust, nil
+	return placement, trust, true, nil
 }
 
 // taskGrantAllowedRPCs is the callback surface a dispatched component's task

@@ -109,13 +109,40 @@ type LaunchRequest struct {
 	// defaultNetworkMode of its SandboxClass. setec has three modes:
 	// external-only, egress-allow-list and none. It has no mode "full".
 	Egress []EgressRule
+
+	// NetworkMode, when set, is the setec network mode of the launch, and it
+	// wins over the rule above: NetworkModeExternalOnly, NetworkModeAllowList
+	// with the Egress rules, or NetworkModeNone. Empty keeps the rule above.
+	NetworkMode string
 }
 
+// The setec network modes that a launch can name (zeroroot-ai/setec#200).
+const (
+	NetworkModeExternalOnly = "external-only"
+	NetworkModeAllowList    = "egress-allow-list"
+	NetworkModeNone         = "none"
+)
+
 // EgressRule is one egress-allow-list entry, mirroring setec's
-// Network.allow shape (host + port).
+// Network.allow shape. An entry names a Host or a CIDR. It names one Port,
+// or a list of Ports.
 type EgressRule struct {
 	Host string
 	Port uint32
+
+	// CIDR is an address block, for example "10.0.0.0/24".
+	CIDR string
+
+	// Ports are port ranges with a protocol. When set, Port is zero.
+	Ports []PortRange
+}
+
+// PortRange is one port, or a range of ports when EndPort is set, for one
+// protocol. An empty Protocol means TCP.
+type PortRange struct {
+	Protocol string
+	Port     uint32
+	EndPort  uint32
 }
 
 // LaunchResponse is the executor-facing result of Launch.
@@ -267,6 +294,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 		SandboxClass: e.sandboxClass,
 		Timeout:      e.callTimeout + killGrace,
 		Egress:       spec.Egress,
+		NetworkMode:  spec.NetworkMode,
 	})
 	launchSpan.End()
 	if err != nil {
@@ -545,10 +573,10 @@ func (r *ring) tail(nLines int) string {
 }
 
 // EgressRulesFromAllow converts a manifest egressAllow ceiling into setec egress
-// rules. An empty list, or any entry equal to "*", returns nil: the launch then
-// sends no network message and the sandbox takes the defaultNetworkMode of its
-// SandboxClass. Every other entry is "host[:port]"; a missing port defaults to
-// 443.
+// rules. An empty list returns nil: the launch then sends no network message
+// and the sandbox takes the defaultNetworkMode of its SandboxClass. Each entry
+// is "host[:port]"; a missing port defaults to 443. The catalog loader refuses
+// the value "*" (gibson#865), so it never reaches this function.
 func EgressRulesFromAllow(allow []string) []EgressRule {
 	if len(allow) == 0 {
 		return nil
@@ -558,9 +586,6 @@ func EgressRulesFromAllow(allow []string) []EgressRule {
 		a = strings.TrimSpace(a)
 		if a == "" {
 			continue
-		}
-		if a == "*" {
-			return nil
 		}
 		host, port := a, uint32(443)
 		if i := strings.LastIndex(a, ":"); i >= 0 {

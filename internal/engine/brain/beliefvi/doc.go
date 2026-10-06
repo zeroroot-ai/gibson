@@ -26,7 +26,7 @@
 // float64 outputs on the same build, which is what mission replay needs.
 //
 // Every variable in this package is binary ("false"/"true", see States) —
-// the same restriction infer.py declared; noisy-MAX (ADR-0129 names both)
-// would generalise to multi-valued variables, which nothing in this codebase
-// has yet.
+// the same restriction infer.py declared. Only noisy-OR exists. Noisy-MAX is
+// not built while each variable is binary: for a binary variable noisy-MAX is
+// noisy-OR (ADR-0129, gibson#700).
 package beliefvi

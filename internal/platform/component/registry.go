@@ -446,13 +446,21 @@ func DispatchStanding(attested bool, kind, name string) (dispatchpolicy.Placemen
 	if !attested {
 		return dispatchpolicy.PlacementOutside, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 	}
+	return dispatchpolicy.PlacementCluster, catalogContentTrust(kind, name)
+}
+
+// catalogContentTrust is the trust that the signed catalog states for one
+// kind and name. An entry that the catalog does not list has no stated trust
+// (UNSPECIFIED). A value that a component reports about itself is never an
+// input (S3, S4).
+func catalogContentTrust(kind, name string) componentpb.ContentTrust {
 	trust, _ := componentcatalog.LookupContentTrust(kind, name)
 	switch trust {
 	case componentcatalog.ContentTrustTrusted:
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
+		return componentpb.ContentTrust_CONTENT_TRUST_TRUSTED
 	case componentcatalog.ContentTrustUntrusted:
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
+		return componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED
 	default:
-		return dispatchpolicy.PlacementCluster, componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
+		return componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED
 	}
 }

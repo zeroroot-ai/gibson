@@ -125,30 +125,6 @@ func TestPingNeo4j_Error(t *testing.T) {
 
 // --- PingStripe ---
 
-func TestPingStripe_NilClient_Skipped(t *testing.T) {
-	t.Parallel()
-	// A nil StripePinger means STRIPE_API_KEY is unset; no error.
-	if err := health.PingStripe(context.Background(), nil); err != nil {
-		t.Fatalf("expected nil for nil stripe client, got %v", err)
-	}
-}
-
-func TestPingStripe_OK(t *testing.T) {
-	t.Parallel()
-	if err := health.PingStripe(context.Background(), okPinger{}); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestPingStripe_Error(t *testing.T) {
-	t.Parallel()
-	want := errors.New("stripe down")
-	err := health.PingStripe(context.Background(), errPinger{err: want})
-	if !errors.Is(err, want) {
-		t.Fatalf("expected wrapped %v, got %v", want, err)
-	}
-}
-
 // --- Composite ---
 
 func TestComposite_AllOK(t *testing.T) {

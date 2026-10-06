@@ -15,7 +15,7 @@ import (
 // mainPack returns the main pack from the embedded catalog.
 func mainPack(t *testing.T) DomainPack {
 	t.Helper()
-	p, ok := EmbeddedPack(MainDomainPackName)
+	p, ok := EmbeddedCatalog().Get(MainDomainPackName)
 	require.True(t, ok, "the embedded catalog must hold the main pack")
 	return p
 }
@@ -68,10 +68,24 @@ func TestLoadCatalog_Refusals(t *testing.T) {
 				fsys[f] = &fstest.MapFile{Data: []byte(body)}
 			}
 			_, err := LoadCatalog(fsys)
-			require.Error(t, err)
-			assert.True(t, strings.Contains(err.Error(), tc.want), "error %q must contain %q", err, tc.want)
+			require.ErrorContains(t, err, tc.want)
 		})
 	}
+}
+
+// TestLoadCatalog_RefusesAFileItCannotRead: a pack path that is a
+// directory cannot be read, and LoadCatalog names the path.
+func TestLoadCatalog_RefusesAFileItCannotRead(t *testing.T) {
+	fsys := fstest.MapFS{"packs/a.json/inner": {Data: []byte(`{}`)}}
+	_, err := LoadCatalog(fsys)
+	require.ErrorContains(t, err, "read catalog pack file packs/a.json")
+}
+
+// TestNewCheckedCatalog_RefusesADuplicateName: two packs with one name
+// are an error, not a panic.
+func TestNewCheckedCatalog_RefusesADuplicateName(t *testing.T) {
+	_, err := newCheckedCatalog([]DomainPack{{Name: "a"}, {Name: "a"}})
+	require.ErrorContains(t, err, "duplicate name")
 }
 
 // TestEmbeddedCatalog_EveryFileLoads: each embedded pack file loads and
@@ -198,6 +212,12 @@ func TestLoadCatalog_RulesFile(t *testing.T) {
 			"packs/fw.json": pack, "packs/fw.rules.json": `{"mapping_rules":[{"control_id":"ac-3","expression":"true"}]}`,
 		}, "not a control of the pack"},
 		"only a rules file": {map[string]string{"packs/fw.rules.json": rules}, "no catalog pack file"},
+		"two rules documents": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json": rules + " " + rules,
+		}, "more than one JSON document"},
+		"a rules file that cannot be read": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json/inner": "{}",
+		}, "read rules file packs/fw.rules.json"},
 	}
 	for name, tc := range refusals {
 		t.Run(name, func(t *testing.T) {

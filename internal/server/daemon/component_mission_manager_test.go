@@ -7,8 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -95,7 +97,13 @@ func (f *fakeCMMRunStore) ListByMission(_ context.Context, _ types.ID) ([]*missi
 // Conn and whose storeFactory returns the injected fakes.
 func newCMMTest(t *testing.T, store mission.MissionStore, ledger mission.ReservationLedger) *componentMissionManager {
 	t.Helper()
-	d := &daemonImpl{logger: testObsLogger(), pool: &mockPool{conn: minimalConn()}}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	d := &daemonImpl{
+		logger:        testObsLogger(),
+		pool:          &mockPool{conn: minimalConn()},
+		brainRegistry: brain.NewRegistry(ctx),
+	}
 	return &componentMissionManager{
 		daemon: d,
 		storeFactory: func(*datapool.Conn) (mission.MissionStore, mission.ReservationLedger) {
@@ -135,7 +143,6 @@ func TestOriginationStatus(t *testing.T) {
 		{mission.ErrNoParentMission, codes.FailedPrecondition},
 		{mission.ErrScopeWiden, codes.PermissionDenied},
 		{mission.ErrDepthExceeded, codes.FailedPrecondition},
-		{mission.ErrLineageSupplied, codes.InvalidArgument},
 		{mission.ErrMissingAttribution, codes.Unauthenticated},
 		{status.Error(codes.Unknown, "envelope exhausted"), codes.ResourceExhausted},
 	}
@@ -175,6 +182,43 @@ func TestOriginateMission_HappyPath(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &rec))
 	require.NotEmpty(t, rec.ID)
 	require.Equal(t, parent.ID.String(), rec.ParentMissionID)
+
+	// The reply carries the lineage, from the verified request values.
+	wantLineage := map[string]string{
+		lineageKeyOriginatingComponent: "agent:recon",
+		lineageKeyCapabilityGrantID:    "grant-1",
+		lineageKeyParentMissionID:      parent.ID.String(),
+		lineageKeyParentWorkID:         "w-1",
+	}
+	require.Equal(t, wantLineage, rec.Lineage)
+
+	// The originate path submitted the lineage event through the engine of the
+	// tenant, and the reducer folded it (gibson#734).
+	eng := mgr.daemon.brainRegistry.For("acme")
+	require.Eventually(t, func() bool {
+		_, ok := eng.MissionLineage(rec.ID)
+		return ok
+	}, 2*time.Second, 10*time.Millisecond, "the World never folded the lineage event")
+	got, _ := eng.MissionLineage(rec.ID)
+	require.Equal(t, brain.MissionLineage{
+		MissionID:            rec.ID,
+		ParentMissionID:      parent.ID.String(),
+		ParentWorkID:         "w-1",
+		OriginatingComponent: "agent:recon",
+		CapabilityGrantID:    "grant-1",
+	}, got)
+
+	// The saved mission record holds no lineage: the Timeline is its home.
+	saved := store.byID[rec.ID]
+	require.NotNil(t, saved)
+	require.Empty(t, saved.Metadata)
+
+	// A later read of the mission gets the lineage from the World.
+	statusBody, err := mgr.GetMissionStatus(cmmCtx(), "acme", rec.ID)
+	require.NoError(t, err)
+	var read componentMissionRecord
+	require.NoError(t, json.Unmarshal(statusBody, &read))
+	require.Equal(t, wantLineage, read.Lineage)
 }
 
 // erroringLedger refuses every reservation, driving the origination-refused
@@ -362,22 +406,40 @@ func TestMissionRecordAndLineage(t *testing.T) {
 		Name:            "child",
 		Status:          mission.MissionStatusRunning,
 		ParentMissionID: &parentID,
-		Metadata: map[string]any{
-			mission.LineageOriginatingComponent: "agent:recon",
-			mission.LineageCapabilityGrantID:    "grant-1",
-		},
 	}
-	rec := missionRecord(m)
+	lineage := lineageRecord(brain.MissionLineage{
+		MissionID:            m.ID.String(),
+		OriginatingComponent: "agent:recon",
+		CapabilityGrantID:    "grant-1",
+	})
+	require.Equal(t, map[string]string{
+		lineageKeyOriginatingComponent: "agent:recon",
+		lineageKeyCapabilityGrantID:    "grant-1",
+	}, lineage, "an empty lineage value has no key")
+
+	rec := missionRecord(m, lineage)
 	require.Equal(t, m.ID.String(), rec.ID)
 	require.Equal(t, parentID.String(), rec.ParentMissionID)
-
-	lineage := lineageOf(m)
-	require.Equal(t, "agent:recon", lineage[mission.LineageOriginatingComponent])
-	require.Equal(t, "grant-1", lineage[mission.LineageCapabilityGrantID])
+	require.Equal(t, lineage, rec.Lineage)
 
 	// nil mission → zero record; no lineage → nil map.
-	require.Equal(t, componentMissionRecord{}, missionRecord(nil))
-	require.Nil(t, lineageOf(&mission.Mission{}))
+	require.Equal(t, componentMissionRecord{}, missionRecord(nil, nil))
+	require.Nil(t, lineageRecord(brain.MissionLineage{}))
+
+	// A mission that no component originated has no lineage in the World.
+	eng := brain.NewEngine("acme")
+	require.Nil(t, lineageOf(eng, m))
+	require.Nil(t, lineageOf(eng, nil))
+	eng.Submit(brain.MissionOriginated{MissionID: m.ID.String(), OriginatingComponent: "agent:recon"})
+	eng.Tick()
+	require.Equal(t, map[string]string{lineageKeyOriginatingComponent: "agent:recon"}, lineageOf(eng, m))
+}
+
+// A manager with no brain registry refuses a call that needs the lineage.
+func TestTenantEngine_RegistryNotConfigured(t *testing.T) {
+	mgr := &componentMissionManager{daemon: &daemonImpl{logger: testObsLogger()}}
+	_, err := mgr.tenantEngine(cmmCtx())
+	require.Equal(t, codes.Unavailable, status.Code(err))
 }
 
 // TestMissionRecord_MetricsAndConstraints covers the metric/constraint branches.
@@ -388,7 +450,7 @@ func TestMissionRecord_MetricsAndConstraints(t *testing.T) {
 		Constraints: &missionv1.MissionConstraints{MaxCost: 12.5, MaxTokens: 1000},
 		Metrics:     &mission.MissionMetrics{TotalCost: 3.25, TotalTokens: 400},
 	}
-	rec := missionRecord(m)
+	rec := missionRecord(m, nil)
 	require.InDelta(t, 12.5, rec.MaxCostUSD, 0.001)
 	require.Equal(t, int64(1000), rec.MaxTokens)
 	require.InDelta(t, 3.25, rec.TotalCostUSD, 0.001)

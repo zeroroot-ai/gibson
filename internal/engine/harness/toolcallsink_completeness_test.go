@@ -24,20 +24,18 @@
 //     one of the local response-building helpers (metaToolErr /
 //     marshalMetaResult) — purely from the type/call names involved, so a
 //     brand-new terminal return needs no manual tagging to be seen.
-//  2. Passes it if a captureToolCall(...) call appears earlier in the same
-//     function's source (by token position), OR if its enclosing statement
+//  2. Passes it if a captureToolCall(...) call runs on each path to it (see
+//     below), OR if its enclosing statement
 //     carries a "gibson:no-tool-executed" comment — an explicit, reviewed
 //     admission that no tool actually ran on this path (bad input, denied
 //     before dispatch, tool not found, etc.), so there is nothing to record.
 //  3. Fails otherwise.
 //
-// This is a positional heuristic (source order within one function), not
-// full control-flow dominance: it cannot detect a capture call that exists
-// in a sibling, non-dominating branch. That is sufficient for the current,
-// mostly linear dispatch functions this guard covers — it catches exactly
-// the shape of bug fixed in gibson#380 (a whole path with zero capture calls
-// anywhere) — but a future function with independent parallel branches after
-// a shared capture call would need tighter, branch-scoped analysis.
+// A capture satisfies a terminal only when it runs on each path to that
+// terminal: its statement comes earlier in a block or case clause that also
+// holds the terminal. A capture in a sibling branch, or inside an `if` that
+// the path can skip, does not count (gibson#704). The check reads the
+// structure of the code. It does not follow a goto or a loop back edge.
 //
 // The failing fixture proving this guard fires lives in this file too (repo
 // rule: every new guard ships with a failing fixture) — see
@@ -139,12 +137,36 @@ func scanToolCallSinkCompleteness(filename string, src []byte) ([]toolCallSinkVi
 	return violations, nil
 }
 
+// toolCallSinkRecordedHandler is the unary callback handler. It records each
+// call that it dispatches. A second handler that hands its whole call to it,
+// on the service receiver, needs no capture call of its own.
+const toolCallSinkRecordedHandler = "CallToolProto"
+
+// toolCallSinkIsRecordedDelegation reports whether call is
+// `<receiver>.CallToolProto(...)` on the receiver of fd. A call of the same
+// method name on a different value, for example on the harness, is the
+// dispatch itself and records nothing.
+func toolCallSinkIsRecordedDelegation(fd *ast.FuncDecl, call *ast.CallExpr) bool {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 || len(fd.Recv.List[0].Names) == 0 {
+		return false
+	}
+	if fd.Name.Name == toolCallSinkRecordedHandler {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != toolCallSinkRecordedHandler {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	return ok && x.Name == fd.Recv.List[0].Names[0].Name
+}
+
 // scanToolCallSinkFunc applies the completeness rule to one function.
 func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, fd *ast.FuncDecl) []toolCallSinkViolation {
 	var (
-		capturePositions []token.Pos
-		terminals        []terminalCandidate
-		stack            []ast.Node
+		captures  []toolCallSinkCapture
+		terminals []terminalCandidate
+		stack     []ast.Node
 	)
 
 	ast.Inspect(fd.Body, func(n ast.Node) bool {
@@ -158,8 +180,10 @@ func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, 
 
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc {
-				capturePositions = append(capturePositions, node.Pos())
+			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc || toolCallSinkIsRecordedDelegation(fd, node) {
+				if c, ok := toolCallSinkCaptureScope(stack); ok {
+					captures = append(captures, c)
+				}
 			}
 		case *ast.CompositeLit:
 			if desc, ok := toolCallSinkTerminalCompositeLit(node); ok {
@@ -187,7 +211,7 @@ func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, 
 
 	violations := make([]toolCallSinkViolation, 0, len(terminals))
 	for _, term := range terminals {
-		if toolCallSinkPrecededByCapture(term.pos, capturePositions) {
+		if toolCallSinkDominatedByCapture(term.pos, captures) {
 			continue
 		}
 		if toolCallSinkExemptedByComment(fset, file, term.stmt) {
@@ -307,11 +331,43 @@ func toolCallSinkEnclosingStmt(stack []ast.Node) ast.Node {
 	return nil
 }
 
-// toolCallSinkPrecededByCapture reports whether any captureToolCall call in
-// the function appears earlier in the source than pos.
-func toolCallSinkPrecededByCapture(pos token.Pos, captures []token.Pos) bool {
+// toolCallSinkCapture is one capture call and the statement list that holds
+// it. The capture runs on each path through the rest of that list, and on no
+// path outside it.
+type toolCallSinkCapture struct {
+	listStart, listEnd token.Pos // the block or clause that holds the statement
+	stmtEnd            token.Pos // the end of the statement that holds the call
+}
+
+// toolCallSinkCaptureScope finds, from the inspection stack of a capture
+// call, the statement that holds the call and the block or case clause that
+// holds that statement.
+func toolCallSinkCaptureScope(stack []ast.Node) (toolCallSinkCapture, bool) {
+	for i := len(stack) - 1; i > 0; i-- {
+		stmt, isStmt := stack[i].(ast.Stmt)
+		if !isStmt {
+			continue
+		}
+		switch owner := stack[i-1].(type) {
+		case *ast.BlockStmt:
+			return toolCallSinkCapture{listStart: owner.Lbrace, listEnd: owner.Rbrace, stmtEnd: stmt.End()}, true
+		case *ast.CaseClause:
+			return toolCallSinkCapture{listStart: owner.Colon, listEnd: owner.End(), stmtEnd: stmt.End()}, true
+		case *ast.CommClause:
+			return toolCallSinkCapture{listStart: owner.Colon, listEnd: owner.End(), stmtEnd: stmt.End()}, true
+		}
+	}
+	return toolCallSinkCapture{}, false
+}
+
+// toolCallSinkDominatedByCapture reports whether a capture runs on each path
+// to pos: the capture statement ends before pos, and pos is in the same
+// statement list as the capture statement, at its level or deeper. A capture
+// in a sibling branch, or in a branch that the path to pos can skip, does
+// not count (gibson#704).
+func toolCallSinkDominatedByCapture(pos token.Pos, captures []toolCallSinkCapture) bool {
 	for _, c := range captures {
-		if c < pos {
+		if c.stmtEnd <= pos && c.listStart < pos && pos < c.listEnd {
 			return true
 		}
 	}
@@ -478,5 +534,111 @@ func TestToolCallSinkCompleteness_AllowsExplicitlyExemptedReturn(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("an explicitly exempted return must not violate the guard: %v", violations)
+	}
+}
+
+// toolCallSinkDelegationFixture is a second handler that hands its call to
+// the recorded unary handler on the service receiver. It needs no capture
+// call of its own.
+const toolCallSinkDelegationFixture = `package harness
+
+func (s *HarnessCallbackService) delegatingStream() error {
+	resp, err := s.CallToolProto(ctx, req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(&harnesspb.CallToolProtoStreamResponse{
+		Payload: &harnesspb.CallToolProtoStreamResponse_Complete{Complete: &harnesspb.ToolCompleteEvent{OutputJson: resp.GetOutputJson()}},
+	})
+}
+`
+
+// toolCallSinkHarnessDispatchFixture calls CallToolProto on the harness, which
+// is the dispatch itself and records nothing. The guard must still fail.
+const toolCallSinkHarnessDispatchFixture = `package harness
+
+func (s *HarnessCallbackService) dispatchingStream() error {
+	err := harness.CallToolProto(ctx, name, in, out)
+	return stream.Send(&harnesspb.CallToolProtoStreamResponse{
+		Payload: &harnesspb.CallToolProtoStreamResponse_Complete{Complete: &harnesspb.ToolCompleteEvent{}},
+	})
+}
+`
+
+func TestToolCallSinkCompleteness_AllowsDelegationToTheRecordedHandler(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("delegation_fixture.go", []byte(toolCallSinkDelegationFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("a hand-off to the recorded handler needs no capture, got: %v", violations)
+	}
+}
+
+func TestToolCallSinkCompleteness_CatchesADispatchOnTheHarness(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("harness_dispatch_fixture.go", []byte(toolCallSinkHarnessDispatchFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("a dispatch on the harness records nothing; want 1 violation, got %d: %v", len(violations), violations)
+	}
+}
+
+// toolCallSinkSiblingBranchFixture has its capture in a branch that does not
+// run on the path to the terminal (gibson#704). Source order alone would
+// accept it.
+const toolCallSinkSiblingBranchFixture = `package harness
+
+func (s *HarnessCallbackService) siblingBranch() (*harnesspb.CallToolProtoResponse, error) {
+	if failed {
+		s.captureToolCall(ctx, info, name, args, "", "boom")
+		return &harnesspb.CallToolProtoResponse{}, nil
+	} else {
+		s.captureToolCall(ctx, info, name, args, "", "other")
+	}
+	if skipped {
+		s.captureToolCall(ctx, info, name, args, "", "maybe")
+	}
+	return &harnesspb.CallToolProtoResponse{OutputJson: out}, nil
+}
+`
+
+// toolCallSinkDominatingFixture has a capture that runs on each path to each
+// terminal, at the same level, in a nested branch after it, and in a case
+// clause.
+const toolCallSinkDominatingFixture = `package harness
+
+func (s *HarnessCallbackService) dominating() (*harnesspb.CallToolProtoResponse, error) {
+	switch kind {
+	case "a":
+		s.captureToolCall(ctx, info, name, args, "", "a")
+		return &harnesspb.CallToolProtoResponse{}, nil
+	}
+	s.captureToolCall(ctx, info, name, args, out, "")
+	if late {
+		return &harnesspb.CallToolProtoResponse{}, nil
+	}
+	return &harnesspb.CallToolProtoResponse{OutputJson: out}, nil
+}
+`
+
+func TestToolCallSinkCompleteness_CatchesACaptureInASiblingBranch(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("sibling_fixture.go", []byte(toolCallSinkSiblingBranchFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("the last return has no capture on its path; want 1 violation, got %d: %v", len(violations), violations)
+	}
+}
+
+func TestToolCallSinkCompleteness_AllowsADominatingCapture(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("dominating_fixture.go", []byte(toolCallSinkDominatingFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("each return has a capture on its path, got: %v", violations)
 	}
 }

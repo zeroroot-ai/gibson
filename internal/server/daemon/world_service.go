@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -54,7 +55,11 @@ func (s *worldServer) engine(ctx context.Context) (*brain.Engine, error) {
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(t.String()), nil
+	eng, ok := api.TenantEngine(s.registry, t.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return eng, nil
 }
 
 func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {
@@ -164,9 +169,11 @@ func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineR
 	// empty returns the whole tenant Timeline. Either way events are re-indexed from
 	// 0 by their position in the (possibly filtered) sequence, so the Scroller's
 	// timeline and its GetFrameAt frames share one indexing.
-	events := e.Events()
-	if mid := req.GetMissionId(); mid != "" {
-		events = e.MissionEvents(mid)
+	// The events come from the full history of the tenant, not from the
+	// in-memory tail of the engine (ADR-0163, gibson#786).
+	events, err := e.MissionHistory(ctx, req.GetMissionId())
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "the Timeline history is not available: %v", err)
 	}
 	resp := &worldpb.GetTimelineResponse{}
 	for i, ev := range events {
@@ -194,21 +201,12 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 		return nil, err
 	}
 
-	var w *brain.World
-	n := int(req.GetSeq())
-	var total int
-	if mid := req.GetMissionId(); mid != "" {
-		total = len(e.MissionEvents(mid))
-		if n > total {
-			n = total
-		}
-		w = e.MissionFrameAt(mid, n)
-	} else {
-		total = len(e.Events())
-		if n > total {
-			n = total
-		}
-		w = e.FrameAt(n)
+	// The frame folds the full history of the tenant, so a frame before the
+	// last snapshot is still there after the stream trim (ADR-0163).
+	seq := min(req.GetSeq(), uint64(math.MaxInt))
+	w, n, total, err := e.HistoryFrameAt(ctx, req.GetMissionId(), int(seq)) //nolint:gosec // G115: seq is clamped to math.MaxInt above
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "the Timeline history is not available: %v", err)
 	}
 
 	resp := &worldpb.GetFrameAtResponse{Seq: uint64(n), Total: uint64(total)}

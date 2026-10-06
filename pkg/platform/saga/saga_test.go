@@ -74,9 +74,10 @@ func TestAllCapabilities_NoDuplicates(t *testing.T) {
 		}
 		seen[c] = true
 	}
-	// Sanity: at least 11 capabilities listed (Langfuse retired, gibson#755).
-	if got := len(saga.AllCapabilities()); got < 11 {
-		t.Errorf("AllCapabilities() returned %d entries, want >= 11", got)
+	// Sanity: at least 10 capabilities listed (Langfuse retired, gibson#755;
+	// Stripe left the platform, gibson#713).
+	if got := len(saga.AllCapabilities()); got < 10 {
+		t.Errorf("AllCapabilities() returned %d entries, want >= 10", got)
 	}
 }
 

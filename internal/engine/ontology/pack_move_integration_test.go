@@ -27,7 +27,7 @@ func TestImportStore_RealPostgres(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
 	require.Eventually(t, func() bool { return db.PingContext(ctx) == nil }, 30*time.Second, 200*time.Millisecond)
-	ddl, err := os.ReadFile("../../../pkg/platform/migrations/postgres/platform/034_domain_pack_imports.up.sql")
+	ddl, err := os.ReadFile("../../../pkg/platform/migrations/postgres/platform/036_domain_pack_imports.up.sql")
 	require.NoError(t, err)
 	_, err = db.ExecContext(ctx, string(ddl))
 	require.NoError(t, err)

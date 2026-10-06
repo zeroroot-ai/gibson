@@ -135,8 +135,15 @@ func (a *MissionOperatorAdapter) CreateMission(ctx context.Context, req *CreateM
 		return nil, status.Error(codes.InvalidArgument, "create mission request is required")
 	}
 
+	// The constraints of the request go into the definition, because the
+	// mission store reads the constraints of a mission from its definition.
+	definitionJSON, err := withRequestedConstraints(req.MissionDefinitionJSON, req.Constraints)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "create mission: %v", err)
+	}
+
 	clientReq := &MissionClientCreateRequest{
-		MissionDefinitionJSON: req.MissionDefinitionJSON,
+		MissionDefinitionJSON: definitionJSON,
 		Name:                  req.Name,
 		Description:           req.Description,
 		TargetID:              req.TargetID,

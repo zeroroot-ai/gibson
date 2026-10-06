@@ -153,7 +153,7 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	}
 
 	// Connect admin Postgres pool when a DSN is provided.
-	// Apply required connection lifecycle settings via platform-clients/pools
+	// Apply required connection lifecycle settings via internal/infra/pools
 	// (audit finding P1, zeroroot-ai/.github#101).
 	if cfg.PostgresDSN != "" {
 		pgPool, err := pcpools.NewPgxPool(context.Background(), cfg.PostgresDSN, pcpools.PgxPoolOptions{
@@ -167,7 +167,7 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	}
 
 	// Connect admin Redis client (db 0 — master index).
-	// Apply required connection lifecycle settings via platform-clients/pools.
+	// Apply required connection lifecycle settings via internal/infra/pools.
 	if cfg.RedisAddr != "" {
 		ap.redisAdmin = redis.NewClient(&redis.Options{
 			Addr:            cfg.RedisAddr,
@@ -182,7 +182,7 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	}
 
 	// Connect admin Neo4j driver when a URI is provided.
-	// Apply required connection lifecycle settings via platform-clients/pools.
+	// Apply required connection lifecycle settings via internal/infra/pools.
 	if cfg.Neo4jURI != "" {
 		driver, err := neo4j.NewDriverWithContext(
 			cfg.Neo4jURI,

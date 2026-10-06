@@ -738,7 +738,7 @@ func TestGetFindings_LimitCap(t *testing.T) {
 	// logic ran). We just check for Internal (not InvalidArgument / PermissionDenied).
 	srv := graphServerReadyPool()
 
-	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{Limit: 9999})
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageSize: 999})
 	// Should be Internal (query failure on nil session) or nil — not a cap/auth error.
 	if err != nil {
 		s, _ := status.FromError(err)
@@ -748,13 +748,21 @@ func TestGetFindings_LimitCap(t *testing.T) {
 	}
 }
 
+// A page_token that the daemon did not write is InvalidArgument (ADR-0028).
+func TestGetFindings_RefusesABadPageToken(t *testing.T) {
+	t.Parallel()
+	srv := graphServerReadyPool()
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageToken: "not-a-token"})
+	assertGRPCCode(t, err, codes.InvalidArgument, "GetFindings bad page token")
+}
+
 func TestGetFindings_DefaultLimit(t *testing.T) {
 	t.Parallel()
-	// Limit=0 should apply DefaultFindingsLimit (100); handler should not error
+	// PageSize=0 should apply DefaultFindingsLimit (100); handler should not error
 	// on the limit logic itself.
 	srv := graphServerReadyPool()
 
-	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{Limit: 0})
+	_, err := srv.GetFindings(graphTenantCtx(), &graphpb.GetFindingsRequest{PageSize: 0})
 	if err != nil {
 		s, _ := status.FromError(err)
 		// Acceptable: Internal (nil-session query fail) — NOT PermissionDenied/InvalidArgument.

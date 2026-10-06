@@ -6,14 +6,14 @@
 
 package sandboxed
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestEgressRulesFromAllow(t *testing.T) {
 	if EgressRulesFromAllow(nil) != nil {
 		t.Error("empty ceiling must be unrestricted (nil)")
-	}
-	if EgressRulesFromAllow([]string{"a.com:80", "*", "b.com"}) != nil {
-		t.Error(`a "*" entry must mean unrestricted (nil)`)
 	}
 	if EgressRulesFromAllow([]string{"", "  "}) != nil {
 		t.Error("only-blank entries must be unrestricted (nil)")
@@ -28,7 +28,7 @@ func TestEgressRulesFromAllow(t *testing.T) {
 		t.Fatalf("got %d rules, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("rule %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}

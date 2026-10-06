@@ -112,18 +112,6 @@ func (s *DaemonServer) selfServeGate() error {
 	return nil
 }
 
-// stripeCustomerIDPattern is the shape of a Stripe customer identifier.
-//
-// A shape check is not an ownership check — the store's statement is what
-// binds the id to the session, in both directions. This is the cheap half:
-// it keeps arbitrary caller text out of a column that flows on to the
-// provisioning row and the tenant-status row, and it is answerable from the
-// request alone, so it costs no database round-trip.
-var stripeCustomerIDPattern = regexp.MustCompile(`^cus_[A-Za-z0-9]{1,64}$`)
-
-// isStripeCustomerID reports whether s has the shape of a Stripe customer id.
-func isStripeCustomerID(s string) bool { return stripeCustomerIDPattern.MatchString(s) }
-
 // hashClientIP reduces an IP to a hash before it is stored. The row it lands on
 // is created before anyone has consented to anything and may describe someone
 // who never asked for it.
@@ -362,41 +350,11 @@ func (s *DaemonServer) RedeemEmailVerification(ctx context.Context, req *tenantv
 	}, nil
 }
 
-// AttachSignupCustomer implements SignupServiceServer.
-//
-// Records the billing customer against the verified session so that completion
-// reads the customer id from the daemon's own row rather than from the client.
-func (s *DaemonServer) AttachSignupCustomer(ctx context.Context, req *tenantv1.AttachSignupCustomerRequest) (*tenantv1.AttachSignupCustomerResponse, error) {
-	if err := s.selfServeGate(); err != nil {
-		return nil, err
-	}
-	if err := s.checkSignupLimits(ctx, attachCustomerLimits(normalizeSignupClientIP(req.GetClientIp()))...); err != nil {
-		return nil, err
-	}
-	if s.signupVerifications == nil {
-		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
-	}
-	if req.GetStripeCustomerId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "stripe_customer_id is required")
-	}
-	if !isStripeCustomerID(req.GetStripeCustomerId()) {
-		return nil, status.Error(codes.InvalidArgument, "stripe_customer_id is not a customer identifier")
-	}
-	switch err := s.signupVerifications.AttachStripeCustomer(ctx, req.GetVerifiedSessionToken(), req.GetStripeCustomerId()); {
-	case errors.Is(err, ErrSignupVerificationNotFound):
-		return nil, redeemDenied()
-	case err != nil:
-		s.logger.ErrorContext(ctx, "AttachSignupCustomer: attach failed", "error", err.Error())
-		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
-	}
-	return &tenantv1.AttachSignupCustomerResponse{}, nil
-}
-
 // Signup implements SignupServiceServer.
 //
 // This is the only path to provisioning, and it does not run without a live
 // verified session. Everything about the tenant — owner address, workspace
-// name, tier, profile, billing customer — is read from the verification row the
+// name, tier, profile — is read from the verification row the
 // session resolves to; the request carries none of it. A caller who redeemed a
 // token for one address therefore cannot provision a tenant for another.
 func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) (*tenantv1.SignupResponse, error) {
@@ -461,14 +419,14 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	}
 
 	// ---- plan gate ----
-	// SignupRequest carries neither tier nor billing-customer id — both are
-	// read from the verification row, exactly so a caller cannot self-select
-	// a paid tier by putting one in the request. row.Tier reaches the
+	// SignupRequest carries no tier — it is read from the verification row,
+	// exactly so a caller cannot self-select a paid tier by putting one in the
+	// request. row.Tier reaches the
 	// operator through the pending-provisioning queue, where it sizes the
 	// per-tenant data plane and binds the Stripe product, so resolve it
 	// against the canonical plan set before creating any identity or
 	// provisioning state. See plan gate rationale in internal/platform/plans.
-	plan, err := s.resolveSignupPlan(row.Tier, row.StripeCustomerID)
+	plan, err := s.resolveSignupPlan(row.Tier, s.signupStepConfigured())
 	if err != nil {
 		s.logger.WarnContext(ctx, "Signup: plan gate refused request",
 			"attempt_id", req.GetAttemptId(),
@@ -515,6 +473,16 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		}
 	}
 
+	// ---- the external signup step ----
+	// With a step URL in config the tenant waits for the step (ADR-0060, D54).
+	// The token goes to the browser once and only its hash is stored.
+	hold, stepToken, herr := s.holdForSignupStep(req.GetAttemptId())
+	if herr != nil {
+		s.logger.ErrorContext(ctx, "Signup: create step token failed",
+			"attempt_id", req.GetAttemptId(), "error", herr.Error())
+		return nil, status.Error(codes.Internal, "failed to complete signup")
+	}
+
 	// ---- enqueue the tenant for operator-pull provisioning ----
 	// Operator-pull tenant provisioning (E9, gibson#948, enables dashboard#813):
 	// instead of the dashboard creating the Tenant CR, the daemon records the
@@ -534,9 +502,8 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		WorkspaceName: row.WorkspaceName,
 		// Enqueue the RESOLVED canonical plan id, not the raw verification-row
 		// string, so nothing downstream sees an id the plan gate did not accept.
-		Tier:             plan.ID,
-		StripeCustomerId: row.StripeCustomerID,
-	}); eerr != nil {
+		Tier: plan.ID,
+	}, hold); eerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
 			"attempt_id", req.GetAttemptId(),
 			"tenant_id", slug,
@@ -569,7 +536,18 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		// provisions, by construction rather than by the caller re-deriving it
 		// (gibson#1325).
 		PlanId: plan.ID,
+		// Both are empty when no step is configured.
+		StepUrl:   stepURLFor(hold, s.signupStepURL),
+		StepToken: stepToken,
 	}, nil
+}
+
+// stepURLFor returns the step URL when the signup waits for the step.
+func stepURLFor(hold *signupStepHold, u string) string {
+	if hold == nil {
+		return ""
+	}
+	return u
 }
 
 // resolveSignupPlan is the server-side plan gate for self-serve signup. It
@@ -586,21 +564,14 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 //     legitimately land on it; requesting it is PermissionDenied and the
 //     caller is pointed at the administrator path (AdminProvisionTenant).
 //
-//  3. A paid plan MUST come with a billing customer WHEN the deployment
-//     enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true — the SaaS
-//     overlay, deploy#1055). The card-first signup flow creates the Stripe
-//     customer and subscription BEFORE calling Signup and passes the customer
-//     id here, so an empty id in SaaS mode means the caller skipped payment
-//     setup entirely. Self-hosted installs leave the knob unset and are
-//     unaffected: ADR-0074 makes the billing seam bypassable on-prem by
-//     design, and this gate must not turn Stripe into an on-prem dependency.
+//  3. A paid plan MUST pass the external signup step WHEN the deployment
+//     enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true). With no step
+//     configured, nothing can confirm the plan, so the request is refused.
+//     Self-hosted installs leave the knob unset and are unaffected: ADR-0074
+//     makes the seam bypassable on-prem by design (ADR-0060, D54).
 //
-// Rule 3 is a presence check, not a proof of payment — the daemon cannot talk
-// to Stripe (that lives entirely behind the closed billing seam). The
-// subsequent enforcement point is the pending-provisioning drain, which
-// withholds a paid-tier tenant until billing_active is recorded; see
-// ListPendingTenantProvisioning.
-func (s *DaemonServer) resolveSignupPlan(tier, stripeCustomerID string) (plans.Plan, error) {
+// stepConfigured is false on the approval rung, which has no step.
+func (s *DaemonServer) resolveSignupPlan(tier string, stepConfigured bool) (plans.Plan, error) {
 	plan, ok := plans.Lookup(tier)
 	if !ok {
 		return plans.Plan{}, status.Errorf(codes.InvalidArgument,
@@ -612,9 +583,9 @@ func (s *DaemonServer) resolveSignupPlan(tier, stripeCustomerID string) (plans.P
 			"plan %q is not available through self-serve signup; contact sales to have an administrator provision it",
 			plan.ID)
 	}
-	if plan.Paid && entitlements.Required() && strings.TrimSpace(stripeCustomerID) == "" {
+	if plan.Paid && entitlements.Required() && !stepConfigured {
 		return plans.Plan{}, status.Errorf(codes.PermissionDenied,
-			"plan %q requires an active billing customer; complete payment setup before signing up",
+			"plan %q is not available through this signup path; contact your administrator",
 			plan.ID)
 	}
 	return plan, nil

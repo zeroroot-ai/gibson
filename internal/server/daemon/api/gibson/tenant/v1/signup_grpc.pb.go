@@ -27,8 +27,14 @@
 //     RequestEmailVerification  → one expiring verification row + one email
 //     RedeemEmailVerification   → the emailed token is exchanged for a short
 //                                 completion session
-//     Signup                    → identity, billing and provisioning, all of it
+//     Signup                    → identity and provisioning, all of it
 //                                 strictly after that proof
+//
+//   With a signup step URL in config (GIBSON_SIGNUP_STEP_URL), Signup holds the
+//   new tenant as waiting and returns an opaque step token. A component outside
+//   this repository runs the step and reports it done through
+//   gibson.daemon.connection.v1.ConnectionPointService.CompleteSignupStep. With
+//   no URL, signup never waits (ADR-0060, D54).
 //
 //   The APPROVAL rung (ADR-0074, gibson#22) replaces that round trip with one
 //   Register call and an administrator's decision. It is a different proof of
@@ -64,8 +70,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	SignupService_RequestEmailVerification_FullMethodName = "/gibson.tenant.v1.SignupService/RequestEmailVerification"
 	SignupService_RedeemEmailVerification_FullMethodName  = "/gibson.tenant.v1.SignupService/RedeemEmailVerification"
-	SignupService_AttachSignupCustomer_FullMethodName     = "/gibson.tenant.v1.SignupService/AttachSignupCustomer"
 	SignupService_Signup_FullMethodName                   = "/gibson.tenant.v1.SignupService/Signup"
+	SignupService_GetSignupStep_FullMethodName            = "/gibson.tenant.v1.SignupService/GetSignupStep"
 	SignupService_Register_FullMethodName                 = "/gibson.tenant.v1.SignupService/Register"
 )
 
@@ -106,13 +112,6 @@ type SignupServiceClient interface {
 	// Distinguishing them would turn this RPC into a checker for which tokens
 	// and which signups exist.
 	RedeemEmailVerification(ctx context.Context, in *RedeemEmailVerificationRequest, opts ...grpc.CallOption) (*RedeemEmailVerificationResponse, error)
-	// AttachSignupCustomer records the billing customer created for a verified
-	// signup session, so the completion path does not have to trust the client
-	// for the customer id.
-	//
-	// Only reachable with a live verified session, which is what keeps billing
-	// objects from existing for unproven addresses.
-	AttachSignupCustomer(ctx context.Context, in *AttachSignupCustomerRequest, opts ...grpc.CallOption) (*AttachSignupCustomerResponse, error)
 	// Signup completes a verified signup: it creates the founding-owner Zitadel
 	// human user with the supplied password and enqueues the tenant for
 	// operator-pull provisioning.
@@ -128,7 +127,15 @@ type SignupServiceClient interface {
 	//
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
+	//
+	// With a signup step configured, the tenant waits for the step and the
+	// response carries step_url and step_token.
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
+	// GetSignupStep reports the state of the external signup step of one
+	// signup attempt. The attempt id is the capability, as for
+	// GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+	// the answer does not tell a caller which attempts exist.
+	GetSignupStep(ctx context.Context, in *GetSignupStepRequest, opts ...grpc.CallOption) (*GetSignupStepResponse, error)
 	// Register is the APPROVAL rung's single registration call (ADR-0074,
 	// gibson#22). It is served only when the deployment selects that rung, and
 	// the four RPCs above are refused on it; on every other rung Register is
@@ -185,20 +192,20 @@ func (c *signupServiceClient) RedeemEmailVerification(ctx context.Context, in *R
 	return out, nil
 }
 
-func (c *signupServiceClient) AttachSignupCustomer(ctx context.Context, in *AttachSignupCustomerRequest, opts ...grpc.CallOption) (*AttachSignupCustomerResponse, error) {
+func (c *signupServiceClient) Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AttachSignupCustomerResponse)
-	err := c.cc.Invoke(ctx, SignupService_AttachSignupCustomer_FullMethodName, in, out, cOpts...)
+	out := new(SignupResponse)
+	err := c.cc.Invoke(ctx, SignupService_Signup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *signupServiceClient) Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error) {
+func (c *signupServiceClient) GetSignupStep(ctx context.Context, in *GetSignupStepRequest, opts ...grpc.CallOption) (*GetSignupStepResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SignupResponse)
-	err := c.cc.Invoke(ctx, SignupService_Signup_FullMethodName, in, out, cOpts...)
+	out := new(GetSignupStepResponse)
+	err := c.cc.Invoke(ctx, SignupService_GetSignupStep_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -252,13 +259,6 @@ type SignupServiceServer interface {
 	// Distinguishing them would turn this RPC into a checker for which tokens
 	// and which signups exist.
 	RedeemEmailVerification(context.Context, *RedeemEmailVerificationRequest) (*RedeemEmailVerificationResponse, error)
-	// AttachSignupCustomer records the billing customer created for a verified
-	// signup session, so the completion path does not have to trust the client
-	// for the customer id.
-	//
-	// Only reachable with a live verified session, which is what keeps billing
-	// objects from existing for unproven addresses.
-	AttachSignupCustomer(context.Context, *AttachSignupCustomerRequest) (*AttachSignupCustomerResponse, error)
 	// Signup completes a verified signup: it creates the founding-owner Zitadel
 	// human user with the supplied password and enqueues the tenant for
 	// operator-pull provisioning.
@@ -274,7 +274,15 @@ type SignupServiceServer interface {
 	//
 	// The session is consumed on success, so the completion cookie cannot be
 	// replayed into a second tenant.
+	//
+	// With a signup step configured, the tenant waits for the step and the
+	// response carries step_url and step_token.
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
+	// GetSignupStep reports the state of the external signup step of one
+	// signup attempt. The attempt id is the capability, as for
+	// GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+	// the answer does not tell a caller which attempts exist.
+	GetSignupStep(context.Context, *GetSignupStepRequest) (*GetSignupStepResponse, error)
 	// Register is the APPROVAL rung's single registration call (ADR-0074,
 	// gibson#22). It is served only when the deployment selects that rung, and
 	// the four RPCs above are refused on it; on every other rung Register is
@@ -317,11 +325,11 @@ func (UnimplementedSignupServiceServer) RequestEmailVerification(context.Context
 func (UnimplementedSignupServiceServer) RedeemEmailVerification(context.Context, *RedeemEmailVerificationRequest) (*RedeemEmailVerificationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RedeemEmailVerification not implemented")
 }
-func (UnimplementedSignupServiceServer) AttachSignupCustomer(context.Context, *AttachSignupCustomerRequest) (*AttachSignupCustomerResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AttachSignupCustomer not implemented")
-}
 func (UnimplementedSignupServiceServer) Signup(context.Context, *SignupRequest) (*SignupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Signup not implemented")
+}
+func (UnimplementedSignupServiceServer) GetSignupStep(context.Context, *GetSignupStepRequest) (*GetSignupStepResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSignupStep not implemented")
 }
 func (UnimplementedSignupServiceServer) Register(context.Context, *RegisterRequest) (*RegisterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Register not implemented")
@@ -383,24 +391,6 @@ func _SignupService_RedeemEmailVerification_Handler(srv interface{}, ctx context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _SignupService_AttachSignupCustomer_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AttachSignupCustomerRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SignupServiceServer).AttachSignupCustomer(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: SignupService_AttachSignupCustomer_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SignupServiceServer).AttachSignupCustomer(ctx, req.(*AttachSignupCustomerRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _SignupService_Signup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SignupRequest)
 	if err := dec(in); err != nil {
@@ -415,6 +405,24 @@ func _SignupService_Signup_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(SignupServiceServer).Signup(ctx, req.(*SignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SignupService_GetSignupStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSignupStepRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SignupServiceServer).GetSignupStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SignupService_GetSignupStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SignupServiceServer).GetSignupStep(ctx, req.(*GetSignupStepRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -453,12 +461,12 @@ var SignupService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SignupService_RedeemEmailVerification_Handler,
 		},
 		{
-			MethodName: "AttachSignupCustomer",
-			Handler:    _SignupService_AttachSignupCustomer_Handler,
-		},
-		{
 			MethodName: "Signup",
 			Handler:    _SignupService_Signup_Handler,
+		},
+		{
+			MethodName: "GetSignupStep",
+			Handler:    _SignupService_GetSignupStep_Handler,
 		},
 		{
 			MethodName: "Register",

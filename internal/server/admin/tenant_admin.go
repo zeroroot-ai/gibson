@@ -55,6 +55,7 @@ import (
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -257,7 +258,7 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 
 // GetBrokerConfig returns the redacted current configuration. Sensitive
 // fields are NEVER returned.
-func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.GetBrokerConfigRequest) (*tenantv1.GetBrokerConfigResponse, error) {
+func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *secretsv1.GetBrokerConfigRequest) (*secretsv1.GetBrokerConfigResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -266,7 +267,7 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.Get
 	cfg, err := s.reader.Get(ctx, tenant)
 	if err != nil {
 		if errors.Is(err, secrets.ErrBrokerConfigNotFound) {
-			return &tenantv1.GetBrokerConfigResponse{Configured: false}, nil
+			return &secretsv1.GetBrokerConfigResponse{Configured: false}, nil
 		}
 		return nil, status.Errorf(codes.Internal, "read broker config: %v", err)
 	}
@@ -275,14 +276,14 @@ func (s *TenantAdminServer) GetBrokerConfig(ctx context.Context, _ *tenantv1.Get
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "redact: %v", err)
 	}
-	return &tenantv1.GetBrokerConfigResponse{
+	return &secretsv1.GetBrokerConfigResponse{
 		Config:     redacted,
 		Configured: true,
 	}, nil
 }
 
 // ProbeBrokerConfig tests a candidate config without persisting.
-func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *tenantv1.ProbeBrokerConfigRequest) (*tenantv1.ProbeBrokerConfigResponse, error) {
+func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *secretsv1.ProbeBrokerConfigRequest) (*secretsv1.ProbeBrokerConfigResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -299,11 +300,11 @@ func (s *TenantAdminServer) ProbeBrokerConfig(ctx context.Context, req *tenantv1
 	start := s.now()
 	probeRes := s.probeOnce(ctx, providerName, blob)
 	probeRes.DurationMs = time.Since(start).Milliseconds()
-	return &tenantv1.ProbeBrokerConfigResponse{Result: probeRes}, nil
+	return &secretsv1.ProbeBrokerConfigResponse{Result: probeRes}, nil
 }
 
 // SetBrokerConfig probes then persists.
-func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.SetBrokerConfigRequest) (*tenantv1.SetBrokerConfigResponse, error) {
+func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *secretsv1.SetBrokerConfigRequest) (*secretsv1.SetBrokerConfigResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -324,7 +325,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.S
 	probeRes.DurationMs = time.Since(start).Milliseconds()
 	if !probeRes.GetOk() {
 		// Return PreconditionFailed with the structured probe result.
-		return &tenantv1.SetBrokerConfigResponse{ProbeResult: probeRes},
+		return &secretsv1.SetBrokerConfigResponse{ProbeResult: probeRes},
 			status.Errorf(codes.FailedPrecondition, "probe failed: %s", probeRes.GetErrorClass())
 	}
 
@@ -360,13 +361,13 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.S
 	if err != nil {
 		// Persistence succeeded; redaction read-back failed. Return
 		// success with a minimal redacted view.
-		redacted = &tenantv1.RedactedConfig{
+		redacted = &secretsv1.RedactedConfig{
 			Provider:      candidateProvider(req.GetCandidate()),
 			UpdatedAtUnix: s.now().UTC().Unix(),
 			UpdatedBy:     identity.Subject,
 		}
 	}
-	return &tenantv1.SetBrokerConfigResponse{
+	return &secretsv1.SetBrokerConfigResponse{
 		Config:      redacted,
 		ProbeResult: probeRes,
 	}, nil
@@ -382,7 +383,7 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *tenantv1.S
 // secrets.Service.List path already audits via the existing AuditWriter
 // pipeline. Double-auditing on a count surface would inflate the audit
 // stream for an essentially-free read.
-func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *tenantv1.CountSecretsRequest) (*tenantv1.CountSecretsResponse, error) {
+func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *secretsv1.CountSecretsRequest) (*secretsv1.CountSecretsResponse, error) {
 	if _, ok := auth.TenantFromContext(ctx); !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
@@ -391,7 +392,7 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *tenantv1.CountS
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "list secrets: %v", err)
 	}
-	return &tenantv1.CountSecretsResponse{Count: int64(len(names))}, nil
+	return &secretsv1.CountSecretsResponse{Count: int64(len(names))}, nil
 }
 
 // rosterRoleRelations are the FGA relations ListMembers checks for each
@@ -612,30 +613,30 @@ func hasPrefixFold(s, prefix string) bool {
 
 // probeOnce constructs a candidate provider and probes it. Result.Ok is
 // true on success.
-func (s *TenantAdminServer) probeOnce(ctx context.Context, providerName string, blob []byte) *tenantv1.ProbeResult {
+func (s *TenantAdminServer) probeOnce(ctx context.Context, providerName string, blob []byte) *secretsv1.ProbeResult {
 	candidate, err := s.probeFac.Construct(providerName, blob)
 	if err != nil {
-		return &tenantv1.ProbeResult{
+		return &secretsv1.ProbeResult{
 			Ok:           false,
 			ErrorClass:   "provider_construct_failed",
 			ErrorMessage: redactProbeMessage(err.Error()),
 		}
 	}
 	if err := candidate.Probe(ctx); err != nil {
-		return &tenantv1.ProbeResult{
+		return &secretsv1.ProbeResult{
 			Ok:           false,
 			ErrorClass:   classifyProbeError(err),
 			ErrorMessage: redactProbeMessage(err.Error()),
 		}
 	}
-	return &tenantv1.ProbeResult{Ok: true}
+	return &secretsv1.ProbeResult{Ok: true}
 }
 
 // candidateProvider returns the provider name for a candidate without
 // converting to the canonical lowercase string. Used in fallback paths.
-func candidateProvider(c *tenantv1.CandidateConfig) tenantv1.BrokerProvider {
+func candidateProvider(c *secretsv1.CandidateConfig) secretsv1.BrokerProvider {
 	if c == nil {
-		return tenantv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
+		return secretsv1.BrokerProvider_BROKER_PROVIDER_UNSPECIFIED
 	}
 	return c.GetProvider()
 }

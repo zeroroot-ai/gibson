@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	destructiveauthzv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -56,15 +57,17 @@ func (s *destructiveAuthzServer) queue(ctx context.Context) (*brain.DestructiveA
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(t.String()).DestructiveAuthorizationQueue(), nil
+	eng, ok := api.TenantEngine(s.registry, t.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return eng.DestructiveAuthorizationQueue(), nil
 }
 
 // toPendingDestructiveActionPB converts a brain.DestructiveActionSnapshot
-// into its wire representation. BlastRadius/Reversibility are left at their
-// zero values: ADR-0132's Domain Pack risk-tier signal is not
-// built yet (see the .proto's Reversibility doc comment) — every action
-// reaching this queue is already known destructive via
-// BetSettlementRequest.Destructive alone, which is why it is here at all.
+// into its wire representation. The blast radius and the reversibility are
+// what the agent reported with the request (ADR-0132). They are empty when
+// the agent reported no signal.
 func toPendingDestructiveActionPB(a brain.DestructiveActionSnapshot) *destructiveauthzv1.PendingDestructiveAction {
 	return &destructiveauthzv1.PendingDestructiveAction{
 		ActionId:          a.HypothesisID,
@@ -74,6 +77,8 @@ func toPendingDestructiveActionPB(a brain.DestructiveActionSnapshot) *destructiv
 		Technique:         a.Technique,
 		PredicateType:     a.PredicateType,
 		RequestedAtUnixMs: a.RequestedAtUnixMS,
+		BlastRadius:       a.BlastRadius,
+		Reversibility:     destructiveauthzv1.Reversibility(a.Reversibility),
 	}
 }
 

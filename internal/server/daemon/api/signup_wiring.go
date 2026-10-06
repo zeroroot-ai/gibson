@@ -50,7 +50,6 @@ type signupVerificationStore interface {
 	LastSentAt(ctx context.Context, email string) (time.Time, bool, error)
 	RedeemToken(ctx context.Context, rawToken string) (SignupVerification, string, error)
 	GetByVerifiedSession(ctx context.Context, rawSession string) (SignupVerification, error)
-	AttachStripeCustomer(ctx context.Context, rawSession, customerID string) error
 	ClaimCompletion(ctx context.Context, rawSession string) (SignupVerification, error)
 	MarkConsumed(ctx context.Context, rawSession string) error
 	PurgeExpired(ctx context.Context) (expired, deleted int64, err error)

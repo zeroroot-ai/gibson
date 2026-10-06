@@ -11,15 +11,10 @@ import "sort"
 // bounded neighborhood "toward" the target rather than the full attack graph
 // DeriveAttackGraph derives (gibson#286).
 //
-// The whole-graph DAG is already acyclic, and any subgraph of a DAG is itself
-// acyclic — so, unlike DeriveAttackGraph, this file runs no cycle-breaking of
-// its own. ADR-0129's "a back-edge dropped in one node's slice is a
-// forward edge in another's" describes cycle-breaking done per-slice directly
-// against a cyclic infra graph; this codebase instead derives one global DAG
-// once (gibson#286) and slices THAT, which is a strictly simpler, equally
-// faithful reading the two issues' own blocking relationship states (#287 is
-// "blocked by gibson#286 (the derived DAG to slice)" — its input is already a
-// DAG, not the raw infra graph).
+// The input can hold a cycle: the belief engine slices the uncut
+// EnablementGraph. ExtractBoundedSlice breaks the cycles of the slice itself
+// (BreakCycles), so an edge that a cut of the whole graph would remove stays
+// in each slice where it makes no cycle (ADR-0129, gibson#700).
 
 // SliceOptions bounds how far ExtractBoundedSlice expands from its target and
 // how large the result may grow before relevance-based pruning kicks in
@@ -54,9 +49,9 @@ type SliceOptions struct {
 // smaller (lexicographically) stable node id, the same tiebreak
 // DeriveAttackGraph (gibson#286) uses.
 //
-// graph must already be acyclic (DeriveAttackGraph's output). A subgraph of a
-// DAG can never contain a cycle, so no cycle-breaking runs here — see the
-// file doc comment. Returns an empty AttackGraph if target is not in graph.
+// graph can hold a cycle. The walk visits each node one time, and the slice
+// it returns is acyclic: BreakCycles runs on the slice. Returns an empty
+// AttackGraph if target is not in graph.
 //
 // The same graph (any node/edge order), target, opts and relevance always
 // produce the same slice: BFS distance does not depend on visit order, and
@@ -73,7 +68,25 @@ func ExtractBoundedSlice(graph AttackGraph, target string, opts SliceOptions, re
 
 	depth := sliceBackwardBFS(byID, graph.Edges, target, opts.MaxDepth)
 	kept := sliceSelectByBudget(depth, target, opts.NodeBudget, relevance)
-	return sliceBuildGraph(byID, graph.Edges, kept)
+	return BreakCycles(sliceDropTargetOutEdges(sliceBuildGraph(byID, graph.Edges, kept), target))
+}
+
+// sliceDropTargetOutEdges moves each edge out of target into Dropped. The
+// slice holds the ancestors of target, so an edge out of target closes a cycle
+// back through target, and the belief of target does not depend on it. With
+// those edges gone, the cut that BreakCycles makes never removes an edge into
+// target when another edge of the cycle can go.
+func sliceDropTargetOutEdges(g AttackGraph, target string) AttackGraph {
+	kept := g.Edges[:0:0]
+	for _, e := range g.Edges {
+		if e.From == target {
+			g.Dropped = append(g.Dropped, e)
+			continue
+		}
+		kept = append(kept, e)
+	}
+	g.Edges = kept
+	return g
 }
 
 // sliceBackwardBFS walks graph.Edges backward from target — over

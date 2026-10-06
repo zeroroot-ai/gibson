@@ -492,9 +492,10 @@ func (s *TenantAdminServer) tenantOf(ctx context.Context, tenantID string) (tena
 // TransferOwnership (#397)
 // ---------------------------------------------------------------------------
 
-// TransferOwnership moves the owner relation from the caller to
-// new_owner_user_id in a single atomic FGA write, granting the caller admin
-// in the same transaction (hosted#190, ADR-0093 §5).
+// TransferOwnership moves the Owner role from the caller to
+// new_owner_user_id and makes the caller an Admin (hosted#190, ADR-0093 §5).
+// Zitadel owns tenant roles: Roles.Transfer writes the two Zitadel grants
+// first, then Roles.Sync copies them into FGA.
 //
 // Rules, each enforced before any FGA mutation:
 //   - Only the tenant's current Owner may call this RPC. The authz registry
@@ -503,11 +504,10 @@ func (s *TenantAdminServer) tenantOf(ctx context.Context, tenantID string) (tena
 //     this code by some path other than the ext-authz-fronted one.
 //   - new_owner_user_id must already be a member of the caller's tenant
 //     (holds at least the "member" relation, which every tenant role implies).
-//   - The transfer itself — delete the caller's owner tuple, write the new
-//     owner's owner tuple, write the caller's admin tuple — is one FGA
-//     WriteRequest via AtomicWriter.WriteAndDelete. OpenFGA applies all of it
-//     or none of it, so the tenant is never observed with zero or two Owners,
-//     and a failure leaves the caller as the sole, unchanged Owner.
+//   - The FGA copy of the transfer — delete the caller's owner tuple, write
+//     the new owner's owner tuple, write the caller's admin tuple — is one
+//     WriteAndDelete, so FGA never holds zero or two Owners. The Zitadel
+//     write comes before it and is not in the same transaction.
 //
 // Transferring ownership to oneself is a no-op: it still requires the caller
 // to already be Owner, and performs no FGA write.

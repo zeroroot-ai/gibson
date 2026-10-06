@@ -38,7 +38,7 @@ import (
 
 // HostNodeID is the InfraNode.ID / NodeRef.ID a Host's stable brain id maps
 // to (ADR-0129's graph and slice types use string ids; Host.ID is a uint64).
-// HostsToInfraGraph and WorldBeliefSubstrate both use this exact mapping, so
+// The infra graph (belief_infra_graph.go) and WorldBeliefSubstrate both use this exact mapping, so
 // a slice-gate write can always find the host it means to.
 func HostNodeID(id uint64) string { return strconv.FormatUint(id, 10) }
 
@@ -49,20 +49,6 @@ func ParseHostNodeID(s string) (uint64, error) {
 		return 0, fmt.Errorf("belief world substrate: %q is not a host node id: %w", s, err)
 	}
 	return id, nil
-}
-
-// HostsToInfraGraph converts a live host snapshot list into the InfraNode set
-// DeriveAttackGraph consumes (gibson#286). It carries no edges: no enablement
-// relationship between two Hosts exists in the current evidence model (Host
-// has no field referencing another host) — this is an honest reflection of
-// today's data, not a limitation of the derivation machinery, which already
-// handles edges the moment a future evidence-collection slice produces them.
-func HostsToInfraGraph(hosts []HostSnapshot) []InfraNode {
-	nodes := make([]InfraNode, 0, len(hosts))
-	for _, h := range hosts {
-		nodes = append(nodes, InfraNode{ID: HostNodeID(h.ID), Kind: "Host"})
-	}
-	return nodes
 }
 
 // WorldBeliefSubstrate is the BeliefSubstrate backing the live per-tenant
@@ -90,7 +76,9 @@ func (s *WorldBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelie
 		}
 		for _, h := range s.eng.Hosts() {
 			if h.ID == id {
-				return NodeBelief{Belief: h.Belief, EvidenceDigest: h.EvidenceDigest}, true, nil
+				// The read returns each field that SetBelief writes, the causes
+				// too, so a reader can tell a new score from the stored one.
+				return NodeBelief{Belief: h.Belief, EvidenceDigest: h.EvidenceDigest, CauseEdgeTypes: h.CauseEdgeTypes}, true, nil
 			}
 		}
 		return NodeBelief{}, false, nil
@@ -100,7 +88,7 @@ func (s *WorldBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelie
 	}
 	for _, nb := range s.eng.NodeBeliefs() {
 		if nb.Ref == ref {
-			return NodeBelief{Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest}, true, nil
+			return NodeBelief{Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest, CauseEdgeTypes: nb.CauseEdgeTypes}, true, nil
 		}
 	}
 	return NodeBelief{}, false, nil

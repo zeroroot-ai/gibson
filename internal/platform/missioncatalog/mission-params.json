@@ -1,0 +1,26 @@
+{
+  "_comment": "Generated from internal/platform/missioncatalog/missions/*.cue in zeroroot-ai/gibson. Do not edit. The daemon refuses a parameter that this file does not list, and a request that omits one.",
+  "missions": {
+    "cluster-assessment": {
+      "version": "1.0.0",
+      "params": [
+        "bank",
+        "forgeConnector",
+        "kubeconfigSecret",
+        "manifestsProject"
+      ]
+    },
+    "scan": {
+      "version": "1.0.0",
+      "params": [
+        "application",
+        "commit",
+        "imageRef",
+        "pipelineId",
+        "pipelineUrl",
+        "ref",
+        "repositoryUrl"
+      ]
+    }
+  }
+}

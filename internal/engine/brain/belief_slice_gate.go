@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 )
@@ -311,6 +312,26 @@ func (w *SliceBeliefWorker) Tap(req SliceScoreRequested) {
 	w.mu.Unlock()
 }
 
+// changesABelief reports whether one of nodes holds a belief that differs from
+// the belief that the substrate holds now. The EvidenceDigest is not part of
+// the comparison: Apply keeps the current one.
+func (w *SliceBeliefWorker) changesABelief(ctx context.Context, nodes []ScoredNode) (bool, error) {
+	for _, n := range nodes {
+		existing, ok, err := w.gate.substrate.Belief(ctx, n.Ref)
+		if err != nil {
+			return false, fmt.Errorf("read the belief of %s: %w", n.Ref.ID, err)
+		}
+		if !ok {
+			return true, nil
+		}
+		// A nil and an empty cause list are the same list.
+		if n.Belief.Belief != existing.Belief || !slices.Equal(n.Belief.CauseEdgeTypes, existing.CauseEdgeTypes) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Drain scores every buffered request off the tick, applies each result, and
 // invalidates that request's bounded downstream neighbourhood (propagateOpts)
 // when the apply lands (not when it is dropped as stale — a stale score
@@ -326,21 +347,35 @@ func (w *SliceBeliefWorker) Drain(ctx context.Context, graph AttackGraph, propag
 
 	affectedSet := make(map[string]struct{})
 	for _, req := range reqs {
+		// A slice answers for its target only. Each slice breaks its own
+		// cycles (gibson#700), so the posterior of another node in this slice
+		// is computed on a cut that its own slice does not make. A write of it
+		// would fight the score of that node's own slice, and the rounds would
+		// never settle. Each node is the target of its own slice, so each node
+		// still gets a score.
 		result := w.provider.ScoreSlice(req.Slice)
-		nodes := make([]ScoredNode, 0, len(req.Slice.Nodes))
+		var nodes []ScoredNode
 		for _, n := range req.Slice.Nodes {
-			nb, ok := result[n.ID]
-			if !ok {
+			if n.ID != req.Target {
 				continue
 			}
-			nodes = append(nodes, ScoredNode{Ref: NodeRef{Kind: NodeKind(n.Kind), ID: n.ID}, Belief: nb})
+			if nb, ok := result[n.ID]; ok {
+				nodes = append(nodes, ScoredNode{Ref: NodeRef{Kind: NodeKind(n.Kind), ID: n.ID}, Belief: nb})
+			}
 		}
 
+		changed, changeErr := w.changesABelief(ctx, nodes)
+		if changeErr != nil {
+			return 0, nil, fmt.Errorf("slice drain: target %s: %w", req.Target, changeErr)
+		}
 		applied, applyErr := w.gate.Apply(ctx, SliceScored{Target: req.Target, Nodes: nodes, Digest: req.Digest})
 		if applyErr != nil {
 			return 0, nil, fmt.Errorf("slice drain: apply for target %s: %w", req.Target, applyErr)
 		}
-		if !applied {
+		// A score that changes no belief carries nothing to propagate. On a
+		// cycle of nodes, a propagation of an unchanged score would invalidate
+		// the whole cycle on each round, and the rounds would never settle.
+		if !applied || !changed {
 			continue
 		}
 		for _, id := range w.gate.Invalidate(graph, req.Target, propagateOpts) {

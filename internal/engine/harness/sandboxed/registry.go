@@ -40,6 +40,10 @@ type ToolSpec struct {
 	// Sandbox isolation is unconditional; this only bounds egress breadth.
 	Egress []EgressRule
 
+	// NetworkMode, when set, is the network mode of the launch. It carries
+	// the network scope of the mission node that starts the tool (gibson#865).
+	NetworkMode string
+
 	// Live carries the per-call scope the running-sandbox console keys by.
 	// Like Egress it is dispatch-time scope, not catalog data: the caller
 	// fills it from the request it is serving. An empty Tenant disables

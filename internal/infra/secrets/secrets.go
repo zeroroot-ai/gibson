@@ -5,8 +5,8 @@
 // provider) circuit breaking and pluggable backend providers.
 //
 // The Broker interface mirrors the shape used by the Gibson daemon's
-// internal secrets stack so platform-clients can serve as a drop-in
-// replacement for OSS-SDK-resident broker code. Daemon-side consumers
+// internal secrets stack, so this package replaces the broker code that
+// lived in the OSS SDK. Daemon-side consumers
 // resolve a per-tenant Broker via a registry and invoke
 // Get/Put/Delete/List/Health/Probe/Capabilities directly.
 //

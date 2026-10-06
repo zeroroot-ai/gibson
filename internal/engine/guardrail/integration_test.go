@@ -95,7 +95,7 @@ func TestPipeline_MultipleGuardrails(t *testing.T) {
 				Content:  "Fetch data from the API",
 				ToolName: "web_fetch",
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://api.example.com/data",
+					Connection: map[string]any{"url": "https://api.example.com/data"},
 				},
 			},
 			wantErr:     false,
@@ -118,7 +118,7 @@ func TestPipeline_MultipleGuardrails(t *testing.T) {
 			input: guardrail.GuardrailInput{
 				Content: "Access unauthorized site",
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://evil.com/data",
+					Connection: map[string]any{"url": "https://evil.com/data"},
 				},
 			},
 			wantErr:     true,
@@ -271,10 +271,10 @@ func TestPipeline_RealisticAgentScenarios(t *testing.T) {
 				AgentName: "recon-agent",
 				ToolName:  "port_scanner",
 				TargetInfo: &harness.TargetInfo{
-					ID:   types.NewID(),
-					Name: "test-target",
-					URL:  "https://target.example.com",
-					Type: "web-server",
+					ID:         types.NewID(),
+					Name:       "test-target",
+					Connection: map[string]any{"url": "https://target.example.com"},
+					Type:       "web-server",
 				},
 				MissionContext: &harness.MissionContext{
 					ID:           types.NewID(),
@@ -294,7 +294,7 @@ func TestPipeline_RealisticAgentScenarios(t *testing.T) {
 				AgentName: "scanner-agent",
 				ToolName:  "web_fetch",
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://target.example.com/admin/users",
+					Connection: map[string]any{"url": "https://target.example.com/admin/users"},
 				},
 			},
 			wantErr:     true,
@@ -337,8 +337,8 @@ func TestPipeline_RealisticAgentScenarios(t *testing.T) {
 				AgentName: "network-agent",
 				ToolName:  "nmap",
 				TargetInfo: &harness.TargetInfo{
-					URL:  "https://target.example.com",
-					Type: "network",
+					Connection: map[string]any{"url": "https://target.example.com"},
+					Type:       "network",
 				},
 			},
 			wantErr:     false,
@@ -416,7 +416,7 @@ func TestPipeline_ShortCircuitOnBlock(t *testing.T) {
 			input: guardrail.GuardrailInput{
 				Content: "Access blocked domain",
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://evil.com/data",
+					Connection: map[string]any{"url": "https://evil.com/data"},
 				},
 			},
 			expectedBlocker:  "scope-validator",
@@ -460,7 +460,7 @@ func TestPipeline_ShortCircuitOnBlock(t *testing.T) {
 			input: guardrail.GuardrailInput{
 				Content: "This contains forbidden content",
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://api.example.com",
+					Connection: map[string]any{"url": "https://api.example.com"},
 				},
 			},
 			expectedBlocker:  "content-filter",
@@ -559,7 +559,7 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 						AgentName: agentName,
 						ToolName:  "web_fetch",
 						TargetInfo: &harness.TargetInfo{
-							URL: fmt.Sprintf("https://%s/api/data", targetDomain),
+							Connection: map[string]any{"url": fmt.Sprintf("https://%s/api/data", targetDomain)},
 						},
 					}
 
@@ -629,7 +629,7 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 						AgentName: agentName,
 						ToolName:  "web_fetch",
 						TargetInfo: &harness.TargetInfo{
-							URL: "https://shared-target.example.com/api/data",
+							Connection: map[string]any{"url": "https://shared-target.example.com/api/data"},
 						},
 					}
 
@@ -685,7 +685,7 @@ func TestPipeline_ConcurrentUsage(t *testing.T) {
 					AgentName: fmt.Sprintf("agent-%d", idx),
 					ToolName:  "log_message",
 					TargetInfo: &harness.TargetInfo{
-						URL: fmt.Sprintf("https://target%d.example.com", idx),
+						Connection: map[string]any{"url": fmt.Sprintf("https://target%d.example.com", idx)},
 					},
 				}
 

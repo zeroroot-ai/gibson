@@ -30,14 +30,12 @@ import (
 // forever on a dead target.
 const defaultDelegateTimeout = 5 * time.Minute
 
-// agentDelegateWorkType is the WorkType a delegated task is enqueued under.
-// MUST match internal/engine/harness/implementation.go's
-// dispatchWorkAndWait(..., "agent", ..., "agent_execute", ...) call in
-// delegateToAgentViaWorkQueue: the target agent is the same physical
-// component whichever path dispatched to it, and it parses every "agent"-kind
-// work item's payload as a protojson-encoded agentpb.ExecuteRequest regardless
-// of who enqueued it.
-const agentDelegateWorkType = "agent_execute"
+// WorkTypeAgentExecute is the work type of an agent dispatch on the component
+// work queue (ADR-0111). It is the one definition. The harness uses it for a
+// mission node, and this service uses it for a delegated task. The target
+// agent is the same component on each path, and it reads the payload of each
+// item of this type as a protojson `agentpb.ExecuteRequest`.
+const WorkTypeAgentExecute = "agent_execute"
 
 // DelegateToAgent hands a sub-task to another enrolled agent WITHIN the
 // caller's current mission and returns its result (gibson#1186 slice C).
@@ -53,7 +51,7 @@ const agentDelegateWorkType = "agent_execute"
 // the same shape CallTool already uses.
 //
 // The target agent receives the SAME wire contract the in-cluster harness's
-// delegateToAgentViaWorkQueue already dispatches: WorkType "agent_execute", a
+// delegateToAgentViaWorkQueue already dispatches: WorkTypeAgentExecute, a
 // protojson-encoded agentpb.ExecuteRequest payload, and a protojson-encoded
 // agentpb.ExecuteResponse result. An agent that already serves in-cluster
 // delegation (gibson#1197) needs no change to also serve this off-cluster
@@ -148,7 +146,7 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	workID := uuid.New().String()
 	workItem := WorkItem{
 		WorkID:   workID,
-		WorkType: agentDelegateWorkType,
+		WorkType: WorkTypeAgentExecute,
 		Payload:  payload,
 		Context:  workCtx,
 	}

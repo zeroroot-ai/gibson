@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
@@ -301,21 +300,21 @@ func newMissionContext(ctx context.Context, tenant auth.TenantID) (context.Conte
 }
 
 // setActive registers a mission in the tenant-partitioned active map (C9 closure).
-func (mm *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	if mm.activeMissions[tenant] == nil {
-		mm.activeMissions[tenant] = make(map[string]*activeMission)
+func (m *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeMissions[tenant] == nil {
+		m.activeMissions[tenant] = make(map[string]*activeMission)
 	}
-	mm.activeMissions[tenant][missionID] = am
+	m.activeMissions[tenant][missionID] = am
 }
 
 // getActive retrieves an active mission scoped to the given tenant (C9 closure).
 // Returns nil, false if not found.
-func (mm *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
-	mm.mu.RLock()
-	defer mm.mu.RUnlock()
-	if sub, ok := mm.activeMissions[tenant]; ok {
+func (m *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if sub, ok := m.activeMissions[tenant]; ok {
 		am, exists := sub[missionID]
 		return am, exists
 	}
@@ -323,16 +322,16 @@ func (mm *missionManager) getActive(tenant auth.TenantID, missionID string) (*ac
 }
 
 // deleteActive removes a mission from the active map (C9 closure).
-func (mm *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
-	if sub, ok := mm.activeMissions[tenant]; ok {
+func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if sub, ok := m.activeMissions[tenant]; ok {
 		delete(sub, missionID)
 		if len(sub) == 0 {
-			delete(mm.activeMissions, tenant)
+			delete(m.activeMissions, tenant)
 		}
 	}
-	mm.completedCount++
+	m.completedCount++
 }
 
 // Run starts a mission by reference and returns an event channel for progress
@@ -1013,9 +1012,6 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	}
 	defer poolConn.Release()
 
-	// Wrap the per-tenant session as a GraphClient for the mission graph bootstrap.
-	graphClient := graph.NewSessionGraphClient(poolConn.Neo4j)
-
 	// Use the MissionRun from active mission (already created in Run())
 	missionRun := active.missionRun
 	if missionRun == nil {
@@ -1056,7 +1052,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Bootstrap mission graph structure before execution, from the projection:
 	// one graph node per unit of work that will actually run, each fan-out
 	// instance naming its own target (gibson#528).
-	bootstrapper := NewGraphBootstrapper(graphClient, m.graphWriter, m.logger)
+	bootstrapper := NewGraphBootstrapper(m.graphWriter, m.logger)
 	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins, fanTargets)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
@@ -1287,7 +1283,10 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 	if tenantErr != nil {
 		return nil, 0, tenantErr
 	}
-	eng := m.brainRegistry.For(tenant.String())
+	eng, ok := api.TenantEngine(m.brainRegistry, tenant.String())
+	if !ok {
+		return nil, 0, api.ErrWorldUnavailable
+	}
 	snapshots := eng.Missions()
 
 	var result []api.MissionData
@@ -1299,7 +1298,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		if activeOnly && ms.Status != brain.MissionRunning && ms.Status != brain.MissionPaused {
 			continue
 		}
-		result = append(result, missionSnapshotToData(ms))
+		result = append(result, missionSnapshotToData(eng, ms))
 	}
 
 	total := len(result)
@@ -1329,7 +1328,10 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 	if tenantErr != nil {
 		return nil, tenantErr
 	}
-	eng := m.brainRegistry.For(tenant.String())
+	eng, ok := api.TenantEngine(m.brainRegistry, tenant.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
 	for _, ms := range eng.Missions() {
 		if ms.ID != missionID {
 			continue
@@ -1338,7 +1340,7 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			break
 		}
-		data := missionSnapshotToData(ms)
+		data := missionSnapshotToData(eng, ms)
 		return &data, nil
 	}
 	return nil, fmt.Errorf("mission %s not found", missionID)
@@ -1346,9 +1348,10 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 
 // missionSnapshotToData converts a brain.MissionSnapshot (World-derived, ADR-0163)
 // to api.MissionData. Status and progress are authoritative — they come from the
-// folded World, not a secondary store.
-func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
-	return api.MissionData{
+// folded World, not a secondary store. The parent of a rewound mission comes
+// from the same World (ADR-0170).
+func missionSnapshotToData(eng *brain.Engine, ms brain.MissionSnapshot) api.MissionData {
+	data := api.MissionData{
 		ID:           ms.ID,
 		TenantID:     ms.TenantID,
 		Name:         ms.Name,
@@ -1359,6 +1362,11 @@ func missionSnapshotToData(ms brain.MissionSnapshot) api.MissionData {
 		FindingCount: ms.FindingsCount,
 		CreatedBy:    ms.CreatedBy,
 	}
+	if r, ok := eng.MissionRewind(ms.ID); ok {
+		data.ParentMissionID = r.ParentMissionID
+		data.ParentCheckpointID = r.ParentCheckpointID
+	}
+	return data
 }
 
 // worldMissionStatus returns the current status string for missionID from the

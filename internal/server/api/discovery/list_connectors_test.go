@@ -71,13 +71,13 @@ func TestListConnectors_RwxPerCaller(t *testing.T) {
 		"user:alice|can_read|component:connector/gitlab":    true,
 		"user:alice|can_execute|component:connector/gitlab": true,
 		// can_configure absent → Write false.
-		"user:alice|can_read|component:connector/osv": true,
-		// osv execute denied.
+		"user:alice|can_read|component:connector/hosted-fixture": true,
+		// hosted-fixture execute denied.
 		// ghost is enabled but no longer in the embedded catalog: it must
 		// stay visible and gateable, falling back to its bare id.
 		"user:alice|can_read|component:connector/ghost": true,
 	}}
-	s := NewServer(az, nil, &stubConnectorLister{ids: []string{"gitlab", "osv", "ghost"}}, nil)
+	s := NewServer(az, nil, &stubConnectorLister{ids: []string{"gitlab", "hosted-fixture", "ghost"}}, nil)
 
 	resp, err := s.ListConnectors(discoveryCallerCtx(t, "alice", "acme"), &discoverypb.ListConnectorsRequest{})
 	if err != nil {
@@ -97,9 +97,9 @@ func TestListConnectors_RwxPerCaller(t *testing.T) {
 	if g == nil || !g.GetRwx().GetRead() || g.GetRwx().GetWrite() || !g.GetRwx().GetExecute() {
 		t.Fatalf("gitlab rwx = %+v, want read+execute only", g.GetRwx())
 	}
-	o := byName["osv"]
+	o := byName["hosted-fixture"]
 	if o == nil || o.GetRwx().GetExecute() {
-		t.Fatalf("osv rwx = %+v, want execute denied", o.GetRwx())
+		t.Fatalf("hosted-fixture rwx = %+v, want execute denied", o.GetRwx())
 	}
 	if g.GetDisplayName() == "" {
 		t.Error("catalog-backed connector must carry a display name")
@@ -114,7 +114,7 @@ func TestListConnectors_ActionFilterExcludesDenied(t *testing.T) {
 	az := &stubDiscoveryAuthorizer{allowed: map[string]bool{
 		"user:alice|can_execute|component:connector/gitlab": true,
 	}}
-	s := NewServer(az, nil, &stubConnectorLister{ids: []string{"gitlab", "osv"}}, nil)
+	s := NewServer(az, nil, &stubConnectorLister{ids: []string{"gitlab", "hosted-fixture"}}, nil)
 
 	resp, err := s.ListConnectors(discoveryCallerCtx(t, "alice", "acme"), &discoverypb.ListConnectorsRequest{
 		Query: &discoverypb.ListQuery{Action: discoverypb.Action_ACTION_EXECUTE},

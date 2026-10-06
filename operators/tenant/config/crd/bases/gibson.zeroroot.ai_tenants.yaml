@@ -288,14 +288,6 @@ spec:
                 - Terminating
                 - Terminated
                 type: string
-              stripeCustomerId:
-                description: |-
-                  StripeCustomerID is the Stripe customer created for this tenant by the
-                  CreateStripeCustomer saga step. Lives in status (controller-populated,
-                  persisted by the reconciler's Status().Patch) — it was previously a
-                  spec field whose mid-saga write was silently discarded, so every
-                  reconcile created a fresh Stripe customer (tenant-operator#354).
-                type: string
               zitadelOrgID:
                 description: |-
                   ZitadelOrgID is the Zitadel organization ID provisioned for this tenant.

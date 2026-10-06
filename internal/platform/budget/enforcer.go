@@ -50,6 +50,12 @@ type Enforcer interface {
 	// ListStatusByScope returns current usage for every subject with a
 	// configured budget in the given scope. Tenant taken from ctx.
 	ListStatusByScope(ctx context.Context, scope Scope) ([]*Status, error)
+
+	// TenantPeriodUsage returns the tokens and the cost that the named tenant
+	// used in the current budget period, and the end of that period. The
+	// tenant is a parameter, not the ctx tenant: the platform reads the usage
+	// of each tenant for the neutral usage report (ADR-0060, D41).
+	TenantPeriodUsage(ctx context.Context, tenantID string) (tokens, costUSDCents int64, resetAt time.Time)
 }
 
 // TeamMembershipResolver returns the team IDs the current user belongs
@@ -392,6 +398,13 @@ func (e *redisEnforcer) SetBudget(ctx context.Context, b *Budget) error {
 		return fmt.Errorf("set budget %s: %w", key, err)
 	}
 	return nil
+}
+
+// TenantPeriodUsage implements Enforcer.TenantPeriodUsage.
+func (e *redisEnforcer) TenantPeriodUsage(ctx context.Context, tenantID string) (tokens, costUSDCents int64, resetAt time.Time) {
+	now := e.clock()
+	tokens, costUSDCents = e.readCounter(ctx, counterKey(tenantID, ScopeTenant, "", PeriodID(now)))
+	return tokens, costUSDCents, PeriodResetAt(now)
 }
 
 // ListStatusByScope implements Enforcer.ListStatusByScope. Scans the

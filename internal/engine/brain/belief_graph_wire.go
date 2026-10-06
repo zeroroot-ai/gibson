@@ -19,8 +19,7 @@ import (
 //
 // It runs entirely off the engine's own tick, the same architecture
 // WireBelief already uses for the per-host pipeline: a ticker goroutine
-// derives the current attack graph from the World's live hosts
-// (HostsToInfraGraph), Checks every node's bounded slice for a digest change,
+// derives the current attack graph from the World (LiveAttackGraph), Checks every node's bounded slice for a digest change,
 // and Drains whatever that produced through the provider — never inside
 // runSystems, so a slow provider (an HTTP round trip to the sidecar) can never
 // stall the ~50ms tick budget (TestWireSliceBelief_RunsOffTheEngineTick).
@@ -32,12 +31,10 @@ import (
 // path (BeliefScored, applyBeliefScored's existing staleness check) — the two
 // never race, because they write the same field through the same reducer.
 //
-// The current evidence model gives HostsToInfraGraph no cross-host edges (no
-// Host field yet references another Host), so the derived graph today is N
-// isolated Host nodes — an honest reflection of what the evidence model
-// tracks, not a limitation of this wiring: the moment an evidence-collection
-// slice adds a real enablement relationship between hosts, it flows through
-// unchanged.
+// The graph comes from LiveAttackGraph (belief_infra_graph.go): the hosts of
+// the World plus each relationship of the World that the belief schema marks
+// as an enablement edge. With the seed schema only Host bears belief, so an
+// edge reaches the attack graph when it links two hosts.
 
 // Default bounds for the live graph-coupled round (ADR-0129: "the bound
 // lives in the scope", "propagate... bounded"). Exported so the daemon's
@@ -86,8 +83,8 @@ func SliceBeliefRound(
 	propagateOpts SliceOptions,
 ) (checked, scored int, err error) {
 	hosts := eng.Hosts()
-	nodes := HostsToInfraGraph(hosts)
-	graph := DeriveAttackGraph(nodes, nil, registry)
+	// The uncut graph: each slice breaks its own cycles (gibson#700).
+	graph := LiveEnablementGraph(eng, hosts, registry)
 
 	relevance := make(map[string]float64, len(hosts))
 	for _, h := range hosts {

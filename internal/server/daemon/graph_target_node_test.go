@@ -36,9 +36,8 @@ func TestBootstrap_WritesATargetNodePerResolvedTarget(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	client := &recordingGraphClient{}
 	writer := newFakeGraphWriter()
-	b := NewGraphBootstrapper(client, writer, slog.New(slog.DiscardHandler))
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -66,13 +65,9 @@ func TestBootstrap_WritesATargetNodePerResolvedTarget(t *testing.T) {
 		}
 	}
 
-	// The bootstrap must not write a :Target itself — the projector is the sole
-	// writer of a graph node (ADR-0112), same rule as :Mission in gibson#551.
-	for _, w := range client.writes {
-		if targetNodeWritePattern.MatchString(w.cypher) {
-			t.Errorf("the bootstrap wrote a :Target node itself:\n%s", w.cypher)
-		}
-	}
+	// The bootstrap holds no graph client, so it cannot write a :Target
+	// itself: the projector is the sole writer of a graph node (ADR-0112,
+	// gibson#673).
 }
 
 // targetNodeWritePattern matches a statement that CREATEs or MERGEs a :Target.
@@ -94,7 +89,7 @@ func TestBootstrap_SkipsATargetThatDidNotResolve(t *testing.T) {
 	}
 
 	writer := newFakeGraphWriter()
-	b := NewGraphBootstrapper(&recordingGraphClient{}, writer, slog.New(slog.DiscardHandler))
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
@@ -292,7 +287,7 @@ func TestBootstrap_ATargetWriteFailureFailsTheRun(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	b := NewGraphBootstrapper(&recordingGraphClient{},
+	b := NewGraphBootstrapper(
 		failingTargetWriter{fakeGraphWriter: newFakeGraphWriter()}, slog.New(slog.DiscardHandler))
 	_, err = b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets)
 	if err == nil {

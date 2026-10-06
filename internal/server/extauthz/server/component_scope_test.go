@@ -25,7 +25,7 @@ import (
 // derived from the caller's own verified component_scope claim.
 const componentScopeTestYAML = `entries:
   "/gibson.daemon.discovery.v1.DiscoveryService/ListFindings":
-    relation: "can_read_as_component"
+    relation: "can_read"
     object_type: "component"
     object_deriver: "component_from_identity"
     allowed_identities:
@@ -106,6 +106,7 @@ func buildComponentScopeServer(t *testing.T, mock fga.FGAClient, descBase string
 		KeysBaseURL:       descBase,
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       componentTestReplayStore(t),
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
 	})
 	if err != nil {
@@ -271,6 +272,7 @@ func TestComponentScope_VerifierReadsClaimAfterSignature(t *testing.T) {
 		KeysBaseURL:       desc.URL + "/capabilitygrant/v1/keys",
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       componentTestReplayStore(t),
 		HTTPClient:        desc.Client(),
 	})
 	if err != nil {

@@ -200,25 +200,6 @@ func isComponentPrincipal(subject string) bool {
 	return false
 }
 
-// componentScopeRelations maps an owner-side relation to the component-scoped
-// relation that narrows it. can_*_as_component requires BOTH the owner-side
-// grant and a per-component enablement written for this principal, so a
-// component reaches only what was granted to IT.
-var componentScopeRelations = map[string]string{
-	"can_execute":   "can_execute_as_component",
-	"can_read":      "can_read_as_component",
-	"can_configure": "can_write_as_component",
-}
-
-// componentScopeGrantRelations maps an owner-side relation to the direct
-// per-component enablement tuple written for a component principal. These are
-// the relations ListObjects can enumerate for a principal subject.
-var componentScopeGrantRelations = map[string]string{
-	"can_execute":   "component_execute_enabled",
-	"can_read":      "component_read_enabled",
-	"can_configure": "component_write_enabled",
-}
-
 // CheckExecution reports whether subjectFGA may execute componentRef.
 //
 // subjectFGA is a FULLY-QUALIFIED FGA subject — "user:<id>" for a human,
@@ -227,9 +208,9 @@ var componentScopeGrantRelations = map[string]string{
 // silently prefixing "user:" is how an executing component came to be checked
 // as though it were its enroller.
 //
-// A component principal is evaluated against can_execute_as_component, so it
-// needs both the owner-side grant and the per-component enablement written for
-// it; a human is evaluated against can_execute. componentRef must be in
+// A component principal and a human are evaluated against the same relation,
+// can_execute (ADR-0041). The grant is the approval, and no second
+// per-component enablement exists. componentRef must be in
 // "component:{name}" format.
 //
 // It delegates directly to the Authorizer.Check method without any local
@@ -242,10 +223,7 @@ func (b *FGABridge) CheckExecution(ctx context.Context, subjectFGA, componentRef
 		return false, fmt.Errorf("capabilitygrant: malformed subject %q: expected a typed FGA subject such as \"user:{id}\" or \"agent_principal:{id}\"", subjectFGA)
 	}
 
-	relation := "can_execute"
-	if isComponentPrincipal(subjectFGA) {
-		relation = componentScopeRelations["can_execute"]
-	}
+	const relation = "can_execute"
 
 	allowed, err := b.authorizer.Check(ctx, subjectFGA, relation, componentRef)
 	if err != nil {
@@ -257,8 +235,9 @@ func (b *FGABridge) CheckExecution(ctx context.Context, subjectFGA, componentRef
 }
 
 // ResolveComponentCapabilities returns the capabilities a registered component
-// principal actually holds: its own per-component grants, intersected with what
-// the enrolling owner can reach.
+// principal actually holds: the components that it can execute, read and
+// configure on its own grants, intersected with what the enrolling owner can
+// reach.
 //
 // Registration used to record the OWNER's whole capability set against the new
 // component, which made the stored grants — and the list the dashboard shows —
@@ -302,10 +281,8 @@ func (b *FGABridge) ResolveComponentCapabilities(ctx context.Context, principalR
 	caps := make([]Capability, 0, len(ownerCaps))
 	seen := make(map[string]struct{}, len(ownerCaps))
 	for _, rel := range relations {
-		grantRelation, ok := componentScopeGrantRelations[rel.fgaRelation]
-		if !ok {
-			continue
-		}
+		// The principal is checked on the same relations as a user.
+		grantRelation := rel.fgaRelation
 		objects, err := b.authorizer.ListObjects(ctx, principalRef, grantRelation, "component")
 		if err != nil {
 			return nil, fmt.Errorf("capabilitygrant: ListObjects(%q, %q, %q) failed: %w",

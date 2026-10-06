@@ -13,6 +13,8 @@ import (
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
@@ -31,12 +33,14 @@ func (f fakeSearchReg) ListTenantComponents(context.Context, string) ([]componen
 
 type fakeSearchAuthz struct {
 	authz.Authorizer
-	allow    map[string]bool
-	lastUser string
+	allow      map[string]bool
+	lastUser   string
+	lastObject string
 }
 
 func (f *fakeSearchAuthz) Check(_ context.Context, user, _, object string) (bool, error) {
 	f.lastUser = user
+	f.lastObject = object
 	return f.allow[object], nil
 }
 
@@ -58,8 +62,13 @@ func TestSearchTools_FiltersByCanInvokeAndMaps(t *testing.T) {
 		logger:     slog.Default(),
 		authzStore: fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "acme", Status: "active"}},
 		componentRegistry: fakeSearchReg{comps: []component.ComponentInfo{
-			{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue", Description: "open a gitlab issue"}}},
-			{Kind: "plugin", Name: "github", Methods: []component.MethodInfo{{Name: "create_issue", Description: "open a github issue"}}},
+			// A plugin has no MCP (ADR-0065): its methods are not catalog
+			// entries, even when a connector has the same name.
+			{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue", Description: "a plugin method"}}},
+		}},
+		connectors: fakeConnectors{tools: []catalog.ToolEntry{
+			{Source: toolid.SourceMCP, Connector: "gitlab", Tool: "create_issue", Description: "open a gitlab issue"},
+			{Source: toolid.SourceMCP, Connector: "github", Tool: "create_issue", Description: "open a github issue"},
 		}},
 		componentAuthorizer: authzer,
 	}
@@ -106,4 +115,24 @@ func TestSearchTools_RequiresRunID(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("want InvalidArgument for missing run id, got %v", err)
 	}
+}
+
+// fakeConnectors is the one MCP client of the daemon, in a test.
+type fakeConnectors struct {
+	tools   []catalog.ToolEntry
+	listErr error
+	result  any
+	callErr error
+	called  *[]string
+}
+
+func (f fakeConnectors) ListConnectorTools(context.Context, string) ([]catalog.ToolEntry, error) {
+	return f.tools, f.listErr
+}
+
+func (f fakeConnectors) CallConnectorTool(_ context.Context, tenant, connector, tool string, _ map[string]any) (any, error) {
+	if f.called != nil {
+		*f.called = append(*f.called, tenant+"/"+connector+"/"+tool)
+	}
+	return f.result, f.callErr
 }

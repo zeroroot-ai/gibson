@@ -9,12 +9,14 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -93,6 +95,33 @@ type fakeSystemClient struct {
 	added    []string
 	addErr   error
 	listErr  error
+
+	// The admin token half (gibson#794): validTokens are the tokens Zitadel
+	// accepts, minted counts each mint, and mintErr and validErr fail the calls.
+	validTokens map[string]bool
+	minted      int
+	mintErr     error
+	validErr    error
+}
+
+func (f *fakeSystemClient) MintAdminToken(_ context.Context, userName string, _ time.Time) (userID, pat string, err error) {
+	if f.mintErr != nil {
+		return "", "", f.mintErr
+	}
+	f.minted++
+	pat = fmt.Sprintf("pat-%d", f.minted)
+	if f.validTokens == nil {
+		f.validTokens = map[string]bool{}
+	}
+	f.validTokens[pat] = true
+	return "user-" + userName, pat, nil
+}
+
+func (f *fakeSystemClient) AdminTokenValid(_ context.Context, pat string) (bool, error) {
+	if f.validErr != nil {
+		return false, f.validErr
+	}
+	return f.validTokens[pat], nil
 }
 
 func (f *fakeSystemClient) ListInstanceDomains(context.Context) ([]string, error) {
@@ -239,7 +268,8 @@ func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
 	}
 }
 
-// TestReconcileTrustedDomain_NilSystemClient keeps the opt-out path intact.
+// TestReconcileTrustedDomain_NilSystemClient: with no system client the step
+// cannot run, so its condition is False and never Ready (gibson#223).
 func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 	r := &PlatformBootstrapReconciler{
 		SystemClientFactory: func(string, string, string, string) (zitadel.SystemClient, error) {
@@ -253,8 +283,8 @@ func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 		t.Fatalf("reconcileTrustedDomain: %v", err)
 	}
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionTrustedDomainReady)
-	if cond == nil || cond.Reason != "SystemClientDisabled" {
-		t.Fatalf("condition = %+v, want reason SystemClientDisabled", cond)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "SystemClientMissing" {
+		t.Fatalf("condition = %+v, want False with reason SystemClientMissing", cond)
 	}
 }
 

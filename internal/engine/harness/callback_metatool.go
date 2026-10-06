@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -68,7 +69,7 @@ func metaToolDescriptors() []ToolDescriptor {
 		{
 			Name: metatool.InvokeToolName,
 			Description: "Invoke a catalog tool by its canonical id (from search_tools), passing the " +
-				"tool's arguments. The id has the form mcp:<connector>:<tool>. Authorization is " +
+				"tool's arguments. The id has the form mcp:<connector>:<tool> or native:<tool>. Authorization is " +
 				"enforced; only ids returned by search_tools are invocable.",
 			InputSchema: schema.Object(map[string]schema.JSON{
 				"id":   schema.StringWithDesc("Canonical tool id, e.g. mcp:gitlab:create_issue."),
@@ -88,6 +89,8 @@ func isMetaTool(name string) bool {
 // and SearchTools handlers do — builds the catalog engine + authorizer, and
 // dispatches through metatool.Handler. invoke_tool re-checks can_execute there,
 // because this in-process path does not pass the per-plugin ext-authz gate.
+// A native:<tool> id then goes through the direct tool call handler, so it
+// takes the sandbox path or the work queue path like a direct call (ADR-0065).
 func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnesspb.CallToolProtoRequest) (*harnesspb.CallToolProtoResponse, error) {
 	if !s.metaToolsWired() {
 		// gibson:no-tool-executed — the catalog is not wired; nothing runs.
@@ -120,9 +123,9 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(
-		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry), authorizer),
+		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry, s.connectors), authorizer),
 		authorizer,
-		h,
+		s.connectors,
 	)
 	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
 
@@ -130,7 +133,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	case metatool.SearchToolsName:
 		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
 	case metatool.InvokeToolName:
-		return s.metaInvoke(ctx, req.GetContext(), handler, caller, h.Mission().BlockedTools, req.GetInputJson())
+		return s.metaInvoke(ctx, req.GetContext(), handler, h, caller, h.Mission().BlockedTools, req.GetInputJson())
 	default:
 		// gibson:no-tool-executed — not one of the two known meta-tools.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "unknown meta-tool: "+req.GetName()), nil
@@ -184,7 +187,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 	return marshalMetaResult(s, out)
 }
 
-func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *harnesspb.ContextInfo, h *metatool.Handler, caller catalog.Caller, blocked []string, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *harnesspb.ContextInfo, h *metatool.Handler, harness AgentHarness, caller catalog.Caller, blocked []string, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		ID   string         `json:"id"`
 		Args map[string]any `json:"args"`
@@ -223,7 +226,15 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		argsJSON = []byte("{}")
 	}
 
-	result, err := h.Invoke(ctx, caller, in.ID, in.Args)
+	tid, err := h.Authorize(ctx, caller, in.ID)
+	if err == nil && tid.Source == toolid.SourceNative {
+		// The tool call handler owns a native call and its one record.
+		return s.invokeNativeTool(ctx, contextInfo, harness, tid.Tool, canon, argsJSON)
+	}
+	var result any
+	if err == nil {
+		result, err = h.Dispatch(ctx, caller, tid, in.Args)
+	}
 	if err != nil {
 		code := commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
 		if errors.Is(err, metatool.ErrUnauthorized) {
@@ -257,6 +268,40 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	return marshalMetaResult(s, struct {
 		Result any `json:"result"`
 	}{Result: result})
+}
+
+// invokeNativeTool sends an authorized native:<tool> id from invoke_tool to
+// the tool call handler of this service. That handler owns the whole call:
+// the mission deny list, the execute gate of the dispatch, the sandbox path
+// or the work queue path, the discovery ingest and the one record of the
+// call. A tool with no usable descriptor never reaches it, and this function
+// records that refusal.
+func (s *HarnessCallbackService) invokeNativeTool(ctx context.Context, contextInfo *harnesspb.ContextInfo, harness AgentHarness, tool, canon string, argsJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+	desc, err := harness.GetToolDescriptor(ctx, tool)
+	if err == nil && (desc.InputProtoType == "" || desc.OutputProtoType == "") {
+		err = fmt.Errorf("native tool %q declares no input or output message type", tool)
+	}
+	if err != nil {
+		s.captureToolCall(ctx, contextInfo, canon, string(argsJSON), "", err.Error())
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, fmt.Sprintf("native tool %q: %v", tool, err)), nil
+	}
+
+	resp, err := s.CallToolProto(ctx, &harnesspb.CallToolProtoRequest{
+		Context:    contextInfo,
+		Name:       tool,
+		InputType:  desc.InputProtoType,
+		OutputType: desc.OutputProtoType,
+		InputJson:  argsJSON,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if e := resp.GetError(); e != nil {
+		return metaToolErr(e.GetCode(), e.GetMessage()), nil
+	}
+	return marshalMetaResult(s, struct {
+		Result json.RawMessage `json:"result"`
+	}{Result: json.RawMessage(resp.GetOutputJson())})
 }
 
 // metaSearchCandidate is the LLM-facing shape of a catalog candidate. InputSchema

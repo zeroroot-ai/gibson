@@ -1,0 +1,23 @@
+{
+  "method": "GET",
+  "path": "/api/v4/projects/9001/issues",
+  "status": 200,
+  "response": [
+    {
+      "id": 5001,
+      "iid": 12,
+      "title": "Session affinity",
+      "state": "opened",
+      "description": "Two steps land in different sandboxes.",
+      "web_url": "https://gitlab.com/zeroroot-ai/gibson/-/issues/12"
+    },
+    {
+      "id": 5002,
+      "iid": 13,
+      "title": "Reference integration set",
+      "state": "opened",
+      "description": "GitHub + GitLab as plugin and connector.",
+      "web_url": "https://gitlab.com/zeroroot-ai/gibson/-/issues/13"
+    }
+  ]
+}

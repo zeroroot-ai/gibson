@@ -52,6 +52,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	dataplaneclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/finalbackup"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
@@ -146,7 +147,7 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// Initialise OpenTelemetry (traces + metrics) via platform-clients/otelinit.
+	// Initialise OpenTelemetry (traces + metrics) via internal/infra/otelinit.
 	// Each Init call returns an independent *Observability (no global state mutation).
 	// SetGlobal wires the global OTel TracerProvider + MeterProvider + propagator so
 	// auto-instrumented libraries pick them up. The OTLP endpoint is read from
@@ -693,22 +694,9 @@ func main() {
 		// dashboard#813): drain the daemon's pending-provisioning queue and
 		// create Tenant CRs. Reuses the same SPIFFE-mTLS daemon client; the
 		// daemon never touches Kubernetes (ADR-0023).
-		//
-		// stripe_customer_id adoption defense-in-depth (gibson#1099): when the
-		// pod carries a real Stripe key (hosted deployments; the chart projects
-		// gibson-stripe-credentials as STRIPE_API_KEY), re-verify a recorded
-		// customer's tenant-linkage metadata before adopting it onto the CR.
-		// OSS/self-hosted (no key) and dev stripe-mock redirects
-		// (STRIPE_API_BASE_URL set — the mock serves canned fixtures with no
-		// real metadata) bind the no-op: adoption is unaffected, matching the
-		// pkg/billing no-op bypass posture.
-		// Env-decision logic extracted to selectStripeCustomerVerifier for
-		// testability (mirrors loadSystemTenantKEK, same package).
-		stripeVerifier := selectStripeCustomerVerifier(os.Getenv, setupLog)
 		if err := (&controller.PendingProvisioningRunnable{
-			Client:   mgr.GetClient(),
-			Daemon:   grpcClient,
-			Verifier: stripeVerifier,
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to register pending-provisioning runnable")
 			os.Exit(1)
@@ -776,10 +764,20 @@ func main() {
 		dataplane.NewProductionVersionReader(os.Getenv("DATAPLANE_PG_ADMIN_DSN"), mgr.GetClient()),
 	)
 
+	// The last backup of a tenant delete (ADR-0075). VELERO_NAMESPACE is
+	// required: no switch turns the backup off, so an operator with no Velero
+	// namespace must not start.
+	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"))
+	if err != nil {
+		setupLog.Error(err, "VELERO_NAMESPACE is required: the tenant delete flow takes a last Velero backup")
+		os.Exit(1)
+	}
+
 	if err := (&controller.TenantReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
+		FinalBackup:       finalBackup,
 		ProvisionSteps:    provisionSteps,
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,
@@ -986,7 +984,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Readyz check: platform-clients/readiness.Aggregator probes every downstream
+	// Readyz check: internal/infra/readiness.Aggregator probes every downstream
 	// dependency concurrently. Vault is now included (P1 finding: it was absent from
 	// the previous buildReadyzDeps implementation). The aggregator is adapted to
 	// controller-runtime's healthz.Checker interface via a response-capture helper.
@@ -1278,7 +1276,7 @@ func (p pingAdapter) Check(ctx context.Context) error {
 	return nil
 }
 
-// buildReadyzAggregator constructs a platform-clients/readiness.Aggregator
+// buildReadyzAggregator constructs an internal/infra/readiness.Aggregator
 // probing every downstream dependency concurrently. Nil ping functions are
 // omitted so the aggregator never fails on unconfigured optional clients.
 // Vault is now included (P1 finding: it was absent from the previous
@@ -1337,7 +1335,7 @@ func buildReadyzAggregator(
 //     override runtime detection. Empty triggers /sys/health probe.
 //
 // buildVaultAdminClient constructs the Vault admin client with a
-// platform-clients/secrets/vault.Provider token source so the Vault token
+// internal/infra/secrets/vault.Provider token source so the Vault token
 // renews before its TTL expires (P1 finding: env-baked admin token, never
 // renewed — operator pod restart required after token rotation).
 //
@@ -1361,10 +1359,9 @@ func buildVaultAdminClient(log logr.Logger) vaultadmin.AdminClient {
 
 	// The admin token is a periodic renewable token (per ADR-0032): minted by
 	// the openbao-auto-init Job with period=1h, renewed by the sidecar renewal
-	// probe. The platform-clients/secrets/vault Provider that previously wrapped
-	// it for in-process LiveToken() renewal was removed in platform-clients
-	// v0.6.0 (the renewal responsibility moved fully to the ADR-0032 renewal
-	// probe). Use the static token directly.
+	// probe. No in-process LiveToken() renewal wraps it any more: the renewal
+	// responsibility moved fully to the ADR-0032 renewal probe. Use the
+	// static token directly.
 	// JWTBoundIssuer + JWKSURL + JWKSCAPEMPath wire the per-tenant
 	// auth/jwt/config writer (ConfigureSecretsJWTAuth step,
 	// tenant-operator#189). JWTBoundIssuer is REQUIRED — the step refuses
@@ -1476,8 +1473,8 @@ func buildWriteTenantBrokerConfigDeps(log logr.Logger) flows.WriteTenantBrokerCo
 	// on plugin JWTs (ADR-0009 / tenant-operator#147). The per-tenant
 	// Vault JWT role written by writeJWTRole carries this value in its
 	// `bound_audiences`; daemon-side JWT-bearer logins must present the
-	// same audience. Empty → operator exits 1 (mirrors STRIPE_API_KEY /
-	// SMTP_HOST / PLATFORM_PG_DSN fail-loud). The value is operator-
+	// same audience. Empty → operator exits 1 (mirrors SMTP_HOST /
+	// PLATFORM_PG_DSN fail-loud). The value is operator-
 	// internal: it surfaces on the Vault role, NOT on the broker config
 	// JSON the daemon reads.
 	jwtBoundAudience := os.Getenv("GIBSON_VAULT_JWT_BOUND_AUDIENCE")

@@ -66,7 +66,7 @@ func (s *ComponentServiceServer) ListTools(
 	}
 
 	engine := catalog.NewEngine(
-		NewCatalogToolLister(s.registry),
+		NewCatalogToolLister(s.registry, s.connectorTools),
 		catalog.NewFGAAuthorizer(s.authorizer),
 	)
 

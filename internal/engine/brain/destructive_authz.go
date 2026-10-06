@@ -49,6 +49,21 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
+// Reversibility states whether a destructive action can be undone after it
+// runs. The agent reports it with the request, and the approver reads it
+// (ADR-0132). The numbers match the wire enums of the harness callback and
+// of DestructiveAuthorizationService, so a stored event keeps its meaning.
+type Reversibility int32
+
+const (
+	// ReversibilityUnspecified means that the agent reported no signal.
+	ReversibilityUnspecified Reversibility = 0
+	// ReversibilityReversible means that the action can be undone.
+	ReversibilityReversible Reversibility = 1
+	// ReversibilityIrreversible means that the action cannot be undone.
+	ReversibilityIrreversible Reversibility = 2
+)
+
 // DestructiveAction is the per-bet destructive-proof authorization record
 // (ADR-0132). Identity is HypothesisID.
 type DestructiveAction struct {
@@ -58,6 +73,11 @@ type DestructiveAction struct {
 	MissionID     string
 	Technique     string
 	PredicateType string
+	// BlastRadius states, in plain words, what the action would reach. The
+	// agent reports it. Empty means that the agent reported no signal.
+	BlastRadius string
+	// Reversibility states whether the action can be undone.
+	Reversibility Reversibility
 	// RequestedAtUnixMS is when the request was queued, captured by the live
 	// caller (Request) — never derived from wall-clock inside the reducer,
 	// so replay reproduces the exact recorded value (the same pattern
@@ -85,6 +105,11 @@ type DestructiveActionRequested struct {
 	Technique         string
 	PredicateType     string
 	RequestedAtUnixMS int64
+	// BlastRadius and Reversibility are what the agent reported about the
+	// action. They are part of the event, so they survive a restart and a
+	// replay. An event from before these fields decodes with zero values.
+	BlastRadius   string        `json:",omitempty"`
+	Reversibility Reversibility `json:",omitempty"`
 }
 
 // Kind identifies the destructive_action.requested brain event.
@@ -118,6 +143,8 @@ func applyDestructiveActionRequested(w *World, e DestructiveActionRequested) {
 		MissionID:         e.MissionID,
 		Technique:         e.Technique,
 		PredicateType:     e.PredicateType,
+		BlastRadius:       e.BlastRadius,
+		Reversibility:     e.Reversibility,
 		RequestedAtUnixMS: e.RequestedAtUnixMS,
 	})
 }
@@ -180,6 +207,8 @@ type DestructiveActionSnapshot struct {
 	Approved          bool
 	UserID            string
 	DecidedAtUnixMS   int64
+	BlastRadius       string        `json:",omitempty"`
+	Reversibility     Reversibility `json:",omitempty"`
 }
 
 // DestructiveActionSnapshot returns destructive actions in deterministic
@@ -203,6 +232,8 @@ func (w *World) DestructiveActionSnapshot() []DestructiveActionSnapshot {
 			Approved:          a.Approved,
 			UserID:            a.UserID,
 			DecidedAtUnixMS:   a.DecidedAtUnixMS,
+			BlastRadius:       a.BlastRadius,
+			Reversibility:     a.Reversibility,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].HypothesisID < out[j].HypothesisID })
@@ -300,6 +331,10 @@ type DestructiveAuthorizationRequest struct {
 	MissionID     string
 	Technique     string
 	PredicateType string
+	// BlastRadius and Reversibility are what the agent reported about the
+	// action, for the approver.
+	BlastRadius   string
+	Reversibility Reversibility
 }
 
 // Request enqueues req as a pending destructive action and returns
@@ -333,6 +368,8 @@ func (q *DestructiveAuthorizationQueue) Request(tenant string, req DestructiveAu
 		MissionID:         req.MissionID,
 		Technique:         req.Technique,
 		PredicateType:     req.PredicateType,
+		BlastRadius:       req.BlastRadius,
+		Reversibility:     req.Reversibility,
 		RequestedAtUnixMS: q.now().UnixMilli(),
 	})
 	return req.HypothesisID, nil

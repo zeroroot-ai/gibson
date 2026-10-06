@@ -18,11 +18,11 @@ import (
 )
 
 // pgxPoolProductionOpts are the required connection lifecycle settings applied
-// to every per-tenant pgxpool. These are enforced via platform-clients/pools
+// to every per-tenant pgxpool. These are enforced via internal/infra/pools
 // so that the daemon uses the same validated defaults as every other platform
 // service (ext-authz, tenant-operator, etc.).
 //
-// Values follow platform-clients/pools recommended production defaults:
+// Values follow internal/infra/pools recommended production defaults:
 //   - MaxConnLifetime: 1 h  — connections older than this are recycled.
 //   - MaxConnIdleTime: 30 m — idle connections are released after 30 min.
 //
@@ -105,7 +105,7 @@ func (p *pgPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID, tenan
 		return nil, fmt.Errorf("datapool: postgres: invalid connection string for tenant %s: %w", tenant, err)
 	}
 
-	// Apply required connection lifecycle settings enforced by platform-clients/pools.
+	// Apply required connection lifecycle settings enforced by internal/infra/pools.
 	// MaxConnLifetime and MaxConnIdleTime are required fields; failing to set them
 	// leaves connections open indefinitely, exhausting server-side connection slots
 	// (audit finding P1, zeroroot-ai/.github#101).

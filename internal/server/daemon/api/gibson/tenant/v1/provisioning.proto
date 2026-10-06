@@ -5,10 +5,9 @@ syntax = "proto3";
 // dashboard#813).
 //
 // Once the dashboard stops touching Kubernetes, it can no longer read the
-// Tenant CR's status (data-plane provisioning progress, billing state) to drive
-// the onboarding / signup-status / billing surfaces, nor patch the
-// billing-active annotation from the Stripe webhook. ADR-0023 forbids the
-// daemon from reading Kubernetes, so the daemon cannot read the CR either.
+// Tenant CR's status (data-plane provisioning progress) to drive the
+// onboarding and signup-status surfaces. ADR-0023 forbids the daemon from
+// reading Kubernetes, so the daemon cannot read the CR either.
 //
 // Instead the tenant-operator — the one component that already watches Tenant
 // CRs — REPORTS the observed status into the daemon's platform Postgres
@@ -17,38 +16,16 @@ syntax = "proto3";
 //
 //   - GetTenantProvisioningStatus replaces the dashboard's getTenant() reads
 //     (onboarding data-plane progress, signup-status polling, tenant-available
-//     existence check, billing customer-id lookup).
-//   - SetTenantBillingActive replaces the dashboard billing webhook's
-//     patchTenant() that stamped the gibson.zeroroot.ai/billing-active
-//     annotation. The webhook records billing-active here; the operator reads
-//     it back and stamps the CR annotation, so the saga's
-//     WaitForBillingConfirmation step is unchanged.
+//     existence check).
 //
-// Authorization (gibson#1230, gibson#1339): both RPCs remain REACHABLE without
-// a tenant JWT — signup polling and the Stripe webhook both run before any
-// principal exists — but reachability is not authorization, and each handler
-// now enforces its own gate:
+// Authorization (gibson#1230, gibson#1339): GetTenantProvisioningStatus is
+// intentionally unauthenticated, because signup polling runs before any
+// principal exists. It serves ONLY existence plus coarse provisioning progress
+// (phase, data_plane_ready, per-store states, zitadel_org_ready). It does NOT
+// serve the cross-tenant identifier zitadel_org_slug to anyone.
 //
-//   - GetTenantProvisioningStatus is intentionally unauthenticated and serves
-//     ONLY existence plus coarse provisioning progress (phase, data_plane_ready,
-//     per-store states, zitadel_org_ready) — the data the pre-identity signup
-//     page needs. It does NOT serve the cross-tenant identifiers
-//     (zitadel_org_slug, stripe_customer_id) or the billing state to anyone.
-//
-//     gibson#1230 originally gated those behind an in-handler "same authenticated
-//     tenant" redaction, but ext-authz never resolves a tenant for an
-//     unauthenticated-mode RPC (skipTenantResolution), so that allow-branch was
-//     unreachable for EVERY caller — including the tenant's own billing portal
-//     (gibson#1339). The identifiers now live on rule-mode RPCs where ext-authz
-//     + FGA can actually authorize the caller: TenantService.GetTenantBilling
-//     (own tenant, tenant_from_identity) and AdminTenantService
-//     .AdminGetTenantBilling (cross-tenant, platform_owner).
-//   - SetTenantBillingActive requires a fresh HMAC assertion bound to this
-//     tenant_id and active value, signed with the deployment's billing-webhook
-//     secret. Envoy routing alone used to be the only control, which meant any
-//     caller on that route could flip billing_active for any tenant. This gate
-//     is CORRECT precisely because the webhook caller is identity-less — an
-//     identity-based gate here would repeat the gibson#1339 mistake.
+// The billing state and the billing customer id were removed (ADR-0060, D54):
+// the public platform does not know that a billing component exists.
 package gibson.tenant.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
@@ -73,35 +50,16 @@ service TenantProvisioningService {
   //
   // UNAUTHENTICATED-REACHABLE: runs pre-membership (signup polling, slug
   // availability). EVERY caller receives existence plus coarse progress only
-  // (phase, data_plane_ready, stores, zitadel_org_ready); the org slug, Stripe
-  // customer id and billing_active are never served here — read them via
-  // TenantService.GetTenantBilling (own tenant) or
-  // AdminTenantService.AdminGetTenantBilling (cross-tenant) (gibson#1230,
-  // gibson#1339).
+  // (phase, data_plane_ready, stores, zitadel_org_ready); the org slug is
+  // never served here (gibson#1230, gibson#1339).
   rpc GetTenantProvisioningStatus(GetTenantProvisioningStatusRequest) returns (GetTenantProvisioningStatusResponse) {
     option (gibson.auth.v1.authz) = {
       unauthenticated: true
     };
   }
 
-  // SetTenantBillingActive records the tenant's billing-active state, replacing
-  // the dashboard billing webhook's patchTenant of the
-  // gibson.zeroroot.ai/billing-active annotation. The daemon persists the flag
-  // in tenant_status; the tenant-operator reads it back on its next reconcile
-  // and stamps the CR annotation the saga's WaitForBillingConfirmation step
-  // waits on. Idempotent.
-  //
-  // UNAUTHENTICATED-REACHABLE: the Stripe webhook path has no tenant JWT. The
-  // caller must instead present x-gibson-billing-signature and
-  // x-gibson-billing-issued-at — an HMAC over this tenant_id and active value,
-  // signed with the deployment's billing-webhook secret and valid for a bounded
-  // window. A daemon with no secret configured refuses every caller
-  // (gibson#1230).
-  rpc SetTenantBillingActive(SetTenantBillingActiveRequest) returns (SetTenantBillingActiveResponse) {
-    option (gibson.auth.v1.authz) = {
-      unauthenticated: true
-    };
-  }
+  // SetTenantBillingActive was removed (ADR-0060, D54). Tenant activation is
+  // gibson.daemon.connection.v1.ConnectionPointService.SetTenantActivation.
 }
 
 // TenantDataPlaneStoreStatus mirrors the Tenant CR's
@@ -139,20 +97,14 @@ message GetTenantProvisioningStatusResponse {
 
   // zitadel_org_slug mirrors status.zitadelOrgSlug (the per-tenant org login
   // slug). RETAINED for wire compatibility but NO LONGER POPULATED by this
-  // unauthenticated RPC (gibson#1339) — read it via TenantService
-  // .GetTenantBilling (own tenant) or AdminTenantService.AdminGetTenantBilling
-  // (cross-tenant). Use zitadel_org_ready (field 8) for the org-created edge.
+  // unauthenticated RPC (gibson#1339). Use zitadel_org_ready (field 8) for the
+  // org-created edge.
   string zitadel_org_slug = 5;
 
-  // stripe_customer_id mirrors status.stripeCustomerId. RETAINED for wire
-  // compatibility but NO LONGER POPULATED here (gibson#1339) — read it via
-  // TenantService.GetTenantBilling / AdminTenantService.AdminGetTenantBilling.
-  string stripe_customer_id = 6;
-
-  // billing_active is the billing-active state last recorded via
-  // SetTenantBillingActive. RETAINED for wire compatibility but NO LONGER
-  // POPULATED here (gibson#1339) — read it via the billing RPCs above.
-  bool billing_active = 7;
+  // Fields 6 (stripe_customer_id) and 7 (billing_active) were removed
+  // (ADR-0060, D54).
+  reserved 6, 7;
+  reserved "stripe_customer_id", "billing_active";
 
   // zitadel_org_ready reports WHETHER the per-tenant Zitadel org exists, without
   // disclosing its slug. It is the readiness edge the signup poller waits on:
@@ -168,19 +120,4 @@ message GetTenantProvisioningStatusResponse {
   // boolean carries neither: it names nothing and cannot be replayed into any
   // other system. zitadel_org_slug itself stays redacted.
   bool zitadel_org_ready = 8;
-}
-
-// SetTenantBillingActiveRequest records a tenant's billing-active state.
-message SetTenantBillingActiveRequest {
-  // tenant_id is the tenant slug whose billing state is being recorded.
-  string tenant_id = 1;
-
-  // active is the billing-active state (true once a subscription/trial is live).
-  bool active = 2;
-}
-
-// SetTenantBillingActiveResponse confirms the record was written.
-message SetTenantBillingActiveResponse {
-  // updated is true when the row was inserted or its billing_active changed.
-  bool updated = 1;
 }

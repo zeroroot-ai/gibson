@@ -36,7 +36,8 @@ func voiEngineWithCatalog(
 ) (*Engine, *VoIWorker) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
-	w := NewVoIWorker(e, substrate, registry, scorer, topK, catalog, hierarchy, testBAMCPPlanner(registry))
+	e.SetCapabilityCatalog(catalog)
+	w := NewVoIWorker(e, substrate, registry, scorer, topK, hierarchy, testBAMCPPlanner(registry))
 	e.Subscribe(w.Tap)
 	return e, w
 }
@@ -168,7 +169,7 @@ func TestWireVoIPlanner_ProducesAReplayablePlanOffTheTick(t *testing.T) {
 	e := NewEngine("t")
 	e.AddSystem(VoIGateSystem)
 	ctx, cancel := context.WithCancel(context.Background())
-	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, nil, testBAMCPPlanner(registry))
+	WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, 5*time.Millisecond, nil, testBAMCPPlanner(registry))
 
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -213,9 +214,8 @@ func TestVoIWorker_RecordsRankedCandidates(t *testing.T) {
 	}
 }
 
-// TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic proves NewVoIWorker's nil
-// catalog/hierarchy defaults (mirroring NewDeciderWorker's own nil-catalog
-// convention) make a fully-usable worker: draining a plan for a hypothesis
+// TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic proves that a worker on an
+// engine with no capability catalog, and with the default hierarchy, is usable: draining a plan for a hypothesis
 // with a technique set resolves no covering capabilities, never a panic.
 func TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic(t *testing.T) {
 	substrate := newFakeBeliefSubstrate()
@@ -236,7 +236,7 @@ func TestNewVoIWorker_NilCatalogAndHierarchyNeverPanic(t *testing.T) {
 }
 
 // TestVoIWorker_ResolvesCoveringCapabilitiesFromItsLiveCatalog proves the
-// worker's own catalog/hierarchy (NewVoIWorker's trailing params, ADR-0135/gibson#387)
+// catalog of the engine and the worker's hierarchy (ADR-0135/gibson#387)
 // reach PlanVoI end-to-end through a live tick/drain
 // cycle, not just through a directly-constructed VoIPlanInput: a hypothesis
 // candidate's technique resolves against the mission id the gate/worker

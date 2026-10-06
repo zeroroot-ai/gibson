@@ -20,7 +20,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -166,9 +166,9 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
+	resp, err := srv.SetSecret(ctx, &secretsv1.SetSecretRequest{
 		Name:     "openai-prod",
-		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("super-secret-value"),
 	})
 	if err != nil {
@@ -178,7 +178,7 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("expected caller name cred:openai-prod, got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_CRED {
+	if resp.GetMetadata().GetCategory() != secretsv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
 	// H1 (gibson#1106): the broker stores the secret colon-flat at the KV root.
@@ -189,9 +189,9 @@ func TestSetSecret_NoValueInResponse(t *testing.T) {
 
 func TestSetSecret_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
-	_, err := srv.SetSecret(context.Background(), &tenantv1.SetSecretRequest{
+	_, err := srv.SetSecret(context.Background(), &secretsv1.SetSecretRequest{
 		Name:     "x",
-		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("v"),
 	})
 	if err == nil {
@@ -205,9 +205,9 @@ func TestSetSecret_RequiresTenant(t *testing.T) {
 func TestSetSecret_RejectsEmptyValue(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
+	_, err := srv.SetSecret(ctx, &secretsv1.SetSecretRequest{
 		Name:     "x",
-		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
@@ -221,7 +221,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 	broker.store["cred:openai-prod"] = []byte("v")
 
 	// Caller passes the caller-facing name (colon-flat root key).
-	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "cred:openai-prod"})
+	resp, err := srv.GetSecret(ctx, &secretsv1.GetSecretRequest{Name: "cred:openai-prod"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 	if resp.GetMetadata().GetName() != "cred:openai-prod" {
 		t.Errorf("name mismatch: got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_CRED {
+	if resp.GetMetadata().GetCategory() != secretsv1.SecretCategory_SECRET_CATEGORY_CRED {
 		t.Errorf("category mismatch")
 	}
 	// SECURITY: response message has no value field by proto contract.
@@ -240,7 +240,7 @@ func TestGetSecret_MetadataOnly(t *testing.T) {
 func TestGetSecret_NotFound(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "missing"})
+	_, err := srv.GetSecret(ctx, &secretsv1.GetSecretRequest{Name: "missing"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", err)
 	}
@@ -253,7 +253,7 @@ func TestRotateSecret_EmitsRotatedEvent(t *testing.T) {
 	broker.store["cred:db"] = []byte("old")
 
 	// Caller passes the caller-facing name (colon-flat root key).
-	resp, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
+	resp, err := srv.RotateSecret(ctx, &secretsv1.RotateSecretRequest{
 		Name:  "cred:db",
 		Value: []byte("new"),
 	})
@@ -277,7 +277,7 @@ func TestRotateSecret_NotFound(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	// "cred:missing" is the colon-flat root key, which does not exist → NotFound.
-	_, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{
+	_, err := srv.RotateSecret(ctx, &secretsv1.RotateSecretRequest{
 		Name:  "cred:missing",
 		Value: []byte("v"),
 	})
@@ -293,7 +293,7 @@ func TestDeleteSecret_EmitsRevokedEvent(t *testing.T) {
 	broker.store["cred:db"] = []byte("v")
 
 	// Caller passes the caller-facing name.
-	_, err := srv.DeleteSecret(ctx, &tenantv1.DeleteSecretRequest{Name: "cred:db"})
+	_, err := srv.DeleteSecret(ctx, &secretsv1.DeleteSecretRequest{Name: "cred:db"})
 	if err != nil {
 		t.Fatalf("DeleteSecret: %v", err)
 	}
@@ -314,8 +314,8 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	broker.store["cred:b"] = []byte("bv")
 	broker.store["provider_config:openai:default"] = []byte("k")
 
-	resp, err := srv.ListSecrets(ctx, &tenantv1.ListSecretsRequest{
-		CategoryFilter: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+	resp, err := srv.ListSecrets(ctx, &secretsv1.ListSecretsRequest{
+		CategoryFilter: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 	})
 	if err != nil {
 		t.Fatalf("ListSecrets: %v", err)
@@ -328,6 +328,26 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 		if !strings.HasPrefix(s.GetName(), "cred:") {
 			t.Errorf("got non-cred secret %q in cred-filtered list", s.GetName())
 		}
+	}
+}
+
+// A page token that the daemon did not write is InvalidArgument, and a full
+// page carries a next page token (ADR-0028, rule 3).
+func TestListSecrets_PageTokens(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+	broker.store["cred:a"] = []byte("av")
+	broker.store["cred:b"] = []byte("bv")
+
+	if _, err := srv.ListSecrets(ctx, &secretsv1.ListSecretsRequest{PageToken: "x"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("bad token: code %v, want InvalidArgument", status.Code(err))
+	}
+	resp, err := srv.ListSecrets(ctx, &secretsv1.ListSecretsRequest{PageSize: 1})
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	if len(resp.GetSecrets()) == 1 && resp.GetNextPageToken() == "" {
+		t.Error("a full page has no next page token")
 	}
 }
 
@@ -373,7 +393,7 @@ func TestGetMissionAudit_AggregatesByRef(t *testing.T) {
 		},
 	}
 
-	resp, err := srv.GetMissionAudit(ctx, &tenantv1.GetMissionAuditRequest{MissionId: "mission-X"})
+	resp, err := srv.GetMissionAudit(ctx, &secretsv1.GetMissionAuditRequest{MissionId: "mission-X"})
 	if err != nil {
 		t.Fatalf("GetMissionAudit: %v", err)
 	}
@@ -394,7 +414,7 @@ func TestGetMissionAudit_AggregatesByRef(t *testing.T) {
 
 func TestGetMissionAudit_RequiresTenant(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
-	_, err := srv.GetMissionAudit(context.Background(), &tenantv1.GetMissionAuditRequest{MissionId: "x"})
+	_, err := srv.GetMissionAudit(context.Background(), &secretsv1.GetMissionAuditRequest{MissionId: "x"})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Errorf("want PermissionDenied, got %v", err)
 	}
@@ -403,7 +423,7 @@ func TestGetMissionAudit_RequiresTenant(t *testing.T) {
 func TestGetMissionAudit_RequiresMissionID(t *testing.T) {
 	srv, _, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
-	_, err := srv.GetMissionAudit(ctx, &tenantv1.GetMissionAuditRequest{})
+	_, err := srv.GetMissionAudit(ctx, &secretsv1.GetMissionAuditRequest{})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
@@ -412,12 +432,12 @@ func TestGetMissionAudit_RequiresMissionID(t *testing.T) {
 func TestParseCategory(t *testing.T) {
 	tests := []struct {
 		name string
-		want tenantv1.SecretCategory
+		want secretsv1.SecretCategory
 	}{
 		// colon-flat root keys (stored form == caller-facing form)
-		{"cred:openai", tenantv1.SecretCategory_SECRET_CATEGORY_CRED},
-		{"provider_config:anthropic:default", tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
-		{"unknown", tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
+		{"cred:openai", secretsv1.SecretCategory_SECRET_CATEGORY_CRED},
+		{"provider_config:anthropic:default", secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG},
+		{"unknown", secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED},
 	}
 	for _, tc := range tests {
 		if got := parseCategory(tc.name); got != tc.want {
@@ -530,15 +550,15 @@ func TestNewSecretsAdminServer_RequiresBroker(t *testing.T) {
 
 func TestStoredName_ColonFlatRoot(t *testing.T) {
 	tests := []struct {
-		cat  tenantv1.SecretCategory
+		cat  secretsv1.SecretCategory
 		name string
 		want string
 	}{
-		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "cred:openai-prod"},
-		{tenantv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "cred:openai-prod"}, // idempotent
-		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "provider_config:openai:default"},
-		{tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "provider_config:openai:default", "provider_config:openai:default"}, // idempotent
-		{tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"},                                                           // unspecified — no prefix added
+		{secretsv1.SecretCategory_SECRET_CATEGORY_CRED, "openai-prod", "cred:openai-prod"},
+		{secretsv1.SecretCategory_SECRET_CATEGORY_CRED, "cred:openai-prod", "cred:openai-prod"}, // idempotent
+		{secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "openai:default", "provider_config:openai:default"},
+		{secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG, "provider_config:openai:default", "provider_config:openai:default"}, // idempotent
+		{secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED, "raw", "raw"},                                                           // unspecified — no prefix added
 	}
 	for _, tc := range tests {
 		got := storedName(tc.cat, tc.name)
@@ -584,9 +604,9 @@ func TestSetSecret_ColonFlatRoot(t *testing.T) {
 	srv, broker, _, _, _ := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.SetSecret(ctx, &tenantv1.SetSecretRequest{
+	resp, err := srv.SetSecret(ctx, &secretsv1.SetSecretRequest{
 		Name:     "my-key",
-		Category: tenantv1.SecretCategory_SECRET_CATEGORY_CRED,
+		Category: secretsv1.SecretCategory_SECRET_CATEGORY_CRED,
 		Value:    []byte("secret"),
 	})
 	if err != nil {
@@ -618,14 +638,14 @@ func TestGetSecret_ColonFlatRoot(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	broker.store["provider_config:openai:key"] = []byte("v")
 
-	resp, err := srv.GetSecret(ctx, &tenantv1.GetSecretRequest{Name: "provider_config:openai:key"})
+	resp, err := srv.GetSecret(ctx, &secretsv1.GetSecretRequest{Name: "provider_config:openai:key"})
 	if err != nil {
 		t.Fatalf("GetSecret: %v", err)
 	}
 	if resp.GetMetadata().GetName() != "provider_config:openai:key" {
 		t.Errorf("name: want provider_config:openai:key, got %q", resp.GetMetadata().GetName())
 	}
-	if resp.GetMetadata().GetCategory() != tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG {
+	if resp.GetMetadata().GetCategory() != secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG {
 		t.Errorf("category mismatch")
 	}
 }
@@ -666,7 +686,7 @@ func TestRotateSecret_TellsEveryBoundPlugin(t *testing.T) {
 	srv.events = pub
 	broker.store["cred:db"] = []byte("old")
 	ctx := ctxWithTenant(t, "acme")
-	if _, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
+	if _, err := srv.RotateSecret(ctx, &secretsv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
 		t.Fatalf("RotateSecret: %v", err)
 	}
 	if len(pub.events) != 2 {
@@ -679,7 +699,7 @@ func TestRotateSecret_TellsEveryBoundPlugin(t *testing.T) {
 		}
 	}
 	srv.events = &recordingPublisher{err: errors.New("redis down")}
-	if _, err := srv.RotateSecret(ctx, &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("newer")}); err != nil {
+	if _, err := srv.RotateSecret(ctx, &secretsv1.RotateSecretRequest{Name: "cred:db", Value: []byte("newer")}); err != nil {
 		t.Fatalf("a publish failure must not fail the rotation: %v", err)
 	}
 	if string(broker.store["cred:db"]) != "newer" {
@@ -710,7 +730,7 @@ func TestRotateSecret_ListingBoundPluginsFailureIsLoggedNotFatal(t *testing.T) {
 	pub := &recordingPublisher{}
 	srv.events = pub
 	broker.store["cred:db"] = []byte("old")
-	if _, err := srv.RotateSecret(ctxWithTenant(t, "acme"), &tenantv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
+	if _, err := srv.RotateSecret(ctxWithTenant(t, "acme"), &secretsv1.RotateSecretRequest{Name: "cred:db", Value: []byte("new")}); err != nil {
 		t.Fatalf("RotateSecret: %v", err)
 	}
 	if len(pub.events) != 0 {

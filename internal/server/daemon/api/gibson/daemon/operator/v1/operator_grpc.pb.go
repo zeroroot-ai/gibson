@@ -35,6 +35,8 @@ const (
 	DaemonOperatorService_AckTenantOp_FullMethodName                   = "/gibson.daemon.operator.v1.DaemonOperatorService/AckTenantOp"
 	DaemonOperatorService_RevokeConnectorGrant_FullMethodName          = "/gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant"
 	DaemonOperatorService_GetConnectorAuthStatus_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus"
+	DaemonOperatorService_GetBeliefTrainingData_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData"
+	DaemonOperatorService_StoreBeliefArtifact_FullMethodName           = "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -113,17 +115,6 @@ type DaemonOperatorServiceClient interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(ctx context.Context, in *AckTenantProvisionedRequest, opts ...grpc.CallOption) (*AckTenantProvisionedResponse, error)
-	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
-	// daemon's platform Postgres (tenant_status table) so the dashboard can read
-	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
-	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
-	// reconciler calls this best-effort after each status patch; the daemon
-	// cannot read the CR itself, so the operator is the sole source of this
-	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
-	//
-	// Note: billing_active is NOT carried here — it is owned by the dashboard
-	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
-	// must not be clobbered by an operator status report.
 	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
 	// declares (spec.maxRuntime) so the daemon can bound that agent's
 	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
@@ -170,6 +161,17 @@ type DaemonOperatorServiceClient interface {
 	// gibson.tenant.v1.ConnectorAuthService, with the tenant carried
 	// explicitly. It never returns credential material.
 	GetConnectorAuthStatus(ctx context.Context, in *GetConnectorAuthStatusRequest, opts ...grpc.CallOption) (*GetConnectorAuthStatusResponse, error)
+	// GetBeliefTrainingData returns the training data of one tenant from its
+	// World: one row for each observed host, and the outcome counts of each
+	// edge type (ADR-0106, gibson#788). The belief trainer of that tenant calls
+	// it over SPIFFE mTLS. The handler serves only the trainer identity of the
+	// tenant in the request, spiffe://<trust domain>/trainer/<tenant_id>.
+	GetBeliefTrainingData(ctx context.Context, in *GetBeliefTrainingDataRequest, opts ...grpc.CallOption) (*GetBeliefTrainingDataResponse, error)
+	// StoreBeliefArtifact stores the two artifacts of one fit as the next
+	// version of one tenant, with the state candidate (ADR-0106, gibson#788).
+	// The quality gate decides which version becomes current. The handler
+	// serves only the trainer identity of the tenant in the request.
+	StoreBeliefArtifact(ctx context.Context, in *StoreBeliefArtifactRequest, opts ...grpc.CallOption) (*StoreBeliefArtifactResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -330,6 +332,26 @@ func (c *daemonOperatorServiceClient) GetConnectorAuthStatus(ctx context.Context
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) GetBeliefTrainingData(ctx context.Context, in *GetBeliefTrainingDataRequest, opts ...grpc.CallOption) (*GetBeliefTrainingDataResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBeliefTrainingDataResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetBeliefTrainingData_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) StoreBeliefArtifact(ctx context.Context, in *StoreBeliefArtifactRequest, opts ...grpc.CallOption) (*StoreBeliefArtifactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StoreBeliefArtifactResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_StoreBeliefArtifact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -406,17 +428,6 @@ type DaemonOperatorServiceServer interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(context.Context, *AckTenantProvisionedRequest) (*AckTenantProvisionedResponse, error)
-	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
-	// daemon's platform Postgres (tenant_status table) so the dashboard can read
-	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
-	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
-	// reconciler calls this best-effort after each status patch; the daemon
-	// cannot read the CR itself, so the operator is the sole source of this
-	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
-	//
-	// Note: billing_active is NOT carried here — it is owned by the dashboard
-	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
-	// must not be clobbered by an operator status report.
 	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
 	// declares (spec.maxRuntime) so the daemon can bound that agent's
 	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
@@ -463,6 +474,17 @@ type DaemonOperatorServiceServer interface {
 	// gibson.tenant.v1.ConnectorAuthService, with the tenant carried
 	// explicitly. It never returns credential material.
 	GetConnectorAuthStatus(context.Context, *GetConnectorAuthStatusRequest) (*GetConnectorAuthStatusResponse, error)
+	// GetBeliefTrainingData returns the training data of one tenant from its
+	// World: one row for each observed host, and the outcome counts of each
+	// edge type (ADR-0106, gibson#788). The belief trainer of that tenant calls
+	// it over SPIFFE mTLS. The handler serves only the trainer identity of the
+	// tenant in the request, spiffe://<trust domain>/trainer/<tenant_id>.
+	GetBeliefTrainingData(context.Context, *GetBeliefTrainingDataRequest) (*GetBeliefTrainingDataResponse, error)
+	// StoreBeliefArtifact stores the two artifacts of one fit as the next
+	// version of one tenant, with the state candidate (ADR-0106, gibson#788).
+	// The quality gate decides which version becomes current. The handler
+	// serves only the trainer identity of the tenant in the request.
+	StoreBeliefArtifact(context.Context, *StoreBeliefArtifactRequest) (*StoreBeliefArtifactResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -517,6 +539,12 @@ func (UnimplementedDaemonOperatorServiceServer) RevokeConnectorGrant(context.Con
 }
 func (UnimplementedDaemonOperatorServiceServer) GetConnectorAuthStatus(context.Context, *GetConnectorAuthStatusRequest) (*GetConnectorAuthStatusResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConnectorAuthStatus not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetBeliefTrainingData(context.Context, *GetBeliefTrainingDataRequest) (*GetBeliefTrainingDataResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetBeliefTrainingData not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) StoreBeliefArtifact(context.Context, *StoreBeliefArtifactRequest) (*StoreBeliefArtifactResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StoreBeliefArtifact not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -809,6 +837,42 @@ func _DaemonOperatorService_GetConnectorAuthStatus_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_GetBeliefTrainingData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBeliefTrainingDataRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetBeliefTrainingData(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetBeliefTrainingData_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetBeliefTrainingData(ctx, req.(*GetBeliefTrainingDataRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_StoreBeliefArtifact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StoreBeliefArtifactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).StoreBeliefArtifact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_StoreBeliefArtifact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).StoreBeliefArtifact(ctx, req.(*StoreBeliefArtifactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -875,6 +939,14 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConnectorAuthStatus",
 			Handler:    _DaemonOperatorService_GetConnectorAuthStatus_Handler,
+		},
+		{
+			MethodName: "GetBeliefTrainingData",
+			Handler:    _DaemonOperatorService_GetBeliefTrainingData_Handler,
+		},
+		{
+			MethodName: "StoreBeliefArtifact",
+			Handler:    _DaemonOperatorService_StoreBeliefArtifact_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -18,7 +18,7 @@ import (
 )
 
 // redisProductionOpts are the required connection lifecycle settings for
-// per-tenant Redis clients, enforced via platform-clients/pools so that the
+// per-tenant Redis clients, enforced via internal/infra/pools so that the
 // daemon uses the same validated defaults as every other platform service.
 //
 // Values:
@@ -119,7 +119,7 @@ func (r *redisPerTenant) ForTenant(ctx context.Context, tenant auth.TenantID) (*
 		}
 	}
 
-	// Apply required connection lifecycle settings enforced by platform-clients/pools.
+	// Apply required connection lifecycle settings enforced by internal/infra/pools.
 	// ConnMaxLifetime is required; omitting it leaves connections open indefinitely
 	// (audit finding P1, zeroroot-ai/.github#101).
 	client := redis.NewClient(&redis.Options{

@@ -12,7 +12,6 @@ import (
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -78,7 +77,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// ComponentInstallRegistry field was removed in plugin-runtime Spec 2 Phase 7;
 		// plugin dispatch goes through ComponentRegistry + WorkQueue
 		// (PluginInvokeService, see internal/platform/component/plugin_dispatch.go).
-		ComponentAccess: d.pluginAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
+		ComponentAccess: d.componentAccessStore, // nil when no KeyProvider configured; harness skips opt-in checks
 
 		// ComponentAuthorizer gates AGENT dispatch on can_execute (gibson#1595).
 		// The SAME FGA authorizer the callback service gets (daemon.go
@@ -149,13 +148,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// The minter is created after this factory (daemon Start), so hand the
 	// factory a getter; each harness reads it when it is built.
 	config.CGMinter = func() *capabilitygrant.Minter { return d.cgMinter }
-
-	// DeploymentShape is the untrusted-execution isolation policy
-	// (GIBSON_UNTRUSTED_EXEC). nil config or an unset value fail-closes to
-	// ShapeSetecOnly (the zero value). See ADR-0110 / gibson#994.
-	if d.config != nil {
-		config.DeploymentShape = dispatchpolicy.ParseShape(d.config.UntrustedExecMode())
-	}
 
 	// Sandboxed tool executor (Setec microVM dispatch) — constructed only
 	// when sandbox.enabled=true in config AND gibson was built with

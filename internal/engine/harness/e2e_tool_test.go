@@ -15,14 +15,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
-	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/descriptorpb"
@@ -46,22 +44,20 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 	// Create FileDescriptorSet for a mock remote tool
 	fdsBase64, inputTypeName, outputTypeName := createMockToolFileDescriptorSet(t)
 
-	// Create mock registry that returns our remote tool
-	mockRegistry := &mockComponentDiscovery{
-		tools: map[string]mockRemoteTool{
-			"acme-remote-tool": {
-				name:                 "acme-remote-tool",
-				version:              "1.0.0",
-				inputMessageType:     inputTypeName,
-				outputMessageType:    outputTypeName,
-				fileDescriptorSet:    fdsBase64,
-				mockExecutionHandler: createMockToolHandler(t, inputTypeName, outputTypeName),
-			},
+	// The remote tool pulls its work from the work queue. A tool has the
+	// sandbox path and the work queue path only (ADR-0110).
+	queue := &remoteToolQueue{
+		inputTypeName: inputTypeName,
+		metadata: map[string]string{
+			"tool_name":           "acme-remote-tool",
+			"file_descriptor_set": fdsBase64,
 		},
+		handler: createMockToolHandler(t, inputTypeName, outputTypeName),
 	}
 
 	// Create harness with ProtoResolver
-	harness := createHarnessWithResolver(t, mockRegistry)
+	harness := createHarnessWithResolver(t, queue)
+	queue.resolver = harness.(*DefaultAgentHarness).resolver
 
 	// Execute tool via CallToolProto
 	t.Run("ExecuteRemoteTool", func(t *testing.T) {
@@ -274,101 +270,37 @@ func createMockToolFileDescriptorSet(t *testing.T) (string, string, string) {
 	return fdsBase64, "toolspb.HttpxRequest", "toolspb.HttpxResponse"
 }
 
-// mockRemoteTool represents a remote tool with proto schema
-type mockRemoteTool struct {
-	name                 string
-	version              string
-	inputMessageType     string
-	outputMessageType    string
-	fileDescriptorSet    string // base64-encoded
-	mockExecutionHandler func(ctx context.Context, input proto.Message) (proto.Message, error)
+// remoteToolQueue is a component.WorkQueue that runs one remote tool. It
+// decodes the work item payload into the dynamic input type, runs the
+// handler, and returns the output as proto JSON, as a remote tool does.
+type remoteToolQueue struct {
+	queueFake
+	resolver      protoresolver.ProtoResolver
+	inputTypeName string
+	metadata      map[string]string
+	handler       func(ctx context.Context, input proto.Message) (proto.Message, error)
 }
 
-// mockComponentDiscovery is a mock registry adapter for testing
-type mockComponentDiscovery struct {
-	tools map[string]mockRemoteTool
-}
-
-// DiscoverTool returns a mock gRPC tool client
-func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
-	mockTool, ok := m.tools[name]
-	if !ok {
-		return nil, fmt.Errorf("tool not found: %s", name)
+func (q *remoteToolQueue) Enqueue(ctx context.Context, tenant, kind, name string, item component.WorkItem) (string, error) {
+	if _, err := q.queueFake.Enqueue(ctx, tenant, kind, name, item); err != nil {
+		return "", err
 	}
-
-	return &mockGRPCToolClient{
-		toolName:         mockTool.name,
-		toolVersion:      mockTool.version,
-		inputType:        mockTool.inputMessageType,
-		outputType:       mockTool.outputMessageType,
-		fdsBase64:        mockTool.fileDescriptorSet,
-		executionHandler: mockTool.mockExecutionHandler,
-	}, nil
-}
-
-// Stub implementations for other discovery methods
-func (m *mockComponentDiscovery) DiscoverAgent(ctx context.Context, name string) (agent.Agent, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-// DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
-// Spec 2 Phase 7; the mock no longer needs to implement it.
-
-func (m *mockComponentDiscovery) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockComponentDiscovery) ListTools(ctx context.Context) ([]component.ToolInfo, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.PluginInfo, error) {
-	return nil, fmt.Errorf("not implemented")
-}
-
-func (m *mockComponentDiscovery) DelegateToAgent(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error) {
-	return agent.Result{}, fmt.Errorf("not implemented")
-}
-
-// mockGRPCToolClient simulates a gRPC tool client for testing
-type mockGRPCToolClient struct {
-	toolName         string
-	toolVersion      string
-	inputType        string
-	outputType       string
-	fdsBase64        string
-	executionHandler func(ctx context.Context, input proto.Message) (proto.Message, error)
-}
-
-func (m *mockGRPCToolClient) Name() string        { return m.toolName }
-func (m *mockGRPCToolClient) Description() string { return "Mock HTTP tool" }
-func (m *mockGRPCToolClient) Version() string     { return m.toolVersion }
-func (m *mockGRPCToolClient) Tags() []string      { return []string{"http", "network"} }
-
-func (m *mockGRPCToolClient) InputMessageType() string  { return m.inputType }
-func (m *mockGRPCToolClient) OutputMessageType() string { return m.outputType }
-
-func (m *mockGRPCToolClient) Metadata() map[string]string {
-	return map[string]string{
-		"file_descriptor_set": m.fdsBase64,
-		"tool_name":           m.toolName,
+	input, err := q.resolver.ResolveInputType(ctx, q.inputTypeName, q.metadata)
+	if err != nil {
+		return "", fmt.Errorf("resolve input type: %w", err)
 	}
-}
-
-func (m *mockGRPCToolClient) ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error) {
-	if m.executionHandler != nil {
-		return m.executionHandler(ctx, input)
+	if err := protojson.Unmarshal(item.Payload, input); err != nil {
+		return "", fmt.Errorf("decode payload: %w", err)
 	}
-	return nil, fmt.Errorf("no execution handler configured")
-}
-
-// Stub implementations for legacy methods
-func (m *mockGRPCToolClient) GetCapabilities(ctx context.Context) (*sdktypes.Capabilities, error) {
-	return &sdktypes.Capabilities{}, nil
-}
-
-func (m *mockGRPCToolClient) Health(ctx context.Context) types.HealthStatus {
-	return types.Healthy("ok")
+	output, err := q.handler(ctx, input)
+	if err != nil {
+		return "", err
+	}
+	q.result, err = protojson.Marshal(output)
+	if err != nil {
+		return "", fmt.Errorf("encode result: %w", err)
+	}
+	return "1-0", nil
 }
 
 // createMockToolHandler creates a handler that validates input and returns mock output
@@ -470,7 +402,7 @@ func extractHostFromURL(url string) string {
 }
 
 // createHarnessWithResolver creates a test harness with ProtoResolver configured
-func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDiscovery) AgentHarness {
+func createHarnessWithResolver(t *testing.T, queue component.WorkQueue) AgentHarness {
 	t.Helper()
 
 	// Create ProtoResolver with default config
@@ -482,7 +414,11 @@ func createHarnessWithResolver(t *testing.T, mockRegistry component.ComponentDis
 
 	// Create minimal harness with resolver
 	harness := &DefaultAgentHarness{
-		registryAdapter: mockRegistry,
+		// One live instance of the tool runs on the tenant's machine.
+		componentRegistry: &gateFakeRegistry{tenantInstances: []component.ComponentInfo{{
+			Kind: "tool", Name: "acme-remote-tool", InstanceID: "i1",
+		}}},
+		workQueue: queue,
 		// The tenant has the tool enabled, so the execute gate passes.
 		componentAuthorizer: &recordingAuthorizer{allow: true},
 		resolver:            resolver,

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 func manifestFSWith(files map[string]string) fstest.MapFS {
@@ -78,6 +80,48 @@ func TestLoad_FailLoud(t *testing.T) {
 			_, err := load(manifestFSWith(map[string]string{"m.yaml": tc.body}))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestLoad_RefusesADomainPackManifest: a Domain Pack is an authorization
+// object type, not a catalog component kind (gibson#735). The loader refuses
+// a domainpack manifest, with an empty spec or with a spec, and the error
+// names the four kinds that the loader accepts.
+func TestLoad_RefusesADomainPackManifest(t *testing.T) {
+	if !authz.IsComponentKind(authz.KindDomainPack) {
+		t.Fatal("precondition: the authorization model has the kind domainpack")
+	}
+	for name, body := range map[string]string{
+		"empty spec": "id: nist-800-53-r5\nkind: domainpack\nspec: {}\n",
+		"with spec":  "id: nist-800-53-r5\nkind: domainpack\nspec:\n  contentTrust: trusted\n  image: ghcr.io/x@sha256:a\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(manifestFSWith(map[string]string{"m.yaml": body}))
+			if err == nil {
+				t.Fatal("the loader accepted a domainpack manifest")
+			}
+			const want = `kind "domainpack" must be one of agent, tool, plugin, connector`
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want it to contain %q", err, want)
+			}
+		})
+	}
+}
+
+// TestManifestKinds_EachKindHasASpecCheck: each kind that the loader accepts
+// reaches its own spec check. A manifest of each kind with an empty spec
+// fails in that check, not in the kind check.
+func TestManifestKinds_EachKindHasASpecCheck(t *testing.T) {
+	for _, kind := range manifestKinds {
+		t.Run(kind, func(t *testing.T) {
+			_, err := load(manifestFSWith(map[string]string{"m.yaml": "id: x\nkind: " + kind + "\nspec: {}\n"}))
+			if err == nil {
+				t.Fatalf("an empty %s spec loaded: the kind has no spec check", kind)
+			}
+			if strings.Contains(err.Error(), "must be one of agent") {
+				t.Fatalf("the loader refused its own kind %s: %v", kind, err)
 			}
 		})
 	}
@@ -204,13 +248,11 @@ func TestLookupAgentEmbedded(t *testing.T) {
 // projects its owner-locked policy, and seeds platform_enabled for its ref.
 // Model and budget are resolved at dispatch, so the manifest pins neither
 // (empty Model, zero BudgetLimit).
-// TestClaudeManifestEgressIsUnconfined pins the posture the claude agent is
-// dispatched under. "*" means gibson imposes no allow-list, so the sandbox
-// takes its SandboxClass default (external-only: the public internet, never
-// the operator's reserved ranges). A pinned destination list here cannot
-// work for a coding agent, whose mission names hosts no manifest can know
-// in advance, and re-pinning it silently breaks every such mission.
-func TestClaudeManifestEgressIsUnconfined(t *testing.T) {
+// TestClaudeManifestStatesNoEgressCeiling pins the posture of the claude
+// agent. The manifest states no ceiling: the network scope of its mission
+// node decides (owner decision S6, gibson#865). A coding agent runs in a node
+// that the mission author marks research.
+func TestClaudeManifestStatesNoEgressCeiling(t *testing.T) {
 	e, ok := LookupAgent("claude")
 	if !ok {
 		t.Fatal("LookupAgent(claude): not listed in the embedded catalog")
@@ -218,8 +260,27 @@ func TestClaudeManifestEgressIsUnconfined(t *testing.T) {
 	if e.DispatchMode != DispatchModeSandboxed {
 		t.Errorf("dispatchMode = %q, want %q", e.DispatchMode, DispatchModeSandboxed)
 	}
-	if len(e.EgressAllow) != 1 || e.EgressAllow[0] != "*" {
-		t.Errorf("egressAllow = %+v, want [*] so the SandboxClass posture applies", e.EgressAllow)
+	if len(e.EgressAllow) != 0 {
+		t.Errorf("egressAllow = %+v, want none: the node decides", e.EgressAllow)
+	}
+}
+
+// TestLoad_RefusesAWildcardEgress is the failing fixture of the rule that the
+// catalog holds no "*" (owner decision S6).
+func TestLoad_RefusesAWildcardEgress(t *testing.T) {
+	body := "id: t\nkind: tool\negressAllow:\n  - api.example.com\n  - \" * \"\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: t\n  image: ghcr.io/x/t@sha256:abc\n"
+	_, err := load(manifestFSWith(map[string]string{"m.yaml": body}))
+	if err == nil || !strings.Contains(err.Error(), `egressAllow holds "*"`) {
+		t.Fatalf("load error = %v, want the wildcard refused", err)
+	}
+}
+
+// The shipped catalog holds no "*".
+func TestCatalog_HoldsNoWildcardEgress(t *testing.T) {
+	for _, m := range catalog {
+		if err := validateEgressAllow(m.ID, m.EgressAllow); err != nil {
+			t.Error(err)
+		}
 	}
 }
 
@@ -243,8 +304,8 @@ func TestZerocoolManifest(t *testing.T) {
 	if e.DispatchMode != DispatchModeSandboxed {
 		t.Errorf("dispatchMode = %q, want %q", e.DispatchMode, DispatchModeSandboxed)
 	}
-	if len(e.EgressAllow) != 1 || e.EgressAllow[0] != "*" {
-		t.Errorf("egressAllow = %+v, want [*]", e.EgressAllow)
+	if len(e.EgressAllow) != 0 {
+		t.Errorf("egressAllow = %+v, want none: the node decides", e.EgressAllow)
 	}
 	if e.Model != "" {
 		t.Errorf("model must not be pinned (resolved newest at dispatch), got %q", e.Model)

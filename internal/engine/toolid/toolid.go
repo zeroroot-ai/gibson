@@ -18,9 +18,8 @@
 //	mcp__<connector>__<tool>
 //	native__<tool>
 //
-// An MCP id decomposes to the existing (plugin_name, method) dispatch key via
-// PluginRef, so connectors route through the daemon's existing PluginInvoke path
-// with no new mechanism. See ADR-0065.
+// An MCP id names a connector and one of its tools. The daemon, the one MCP
+// client, calls that connector. See ADR-0065.
 package toolid
 
 import (
@@ -151,15 +150,6 @@ func Unflatten(flat string) (ID, error) {
 	default:
 		return ID{}, fmt.Errorf("toolid: unknown source in flattened name %q", flat)
 	}
-}
-
-// PluginRef decomposes an MCP id to the existing (plugin_name, method) dispatch
-// key. ok is false for native tools, which are not PluginInvoke targets.
-func (id ID) PluginRef() (pluginName, method string, ok bool) {
-	if id.Source != SourceMCP {
-		return "", "", false
-	}
-	return id.Connector, id.Tool, true
 }
 
 // ValidFunctionName reports whether s is a legal native LLM function name.

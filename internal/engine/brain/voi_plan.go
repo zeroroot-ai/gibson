@@ -73,6 +73,15 @@ type VoIPlanInput struct {
 	// no covering capabilities at all for any candidate (see its own doc
 	// comment) — it still never panics.
 	Hierarchy *taxonomy.TechniqueHierarchy
+	// Budget is the budget state of the mission. The resource cost of each
+	// candidate scales with the part that is left (voi_score.go). The zero
+	// value is a mission with no limit.
+	Budget VoIBudget
+	// DestructiveTechniques names each technique whose predicate an enabled
+	// Domain Pack marks as destructive (ADR-0132). A hypothesis candidate
+	// with one of these techniques gets the higher risk cost. Nil means that
+	// no technique has the mark.
+	DestructiveTechniques map[string]bool
 }
 
 // PlanVoI scores every candidate in in (evidence moves from Hosts, test moves
@@ -82,6 +91,7 @@ type VoIPlanInput struct {
 // own budget convention.
 func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, scorer VoIScorer, topK int) ([]VoICandidate, error) {
 	degree := attackGraphDegree(in.Graph)
+	budgetSpent := in.Budget.SpentFraction()
 
 	candidates := make([]VoICandidate, 0, len(in.Hosts)+len(in.Hypotheses))
 
@@ -102,6 +112,7 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 			Connectivity: degree[id],
 			Surprised:    h.Surprise != "",
 			Reputation:   reputation,
+			BudgetSpent:  budgetSpent,
 		}))
 	}
 
@@ -151,6 +162,8 @@ func PlanVoI(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, sc
 			Connectivity: len(hyp.References),
 			HasStake:     ok,
 			Reputation:   reputation,
+			BudgetSpent:  budgetSpent,
+			Destructive:  hyp.Technique != "" && in.DestructiveTechniques[hyp.Technique],
 		})
 		// VoI dispatch gating's technique -> capability bridge (ADR-0135,
 		// gibson#387): resolve this candidate's covering
@@ -215,7 +228,7 @@ func sortVoICandidates(c []VoICandidate) {
 
 // attackGraphDegree returns every node's degree (in + out) in g — ADR-0126's
 // "connectivity" input. A node absent from g has degree 0, the common
-// case while HostsToInfraGraph (gibson#275) still produces an edgeless graph.
+// case for a host that no relationship of the World links to a second host.
 func attackGraphDegree(g AttackGraph) map[string]int {
 	degree := make(map[string]int, len(g.Nodes))
 	for _, e := range g.Edges {

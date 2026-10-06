@@ -59,22 +59,22 @@ func classifyActorSource(ctx context.Context) string {
 // filter cleanly.
 //
 // Mapping (R6 AC 3):
-//   - can_read / *_read_disabled / component_read_enabled        → "read"
-//   - can_configure / *_write_disabled / component_write_enabled → "write"
-//   - can_execute / *_execute_disabled / component_execute_enabled → "execute"
+//   - can_read / direct_read / *_read_disabled            → "read"
+//   - can_configure / direct_configure / *_write_disabled → "write"
+//   - can_execute / direct_execute / *_execute_disabled   → "execute"
 func classifyRelationAction(relation string) string {
 	switch {
 	case relation == "can_read",
-		strings.HasSuffix(relation, "_read_disabled"),
-		relation == "component_read_enabled":
+		relation == "direct_read",
+		strings.HasSuffix(relation, "_read_disabled"):
 		return "read"
 	case relation == "can_configure",
-		strings.HasSuffix(relation, "_write_disabled"),
-		relation == "component_write_enabled":
+		relation == "direct_configure",
+		strings.HasSuffix(relation, "_write_disabled"):
 		return "write"
 	case relation == "can_execute",
-		strings.HasSuffix(relation, "_execute_disabled"),
-		relation == "component_execute_enabled":
+		relation == "direct_execute",
+		strings.HasSuffix(relation, "_execute_disabled"):
 		return "execute"
 	}
 	return ""

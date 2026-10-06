@@ -129,3 +129,61 @@ func TestRegisterComponent_PersistsTheCallersPrincipal(t *testing.T) {
 		t.Errorf("persisted principal %q, want the caller's plugin_principal verbatim", spy.got.PrincipalRef)
 	}
 }
+
+// TestRegisterComponent_RecordsTheTrustThatTheCatalogStates: the install
+// record holds the trust of the signed catalog, never the value that the
+// component reports in its metadata (S3, S4).
+func TestRegisterComponent_RecordsTheTrustThatTheCatalogStates(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		reported string
+		want     componentpb.ContentTrust
+	}{
+		{"an unlisted tool that reports trusted", "tool", "trusted", componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED},
+		{"a catalog plugin that reports untrusted", "plugin", "untrusted", catalogContentTrust("plugin", "github")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &installRegistrySpy{}
+			svc := newParityServer()
+			svc.WithComponentInstallRegistry(spy)
+			svc.WithEnrollmentReader(attestedCaller{})
+			name := "self-described"
+			if tc.kind == "plugin" {
+				name = "github"
+			}
+			ctx := credCallerCtx(t, "plugin_principal:"+name, "test-tenant")
+			if _, err := svc.RegisterComponent(ctx, &componentpb.RegisterComponentRequest{
+				Kind: tc.kind, Name: name, Version: "0.1.0",
+				Metadata: map[string]string{"plugin:content_trust": tc.reported},
+			}); err != nil {
+				t.Fatalf("RegisterComponent: %v", err)
+			}
+			if spy.got == nil || spy.got.ContentTrust != tc.want {
+				t.Fatalf("recorded trust = %v; want %v", spy.got, tc.want)
+			}
+		})
+	}
+	if catalogContentTrust("plugin", "github") == componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED {
+		t.Fatal("the catalog must state a trust for the github plugin, or this test proves nothing")
+	}
+}
+
+// TestCatalogContentTrust_StatesEachValue: the helper returns the trust that
+// the catalog states, and UNSPECIFIED for an entry that it does not list.
+func TestCatalogContentTrust_StatesEachValue(t *testing.T) {
+	cases := []struct {
+		kind, name string
+		want       componentpb.ContentTrust
+	}{
+		{"plugin", "github", componentpb.ContentTrust_CONTENT_TRUST_TRUSTED},
+		{"tool", "nmap", componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED},
+		{"tool", "not-in-the-catalog", componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		if got := catalogContentTrust(tc.kind, tc.name); got != tc.want {
+			t.Errorf("catalogContentTrust(%q, %q) = %v; want %v", tc.kind, tc.name, got, tc.want)
+		}
+	}
+}

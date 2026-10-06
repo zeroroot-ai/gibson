@@ -120,9 +120,9 @@ func TestEvidence_PagesARangeWithMoreEventsThanOnePage(t *testing.T) {
 	for i := int64(1); i <= 5; i++ {
 		rows = append(rows, row(i, "agent_grant_added", start.Add(time.Duration(i)*time.Hour)))
 	}
-	var ids []string
+	ids := make([]string, 0, len(rows))
 	token := ""
-	for page := 0; page < 3; page++ {
+	for page := range 3 {
 		r := newTestReader(t, rows, enabledFw())
 		rep, err := r.Evidence(context.Background(), Query{
 			Tenant: "acme", Pack: "fw", Start: start, End: end, PageSize: 2, PageToken: token,
@@ -149,6 +149,10 @@ func TestEvidence_RefusesATokenOfADifferentQuery(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidQuery)
 
 	_, err = r.Evidence(context.Background(), Query{Tenant: "acme", Pack: "fw", Start: start, End: end, PageToken: "!!"})
+	require.ErrorIs(t, err, ErrInvalidQuery)
+
+	// "eA" is valid base64 for the byte "x", which is not JSON.
+	_, err = r.Evidence(context.Background(), Query{Tenant: "acme", Pack: "fw", Start: start, End: end, PageToken: "eA"})
 	require.ErrorIs(t, err, ErrInvalidQuery)
 }
 

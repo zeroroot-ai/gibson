@@ -31,7 +31,6 @@ import (
 // the Dockerfile fails this test; shipping it in the Dockerfile without listing
 // it here also fails, so the list cannot silently drift out of date.
 var shippedTools = []string{
-	"active-session-backfill",
 	// bootstrap-tenant-owner (gibson#1103): a one-time, operator-credentialed
 	// one-shot that creates the owner human identity for a tenant on a
 	// closed-registration self-hosted install. No Helm hook — invoked ad hoc

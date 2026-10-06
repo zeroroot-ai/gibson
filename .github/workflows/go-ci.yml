@@ -217,7 +217,7 @@ jobs:
   #
   # Legs:
   #   ""                 default build; also the `!setec_integration` /
-  #                      `!test_fixtures` / `!embedder_tests` negative variants.
+  #                      `!test_fixtures` negative variants.
   #   setec_integration  microVM round-trip suite (run on the KVM runner).
   #   integration        testcontainers suite. Vetted module-wide here, which is
   #                      strictly wider than the `integration` job's scoped

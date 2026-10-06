@@ -265,7 +265,7 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 	}
 
 	// Set global OTel providers for library instrumentation.
-	// Delegate to platform-clients/observability so the global registration
+	// Delegate to internal/infra/observability so the global registration
 	// follows the same pattern used across all platform services (ext-authz,
 	// tenant-operator, etc.). This also registers the composite propagator
 	// (TraceContext + Baggage) consistently.

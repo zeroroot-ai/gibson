@@ -5,6 +5,8 @@ package controller
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,6 +71,12 @@ type TenantReconciler struct {
 	// NamespaceProvisioner produces the namespace step.
 	NamespaceProvisioner *NamespaceProvisioner
 
+	// FinalBackup takes the last backup of a tenant before the delete flow
+	// removes anything (ADR-0075). Required: main.go builds it from the
+	// manager client and the Velero namespace, and a delete pass with no
+	// FinalBackup fails.
+	FinalBackup FinalBackupTaker
+
 	// PlatformNamespace is where the operator itself runs.
 	PlatformNamespace string
 
@@ -97,8 +105,7 @@ type TenantReconciler struct {
 
 	// StatusReporter pushes observed Tenant status to the daemon so the
 	// dashboard can read provisioning status without Kubernetes access
-	// (gibson#948, dashboard#813), and echoes back the dashboard-recorded
-	// billing-active flag the operator stamps onto the CR. Always non-nil on the
+	// (gibson#948, dashboard#813). Always non-nil on the
 	// reconcile path: main.go injects NoopTenantStatusReporter when the operator
 	// boots without GIBSON_DAEMON_GRPC_ADDRESS (report-back disabled).
 	StatusReporter TenantStatusReporter
@@ -121,6 +128,10 @@ type TenantReconciler struct {
 //     dynamic per-tenant scope; that's a runtime concern.
 // A CI guard (scripts/check-operator-rbac-scope.sh) fails the build if
 // any of those resources reappear in this ClusterRole.
+//
+// The last backup of a tenant delete (package finalbackup) needs get and
+// create on velero.io Backups in the Velero namespace only. The chart grants
+// that with a Role in that namespace, so it is not a marker here.
 // =================================================================
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenants,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenants/status,verbs=get;update;patch
@@ -128,6 +139,21 @@ type TenantReconciler struct {
 // +kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups=events.k8s.io,resources=events,verbs=create;patch
+
+// FinalBackupTaker takes the last backup of a tenant. Ensure reports true when
+// the backup is complete and the delete flow can go on, false while the backup
+// runs, and an error when the backup failed. *finalbackup.Taker implements it.
+type FinalBackupTaker interface {
+	Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool, error)
+}
+
+// finalBackupRequeueInterval is the time between two reads of a backup that
+// is not finished.
+const finalBackupRequeueInterval = 15 * time.Second
+
+// errNoFinalBackupTaker reports a reconciler that was built with no
+// FinalBackup. The delete flow never runs without the backup.
+var errNoFinalBackupTaker = errors.New("tenant reconciler: FinalBackup is not set, so no tenant can be deleted")
 
 // reader is the client that fetches the Tenant at the start of a pass: the
 // uncached API reader when the manager gave us one, else Client. Same shape
@@ -266,8 +292,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	}
 
 	// Report the observed status to the daemon so the dashboard can read it
-	// without Kubernetes access (gibson#948, dashboard#813), and stamp the
-	// billing-active annotation from the daemon-recorded flag. Best-effort: a
+	// without Kubernetes access (gibson#948, dashboard#813). Best-effort: a
 	// daemon blip logs and never fails the reconcile. Production always injects a
 	// reporter (NoopTenantStatusReporter when report-back is disabled); the
 	// positive guard keeps unit tests that omit it from dereferencing nil,
@@ -327,6 +352,22 @@ func (r *TenantReconciler) reconcileDelete(ctx context.Context, tenant *gibsonv1
 	// deletion, so without this report the row keeps its last "ready" state
 	// for a tenant that no longer exists (gibson#661).
 	r.reportTeardownToDaemon(ctx, tenant, gibsonv1alpha1.TenantPhaseTerminating)
+
+	// The last backup comes before every removal (ADR-0075). While the backup
+	// runs, and when it fails, this pass returns here: no child, no Redis key
+	// and no namespace is deleted, and the finalizer stays.
+	if r.FinalBackup == nil {
+		return ctrl.Result{}, errNoFinalBackupTaker
+	}
+	backedUp, backupErr := r.FinalBackup.Ensure(ctx, tenant)
+	if backupErr != nil {
+		log.Error(backupErr, "the last backup did not complete; the delete flow removes nothing")
+		return ctrl.Result{}, fmt.Errorf("tenant %q: last backup: %w", tenant.Name, backupErr)
+	}
+	if !backedUp {
+		log.Info("the last backup runs; the delete flow waits")
+		return ctrl.Result{RequeueAfter: finalBackupRequeueInterval}, nil
+	}
 
 	// Dependency-ordered child teardown (E8/gibson#805). Delete the owned
 	// sub-CRDs in REVERSE dependency order, waiting for each child's own

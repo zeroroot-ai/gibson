@@ -49,6 +49,12 @@ const (
 	// dial Zitadel by Service name without hostAliases. See ADR-0092.
 	ConditionTrustedDomainReady = "TrustedDomainReady"
 
+	// ConditionAdminTokenReady reports whether OpenBao holds a valid Zitadel
+	// admin token that this operator minted (gibson#794). The operator mints
+	// the first one with its System API key, and a new one when the stored
+	// token is missing or no longer valid.
+	ConditionAdminTokenReady = "AdminTokenReady"
+
 	// ConditionUnsealKeyEscrowed reports whether the OpenBao unseal key has
 	// been copied to a destination declared in spec.unsealEscrow.
 	//

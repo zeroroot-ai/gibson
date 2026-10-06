@@ -57,7 +57,7 @@ type VaultClientFactory func(apiEndpoint string, tokenFn vault.TokenFunc) (vault
 // must be safe for concurrent use from multiple goroutines.
 //
 // The primary production implementation is vaulttoken.Renewer, which wraps
-// platform-clients vault.Provider and calls RenewSelf before the token TTL
+// internal/infra/secrets/vault Provider and calls RenewSelf before the token TTL
 // expires. Tests may substitute a static implementation.
 //
 // A non-nil error from Token signals that the token is stale or the renewal
@@ -95,13 +95,15 @@ type PlatformBootstrapReconciler struct {
 	// already recorded: identity run 36680224658 mailed the Platform owner's
 	// setup link twice one second apart that way. Nil in tests, where the
 	// fake client has no cache and Client serves both reads.
-	APIReader           client.Reader
-	Scheme              *runtime.Scheme
-	Recorder            record.EventRecorder
-	ZitadelFactory      ZitadelClientFactory
-	FGAFactory          FGAClientFactory
-	VaultFactory        VaultClientFactory
-	VaultToken          VaultTokenSource
+	APIReader      client.Reader
+	Scheme         *runtime.Scheme
+	Recorder       record.EventRecorder
+	ZitadelFactory ZitadelClientFactory
+	FGAFactory     FGAClientFactory
+	VaultFactory   VaultClientFactory
+	VaultToken     VaultTokenSource
+	// Now is the clock of the admin token expiry. Nil means time.Now.
+	Now                 func() time.Time
 	PostgresFactory     PostgresClientFactory
 	SystemClientFactory SystemClientFactory
 }
@@ -207,6 +209,10 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// It never blocks the rest: an unescrowed key holds the Ready condition,
 		// not the reconcile.
 		r.reconcileUnsealEscrow,
+		// Step 0b: the Zitadel admin token in OpenBao (gibson#794). The
+		// operator mints it with its System API key, so it needs no token
+		// to exist before. Step 1 reads it through the ExternalSecret.
+		r.reconcileAdminToken,
 		// Step 1: Zitadel project + service users.
 		r.reconcileZitadelProject,
 		// Step 2: OIDCClient children.
@@ -652,6 +658,7 @@ func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb 
 // every sub-step condition.
 func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.PlatformBootstrap) {
 	all := []string{
+		gibsonv1alpha1.ConditionAdminTokenReady,
 		gibsonv1alpha1.ConditionZitadelProjectReady,
 		gibsonv1alpha1.ConditionOIDCClientsReady,
 		gibsonv1alpha1.ConditionSAIdentityMapReady,

@@ -41,20 +41,14 @@ func TestBootstrap_WritesTheMissionNodeThroughTheSoleWriter(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	client := &recordingGraphClient{}
 	writer := newFakeGraphWriter()
-	b := NewGraphBootstrapper(client, writer, slog.New(slog.DiscardHandler))
+	b := NewGraphBootstrapper(writer, slog.New(slog.DiscardHandler))
 	if _, err := b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets); err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
 
-	// The bootstrap's own client must not CREATE or MERGE a :Mission node. It
-	// may still MATCH one — that is how a MissionRun and a MissionNode attach.
-	for _, w := range client.writes {
-		if loc := missionNodeWritePattern.FindString(w.cypher); loc != "" {
-			t.Errorf("the bootstrap wrote a :Mission node itself (%q):\n%s", loc, w.cypher)
-		}
-	}
+	// The bootstrap holds no graph client, so each of its graph writes goes
+	// through the writer (gibson#673).
 
 	got := writer.missions[m.TenantID]
 	if len(got) != 1 {
@@ -104,7 +98,7 @@ func TestBootstrap_WithoutAGraphWriter_Fails(t *testing.T) {
 		t.Fatalf("project: %v", err)
 	}
 
-	b := NewGraphBootstrapper(&recordingGraphClient{}, nil, slog.New(slog.DiscardHandler))
+	b := NewGraphBootstrapper(nil, slog.New(slog.DiscardHandler))
 	_, err = b.Bootstrap(context.Background(), m.TenantID, m, def, run, proj, origins, targets)
 	if err == nil {
 		t.Fatal("bootstrap succeeded with no graph writer; the run's :Mission node would never exist")

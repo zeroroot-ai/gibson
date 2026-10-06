@@ -222,20 +222,20 @@ func (s *IdentityServer) canRevokeSomeSessions(ctx context.Context, principalID,
 	return len(adminTeams) > 0, nil
 }
 
-// collectComponentGrants enumerates the principal's per-action grants
-// on the `component` FGA type. For each of the three relations
-// (component_read_enabled / component_write_enabled /
-// component_execute_enabled), we ListObjects to find every component
-// the principal has been granted that action on.
+// collectComponentGrants enumerates the principal's effective access on
+// the `component` FGA type. For each of the three actions (can_read,
+// can_configure, can_execute), we ListObjects to find every component
+// that the principal can use for that action. A component principal is
+// checked on the same relations as a user (ADR-0041).
 func (s *IdentityServer) collectComponentGrants(ctx context.Context, target PrincipalRecord) ([]*identitypb.ComponentGrantEffective, bool, error) {
 	type relSpec struct {
 		fga    string
 		setter func(*identitypb.ComponentGrantEffective)
 	}
 	rels := []relSpec{
-		{"component_read_enabled", func(g *identitypb.ComponentGrantEffective) { g.CanRead = true }},
-		{"component_write_enabled", func(g *identitypb.ComponentGrantEffective) { g.CanConfigure = true }},
-		{"component_execute_enabled", func(g *identitypb.ComponentGrantEffective) { g.CanExecute = true }},
+		{"can_read", func(g *identitypb.ComponentGrantEffective) { g.CanRead = true }},
+		{"can_configure", func(g *identitypb.ComponentGrantEffective) { g.CanConfigure = true }},
+		{"can_execute", func(g *identitypb.ComponentGrantEffective) { g.CanExecute = true }},
 	}
 
 	user := fgaUserRef(target.PrincipalID)

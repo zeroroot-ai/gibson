@@ -52,13 +52,13 @@ var (
 type State int
 
 const (
-	// StateNoRule: the pack has no mapping rule for the control. The text
+	// StateNoRule means that the pack has no mapping rule for the control. The text
 	// for it is "No automated evidence".
 	StateNoRule State = iota + 1
-	// StateNoEvents: the control has a rule, and no event in the range
+	// StateNoEvents means that the control has a rule, and no event in the range
 	// matched it.
 	StateNoEvents
-	// StateHasEvidence: one event or more in the range matched the rule.
+	// StateHasEvidence means that one event or more in the range matched the rule.
 	StateHasEvidence
 )
 

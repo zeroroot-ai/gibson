@@ -16,7 +16,7 @@ import (
 
 // TestEnableDomainPack_MainCatalogPack_BindingsGoLive is the acceptance test
 // for gibson#382 (epic #376, ADR-0133): the real, seeded "main" catalog pack
-// (ontology.EmbeddedPack — the same value the daemon wires into its
+// (ontology.EmbeddedCatalog().Get — the same value the daemon wires into its
 // DomainPackCatalog at startup, see internal/server/daemon/infrastructure.go)
 // is default-off for a fresh tenant, and EnableDomainPack makes its CEL
 // predicate bindings live — present in that tenant's World, and still
@@ -66,7 +66,7 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 // mustMainPack returns the main pack from the embedded catalog.
 func mustMainPack(t *testing.T) ontology.DomainPack {
 	t.Helper()
-	p, ok := ontology.EmbeddedPack(ontology.MainDomainPackName)
+	p, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
 	if !ok {
 		t.Fatal("the embedded catalog must hold the main pack")
 	}

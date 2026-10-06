@@ -54,7 +54,6 @@ const (
 	AdminTenantService_AdminProvisionTenant_FullMethodName          = "/gibson.tenant.v1.AdminTenantService/AdminProvisionTenant"
 	AdminTenantService_AdminUpdateTenant_FullMethodName             = "/gibson.tenant.v1.AdminTenantService/AdminUpdateTenant"
 	AdminTenantService_AdminDeleteTenant_FullMethodName             = "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant"
-	AdminTenantService_AdminGetTenantBilling_FullMethodName         = "/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling"
 	AdminTenantService_AdminListPendingRegistrations_FullMethodName = "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations"
 	AdminTenantService_AdminApproveRegistration_FullMethodName      = "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration"
 	AdminTenantService_AdminRejectRegistration_FullMethodName       = "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration"
@@ -88,19 +87,6 @@ type AdminTenantServiceClient interface {
 	// daemon does NOT delete any tenant data itself. Idempotent: deleting an
 	// already-absent Tenant CR is a no-op success at apply time.
 	AdminDeleteTenant(ctx context.Context, in *AdminDeleteTenantRequest, opts ...grpc.CallOption) (*AdminDeleteTenantResponse, error)
-	// AdminGetTenantBilling returns ANY tenant's billing identifiers — the Stripe
-	// customer id, the billing-active flag and the Zitadel org slug — for the
-	// platform-owner admin surfaces (the trial-extension tool, dashboard#1016).
-	//
-	// This is a genuine CROSS-tenant read: a staff operator acting on an arbitrary
-	// tenant_id. It cannot use the unauthenticated
-	// TenantProvisioningService.GetTenantProvisioningStatus (that RPC no longer
-	// discloses billing state to any caller — gibson#1339), nor the own-tenant
-	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
-	// carries the same platform_owner gate as the other AdminTenantService
-	// RPCs: ext-authz authorizes platform_owner on system_tenant:_system before
-	// the handler trusts the request tenant_id.
-	AdminGetTenantBilling(ctx context.Context, in *AdminGetTenantBillingRequest, opts ...grpc.CallOption) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a
 	// decision, oldest first. Each one is a person who registered on the
 	// approval rung and holds a deactivated account until an administrator
@@ -165,16 +151,6 @@ func (c *adminTenantServiceClient) AdminDeleteTenant(ctx context.Context, in *Ad
 	return out, nil
 }
 
-func (c *adminTenantServiceClient) AdminGetTenantBilling(ctx context.Context, in *AdminGetTenantBillingRequest, opts ...grpc.CallOption) (*AdminGetTenantBillingResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(AdminGetTenantBillingResponse)
-	err := c.cc.Invoke(ctx, AdminTenantService_AdminGetTenantBilling_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *adminTenantServiceClient) AdminListPendingRegistrations(ctx context.Context, in *AdminListPendingRegistrationsRequest, opts ...grpc.CallOption) (*AdminListPendingRegistrationsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AdminListPendingRegistrationsResponse)
@@ -233,19 +209,6 @@ type AdminTenantServiceServer interface {
 	// daemon does NOT delete any tenant data itself. Idempotent: deleting an
 	// already-absent Tenant CR is a no-op success at apply time.
 	AdminDeleteTenant(context.Context, *AdminDeleteTenantRequest) (*AdminDeleteTenantResponse, error)
-	// AdminGetTenantBilling returns ANY tenant's billing identifiers — the Stripe
-	// customer id, the billing-active flag and the Zitadel org slug — for the
-	// platform-owner admin surfaces (the trial-extension tool, dashboard#1016).
-	//
-	// This is a genuine CROSS-tenant read: a staff operator acting on an arbitrary
-	// tenant_id. It cannot use the unauthenticated
-	// TenantProvisioningService.GetTenantProvisioningStatus (that RPC no longer
-	// discloses billing state to any caller — gibson#1339), nor the own-tenant
-	// TenantService.GetTenantBilling (the operator is not that tenant's admin). It
-	// carries the same platform_owner gate as the other AdminTenantService
-	// RPCs: ext-authz authorizes platform_owner on system_tenant:_system before
-	// the handler trusts the request tenant_id.
-	AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error)
 	// AdminListPendingRegistrations returns the registrations awaiting a
 	// decision, oldest first. Each one is a person who registered on the
 	// approval rung and holds a deactivated account until an administrator
@@ -288,9 +251,6 @@ func (UnimplementedAdminTenantServiceServer) AdminUpdateTenant(context.Context, 
 }
 func (UnimplementedAdminTenantServiceServer) AdminDeleteTenant(context.Context, *AdminDeleteTenantRequest) (*AdminDeleteTenantResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminDeleteTenant not implemented")
-}
-func (UnimplementedAdminTenantServiceServer) AdminGetTenantBilling(context.Context, *AdminGetTenantBillingRequest) (*AdminGetTenantBillingResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method AdminGetTenantBilling not implemented")
 }
 func (UnimplementedAdminTenantServiceServer) AdminListPendingRegistrations(context.Context, *AdminListPendingRegistrationsRequest) (*AdminListPendingRegistrationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminListPendingRegistrations not implemented")
@@ -376,24 +336,6 @@ func _AdminTenantService_AdminDeleteTenant_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
-func _AdminTenantService_AdminGetTenantBilling_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(AdminGetTenantBillingRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AdminTenantServiceServer).AdminGetTenantBilling(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AdminTenantService_AdminGetTenantBilling_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AdminTenantServiceServer).AdminGetTenantBilling(ctx, req.(*AdminGetTenantBillingRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _AdminTenantService_AdminListPendingRegistrations_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminListPendingRegistrationsRequest)
 	if err := dec(in); err != nil {
@@ -466,10 +408,6 @@ var AdminTenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminDeleteTenant",
 			Handler:    _AdminTenantService_AdminDeleteTenant_Handler,
-		},
-		{
-			MethodName: "AdminGetTenantBilling",
-			Handler:    _AdminTenantService_AdminGetTenantBilling_Handler,
 		},
 		{
 			MethodName: "AdminListPendingRegistrations",

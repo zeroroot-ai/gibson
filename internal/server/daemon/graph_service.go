@@ -37,6 +37,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -543,14 +544,13 @@ func (s *graphServer) GetFindings(
 	}
 	defer release()
 
-	// Clamp limit.
-	limit := req.GetLimit()
-	if limit == 0 {
-		limit = graph.DefaultFindingsLimit
+	// The page window (ADR-0028, rule 3). The findings query has its own cap.
+	pageOffset, pageLimit, pageErr := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if pageErr != nil {
+		return nil, status.Error(codes.InvalidArgument, pageErr.Error())
 	}
-	if limit > graph.MaxFindingsLimit {
-		limit = graph.MaxFindingsLimit
-	}
+	limit := pagetoken.Uint32(min(pageLimit, int(graph.MaxFindingsLimit)))
+	offset := pagetoken.Uint32(pageOffset)
 
 	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
 	defer cancel()
@@ -561,7 +561,7 @@ func (s *graphServer) GetFindings(
 		MissionID: req.GetMissionId(),
 		Search:    req.GetSearch(),
 		Limit:     limit,
-		Offset:    req.GetOffset(),
+		Offset:    offset,
 	}
 
 	q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
@@ -593,13 +593,13 @@ func (s *graphServer) GetFindings(
 		pbFindings = append(pbFindings, pbf)
 	}
 
-	offset := req.GetOffset()
 	truncated := total > uint64(offset)+uint64(len(pbFindings))
 
 	return &graphpb.GetFindingsResponse{
-		Findings:  pbFindings,
-		Total:     total,
-		Truncated: truncated,
+		Findings:      pbFindings,
+		Total:         total,
+		Truncated:     truncated,
+		NextPageToken: pagetoken.Next(pageOffset, int(limit), len(pbFindings), pagetoken.Int(total)),
 	}, nil
 }
 

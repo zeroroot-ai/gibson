@@ -12,11 +12,9 @@ description: >-
   check at the severity trivy reports, a Workload node per resource audited,
   and a ClusterAudit node listing every resource that could not be read.
   Needs a kubeconfig that the daemon supplies from a tenant secret.
-# A scanner reaches the mission's targets. The effective egress of a tool
-# launch is bounded by the dispatching agent's ceiling (ADR-0116), so this
-# is a ceiling, not a grant.
-egressAllow:
-  - "*"
+# A scanner reaches the targets of its mission node. The network scope of
+# the node decides the egress of the tool sandbox (owner decision S6,
+# gibson#865), so the manifest states no ceiling. The catalog holds no "*".
 spec:
   contentTrust: untrusted
   dispatchMode: sandboxed

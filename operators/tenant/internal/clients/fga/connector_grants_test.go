@@ -22,6 +22,9 @@ type connectorStubFGAClient struct {
 	deleted   []fga.Tuple
 	writeErr  error
 	deleteErr error
+	// stored is what Read answers from, and readErr fails Read.
+	stored  []fga.Tuple
+	readErr error
 }
 
 func (s *connectorStubFGAClient) Write(_ context.Context, tuples []fga.Tuple) error {
@@ -44,8 +47,17 @@ func (s *connectorStubFGAClient) Delete(_ context.Context, tuples []fga.Tuple) e
 	return nil
 }
 
-func (s *connectorStubFGAClient) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, error) {
-	return nil, nil
+func (s *connectorStubFGAClient) Read(_ context.Context, filter fga.Tuple) ([]fga.Tuple, error) {
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	var out []fga.Tuple
+	for _, t := range s.stored {
+		if t == filter {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func (s *connectorStubFGAClient) Check(_ context.Context, _, _, _ string) (bool, error) {
@@ -144,15 +156,32 @@ func TestLegacyConnectorInvokeTuple_ShapeAndDelete(t *testing.T) {
 	if got != want {
 		t.Fatalf("tuple = %+v, want %+v", got, want)
 	}
-	stub := &connectorStubFGAClient{}
+	stub := &connectorStubFGAClient{stored: []fga.Tuple{want}}
 	if err := fga.DeleteLegacyConnectorInvokeTuple(context.Background(), stub, "gitlab", "acme"); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if len(stub.deleted) != 1 || stub.deleted[0] != want {
 		t.Fatalf("deleted = %+v, want exactly the legacy tuple", stub.deleted)
 	}
-	failing := &connectorStubFGAClient{deleteErr: fmt.Errorf("dial: %w", clients.ErrUnreachable)}
+	failing := &connectorStubFGAClient{stored: []fga.Tuple{want}, deleteErr: fmt.Errorf("dial: %w", clients.ErrUnreachable)}
 	if err := fga.DeleteLegacyConnectorInvokeTuple(context.Background(), failing, "gitlab", "acme"); err == nil {
 		t.Fatal("want error propagation")
+	}
+}
+
+// When the retired tuple is gone, the delete sends nothing and succeeds, so a
+// reconcile after the first one completes (gibson#879). A delete of a missing
+// tuple would fail at the server.
+func TestDeleteLegacyConnectorInvokeTuple_GoneSendsNoDelete(t *testing.T) {
+	stub := &connectorStubFGAClient{deleteErr: errors.New("a delete must not be sent")}
+	if err := fga.DeleteLegacyConnectorInvokeTuple(context.Background(), stub, "gitlab", "acme"); err != nil {
+		t.Fatalf("delete with no retired tuple: %v", err)
+	}
+	if len(stub.deleted) != 0 {
+		t.Fatalf("deleted = %+v, want nothing", stub.deleted)
+	}
+	reading := &connectorStubFGAClient{readErr: errors.New("fga down")}
+	if err := fga.DeleteLegacyConnectorInvokeTuple(context.Background(), reading, "gitlab", "acme"); err == nil {
+		t.Fatal("a read error must fail the call")
 	}
 }

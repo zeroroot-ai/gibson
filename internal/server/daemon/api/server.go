@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"log/slog"
 	"os"
 	"strings"
@@ -33,7 +34,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
+	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -74,6 +77,7 @@ type DaemonServer struct {
 	tenantv1.UnimplementedUserServiceServer
 	tenantv1.UnimplementedSignupServiceServer
 	tenantv1.UnimplementedTenantProvisioningServiceServer
+	connectionv1.UnimplementedConnectionPointServiceServer
 	tenantv1.UnimplementedAdminTenantServiceServer
 	sessionv1.UnimplementedSessionServiceServer
 	daemonoperatorv1.UnimplementedDaemonOperatorServiceServer
@@ -107,6 +111,11 @@ type DaemonServer struct {
 	// GetConnectorAuthStatus (ADR-0061). Wired via
 	// WithConnectorAuthStatusReader; nil answers Unavailable.
 	connectorAuthStatusReader ConnectorAuthStatusReader
+
+	// beliefWorlds and trainerTrustDomain back the two belief trainer RPCs
+	// (gibson#788).
+	beliefWorlds       BeliefWorlds
+	trainerTrustDomain spiffeid.TrustDomain
 
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
@@ -308,12 +317,18 @@ type DaemonServer struct {
 	// Spec: seam-signup-saas-only (gibson#1088, ADR-0074).
 	signupPolicy signup.Policy
 
-	// billingWebhookSecret is the shared secret the billing-webhook caller
-	// signs SetTenantBillingActive assertions with. Wired via
-	// WithBillingWebhookSecret from GIBSON_BILLING_WEBHOOK_SECRET. Empty means
-	// the RPC cannot authenticate anyone and therefore refuses everyone — see
-	// billing_webhook_auth.go for the mechanism and the fail-closed rationale.
-	billingWebhookSecret []byte
+	// connectionCallers are the SPIFFE IDs that may call the neutral
+	// connection points (connection_points.go).
+	connectionCallers ConnectionPointCallers
+
+	// tenantActivation caches reads of the tenant activation signal
+	// (tenant_activation.go).
+	tenantActivation activationCache
+
+	// signupStepURL is the URL of the external signup step (ADR-0060, D54).
+	// Wired via WithSignupStepURL from GIBSON_SIGNUP_STEP_URL. Empty means
+	// signup never waits. See signup_step.go.
+	signupStepURL string
 
 	// signupVerifications holds proof of mailbox control for in-flight
 	// self-serve signups (platform Postgres, migration 021). Wired via
@@ -406,9 +421,8 @@ type MissionQuotaChecker interface {
 	IncrementMissionCount(ctx context.Context) error
 
 	// InvalidateCache drops any in-process cached limits for tenant so the
-	// next Limits call fetches a fresh value. Called by SetTenantBillingActive
-	// when a subscription-status change is recorded, allowing the 60 s TTL to
-	// be bypassed without waiting for natural expiry.
+	// next Limits call fetches a fresh value, allowing the 60 s TTL to be
+	// bypassed without waiting for natural expiry.
 	// Implementations must be safe to call concurrently and must be a no-op
 	// when the underlying provider has no cache (OSS configProvider path:
 	// delete(cache, tenant) on an empty map is always harmless).
@@ -466,7 +480,7 @@ type DaemonInterface interface {
 	// PauseMission pauses a running mission at the next clean checkpoint boundary
 	PauseMission(ctx context.Context, missionID string, force bool) error
 
-	// ResumeMission resumes a paused mission from its last checkpoint.
+	// ResumeMission resumes a paused mission run where it paused.
 	// Callers observe the resumed run via Subscribe filtered on the mission
 	// ID (gibson#1112 PR 3).
 	ResumeMission(ctx context.Context, missionID string) error
@@ -474,34 +488,15 @@ type DaemonInterface interface {
 	// GetMissionHistory returns all runs for a mission name
 	GetMissionHistory(ctx context.Context, name string, limit int, offset int) ([]MissionRunData, int, error)
 
-	// GetMissionCheckpoints returns all checkpoints for a mission
-	GetMissionCheckpoints(ctx context.Context, missionID string) ([]CheckpointData, error)
+	// GetMissionCheckpoints returns the checkpoints of a mission run. A
+	// checkpoint is the end of a node in the run (ADR-0170). The list is in
+	// the order the nodes ended.
+	GetMissionCheckpoints(ctx context.Context, missionID string) ([]MissionCheckpoint, error)
 
-	// GetMissionCheckpointPayload returns the rich, per-super-step
-	// payload for a single checkpoint — the decrypted working memory,
-	// mission memory, DAG steps, findings, and parallel-group state.
-	// Implementations that lack the per-super-step store fall back to
-	// the legacy mission.MissionCheckpoint metadata view. The returned
-	// CheckpointData's heavy fields may be nil/empty on the fallback
-	// path; the mission handlers degrade gracefully in that case.
-	//
-	// Spec: mission-checkpointing R14.1-R14.3.
-	GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error)
-
-	// RewindMission rewinds a mission's state to the named target
-	// checkpoint, cancelling any in-flight tools per their declared
-	// idempotency runtime, dropping any super-steps newer than the
-	// target, and writing a CHECKPOINT_SOURCE_MANUAL marker checkpoint.
-	// Returns the ID of the marker checkpoint on success.
-	//
-	// Spec: mission-checkpointing R16.4 (rewind core).
-	RewindMission(ctx context.Context, missionID, targetCheckpointID string) (markerCheckpointID string, err error)
-
-	// BuildComponent rebuilds a component from source
-	BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error)
-
-	// ShowComponent returns detailed information about a component
-	ShowComponent(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
+	// RewindMission starts a new mission run at the node of a checkpoint of
+	// an earlier run, with that run as its parent (ADR-0170). It deletes
+	// nothing. It returns the id of the new run.
+	RewindMission(ctx context.Context, req RewindRequest) (string, error)
 
 	// GetComponentLogs streams log entries for a component
 	GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
@@ -602,6 +597,11 @@ type MissionData struct {
 	FindingCount        int32
 	Progress            float64
 	CreatedBy           principal.Principal
+	// ParentMissionID and ParentCheckpointID name the run and the checkpoint
+	// that a rewind started this mission from (ADR-0170). Empty when no
+	// rewind started it.
+	ParentMissionID    string
+	ParentCheckpointID string
 }
 
 // MissionEventData represents mission event data from the daemon.
@@ -733,29 +733,6 @@ type StopComponentResult struct {
 	TotalCount   int
 }
 
-// BuildComponentResult represents the result of building a component.
-type BuildComponentResult struct {
-	Success    bool
-	Stdout     string
-	Stderr     string
-	DurationMs int64
-}
-
-// ComponentInfoInternal represents detailed component information.
-type ComponentInfoInternal struct {
-	Name      string
-	Version   string
-	Kind      string
-	Status    string
-	Source    string
-	RepoPath  string
-	BinPath   string
-	Port      int
-	PID       int
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
 // LogEntryData represents a single log entry.
 type LogEntryData struct {
 	Timestamp int64
@@ -777,107 +754,42 @@ type MissionRunData struct {
 	Error         string
 	PreviousRunID string // ID of the previous run (for linking run history)
 	TraceID       string // OTel trace ID for distributed-trace lookup
+	// ParentMissionID and ParentCheckpointID name the run and the checkpoint
+	// that a rewind started this run from (ADR-0170). Empty otherwise.
+	ParentMissionID    string
+	ParentCheckpointID string
 }
 
-// CheckpointData provides metadata about a mission checkpoint.
-//
-// The heavy fields below (WorkingMemory, MissionMemory, DagSteps,
-// FindingSnapshots, ParallelGroups, InFlightIdempotency, SizeBytes,
-// Source) are populated by the per-super-step payload exposure path
-// (Spec 4 Phase 2A — `ThreadedCheckpointer.OnSuperStepComplete`). The
-// legacy `daemonImpl.GetMissionCheckpoints` returns only the metadata
-// fields; the richer fields are zero in that case. The mission
-// handlers' `GetCheckpoint` and `DiffCheckpoints` opt into the rich
-// payload via `GetMissionCheckpointPayload` (see DaemonInterface).
-//
-// Spec: mission-checkpointing R13.1, R14.1, R15.1.
-type CheckpointData struct {
-	CheckpointID   string
-	CreatedAt      int64
-	CompletedNodes int
-	TotalNodes     int
-	FindingsCount  int
-	Version        int
-
-	// SizeBytes is the on-wire byte size of the persisted checkpoint
-	// (post-encryption + compression). Zero on the metadata-only path.
-	SizeBytes int64
-
-	// Source maps to daemonpb.CheckpointSource. Empty string falls back
-	// to CHECKPOINT_SOURCE_SUPER_STEP at proto-shape time.
-	// Valid: super_step / approval_gate / graceful_shutdown /
-	// parallel_group / manual.
-	Source string
-
-	// ParallelGroupID, when non-empty, indicates this checkpoint was
-	// captured at a parallel-group barrier.
-	ParallelGroupID string
-
-	// InFlightIdempotency surfaces the idempotency mode of any tool
-	// whose call was mid-flight at checkpoint time. Empty when no tool
-	// was in flight. Valid:
-	//   "AT_MOST_ONCE" / "AT_LEAST_ONCE" / "EXACTLY_ONCE"
-	InFlightIdempotency string
-
-	// InFlightNodeID is the node ID of the in-flight tool at checkpoint
-	// time, or empty if none was in flight.
-	InFlightNodeID string
-
-	// ResumptionToken is the EXACTLY_ONCE handshake token written by the
-	// tool at its last side-effecting step. Empty for AT_MOST_ONCE /
-	// AT_LEAST_ONCE.
-	ResumptionToken string
-
-	// WorkingMemory is the decrypted opaque bytes from per-super-step
-	// storage. Nil on the metadata-only path.
-	WorkingMemory []byte
-
-	// MissionMemory is the decrypted opaque bytes from per-super-step
-	// storage. Nil on the metadata-only path.
-	MissionMemory []byte
-
-	// DagSteps captures one snapshot row per node at checkpoint time.
-	// Nil on the metadata-only path.
-	DagSteps []DagStepData
-
-	// FindingSnapshots captures the per-finding slice of the checkpoint.
-	// Nil on the metadata-only path.
-	FindingSnapshots []FindingSnapshotData
-
-	// ParallelGroups maps group ID → state at checkpoint time. Nil on
-	// the metadata-only path.
-	ParallelGroups map[string]ParallelGroupStateData
+// MissionCheckpoint is the end of one node in a mission run (ADR-0170).
+type MissionCheckpoint struct {
+	// CheckpointID identifies the checkpoint inside its run. It is the id of
+	// the node that ended, because a node ends once in a run.
+	CheckpointID string
+	// NodeID is the id of the node that ended.
+	NodeID string
+	// TimelinePosition is the position in the mission slice of the Timeline
+	// of the event that ended the node: the frame GetFrameAt returns for this
+	// position holds the end. Zero when that event is no longer in memory.
+	TimelinePosition uint64
+	// SnapshotID is the sandbox snapshot taken at the end of the node. Empty
+	// when the run took none.
+	SnapshotID string
 }
 
-// DagStepData is a single DAG node's snapshot at checkpoint time. The
-// inputs and outputs are opaque, agent-defined byte payloads.
-type DagStepData struct {
-	NodeID         string
-	State          string
-	StartedAtUnix  int64
-	FinishedAtUnix int64
-	Inputs         []byte
-	Outputs        []byte
-	RetryCount     int32
-	Error          string
-}
-
-// FindingSnapshotData is the per-finding row at checkpoint time.
-// Payload is the taxonomy-canonical Finding bytes.
-type FindingSnapshotData struct {
-	FindingID string
-	Severity  string
-	Title     string
-	NodeID    string
-	Payload   []byte
-}
-
-// ParallelGroupStateData captures the state of a parallel-group barrier.
-type ParallelGroupStateData struct {
-	GroupID          string
-	Expected         int32
-	Completed        int32
-	CompletedNodeIDs []string
+// RewindRequest asks for a new mission run that starts at a checkpoint of an
+// earlier run (ADR-0170).
+type RewindRequest struct {
+	// MissionID is the earlier run.
+	MissionID string
+	// CheckpointID is a checkpoint of that run, as GetMissionCheckpoints
+	// returns it.
+	CheckpointID string
+	// Instruction, when not nil, replaces the instruction of the node of the
+	// checkpoint. No other node can change.
+	Instruction *string
+	// IdempotencyKey makes a retry safe: a second request with the same key
+	// starts no second run. Empty turns the protection off.
+	IdempotencyKey string
 }
 
 // MissionDefinitionData represents an installed mission definition.
@@ -1256,23 +1168,6 @@ func (s *DaemonServer) WithSignupPolicy(p signup.Policy) *DaemonServer {
 	return s
 }
 
-// WithBillingWebhookSecret wires the shared secret that authenticates
-// TenantProvisioningService.SetTenantBillingActive. An empty or
-// whitespace-only secret leaves the server unconfigured, which makes that RPC
-// refuse every caller (fail-closed — see billing_webhook_auth.go).
-//
-// The secret is deploy-time configuration read once at startup; no request can
-// change it.
-func (s *DaemonServer) WithBillingWebhookSecret(secret string) *DaemonServer {
-	trimmed := strings.TrimSpace(secret)
-	if trimmed == "" {
-		s.billingWebhookSecret = nil
-		return s
-	}
-	s.billingWebhookSecret = []byte(trimmed)
-	return s
-}
-
 // containsString reports whether needle is present in the haystack slice.
 // Used for capability-based scope filtering on agent lists.
 func containsString(haystack []string, needle string) bool {
@@ -1418,6 +1313,11 @@ func (s *DaemonServer) RunMission(req *daemonpb.RunMissionRequest, stream grpc.S
 	}
 
 	// Enforce per-tenant quotas before any resource allocation.
+	// A suspended tenant starts no new mission (ADR-0060, D41).
+	if err := s.requireActiveTenant(stream.Context(), auth.TenantStringFromContext(stream.Context())); err != nil {
+		s.logger.Warn("mission submission rejected: tenant suspended", "error", err)
+		return err
+	}
 	if s.quotaManager != nil {
 		if err := s.quotaManager.CheckMissionQuota(stream.Context()); err != nil {
 			s.logger.Warn("mission submission rejected: mission quota exceeded", "error", err)
@@ -1542,17 +1442,21 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissio
 // disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
 	tenant := auth.TenantStringFromContext(ctx)
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
 
 	s.logger.Debug("mission list request received",
 		"active_only", req.ActiveOnly,
 		"status_filter", req.StatusFilter,
 		"name_pattern", req.NamePattern,
-		"limit", req.Limit,
-		"offset", req.Offset,
+		"page_size", limit,
+		"offset", offset,
 		"tenant", tenant,
 	)
 
-	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, int(req.Limit), int(req.Offset))
+	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, limit, offset)
 	if err != nil {
 		s.logger.Error("failed to list missions", "error", err)
 		return nil, preserveStatus(err, "failed to list missions")
@@ -1587,12 +1491,15 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 			FindingCount:        m.FindingCount,
 			Progress:            m.Progress,
 			CreatedBy:           principal.ToProto(m.CreatedBy),
+			ParentMissionId:     m.ParentMissionID,
+			ParentCheckpointId:  m.ParentCheckpointID,
 		}
 	}
 
 	return &daemonpb.ListMissionsResponse{
-		Missions: protoMissions,
-		Total:    int32(total),
+		Missions:      protoMissions,
+		Total:         pagetoken.Int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoMissions), total),
 	}, nil
 }
 
@@ -2078,75 +1985,23 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMiss
 	}, nil
 }
 
-// ResumeMission resumes a paused mission from its last checkpoint and streams execution events.
+// ResumeMission resumes a paused mission and streams execution events.
 //
-// target_checkpoint_id (proto field 3) optionally requests rewind-and-resume:
-// when non-empty, the daemon discards work past the named checkpoint and
-// resumes from that point. When empty, behaviour is the legacy resume-from-
-// latest path. Spec: mission-checkpointing R16.
+// A resume continues the same run. It never moves a run back to a checkpoint:
+// RewindMission does that, and it starts a new run (ADR-0170). A request that
+// names a checkpoint is refused, so a caller cannot ask for a rewind that this
+// path would ignore.
 func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream grpc.ServerStreamingServer[daemonpb.ResumeMissionResponse]) error {
-	s.logger.Info("mission resume request received",
-		"mission_id", req.MissionId,
-		"checkpoint_id", req.CheckpointId,
-		"target_checkpoint_id", req.TargetCheckpointId,
-	)
+	s.logger.Info("mission resume request received", "mission_id", req.MissionId)
 
 	// Validate mission ID
 	if req.MissionId == "" {
 		return status_grpc.Errorf(codes.InvalidArgument, "mission ID is required")
 	}
-
-	// Rewind path: when target_checkpoint_id is set, this is a rewind-and-
-	// resume request, which requires admin (not viewer) per R16.3.
-	if req.TargetCheckpointId != "" {
-		if err := s.requireMissionAdminForRewind(stream.Context(), req.MissionId); err != nil {
-			return err
-		}
-		// Resolve the latest checkpoint as `from_checkpoint_id` BEFORE
-		// the rewind mutates state. R16.6 audit envelope wants both
-		// from_id and to_id.
-		fromCheckpointID := s.resolveLatestCheckpointID(stream.Context(), req.MissionId)
-
-		// Drive the orchestrator-side rewind core: validate the target,
-		// dispatch in-flight tools per their idempotency contract,
-		// write the marker checkpoint. The daemon's RewindMission
-		// returns the marker checkpoint ID on success.
-		markerID, rewindErr := s.daemon.RewindMission(stream.Context(), req.MissionId, req.TargetCheckpointId)
-		if rewindErr != nil {
-			s.logger.Warn("mission rewind failed",
-				"mission_id", req.MissionId,
-				"target_checkpoint_id", req.TargetCheckpointId,
-				"error", rewindErr,
-			)
-			if strings.Contains(rewindErr.Error(), "not found") {
-				return status_grpc.Errorf(codes.NotFound,
-					"target checkpoint %s not found for mission %s",
-					req.TargetCheckpointId, req.MissionId)
-			}
-			return preserveStatus(rewindErr, "rewind failed")
-		}
-		s.logger.Info("mission rewind completed",
-			"mission_id", req.MissionId,
-			"target_checkpoint_id", req.TargetCheckpointId,
-			"marker_checkpoint_id", markerID,
-			"from_checkpoint_id", fromCheckpointID,
-		)
-		// Audit emission per R16.6.
-		s.emitRewindCompletedAudit(stream.Context(), req.MissionId, fromCheckpointID, req.TargetCheckpointId)
-
-		// Apply the orchestrator-side idempotency dispatch decision for
-		// any in-flight tool captured at the target checkpoint. The
-		// dispatcher emits per-tool audit hints; failures (EXACTLY_ONCE
-		// without resumption_token) abort the rewind early.
-		if err := s.applyRewindIdempotency(stream.Context(), req.MissionId, req.TargetCheckpointId); err != nil {
-			return err
-		}
+	if req.GetCheckpointId() != "" || req.GetTargetCheckpointId() != "" {
+		return status_grpc.Error(codes.InvalidArgument,
+			"a resume continues the same run and takes no checkpoint; use RewindMission to start a run at a checkpoint")
 	}
-
-	// Build CheckpointMetadata up-front from the latest available
-	// checkpoint (or the targeted one) so we can attach it to the first
-	// streamed response event. R9.2 + R9.3.
-	checkpointMetadata := s.buildResumeCheckpointMetadata(stream.Context(), req.MissionId, req.TargetCheckpointId)
 
 	// Subscribe BEFORE resuming so no early lifecycle event can be missed;
 	// unlike RunMission the mission ID is known up front, so the bus filters
@@ -2176,7 +2031,6 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 	}
 
 	// Stream events to client (similar to RunMission)
-	firstEvent := true
 	for {
 		select {
 		case <-stream.Context().Done():
@@ -2217,14 +2071,6 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 				protoEvent.Result = me.Result
 			}
 
-			// Attach checkpoint_metadata on the first emitted event so the
-			// dashboard's "Resumed from <checkpoint>" badge can render
-			// without a follow-up RPC. R9.2.
-			if firstEvent {
-				protoEvent.CheckpointMetadata = checkpointMetadata
-				firstEvent = false
-			}
-
 			// Send event to client
 			if err := stream.Send(protoEvent); err != nil {
 				s.logger.Error("failed to send mission event", "error", err)
@@ -2241,174 +2087,21 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 	}
 }
 
-// buildResumeCheckpointMetadata constructs the CheckpointMetadata block
-// attached to the first event of a ResumeMission response. Returns nil
-// when there is no checkpoint to surface (from-scratch resume or
-// metadata lookup error). Spec: mission-checkpointing R9.2.
-func (s *DaemonServer) buildResumeCheckpointMetadata(ctx context.Context, missionID, targetCheckpointID string) *daemonpb.CheckpointMetadata {
-	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, missionID)
-	if err != nil || len(checkpoints) == 0 {
-		return nil
-	}
-
-	// Prefer the explicitly targeted checkpoint; otherwise fall back to
-	// the first (most recent) entry returned by the backend.
-	chosen := checkpoints[0]
-	if targetCheckpointID != "" {
-		for _, cp := range checkpoints {
-			if cp.CheckpointID == targetCheckpointID {
-				chosen = cp
-				break
-			}
-		}
-	}
-
-	cadence := "super_step"
-	if targetCheckpointID != "" {
-		cadence = "manual_rewind"
-	}
-	return &daemonpb.CheckpointMetadata{
-		CheckpointId:       chosen.CheckpointID,
-		SavedAtUnixSeconds: chosen.CreatedAt,
-		SuperStepNumber:    int32(chosen.Version),
-		CadenceReason:      cadence,
-	}
-}
-
-// requireMissionAdminForRewind enforces mission-scoped admin FGA via
-// `mission#admin`, which cascades from `tenant#admin` per the OpenFGA
-// model relation `define admin: [user] or admin from belongs_to` (see
-// internal/platform/authz/model.fga `type mission`). Tenant admins can rewind any
-// mission in their tenant; per-mission admins (e.g. shared with a
-// specific user) layer on top via `(user:<sub>, admin, mission:<id>)`.
-// When the FGA Authorizer is not wired (kind dev), the per-tenant Pool's
-// tenant-id scoping is the implicit guard.
-//
-// Spec: mission-checkpointing R16.3, R17.8.
-func (s *DaemonServer) requireMissionAdminForRewind(ctx context.Context, missionID string) error {
-	id, idErr := auth.IdentityFromContext(ctx)
-	if idErr != nil {
-		return status_grpc.Error(codes.Unauthenticated, "no identity in context")
-	}
-	tenantID := auth.TenantStringFromContext(ctx)
-	if tenantID == "" {
-		return status_grpc.Error(codes.PermissionDenied, "caller has no tenant")
-	}
-
-	if s.authorizer == nil {
-		// Fail closed: rewind is a WRITE, and an unconfigured authorizer must
-		// never allow it. FGA is a hard startup dependency, so a nil authorizer
-		// means misconfiguration, not a dev shortcut — the same reasoning that
-		// makes requireTenantAdmin return Unavailable here. Allowing on nil
-		// (the previous behaviour) was a latent fail-open on a mutating path
-		// (GHSA-v8j9-4h88-24p5).
-		s.logger.Warn("ResumeMission rewind denied: no authorizer wired (fail closed)",
-			"mission_id", missionID,
-			"tenant_id", tenantID,
-		)
-		return status_grpc.Error(codes.Unavailable, "authorizer not configured")
-	}
-
-	// Mission-scoped rewind check. can_rewind is the mission admin, which
-	// cascades from tenant#admin; per-mission admin shares layer on top. The
-	// check names the permission and not the role behind it, so the model
-	// can change who may rewind without a change here (hosted#358).
-	ok, err := s.authorizer.Check(ctx,
-		"user:"+id.Subject,
-		"can_rewind",
-		"mission:"+missionID,
-	)
-	if err != nil {
-		s.logger.Warn("ResumeMission rewind: authz check failed",
-			"mission_id", missionID,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-		return status_grpc.Errorf(codes.Internal, "authz check failed: %v", err)
-	}
-	if !ok {
-		return status_grpc.Errorf(codes.PermissionDenied,
-			"rewind requires admin on mission %s", missionID)
-	}
-	return nil
-}
-
-// emitRewindCompletedAudit emits the mission.rewind.completed audit
-// event (R16.6) after the rewind path validates and the orchestrator
-// has applied the idempotency contract. Carries both from_id (the
-// checkpoint the daemon was tracking pre-rewind) and to_id (the user-
-// chosen target).
-func (s *DaemonServer) emitRewindCompletedAudit(ctx context.Context, missionID, fromCheckpointID, toCheckpointID string) {
-	tenantID := auth.TenantStringFromContext(ctx)
-	subject := ""
-	if id, err := auth.IdentityFromContext(ctx); err == nil {
-		subject = id.Subject
-	}
-
-	s.logger.Info("audit: mission.rewind.completed",
-		"event_kind", "mission.rewind.completed",
-		"tenant_id", tenantID,
-		"mission_id", missionID,
-		"from_checkpoint_id", fromCheckpointID,
-		"to_checkpoint_id", toCheckpointID,
-		"caller_subject", subject,
-	)
-
-	if s.tenantAdminAuditWriter != nil {
-		meta := fmt.Sprintf(
-			`{"mission_id":%q,"from_checkpoint_id":%q,"to_checkpoint_id":%q}`,
-			missionID, fromCheckpointID, toCheckpointID,
-		)
-		s.tenantAdminAuditWriter.Log(audit.Event{
-			TenantID:   tenantID,
-			ActorID:    subject,
-			ActorType:  "user",
-			Action:     "mission.rewind.completed",
-			TargetType: "mission",
-			TargetID:   missionID,
-			Metadata:   []byte(meta),
-		})
-	}
-}
-
-// resolveLatestCheckpointID returns the most-recent checkpoint ID for
-// the given mission, or empty string when the lookup fails or the
-// mission has no checkpoints. Used as `from_checkpoint_id` in the
-// rewind audit envelope.
-func (s *DaemonServer) resolveLatestCheckpointID(ctx context.Context, missionID string) string {
-	checkpoints, err := s.daemon.GetMissionCheckpoints(ctx, missionID)
-	if err != nil || len(checkpoints) == 0 {
-		return ""
-	}
-	return checkpoints[0].CheckpointID
-}
-
-// applyRewindIdempotency / serverRewindEmitter live in rewind.go
-// to keep the orchestrator import out of server.go's already-busy
-// import block. Spec: mission-checkpointing R6.3-R6.6, R16.4.
-
 // GetMissionHistory returns all runs for a mission name.
 func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetMissionHistoryRequest) (*daemonpb.GetMissionHistoryResponse, error) {
-	s.logger.Debug("mission history request received",
-		"name", req.Name,
-		"limit", req.Limit,
-		"offset", req.Offset,
-	)
-
 	// Validate request
 	if req.Name == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
 	}
-
-	// Set defaults for pagination
-	limit := int(req.Limit)
-	if limit <= 0 {
-		limit = 100
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
 	}
-	offset := int(req.Offset)
-	if offset < 0 {
-		offset = 0
-	}
+	s.logger.Debug("mission history request received",
+		"name", req.Name,
+		"page_size", limit,
+		"offset", offset,
+	)
 
 	// Call daemon implementation
 	runs, total, err := s.daemon.GetMissionHistory(ctx, req.Name, limit, offset)
@@ -2430,131 +2123,16 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 			PreviousRunId: run.PreviousRunID,
 			TraceId:       run.TraceID,
 		}
+		protoRuns[i].ParentMissionId = run.ParentMissionID
+		protoRuns[i].ParentCheckpointId = run.ParentCheckpointID
 	}
 
 	s.logger.Debug("mission history retrieved", "name", req.Name, "count", len(runs), "total", total)
 
 	return &daemonpb.GetMissionHistoryResponse{
-		Runs:  protoRuns,
-		Total: int32(total),
-	}, nil
-}
-
-// The checkpoint-browser RPCs (ListCheckpoints, GetCheckpoint,
-// DiffCheckpoints, GetMissionCheckpoints) were retired: sdk#426 removed
-// them from gibson/daemon/v1 after gibson#1117 (ADR-0163) collapsed
-// snapshotting onto World snapshots and left the handlers rendering an
-// always-empty store. Until the SDK pin advances past the removal, the
-// embedded UnimplementedDaemonServiceServer answers them with
-// codes.Unimplemented. Rewind/resume is unaffected — it rides the
-// internal daemon interface (GetMissionCheckpoints /
-// GetMissionCheckpointPayload / RewindMission), not these RPCs.
-// Spec: gibson#1321.
-
-// BuildComponent rebuilds a component (agent, tool, or plugin) from source.
-func (s *DaemonServer) BuildComponent(ctx context.Context, req *daemonpb.BuildComponentRequest) (*daemonpb.BuildComponentResponse, error) {
-	s.logger.Info("build component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.BuildComponent(ctx, req.Kind, req.Name)
-	if err != nil {
-		s.logger.Error("failed to build component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to build component: %v", err)
-	}
-
-	s.logger.Info("component build completed",
-		"kind", req.Kind,
-		"name", req.Name,
-		"success", result.Success,
-	)
-
-	msg := fmt.Sprintf("Component '%s' built successfully", req.Name)
-	if !result.Success {
-		msg = fmt.Sprintf("Component '%s' build failed", req.Name)
-	}
-
-	return &daemonpb.BuildComponentResponse{
-		Success:    result.Success,
-		Stdout:     result.Stdout,
-		Stderr:     result.Stderr,
-		DurationMs: result.DurationMs,
-		Message:    msg,
-	}, nil
-}
-
-// ShowComponent returns detailed information about a component (agent, tool, or plugin).
-func (s *DaemonServer) ShowComponent(ctx context.Context, req *daemonpb.ShowComponentRequest) (*daemonpb.ShowComponentResponse, error) {
-	s.logger.Debug("show component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	info, err := s.daemon.ShowComponent(ctx, req.Kind, req.Name)
-	if err != nil {
-		s.logger.Error("failed to show component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to show component: %v", err)
-	}
-
-	s.logger.Debug("component info retrieved",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	return &daemonpb.ShowComponentResponse{
-		Success:   true,
-		Name:      info.Name,
-		Version:   info.Version,
-		Kind:      info.Kind,
-		Status:    info.Status,
-		Source:    info.Source,
-		RepoPath:  info.RepoPath,
-		BinPath:   info.BinPath,
-		Port:      int32(info.Port),
-		Pid:       int32(info.PID),
-		CreatedAt: info.CreatedAt.Unix(),
-		UpdatedAt: info.UpdatedAt.Unix(),
+		Runs:          protoRuns,
+		Total:         pagetoken.Int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoRuns), total),
 	}, nil
 }
 
@@ -2625,14 +2203,14 @@ func (s *DaemonServer) GetComponentLogs(req *daemonpb.GetComponentLogsRequest, s
 
 // ListMissionDefinitions returns all installed mission definitions.
 func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb.ListMissionDefinitionsRequest) (*daemonpb.ListMissionDefinitionsResponse, error) {
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
 	s.logger.Debug("list mission definitions request received",
-		"limit", req.Limit,
-		"offset", req.Offset,
+		"page_size", limit,
+		"offset", offset,
 	)
-
-	// Convert limit/offset to int (proto uses int32)
-	limit := int(req.Limit)
-	offset := int(req.Offset)
 
 	// Call daemon implementation
 	definitions, total, err := s.daemon.ListMissionDefinitions(ctx, limit, offset)
@@ -2659,8 +2237,9 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 	s.logger.Debug("listed mission definitions", "count", len(definitions), "total", total)
 
 	return &daemonpb.ListMissionDefinitionsResponse{
-		Missions: protoDefinitions,
-		Total:    int32(total),
+		Missions:      protoDefinitions,
+		Total:         pagetoken.Int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoDefinitions), total),
 	}, nil
 }
 

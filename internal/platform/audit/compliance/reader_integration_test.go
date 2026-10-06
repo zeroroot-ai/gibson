@@ -32,10 +32,13 @@ func TestEvidence_RealPostgres(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	require.Eventually(t, func() bool { return db.PingContext(ctx) == nil }, 30*time.Second, 200*time.Millisecond)
 
-	ddl, err := os.ReadFile("../../../../pkg/platform/migrations/postgres/platform/022_audit_log_hash_chain.up.sql")
-	require.NoError(t, err)
-	_, err = db.ExecContext(ctx, string(ddl))
-	require.NoError(t, err)
+	// The writer needs the hash chain (022) and the chain anchor (035).
+	for _, file := range []string{"022_audit_log_hash_chain.up.sql", "035_audit_retention.up.sql"} {
+		ddl, err := os.ReadFile("../../../../pkg/platform/migrations/postgres/platform/" + file)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, string(ddl))
+		require.NoError(t, err, file)
+	}
 
 	w := audit.NewWriter(db, slog.Default())
 	for _, action := range []string{"agent_grant_added", "plugin.enable", "agent_grant_removed", "agent_grant_added"} {

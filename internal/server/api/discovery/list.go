@@ -136,7 +136,6 @@ func (s *Server) catalogItemForScope(
 	object := objectForComponent(kind, name)
 
 	subject := userRef
-	isComponentSubject := false
 	if q.GetScope() == discoverypb.Scope_SCOPE_COMPONENT_ENABLED {
 		scope := auth.ComponentScopeFromContext(ctx)
 		if scope == "" {
@@ -144,7 +143,6 @@ func (s *Server) catalogItemForScope(
 			return nil, false
 		}
 		subject = scope
-		isComponentSubject = true
 	}
 	// USER_VIEW / TEAM_VIEW override the subject with the target.
 	if q.GetScope() == discoverypb.Scope_SCOPE_USER_VIEW {
@@ -162,9 +160,9 @@ func (s *Server) catalogItemForScope(
 
 	// Resolve the three per-action capabilities in one round-trip.
 	checks := []authz.CheckRequest{
-		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_READ, isComponentSubject), Object: object},
-		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_WRITE, isComponentSubject), Object: object},
-		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_EXECUTE, isComponentSubject), Object: object},
+		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_READ), Object: object},
+		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_WRITE), Object: object},
+		{User: subject, Relation: actionRelationFor(discoverypb.Action_ACTION_EXECUTE), Object: object},
 	}
 	results, err := s.authorizer.BatchCheck(ctx, checks)
 	if err != nil {
@@ -234,24 +232,15 @@ func tenant(ctx context.Context) string {
 }
 
 // actionRelationFor returns the FGA relation name to check for the given
-// action. For user subjects the canonical can_*; for component subjects the
-// narrowed can_*_as_component variant. Action_UNSPECIFIED defaults to read.
-func actionRelationFor(a discoverypb.Action, component bool) string {
+// action. A user subject and a component subject are checked on the same
+// relation (ADR-0041). Action_UNSPECIFIED defaults to read.
+func actionRelationFor(a discoverypb.Action) string {
 	switch a {
 	case discoverypb.Action_ACTION_WRITE:
-		if component {
-			return "can_write_as_component"
-		}
 		return "can_configure"
 	case discoverypb.Action_ACTION_EXECUTE:
-		if component {
-			return "can_execute_as_component"
-		}
 		return "can_execute"
 	default:
-		if component {
-			return "can_read_as_component"
-		}
 		return "can_read"
 	}
 }

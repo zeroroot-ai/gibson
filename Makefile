@@ -2,7 +2,9 @@
 # Stage 1 - Foundation
 
 .PHONY: check-no-tracked-binaries
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-rules-enforced check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: check-no-payment-vendor
+.PHONY: check-plugin-modules
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-rules-enforced check-service-names check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -379,19 +381,35 @@ check-no-tracked-binaries:
 	@bash scripts/check-no-tracked-binaries.sh --selftest
 	@bash scripts/check-no-tracked-binaries.sh
 
+# check-no-payment-vendor asserts that no non-test Go code names a payment
+# vendor host, import or variable (ADR-0060, gibson#713). Self-test first.
+check-no-payment-vendor:
+	@bash scripts/check-no-payment-vendor.sh --selftest
+	@bash scripts/check-no-payment-vendor.sh
+
+# check-plugin-modules asserts that each plugin under plugins/ is its own Go
+# module on the public SDK, and runs its tests (ADR-0065, gibson#790).
+check-plugin-modules:
+	@bash scripts/check-plugin-modules.sh --selftest
+	@bash scripts/check-plugin-modules.sh
+	@for d in plugins/*/; do (cd "$$d" && $(GOCMD) vet ./... && $(GOCMD) test ./...) || exit 1; done
+
 # check-bringup-diagnostics proves the Argo bringup dumper still reports a failed
 # hook Job and stays silent on a healthy Application. It runs for real only on
 # main, against a cluster that is gone by the time anyone reads the log.
 check-bringup-diagnostics:
 	@bash scripts/ci/dump-bringup-diagnostics.sh --selftest
 
-# check-oss-boundary asserts the open-core boundary (gibson#817, ADR-0089):
-# the Apache layer (sdk/adk/setec/gibson-executor) links zero ELv2/closed code,
-# and gibson's go.mod never requires the closed billing repo. Clones the public
-# OSS repos (network) unless OSS_BOUNDARY_REPOS_DIR points at existing checkouts.
+# check-oss-boundary asserts the license layers (gibson#817, gibson#711,
+# ADR-0089): the permissive layer (sdk/adk/setec) links zero ELv2/closed code,
+# gibson-executor (ELv2) links zero closed code, and gibson's go.mod never
+# requires the closed billing repo or gibson-executor. Runs its fixtures first.
+# Clones the public repos (network) unless OSS_BOUNDARY_REPOS_DIR points at
+# existing checkouts.
 # CI: .github/workflows/oss-boundary.yml (path-filtered PRs + weekly sweep).
 check-oss-boundary:
-	@echo "Checking open-core boundary (Apache layer vs ELv2/closed)..."
+	@echo "Checking the license layers (permissive, ELv2, closed)..."
+	@bash scripts/check-oss-boundary.sh --selftest
 	@bash scripts/check-oss-boundary.sh
 	@echo "check-oss-boundary PASSED"
 
@@ -702,7 +720,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-plugin-modules check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # check-comment-paths asserts that a repo-relative path named in a comment exists.
@@ -722,6 +740,13 @@ check-comment-paths:
 check-adr-index:
 	@python3 scripts/gen-adr-index.py --selftest
 	@python3 scripts/gen-adr-index.py --check
+
+# check-service-names asserts that one gRPC service name is declared one time
+# across the sdk protos and the daemon-local protos (gibson#531). The test has
+# its own failing fixture.
+check-service-names:
+	@echo "Checking that each service name is declared one time..."
+	$(GOTEST) -count=1 ./tests/servicenames/
 
 # check-rules-enforced asserts every docs/rules.yaml conforms to the shared
 # schema in the SDK, that each rule's enforced_by names a guard that exists —

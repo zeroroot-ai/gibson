@@ -186,8 +186,8 @@ type Config struct {
 
 	// TokenProvider, when non-nil, is called on every outgoing HTTP request
 	// to retrieve the current live Vault token. This allows the caller to
-	// wire in a lease-renewing token source (e.g. platform-clients
-	// secrets/vault.Provider) so the admin client never hard-bakes a
+	// wire in a lease-renewing token source (e.g.
+	// internal/infra/secrets/vault.Provider) so the admin client never hard-bakes a
 	// static token that expires after pod uptime exceeds the token TTL.
 	// When set, AdminToken is ignored after construction.
 	TokenProvider func() string

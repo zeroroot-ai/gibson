@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 )
 
 // MissionProjection is the complete Mission-node shape. Every caller describes
@@ -96,6 +97,15 @@ type GraphWriter interface {
 	// assesses. Called from the per-run graph bootstrap, because a Target is
 	// read from the target store rather than folded out of the World.
 	UpsertTarget(ctx context.Context, tenant string, t TargetProjection) error
+	// UpsertMissionRun, UpsertMissionNode and LinkMissionNodes write the
+	// per-run mission graph: the :MissionRun, one :MissionNode for each
+	// projected work node, and the DEPENDS_ON edges. The per-run graph
+	// bootstrap calls them (graph_bootstrap.go), because the run structure is
+	// not a World entity. The projector is their writer, as for every other
+	// node (ADR-0112, gibson#673).
+	UpsertMissionRun(ctx context.Context, tenant string, r MissionRunProjection) error
+	UpsertMissionNode(ctx context.Context, tenant string, node *schema.MissionNode) error
+	LinkMissionNodes(ctx context.Context, tenant, fromID, toID string) error
 	UpsertFinding(ctx context.Context, tenant string, f brain.FindingSnapshot) error
 	UpsertDomain(ctx context.Context, tenant string, d brain.DomainSnapshot) error
 	UpsertSubdomain(ctx context.Context, tenant string, s brain.SubdomainSnapshot) error

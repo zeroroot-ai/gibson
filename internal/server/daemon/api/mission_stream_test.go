@@ -259,8 +259,8 @@ func TestResumeMission_ErrorMapping(t *testing.T) {
 }
 
 // TestResumeMission_StreamsUntilTerminal: the resume subscription is filtered
-// server-side (the ID is known up front), events flow until the projector's
-// terminal status, and checkpoint metadata rides the first emitted event.
+// server-side (the ID is known up front) and events flow until the projector's
+// terminal status.
 func TestResumeMission_StreamsUntilTerminal(t *testing.T) {
 	events := make(chan EventData, 3)
 	var subscribedMissionID string
@@ -270,9 +270,6 @@ func TestResumeMission_StreamsUntilTerminal(t *testing.T) {
 			return events, nil
 		},
 		resumeMissionFn: func(context.Context, string) error { return nil },
-		getMissionCheckpointsFn: func(context.Context, string) ([]CheckpointData, error) {
-			return []CheckpointData{{CheckpointID: "cp-9"}}, nil
-		},
 	}
 	server := NewDaemonServer(daemon, nil, nil)
 	stream := &fakeStream[daemonpb.ResumeMissionResponse]{ctx: context.Background()}
@@ -290,13 +287,6 @@ func TestResumeMission_StreamsUntilTerminal(t *testing.T) {
 	}
 	if len(stream.sent) != 2 {
 		t.Fatalf("want 2 forwarded events, got %d", len(stream.sent))
-	}
-	// Checkpoint metadata rides the first emitted event only.
-	if stream.sent[0].CheckpointMetadata == nil {
-		t.Error("first resume event must carry checkpoint metadata")
-	}
-	if stream.sent[1].CheckpointMetadata != nil {
-		t.Error("only the first resume event carries checkpoint metadata")
 	}
 }
 

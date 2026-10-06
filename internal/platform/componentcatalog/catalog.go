@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io/fs"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -217,14 +218,26 @@ const DispatchModeSandboxed = "sandboxed"
 
 const digestMarker = "@sha256:"
 
+// manifestKinds lists the kinds of manifest that the catalog loader accepts.
+// Each kind has a spec check in validate.
+//
+// The list belongs to the loader. The authorization model has one more
+// component kind, domainpack, which is an authorization object type only. A
+// Domain Pack is not a catalog component: packs are in the ontology catalog
+// (internal/engine/ontology). The loader refuses a domainpack manifest.
+var manifestKinds = []string{authz.KindAgent, authz.KindTool, authz.KindPlugin, authz.KindConnector}
+
 // validate checks the envelope and the kind-specific spec, decoding the spec
 // into its typed form. A bad manifest fails the load loudly.
 func (m *Manifest) validate() error {
 	if m.ID == "" {
 		return errors.New("id is required")
 	}
-	if !authz.IsComponentKind(m.Kind) {
-		return fmt.Errorf("%s: kind %q must be one of agent, tool, plugin, connector", m.ID, m.Kind)
+	if err := validateEgressAllow(m.ID, m.EgressAllow); err != nil {
+		return err
+	}
+	if !slices.Contains(manifestKinds, m.Kind) {
+		return fmt.Errorf("%s: kind %q must be one of %s", m.ID, m.Kind, strings.Join(manifestKinds, ", "))
 	}
 	switch m.Kind {
 	case authz.KindConnector:
@@ -324,6 +337,18 @@ func (m *Manifest) validate() error {
 // validateStaticEnv checks a manifest's static launch environment. Like
 // memberCommand and minContextWindow it is read only on a sandboxed launch,
 // so declaring it elsewhere would ship a field that silently does nothing.
+// validateEgressAllow refuses the value "*" (owner decision S6, gibson#865).
+// The network scope of a mission node decides the egress of each sandbox in
+// it. A manifest names hosts, or nothing.
+func validateEgressAllow(id string, allow []string) error {
+	for _, a := range allow {
+		if strings.TrimSpace(a) == "*" {
+			return fmt.Errorf(`%s: egressAllow holds "*": the catalog states no wildcard; the network scope of the mission node decides`, id)
+		}
+	}
+	return nil
+}
+
 func validateStaticEnv(id string, env map[string]string, dispatchMode string) error {
 	if len(env) == 0 {
 		return nil

@@ -37,6 +37,8 @@ type authzStubFGA struct {
 	written  []fga.Tuple
 	deleted  []fga.Tuple
 	writeErr error
+	// stored is what Read answers from.
+	stored []fga.Tuple
 }
 
 func (s *authzStubFGA) Write(_ context.Context, tuples []fga.Tuple) error {
@@ -51,7 +53,15 @@ func (s *authzStubFGA) Delete(_ context.Context, tuples []fga.Tuple) error {
 	s.deleted = append(s.deleted, tuples...)
 	return nil
 }
-func (s *authzStubFGA) Read(_ context.Context, _ fga.Tuple) ([]fga.Tuple, error) { return nil, nil }
+func (s *authzStubFGA) Read(_ context.Context, filter fga.Tuple) ([]fga.Tuple, error) {
+	var out []fga.Tuple
+	for _, t := range s.stored {
+		if t == filter {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
 func (s *authzStubFGA) Check(_ context.Context, _, _, _ string) (bool, error)    { return false, nil }
 func (s *authzStubFGA) Ping(_ context.Context) error                             { return nil }
 func (s *authzStubFGA) WriteAndDelete(_ context.Context, _, _ []fga.Tuple) error { return nil }
@@ -104,7 +114,7 @@ func reconcileOnce(t *testing.T, r *ConnectorInstanceAuthzReconciler, name, name
 }
 
 func TestConnectorAuthz_SeedsTuplesAndFinalizer(t *testing.T) {
-	stub := &authzStubFGA{}
+	stub := &authzStubFGA{stored: []fga.Tuple{fga.LegacyConnectorInvokeTuple("gitlab", "acme")}}
 	r := newAuthzReconciler(t, stub, connectorCR("gitlab", "tenant-acme"))
 
 	reconcileOnce(t, r, "gitlab", "tenant-acme")
@@ -304,5 +314,17 @@ func TestConnectorAuthz_SetupWithManager(t *testing.T) {
 	r := &ConnectorInstanceAuthzReconciler{Client: mgr.GetClient(), Scheme: s, FGA: &authzStubFGA{}}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
+	}
+}
+
+// A store with no retired tuple gets no delete, and the reconcile completes
+// (gibson#879). Before, the delete failed at the server on every pass.
+func TestConnectorAuthz_NoRetiredTupleCompletes(t *testing.T) {
+	stub := &authzStubFGA{}
+	r := newAuthzReconciler(t, stub, connectorCR("gitlab", "tenant-acme"))
+	reconcileOnce(t, r, "gitlab", "tenant-acme")
+	reconcileOnce(t, r, "gitlab", "tenant-acme")
+	if len(stub.deleted) != 0 {
+		t.Fatalf("deleted = %+v, want nothing", stub.deleted)
 	}
 }

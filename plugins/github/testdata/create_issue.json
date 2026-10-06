@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/repos/zeroroot-ai/gibson/issues",
+  "status": 201,
+  "response": {
+    "number": 1601,
+    "title": "Session affinity regression",
+    "state": "open",
+    "body": "Two tool calls landed in different sandboxes.",
+    "html_url": "https://github.com/zeroroot-ai/gibson/issues/1601"
+  }
+}

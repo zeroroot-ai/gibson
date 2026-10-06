@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/finding"
 	sdkmission "github.com/zeroroot-ai/sdk/mission"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // Mission management implementation for DefaultAgentHarness.
@@ -97,11 +99,13 @@ func (h *DefaultAgentHarness) CreateMission(ctx context.Context, wf any, targetI
 
 		// Convert SDK constraints to harness constraints
 		if opts.Constraints != nil {
-			req.Constraints = &MissionConstraints{
-				MaxDuration: opts.Constraints.MaxDuration,
+			req.Constraints = &missionv1.MissionConstraints{
 				MaxTokens:   opts.Constraints.MaxTokens,
 				MaxCost:     opts.Constraints.MaxCost,
-				MaxFindings: opts.Constraints.MaxFindings,
+				MaxFindings: int32(opts.Constraints.MaxFindings), //nolint:gosec // G115: a finding cap far below 2^31
+			}
+			if opts.Constraints.MaxDuration > 0 {
+				req.Constraints.MaxDuration = durationpb.New(opts.Constraints.MaxDuration)
 			}
 		}
 	}
@@ -553,14 +557,14 @@ func (h *DefaultAgentHarness) GetMissionResults(ctx context.Context, missionID s
 func toGibsonMissionFilter(filter *sdkmission.MissionFilter) (*MissionFilter, error) {
 	if filter == nil {
 		return &MissionFilter{
-			Limit:  100, // Default limit
-			Offset: 0,
+			Limit: 100, // Default limit
 		}, nil
 	}
 
+	// The sdk filter has no offset (ADR-0028, rule 3): an in-process caller
+	// reads from the first mission.
 	gibsonFilter := &MissionFilter{
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
+		Limit: filter.Limit,
 	}
 
 	// Convert status if provided

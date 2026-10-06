@@ -178,10 +178,10 @@ type GrantTuple struct {
 	// object is the FGA object identifier, e.g. "component:gitlab" or
 	// "plugin:nmap-runner".
 	Object string `protobuf:"bytes,1,opt,name=object,proto3" json:"object,omitempty"`
-	// relation is the FGA relation. Must be one of:
-	//   - "can_read"        (component_read_enabled)
-	//   - "can_configure"   (component_write_enabled)
-	//   - "can_execute"     (component_execute_enabled)
+	// relation is the action to grant. Must be one of:
+	//   - "can_read"        (the tuple goes on direct_read)
+	//   - "can_configure"   (the tuple goes on direct_configure)
+	//   - "can_execute"     (the tuple goes on direct_execute)
 	//   - "can_invoke"      (plugin invocation; tool targets only)
 	Relation string `protobuf:"bytes,2,opt,name=relation,proto3" json:"relation,omitempty"`
 }

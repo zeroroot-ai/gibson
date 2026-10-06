@@ -25,7 +25,7 @@ import (
 // without setec_integration wires nil and tests can supply a stub.
 //
 // Nil means no sandboxed agent dispatch: DelegateToAgent denies an untrusted
-// agent fail-closed under setec-only.
+// agent fail-closed.
 type AgentSandboxLauncher interface {
 	LaunchAgent(ctx context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
 }
@@ -110,6 +110,35 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	if err != nil {
 		return agent.Result{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent %q: resolve launch spec", name), err)
+	}
+
+	// The network scope of the node (S6, gibson#865). The sandbox reaches the
+	// targets of the node, the model provider and the callback endpoint of
+	// the daemon. A research node is unrestricted.
+	if task.Network != nil {
+		spec.NetworkMode, spec.Egress = nodeNetworkScope(task.Network, h.agentCallbackEndpoint)
+	}
+
+	// The sandboxed agent calls back over HarnessCallbackService with
+	// (mission, agent) in its context. Those calls resolve through the
+	// callback registry to a harness, so the child harness of this agent is
+	// registered for the run, as on the work queue path (gibson#1633). Its
+	// mission context carries the scope of the node, so each tool that the
+	// agent starts gets the network of the node.
+	if h.callbackManager != nil && h.factory != nil {
+		childMissionCtx := h.missionCtx
+		childMissionCtx.CurrentAgent = name
+		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
+		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
+		childMissionCtx.NodeNetwork = task.Network
+		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
+		if cerr != nil {
+			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+				"failed to create child harness for the sandboxed agent: "+name, cerr)
+		}
+		if key := h.callbackManager.RegisterHarnessForMission(h.missionCtx.ID.String(), name, childHarness); key != "" {
+			defer h.callbackManager.UnregisterHarness(key)
+		}
 	}
 
 	// Per-dispatch grant: a tenant+run-scoped CG-JWT with a short TTL, nothing

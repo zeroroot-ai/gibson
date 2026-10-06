@@ -61,7 +61,7 @@ func discardSlog() *slog.Logger {
 // a per-op acquire closure. It then exercises Append through the store to
 // confirm the per-op acquire path actually works end-to-end.
 // Covers daemon.go lines 1153 (probeConn.Release), 1162-1169 (acquire closure
-// + NewRedisTimelineStore return).
+// + NewTimelineStore return).
 func TestTimelineStoreFactory_ValidTenant(t *testing.T) {
 	t.Parallel()
 
@@ -169,4 +169,29 @@ func TestAssertTimelineDurability_PassesWhenAOFConfirmed(t *testing.T) {
 	confirmed := func(ctx context.Context, addr, password string) error { return nil }
 	err := assertTimelineDurability(context.Background(), "redis:6379", "", confirmed, discardSlog())
 	assert.NoError(t, err, "confirmed AOF must pass the boot guard")
+}
+
+// flakyPool answers the probe and fails each later acquire.
+type flakyPool struct {
+	conn  *datapool.Conn
+	calls int
+}
+
+func (p *flakyPool) For(context.Context, auth.TenantID) (*datapool.Conn, error) {
+	p.calls++
+	if p.calls == 1 {
+		return p.conn, nil
+	}
+	return nil, errors.New("the pool is gone")
+}
+
+// TestTimelineStoreFactory_AcquireErrorIsReturned: an operation whose
+// per-op acquire fails returns the pool error.
+func TestTimelineStoreFactory_AcquireErrorIsReturned(t *testing.T) {
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	store := timelineStoreFactory(&flakyPool{conn: conn}, discardSlog())(context.Background(), "acme")
+	require.NotNil(t, store)
+	_, err := store.Append(context.Background(), "acme", "key-1", brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+	require.ErrorContains(t, err, "the pool is gone")
 }

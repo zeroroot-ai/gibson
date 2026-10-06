@@ -145,7 +145,7 @@ func Render(pack ontology.DomainPack) ([]byte, error) {
 
 // Generate reads the catalog in root and returns the bytes of the pack file.
 func Generate(root string) ([]byte, error) {
-	f, err := os.Open(filepath.Join(root, CatalogFile))
+	f, err := os.Open(filepath.Clean(filepath.Join(root, CatalogFile)))
 	if err != nil {
 		return nil, fmt.Errorf("oscalgen: %w", err)
 	}
@@ -191,7 +191,7 @@ func main() {
 		}
 		return
 	}
-	committed, err := os.ReadFile(target)
+	committed, err := os.ReadFile(filepath.Clean(target))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

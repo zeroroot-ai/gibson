@@ -26,12 +26,13 @@ import (
 // TenantReconciler.teardownSteps) outlives the namespaced children.
 //
 // The retained teardown saga owns only the foundation cleanup with no owning
-// sub-CRD: the final backup safety net, the tenant-name delete, and the Redis
-// keyspace delete. Order: backup first (safety net before any data deletion),
-// then tenant-name, then Redis keyspace.
+// sub-CRD: the tenant-name delete and the Redis keyspace delete.
+//
+// The last backup of the tenant is not a step of this saga. The Tenant
+// reconciler takes it before it deletes the first child (package finalbackup,
+// ADR-0075), because this saga runs after the children are gone.
 func TeardownSteps(deps ProvisionDeps) []saga.Step {
 	return []saga.Step{
-		newFinalBackupStep(deps.FinalBackup),
 		newDeleteTenantNameStep(deps),
 		newDeleteRedisKeyspaceStep(deps),
 	}
@@ -55,9 +56,7 @@ func newDeleteTenantNameStep(deps ProvisionDeps) *deleteTenantNameStep {
 			// that has moved to the TenantIdentity sub-CRD finalizer (which the
 			// Tenant reconciler drains before this saga runs). The tenant-name
 			// delete only touches the Redis registry PublishTenantName
-			// populated; it Req's FinalNeo4jBackup so the safety-net backup
-			// still precedes any data deletion.
-			Req:   []string{"FinalNeo4jBackup"},
+			// populated.
 			Caps:  []saga.ClientCapability{saga.CapabilityRedisAdmin},
 			Owner: "platform-redis",
 			P99:   1 * time.Second,

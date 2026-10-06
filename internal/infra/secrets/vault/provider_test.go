@@ -96,7 +96,7 @@ func healthResponseSealed() string {
 // mu guards handlers and override — httptest.Server calls ServeHTTP from its
 // own goroutine while the test goroutine may still be registering handlers via
 // handle(). Without the mutex the map access is a data race that intermittently
-// causes valid handlers to appear missing (#93 sdk / platform-clients).
+// causes valid handlers to appear missing (sdk#93).
 type vaultMock struct {
 	mu       sync.RWMutex
 	handlers map[string]http.HandlerFunc

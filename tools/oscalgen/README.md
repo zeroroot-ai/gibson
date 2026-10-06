@@ -14,9 +14,9 @@
 
 The file `NIST_SP-800-53_rev5_catalog.json.gz` is that file, compressed with `gzip -9 -n`. The tool checks the SHA-256 before it reads the file. It never downloads.
 
-## Licence
+## License
 
-The catalog is a work of the United States government. It is in the public domain in the United States (17 U.S.C. 105). The licence of this repository does not apply to it.
+The catalog is a work of the United States government. It is in the public domain in the United States (17 U.S.C. 105). The license of this repository does not apply to it.
 
 ## Use
 

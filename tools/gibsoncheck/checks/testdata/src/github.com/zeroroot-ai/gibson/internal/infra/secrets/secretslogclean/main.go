@@ -1,5 +1,5 @@
 // Package secretslogclean is a synthetic test fixture for the secretsnolog
-// gibsoncheck rule (platform-clients surface). It calls secrets Get/Resolve
+// gibsoncheck rule (internal/infra/secrets surface). It calls secrets Get/Resolve
 // but uses the returned bytes only for legitimate purposes — never passing
 // them to a logging sink. The analyzer must emit zero diagnostics against
 // this package.

@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // goroutineDispatcher actuates agent work by immediately reporting completion back
@@ -25,8 +27,14 @@ func TestWireExecutor_DrivesGoalMissionEndToEnd(t *testing.T) {
 
 	reg := NewRegistry(context.Background(), ExecutorSystems()...)
 	disp := &goroutineDispatcher{}
+	beliefRegistry := liveBeliefRegistry(t)
 	reg.OnEngine(func(e *Engine) {
 		disp.eng = e
+		// The daemon wires the VoI planner beside the executor. The Decider
+		// waits for the plan that the VoI gate requested, so an engine with
+		// the gate and no planner never decides.
+		WireVoIPlanner(context.Background(), e, beliefRegistry, ExactVoIScorer(), DefaultVoITopK,
+			5*time.Millisecond, nil, testBAMCPPlanner(beliefRegistry))
 		WireExecutor(context.Background(), e, ExecutorDeps{
 			Dispatcher:    disp,
 			Decider:       llm,
@@ -88,5 +96,64 @@ func TestWireExecutor_NoGoalMissionCompletesMechanically(t *testing.T) {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A nil capability catalog is a wiring defect: the VoI gate would refuse each
+// Decider dispatch (gibson#693). WireExecutor must stop the start.
+func TestWireExecutor_NilCatalogPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("WireExecutor accepted a nil capability catalog")
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	WireExecutor(ctx, NewEngine("t1"), ExecutorDeps{
+		Dispatcher: &goroutineDispatcher{},
+		Decider:    &scriptedLLM{},
+	})
+}
+
+// The VoI planner reads the catalog that WireExecutor set on the engine, in
+// each order of the two Wire calls. The daemon wires the planner first.
+func TestWireExecutor_GivesThePlannerItsCatalog(t *testing.T) {
+	for _, plannerFirst := range []bool{true, false} {
+		registry := liveBeliefRegistry(t)
+		hierarchy := dispatchTestHierarchy(t)
+		hunter := Capability{Kind: "agent", Name: "injection-hunter",
+			Coverage: dispatchCoverage(t, hierarchy, []taxonomy.CategoryID{"prompt_injection"}, nil)}
+		deps := ExecutorDeps{
+			Dispatcher:    &goroutineDispatcher{},
+			Decider:       &scriptedLLM{},
+			Catalog:       func(string) []Capability { return []Capability{hunter} },
+			DrainInterval: time.Hour,
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		e := NewEngine("t1")
+		e.AddSystem(VoIGateSystem)
+		var w *VoIWorker
+		if plannerFirst {
+			w = WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, time.Hour, hierarchy, testBAMCPPlanner(registry))
+			WireExecutor(ctx, e, deps)
+		} else {
+			WireExecutor(ctx, e, deps)
+			w = WireVoIPlanner(ctx, e, registry, ExactVoIScorer(), DefaultVoITopK, time.Hour, hierarchy, testBAMCPPlanner(registry))
+		}
+
+		e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+		e.Submit(HypothesisObserved{ScopeID: "s", Claim: "the filter is bypassable", Proposer: "a", Technique: "indirect_prompt_injection"})
+		voiSettle(e, w, 1)
+		cancel()
+
+		plans := e.VoIPlanSnapshot()
+		if len(plans) != 1 || len(plans[0].Candidates) != 1 {
+			t.Fatalf("plannerFirst=%v: plans = %+v, want one plan with one candidate", plannerFirst, plans)
+		}
+		got := plans[0].Candidates[0].CoveringCapabilities
+		if len(got) != 1 || got[0].Name != "injection-hunter" {
+			t.Fatalf("plannerFirst=%v: CoveringCapabilities = %+v, want injection-hunter", plannerFirst, got)
+		}
 	}
 }

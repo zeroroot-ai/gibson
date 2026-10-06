@@ -70,9 +70,11 @@
 //	                                not configured — gibson#1246; the former
 //	                                EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE is retired)
 //	EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL  default 5m
-//	EXT_AUTHZ_CGJWT_REPLAY_CACHE_MAX_ENTRIES
-//	                                default 100000 — per-pod (kid, jti) single-use
-//	                                cache for component tokens (gibson#1246)
+//	EXT_AUTHZ_REDIS_URL             REQUIRED — the Redis that holds the replay
+//	                                state of component tokens and carries the
+//	                                FGA write events. ext-authz does not start
+//	                                when it is empty or Redis does not answer.
+//	REDIS_PASSWORD                  the password of that Redis, when it has one
 //	EXT_AUTHZ_GRPC_REFLECTION       default off; set to "1" to enable gRPC reflection
 //	                                (zero-trust-hardening Req 11.2; leave unset in prod)
 //	EXT_AUTHZ_HUMAN_CLIENT_IDS      optional — comma-separated OIDC client ids of the
@@ -210,16 +212,24 @@ func main() {
 	}
 	log.Info("FGA registry loaded", "entries", reg.Len(), "source", registrySrc)
 
-	// FGA client + cached checker. The platform-clients FGAClient
+	// FGA client + cached checker. The internal/infra/authz FGAClient
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
 	checker, fgaClient := buildChecker(log, reg)
 	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
-	startFGAEventSubscriber(ctx, log, cachedChecker, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+
+	// Redis is required. It holds the replay state of component tokens, which
+	// all replicas share, and it carries the FGA write events.
+	stateClient, replayStore, err := initRedis(ctx, log, cachedChecker)
+	if err != nil {
+		log.Error("init Redis", "err", err)
+		os.Exit(1)
+	}
+	defer func() { _ = stateClient.Close() }()
 
 	// Both capability-grant verifiers, on one SVID-pinned key transport.
-	cgVerifier, componentVerifier, err := buildCGVerifiers(log, x509Source, x509Source)
+	cgVerifier, componentVerifier, err := buildCGVerifiers(log, x509Source, x509Source, replayStore)
 	if err != nil {
 		log.Error("init capability-grant verifiers", "err", err)
 		os.Exit(1)
@@ -388,7 +398,7 @@ func intOr(key string, fallback int) int {
 	return n
 }
 
-// buildChecker constructs the FGA Checker over a platform-clients
+// buildChecker constructs the FGA Checker over an internal/infra/authz
 // FGAClient. The PerCallTimeout floor here is THE fix for the audit
 // finding "no per-call FGA timeout floor (so slow OpenFGA consumes
 // Envoy's full 5s ext_authz budget)" — 1500ms sits comfortably under
@@ -431,7 +441,7 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 		os.Exit(1)
 	}
 
-	// Startup self-check (ext-authz#24). The platform-clients constructor
+	// Startup self-check (ext-authz#24). The internal/infra/authz constructor
 	// does NOT dial; an explicit round-trip catches port/protocol
 	// mismatches the way deploy#140 did. Fail-fast on transport-class
 	// errors so kubelet's CrashLoopBackoff + container log surface the
@@ -464,6 +474,7 @@ func buildCGVerifiers(
 	log *slog.Logger,
 	svid x509svid.Source,
 	bundle x509bundle.Source,
+	replay cgjwt.ReplayStore,
 ) (*cgjwt.Verifier, *cgjwt.ComponentVerifier, error) {
 	keysClient, err := buildCGKeysClient(log, svid, bundle)
 	if err != nil {
@@ -473,7 +484,7 @@ func buildCGVerifiers(
 	if err != nil {
 		return nil, nil, fmt.Errorf("dispatch capability-grant verifier: %w", err)
 	}
-	component, err := buildComponentVerifier(log, keysClient)
+	component, err := buildComponentVerifier(log, keysClient, replay)
 	if err != nil {
 		return nil, nil, fmt.Errorf("component capability-grant verifier: %w", err)
 	}
@@ -639,7 +650,14 @@ func buildCGVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.Verifier
 // which is an all-component-auth outage. (The former
 // EXT_AUTHZ_CGJWT_COMPONENT_AUDIENCE env var is retired; any lingering Helm
 // value for it is now ignored.)
-func buildComponentVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.ComponentVerifier, error) {
+//
+// replay is the store that all replicas share. It records each accepted
+// token id, so a component token is accepted one time by the deployment.
+func buildComponentVerifier(
+	log *slog.Logger,
+	keysClient *http.Client,
+	replay cgjwt.ReplayStore,
+) (*cgjwt.ComponentVerifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
 	if keysURL == "" {
 		log.Warn("EXT_AUTHZ_CGJWT_KEYS_URL not set — component CG-JWT auth disabled")
@@ -647,18 +665,16 @@ func buildComponentVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.C
 	}
 	audiences := []string{capabilitygrant.AudienceGibsonDaemon}
 	ttl := durationOr("EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL", 5*time.Minute)
-	replayMax := intOr("EXT_AUTHZ_CGJWT_REPLAY_CACHE_MAX_ENTRIES", cgjwt.DefaultReplayCacheMaxEntries)
 	log.Info("component CG-JWT auth enabled",
 		"keys_url", keysURL,
 		"expected_audiences", audiences,
-		"descriptor_ttl", ttl.String(),
-		"replay_cache_max_entries", replayMax)
+		"descriptor_ttl", ttl.String())
 	return cgjwt.NewComponentVerifier(cgjwt.ComponentConfig{
-		KeysBaseURL:           keysURL,
-		TTL:                   ttl,
-		ExpectedAudiences:     audiences,
-		ReplayCacheMaxEntries: replayMax,
-		HTTPClient:            keysClient,
+		KeysBaseURL:       keysURL,
+		TTL:               ttl,
+		ExpectedAudiences: audiences,
+		ReplayStore:       replay,
+		HTTPClient:        keysClient,
 	})
 }
 
@@ -972,37 +988,40 @@ func fgaCacheSettings() (ttl time.Duration, maxSize int) {
 // defaultFGACacheMaxSize bounds the decision cache; random eviction above it.
 const defaultFGACacheMaxSize = 100_000
 
-// startFGAEventSubscriber subscribes to the FGA write events the daemon and
-// the tenant-operator publish, and evicts the subject's cached decisions on
-// each one (hosted#204). EXT_AUTHZ_REDIS_URL names the Redis; REDIS_PASSWORD
-// is its password when set (the same Secret the daemon uses). Without a URL
-// the cache TTL is the only bound, and the log says so once.
-func startFGAEventSubscriber(ctx context.Context, log *slog.Logger, cc subjectEvicter, redisURL, password string) bool {
-	sc, err := fgaEventStateClient(ctx, redisURL, password)
-	if err != nil {
-		log.Error("EXT_AUTHZ_REDIS_URL is not usable; FGA write events are not subscribed, the cache TTL bounds role changes", "err", err)
-		return false
-	}
-	if sc == nil {
-		log.Warn("EXT_AUTHZ_REDIS_URL not set: FGA write events are not subscribed, the cache TTL bounds role changes")
-		return false
-	}
-	go runFGAEventSubscriber(ctx, sc, log, cc)
-	return true
-}
-
 // subjectEvicter is the one method of the decision cache the subscriber uses.
 type subjectEvicter interface {
 	InvalidateSubject(subject string) int
 }
 
-// fgaEventStateClient builds the subscriber's Redis client from a URL and an
-// optional password, and proves it reachable once so a wrong address or
-// password is a boot-time error, not silence. An empty URL means no
-// subscriber (nil, nil).
-func fgaEventStateClient(ctx context.Context, redisURL, password string) (*state.StateClient, error) {
-	if redisURL == "" {
-		return nil, nil
+// initRedis connects ext-authz to its required Redis. It starts the
+// subscriber that evicts cached decisions on an FGA write event (hosted#204),
+// and it returns the store for the replay state of component tokens. The
+// caller closes the returned client.
+//
+// EXT_AUTHZ_REDIS_URL names the Redis. REDIS_PASSWORD is its password, when
+// it has one.
+func initRedis(
+	ctx context.Context,
+	log *slog.Logger,
+	cc subjectEvicter,
+) (*state.StateClient, cgjwt.ReplayStore, error) {
+	sc, err := requiredStateClient(ctx, os.Getenv("EXT_AUTHZ_REDIS_URL"), os.Getenv("REDIS_PASSWORD"))
+	if err != nil {
+		return nil, nil, err
+	}
+	go runFGAEventSubscriber(ctx, sc, log, cc)
+	return sc, cgjwt.NewRedisReplayStore(sc), nil
+}
+
+// requiredStateClient builds the Redis client of ext-authz from a URL and an
+// optional password (the same Secret that the daemon uses). It proves one
+// time that Redis answers, so an empty URL, a wrong address or a wrong
+// password is an error at start. Redis is required: it holds the replay
+// state of component tokens, and it carries the FGA write events that evict
+// cached decisions (hosted#204).
+func requiredStateClient(ctx context.Context, redisURL, password string) (*state.StateClient, error) {
+	if strings.TrimSpace(redisURL) == "" {
+		return nil, errors.New("EXT_AUTHZ_REDIS_URL required (Redis holds the replay state of component tokens)")
 	}
 	cfg := state.DefaultConfig()
 	cfg.URL = redisURL

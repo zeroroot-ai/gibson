@@ -9,7 +9,7 @@
 # Proves the untrusted-execution-isolation boundary (ADR-0110) end-to-end: an
 # UNTRUSTED tool dispatched through the harness executes ONLY via a real setec
 # microVM round-trip, and is denied (typed error, no in-process fallback) when
-# no sandboxed dispatch is available under GIBSON_UNTRUSTED_EXEC=setec-only.
+# no sandboxed dispatch is available.
 #
 # OLD model: self-hosted `setec-bare-metal` runner with local /dev/kvm,
 # dialing a NodePort on the same host (SETEC_ROUNDTRIP_ADDR=127.0.0.1:30051).

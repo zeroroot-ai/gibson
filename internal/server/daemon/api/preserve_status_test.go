@@ -150,20 +150,11 @@ func (n nilDaemonStub) ResumeMission(_ context.Context, _ string) error        {
 func (n nilDaemonStub) GetMissionHistory(_ context.Context, _ string, _, _ int) ([]MissionRunData, int, error) {
 	return nil, 0, nil
 }
-func (n nilDaemonStub) GetMissionCheckpoints(_ context.Context, _ string) ([]CheckpointData, error) {
+func (n nilDaemonStub) GetMissionCheckpoints(_ context.Context, _ string) ([]MissionCheckpoint, error) {
 	return nil, nil
 }
-func (n nilDaemonStub) GetMissionCheckpointPayload(_ context.Context, _, _ string) (*CheckpointData, error) {
-	return nil, nil
-}
-func (n nilDaemonStub) RewindMission(_ context.Context, _, _ string) (string, error) {
+func (n nilDaemonStub) RewindMission(_ context.Context, _ RewindRequest) (string, error) {
 	return "", nil
-}
-func (n nilDaemonStub) BuildComponent(_ context.Context, _, _ string) (BuildComponentResult, error) {
-	return BuildComponentResult{}, nil
-}
-func (n nilDaemonStub) ShowComponent(_ context.Context, _, _ string) (ComponentInfoInternal, error) {
-	return ComponentInfoInternal{}, nil
 }
 func (n nilDaemonStub) GetComponentLogs(_ context.Context, _, _ string, _ bool, _ int) (<-chan LogEntryData, error) {
 	ch := make(chan LogEntryData)

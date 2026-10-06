@@ -36,7 +36,7 @@ func TestMainDomainPack_RegistersIntoCatalog(t *testing.T) {
 	assert.Equal(t, MainDomainPackName, list[0].Name)
 }
 
-// TestMainDomainPack_FreshValueEachCall proves EmbeddedPack never hands
+// TestMainDomainPack_FreshValueEachCall proves EmbeddedCatalog().Get never hands
 // back a shared, mutable instance: a caller that mutates one call's Predicates
 // map must never affect another.
 func TestMainDomainPack_FreshValueEachCall(t *testing.T) {

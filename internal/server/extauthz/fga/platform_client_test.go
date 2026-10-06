@@ -13,7 +13,7 @@ import (
 )
 
 // TestClassifyOutcome verifies the OTel attribute mapping covers each
-// platform-clients sentinel error + the allow/deny path. Low-cardinality
+// internal/infra/authz sentinel error + the allow/deny path. Low-cardinality
 // labels are critical for the histogram and counter: any new error
 // shape must be classified here, not leaked as a unique string.
 func TestClassifyOutcome(t *testing.T) {
@@ -45,7 +45,7 @@ func TestClassifyOutcome(t *testing.T) {
 }
 
 // TestNewPlatformFGAClient_RequiresFields — bad opts must NOT silently
-// succeed; the underlying platform-clients validator must propagate.
+// succeed; the underlying internal/infra/authz validator must propagate.
 func TestNewPlatformFGAClient_RequiresFields(t *testing.T) {
 	t.Parallel()
 	_, err := NewPlatformFGAClient(authz.FGAClientOptions{})

@@ -71,14 +71,12 @@ type AttackGraphNode struct {
 	Potential int
 }
 
-// AttackGraph is the derived directed-acyclic enablement graph belief
-// propagates over (ADR-0129) — never the raw infra graph. Edges is the
-// kept, directed, acyclic edge set. Dropped is every enablement edge cut to
-// break a cycle: a back-edge in THIS derivation. (ADR-0129 notes a
-// back-edge dropped in one node's bounded slice can be a forward edge in
-// another's — that per-node slicing is the separate, later concern noted on
-// this file; a whole-graph derivation has no "other node's slice" to be a
-// forward edge in, so a Dropped edge here is simply cut.)
+// AttackGraph is an enablement graph belief propagates over (ADR-0129) —
+// never the raw infra graph. After BreakCycles, Edges is the kept, directed,
+// acyclic edge set, and Dropped is every enablement edge cut to break a cycle:
+// a back-edge in THAT graph. A back-edge of the whole graph can be a forward
+// edge in one bounded slice, so the belief engine slices the uncut
+// EnablementGraph and breaks the cycles of each slice (gibson#700).
 type AttackGraph struct {
 	Nodes   []AttackGraphNode
 	Edges   []InfraEdge
@@ -116,6 +114,18 @@ type AttackGraph struct {
 //
 // registry must not be nil.
 func DeriveAttackGraph(nodes []InfraNode, edges []InfraEdge, registry *ontology.BeliefSchemaRegistry) AttackGraph {
+	return BreakCycles(EnablementGraph(nodes, edges, registry))
+}
+
+// EnablementGraph runs steps 1 and 2 of DeriveAttackGraph: it keeps the
+// belief-bearing nodes and the enablement edges between them, and cuts
+// nothing. The result can hold a cycle. The belief engine slices this graph
+// and breaks the cycles of each slice (ADR-0129, gibson#700): an edge that a
+// cut of the whole graph removes can be a forward edge inside one slice.
+// Each node has Potential 0 until BreakCycles assigns one.
+//
+// registry must not be nil.
+func EnablementGraph(nodes []InfraNode, edges []InfraEdge, registry *ontology.BeliefSchemaRegistry) AttackGraph {
 	beliefBearing := make(map[string]InfraNode, len(nodes))
 	for _, n := range nodes {
 		if registry.IsBeliefBearing(n.Kind) {
@@ -142,18 +152,39 @@ func DeriveAttackGraph(nodes []InfraNode, edges []InfraEdge, registry *ontology.
 		}
 		kept = append(kept, e)
 	}
+	sortEdges(kept)
 
 	ids := make([]string, 0, len(beliefBearing))
 	for id := range beliefBearing {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
+	outNodes := make([]AttackGraphNode, 0, len(ids))
+	for _, id := range ids {
+		n := beliefBearing[id]
+		outNodes = append(outNodes, AttackGraphNode{InfraNode: n, Variables: registry.Variables(n.Kind)})
+	}
+	return AttackGraph{Nodes: outNodes, Edges: kept}
+}
 
-	potential := assignTopologicalPotential(ids, kept)
+// BreakCycles runs steps 3 and 4 of DeriveAttackGraph on g: it assigns each
+// node a topological potential and moves each edge whose potential does not
+// strictly increase into Dropped. The result is acyclic. Edges that g already
+// listed in Dropped stay there. The same g in any order gives the same result.
+func BreakCycles(g AttackGraph) AttackGraph {
+	ids := make([]string, 0, len(g.Nodes))
+	byID := make(map[string]AttackGraphNode, len(g.Nodes))
+	for _, n := range g.Nodes {
+		ids = append(ids, n.ID)
+		byID[n.ID] = n
+	}
+	sort.Strings(ids)
 
-	dagEdges := make([]InfraEdge, 0, len(kept))
-	var dropped []InfraEdge
-	for _, e := range kept {
+	potential := assignTopologicalPotential(ids, g.Edges)
+
+	dagEdges := make([]InfraEdge, 0, len(g.Edges))
+	dropped := append([]InfraEdge(nil), g.Dropped...)
+	for _, e := range g.Edges {
 		if potential[e.From] < potential[e.To] {
 			dagEdges = append(dagEdges, e)
 		} else {
@@ -165,14 +196,10 @@ func DeriveAttackGraph(nodes []InfraNode, edges []InfraEdge, registry *ontology.
 
 	outNodes := make([]AttackGraphNode, 0, len(ids))
 	for _, id := range ids {
-		n := beliefBearing[id]
-		outNodes = append(outNodes, AttackGraphNode{
-			InfraNode: n,
-			Variables: registry.Variables(n.Kind),
-			Potential: potential[id],
-		})
+		n := byID[id]
+		n.Potential = potential[id]
+		outNodes = append(outNodes, n)
 	}
-
 	return AttackGraph{Nodes: outNodes, Edges: dagEdges, Dropped: dropped}
 }
 

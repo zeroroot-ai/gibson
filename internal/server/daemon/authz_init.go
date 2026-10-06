@@ -51,7 +51,7 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 		return fmt.Errorf("authorization service: failed to resolve FGA IDs (FGA is required — no fallback): %w", err)
 	}
 
-	// Enforce the per-call timeout floor via platform-clients/authz.
+	// Enforce the per-call timeout floor via internal/infra/authz.
 	//
 	// The timeout MUST be strictly below the Envoy ext_authz budget
 	// (pcauthz.EnvoyExtAuthzBudgetDefault = 5s). A value at or above the

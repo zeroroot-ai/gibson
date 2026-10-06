@@ -78,7 +78,7 @@ func (s *DomainPackService) ImportDomainPack(
 	if pack.Name == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "ImportDomainPack: the pack has no name")
 	}
-	if _, embedded := ontology.EmbeddedPack(pack.Name); embedded {
+	if _, embedded := ontology.EmbeddedCatalog().Get(pack.Name); embedded {
 		return nil, status_grpc.Errorf(codes.AlreadyExists,
 			"ImportDomainPack: %q is an embedded catalog pack, and an import never replaces one", pack.Name)
 	}

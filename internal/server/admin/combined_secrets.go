@@ -3,7 +3,7 @@
 
 // Package admin — combined_secrets.go
 //
-// CombinedSecretsServer implements tenantv1.SecretsServiceServer by composing
+// CombinedSecretsServer implements secretsv1.SecretsServiceServer by composing
 // two existing handler structs (ADR-0058):
 //
 //   - broker-config RPCs (GetBrokerConfig / ProbeBrokerConfig / SetBrokerConfig
@@ -23,13 +23,13 @@ package admin
 import (
 	"context"
 
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 )
 
 // CombinedSecretsServer is the single server registered for
-// gibson.tenant.v1.SecretsService on the daemon gRPC port.
+// gibson.secrets.v1.SecretsService on the daemon gRPC port.
 type CombinedSecretsServer struct {
-	tenantv1.UnimplementedSecretsServiceServer
+	secretsv1.UnimplementedSecretsServiceServer
 
 	brokerConfig *TenantAdminServer
 	secrets      *SecretsAdminServer
@@ -45,19 +45,23 @@ func NewCombinedSecretsServer(brokerConfig *TenantAdminServer, secrets *SecretsA
 // Broker-config RPCs — delegated to TenantAdminServer
 // ---------------------------------------------------------------------------
 
-func (s *CombinedSecretsServer) GetBrokerConfig(ctx context.Context, req *tenantv1.GetBrokerConfigRequest) (*tenantv1.GetBrokerConfigResponse, error) {
+// GetBrokerConfig delegates to TenantAdminServer.GetBrokerConfig.
+func (s *CombinedSecretsServer) GetBrokerConfig(ctx context.Context, req *secretsv1.GetBrokerConfigRequest) (*secretsv1.GetBrokerConfigResponse, error) {
 	return s.brokerConfig.GetBrokerConfig(ctx, req)
 }
 
-func (s *CombinedSecretsServer) ProbeBrokerConfig(ctx context.Context, req *tenantv1.ProbeBrokerConfigRequest) (*tenantv1.ProbeBrokerConfigResponse, error) {
+// ProbeBrokerConfig delegates to TenantAdminServer.ProbeBrokerConfig.
+func (s *CombinedSecretsServer) ProbeBrokerConfig(ctx context.Context, req *secretsv1.ProbeBrokerConfigRequest) (*secretsv1.ProbeBrokerConfigResponse, error) {
 	return s.brokerConfig.ProbeBrokerConfig(ctx, req)
 }
 
-func (s *CombinedSecretsServer) SetBrokerConfig(ctx context.Context, req *tenantv1.SetBrokerConfigRequest) (*tenantv1.SetBrokerConfigResponse, error) {
+// SetBrokerConfig delegates to TenantAdminServer.SetBrokerConfig.
+func (s *CombinedSecretsServer) SetBrokerConfig(ctx context.Context, req *secretsv1.SetBrokerConfigRequest) (*secretsv1.SetBrokerConfigResponse, error) {
 	return s.brokerConfig.SetBrokerConfig(ctx, req)
 }
 
-func (s *CombinedSecretsServer) CountSecrets(ctx context.Context, req *tenantv1.CountSecretsRequest) (*tenantv1.CountSecretsResponse, error) {
+// CountSecrets delegates to TenantAdminServer.CountSecrets.
+func (s *CombinedSecretsServer) CountSecrets(ctx context.Context, req *secretsv1.CountSecretsRequest) (*secretsv1.CountSecretsResponse, error) {
 	return s.brokerConfig.CountSecrets(ctx, req)
 }
 
@@ -65,26 +69,32 @@ func (s *CombinedSecretsServer) CountSecrets(ctx context.Context, req *tenantv1.
 // Secrets-CRUD RPCs — delegated to SecretsAdminServer
 // ---------------------------------------------------------------------------
 
-func (s *CombinedSecretsServer) ListSecrets(ctx context.Context, req *tenantv1.ListSecretsRequest) (*tenantv1.ListSecretsResponse, error) {
+// ListSecrets delegates to SecretsAdminServer.ListSecrets.
+func (s *CombinedSecretsServer) ListSecrets(ctx context.Context, req *secretsv1.ListSecretsRequest) (*secretsv1.ListSecretsResponse, error) {
 	return s.secrets.ListSecrets(ctx, req)
 }
 
-func (s *CombinedSecretsServer) GetSecret(ctx context.Context, req *tenantv1.GetSecretRequest) (*tenantv1.GetSecretResponse, error) {
+// GetSecret delegates to SecretsAdminServer.GetSecret.
+func (s *CombinedSecretsServer) GetSecret(ctx context.Context, req *secretsv1.GetSecretRequest) (*secretsv1.GetSecretResponse, error) {
 	return s.secrets.GetSecret(ctx, req)
 }
 
-func (s *CombinedSecretsServer) SetSecret(ctx context.Context, req *tenantv1.SetSecretRequest) (*tenantv1.SetSecretResponse, error) {
+// SetSecret delegates to SecretsAdminServer.SetSecret.
+func (s *CombinedSecretsServer) SetSecret(ctx context.Context, req *secretsv1.SetSecretRequest) (*secretsv1.SetSecretResponse, error) {
 	return s.secrets.SetSecret(ctx, req)
 }
 
-func (s *CombinedSecretsServer) RotateSecret(ctx context.Context, req *tenantv1.RotateSecretRequest) (*tenantv1.RotateSecretResponse, error) {
+// RotateSecret delegates to SecretsAdminServer.RotateSecret.
+func (s *CombinedSecretsServer) RotateSecret(ctx context.Context, req *secretsv1.RotateSecretRequest) (*secretsv1.RotateSecretResponse, error) {
 	return s.secrets.RotateSecret(ctx, req)
 }
 
-func (s *CombinedSecretsServer) DeleteSecret(ctx context.Context, req *tenantv1.DeleteSecretRequest) (*tenantv1.DeleteSecretResponse, error) {
+// DeleteSecret delegates to SecretsAdminServer.DeleteSecret.
+func (s *CombinedSecretsServer) DeleteSecret(ctx context.Context, req *secretsv1.DeleteSecretRequest) (*secretsv1.DeleteSecretResponse, error) {
 	return s.secrets.DeleteSecret(ctx, req)
 }
 
-func (s *CombinedSecretsServer) GetMissionAudit(ctx context.Context, req *tenantv1.GetMissionAuditRequest) (*tenantv1.GetMissionAuditResponse, error) {
+// GetMissionAudit delegates to SecretsAdminServer.GetMissionAudit.
+func (s *CombinedSecretsServer) GetMissionAudit(ctx context.Context, req *secretsv1.GetMissionAuditRequest) (*secretsv1.GetMissionAuditResponse, error) {
 	return s.secrets.GetMissionAudit(ctx, req)
 }

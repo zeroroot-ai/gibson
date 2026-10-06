@@ -69,10 +69,20 @@ type worldSnapshotData struct {
 	// cycle even though the World fold never disabled them.
 	DomainPacks []DomainPackSnapshot `json:"domain_packs"`
 
+	// MissionLineage is the lineage of each mission that a component
+	// originated (gibson#734). The snapshot must hold it, or the lineage is
+	// gone after the trim removes the mission.originated events.
+	MissionLineage []MissionLineage `json:"mission_lineage,omitempty"`
+
 	// ProofReviews is the proofs with agent-typed evidence that wait for a
 	// human review (proof_review.go). Without it a pending review would
 	// vanish across a snapshot and trim cycle.
 	ProofReviews []ProofReviewSnapshot `json:"proof_reviews"`
+
+	// MissionRewinds is the parent of each mission that a rewind started
+	// (ADR-0170). Without it the link from a rewound mission to its earlier
+	// run would vanish across a snapshot and trim cycle.
+	MissionRewinds []MissionRewind `json:"mission_rewinds"`
 
 	// Monotonic ID counters (replay-deterministic; must be restored exactly).
 	NextHostID        uint64 `json:"next_host_id"`
@@ -114,7 +124,9 @@ func SnapshotWorld(w *World, atSeq string) WorldSnapshot {
 		AgentToolCalls:       w.AgentToolCallSnapshot(),
 		FlightRecorderPolicy: w.flightRecorderPolicy,
 		DomainPacks:          w.DomainPackSnapshot(),
+		MissionLineage:       w.MissionLineageSnapshot(),
 		ProofReviews:         w.ProofReviewSnapshot(),
+		MissionRewinds:       w.MissionRewindSnapshot(),
 
 		NextHostID:        w.nextHostID,
 		NextDomainID:      w.nextDomainID,
@@ -373,6 +385,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			MissionID:         a.MissionID,
 			Technique:         a.Technique,
 			PredicateType:     a.PredicateType,
+			BlastRadius:       a.BlastRadius,
+			Reversibility:     a.Reversibility,
 			RequestedAtUnixMS: a.RequestedAtUnixMS,
 		})
 		if a.Decided {
@@ -412,6 +426,17 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Evidence:            append([]ProofReviewEvidence(nil), r.Evidence...),
 			SubmittedAtUnixNano: r.SubmittedAtUnixNano,
 		})
+	}
+
+	// Replay the parent of each rewound mission (ADR-0170).
+	for _, r := range data.MissionRewinds {
+		Reduce(w, MissionRewound(r))
+	}
+
+	// Replay the lineage of each originated mission (gibson#734). Identity is
+	// the mission id, so the order does not matter.
+	for _, l := range data.MissionLineage {
+		Reduce(w, MissionOriginated(l))
 	}
 
 	// Replay enabled Domain Packs (ADR-0133, gibson#381). Order does not

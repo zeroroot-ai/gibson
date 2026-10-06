@@ -59,17 +59,12 @@ import (
 //   - operators/tenant/cmd/gibson-backup — APOC export. Operational tooling,
 //     outside the data plane.
 //
-//   - internal/engine/graphrag/graph, but only its specific driver-holding
-//     files (neo4j.go, session_client.go) — NOT the whole package (gibson#1300).
-//     Holding the driver is those files' purpose; Query in each selects a write
-//     transaction from the statement text, which schema DDL migrations and the
-//     being-retired ingest loader still rely on. A new write-capable method
-//     added in any OTHER file of the package is flagged, so the exemption can no
-//     longer silently absorb a fresh write path. (The former whole-package
-//     exemption justified itself by "the GraphClient interface no longer
-//     re-exports a write transaction" — which had gone stale: Query is
-//     write-capable, and the dormant CreateNode/CreateRelationship/DeleteNode
-//     methods were removed rather than left to prove the claim false.)
+// The driver-adapter package internal/engine/graphrag/graph has NO
+// allowance. Its Query used to pick a write transaction from the statement
+// text (isWriteOperation), so its two driver-holding files were exempt. Query
+// is now read-only (gibson#673), so no file of the package may open a write
+// transaction, and a write through a read entry point is flagged like any
+// other.
 //
 // Test files are exempt: a test that seeds a fixture graph is not the data
 // plane, and the invariant this protects is about production write paths. The
@@ -109,24 +104,6 @@ var graphWriteAllowedPackages = []string{
 	"/testdata/",
 }
 
-// graphWriteAdapterPackage is the driver-adapter package. Holding the driver is
-// its purpose, but only its specific driver-holding files may open a write
-// transaction — a NEW write-capable method added in any other file of the
-// package is flagged (gibson#1300). This replaces the former whole-package
-// exemption, whose justification ("the GraphClient interface no longer
-// re-exports a write transaction") had gone stale.
-const graphWriteAdapterPackage = "github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
-
-// graphWriteAdapterFiles are the base names within the adapter package that
-// legitimately hold the Neo4j driver/session. Query in each selects its
-// transaction mode from the statement text (schema DDL + the being-retired
-// loader still need write mode); everything else in the package is read-only
-// and must stay that way.
-var graphWriteAdapterFiles = map[string]bool{
-	"neo4j.go":          true,
-	"session_client.go": true,
-}
-
 // graphWriteProjectorPackage is the package the graph projector lives in. Only
 // the projector's own files within it are allowed to write.
 const graphWriteProjectorPackage = "github.com/zeroroot-ai/gibson/internal/server/daemon"
@@ -146,7 +123,6 @@ func runGraphWrite(pass *analysis.Pass) (any, error) {
 	}
 	isProjectorPackage := strings.HasSuffix(pkgPath, graphWriteProjectorPackage) ||
 		pkgPath == graphWriteProjectorPackage
-	isAdapterPackage := pkgPath == graphWriteAdapterPackage
 
 	for _, file := range pass.Files {
 		fname := pass.Fset.Position(file.Pos()).Filename
@@ -154,9 +130,6 @@ func runGraphWrite(pass *analysis.Pass) (any, error) {
 			continue
 		}
 		if isProjectorPackage && isGraphProjectorFile(fname) {
-			continue
-		}
-		if isAdapterPackage && graphWriteAdapterFiles[filepath.Base(filepath.ToSlash(fname))] {
 			continue
 		}
 

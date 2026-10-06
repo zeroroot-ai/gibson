@@ -5,19 +5,14 @@ package harness
 
 import (
 	"context"
-	"log/slog"
-	"os"
+	"strings"
 	"testing"
 
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -27,7 +22,7 @@ import (
 // it is found in the manifest catalog, the component registry or the registry
 // adapter, and whether the call is unary or streaming.
 //
-// Each test uses a TRUSTED component under the setec-only shape, so the trust
+// Each test uses a TRUSTED component, so the trust
 // gate would let the call through. The execute gate is the only thing that
 // can refuse it.
 
@@ -35,7 +30,7 @@ import (
 // component registry, for a tenant that did not enable it, is refused and no
 // dispatch path is reached.
 func TestExecuteGate_RegistryTool_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	deny := &recordingAuthorizer{allow: false}
 	h.componentAuthorizer = deny
 
@@ -58,7 +53,7 @@ func TestExecuteGate_RegistryTool_RefusedWhenNotEnabled(t *testing.T) {
 // registry adapter knows (no component registry at all) is refused the same
 // way. This is the last dispatch path.
 func TestExecuteGate_AdapterOnlyTool_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	h.componentRegistry = nil
 	h.componentAuthorizer = &recordingAuthorizer{allow: false}
 
@@ -77,7 +72,7 @@ func TestExecuteGate_AdapterOnlyTool_RefusedWhenNotEnabled(t *testing.T) {
 // TestExecuteGate_Stream_RefusedWhenNotEnabled: the streaming harness call is
 // another road to the same tool, and it is refused before any lookup.
 func TestExecuteGate_Stream_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	h.componentAuthorizer = &recordingAuthorizer{allow: false}
 
 	err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
@@ -116,7 +111,7 @@ func TestExecuteGate_FailsClosedOnEveryPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+			h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 			h.componentAuthorizer = tc.az
 
 			if err := h.CallToolProto(tc.ctx(t), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}); err == nil {
@@ -132,50 +127,27 @@ func TestExecuteGate_FailsClosedOnEveryPath(t *testing.T) {
 	}
 }
 
-// TestExecuteGate_CallbackStream_RefusedWhenNotEnabled: the callback service
-// resolves and streams a tool itself, so it asks the question itself. A
-// refusal sends one PERMISSION_DENIED event, returns PermissionDenied, never
-// opens a stream to the tool, and records no tool call.
+// TestExecuteGate_CallbackStream_RefusedWhenNotEnabled: the callback stream
+// handler hands its call to the unary handler, whose dispatch runs the execute
+// gate. A refusal of the gate reaches the caller as one fatal error event, and
+// no result is sent.
 func TestExecuteGate_CallbackStream_RefusedWhenNotEnabled(t *testing.T) {
-	toolServer := &fakeStreamToolServer{sendComplete: true, outputJSON: `{"ok":true}`}
-	conn := startFakeToolServer(t, toolServer)
+	var captured []capturedTool
+	refusal := types.NewError(types.SANDBOX_POLICY_DENIED, "tool test-external-tool is not enabled for this tenant")
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, refusal)
+	stream := &fakeStreamSendServer{ctx: testCtxWithTenant()}
 
-	h := newStreamingTestHarness(conn)
-	h.componentAuthorizer = &recordingAuthorizer{allow: false}
-	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-stream", "test-agent", h)
-
-	var captured int
-	svc := NewHarnessCallbackServiceWithRegistry(
-		slog.New(slog.NewTextHandler(os.Stdout, nil)),
-		registry,
-		WithToolCallSink(func(context.Context, string, ToolCallRecord) { captured++ }),
-	)
-	req := &harnesspb.CallToolProtoStreamRequest{
-		Context: &harnesspb.ContextInfo{
-			TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-stream",
-			MissionRunId: "run-1", ToolExecutionId: "tool-exec-refused-1",
-		},
-		Name:       "stream-tool",
-		InputType:  "testtool.ToolInput",
-		InputJson:  []byte(`{"query":"streamed"}`),
-		OutputType: "testtool.ToolOutput",
-		TimeoutMs:  5000,
-	}
-	stream := &fakeStreamSendServer{ctx: callerCtx(t, "user-42", "test-tenant")}
-
-	err := svc.CallToolProtoStream(req, stream)
-	if status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("err = %v, want PermissionDenied", err)
+	if err := svc.CallToolProtoStream(streamRequest(contextInfo), stream); err != nil {
+		t.Fatalf("CallToolProtoStream: %v", err)
 	}
 	if len(stream.sent) != 1 {
 		t.Fatalf("sent %d events, want one error event", len(stream.sent))
 	}
 	ev := stream.sent[0].GetError()
-	if ev == nil || !ev.GetFatal() || ev.GetError().GetCode().String() != "ERROR_CODE_PERMISSION_DENIED" {
-		t.Fatalf("event = %v, want a fatal PERMISSION_DENIED error", stream.sent[0])
+	if ev == nil || !ev.GetFatal() || !strings.Contains(ev.GetError().GetMessage(), "not enabled") {
+		t.Fatalf("event = %v, want a fatal error that names the refusal", stream.sent[0])
 	}
-	if captured != 0 {
-		t.Errorf("a refused call recorded %d tool call(s)", captured)
+	if stream.sent[0].GetComplete() != nil {
+		t.Fatal("a refused call sent a result")
 	}
 }

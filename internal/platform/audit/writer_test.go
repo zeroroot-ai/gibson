@@ -88,7 +88,7 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 // without a cast), and chain_seq/prev_hash/entry_hash carry the per-tenant
 // hash chain that flush() writes on every INSERT (chain.go). Query.List
 // reads id, ..., decision (COALESCE'd), metadata, created_at and orders by
-// created_at DESC. audit_chain_anchor mirrors 033_audit_retention.up.sql.
+// created_at DESC. audit_chain_anchor mirrors 035_audit_retention.up.sql.
 func createAuditSchema(ctx context.Context, db *sql.DB) error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS audit_log (

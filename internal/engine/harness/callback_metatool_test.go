@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"math"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
 type mtSearcher struct {
@@ -38,8 +40,8 @@ type mtQuerier struct {
 	ret                any
 }
 
-func (f *mtQuerier) QueryPlugin(_ context.Context, name, method string, _ map[string]any) (any, error) {
-	f.gotName, f.gotMethod = name, method
+func (f *mtQuerier) CallConnectorTool(_ context.Context, _, connector, tool string, _ map[string]any) (any, error) {
+	f.gotName, f.gotMethod = connector, tool
 	return f.ret, nil
 }
 
@@ -83,7 +85,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -123,7 +125,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 		MissionId: "m1", MissionRunId: "run-1", ToolExecutionId: "tool-exec-meta-1",
 	}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -173,7 +175,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -216,7 +218,7 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -248,7 +250,7 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -267,7 +269,7 @@ func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{Tenant: "acme"},
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"},
 		[]string{"mcp:gitlab:create_issue"},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
@@ -299,7 +301,7 @@ func TestMatchBlocked(t *testing.T) {
 
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, catalog.Caller{}, nil, []byte(`{"args":{}}`))
+	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, nil, []byte(`{"args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -326,5 +328,261 @@ func TestMetaToolDescriptors_Shape(t *testing.T) {
 	}
 	if !isMetaTool(metatool.SearchToolsName) || isMetaTool("nmap") {
 		t.Fatal("isMetaTool classification wrong")
+	}
+}
+
+// newNativeMetaSvc builds a callback service whose harness serves one native
+// tool, and the native caller that invoke_tool uses for it.
+func newNativeMetaSvc(t *testing.T, captured *[]capturedTool, toolErr error) (*HarnessCallbackService, *mockHarnessWithResolver, *harnesspb.ContextInfo) {
+	t.Helper()
+	return newStreamCaptureSvc(t, captured, toolErr)
+}
+
+// TestMetaInvoke_NativeToolRunsThroughTheDirectHandler proves that invoke_tool
+// dispatches a native:<tool> id (gibson#725). The call takes the direct tool
+// call handler, and the flight recorder gets exactly one record of it.
+func TestMetaInvoke_NativeToolRunsThroughTheDirectHandler(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{"query":"q","limit":2}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() != nil {
+		t.Fatalf("unexpected error response: %v", resp.GetError())
+	}
+	var out struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(resp.GetOutputJson(), &out); err != nil || out.Result["result"] != "success" {
+		t.Fatalf("result not wrapped: %s (%v)", resp.GetOutputJson(), err)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured %d tool calls, want exactly 1", len(captured))
+	}
+	if captured[0].call.ToolName != "test-external-tool" || captured[0].call.Err != "" {
+		t.Fatalf("captured call = %+v, want one success record of test-external-tool", captured[0].call)
+	}
+}
+
+// TestMetaInvoke_NativeToolNotEnabledIsRefused proves that a native tool that
+// the tenant did not enable gets a refusal and never runs. The refusal is
+// recorded one time.
+func TestMetaInvoke_NativeToolNotEnabledIsRefused(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, &mtQuerier{})
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("error = %v, want PERMISSION_DENIED", resp.GetError())
+	}
+	if len(captured) != 1 || captured[0].call.ToolName != "native:test-external-tool" || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v, want one refusal record", captured)
+	}
+}
+
+// TestMetaInvoke_NativeToolFailureIsRecordedOnce proves that a native tool
+// that fails after dispatch returns an error and leaves one record.
+func TestMetaInvoke_NativeToolFailureIsRecordedOnce(t *testing.T) {
+	var captured []capturedTool
+	svc, native, contextInfo := newNativeMetaSvc(t, &captured, errors.New("tool boom"))
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
+
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+		[]byte(`{"id":"native:test-external-tool","args":{}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError() == nil {
+		t.Fatal("want an error response for a failed tool")
+	}
+	if len(captured) != 1 || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v, want exactly one failure record", captured)
+	}
+}
+
+// invokeNativeThroughCallToolProto sends one invoke_tool call for the native
+// test tool through the public handler, with the catalog wired. allow is the
+// answer of the can_execute check on the tool object.
+func invokeNativeThroughCallToolProto(t *testing.T, captured *[]capturedTool, allow bool) (*harnesspb.CallToolProtoResponse, *fakeSearchAuthz) {
+	t.Helper()
+	svc, _, contextInfo := newNativeMetaSvc(t, captured, nil)
+	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:tool/test-external-tool": allow}}
+	svc.componentAuthorizer = authzer
+	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{{Kind: "tool", Name: "test-external-tool"}}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"native:test-external-tool","args":{"query":"q"}}`),
+	})
+	if err != nil {
+		t.Fatalf("CallToolProto: %v", err)
+	}
+	return resp, authzer
+}
+
+// TestInvokeTool_CallsOneNativeTool is the end-to-end case of gibson#725: an
+// agent calls one native tool through invoke_tool. The can_execute check is on
+// the tool object, for the user of the run.
+func TestInvokeTool_CallsOneNativeTool(t *testing.T) {
+	var captured []capturedTool
+	resp, authzer := invokeNativeThroughCallToolProto(t, &captured, true)
+
+	if resp.GetError() != nil {
+		t.Fatalf("unexpected error response: %v", resp.GetError())
+	}
+	var out struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(resp.GetOutputJson(), &out); err != nil || out.Result["result"] != "success" {
+		t.Fatalf("result = %s (%v); want the output of the tool", resp.GetOutputJson(), err)
+	}
+	if authzer.lastUser != "user:alice" {
+		t.Errorf("can_execute subject = %q; want user:alice", authzer.lastUser)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured %d tool calls; want exactly 1", len(captured))
+	}
+}
+
+// TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable is the second
+// case of gibson#725: no can_execute on the tool object, so the tool does not
+// run.
+func TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable(t *testing.T) {
+	var captured []capturedTool
+	resp, _ := invokeNativeThroughCallToolProto(t, &captured, false)
+
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("error = %v; want PERMISSION_DENIED", resp.GetError())
+	}
+	if len(captured) != 1 || captured[0].call.Result != "" || captured[0].call.Err == "" {
+		t.Fatalf("captured = %+v; want one refusal record and no result", captured)
+	}
+}
+
+// blockedToolHarness is a harness whose mission deny list names the test tool.
+type blockedToolHarness struct{ *mockHarnessWithResolver }
+
+func (h blockedToolHarness) Mission() MissionContext {
+	return MissionContext{TenantID: "test-tenant", BlockedTools: []string{"test-external-tool"}}
+}
+
+// TestInvokeNativeTool_Refusals covers the refusals before and after the
+// hand-off to the tool call handler. Each one leaves exactly one record.
+func TestInvokeNativeTool_Refusals(t *testing.T) {
+	t.Run("a tool with no descriptor is not found", func(t *testing.T) {
+		var captured []capturedTool
+		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
+		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, harness, "no-such-tool", "native:no-such-tool", []byte(`{}`))
+		if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_NOT_FOUND {
+			t.Fatalf("resp = %v, err = %v; want NOT_FOUND", resp, err)
+		}
+		if len(captured) != 1 {
+			t.Fatalf("captured %d records; want 1", len(captured))
+		}
+	})
+
+	t.Run("a tool with no message types is refused", func(t *testing.T) {
+		var captured []capturedTool
+		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
+		harness.toolDescriptors["untyped"] = &ToolDescriptor{Name: "untyped"}
+		resp, _ := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, harness, "untyped", "native:untyped", []byte(`{}`))
+		if resp.GetError() == nil || len(captured) != 1 {
+			t.Fatalf("resp = %v, captured = %d; want an error and one record", resp, len(captured))
+		}
+	})
+
+	t.Run("a call with no run context fails", func(t *testing.T) {
+		var captured []capturedTool
+		svc, harness, _ := newNativeMetaSvc(t, &captured, nil)
+		if _, err := svc.invokeNativeTool(testCtxWithTenant(), nil, harness, "test-external-tool", "native:test-external-tool", []byte(`{}`)); err == nil {
+			t.Fatal("want an error for a call with no run context")
+		}
+	})
+
+	t.Run("a tool on the mission deny list is refused", func(t *testing.T) {
+		var captured []capturedTool
+		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
+		blocked := blockedToolHarness{harness}
+		registry := NewCallbackHarnessRegistry()
+		registry.Register(contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
+		svc.registry = registry
+		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, blocked, "test-external-tool", "native:test-external-tool", []byte(`{}`))
+		if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+			t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
+		}
+	})
+}
+
+// TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead is the rule of
+// ADR-0067 for gibson#723: a plugin and a connector have one name, and the
+// caller may execute the connector only. invoke_tool checks can_execute on
+// the connector object and calls that connector through MCP. No plugin
+// method is reached.
+func TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead(t *testing.T) {
+	var captured []capturedTool
+	svc, harness, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentAuthorizer = authzer
+	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{
+		{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue"}}},
+	}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	var called []string
+	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
+	pluginCalls := 0
+	harness.queryPluginHook = func() { pluginCalls++ }
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`),
+	})
+	if err != nil || resp.GetError() != nil {
+		t.Fatalf("resp = %v, err = %v; want a result", resp, err)
+	}
+	if authzer.lastObject != "component:connector/gitlab" {
+		t.Errorf("can_execute object = %q; want component:connector/gitlab", authzer.lastObject)
+	}
+	if len(called) != 1 || called[0] != "test-tenant/gitlab/create_issue" {
+		t.Errorf("connector calls = %v; want one call of gitlab for the tenant of the run", called)
+	}
+	if pluginCalls != 0 {
+		t.Errorf("the plugin of the same name was called %d time(s)", pluginCalls)
+	}
+	if len(captured) != 1 {
+		t.Errorf("captured %d records; want 1", len(captured))
+	}
+}
+
+// TestInvokeTool_AnMCPIdWithNoClientFailsClosed: with no MCP client wired, an
+// mcp: id gets an error and one record.
+func TestInvokeTool_AnMCPIdWithNoClientFailsClosed(t *testing.T) {
+	var captured []capturedTool
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentRegistry = fakeSearchReg{}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+
+	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{}}`),
+	})
+	if err != nil || resp.GetError() == nil {
+		t.Fatalf("resp = %v, err = %v; want an error response", resp, err)
+	}
+	if len(captured) != 1 {
+		t.Errorf("captured %d records; want 1", len(captured))
 	}
 }

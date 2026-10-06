@@ -4,6 +4,8 @@
 package daemon
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
+
 	"sort"
 	"testing"
 
@@ -178,7 +180,7 @@ func deniedMethod() string {
 // peer set is exactly the two operators: EnvoyID and any browser-path SVID
 // are deliberately absent (they transit Envoy + ext-authz, never this bypass).
 func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
-	policies := spiffePeerMethodPolicies()
+	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
 
 	// In a PRODUCTION build exactly two peers are policed. A test_fixtures
 	// build adds the exit-test runner and nothing else — that identity does not
@@ -215,7 +217,7 @@ func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 // the daemon refuse to start, while a policed peer (tenant-operator) and an
 // empty list pass.
 func TestValidateAllowedPeerPolicies(t *testing.T) {
-	policies := spiffePeerMethodPolicies()
+	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
 
 	t.Run("empty allow-list passes", func(t *testing.T) {
 		assert.NoError(t, validateAllowedPeerPolicies(nil, policies))
@@ -251,7 +253,7 @@ func TestValidateAllowedPeerPolicies(t *testing.T) {
 //   - a non-allow-listed SVID (EnvoyID / browser path) falls through to the
 //     ext-authz header path (matched=false, no error).
 func TestSpiffeBypassDecision(t *testing.T) {
-	policies := spiffePeerMethodPolicies()
+	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
 	allowed := []string{tenantOperatorSVID}
 
 	t.Run("tenant-operator allowed method is authorised", func(t *testing.T) {

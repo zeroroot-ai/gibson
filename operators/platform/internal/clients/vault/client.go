@@ -34,6 +34,13 @@ type Client interface {
 	// EnsureTransitKey creates a transit encryption key with the given
 	// name. Idempotent (409 = already exists = success).
 	EnsureTransitKey(ctx context.Context, keyName string) error
+
+	// ReadKV returns the fields of the KV v2 entry secret/data/<key>, or an
+	// error that wraps ErrNotFound when the entry does not exist.
+	ReadKV(ctx context.Context, key string) (map[string]string, error)
+
+	// WriteKV writes the fields as a new version of secret/data/<key>.
+	WriteKV(ctx context.Context, key string, data map[string]string) error
 }
 
 // TokenFunc is a function that returns the current Vault admin token. It is
@@ -187,4 +194,29 @@ func (c *httpClient) doJSON(ctx context.Context, method, path string, body, out 
 		return fmt.Errorf("vault %s %s 404: %w", method, path, ErrNotFound)
 	}
 	return fmt.Errorf("vault %s %s %d: %s", method, path, resp.StatusCode, string(raw))
+}
+
+// kvPath is the KV v2 data path of key in the mount "secret", the one KV
+// mount the ClusterSecretStore of the chart reads.
+func kvPath(key string) string { return "/v1/secret/data/" + url.PathEscape(key) }
+
+// ReadKV implements Client.
+func (c *httpClient) ReadKV(ctx context.Context, key string) (map[string]string, error) {
+	var out struct {
+		Data struct {
+			Data map[string]string `json:"data"`
+		} `json:"data"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, kvPath(key), nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Data.Data == nil {
+		return nil, fmt.Errorf("vault: kv %s has no data: %w", key, ErrNotFound)
+	}
+	return out.Data.Data, nil
+}
+
+// WriteKV implements Client.
+func (c *httpClient) WriteKV(ctx context.Context, key string, data map[string]string) error {
+	return c.doJSON(ctx, http.MethodPost, kvPath(key), map[string]any{"data": data}, nil)
 }

@@ -179,3 +179,41 @@ func TestRunSystemBackplaneBaseline_ConvergesNowAndOnEveryTick(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// TestNewTenant_GetsExactlyOneSeededTenantEnabledTuple (gibson#718): the
+// seeds that the daemon runs with no admin action give a new tenant exactly
+// one tenant_enabled tuple, on component:_system. The platform catalog gate
+// runs too, over a catalog of each kind, and writes no tuple for a tenant.
+func TestNewTenant_GetsExactlyOneSeededTenantEnabledTuple(t *testing.T) {
+	a := &recordingAuthorizer{
+		listUsers: map[listUsersKey][]string{
+			{ObjectType: "system_tenant", Object: "system_tenant:_system", Relation: "parent"}: {"tenant:new"},
+		},
+	}
+	catalog := []CatalogRef{
+		{Kind: authz.KindAgent, ID: "zerocool"},
+		{Kind: authz.KindTool, ID: "nmap"},
+		{Kind: authz.KindPlugin, ID: "github"},
+		{Kind: authz.KindConnector, ID: "gitlab"},
+	}
+	if err := SeedComponentCatalogGate(context.Background(), a, catalog, slog.Default()); err != nil {
+		t.Fatalf("catalog gate: %v", err)
+	}
+	if _, err := SeedSystemBackplaneBaseline(context.Background(), a, slog.Default()); err != nil {
+		t.Fatalf("backplane baseline: %v", err)
+	}
+
+	var forTenant []authz.Tuple
+	for _, w := range a.writes {
+		if w.User == "tenant:new" {
+			forTenant = append(forTenant, w)
+		}
+	}
+	want := []authz.Tuple{{User: "tenant:new", Relation: "tenant_enabled", Object: SystemBackplaneObject}}
+	if len(forTenant) != 1 || forTenant[0] != want[0] {
+		t.Fatalf("seeded tuples for a new tenant = %+v, want exactly %+v", forTenant, want)
+	}
+	if SystemBackplaneObject != "component:_system" {
+		t.Fatalf("SystemBackplaneObject = %q, want component:_system", SystemBackplaneObject)
+	}
+}

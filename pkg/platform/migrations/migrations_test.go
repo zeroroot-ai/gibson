@@ -12,17 +12,18 @@ import (
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 12: 009 is session_context (component session-context store,
+	// 13: 009 is session_context (component session-context store,
 	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0119,
 	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
 	// provider_config_meta, the default-provider pointer that shadowed
-	// provider_configs.is_default (gibson#505).
+	// provider_configs.is_default (gibson#505), 013 is timeline_events (the
+	// full history of the Timeline, ADR-0163, gibson#786).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 12 {
-		t.Errorf("tenant: expected 12 up.sql files, got %d", upCount)
+	if upCount != 13 {
+		t.Errorf("tenant: expected 13 up.sql files, got %d", upCount)
 	}
-	if downCount != 12 {
-		t.Errorf("tenant: expected 12 down.sql files, got %d", downCount)
+	if downCount != 13 {
+		t.Errorf("tenant: expected 13 down.sql files, got %d", downCount)
 	}
 }
 
@@ -43,11 +44,11 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 34 {
-		t.Errorf("platform: expected 34 up.sql files, got %d", upCount)
+	if upCount != 36 {
+		t.Errorf("platform: expected 36 up.sql files, got %d", upCount)
 	}
-	if downCount != 34 {
-		t.Errorf("platform: expected 34 down.sql files, got %d", downCount)
+	if downCount != 36 {
+		t.Errorf("platform: expected 36 down.sql files, got %d", downCount)
 	}
 }
 
@@ -102,8 +103,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 12 {
-		t.Errorf("TenantMaxVersion: got %d, want 12", v)
+	if v != 13 {
+		t.Errorf("TenantMaxVersion: got %d, want 13", v)
 	}
 }
 
@@ -152,8 +153,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 34 {
-		t.Errorf("PlatformMaxVersion: got %d, want 34", v)
+	if v != 36 {
+		t.Errorf("PlatformMaxVersion: got %d, want 36", v)
 	}
 }
 

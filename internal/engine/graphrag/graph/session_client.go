@@ -59,8 +59,8 @@ func (c *SessionGraphClient) Health(_ context.Context) types.HealthStatus {
 	return types.Healthy("session graph client: session present")
 }
 
-// Query executes a Cypher query on the held session.
-// Read queries use ExecuteRead; write queries use ExecuteWrite.
+// Query runs a Cypher query in a read transaction on the held session. A
+// write statement fails: Query never opens a write transaction (ADR-0112).
 func (c *SessionGraphClient) Query(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
 	if c.session == nil {
 		return QueryResult{}, types.NewError(ErrCodeGraphConnectionClosed, "session graph client: no session")
@@ -83,13 +83,7 @@ func (c *SessionGraphClient) Query(ctx context.Context, cypher string, params ma
 		return convertNeo4jResult(records, summary), nil
 	}
 
-	var res any
-	var err error
-	if isWriteOperation(cypher) {
-		res, err = c.session.ExecuteWrite(ctx, txWork)
-	} else {
-		res, err = c.session.ExecuteRead(ctx, txWork)
-	}
+	res, err := c.session.ExecuteRead(ctx, txWork)
 	if err != nil {
 		return QueryResult{}, types.WrapError(ErrCodeGraphQueryFailed, "session client: query failed", err)
 	}
