@@ -29,29 +29,6 @@ func (s failingSession) ExecuteWrite(context.Context, neo4j.ManagedTransactionWo
 
 func (failingSession) Close(context.Context) error { return nil }
 
-// TestNeo4jGraphWriter_UpsertMission_NilNeo4j_NoError exercises UpsertMission
-// end to end (gibson#1254/ADR-0112): the mission MERGE moved here from the
-// CreateMission RPC handler, which is now the projector's job to run through
-// the shared exec path like every other projection. When Neo4j is not
-// configured for the tenant, exec's nil guard must make this a no-op, not an
-// error — that was the CreateMission handler's behaviour before the move, and
-// UpsertMission must preserve it (mockPool/minimalConn from poolmock_test.go).
-func TestNeo4jGraphWriter_UpsertMission_NilNeo4j_NoError(t *testing.T) {
-	pool := &mockPool{conn: minimalConn()}
-	w := newNeo4jGraphWriter(func() datapool.Pool { return pool })
-
-	err := w.UpsertMission(context.Background(), "acme", MissionProjection{
-		ID:        "m1",
-		Name:      "recon",
-		TargetID:  "target-1",
-		Status:    "running",
-		CreatedBy: "recon",
-	})
-	if err != nil {
-		t.Fatalf("UpsertMission with no Neo4j configured for the tenant: %v", err)
-	}
-}
-
 // TestNeo4jGraphWriter_Exec_PoolForError proves exec surfaces a pool.For
 // failure rather than silently dropping the projection.
 func TestNeo4jGraphWriter_Exec_PoolForError(t *testing.T) {
@@ -90,27 +67,6 @@ func TestNeo4jGraphWriter_Exec_ExecuteWriteError(t *testing.T) {
 	}
 	if !errors.Is(err, writeErr) {
 		t.Errorf("err = %v, want it to wrap %v", err, writeErr)
-	}
-}
-
-// TestNeo4jGraphWriter_UpsertTarget_NilNeo4j_NoError exercises UpsertTarget
-// through the shared exec path. A tenant with no Neo4j configured must be a
-// no-op, like every other projection — a Target is written on every run, so an
-// error here would fail every run on such a tenant (gibson#550).
-func TestNeo4jGraphWriter_UpsertTarget_NilNeo4j_NoError(t *testing.T) {
-	pool := &mockPool{conn: minimalConn()}
-	w := newNeo4jGraphWriter(func() datapool.Pool { return pool })
-
-	err := w.UpsertTarget(context.Background(), "acme", TargetProjection{
-		ID:        "11111111-1111-1111-1111-111111111111",
-		Name:      "prod-cluster",
-		Type:      "kubernetes",
-		URL:       "https://10.0.0.1:6443",
-		Status:    "active",
-		MissionID: "m1",
-	})
-	if err != nil {
-		t.Fatalf("UpsertTarget with no Neo4j configured for the tenant: %v", err)
 	}
 }
 

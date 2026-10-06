@@ -178,9 +178,6 @@ func (w *neo4jGraphWriter) execExpectingRow(
 		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
 	}
 	defer conn.Release()
-	if conn.Neo4j == nil {
-		return nil
-	}
 	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
 		return err
 	}

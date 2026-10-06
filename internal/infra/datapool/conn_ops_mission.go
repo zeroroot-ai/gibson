@@ -376,10 +376,6 @@ type runningMissionDoc struct {
 // keys. Keys carrying no-tenant prefixes are exactly the pattern produced by
 // MissionOps.SaveRun; isolation is structural (per-tenant logical DB).
 func (m *MissionOps) ListRunning(ctx context.Context) ([]RunningMission, error) {
-	if m.rdb == nil {
-		return nil, nil
-	}
-
 	var results []RunningMission
 	var cursor uint64
 

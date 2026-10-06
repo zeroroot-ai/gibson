@@ -115,12 +115,6 @@ func TestMissionGraphWrites_SurfaceADriverError(t *testing.T) {
 	require.ErrorIs(t, w.LinkMissionNodes(ctx, "acme", "a", "b"), driverErr)
 }
 
-// A tenant with no Neo4j has no graph to write into. The write is a no-op.
-func TestMissionGraphWrites_NoNeo4jIsANoOp(t *testing.T) {
-	w := missionGraphWriter(minimalConn())
-	require.NoError(t, w.UpsertMissionRun(context.Background(), "acme", MissionRunProjection{ID: "run-1"}))
-}
-
 // The writer refuses before the pool: no pool, a bad tenant, a pool error.
 func TestMissionGraphWrites_RefuseBeforeTheWrite(t *testing.T) {
 	ctx := context.Background()
