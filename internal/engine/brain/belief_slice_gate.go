@@ -319,7 +319,7 @@ func (w *SliceBeliefWorker) changesABelief(ctx context.Context, nodes []ScoredNo
 	for _, n := range nodes {
 		existing, ok, err := w.gate.substrate.Belief(ctx, n.Ref)
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("read the belief of %s: %w", n.Ref.ID, err)
 		}
 		if !ok {
 			return true, nil
@@ -366,7 +366,7 @@ func (w *SliceBeliefWorker) Drain(ctx context.Context, graph AttackGraph, propag
 
 		changed, changeErr := w.changesABelief(ctx, nodes)
 		if changeErr != nil {
-			return 0, nil, fmt.Errorf("slice drain: read the belief of target %s: %w", req.Target, changeErr)
+			return 0, nil, fmt.Errorf("slice drain: target %s: %w", req.Target, changeErr)
 		}
 		applied, applyErr := w.gate.Apply(ctx, SliceScored{Target: req.Target, Nodes: nodes, Digest: req.Digest})
 		if applyErr != nil {
