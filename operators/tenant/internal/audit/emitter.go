@@ -42,6 +42,18 @@ const (
 	// ActionSecretsBackendDeprovision is the record before the operator
 	// deletes the OpenBao namespace of a tenant.
 	ActionSecretsBackendDeprovision = "operator.secrets_backend_deprovision"
+	// ActionDataPlaneProvision is the record before the operator creates or
+	// corrects the Postgres, Redis and Neo4j stores of a tenant.
+	ActionDataPlaneProvision = "operator.data_plane_provision"
+	// ActionDataPlaneDeprovision is the record before the operator deletes
+	// the data-plane stores of a tenant.
+	ActionDataPlaneDeprovision = "operator.data_plane_deprovision"
+	// ActionGrantsProvision is the record before the operator writes the FGA
+	// grants of a tenant.
+	ActionGrantsProvision = "operator.grants_provision"
+	// ActionGrantsDeprovision is the record before the operator deletes the
+	// FGA grants of a tenant.
+	ActionGrantsDeprovision = "operator.grants_deprovision"
 )
 
 // ResultFailure is the result of the second record of a change that failed.

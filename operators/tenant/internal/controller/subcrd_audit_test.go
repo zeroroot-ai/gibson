@@ -184,7 +184,8 @@ func TestSubCRDRecords_CarryTheRequestStamp(t *testing.T) {
 	}
 }
 
-// The Zitadel and OpenBao controllers do not start without the emitter.
+// The Zitadel, OpenBao, data-plane and grants controllers do not start
+// without the emitter.
 func TestSubCRDReconcilers_RefuseToStartWithoutAudit(t *testing.T) {
 	if err := (&TenantIdentityReconciler{}).SetupWithManager(nil); !errors.Is(err, saga.ErrNoAudit) {
 		t.Errorf("TenantIdentityReconciler.SetupWithManager = %v, want ErrNoAudit", err)
@@ -192,4 +193,142 @@ func TestSubCRDReconcilers_RefuseToStartWithoutAudit(t *testing.T) {
 	if err := (&TenantSecretsBackendReconciler{}).SetupWithManager(nil); !errors.Is(err, saga.ErrNoAudit) {
 		t.Errorf("TenantSecretsBackendReconciler.SetupWithManager = %v, want ErrNoAudit", err)
 	}
+	if err := (&TenantDataPlaneReconciler{}).SetupWithManager(nil); !errors.Is(err, saga.ErrNoAudit) {
+		t.Errorf("TenantDataPlaneReconciler.SetupWithManager = %v, want ErrNoAudit", err)
+	}
+	if err := (&TenantGrantsReconciler{}).SetupWithManager(nil); !errors.Is(err, saga.ErrNoAudit) {
+		t.Errorf("TenantGrantsReconciler.SetupWithManager = %v, want ErrNoAudit", err)
+	}
+}
+
+func dataPlaneFixture(t *testing.T, tdp *gibsonv1alpha1.TenantDataPlane, sink *audittest.Sink) (*TenantDataPlaneReconciler, *stubProvisioner, client.Client) {
+	t.Helper()
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantDataPlane{}).WithObjects(tdp).Build()
+	stub := &stubProvisioner{}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100),
+		Audit: sink.Emitter(t), Provisioner: stub}
+	return r, stub, c
+}
+
+func grantsFixture(t *testing.T, tg *gibsonv1alpha1.TenantGrants, sink *audittest.Sink) (*TenantGrantsReconciler, *stubGrantsProvisioner, client.Client) {
+	t.Helper()
+	scheme := setupScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithStatusSubresource(&gibsonv1alpha1.TenantGrants{}).WithObjects(tg).Build()
+	stub := &stubGrantsProvisioner{}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100),
+		Audit: sink.Emitter(t), Provisioner: stub}
+	return r, stub, c
+}
+
+// The data-plane controller records the change first with the request stamp,
+// writes the failure record, and changes nothing when the record fails.
+func TestTenantDataPlane_AuditsEachChange(t *testing.T) {
+	stamped := func(deleting bool) *gibsonv1alpha1.TenantDataPlane {
+		tdp := withFinalizer(newTenantDataPlane("acme-dataplane", "acme"), gibsonv1alpha1.TenantDataPlaneFinalizer, deleting)
+		tdp.Annotations = map[string]string{audit.AnnotationCorrelationID: "rec-1"}
+		return tdp
+	}
+	t.Run("record first, with the stamp", func(t *testing.T) {
+		sink := &audittest.Sink{}
+		r, stub, _ := dataPlaneFixture(t, stamped(false), sink)
+		at := -1
+		sink.OnEmit = func(audit.Event) { at = len(stub.provisioned) }
+		if _, err := reconcileTDP(t, r, "acme-dataplane"); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		got := sink.Events()
+		if len(got) != 1 || got[0].Action != audit.ActionDataPlaneProvision || at != 0 ||
+			got[0].Fields[audit.FieldCorrelationID] != "rec-1" {
+			t.Fatalf("records = %+v, provisioned at record = %d", got, at)
+		}
+	})
+	t.Run("failed change is recorded", func(t *testing.T) {
+		sink := &audittest.Sink{}
+		r, stub, _ := dataPlaneFixture(t, stamped(false), sink)
+		stub.provisionErr = errors.New("postgres down")
+		_, _ = reconcileTDP(t, r, "acme-dataplane")
+		if got := sink.Events(); len(got) != 2 || got[1].Result != audit.ResultFailure || got[1].Reason != "postgres down" {
+			t.Fatalf("records = %+v", got)
+		}
+	})
+	t.Run("failed record stops the provision", func(t *testing.T) {
+		r, stub, _ := dataPlaneFixture(t, stamped(false), &audittest.Sink{Err: errDaemonDown})
+		if _, err := reconcileTDP(t, r, "acme-dataplane"); !errors.Is(err, errDaemonDown) {
+			t.Fatalf("reconcile = %v, want the audit error", err)
+		}
+		if len(stub.provisioned) != 0 {
+			t.Fatalf("the data plane changed with no record: %v", stub.provisioned)
+		}
+	})
+	t.Run("failed record stops the delete", func(t *testing.T) {
+		r, stub, c := dataPlaneFixture(t, stamped(true), &audittest.Sink{Err: errDaemonDown})
+		if _, err := reconcileTDP(t, r, "acme-dataplane"); err == nil {
+			t.Fatal("reconcile returned no error with no audit record")
+		}
+		if len(stub.deprovisioned) != 0 {
+			t.Fatalf("the data plane was deleted with no record: %v", stub.deprovisioned)
+		}
+		var got gibsonv1alpha1.TenantDataPlane
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-dataplane"}, &got); err != nil {
+			t.Fatalf("the finalizer was removed with no record: %v", err)
+		}
+	})
+}
+
+// The grants controller records each FGA change first with the request
+// stamp, writes the failure record, and changes nothing when the record fails.
+func TestTenantGrants_AuditsEachChange(t *testing.T) {
+	stamped := func(deleting bool) *gibsonv1alpha1.TenantGrants {
+		tg := withFinalizer(newTenantGrants("acme-grants", "acme"), gibsonv1alpha1.TenantGrantsFinalizer, deleting)
+		tg.Annotations = map[string]string{audit.AnnotationCorrelationID: "rec-1"}
+		return tg
+	}
+	t.Run("record first, with the stamp", func(t *testing.T) {
+		sink := &audittest.Sink{}
+		r, stub, _ := grantsFixture(t, stamped(false), sink)
+		at := -1
+		sink.OnEmit = func(audit.Event) { at = len(stub.provisioned) }
+		if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
+			t.Fatalf("reconcile: %v", err)
+		}
+		got := sink.Events()
+		if len(got) != 1 || got[0].Action != audit.ActionGrantsProvision || at != 0 ||
+			got[0].Fields[audit.FieldCorrelationID] != "rec-1" {
+			t.Fatalf("records = %+v, provisioned at record = %d", got, at)
+		}
+	})
+	t.Run("failed change is recorded", func(t *testing.T) {
+		sink := &audittest.Sink{}
+		r, stub, _ := grantsFixture(t, stamped(false), sink)
+		stub.provisionErr = errors.New("fga down")
+		_, _ = reconcileTG(t, r, "acme-grants")
+		if got := sink.Events(); len(got) != 2 || got[1].Result != audit.ResultFailure || got[1].Reason != "fga down" {
+			t.Fatalf("records = %+v", got)
+		}
+	})
+	t.Run("failed record stops the provision", func(t *testing.T) {
+		r, stub, _ := grantsFixture(t, stamped(false), &audittest.Sink{Err: errDaemonDown})
+		if _, err := reconcileTG(t, r, "acme-grants"); !errors.Is(err, errDaemonDown) {
+			t.Fatalf("reconcile = %v, want the audit error", err)
+		}
+		if len(stub.provisioned) != 0 {
+			t.Fatalf("FGA changed with no record: %v", stub.provisioned)
+		}
+	})
+	t.Run("failed record stops the delete", func(t *testing.T) {
+		r, stub, c := grantsFixture(t, stamped(true), &audittest.Sink{Err: errDaemonDown})
+		if _, err := reconcileTG(t, r, "acme-grants"); err == nil {
+			t.Fatal("reconcile returned no error with no audit record")
+		}
+		if len(stub.deprovisioned) != 0 {
+			t.Fatalf("the grants were deleted with no record: %v", stub.deprovisioned)
+		}
+		var got gibsonv1alpha1.TenantGrants
+		if err := c.Get(context.Background(), types.NamespacedName{Namespace: "tenant-acme", Name: "acme-grants"}, &got); err != nil {
+			t.Fatalf("the finalizer was removed with no record: %v", err)
+		}
+	})
 }

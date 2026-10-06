@@ -847,6 +847,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: dataPlaneProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantDataPlane")
 		os.Exit(1)
@@ -907,6 +908,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: grantsProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantGrants")
 		os.Exit(1)

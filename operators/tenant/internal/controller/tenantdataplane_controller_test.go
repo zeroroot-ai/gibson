@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 )
@@ -72,7 +73,7 @@ func TestTenantDataPlane_ProvisionsAndMarksReady(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// Pass 1: finalizer added, requeue.
 	if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
@@ -130,7 +131,7 @@ func TestTenantDataPlane_ProvisionFailureSetsFailed(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{provisionErr: errors.New("cnpg cluster not ready")}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	_, err := reconcileTDP(t, r, "acme-dp")
 	if err == nil {
@@ -166,7 +167,7 @@ func TestTenantDataPlane_FinalizerTeardown(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
 		t.Fatalf("reconcile delete: %v", err)
@@ -196,7 +197,7 @@ func TestTenantDataPlane_TeardownNotFoundIsSuccess(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{deprovisionErr: clients.ErrNotFound}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
 		t.Fatalf("NotFound from deprovision must not error: %v", err)
@@ -237,7 +238,7 @@ func TestTenantDataPlane_SteadyStateNoPhaseFlip(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// First steady-state resync: Provision still runs (drift-correction) but
 	// phase must NOT flip to Provisioning.
@@ -295,7 +296,7 @@ func TestTenantDataPlane_PassesDeclaredLimitsToTheProvisioner(t *testing.T) {
 		Build()
 
 	stub := &stubProvisioner{}
-	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantDataPlaneReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 	for pass := 1; pass <= 2; pass++ {
 		if _, err := reconcileTDP(t, r, "acme-dp"); err != nil {
 			t.Fatalf("reconcile pass %d: %v", pass, err)

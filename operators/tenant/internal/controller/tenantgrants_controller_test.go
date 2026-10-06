@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 )
@@ -68,7 +69,7 @@ func TestTenantGrants_ProvisionsAndMarksReady(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// Pass 1: finalizer added, requeue, no provision yet.
 	if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
@@ -135,7 +136,7 @@ func TestTenantGrants_ExtraTuplesReconciled(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -168,7 +169,7 @@ func TestTenantGrants_ProvisionFailureSetsFailed(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{provisionErr: errors.New("fga write failed")}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	_, err := reconcileTG(t, r, "acme-grants")
 	if err == nil {
@@ -205,7 +206,7 @@ func TestTenantGrants_FinalizerTeardown(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
 		t.Fatalf("reconcile delete: %v", err)
@@ -234,7 +235,7 @@ func TestTenantGrants_TeardownNotFoundIsSuccess(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{deprovisionErr: clients.ErrNotFound}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTG(t, r, "acme-grants"); err != nil {
 		t.Fatalf("NotFound from deprovision must not error: %v", err)
@@ -271,7 +272,7 @@ func TestTenantGrants_SteadyStateNoPhaseFlip(t *testing.T) {
 		Build()
 
 	stub := &stubGrantsProvisioner{}
-	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantGrantsReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// Steady-state resync: Provision still runs (drift-correction) but phase
 	// must NOT flip to Provisioning.
