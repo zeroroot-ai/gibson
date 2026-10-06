@@ -906,6 +906,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
+		childMissionCtx.NodeID = task.NodeID
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,

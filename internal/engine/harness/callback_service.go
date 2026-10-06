@@ -1772,7 +1772,7 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harne
 	}
 
 	// Convert proto Task to internal Task
-	task := protoTaskToTask(req.Task)
+	task := inheritNodeScope(protoTaskToTask(req.Task), harness.Mission())
 
 	// Capture start time for agent execution
 	agentStartTime := time.Now()
@@ -3628,4 +3628,17 @@ func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *har
 			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
+}
+
+// inheritNodeScope gives a delegated agent the node of its caller. A
+// delegation runs inside the node of the caller, so the sub-agent gets the
+// node id and the network scope of that node (gibson#865, ADR-0169). It is
+// not a mission node of its own: no later node names it, and it starts from
+// no other node, so StartsFrom and Forkable stay empty.
+func inheritNodeScope(task agent.Task, caller MissionContext) agent.Task {
+	task.NodeID = caller.NodeID
+	task.Network = caller.NodeNetwork
+	task.StartsFrom = ""
+	task.Forkable = false
+	return task
 }
