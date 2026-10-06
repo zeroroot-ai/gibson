@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -62,7 +63,7 @@ func TestReaper_NoOpWhenNotTenantNamespace(t *testing.T) {
 	scheme := setupScheme(t)
 	ns := newTerminatingNamespace(10*time.Minute, "random-ns")
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
-	r := &OrphanReaperReconciler{Client: c, Recorder: events.NewFakeRecorder(10), GracePeriodSeconds: 300, Enabled: true}
+	r := &OrphanReaperReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: events.NewFakeRecorder(10), GracePeriodSeconds: 300, Enabled: true}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "random-ns"}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -76,7 +77,7 @@ func TestReaper_RequeueWithinGracePeriod(t *testing.T) {
 	scheme := setupScheme(t)
 	ns := newTerminatingNamespace(30*time.Second, "tenant-acme") // well under 300s grace
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns).Build()
-	r := &OrphanReaperReconciler{Client: c, Recorder: events.NewFakeRecorder(10), GracePeriodSeconds: 300, Enabled: true}
+	r := &OrphanReaperReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: events.NewFakeRecorder(10), GracePeriodSeconds: 300, Enabled: true}
 	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "tenant-acme"}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -94,7 +95,7 @@ func TestReaper_SkipWhenParentTenantExists(t *testing.T) {
 	ae := newChildWithFinalizer("AgentEnrollment", "scanner-01", gibsonv1alpha1.AgentEnrollmentFinalizer)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, tenant, ae).Build()
 	rec := events.NewFakeRecorder(10)
-	r := &OrphanReaperReconciler{Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
+	r := &OrphanReaperReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "tenant-acme"}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -116,7 +117,7 @@ func TestReaper_StripsAllowlistedFinalizers(t *testing.T) {
 	tm := newChildWithFinalizer("TenantMember", "invite-1", gibsonv1alpha1.TenantMemberFinalizer)
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ae, tm).Build()
 	rec := events.NewFakeRecorder(20)
-	r := &OrphanReaperReconciler{Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
+	r := &OrphanReaperReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "tenant-acme"}})
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -147,7 +148,7 @@ func TestReaper_PreservesUnknownFinalizers(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(ns, ae).Build()
 	rec := events.NewFakeRecorder(10)
-	r := &OrphanReaperReconciler{Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
+	r := &OrphanReaperReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: rec, GracePeriodSeconds: 300, Enabled: true}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Name: "tenant-acme"}})
 	if err != nil {
 		t.Fatalf("err: %v", err)

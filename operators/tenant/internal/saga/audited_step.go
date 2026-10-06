@@ -13,7 +13,7 @@ import (
 
 	psaga "github.com/zeroroot-ai/gibson/pkg/platform/saga"
 
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 // ErrNoAudit reports a Runner with no audit emitter. The runner refuses to

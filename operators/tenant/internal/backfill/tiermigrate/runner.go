@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package tiermigrate implements the per-tenant tier migration that
-// previously ran as a standalone CLI (cmd/migrate-tenant-tiers/) under
-// a Helm pre-upgrade hook. It is now callable both as a startup
-// Runnable inside the operator (internal/startup/backfills.go) and as
-// the same standalone CLI.
+// Package tiermigrate implements the per-tenant tier migration. It runs as a
+// startup Runnable inside the operator (internal/startup/backfills.go).
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 5.3).
 package tiermigrate
@@ -18,6 +15,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -41,6 +39,9 @@ var LegacyTierMap = map[string]string{
 type Options struct {
 	DryRun  bool
 	Workers int // Default 8 if <= 0.
+	// Audit writes the record of each tier change before the change
+	// (gibson#583). Required unless DryRun.
+	Audit *audit.SagaEmitter
 }
 
 // Run walks every Tenant CR and migrates spec.tier from any legacy id
@@ -52,6 +53,9 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 		return fmt.Errorf("list tenants: %w", err)
 	}
 	slog.Info("tier-migrate: tenants discovered", "count", len(tenants.Items))
+	if opts.Audit == nil && !opts.DryRun {
+		return fmt.Errorf("tier-migrate: %w", audit.ErrNoSink)
+	}
 
 	type job struct {
 		tenant  gibsonv1alpha1.Tenant
@@ -94,10 +98,18 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 	for i := 0; i < workers; i++ {
 		wg.Go(func() {
 			for j := range jobs {
-				err := patchTenantTier(ctx, cl, &j.tenant, j.newTier)
+				from := string(j.tenant.Spec.Tier)
+				ev := audit.Event{
+					Action:     audit.ActionBackfill,
+					TenantID:   j.tenant.Name,
+					TargetType: "tenant",
+					TargetID:   j.tenant.Name,
+					Fields:     map[string]string{"backfill": "tier", "from": from, "to": j.newTier},
+				}
+				err := opts.Audit.Change(ctx, ev, func() error { return patchTenantTier(ctx, cl, &j.tenant, j.newTier) })
 				results <- result{
 					tenant: j.tenant.Name,
-					from:   string(j.tenant.Spec.Tier),
+					from:   from,
 					to:     j.newTier,
 					err:    err,
 				}

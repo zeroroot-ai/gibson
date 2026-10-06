@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 // Sink stands in for the daemon in a test. It keeps each record in order.

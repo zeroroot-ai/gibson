@@ -14,6 +14,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -118,7 +119,7 @@ func TestTenantMember_OwnerRefBackfill(t *testing.T) {
 		WithObjects(tenantNamespaceWithAnnot(t), seededTenant(t), tm).
 		Build()
 
-	r := &TenantMemberReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100)}
+	r := &TenantMemberReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100)}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{
 		NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "invite-abc123"},
 	})

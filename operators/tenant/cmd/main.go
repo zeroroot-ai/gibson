@@ -41,9 +41,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/redisstate"
@@ -723,7 +723,7 @@ func main() {
 		// then drains it exactly as a signup-originated tenant, and
 		// bootstrap-tenant-owner creates the owner user. Idempotent on
 		// tenant_id, so it is a no-op on every restart after the first.
-		if err := controller.RegisterFirstTenantSeed(mgr, os.Getenv, grpcClient, setupLog); err != nil {
+		if err := controller.RegisterFirstTenantSeed(mgr, os.Getenv, grpcClient, sagaAudit, setupLog); err != nil {
 			setupLog.Error(err, "first-tenant seed registration failed")
 			os.Exit(1)
 		}
@@ -799,6 +799,7 @@ func main() {
 		// above, for the same reason: the invitation accept link must reach
 		// a human's browser, not an in-cluster address (hosted#203).
 		BaseAcceptURL: os.Getenv("GIBSON_APP_URL"),
+		Audit:         sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)
@@ -834,6 +835,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		FGA:    fgaClient,
+		Audit:  sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "ConnectorInstanceAuthz")
 		os.Exit(1)
@@ -893,6 +895,7 @@ func main() {
 		Client:   mgr.GetClient(),
 		Syncer:   tenantRoleSyncer,
 		Interval: tenantRoleSyncInterval,
+		Audit:    sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantRoleSync")
 		os.Exit(1)
@@ -928,6 +931,7 @@ func main() {
 		Recorder:           mgr.GetEventRecorder("orphan-reaper"),
 		GracePeriodSeconds: reaperGraceSeconds,
 		Enabled:            reaperEnabled,
+		Audit:              sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "OrphanReaper")
 		os.Exit(1)
@@ -976,7 +980,7 @@ func main() {
 	// Tenant once after leader election and ensures per-tenant RBAC
 	// exists. Replaces the chart's tenant-rbac-backfill Helm Job (which
 	// Phase 8 deletes).
-	if err := startup.Register(mgr, dataPlaneProvisioner); err != nil {
+	if err := startup.Register(mgr, sagaAudit); err != nil {
 		setupLog.Error(err, "Failed to register startup backfills")
 		os.Exit(1)
 	}

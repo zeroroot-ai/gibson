@@ -17,7 +17,7 @@ import (
 
 	psaga "github.com/zeroroot-ai/gibson/pkg/platform/saga"
 
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 )

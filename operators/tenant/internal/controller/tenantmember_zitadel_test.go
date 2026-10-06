@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
@@ -129,6 +130,7 @@ func buildMemberReconcilerWithRoles(
 		t.Fatalf("seed tenant status: %v", err)
 	}
 	r := &TenantMemberReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   fc,
 		Scheme:   s,
 		Recorder: events.NewFakeRecorder(20),
@@ -311,6 +313,7 @@ func TestSyncZitadel_EnsureHumanUser_RolesNilIsAnError(t *testing.T) {
 		t.Fatalf("seed tenant status: %v", err)
 	}
 	r := &TenantMemberReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   fc,
 		Scheme:   s,
 		Recorder: events.NewFakeRecorder(20),

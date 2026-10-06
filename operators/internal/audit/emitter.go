@@ -23,39 +23,6 @@ import (
 	"fmt"
 )
 
-// Actions of the records that the operator writes.
-const (
-	// ActionSagaStep is the record before a saga step changes state.
-	ActionSagaStep = "operator.saga_step"
-	// ActionLastBackup is the record before the last backup of a deleted
-	// tenant is created (ADR-0075).
-	ActionLastBackup = "operator.last_backup"
-	// ActionIdentityProvision is the record before the operator creates or
-	// corrects the Zitadel organization of a tenant.
-	ActionIdentityProvision = "operator.identity_provision"
-	// ActionIdentityDeprovision is the record before the operator deletes the
-	// Zitadel organization of a tenant.
-	ActionIdentityDeprovision = "operator.identity_deprovision"
-	// ActionSecretsBackendProvision is the record before the operator creates
-	// or corrects the OpenBao namespace of a tenant.
-	ActionSecretsBackendProvision = "operator.secrets_backend_provision"
-	// ActionSecretsBackendDeprovision is the record before the operator
-	// deletes the OpenBao namespace of a tenant.
-	ActionSecretsBackendDeprovision = "operator.secrets_backend_deprovision"
-	// ActionDataPlaneProvision is the record before the operator creates or
-	// corrects the Postgres, Redis and Neo4j stores of a tenant.
-	ActionDataPlaneProvision = "operator.data_plane_provision"
-	// ActionDataPlaneDeprovision is the record before the operator deletes
-	// the data-plane stores of a tenant.
-	ActionDataPlaneDeprovision = "operator.data_plane_deprovision"
-	// ActionGrantsProvision is the record before the operator writes the FGA
-	// grants of a tenant.
-	ActionGrantsProvision = "operator.grants_provision"
-	// ActionGrantsDeprovision is the record before the operator deletes the
-	// FGA grants of a tenant.
-	ActionGrantsDeprovision = "operator.grants_deprovision"
-)
-
 // ResultFailure is the result of the second record of a change that failed.
 const ResultFailure = "failure"
 

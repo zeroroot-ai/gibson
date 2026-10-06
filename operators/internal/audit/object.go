@@ -6,6 +6,7 @@ package audit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -57,13 +58,20 @@ func ObjectEvent(action string, obj client.Object, fields map[string]string) Eve
 	}
 }
 
+// ErrNotRecorded reports a change that did not run because its audit record
+// was not written.
+var ErrNotRecorded = errors.New("audit: the record was not written; nothing changed")
+
 // Change writes the record of ev, then runs change. When the record is not
 // written, change does not run. When change fails, Change writes a second
 // record with the result "failure" and the reason, and returns the error of
 // change.
+//
+// When the first record is not written, the error wraps ErrNotRecorded, so a
+// caller can tell "nothing changed" from "the change failed".
 func (e *SagaEmitter) Change(ctx context.Context, ev Event, change func() error) error {
 	if err := e.bounded(ctx, func(rctx context.Context) error { return e.Record(rctx, ev) }); err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrNotRecorded, err)
 	}
 	err := change()
 	if err == nil {

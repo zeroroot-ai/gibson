@@ -387,11 +387,11 @@ internal/server/daemon/test_helpers.go	mockComponentDiscovery.DiscoverTool
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListAgents
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListPlugins
 internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListTools
+operators/internal/audit/audittest/sink.go	Sink.EmitAuditEvent
+operators/internal/audit/audittest/sink.go	Sink.Emitter
+operators/internal/audit/audittest/sink.go	Sink.Events
 operators/tenant/cmd/gibson-backup/internal/s3/client.go	Client.StatObject
 operators/tenant/cmd/require_smtp.go	validateSMTPEnvKey
-operators/tenant/internal/audit/audittest/sink.go	Sink.EmitAuditEvent
-operators/tenant/internal/audit/audittest/sink.go	Sink.Emitter
-operators/tenant/internal/audit/audittest/sink.go	Sink.Events
 operators/tenant/internal/clients/fga/plugin_grants.go	BackfillPluginCanInvokeGrants
 operators/tenant/internal/clients/fga/secrets_grants.go	BackfillSecretResolveGrants
 operators/tenant/internal/clients/signupprogress/redis.go	NewRedisClientFromRedis

@@ -28,7 +28,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
@@ -371,17 +371,7 @@ func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Ev
 	if err != nil {
 		return err
 	}
-	_, err = c.client.EmitAuditEvent(authedCtx, &operatorv1.EmitAuditEventRequest{
-		Event: &operatorv1.AuditEventMessage{
-			Type:       ev.Action,
-			TenantId:   ev.TenantID,
-			TargetType: ev.TargetType,
-			TargetId:   ev.TargetID,
-			Result:     ev.Result,
-			Reason:     ev.Reason,
-			Fields:     ev.Fields,
-		},
-	})
+	_, err = c.client.EmitAuditEvent(authedCtx, audit.MessageOf(ev))
 	return translateGRPCError("emit-audit-event", err)
 }
 

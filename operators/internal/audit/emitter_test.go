@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 )
 
 // The emitter has no default sink: with no sink there is no emitter.

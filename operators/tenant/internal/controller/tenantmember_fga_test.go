@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	fgaclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
@@ -76,6 +77,7 @@ func buildMemberReconcilerWithFGA(
 		t.Fatalf("seed tenant status: %v", err)
 	}
 	return &TenantMemberReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   fc,
 		Scheme:   s,
 		Recorder: events.NewFakeRecorder(20),
