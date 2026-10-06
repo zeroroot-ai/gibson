@@ -726,6 +726,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		return nil, fmt.Errorf("produced components: %w", err)
 	}
 	daemonSvc.WithProducedComponents(d.platformDB, producedLimit)
+	if err := startTimelineArchive(ctx, d.platformDB, func() timelinePoolForer { return d.pool }, d.logger.Slog()); err != nil {
+		return nil, err
+	}
 	// SSRF egress policy for every LLM provider this server constructs from a
 	// tenant-supplied base_url. Off by default (guard on); operators running an
 	// in-cluster or air-gapped model server opt in via

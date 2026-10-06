@@ -1,4 +1,4 @@
--- 041_produced_component.up.sql
+-- 042_produced_component.up.sql
 --
 -- The components that agents enrolled (gibson#33). An agent that produced a
 -- tool, an agent or a plugin enrolls it with ComponentService.EnrollComponent.

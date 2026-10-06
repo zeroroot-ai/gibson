@@ -41,7 +41,7 @@ func producedStorePostgres(t *testing.T) *sql.DB {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	up, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "pkg", "platform", "migrations", "postgres", "platform", "041_produced_component.up.sql"))
+	up, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "pkg", "platform", "migrations", "postgres", "platform", "042_produced_component.up.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
