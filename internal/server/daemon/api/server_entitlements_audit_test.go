@@ -154,31 +154,3 @@ func TestEmitAccessTupleChange_NilEmitter_NoPanic(t *testing.T) {
 	emitAccessTupleChange(context.Background(), nil, "system",
 		struct{ User, Relation, Object string }{"u", "r", "o"}, "write", "test")
 }
-
-func TestEmitReconcileSummary(t *testing.T) {
-	em := &fakeAuditEmitter{}
-	emitReconcileSummary(context.Background(), em, "acme", "operator", ReconcileSummaryFields{
-		Plan:                 "org",
-		AddedFeatureTuples:   3,
-		RemovedFeatureTuples: 1,
-		QuotaDelta:           0,
-		DurationMs:           142,
-		Trigger:              "cr_change",
-	})
-	if len(em.calls) != 1 {
-		t.Fatalf("expected 1 Log call, got %d", len(em.calls))
-	}
-	c := em.calls[0]
-	if c.Action != "entitlements_reconcile" {
-		t.Fatalf("action = %q", c.Action)
-	}
-	if c.ResourceID != "acme" {
-		t.Fatalf("resourceID = %q, want acme", c.ResourceID)
-	}
-	if c.Details["plan"] != "org" {
-		t.Fatalf("plan = %v", c.Details["plan"])
-	}
-	if c.Details["trigger"] != "cr_change" {
-		t.Fatalf("trigger = %v", c.Details["trigger"])
-	}
-}

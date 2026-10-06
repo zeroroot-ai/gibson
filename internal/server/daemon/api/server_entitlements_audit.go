@@ -150,28 +150,3 @@ type ReconcileSummaryFields struct {
 	DurationMs           int64
 	Trigger              string // "cr_change" | "background" | "stripe_webhook"
 }
-
-// emitReconcileSummary records one entitlements-reconcile summary audit
-// event. Intended to be called by the tenant-operator via EmitAuditEvent.
-func emitReconcileSummary(
-	ctx context.Context,
-	em auditEmitter,
-	tenantID string,
-	actorSource string,
-	f ReconcileSummaryFields,
-) {
-	if em == nil {
-		return
-	}
-	details := map[string]any{
-		"plan":                   f.Plan,
-		"added_feature_tuples":   f.AddedFeatureTuples,
-		"removed_feature_tuples": f.RemovedFeatureTuples,
-		"quota_delta":            f.QuotaDelta,
-		"duration_ms":            f.DurationMs,
-		"trigger":                f.Trigger,
-		"actor_source":           actorSource,
-		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	em.Log(ctx, "entitlements_reconcile", "tenant", tenantID, details)
-}

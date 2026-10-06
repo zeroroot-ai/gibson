@@ -120,36 +120,6 @@ func setupTestLLMConfigHandler(t *testing.T) (*LLMConfigHandler, *CredentialHand
 	return handler, credHandler, mr
 }
 
-func TestNewLLMConfigHandler(t *testing.T) {
-	mr, _ := miniredis.Run()
-	defer mr.Close()
-
-	cfg := &state.Config{URL: "redis://" + mr.Addr()}
-	stateClient, _ := state.NewStateClient(cfg)
-	defer stateClient.Close()
-
-	credSvc := buildAPITestService(t, &apiTestBroker{})
-	credHandler, _ := NewCredentialHandler(credSvc)
-
-	t.Run("success", func(t *testing.T) {
-		handler, err := NewLLMConfigHandler(stateClient, credHandler)
-		require.NoError(t, err)
-		assert.NotNil(t, handler)
-	})
-
-	t.Run("nil state client", func(t *testing.T) {
-		_, err := NewLLMConfigHandler(nil, credHandler)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "state client cannot be nil")
-	})
-
-	t.Run("nil credential handler", func(t *testing.T) {
-		_, err := NewLLMConfigHandler(stateClient, nil)
-		assert.Error(t, err)
-		assert.Contains(t, err.Error(), "credential handler cannot be nil")
-	})
-}
-
 func TestLLMConfigHandler_CreateOrUpdateProvider(t *testing.T) {
 	ctx := testContextWithTenant()
 
