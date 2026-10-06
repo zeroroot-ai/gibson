@@ -417,7 +417,7 @@ func TestSubmitOntologyExtensionUpstream_AcceptsAPromotedExtension(t *testing.T)
 	ctx := ownerCtx("acme", "owner-1")
 	promoteViaRPC(ctx, t, s, reg, "acme", taxonomy.ProposedNodeLabel, "Container")
 
-	resp, err := s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+	resp, err := s.SubmitOntologyExtensionUpstream(subjectCtx(t, "acme", "owner-1"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
 	})
 	require.NoError(t, err)
