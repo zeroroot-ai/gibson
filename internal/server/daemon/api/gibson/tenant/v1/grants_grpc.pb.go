@@ -29,6 +29,7 @@ const (
 	GrantsService_ListActiveGrants_FullMethodName  = "/gibson.tenant.v1.GrantsService/ListActiveGrants"
 	GrantsService_WriteAgentGrants_FullMethodName  = "/gibson.tenant.v1.GrantsService/WriteAgentGrants"
 	GrantsService_DeleteAgentGrants_FullMethodName = "/gibson.tenant.v1.GrantsService/DeleteAgentGrants"
+	GrantsService_WriteSecretGrants_FullMethodName = "/gibson.tenant.v1.GrantsService/WriteSecretGrants"
 )
 
 // GrantsServiceClient is the client API for GrantsService service.
@@ -52,6 +53,14 @@ type GrantsServiceClient interface {
 	// present count as `not_present`. Each delete emits an `agent_grant_removed`
 	// audit event.
 	DeleteAgentGrants(ctx context.Context, in *DeleteAgentGrantsRequest, opts ...grpc.CallOption) (*DeleteAgentGrantsResponse, error)
+	// WriteSecretGrants grants a plugin principal can_resolve on named secrets
+	// of the caller's tenant (ADR-0097, dashboard#174). Secret access is
+	// assigned by a tenant admin, never declared by the component
+	// (gibson#554). Only a plugin_principal can hold can_resolve (model.fga),
+	// so an agent or tool target is refused. Each secret must exist in the
+	// caller's tenant. Idempotent, and each new grant emits a
+	// `secret_grant_added` audit event before it takes effect.
+	WriteSecretGrants(ctx context.Context, in *WriteSecretGrantsRequest, opts ...grpc.CallOption) (*WriteSecretGrantsResponse, error)
 }
 
 type grantsServiceClient struct {
@@ -92,6 +101,16 @@ func (c *grantsServiceClient) DeleteAgentGrants(ctx context.Context, in *DeleteA
 	return out, nil
 }
 
+func (c *grantsServiceClient) WriteSecretGrants(ctx context.Context, in *WriteSecretGrantsRequest, opts ...grpc.CallOption) (*WriteSecretGrantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WriteSecretGrantsResponse)
+	err := c.cc.Invoke(ctx, GrantsService_WriteSecretGrants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GrantsServiceServer is the server API for GrantsService service.
 // All implementations must embed UnimplementedGrantsServiceServer
 // for forward compatibility.
@@ -113,6 +132,14 @@ type GrantsServiceServer interface {
 	// present count as `not_present`. Each delete emits an `agent_grant_removed`
 	// audit event.
 	DeleteAgentGrants(context.Context, *DeleteAgentGrantsRequest) (*DeleteAgentGrantsResponse, error)
+	// WriteSecretGrants grants a plugin principal can_resolve on named secrets
+	// of the caller's tenant (ADR-0097, dashboard#174). Secret access is
+	// assigned by a tenant admin, never declared by the component
+	// (gibson#554). Only a plugin_principal can hold can_resolve (model.fga),
+	// so an agent or tool target is refused. Each secret must exist in the
+	// caller's tenant. Idempotent, and each new grant emits a
+	// `secret_grant_added` audit event before it takes effect.
+	WriteSecretGrants(context.Context, *WriteSecretGrantsRequest) (*WriteSecretGrantsResponse, error)
 	mustEmbedUnimplementedGrantsServiceServer()
 }
 
@@ -131,6 +158,9 @@ func (UnimplementedGrantsServiceServer) WriteAgentGrants(context.Context, *Write
 }
 func (UnimplementedGrantsServiceServer) DeleteAgentGrants(context.Context, *DeleteAgentGrantsRequest) (*DeleteAgentGrantsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAgentGrants not implemented")
+}
+func (UnimplementedGrantsServiceServer) WriteSecretGrants(context.Context, *WriteSecretGrantsRequest) (*WriteSecretGrantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteSecretGrants not implemented")
 }
 func (UnimplementedGrantsServiceServer) mustEmbedUnimplementedGrantsServiceServer() {}
 func (UnimplementedGrantsServiceServer) testEmbeddedByValue()                       {}
@@ -207,6 +237,24 @@ func _GrantsService_DeleteAgentGrants_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GrantsService_WriteSecretGrants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteSecretGrantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GrantsServiceServer).WriteSecretGrants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GrantsService_WriteSecretGrants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GrantsServiceServer).WriteSecretGrants(ctx, req.(*WriteSecretGrantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GrantsService_ServiceDesc is the grpc.ServiceDesc for GrantsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -225,6 +273,10 @@ var GrantsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteAgentGrants",
 			Handler:    _GrantsService_DeleteAgentGrants_Handler,
+		},
+		{
+			MethodName: "WriteSecretGrants",
+			Handler:    _GrantsService_WriteSecretGrants_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
