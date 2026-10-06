@@ -5,6 +5,7 @@ package migrations
 
 import (
 	"context"
+	platformmigrations "github.com/zeroroot-ai/gibson/pkg/platform/migrations"
 	"slices"
 	"strings"
 	"testing"
@@ -119,5 +120,15 @@ func TestRunWithDB_EmptyName(t *testing.T) {
 	err := RunWithDB(context.Background(), nil, "")
 	if err == nil || (!strings.Contains(err.Error(), "nil db") && !strings.Contains(err.Error(), "dbName")) {
 		t.Errorf("expected nil-db or dbName error; got %v", err)
+	}
+}
+
+// TestEmbeddedVersionsAreContiguousAndUnique: the operator's own migration set
+// passes the guard of pkg/platform/migrations. A gap or two up files with one
+// version leave a migration that golang-migrate never applies. The failing
+// fixture of the guard is TestCheckVersions_Fixture in that package.
+func TestEmbeddedVersionsAreContiguousAndUnique(t *testing.T) {
+	if err := platformmigrations.CheckVersions(platformFS, "files"); err != nil {
+		t.Fatalf("operator migrations: %v", err)
 	}
 }
