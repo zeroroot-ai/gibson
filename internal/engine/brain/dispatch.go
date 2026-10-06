@@ -6,6 +6,8 @@ package brain
 import (
 	"sync"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 // dispatch.go is the side-effect boundary of the brain (ADR-0109). Systems and
@@ -30,6 +32,10 @@ type DispatchRequest struct {
 	// stops heartbeating, everything else falls back to the work-queue default
 	// (gibson#1602).
 	Timeout time.Duration
+	// Network is the network scope of the node (owner decision S6,
+	// gibson#865). The Dispatcher copies it into agent.Task.Network. Nil
+	// keeps the egress of the catalog manifest.
+	Network *agent.NodeNetwork
 }
 
 // Dispatcher actuates a single unit of work against the real world. It is the
@@ -70,6 +76,7 @@ func (h *DispatchHandler) Tap(ev Event) {
 		Target:    d.Target,
 		Input:     d.Input,
 		Timeout:   d.Timeout,
+		Network:   d.Network,
 	})
 	h.mu.Unlock()
 }
