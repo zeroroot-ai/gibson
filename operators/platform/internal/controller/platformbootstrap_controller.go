@@ -7,9 +7,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"k8s.io/client-go/util/retry"
+	"os"
 	"strings"
 	"time"
 
@@ -100,7 +100,9 @@ type PlatformBootstrapReconciler struct {
 	Scheme    *runtime.Scheme
 	Recorder  record.EventRecorder
 	// ZitadelURL is the in-cluster address the operator connects to: the
-	// connect base of ZITADEL_URL (ADR-0092, gibson#665). It is required.
+	// connect base of ZITADEL_URL (ADR-0092, gibson#665). Empty means
+	// SetupWithManager reads it from the environment, and a start with no
+	// valid ZITADEL_URL fails.
 	ZitadelURL     string
 	ZitadelFactory ZitadelClientFactory
 	FGAFactory     FGAClientFactory
@@ -115,7 +117,11 @@ type PlatformBootstrapReconciler struct {
 // SetupWithManager wires the reconciler to the manager.
 func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.ZitadelURL == "" {
-		return errors.New("platformbootstrap: ZitadelURL is required (ZITADEL_URL, ADR-0092)")
+		url, err := ZitadelConnectURLFromEnv(os.Getenv)
+		if err != nil {
+			return fmt.Errorf("platformbootstrap: ZitadelURL is required: %w", err)
+		}
+		r.ZitadelURL = url
 	}
 	if r.ZitadelFactory == nil {
 		r.ZitadelFactory = DefaultZitadelClientFactory

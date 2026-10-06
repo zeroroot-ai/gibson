@@ -202,19 +202,11 @@ func run(cfg runConfig) error {
 	}
 	setupLog.Info("zitadel system key loaded", "path", systemKeyPath)
 
-	// ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN are required. They are the two
-	// facts every Zitadel call of this operator uses, and a missing one would
-	// otherwise surface later as a reconcile error on each resource.
-	zitadelConnectURL, err := controller.ZitadelConnectURLFromEnv(os.Getenv)
-	if err != nil {
-		return fmt.Errorf("platform-operator configuration: %w", err)
-	}
 	if err := (&controller.PlatformBootstrapReconciler{
 		Client:     mgr.GetClient(),
 		APIReader:  mgr.GetAPIReader(),
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("platformbootstrap-controller"),
-		ZitadelURL: zitadelConnectURL,
 		VaultToken: vaultRenewer,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create PlatformBootstrap controller: %w", err)
@@ -232,9 +224,17 @@ func run(cfg runConfig) error {
 	// never the public origin: that origin does not resolve from inside the
 	// pod and Envoy does not route /debug/ to Zitadel, so probing it pins the
 	// pod at 0/1 forever (platform-operator#76, deploy#630).
+	//
+	// ZITADEL_URL and ZITADEL_EXTERNAL_DOMAIN are required. They are the two
+	// facts every Zitadel call of this operator uses, and a missing one would
+	// otherwise surface later as a reconcile error on each resource.
+	zitadelReadyAddr, err := controller.ZitadelConnectURLFromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("platform-operator configuration: %w", err)
+	}
 	agg := readiness.NewAggregator()
 	agg.Register(&probes.VaultProbe{Address: vaultAddr})
-	agg.Register(&probes.ZitadelProbe{Address: zitadelConnectURL})
+	agg.Register(&probes.ZitadelProbe{Address: zitadelReadyAddr})
 	agg.Register(&systemKeyProbe{path: systemKeyPath})
 
 	// Liveness: always 200 — process is alive, runtime not deadlocked.
