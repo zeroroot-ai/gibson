@@ -127,6 +127,61 @@ type onboardingStep struct {
 	Link string
 }
 
+// OwnerWelcomeEmail is the input of the onboarding email that the owner of a
+// workspace from self-serve signup gets once, when the tenant is ready
+// (gibson#987). It is the invitation email with no accept link: the account
+// already exists, so the first step is to sign in.
+type OwnerWelcomeEmail struct {
+	To       string
+	TenantID string
+	// AppURL and APIURL are the two origins, as in InvitationEmail.
+	AppURL string
+	APIURL string
+}
+
+// SendOwnerWelcome renders and sends the onboarding email to the owner of a
+// new workspace. The text and the HTML parts come from invitationSteps, as
+// for an invitation.
+func (s *InvitationSender) SendOwnerWelcome(ctx context.Context, w OwnerWelcomeEmail) error {
+	if s == nil || s.m == nil {
+		return fmt.Errorf("mailer: invitation sender not configured")
+	}
+	inv := InvitationEmail{To: w.To, TenantID: w.TenantID, Role: "owner", AppURL: w.AppURL, APIURL: w.APIURL}
+	steps := invitationSteps(inv)
+	if err := s.m.Send(ctx, Message{
+		To:      inv.To,
+		Subject: "Welcome to ZeroRoot AI",
+		Text:    invitationText(inv, steps),
+		HTML:    invitationHTML(inv, steps),
+	}); err != nil {
+		return fmt.Errorf("mailer: send owner welcome: %w", err)
+	}
+	return nil
+}
+
+// isWelcome reports an email with no accept link: the welcome of a workspace
+// owner, whose account already exists.
+func (inv InvitationEmail) isWelcome() bool { return inv.AcceptURL == "" }
+
+// lede is the opening sentence of the email.
+func (inv InvitationEmail) lede() string {
+	if inv.isWelcome() {
+		return "You created a Gibson workspace, and it is ready. Every command below already " +
+			"carries the address and the name of this workspace, so you can paste them as they are."
+	}
+	return fmt.Sprintf("Someone added you to a Gibson workspace as %s. Every command below already "+
+		"carries the address and the name of this workspace, so you can paste them as they are.",
+		roleLabel(inv.Role))
+}
+
+// footer is the closing line of the email.
+func (inv InvitationEmail) footer() string {
+	if inv.isWelcome() {
+		return "You get this email once, because you created this workspace."
+	}
+	return "If you did not expect this email, ignore it. Nothing exists until you open the link."
+}
+
 // invitationSteps builds the runbook for one invitation.
 //
 // ONE body, whatever the role. The dashboard's invite dialog defaults to
@@ -143,7 +198,7 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 	app := strings.TrimRight(inv.AppURL, "/")
 	api := strings.TrimRight(inv.APIURL, "/")
 
-	steps := []onboardingStep{{
+	first := onboardingStep{
 		Title: "Accept, and set your password",
 		Body: "The link below does two things. It accepts the invitation, then it takes you " +
 			"to the page where you set a password. Gibson keeps no password of its own, so " +
@@ -151,7 +206,17 @@ func invitationSteps(inv InvitationEmail) []onboardingStep {
 			"factor is required, and sign-in does not finish without one. You have one " +
 			"workspace, so you land straight on the dashboard.",
 		Link: inv.AcceptURL,
-	}, {
+	}
+	if inv.isWelcome() {
+		first = onboardingStep{
+			Title: "Sign in to your workspace",
+			Body: "Your account and your workspace exist. Sign in with the password and the " +
+				"second factor that you set at signup. You have one workspace, so you land " +
+				"straight on the dashboard.",
+			Link: app + "/dashboard",
+		}
+	}
+	steps := []onboardingStep{first, {
 		Title: "Clone the ADK. Do not install the binary.",
 		Body: "The repository is where you work. It carries the five mission templates and " +
 			"their ontologies, the component scaffolder, the Go pin and the agent context. " +
@@ -267,12 +332,10 @@ func invitationTraps() [][2]string {
 func invitationText(inv InvitationEmail, steps []onboardingStep) string {
 	var b strings.Builder
 	b.WriteString("Hello,\n\n")
-	b.WriteString(indentWrap(fmt.Sprintf(
-		"Someone added you to a Gibson workspace as %s. Every command below already "+
-			"carries the address and the name of this workspace, so you can paste them as "+
-			"they are.",
-		roleLabel(inv.Role)), "", 76) + "\n\n")
-	fmt.Fprintf(&b, "The link expires %s.\n\n", expiryLabel(inv.ExpiresAt))
+	b.WriteString(indentWrap(inv.lede(), "", 76) + "\n\n")
+	if !inv.isWelcome() {
+		fmt.Fprintf(&b, "The link expires %s.\n\n", expiryLabel(inv.ExpiresAt))
+	}
 	b.WriteString("START HERE\n")
 	b.WriteString(strings.Repeat("-", 10) + "\n\n")
 
@@ -306,8 +369,7 @@ func invitationText(inv InvitationEmail, steps []onboardingStep) string {
 		b.WriteString(indentWrap(t[1], "    ", 72) + "\n\n")
 	}
 
-	b.WriteString("If you did not expect this email, ignore it. Nothing exists until you open\n")
-	b.WriteString("the link.\n")
+	b.WriteString(indentWrap(inv.footer(), "", 76) + "\n")
 	return b.String()
 }
 
@@ -360,12 +422,18 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 	// Lede.
 	b.WriteString(`<tr><td style="padding:18px 0 0;font-family:` + fontStack + `;font-size:15px;` +
 		`line-height:1.6;color:` + cInk + `;">`)
-	b.WriteString(`Hello,<br><br>Someone added you to a Gibson workspace as <strong>` +
-		html.EscapeString(roleLabel(inv.Role)) + `</strong>. Every command below already carries ` +
-		`the address and the name of this workspace, so you can paste them as they are.`)
+	if inv.isWelcome() {
+		b.WriteString(`Hello,<br><br>` + html.EscapeString(inv.lede()))
+	} else {
+		b.WriteString(`Hello,<br><br>Someone added you to a Gibson workspace as <strong>` +
+			html.EscapeString(roleLabel(inv.Role)) + `</strong>. Every command below already carries ` +
+			`the address and the name of this workspace, so you can paste them as they are.`)
+	}
 	b.WriteString(`</td></tr>`)
-	b.WriteString(`<tr><td style="padding:10px 0 0;font-family:` + fontStack + `;font-size:13px;` +
-		`line-height:1.5;color:` + cMuted + `;">The link expires ` + html.EscapeString(expiryLabel(inv.ExpiresAt)) + `.</td></tr>`)
+	if !inv.isWelcome() {
+		b.WriteString(`<tr><td style="padding:10px 0 0;font-family:` + fontStack + `;font-size:13px;` +
+			`line-height:1.5;color:` + cMuted + `;">The link expires ` + html.EscapeString(expiryLabel(inv.ExpiresAt)) + `.</td></tr>`)
+	}
 
 	// Section rule.
 	b.WriteString(`<tr><td style="padding:30px 0 8px;border-bottom:1px solid ` + cRule + `;">`)
@@ -398,7 +466,7 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 				inlineCode(st.After) + `</div>`)
 		}
 		if st.Link != "" {
-			b.WriteString(linkRow(st.Link, i == 0))
+			b.WriteString(linkRow(st.Link, i == 0, primaryLabel(inv)))
 		}
 		b.WriteString(`</td></tr></table></td></tr>`)
 	}
@@ -421,7 +489,7 @@ func invitationHTML(inv InvitationEmail, steps []onboardingStep) string {
 	// Footer.
 	b.WriteString(`<tr><td style="padding:24px 0 0;border-top:1px solid ` + cRule + `;font-family:` + monoStack +
 		`;font-size:11px;line-height:1.7;color:` + cMuted + `;">`)
-	b.WriteString(`If you did not expect this email, ignore it. Nothing exists until you open the link.`)
+	b.WriteString(html.EscapeString(inv.footer()))
 	b.WriteString(`</td></tr>`)
 
 	b.WriteString(`</table></td></tr></table></body></html>`)
@@ -454,7 +522,7 @@ func terminalPanel(cmds []string) string {
 // linkRow renders a step's URL. primary=true gets the acid plate (the one
 // action this email asks for); the rest are plain links, so the email has
 // exactly one button.
-func linkRow(url string, primary bool) string {
+func linkRow(url string, primary bool, label string) string {
 	esc := html.EscapeString(url)
 	if !primary {
 		return `<div style="padding:10px 0 0;font-family:` + monoStack + `;font-size:13px;word-break:break-all;">` +
@@ -464,9 +532,17 @@ func linkRow(url string, primary bool) string {
 		`<tr><td bgcolor="` + cAcid + `" style="background:` + cAcid + `;border-radius:2px;">` +
 		`<a href="` + esc + `" style="display:inline-block;padding:11px 20px;font-family:` + monoStack +
 		`;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;` +
-		`color:` + cAcidInk + `;text-decoration:none;">Accept and set your password</a>` +
+		`color:` + cAcidInk + `;text-decoration:none;">` + html.EscapeString(label) + `</a>` +
 		`</td></tr><tr><td style="padding:8px 0 0;font-family:` + monoStack + `;font-size:11px;` +
 		`word-break:break-all;color:` + cMuted + `;">` + esc + `</td></tr></table>`
+}
+
+// primaryLabel is the text of the one button of the email.
+func primaryLabel(inv InvitationEmail) string {
+	if inv.isWelcome() {
+		return "Sign in"
+	}
+	return "Accept and set your password"
 }
 
 // span is the one-line helper for the mono eyebrow/label type this layout uses

@@ -1360,11 +1360,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if mErr == nil {
 			mErr = mailer.RequireDelivering(m)
 		}
+		// The same sender writes the onboarding email of a workspace owner
+		// from signup, once, when the tenant is ready (gibson#987). With no
+		// delivering transport the daemon logs each skipped send.
+		var ownerWelcome api.OwnerWelcomeSender
 		if mErr != nil {
 			d.logger.Warn(ctx, "no delivering mail transport; invitation emails disabled", slog.String("error", mErr.Error()))
 		} else {
-			adminMailer = mailer.NewInvitationSender(m)
+			sender := mailer.NewInvitationSender(m)
+			adminMailer = sender
+			ownerWelcome = sender
 		}
+		daemonSvc.WithOwnerWelcome(ownerWelcome, os.Getenv(api.EnvAppURL), os.Getenv("GIBSON_PUBLIC_URL"))
 
 		var tenantAdminSvc *admin.TenantAdminServer
 		if brokerStackOK {

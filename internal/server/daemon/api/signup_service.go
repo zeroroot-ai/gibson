@@ -503,7 +503,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		// Enqueue the RESOLVED canonical plan id, not the raw verification-row
 		// string, so nothing downstream sees an id the plan gate did not accept.
 		Tier: plan.ID,
-	}, hold); eerr != nil {
+	}, hold, true); eerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: enqueue pending tenant provisioning failed",
 			"attempt_id", req.GetAttemptId(),
 			"tenant_id", slug,
