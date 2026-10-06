@@ -150,6 +150,10 @@ func TestEvidence_RefusesATokenOfADifferentQuery(t *testing.T) {
 
 	_, err = r.Evidence(context.Background(), Query{Tenant: "acme", Pack: "fw", Start: start, End: end, PageToken: "!!"})
 	require.ErrorIs(t, err, ErrInvalidQuery)
+
+	// "eA" is valid base64 for the byte "x", which is not JSON.
+	_, err = r.Evidence(context.Background(), Query{Tenant: "acme", Pack: "fw", Start: start, End: end, PageToken: "eA"})
+	require.ErrorIs(t, err, ErrInvalidQuery)
 }
 
 func TestEvidence_Refusals(t *testing.T) {

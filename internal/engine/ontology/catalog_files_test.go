@@ -212,6 +212,12 @@ func TestLoadCatalog_RulesFile(t *testing.T) {
 			"packs/fw.json": pack, "packs/fw.rules.json": `{"mapping_rules":[{"control_id":"ac-3","expression":"true"}]}`,
 		}, "not a control of the pack"},
 		"only a rules file": {map[string]string{"packs/fw.rules.json": rules}, "no catalog pack file"},
+		"two rules documents": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json": rules + " " + rules,
+		}, "more than one JSON document"},
+		"a rules file that cannot be read": {map[string]string{
+			"packs/fw.json": pack, "packs/fw.rules.json/inner": "{}",
+		}, "read rules file packs/fw.rules.json"},
 	}
 	for name, tc := range refusals {
 		t.Run(name, func(t *testing.T) {
