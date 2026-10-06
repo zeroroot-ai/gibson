@@ -23,9 +23,9 @@ import _ "embed"
 //go:embed models/base-v1.json
 var embeddedBaseV1JSON []byte
 
-// DefaultArtifact parses and returns the embedded base-v1 model artifact —
-// the model a daemon uses when no GIBSON_BELIEF_MODEL_PATH override names a
-// different (e.g. commercial curated) artifact.
+// DefaultArtifact parses and returns the embedded base-v1 model artifact:
+// the model that the daemon uses for a tenant with no current version in the
+// platform Postgres (gibson#615).
 func DefaultArtifact() (ModelArtifact, error) {
 	return ParseModelArtifact(embeddedBaseV1JSON)
 }

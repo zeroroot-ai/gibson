@@ -67,6 +67,9 @@ func (v *validatorImpl) Validate(cfg *Config) error {
 	if err := cfg.Sandbox.Validate(); err != nil {
 		return fmt.Errorf("configuration validation failed:\n  - %w", err)
 	}
+	if cfg.Belief.ReloadInterval < 0 {
+		return fmt.Errorf("configuration validation failed:\n  - belief.reload_interval must not be negative (got: %s)", cfg.Belief.ReloadInterval)
+	}
 	return nil
 }
 

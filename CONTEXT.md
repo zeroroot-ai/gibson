@@ -370,7 +370,8 @@ from braintrain, uninformative prior at cold-start — never hand-authored)
 Beta-Bernoulli update per edge type from recorded (cause-active -> effect-observed?) outcomes,
 versioned per tenant (`tenant-<id>-edges-v<n>`, independent of the belief-CPT model's own
 version sequence). `NativeSliceBeliefProvider` consumes the posterior **mean** in place of the
-uninformative prior once one is pinned (`GIBSON_EDGE_POSTERIOR_PATH`); `BAMCPPlanner` Thompson-
+uninformative prior once the tenant has a current version in the platform Postgres
+(`tenant_belief_artifacts`, gibson#615); `BAMCPPlanner` Thompson-
 samples the same artifact. No posterior pinned still means the documented cold start — production
 may have no recorded outcomes yet.
 _Avoid_: influence weight, hand-tuned strength

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Package config loads, defaults and validates the daemon configuration file.
 package config
 
 import (
@@ -108,6 +109,7 @@ type Config struct {
 	PlatformPostgres  PlatformPostgresConfig  `mapstructure:"dashboard_postgres" yaml:"dashboard_postgres,omitempty"`
 	TenantPostgres    TenantPostgresConfig    `mapstructure:"tenant_postgres" yaml:"tenant_postgres,omitempty"`
 	Sandbox           SandboxConfig           `mapstructure:"sandbox" yaml:"sandbox,omitempty"`
+	Belief            BeliefConfig            `mapstructure:"belief" yaml:"belief,omitempty"`
 	// strictTenant controls whether TenantFromContext and related helpers use
 	// the fail-closed strict behaviour introduced in Phase 1. Read via
 	// StrictTenant(). Not sourced from YAML — env-var only.

@@ -81,12 +81,7 @@ func TestWireBrainRegistry_ADeciderDispatchForACoveringCapabilityPassesTheGate(t
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	beliefProvider, err := resolveBeliefProvider()
-	if err != nil {
-		t.Fatalf("resolveBeliefProvider: %v", err)
-	}
-	wireBrainRegistryWithHierarchy(ctx, registry, beliefProvider,
-		resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil, hierarchy)
+	wireBrainRegistryWithHierarchy(ctx, registry, testTenantBeliefs(t, beliefSchemaRegistry, nil), beliefSchemaRegistry, hierarchy)
 
 	// The executor hook comes second, as in Start (daemon.go).
 	disp := &recordingDispatcher{}
@@ -132,11 +127,7 @@ func TestWireBrainRegistry_PlannerReadsTheEngineCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
 	}
-	beliefProvider, err := resolveBeliefProvider()
-	if err != nil {
-		t.Fatalf("resolveBeliefProvider: %v", err)
-	}
-	wireBrainRegistry(ctx, registry, beliefProvider, resolveSliceBeliefProvider(beliefSchemaRegistry, nil), beliefSchemaRegistry, nil)
+	wireBrainRegistry(ctx, registry, testTenantBeliefs(t, beliefSchemaRegistry, nil), beliefSchemaRegistry)
 
 	var mu sync.Mutex
 	asked := map[string]bool{}

@@ -4,8 +4,6 @@
 package braintrain
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -24,25 +22,15 @@ func fittedArtifact() *fit.EdgePosteriorArtifact {
 	}
 }
 
-func TestLoadEdgePosteriorArtifact_RejectsAMissingVersion(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte(`{"posteriors":{}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
+func TestParseEdgePosteriorArtifact_RejectsAMissingVersion(t *testing.T) {
+	if _, err := fit.ParseEdgePosteriorArtifact([]byte(`{"posteriors":{}}`)); err == nil {
 		t.Fatal("expected an error for an artifact with no version")
 	}
 }
 
-func TestLoadEdgePosteriorArtifact_RejectsANonPositiveBetaShape(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
+func TestParseEdgePosteriorArtifact_RejectsANonPositiveBetaShape(t *testing.T) {
 	const raw = `{"version":"v1","posteriors":{"RESOLVES_TO":{"alpha":0,"beta":4}}}`
-	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
+	if _, err := fit.ParseEdgePosteriorArtifact([]byte(raw)); err == nil {
 		t.Fatal("expected an error for a non-positive alpha")
 	}
 }
@@ -66,30 +54,15 @@ func TestEdgePosteriorArtifact_Provider_FallsBackToUninformativeForAnUnfittedEdg
 	}
 }
 
-func TestLoadEdgePosteriorArtifact_MissingFileErrors(t *testing.T) {
-	if _, err := LoadEdgePosteriorArtifact(filepath.Join(t.TempDir(), "does-not-exist.json")); err == nil {
-		t.Fatal("expected an error for a missing artifact file")
-	}
-}
-
-func TestLoadEdgePosteriorArtifact_InvalidJSONErrors(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "bad.json")
-	if err := os.WriteFile(path, []byte("not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
+func TestParseEdgePosteriorArtifact_InvalidJSONErrors(t *testing.T) {
+	if _, err := fit.ParseEdgePosteriorArtifact([]byte("not json")); err == nil {
 		t.Fatal("expected an error for invalid JSON")
 	}
 }
 
-func TestLoadEdgePosteriorArtifact_LoadsAValidFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "edges.json")
+func TestParseEdgePosteriorArtifact_ParsesAValidArtifact(t *testing.T) {
 	const raw = `{"version":"tenant-acme-v1","posteriors":{"RESOLVES_TO":{"alpha":8,"beta":4}}}`
-	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	a, err := LoadEdgePosteriorArtifact(path)
+	a, err := fit.ParseEdgePosteriorArtifact([]byte(raw))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

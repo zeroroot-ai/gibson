@@ -136,3 +136,52 @@ func TestStore_Decide(t *testing.T) {
 		t.Errorf("expectations: %v", err)
 	}
 }
+
+func TestStore_CurrentVersions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewStore(db)
+
+	mock.ExpectQuery("SELECT tenant_id, version").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "version"}).
+			AddRow("acme", int64(3)).AddRow("globex", int64(1)))
+	got, err := store.CurrentVersions(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentVersions: %v", err)
+	}
+	if len(got) != 2 || got["acme"] != 3 || got["globex"] != 1 {
+		t.Fatalf("CurrentVersions = %v, want acme=3 globex=1", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+func TestStore_Version(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	store := NewStore(db)
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT belief_model, edge_posteriors").WithArgs("acme", int64(2)).
+		WillReturnRows(sqlmock.NewRows([]string{"belief_model", "edge_posteriors"}).AddRow(`{"a":1}`, `{"b":2}`))
+	model, edges, found, err := store.Version(ctx, "acme", 2)
+	if err != nil || !found || string(model) != `{"a":1}` || string(edges) != `{"b":2}` {
+		t.Fatalf("Version = %s, %s, %v, %v; want both artifacts", model, edges, found, err)
+	}
+
+	mock.ExpectQuery("SELECT belief_model, edge_posteriors").WithArgs("acme", int64(9)).
+		WillReturnError(sql.ErrNoRows)
+	if _, _, found, err := store.Version(ctx, "acme", 9); err != nil || found {
+		t.Fatalf("Version of a missing version = found %v, err %v; want not found", found, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
