@@ -175,6 +175,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.component.v1.ComponentService/EnrollComponent":
+    relation: "can_execute"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.component.v1.ComponentService/FindSimilarAttacks":
     relation: "can_execute"
     object_type: "component"
@@ -1042,6 +1048,12 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/CancelMission":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/ClaimFork":
     relation: "can_use"
     object_type: "component"
     object_deriver: "system_tenant"

@@ -95,40 +95,105 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		return nil, status_grpc.Error(codes.InvalidArgument, "tenant ID not found in request context")
 	}
 
+	var grants []authz.Tuple
+	for _, cg := range req.ComponentGrants {
+		grants = append(grants, authz.Tuple{Relation: cg.Relation, Object: cg.ComponentRef})
+	}
+	provisioned, err := s.provisionIdentity(ctx, identitySpec{
+		TenantID:        tenantID,
+		OwnerUserID:     callerID.Subject,
+		ActorID:         callerID.Subject,
+		ActorType:       "user",
+		AuditAction:     "agent_identity.created",
+		Role:            idpRole,
+		FGAType:         fgaType,
+		Name:            req.Name,
+		Description:     req.Description,
+		Ceiling:         ceiling,
+		ComponentGrants: grants,
+	})
+	if err != nil {
+		return nil, err
+	}
+	principalID, bootstrapToken := provisioned.PrincipalID, provisioned.BootstrapToken
+
+	gibsonURL := s.gibsonPublicURL
+
+	return &tenantpb.CreateAgentIdentityResponse{
+		PrincipalId:    principalID,
+		Kind:           req.Kind,
+		Name:           req.Name,
+		GibsonUrl:      gibsonURL,
+		BootstrapToken: bootstrapToken, // sole enrollment credential (ADR-0045, gibson#670)
+	}, nil
+}
+
+// identitySpec is one machine identity to provision. CreateAgentIdentity
+// provisions one for a person, and EnrollProducedComponent provisions one for
+// an agent that produced a component (gibson#33).
+type identitySpec struct {
+	TenantID    string
+	OwnerUserID string // the accountable person: the owner tuple and the token
+	ActorID     string // the audit actor
+	ActorType   string // "user" or "agent"
+	AuditAction string
+	Role        idp.Role
+	FGAType     string
+	Name        string
+	Description string
+	Ceiling     []string
+	// ComponentGrants are extra (principal, relation, object) grants. User
+	// is ignored: the new principal is the user of each one.
+	ComponentGrants []authz.Tuple
+	// TokenTTL is the life of the bootstrap token. Zero is the default.
+	TokenTTL time.Duration
+}
+
+// provisionedIdentity is the result of provisionIdentity.
+type provisionedIdentity struct {
+	PrincipalID    string
+	BootstrapToken string
+}
+
+// provisionIdentity creates the service account, writes the durable audit
+// record, writes the FGA tuples and mints the bootstrap token. Each failure
+// after the account exists rolls the account back. It returns gRPC status
+// errors.
+func (s *DaemonServer) provisionIdentity(ctx context.Context, spec identitySpec) (provisionedIdentity, error) {
 	// Verify IdP client is wired.
 	if s.idpAdminClient == nil {
-		return nil, status_grpc.Error(codes.Unavailable,
+		return provisionedIdentity{}, status_grpc.Error(codes.Unavailable,
 			"identity provider not configured; set GIBSON_IDP_PROVIDER and related env vars")
 	}
 
 	// Step 4: Create service account in IdP.
-	saName := serviceAccountName(idpRole, tenantID, req.Name)
+	saName := serviceAccountName(spec.Role, spec.TenantID, spec.Name)
 	sa, err := s.idpAdminClient.CreateServiceAccount(ctx, idp.CreateServiceAccountRequest{
 		Name:        saName,
-		Description: req.Description,
-		Role:        idpRole,
+		Description: spec.Description,
+		Role:        spec.Role,
 	})
 	if err != nil {
 		if errors.Is(err, idp.ErrAlreadyExists) {
-			return nil, status_grpc.Errorf(codes.AlreadyExists, "an identity named %q of kind %s already exists in this tenant", req.Name, req.Kind)
+			return provisionedIdentity{}, status_grpc.Errorf(codes.AlreadyExists, "an identity named %q of type %s already exists in this tenant", spec.Name, spec.FGAType)
 		}
 		s.logger.ErrorContext(ctx, "CreateAgentIdentity: IdP create failed",
-			slog.String("tenant_id", tenantID),
-			slog.String("name", req.Name),
+			slog.String("tenant_id", spec.TenantID),
+			slog.String("name", spec.Name),
 			slog.String("error", err.Error()),
 		)
-		return nil, status_grpc.Error(codes.Internal, "failed to create identity in identity provider")
+		return provisionedIdentity{}, status_grpc.Error(codes.Internal, "failed to create identity in identity provider")
 	}
 
 	// Step 5a: The audit record is durable before the identity gets any
 	// authorization. When it cannot be written, the account rolls back and
 	// nothing is granted (gibson#676). It never holds the bootstrap token.
 	created := audit.Event{
-		TenantID:   tenantID,
-		ActorID:    callerID.Subject,
-		ActorType:  "user",
-		Action:     "agent_identity.created",
-		TargetType: fgaType,
+		TenantID:   spec.TenantID,
+		ActorID:    spec.ActorID,
+		ActorType:  spec.ActorType,
+		Action:     spec.AuditAction,
+		TargetType: spec.FGAType,
 		TargetID:   sa.AccountID,
 		Decision:   "allow",
 	}
@@ -136,10 +201,10 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		if err := s.tenantAdminAuditWriter.WriteSync(ctx, created); err != nil {
 			s.rollbackServiceAccount(ctx, sa.AccountID, "audit write failed")
 			s.logger.ErrorContext(ctx, "CreateAgentIdentity: durable audit write failed",
-				slog.String("tenant_id", tenantID),
+				slog.String("tenant_id", spec.TenantID),
 				slog.String("error", err.Error()),
 			)
-			return nil, status_grpc.Error(codes.Unavailable, "the audit record could not be written; nothing was created")
+			return provisionedIdentity{}, status_grpc.Error(codes.Unavailable, "the audit record could not be written; nothing was created")
 		}
 	}
 
@@ -153,16 +218,16 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	// authority, so there is no project/role membership step. ext-authz
 	// reads the `gibson:tenant` claim + these FGA tuples (and capability-grant
 	// JWTs); it never consults an IdP project-role claim for a principal.
-	principalID := fgaType + ":" + sa.AccountID
+	principalID := spec.FGAType + ":" + sa.AccountID
 	if s.authorizer != nil {
 		tuples := []authz.Tuple{
 			{
-				User:     "user:" + callerID.Subject,
+				User:     "user:" + spec.OwnerUserID,
 				Relation: "owner",
 				Object:   principalID,
 			},
 			{
-				User:     "tenant:" + tenantID,
+				User:     "tenant:" + spec.TenantID,
 				Relation: "belongs_to",
 				Object:   principalID,
 			},
@@ -175,7 +240,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 			{
 				User:     principalID,
 				Relation: "member",
-				Object:   "tenant:" + tenantID,
+				Object:   "tenant:" + spec.TenantID,
 			},
 		}
 
@@ -189,7 +254,7 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		// client grant. The universal `tenant_enabled component:_system` baseline
 		// (catalog fan-out) satisfies in_tenant_catalog; the per-principal grant
 		// here is the real gate.
-		tuples = append(tuples, capabilitygrant.ClientCapabilityGrants(principalID, fgaType)...)
+		tuples = append(tuples, capabilitygrant.ClientCapabilityGrants(principalID, spec.FGAType)...)
 
 		// The enrolling admin turned this component on for their tenant
 		// (ADR-0136: tenant_enabled means a tenant admin turned it
@@ -199,17 +264,17 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		// machine's later RegisterComponent writes only owner: registration is
 		// the component's act, enrollment is the admin's.
 		tuples = append(tuples, authz.Tuple{
-			User:     "tenant:" + tenantID,
+			User:     "tenant:" + spec.TenantID,
 			Relation: "tenant_enabled",
-			Object:   authz.ComponentObject(componentKindOf(fgaType), req.Name),
+			Object:   authz.ComponentObject(componentKindOf(spec.FGAType), spec.Name),
 		})
 
 		// Optional component grants.
-		for _, cg := range req.ComponentGrants {
+		for _, g := range spec.ComponentGrants {
 			tuples = append(tuples, authz.Tuple{
 				User:     principalID,
-				Relation: cg.Relation,
-				Object:   cg.ComponentRef,
+				Relation: g.Relation,
+				Object:   g.Object,
 			})
 		}
 
@@ -221,11 +286,11 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 				s.tenantAdminAuditWriter.Log(failed)
 			}
 			s.logger.ErrorContext(ctx, "CreateAgentIdentity: FGA write failed",
-				slog.String("tenant_id", tenantID),
+				slog.String("tenant_id", spec.TenantID),
 				slog.String("principal_id", principalID),
 				slog.String("error", err.Error()),
 			)
-			return nil, status_grpc.Error(codes.Internal, "failed to configure identity authorization")
+			return provisionedIdentity{}, status_grpc.Error(codes.Internal, "failed to configure identity authorization")
 		}
 	}
 
@@ -238,52 +303,44 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 	// token is the sole enrollment credential for every kind, so a missing or
 	// failing minter is a fail-loud condition (rollback the service account
 	// rather than leak a credential-less principal).
-	kindStr := strings.TrimSuffix(fgaType, "_principal")
+	kindStr := strings.TrimSuffix(spec.FGAType, "_principal")
 	if s.cgMinter == nil {
 		s.rollbackServiceAccount(ctx, sa.AccountID, "CG minter not configured")
 		s.logger.ErrorContext(ctx, "CreateAgentIdentity: capability-grant minter not configured",
-			slog.String("tenant_id", tenantID),
+			slog.String("tenant_id", spec.TenantID),
 			slog.String("principal_id", principalID),
 		)
-		return nil, status_grpc.Error(codes.Unavailable,
+		return provisionedIdentity{}, status_grpc.Error(codes.Unavailable,
 			"capability-grant minter not configured; cannot issue enrollment credential")
 	}
 	bootstrapToken, btErr := s.cgMinter.MintBootstrapToken(capabilitygrant.BootstrapClaims{
-		TenantID:          tenantID,
-		OwnerUserID:       callerID.Subject,
+		TenantID:          spec.TenantID,
+		OwnerUserID:       spec.OwnerUserID,
 		PrincipalID:       principalID,
 		Kind:              kindStr,
-		Name:              req.Name,
-		CapabilityCeiling: ceiling,
-	}, 0)
+		Name:              spec.Name,
+		CapabilityCeiling: spec.Ceiling,
+	}, spec.TokenTTL)
 	if btErr != nil {
 		s.rollbackServiceAccount(ctx, sa.AccountID, "MintBootstrapToken failed")
 		s.logger.ErrorContext(ctx, "CreateAgentIdentity: bootstrap token mint failed",
-			slog.String("tenant_id", tenantID),
+			slog.String("tenant_id", spec.TenantID),
 			slog.String("principal_id", principalID),
 			slog.String("error", btErr.Error()),
 		)
-		return nil, status_grpc.Error(codes.Internal, "failed to generate enrollment credential")
+		return provisionedIdentity{}, status_grpc.Error(codes.Internal, "failed to generate enrollment credential")
 	}
 
 	s.logger.InfoContext(ctx, "agent identity created",
-		slog.String("tenant_id", tenantID),
+		slog.String("tenant_id", spec.TenantID),
 		slog.String("principal_id", principalID),
-		slog.String("kind", req.Kind.String()),
-		slog.String("name", req.Name),
-		slog.String("actor", callerID.Subject),
+		slog.String("type", spec.FGAType),
+		slog.String("name", spec.Name),
+		slog.String("actor", spec.ActorID),
 		// bootstrap token intentionally omitted
 	)
 
-	gibsonURL := s.gibsonPublicURL
-
-	return &tenantpb.CreateAgentIdentityResponse{
-		PrincipalId:    principalID,
-		Kind:           req.Kind,
-		Name:           req.Name,
-		GibsonUrl:      gibsonURL,
-		BootstrapToken: bootstrapToken, // sole enrollment credential (ADR-0045, gibson#670)
-	}, nil
+	return provisionedIdentity{PrincipalID: principalID, BootstrapToken: bootstrapToken}, nil
 }
 
 // validateCapabilityCeiling checks that every requested ceiling entry is a

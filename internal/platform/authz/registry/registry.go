@@ -281,6 +281,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.component.v1.ComponentService/EnrollComponent": {
+		Service:           "gibson.component.v1.ComponentService",
+		Relation:          "can_execute",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.component.v1.ComponentService/FindSimilarAttacks": {
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
@@ -1461,6 +1470,15 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.harness.v1.HarnessCallbackService/CancelMission": {
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.harness.v1.HarnessCallbackService/ClaimFork": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
 		ObjectType:        "component",

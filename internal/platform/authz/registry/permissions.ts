@@ -290,6 +290,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.component.v1.ComponentService/EnrollComponent": {
+    method: "/gibson.component.v1.ComponentService/EnrollComponent",
+    service: "gibson.component.v1.ComponentService",
+    relation: "can_execute",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.component.v1.ComponentService/FindSimilarAttacks": {
     method: "/gibson.component.v1.ComponentService/FindSimilarAttacks",
     service: "gibson.component.v1.ComponentService",
@@ -1602,6 +1612,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.harness.v1.HarnessCallbackService/CancelMission": {
     method: "/gibson.harness.v1.HarnessCallbackService/CancelMission",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.harness.v1.HarnessCallbackService/ClaimFork": {
+    method: "/gibson.harness.v1.HarnessCallbackService/ClaimFork",
     service: "gibson.harness.v1.HarnessCallbackService",
     relation: "can_use",
     objectType: "component",
