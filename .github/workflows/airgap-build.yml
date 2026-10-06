@@ -1,6 +1,6 @@
 # airgap-build — E14 cutover gate (gibson#818, ADR-0089): a clean-room clone
 # of every public Go repo (sdk, adk, setec, gibson-executor, cve-triage,
-# integrations, gibson) builds air-gapped with zero external fetch — the
+# gibson) builds air-gapped with zero external fetch — the
 # self-hostable/defense promise.
 #
 # Per repo the gate: (0) anonymously clones the PUBLIC repo, (1) warms a
