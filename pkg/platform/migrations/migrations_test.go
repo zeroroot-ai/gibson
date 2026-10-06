@@ -4,10 +4,11 @@
 package migrations
 
 import (
+	"errors"
 	"io/fs"
-	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
@@ -158,31 +159,62 @@ func TestPlatformMaxVersion(t *testing.T) {
 	}
 }
 
-// TestPlatformVersionsAreContiguous guards the hazard described above: a gap in
-// the platform sequence means some migration is unreachable on a database that
-// has passed it.
-func TestPlatformVersionsAreContiguous(t *testing.T) {
+// TestVersionsAreContiguousAndUnique guards the hazard described above: a gap
+// or two up files with one version leave a migration that golang-migrate
+// never applies. It reads the real platform and tenant sets.
+func TestVersionsAreContiguousAndUnique(t *testing.T) {
 	t.Parallel()
-	entries, err := fs.ReadDir(Platform, platformDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+	for name, set := range map[string]struct {
+		fsys fs.FS
+		dir  string
+	}{
+		"platform": {Platform, platformDir},
+		"tenant":   {Tenant, tenantDir},
+	} {
+		if err := CheckVersions(set.fsys, set.dir); err != nil {
+			t.Errorf("%s migrations: %v", name, err)
+		}
 	}
-	seen := map[int]bool{}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".up.sql") {
-			continue
-		}
-		n, convErr := strconv.Atoi(strings.SplitN(e.Name(), "_", 2)[0])
-		if convErr != nil {
-			t.Fatalf("migration %q does not start with a version number", e.Name())
-		}
-		seen[n] = true
+}
+
+// TestCheckVersions_Fixture is the failing fixture of the guard: a duplicate
+// version names both files and the next free number, and a gap names the
+// missing version.
+func TestCheckVersions_Fixture(t *testing.T) {
+	t.Parallel()
+	file := &fstest.MapFile{Data: []byte("SELECT 1;")}
+	dup := fstest.MapFS{
+		"m/001_a.up.sql":   file,
+		"m/002_b.up.sql":   file,
+		"m/002_c.up.sql":   file,
+		"m/002_c.down.sql": file,
+		"m/README.md":      file,
+		"m/003_d.up.sql":   file,
+		"m/003_d.down.sql": file,
+		"m/001_a.down.sql": file,
+		"m/002_b.down.sql": file,
 	}
-	for v := 1; v <= len(seen); v++ {
-		if !seen[v] {
-			t.Errorf("platform migration %03d is missing: the sequence must be contiguous, "+
-				"or golang-migrate will silently skip whatever later fills the gap", v)
+	err := CheckVersions(dup, "m")
+	if !errors.Is(err, ErrDuplicateVersion) {
+		t.Fatalf("duplicate version: got %v, want ErrDuplicateVersion", err)
+	}
+	for _, want := range []string{"002_b.up.sql", "002_c.up.sql", "next free number, 004"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("duplicate error %q does not name %q", err, want)
 		}
+	}
+
+	gap := fstest.MapFS{"m/001_a.up.sql": file, "m/003_c.up.sql": file}
+	err = CheckVersions(gap, "m")
+	if !errors.Is(err, ErrVersionGap) || !strings.Contains(err.Error(), "002") {
+		t.Fatalf("gap: got %v, want ErrVersionGap naming 002", err)
+	}
+
+	if _, err := scanMaxVersion(dup, "m"); !errors.Is(err, ErrDuplicateVersion) {
+		t.Fatalf("scanMaxVersion must refuse a duplicate version, got %v", err)
+	}
+	if err := CheckVersions(fstest.MapFS{"m/001_a.up.sql": file, "m/002_b.up.sql": file}, "m"); err != nil {
+		t.Fatalf("a clean set: %v", err)
 	}
 }
 
