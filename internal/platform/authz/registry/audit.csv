@@ -26,6 +26,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/DelegateToAgent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/DisablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
+/gibson.component.v1.ComponentService/EnrollComponent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/FindSimilarAttacks,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/FindSimilarFindings,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetAttackChains,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -158,6 +159,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/CallToolProto,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CallToolProtoStream,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CancelMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/ClaimFork,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CloseJob,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CreateMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DelegateToAgent,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -230,7 +232,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall,member,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls,member,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
-/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.secrets.v1.SecretsService/CountSecrets,admin,tenant,tenant_from_identity,USER,gibson/secrets/v1/secrets.proto,rule
 /gibson.secrets.v1.SecretsService/DeleteSecret,admin,tenant,tenant_from_identity,USER,gibson/secrets/v1/secrets.proto,rule

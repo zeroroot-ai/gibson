@@ -28,7 +28,7 @@ import (
 // installReaderColumns mirrors the SELECT list of both ListAll and Get.
 var installReaderColumns = []string{
 	"id", "tenant_id", "component_name", "version", "declared_methods",
-	"runtime_mode", "setec_required", "principal_ref", "created_at",
+	"principal_ref", "created_at",
 }
 
 // newMockReader pairs the SQL mock with a miniredis the real install
@@ -63,8 +63,8 @@ func TestComponentInstallReader_ListAll_ReadsRenamedTable(t *testing.T) {
 	mock.ExpectQuery("FROM\\s+component_install").
 		WithArgs(tenant.String()).
 		WillReturnRows(sqlmock.NewRows(installReaderColumns).
-			AddRow("inst-1", "acme", "scanner", "1.2.3", []byte(`["Run","Status"]`), "hosted", true, "plugin_principal:scanner", created).
-			AddRow("inst-2", "acme", "reporter", "0.1.0", nil, "microvm", false, "", created))
+			AddRow("inst-1", "acme", "scanner", "1.2.3", []byte(`["Run","Status"]`), "plugin_principal:scanner", created).
+			AddRow("inst-2", "acme", "reporter", "0.1.0", nil, "", created))
 	// inst-1 heartbeated degraded (a revoked secret, gibson#154); inst-2
 	// never heartbeated on this daemon.
 	if err := registry.Heartbeat(context.Background(), "inst-1", "10.0.0.7:50055", "degraded"); err != nil {
@@ -80,9 +80,6 @@ func TestComponentInstallReader_ListAll_ReadsRenamedTable(t *testing.T) {
 	}
 	if got[0].InstallID != "inst-1" || got[0].Name != "scanner" || got[0].Version != "1.2.3" {
 		t.Fatalf("row 0 mapped wrong: %+v", got[0])
-	}
-	if got[0].RuntimeMode != "hosted" || !got[0].SetecRequired {
-		t.Fatalf("row 0 runtime/setec mapped wrong: %+v", got[0])
 	}
 	if len(got[0].DeclaredMethods) != 2 || got[0].DeclaredMethods[0] != "Run" {
 		t.Fatalf("row 0 declared methods mapped wrong: %+v", got[0].DeclaredMethods)
@@ -133,7 +130,7 @@ func TestComponentInstallReader_Get_ReadsRenamedTable(t *testing.T) {
 	mock.ExpectQuery("FROM\\s+component_install").
 		WithArgs(tenant.String(), "inst-9").
 		WillReturnRows(sqlmock.NewRows(installReaderColumns).
-			AddRow("inst-9", "acme", "scanner", "2.0.0", []byte(`["Run"]`), "hosted", false, "plugin_principal:scanner", created))
+			AddRow("inst-9", "acme", "scanner", "2.0.0", []byte(`["Run"]`), "plugin_principal:scanner", created))
 	if err := registry.Heartbeat(context.Background(), "inst-9", "", "serving"); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}

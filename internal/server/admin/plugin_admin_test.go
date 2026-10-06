@@ -6,7 +6,6 @@ package admin
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -46,80 +45,6 @@ func (r *fakeComponentInstallRegistry) Get(_ context.Context, tenant auth.Tenant
 		return nil, ErrInstallNotFound
 	}
 	return &v, nil
-}
-
-type fakeManifestValidator struct {
-	manifest ValidatedManifest
-	errors   []ManifestValidationError
-}
-
-func (v *fakeManifestValidator) Validate(_ []byte) (ValidatedManifest, []ManifestValidationError) {
-	return v.manifest, v.errors
-}
-
-type fakeZitadel struct {
-	mu        sync.Mutex
-	created   []string
-	deleted   []string
-	failOn    string // installID where Create should fail
-	expiresAt time.Time
-}
-
-func (f *fakeZitadel) CreatePrincipal(_ context.Context, _ auth.TenantID, installID, _ string, ttl time.Duration) (string, string, time.Time, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if installID == f.failOn {
-		return "", "", time.Time{}, errors.New("zitadel-failure")
-	}
-	id := "principal-" + installID
-	f.created = append(f.created, id)
-	exp := f.expiresAt
-	if exp.IsZero() {
-		exp = time.Now().Add(ttl)
-	}
-	return id, "boot-" + installID, exp, nil
-}
-
-func (f *fakeZitadel) DeletePrincipal(_ context.Context, principalID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.deleted = append(f.deleted, principalID)
-	return nil
-}
-
-type fakeSecretWriter struct {
-	mu      sync.Mutex
-	put     map[string][]byte
-	deleted []string
-	failPut string
-}
-
-func (f *fakeSecretWriter) Put(_ context.Context, _ auth.TenantID, name string, value []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.failPut == name {
-		return errors.New("put-failure")
-	}
-	if f.put == nil {
-		f.put = map[string][]byte{}
-	}
-	f.put[name] = append([]byte(nil), value...)
-	return nil
-}
-
-func (f *fakeSecretWriter) Delete(_ context.Context, _ auth.TenantID, name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.deleted = append(f.deleted, name)
-	delete(f.put, name)
-	return nil
-}
-
-func (f *fakeSecretWriter) Exists(_ context.Context, _ auth.TenantID, name string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	_, ok := f.put[name]
-	return ok, nil
 }
 
 // fakeAuthorizer records FGA tuple writes / deletes.
@@ -171,30 +96,23 @@ func (f *fakeAuthorizer) Close() error    { return nil }
 // Test fixture
 // ---------------------------------------------------------------------------
 
-func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakeComponentInstallRegistry, *fakeManifestValidator, *fakeZitadel, *fakeSecretWriter, *fakeAuthorizer, *fakeAuditor) {
+func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakeComponentInstallRegistry, *fakeAuthorizer, *fakeAuditor) {
 	t.Helper()
 	reg := &fakeComponentInstallRegistry{installs: map[string]ComponentInstallInfo{}}
-	val := &fakeManifestValidator{}
-	zit := &fakeZitadel{}
-	sw := &fakeSecretWriter{}
 	az := &fakeAuthorizer{}
 	au := &fakeAuditor{}
 
 	srv, err := NewPluginsAdminServer(PluginsAdminConfig{
-		Registry:          reg,
-		ManifestValidator: val,
-		ZitadelClient:     zit,
-		SecretWriter:      sw,
-		Authorizer:        az,
-		BootstrapAuditor:  au,
-		Events:            &recordingPublisher{},
-		BootstrapTokenTTL: time.Hour,
-		Now:               func() time.Time { return time.Unix(1700000000, 0).UTC() },
+		Registry:         reg,
+		Authorizer:       az,
+		BootstrapAuditor: au,
+		Events:           &recordingPublisher{},
+		Now:              func() time.Time { return time.Unix(1700000000, 0).UTC() },
 	})
 	if err != nil {
 		t.Fatalf("NewPluginsAdminServer: %v", err)
 	}
-	return srv, reg, val, zit, sw, az, au
+	return srv, reg, az, au
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +120,7 @@ func newPluginsTestServer(t *testing.T) (*PluginsAdminServer, *fakeComponentInst
 // ---------------------------------------------------------------------------
 
 func TestListPluginInstalls_FiltersByName(t *testing.T) {
-	srv, reg, _, _, _, _, _ := newPluginsTestServer(t)
+	srv, reg, _, _ := newPluginsTestServer(t)
 	reg.installs["a1"] = ComponentInstallInfo{InstallID: "a1", TenantID: "acme", Name: "github", Status: "serving"}
 	reg.installs["b1"] = ComponentInstallInfo{InstallID: "b1", TenantID: "acme", Name: "openai", Status: "serving"}
 
@@ -217,198 +135,11 @@ func TestListPluginInstalls_FiltersByName(t *testing.T) {
 }
 
 func TestGetPluginInstall_NotFound(t *testing.T) {
-	srv, _, _, _, _, _, _ := newPluginsTestServer(t)
+	srv, _, _, _ := newPluginsTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	_, err := srv.GetPluginInstall(ctx, &tenantv1.GetPluginInstallRequest{InstallId: "missing"})
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("want NotFound, got %v", err)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Tests — RegisterPlugin atomicity
-// ---------------------------------------------------------------------------
-
-func TestRegisterPlugin_AtomicSuccess(t *testing.T) {
-	srv, _, val, zit, sw, az, au := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{
-		Name:            "github-plugin",
-		Version:         "1.0.0",
-		DeclaredSecrets: []string{"gh_token", "gh_app_secret"},
-	}
-	ctx := ctxWithTenant(t, "acme")
-
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
-		ManifestYaml: []byte("name: github-plugin"),
-		Bindings: []*tenantv1.PluginSecretBinding{
-			{DeclaredName: "gh_token", Mode: "create", CreateValue: []byte("ghp_xxx")},
-			{DeclaredName: "gh_app_secret", Mode: "existing", ExistingRef: "cred:gh_app_secret"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RegisterPlugin: %v", err)
-	}
-	if resp.GetInstallId() == "" || resp.GetPluginPrincipalId() == "" || resp.GetBootstrapToken() == "" {
-		t.Errorf("missing fields in response: %+v", resp)
-	}
-	if len(zit.created) != 1 {
-		t.Errorf("expected 1 principal create, got %d", len(zit.created))
-	}
-	if _, ok := sw.put["gh_token"]; !ok {
-		t.Errorf("inline secret gh_token not put to broker")
-	}
-	if len(az.writes) != 1 || len(az.writes[0]) != 2 {
-		t.Errorf("expected 1 batch with 2 tuples, got %+v", az.writes)
-	}
-	if len(au.events) != 1 || au.events[0].Action != "plugin_register" {
-		t.Errorf("expected one plugin_register audit event, got %+v", au.events)
-	}
-}
-
-func TestRegisterPlugin_RollbackOnZitadelFailure(t *testing.T) {
-	// We need the zitadel.failOn to match the install ID generated. Since
-	// the install ID is random, we set failOn to "" and instead set
-	// failPut on the secret writer to force a failure earlier — same
-	// rollback semantics, easier to set up.
-	srv, _, val, _, sw, az, _ := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{
-		Name:            "p",
-		DeclaredSecrets: []string{"s1"},
-	}
-	sw.failPut = "s1"
-	ctx := ctxWithTenant(t, "acme")
-
-	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
-		ManifestYaml: []byte("..."),
-		Bindings: []*tenantv1.PluginSecretBinding{
-			{DeclaredName: "s1", Mode: "create", CreateValue: []byte("v")},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error on inline secret put failure")
-	}
-	if status.Code(err) != codes.Internal {
-		t.Errorf("want Internal, got %v", err)
-	}
-	// Rollback: nothing put before the failed put, no FGA write attempted.
-	if len(az.writes) != 0 {
-		t.Errorf("expected 0 FGA writes (transaction aborted), got %d", len(az.writes))
-	}
-}
-
-func TestRegisterPlugin_RollbackOnFGAFailure(t *testing.T) {
-	srv, _, val, zit, sw, az, _ := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{
-		Name:            "p",
-		DeclaredSecrets: []string{"s1"},
-	}
-	az.failWrite = true
-	ctx := ctxWithTenant(t, "acme")
-
-	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
-		ManifestYaml: []byte("..."),
-		Bindings: []*tenantv1.PluginSecretBinding{
-			{DeclaredName: "s1", Mode: "create", CreateValue: []byte("v")},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error on FGA write failure")
-	}
-	// Verify rollback: the inline secret was deleted, principal was deleted.
-	if len(sw.deleted) != 1 || sw.deleted[0] != "s1" {
-		t.Errorf("expected inline secret rollback, got deleted=%v", sw.deleted)
-	}
-	if len(zit.deleted) != 1 {
-		t.Errorf("expected principal rollback, got deleted=%v", zit.deleted)
-	}
-}
-
-func TestRegisterPlugin_DryRun(t *testing.T) {
-	srv, _, val, zit, sw, az, _ := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{
-		Name:            "p",
-		DeclaredSecrets: []string{},
-	}
-	ctx := ctxWithTenant(t, "acme")
-
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
-		ManifestYaml: []byte("..."),
-		DryRun:       true,
-	})
-	if err != nil {
-		t.Fatalf("RegisterPlugin dry_run: %v", err)
-	}
-	if resp.GetInstallId() != "" || resp.GetBootstrapToken() != "" {
-		t.Errorf("dry_run must not return state-changing fields, got %+v", resp)
-	}
-	if len(zit.created) != 0 || len(sw.put) != 0 || len(az.writes) != 0 {
-		t.Errorf("dry_run created side-effects: zit=%v sw=%v az=%v", zit.created, sw.put, az.writes)
-	}
-}
-
-func TestRegisterPlugin_ManifestValidationErrors(t *testing.T) {
-	srv, _, val, _, _, _, _ := newPluginsTestServer(t)
-	val.errors = []ManifestValidationError{
-		{Field: "metadata.name", Code: "missing_required", Message: "metadata.name required"},
-	}
-	ctx := ctxWithTenant(t, "acme")
-
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
-	if err == nil {
-		t.Fatal("expected error on validation failure")
-	}
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("want InvalidArgument, got %v", err)
-	}
-	if len(resp.GetValidationErrors()) != 1 || resp.GetValidationErrors()[0].GetField() != "metadata.name" {
-		t.Errorf("expected validation_errors with metadata.name field, got %+v", resp.GetValidationErrors())
-	}
-}
-
-func TestRegisterPlugin_CrossCheckBindings_Missing(t *testing.T) {
-	srv, _, val, _, _, _, _ := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{
-		Name:            "p",
-		DeclaredSecrets: []string{"a", "b"},
-	}
-	ctx := ctxWithTenant(t, "acme")
-
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
-		ManifestYaml: []byte("..."),
-		Bindings: []*tenantv1.PluginSecretBinding{
-			{DeclaredName: "a", Mode: "create", CreateValue: []byte("v")},
-			// "b" missing
-		},
-	})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("want InvalidArgument, got %v", err)
-	}
-	if len(resp.GetValidationErrors()) == 0 {
-		t.Errorf("expected validation errors")
-	}
-}
-
-func TestRegisterPlugin_BootstrapTokenAudited(t *testing.T) {
-	srv, _, val, _, _, _, au := newPluginsTestServer(t)
-	val.manifest = ValidatedManifest{Name: "p"}
-	ctx := ctxWithTenant(t, "acme")
-
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
-	if err != nil {
-		t.Fatalf("RegisterPlugin: %v", err)
-	}
-	if resp.GetBootstrapToken() == "" {
-		t.Fatal("expected bootstrap token")
-	}
-	if len(au.events) != 1 {
-		t.Fatalf("expected 1 audit event, got %d", len(au.events))
-	}
-	ev := au.events[0]
-	if ev.Action != "plugin_register" {
-		t.Errorf("audit action: want plugin_register, got %q", ev.Action)
-	}
-	if !strings.Contains(ev.ResourceURI, resp.GetInstallId()) {
-		t.Errorf("audit ResourceURI does not include install_id: %q", ev.ResourceURI)
 	}
 }
 
@@ -418,11 +149,11 @@ func TestRegisterPlugin_BootstrapTokenAudited(t *testing.T) {
 
 // TestRevokePluginSecretBinding_DeletesAndAudits: the tuple deleted names the
 // FGA user the plugin registered as, verbatim. A chart-deployed plugin enrols
-// as plugin_principal:<vendor> and binds its own can_resolve under that user
-// (bindDeclaredSecrets); a revocation that shaped the user from the install
-// id deleted a tuple nobody held (gibson#154).
+// as plugin_principal:<vendor>, and a tenant admin grants can_resolve to that
+// user; a revocation that shaped the user from the install id deleted a tuple
+// nobody held (gibson#154).
 func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
-	srv, reg, _, _, _, az, au := newPluginsTestServer(t)
+	srv, reg, az, au := newPluginsTestServer(t)
 	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
 	ctx := ctxWithTenant(t, "acme")
 
@@ -449,7 +180,7 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 // and publishing to a guessed channel would report a revocation that never
 // happened, so the RPC refuses and nothing is written, published or audited.
 func TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress(t *testing.T) {
-	srv, reg, _, _, _, az, au := newPluginsTestServer(t)
+	srv, reg, az, au := newPluginsTestServer(t)
 	pub := &recordingPublisher{}
 	srv.events = pub
 	reg.installs["old"] = ComponentInstallInfo{InstallID: "old", TenantID: "acme", Name: "github"}
@@ -469,7 +200,7 @@ func TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress(t *testing.T)
 }
 
 func TestEditPluginSecretBinding_DeletesThenWrites(t *testing.T) {
-	srv, reg, _, _, _, az, _ := newPluginsTestServer(t)
+	srv, reg, az, _ := newPluginsTestServer(t)
 	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
 	ctx := ctxWithTenant(t, "acme")
 
@@ -504,11 +235,9 @@ func TestNewPluginsAdminServer_RequiresAllFields(t *testing.T) {
 		cfg  PluginsAdminConfig
 	}{
 		{"missing Registry", PluginsAdminConfig{}},
-		{"missing ManifestValidator", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}}},
-		{"missing ZitadelClient", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}}},
-		{"missing SecretWriter", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}}},
-		{"missing Authorizer", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}}},
-		{"missing BootstrapAuditor", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}, Authorizer: &fakeAuthorizer{}}},
+		{"missing Authorizer", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}}},
+		{"missing BootstrapAuditor", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, Authorizer: &fakeAuthorizer{}}},
+		{"missing Events", PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, Authorizer: &fakeAuthorizer{}, BootstrapAuditor: &fakeAuditor{}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -520,7 +249,7 @@ func TestNewPluginsAdminServer_RequiresAllFields(t *testing.T) {
 }
 
 func TestRevokePluginSecretBinding_RequiresFields(t *testing.T) {
-	srv, _, _, _, _, _, _ := newPluginsTestServer(t)
+	srv, _, _, _ := newPluginsTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
 	_, err := srv.RevokePluginSecretBinding(ctx, &tenantv1.RevokePluginSecretBindingRequest{})
 	if status.Code(err) != codes.InvalidArgument {
@@ -562,7 +291,7 @@ func (r *recordingPublisher) Publish(_ context.Context, tenant, principal string
 // declared name, before the audit line, and a publish failure is
 // Unavailable so the operator retries.
 func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
-	srv, reg, _, _, _, _, au := newPluginsTestServer(t)
+	srv, reg, _, au := newPluginsTestServer(t)
 	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
 	pub := &recordingPublisher{}
 	srv.events = pub
@@ -589,7 +318,7 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 }
 
 func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
-	srv, reg, _, _, _, _, _ := newPluginsTestServer(t)
+	srv, reg, _, _ := newPluginsTestServer(t)
 	reg.installs["i1"] = ComponentInstallInfo{InstallID: "i1", TenantID: "acme", Name: "p", PrincipalRef: "plugin_principal:p"}
 	pub := &recordingPublisher{}
 	srv.events = pub
@@ -607,7 +336,7 @@ func TestEditPluginSecretBinding_TellsThePluginTheValueMoved(t *testing.T) {
 }
 
 func TestNewPluginsAdminServer_RequiresEvents(t *testing.T) {
-	cfg := PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, ManifestValidator: &fakeManifestValidator{}, ZitadelClient: &fakeZitadel{}, SecretWriter: &fakeSecretWriter{}, Authorizer: &fakeAuthorizer{}, BootstrapAuditor: &fakeAuditor{}}
+	cfg := PluginsAdminConfig{Registry: &fakeComponentInstallRegistry{}, Authorizer: &fakeAuthorizer{}, BootstrapAuditor: &fakeAuditor{}}
 	if _, err := NewPluginsAdminServer(cfg); err == nil {
 		t.Fatal("a plugins admin with no event publisher must not construct")
 	}

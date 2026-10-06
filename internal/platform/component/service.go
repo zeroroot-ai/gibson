@@ -617,7 +617,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// downstream spans). Spec: llm-user-attribution-governance Req 1.5.
 	// principalRef is the FGA user this registration runs as. It is stored on
 	// the durable install so the secret-binding admin RPCs address the same
-	// user bindDeclaredSecrets grants and WatchComponentEvents keys on
+	// user a tenant admin grants and WatchComponentEvents keys on
 	// (gibson#154).
 	var principalRef string
 	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
@@ -684,14 +684,6 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("instance_id", instanceID),
 	)
 
-	// Bind can_resolve for a catalog plugin's declared secrets so it can read
-	// them at runtime (ADR-0066). For a component outside the signed catalog
-	// the declared list is advisory and writes nothing: a check-in never
-	// assigns its own trust (gibson#554, ADR-0097).
-	if req.Kind == "plugin" {
-		s.bindDeclaredSecrets(ctx, tenant, req.Kind, req.Name, req.Metadata)
-	}
-
 	// Spec plans-and-quotas-simplification: agent registration alone no
 	// longer consumes the concurrent_agents quota. Counters increment when
 	// an agent transitions idle→busy (first task pickup) and decrement on
@@ -717,17 +709,11 @@ func (s *ComponentServiceServer) RegisterComponent(
 				Kind:               req.Kind,
 				Name:               req.Name,
 				Version:            req.Version,
-				ManifestHash:       req.Metadata["plugin:manifest_hash"],
 				DeclaredMethods:    req.Methods,
 				ProtoDescriptorSet: req.FileDescriptorSet,
 				HostID:             req.Metadata["plugin:host_id"],
-				RuntimeMode:        req.Metadata["plugin:runtime_mode"],
-				SetecRequired:      req.Metadata["plugin:setec_required"] == "true",
 				ContentTrust:       catalogContentTrust(req.Kind, req.Name),
 				PrincipalRef:       principalRef,
-			}
-			if install.RuntimeMode == "" {
-				install.RuntimeMode = "process"
 			}
 			if prErr := s.componentInstallRegistry.Register(ctx, install); prErr != nil {
 				// Fail the registration rather than logging and continuing.

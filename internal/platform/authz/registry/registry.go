@@ -281,6 +281,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.component.v1.ComponentService/EnrollComponent": {
+		Service:           "gibson.component.v1.ComponentService",
+		Relation:          "can_execute",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.component.v1.ComponentService/FindSimilarAttacks": {
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
@@ -1469,6 +1478,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.harness.v1.HarnessCallbackService/ClaimFork": {
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.harness.v1.HarnessCallbackService/CloseJob": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",
@@ -2111,15 +2129,6 @@ var Registry = map[string]Entry{
 	"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls": {
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin": {
-		Service:           "gibson.pluginadmin.v1.PluginAdminService",
-		Relation:          "admin",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser,
