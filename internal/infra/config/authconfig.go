@@ -14,7 +14,7 @@ import (
 // and uses it for mTLS on the gRPC server. In-cluster callers (dashboard, tools,
 // agents, plugins) authenticate by presenting their SPIFFE SVIDs in the TLS handshake.
 type SPIFFEConfig struct {
-	// TrustDomain is the SPIFFE trust domain (e.g., "zeroroot.ai").
+	// TrustDomain is the SPIFFE trust domain of the install (e.g., "example.org"). It is required (ADR-0164).
 	// All SPIFFE IDs authenticated by this daemon must be under this trust domain.
 	TrustDomain string `mapstructure:"trust_domain" yaml:"trust_domain"`
 
