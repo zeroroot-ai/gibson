@@ -35,7 +35,7 @@ import (
 // NewSetecSandboxedExecutor is the no-op implementation used when gibson is
 // built without the setec_integration tag. Always returns (nil, nil) so the
 // caller treats sandboxed dispatch as disabled.
-func NewSetecSandboxedExecutor(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ ingest.DiscoveryProcessor, _ sandboxed.EventPublisher) (*sandboxed.Executor, error) {
+func NewSetecSandboxedExecutor(_ config.SandboxConfig, _ setecSVIDSource, _ trace.Tracer, _ *slog.Logger, _ ingest.DiscoveryProcessor, _ sandboxed.EventPublisher) (*sandboxed.Executor, error) {
 	return nil, nil
 }
 
@@ -43,7 +43,7 @@ func NewSetecSandboxedExecutor(_ config.SandboxConfig, _ trace.Tracer, _ *slog.L
 // setec_integration tag. Returns (nil, nil) so the daemon wires a session
 // registry unconditionally and DevboxExec answers Unavailable naming the
 // reason, rather than the caller carrying a build-tag branch.
-func NewSetecSessionClient(_ config.SandboxConfig) (sandboxed.SessionClient, error) {
+func NewSetecSessionClient(_ config.SandboxConfig, _ setecSVIDSource) (sandboxed.SessionClient, error) {
 	return nil, nil
 }
 
@@ -52,13 +52,13 @@ func NewSetecSessionClient(_ config.SandboxConfig) (sandboxed.SessionClient, err
 // unavailable and denies an untrusted agent fail-closed under setec-only,
 // rather than the caller carrying a build-tag branch. The events publisher is
 // unused here — with no launcher there is nothing to tee.
-func NewSetecAgentLauncher(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher, _ string) (*sandboxed.AgentLauncher, error) {
+func NewSetecAgentLauncher(_ config.SandboxConfig, _ setecSVIDSource, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher, _ string) (*sandboxed.AgentLauncher, error) {
 	return nil, nil
 }
 
 // NewSetecIdentityVerifier is the no-op counterpart of the setec_integration
 // build. Returns (nil, nil): with no setec no sandbox is forked, and the
 // callback service refuses each call that needs a verified sandbox.
-func NewSetecIdentityVerifier(_ config.SandboxConfig) (harness.SandboxIdentityVerifier, error) {
+func NewSetecIdentityVerifier(_ config.SandboxConfig, _ setecSVIDSource) (harness.SandboxIdentityVerifier, error) {
 	return nil, nil
 }

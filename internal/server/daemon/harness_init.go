@@ -172,7 +172,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// explaining why — the ingest path was imported everywhere and wired
 		// nowhere, so sandboxed discoveries were silently discarded (gibson#1266).
 		sbxDiscovery := d.newDiscoveryProcessor()
-		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger, sbxDiscovery, newLiveEventPublisher(d.liveAgents))
+		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, daemonSVIDSource{d: d}, sandboxTracer, sandboxLogger, sbxDiscovery, newLiveEventPublisher(d.liveAgents))
 		if err != nil {
 			// The sandbox fleet is required (ADR-0142): a daemon that cannot
 			// build its executor does not start.
@@ -195,7 +195,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// (gibson#13): read once, from the chart's projection of the Envoy
 		// TLS Secret, and empty when the edge chains to public roots.
 		platformCA := platformCAPEM(d.config.Sandbox.Setec.PlatformCAFile, sandboxLogger)
-		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents), platformCA)
+		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, daemonSVIDSource{d: d}, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents), platformCA)
 		if wire, warn := agentLauncherWiring(launcher, launchErr); !wire {
 			d.logger.Warn(ctx, warn, "error", launchErr)
 		} else {

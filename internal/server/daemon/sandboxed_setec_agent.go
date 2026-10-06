@@ -30,8 +30,8 @@ import (
 // Setec gRPC client. On a TLS build failure it returns (nil, err), and the
 // caller logs the warning; the harness then denies an untrusted agent
 // fail-closed under setec-only.
-func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, events sandboxed.EventPublisher, platformCA string) (*sandboxed.AgentLauncher, error) {
-	client, err := NewSetecSandboxClient(cfg)
+func NewSetecAgentLauncher(cfg config.SandboxConfig, src setecSVIDSource, tracer trace.Tracer, logger *slog.Logger, events sandboxed.EventPublisher, platformCA string) (*sandboxed.AgentLauncher, error) {
+	client, err := NewSetecSandboxClient(cfg, src)
 	if err != nil {
 		return nil, err
 	}

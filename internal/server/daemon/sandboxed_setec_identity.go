@@ -25,8 +25,8 @@ var _ harness.SandboxIdentityVerifier = (*setecClient)(nil)
 
 // NewSetecIdentityVerifier dials setec and returns the check of the sandbox
 // identity. The setec address is required (#979), so each daemon has one.
-func NewSetecIdentityVerifier(cfg config.SandboxConfig) (harness.SandboxIdentityVerifier, error) {
-	c, err := NewSetecSandboxClient(cfg)
+func NewSetecIdentityVerifier(cfg config.SandboxConfig, src setecSVIDSource) (harness.SandboxIdentityVerifier, error) {
+	c, err := NewSetecSandboxClient(cfg, src)
 	if err != nil {
 		return nil, err
 	}
