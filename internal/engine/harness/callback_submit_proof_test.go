@@ -157,7 +157,7 @@ func newSubmitProofService(
 	if engine != nil {
 		opts = append(opts, WithProofSettlement(engine))
 	}
-	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
+	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, append(opts, testEventBus())...)
 }
 
 func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, toolCallIDs ...string) *harnesspb.SubmitProofRequest {

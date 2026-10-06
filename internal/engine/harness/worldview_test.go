@@ -30,7 +30,7 @@ func newWorldViewService(t *testing.T, h *observeMockHarness, source WorldViewSo
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
 	registry.Register(h.missionID.String(), "recon-agent", h)
-	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	// Production wires the source through CallbackManager.SetWorldViewSource;
 	// tests set the field directly (same package) to avoid a test-only option.
 	svc.worldViewSource = source
@@ -204,7 +204,7 @@ func TestWorldView_AttributionRefusedWhenTenantMissing(t *testing.T) {
 // TestSetWorldViewSource wires a source onto a CallbackManager's service and
 // confirms it reaches the WorldView handler.
 func TestSetWorldViewSource(t *testing.T) {
-	mgr := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.New(slog.DiscardHandler))
+	mgr := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.New(slog.DiscardHandler))
 	called := false
 	mgr.SetWorldViewSource(func(context.Context, WorldViewQuery) (WorldViewResult, error) {
 		called = true

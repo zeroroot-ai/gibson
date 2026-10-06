@@ -14,7 +14,7 @@ import (
 // contract as SetLLMCallSink, exercised here before Start() (construction
 // alone is enough: NewCallbackServerWithRegistry builds the service eagerly).
 func TestCallbackManager_SetToolCallSink(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	var got ToolCallRecord
 	var gotTenant string

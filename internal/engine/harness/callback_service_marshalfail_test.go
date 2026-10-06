@@ -62,6 +62,7 @@ func TestCallToolProto_FeedsToolCallSink_OnMarshalFailure(t *testing.T) {
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	req := &harnesspb.CallToolProtoRequest{

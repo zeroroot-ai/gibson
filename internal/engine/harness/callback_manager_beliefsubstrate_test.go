@@ -19,7 +19,7 @@ import (
 // that only calls CallbackManager (every real daemon) and always answers
 // Unavailable.
 func TestCallbackManager_SetBeliefSubstrate(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	substrate := newFakeBeliefSubstrate()
 	m.SetBeliefSubstrate(substrate)
@@ -54,7 +54,7 @@ func TestCallbackManager_SetBeliefSubstrate_NilServerIsNoOp(_ *testing.T) {
 // NewCallbackManager (ADR-0003) — it is not exercised against the bare,
 // no-server construction the setter's own nil-safety test uses.
 func TestCallbackManager_BeliefSubstrate(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 	if got := m.BeliefSubstrate(); got != nil {
 		t.Fatalf("BeliefSubstrate() before SetBeliefSubstrate = %v, want nil", got)
 	}

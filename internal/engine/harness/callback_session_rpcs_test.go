@@ -124,7 +124,7 @@ func (m *memSessionContextStore) Delete(_ context.Context, tenant, sessionID str
 func newSessionContextTestService(t *testing.T, store SessionContextStore) *HarnessCallbackService {
 	t.Helper()
 	logger, _ := newBufferLogger()
-	s := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry())
+	s := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry(), testEventBus())
 	s.sessionContextStore = store
 	return s
 }
@@ -433,7 +433,7 @@ func TestPutSessionContext_SetterWiresService(t *testing.T) {
 	logger, _ := newBufferLogger()
 	store := newMemSessionContextStore()
 
-	m := NewCallbackManager(CallbackConfig{Enabled: false}, logger)
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, Enabled: false}, logger)
 	m.SetSessionContextStore(store)
 	require.NotNil(t, m.server, "manager must construct its server eagerly")
 	assert.Same(t, store, m.server.service.sessionContextStore.(*memSessionContextStore),

@@ -58,6 +58,7 @@ func TestCallToolProto_FeedsToolCallSink_OnSuccess(t *testing.T) {
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	req := &harnesspb.CallToolProtoRequest{
@@ -119,6 +120,7 @@ func TestCallToolProto_FeedsToolCallSink_OnFailure(t *testing.T) {
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	req := &harnesspb.CallToolProtoRequest{
@@ -172,6 +174,7 @@ func TestCallToolProto_ToolCallIDFallsBackToFreshUUID(t *testing.T) {
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	req := &harnesspb.CallToolProtoRequest{
@@ -225,7 +228,7 @@ func TestCallToolProto_NoSink_NoPanic(t *testing.T) {
 	}
 	registry := NewCallbackHarnessRegistry()
 	registry.Register("test-mission-123", "test-agent", mockHarness)
-	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.NewTextHandler(os.Stdout, nil)), registry)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.NewTextHandler(os.Stdout, nil)), registry, testEventBus())
 
 	req := &harnesspb.CallToolProtoRequest{
 		Context:    &harnesspb.ContextInfo{TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123"},

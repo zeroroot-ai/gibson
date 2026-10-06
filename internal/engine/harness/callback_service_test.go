@@ -34,7 +34,7 @@ import (
 // TestNewHarnessCallbackService tests the service constructor.
 func TestNewHarnessCallbackService(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	assert.NotNil(t, service)
 	assert.NotNil(t, service.logger)
@@ -43,7 +43,7 @@ func TestNewHarnessCallbackService(t *testing.T) {
 // TestHarnessCallbackServiceUnregister tests harness unregistration via activeHarnesses.
 func TestHarnessCallbackServiceUnregister(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	// Manually store a harness entry to test unregistration
 	taskID := "task-123"
@@ -104,7 +104,7 @@ func TestGetHarness_WithExplicitMissionId(t *testing.T) {
 	registry.Register("mission-123", "test-agent", mockHarn)
 
 	// Create service with registry
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	// Create ContextInfo with explicit MissionId
 	contextInfo := &harnesspb.ContextInfo{
@@ -130,7 +130,7 @@ func TestGetHarness_EmptyMissionId_ReturnsError(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
 
 	// Create service with registry
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	// Create ContextInfo with empty MissionId
 	contextInfo := &harnesspb.ContextInfo{
@@ -161,7 +161,7 @@ func TestGetHarness_LegacyTaskIdWithColon_NoLongerSupported(t *testing.T) {
 	registry.Register("mission-abc", "test-agent", mockHarn)
 
 	// Create service with registry
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	// Create ContextInfo with legacy format (mission in TaskId) but no explicit MissionId
 	contextInfo := &harnesspb.ContextInfo{
@@ -187,7 +187,7 @@ func TestGetHarness_MissionIdNotFound(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
 
 	// Create service with registry
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	// Create ContextInfo with non-existent mission
 	contextInfo := &harnesspb.ContextInfo{
@@ -212,7 +212,7 @@ func TestGetHarness_MissionIdNotFound(t *testing.T) {
 // TestHarnessCallbackService_CreateMission tests the CreateMission RPC handler.
 func TestHarnessCallbackService_CreateMission(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.CreateMissionRequest{
@@ -237,7 +237,7 @@ func TestHarnessCallbackService_CreateMission(t *testing.T) {
 // TestHarnessCallbackService_RunMission tests the RunMission RPC handler.
 func TestHarnessCallbackService_RunMission(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.RunMissionRequest{
@@ -260,7 +260,7 @@ func TestHarnessCallbackService_RunMission(t *testing.T) {
 // TestHarnessCallbackService_GetMissionStatus tests the GetMissionStatus RPC handler.
 func TestHarnessCallbackService_GetMissionStatus(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.GetMissionStatusRequest{
@@ -283,7 +283,7 @@ func TestHarnessCallbackService_GetMissionStatus(t *testing.T) {
 // TestHarnessCallbackService_WaitForMission tests the WaitForMission RPC handler.
 func TestHarnessCallbackService_WaitForMission(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.WaitForMissionRequest{
@@ -307,7 +307,7 @@ func TestHarnessCallbackService_WaitForMission(t *testing.T) {
 // TestHarnessCallbackService_ListMissions tests the ListMissions RPC handler.
 func TestHarnessCallbackService_ListMissions(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.ListMissionsRequest{
@@ -329,7 +329,7 @@ func TestHarnessCallbackService_ListMissions(t *testing.T) {
 // TestHarnessCallbackService_CancelMission tests the CancelMission RPC handler.
 func TestHarnessCallbackService_CancelMission(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.CancelMissionRequest{
@@ -352,7 +352,7 @@ func TestHarnessCallbackService_CancelMission(t *testing.T) {
 // TestHarnessCallbackService_GetMissionResults tests the GetMissionResults RPC handler.
 func TestHarnessCallbackService_GetMissionResults(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger)
+	service := NewHarnessCallbackService(logger, testEventBus())
 
 	ctx := context.Background()
 	req := &harnesspb.GetMissionResultsRequest{
@@ -697,7 +697,7 @@ func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {
 
 	// Create callback service with registry
 	registry := NewCallbackHarnessRegistry()
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	// Register mock harness
 	missionID := "test-mission-123"
@@ -766,7 +766,7 @@ func TestCallToolProto_InputJSONToTypedMessage(t *testing.T) {
 	}
 
 	registry := NewCallbackHarnessRegistry()
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	missionID := "test-mission-456"
 	agentName := "test-agent"
@@ -894,7 +894,7 @@ func TestCallToolProto_OutputTypedMessageToJSON(t *testing.T) {
 			}
 
 			registry := NewCallbackHarnessRegistry()
-			service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+			service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 			missionID := "test-mission-789"
 			agentName := "test-agent"
@@ -973,7 +973,7 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 	}
 
 	registry := NewCallbackHarnessRegistry()
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	missionID := "test-mission-discovery"
 	agentName := "test-agent"
@@ -1117,7 +1117,7 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			registry := NewCallbackHarnessRegistry()
-			service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+			service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 			harness := tc.setupHarness()
 			registry.Register(tc.request.Context.MissionId, tc.request.Context.AgentName, harness)
@@ -1129,6 +1129,36 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			require.NotNil(t, resp)
 			require.NotNil(t, resp.Error, "Response should contain error")
 			assert.Contains(t, resp.Error.Message, tc.expectedError)
+		})
+	}
+}
+
+// discardEventBus is the event bus of a test that does not read events. The
+// callback service requires one (gibson#681).
+type discardEventBus struct{}
+
+func (discardEventBus) Publish(context.Context, interface{}) error { return nil }
+
+// testEventBus returns the option that gives a test service its event bus.
+func testEventBus() CallbackServiceOption { return WithEventBus(discardEventBus{}) }
+
+// TestNewHarnessCallbackService_RequiresAnEventBus proves that no callback
+// service exists without its event bus (gibson#681). publishEvent then needs
+// no nil check.
+func TestNewHarnessCallbackService_RequiresAnEventBus(t *testing.T) {
+	for name, build := range map[string]func(){
+		"NewHarnessCallbackService": func() { NewHarnessCallbackService(slog.Default()) },
+		"NewHarnessCallbackServiceWithRegistry": func() {
+			NewHarnessCallbackServiceWithRegistry(slog.Default(), NewCallbackHarnessRegistry())
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("%s with no event bus did not panic", name)
+				}
+			}()
+			build()
 		})
 	}
 }
