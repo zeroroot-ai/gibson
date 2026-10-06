@@ -176,6 +176,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The retry loop of the grants that the finalizer could not revoke.
+	if err := (&controller.UnrevokedGrantsRunnable{
+		Client:  mgr.GetClient(),
+		Revoker: daemon,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to add the unrevoked grants loop")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)

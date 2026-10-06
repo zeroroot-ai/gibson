@@ -440,8 +440,8 @@ func TestReconcile_DeletionRetriesAFailingRevoke(t *testing.T) {
 	}
 }
 
-// Past the deadline the finalizer releases with a logged warning rather than
-// wedging the delete behind a daemon that stays down.
+// Past the deadline the finalizer writes a durable record of the grant and
+// releases, rather than wedging the delete behind a daemon that stays down.
 func TestReconcile_DeletionReleasesAfterTheRevokeDeadline(t *testing.T) {
 	deletedAt := time.Unix(1_700_000_000, 0).UTC()
 	ci := deletingInstance(secretInstance("github", "tenant-primary"), deletedAt)
@@ -454,6 +454,18 @@ func TestReconcile_DeletionReleasesAfterTheRevokeDeadline(t *testing.T) {
 		t.Fatalf("past the deadline the finalizer must release: %v", err)
 	}
 	assertFinalizerReleased(t, r, key)
+
+	var rec corev1.ConfigMap
+	recKey := types.NamespacedName{Namespace: "tenant-primary", Name: unrevokedGrantName("github")}
+	if err := r.Get(context.Background(), recKey, &rec); err != nil {
+		t.Fatalf("the released grant must have a durable record: %v", err)
+	}
+	if rec.Data[unrevokedGrantKeyTenant] != "primary" || rec.Data[unrevokedGrantKeyConnector] != "github" {
+		t.Errorf("record data = %v, want tenant primary and connector github", rec.Data)
+	}
+	if rec.Labels[labelUnrevokedGrant] != "true" {
+		t.Errorf("record labels = %v, want the unrevoked grant label", rec.Labels)
+	}
 }
 
 // A ConnectorInstance outside a tenant namespace has no tenant store to
