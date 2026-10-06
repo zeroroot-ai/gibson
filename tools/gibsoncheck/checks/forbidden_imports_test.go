@@ -13,7 +13,7 @@ import (
 
 func TestForbiddenImports(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, checks.ForbiddenImportsAnalyzer, "forbidden")
+	analysistest.Run(t, testdata, checks.ForbiddenImportsAnalyzer, "forbidden", "allowed/cmd/vaulttool")
 }
 
 func TestNoTrustLocalhost(t *testing.T) {

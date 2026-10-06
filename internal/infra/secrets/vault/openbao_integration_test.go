@@ -177,8 +177,7 @@ path "secret/metadata/tenant/%s" {
 // TestOpenBao_KVv2RoundTrip exercises the SDK's Put/Get/Delete/List
 // surface against OpenBao with static token auth. This is the
 // load-bearing compat test — proves OpenBao satisfies the SDK's
-// daily-bread KV v2 API contract through the existing
-// hashicorp/vault/api Go client.
+// daily-bread KV v2 API contract through the SDK provider.
 //
 // Does NOT call contract.RunContract because that suite's
 // list_with_prefix_filter sub-test fails identically against both

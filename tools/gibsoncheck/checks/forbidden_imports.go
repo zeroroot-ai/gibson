@@ -33,6 +33,14 @@ var ForbiddenImportsAnalyzer = &analysis.Analyzer{
 	Run:  runForbiddenImports,
 }
 
+// forbiddenEverywhere lists import path prefixes that no package may
+// import, allowlisted or not. The HashiCorp Vault client speaks the same wire
+// API as the OpenBao client, and gibson uses the OpenBao client only
+// (ADR-0024, gibson#686).
+var forbiddenEverywhere = []string{
+	"github.com/hashicorp/vault/",
+}
+
 // forbidden lists import path prefixes that are disallowed.
 var forbidden = []string{
 	"github.com/zitadel/",
@@ -67,13 +75,24 @@ var allowlistPaths = []string{
 
 func runForbiddenImports(pass *analysis.Pass) (any, error) {
 	pkgPath := pass.Pkg.Path()
+	reportImports(pass, forbiddenEverywhere,
+		"forbidden import %q in %q: gibson talks to OpenBao with github.com/openbao/openbao/api/v2 only (ADR-0024)")
 	for _, allow := range allowlistPaths {
 		if strings.Contains(pkgPath, allow) {
 			return nil, nil
 		}
 	}
+	reportImports(pass, forbidden,
+		"forbidden import %q in %q: package belongs to ext-authz/Envoy upstream chain (see unified-identity-and-authorization Requirement 8.1)")
+	return nil, nil
+}
+
+// reportImports reports each import of a non-test file of the package whose
+// path starts with one of prefixes. format takes the import path and the
+// package path.
+func reportImports(pass *analysis.Pass, prefixes []string, format string) {
+	pkgPath := pass.Pkg.Path()
 	for _, file := range pass.Files {
-		// Skip test files.
 		fname := pass.Fset.Position(file.Pos()).Filename
 		if strings.HasSuffix(fname, "_test.go") {
 			continue
@@ -83,16 +102,13 @@ func runForbiddenImports(pass *analysis.Pass) (any, error) {
 			if err != nil {
 				continue
 			}
-			for _, prefix := range forbidden {
+			for _, prefix := range prefixes {
 				if strings.HasPrefix(path, prefix) {
-					pass.Reportf(imp.Pos(),
-						"forbidden import %q in %q: package belongs to ext-authz/Envoy upstream chain (see unified-identity-and-authorization Requirement 8.1)",
-						path, pkgPath)
+					pass.Reportf(imp.Pos(), format, path, pkgPath)
 				}
 			}
 		}
 	}
-	return nil, nil
 }
 
 // astWalkPlaceholder is here to satisfy go vet's unused-import warnings
