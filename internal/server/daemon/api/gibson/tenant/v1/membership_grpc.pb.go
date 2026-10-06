@@ -35,26 +35,27 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MembershipService_ListMembers_FullMethodName         = "/gibson.tenant.v1.MembershipService/ListMembers"
-	MembershipService_SetTenantRole_FullMethodName       = "/gibson.tenant.v1.MembershipService/SetTenantRole"
-	MembershipService_TransferOwnership_FullMethodName   = "/gibson.tenant.v1.MembershipService/TransferOwnership"
-	MembershipService_RemoveMember_FullMethodName        = "/gibson.tenant.v1.MembershipService/RemoveMember"
-	MembershipService_LeaveTenant_FullMethodName         = "/gibson.tenant.v1.MembershipService/LeaveTenant"
-	MembershipService_InviteMember_FullMethodName        = "/gibson.tenant.v1.MembershipService/InviteMember"
-	MembershipService_AcceptInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/AcceptInvitation"
-	MembershipService_ResendInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/ResendInvitation"
-	MembershipService_CancelInvitation_FullMethodName    = "/gibson.tenant.v1.MembershipService/CancelInvitation"
-	MembershipService_ListTeams_FullMethodName           = "/gibson.tenant.v1.MembershipService/ListTeams"
-	MembershipService_CreateTeam_FullMethodName          = "/gibson.tenant.v1.MembershipService/CreateTeam"
-	MembershipService_DeleteTeam_FullMethodName          = "/gibson.tenant.v1.MembershipService/DeleteTeam"
-	MembershipService_ListTeamMembers_FullMethodName     = "/gibson.tenant.v1.MembershipService/ListTeamMembers"
-	MembershipService_AddTeamMember_FullMethodName       = "/gibson.tenant.v1.MembershipService/AddTeamMember"
-	MembershipService_RemoveTeamMember_FullMethodName    = "/gibson.tenant.v1.MembershipService/RemoveTeamMember"
-	MembershipService_SetTeamAdmin_FullMethodName        = "/gibson.tenant.v1.MembershipService/SetTeamAdmin"
-	MembershipService_SetComponentAccess_FullMethodName  = "/gibson.tenant.v1.MembershipService/SetComponentAccess"
-	MembershipService_SetCatalogEnabled_FullMethodName   = "/gibson.tenant.v1.MembershipService/SetCatalogEnabled"
-	MembershipService_SetCatalogPublished_FullMethodName = "/gibson.tenant.v1.MembershipService/SetCatalogPublished"
-	MembershipService_GetReservedNames_FullMethodName    = "/gibson.tenant.v1.MembershipService/GetReservedNames"
+	MembershipService_ListMembers_FullMethodName           = "/gibson.tenant.v1.MembershipService/ListMembers"
+	MembershipService_SetTenantRole_FullMethodName         = "/gibson.tenant.v1.MembershipService/SetTenantRole"
+	MembershipService_TransferOwnership_FullMethodName     = "/gibson.tenant.v1.MembershipService/TransferOwnership"
+	MembershipService_RemoveMember_FullMethodName          = "/gibson.tenant.v1.MembershipService/RemoveMember"
+	MembershipService_LeaveTenant_FullMethodName           = "/gibson.tenant.v1.MembershipService/LeaveTenant"
+	MembershipService_ReassignAgentIdentity_FullMethodName = "/gibson.tenant.v1.MembershipService/ReassignAgentIdentity"
+	MembershipService_InviteMember_FullMethodName          = "/gibson.tenant.v1.MembershipService/InviteMember"
+	MembershipService_AcceptInvitation_FullMethodName      = "/gibson.tenant.v1.MembershipService/AcceptInvitation"
+	MembershipService_ResendInvitation_FullMethodName      = "/gibson.tenant.v1.MembershipService/ResendInvitation"
+	MembershipService_CancelInvitation_FullMethodName      = "/gibson.tenant.v1.MembershipService/CancelInvitation"
+	MembershipService_ListTeams_FullMethodName             = "/gibson.tenant.v1.MembershipService/ListTeams"
+	MembershipService_CreateTeam_FullMethodName            = "/gibson.tenant.v1.MembershipService/CreateTeam"
+	MembershipService_DeleteTeam_FullMethodName            = "/gibson.tenant.v1.MembershipService/DeleteTeam"
+	MembershipService_ListTeamMembers_FullMethodName       = "/gibson.tenant.v1.MembershipService/ListTeamMembers"
+	MembershipService_AddTeamMember_FullMethodName         = "/gibson.tenant.v1.MembershipService/AddTeamMember"
+	MembershipService_RemoveTeamMember_FullMethodName      = "/gibson.tenant.v1.MembershipService/RemoveTeamMember"
+	MembershipService_SetTeamAdmin_FullMethodName          = "/gibson.tenant.v1.MembershipService/SetTeamAdmin"
+	MembershipService_SetComponentAccess_FullMethodName    = "/gibson.tenant.v1.MembershipService/SetComponentAccess"
+	MembershipService_SetCatalogEnabled_FullMethodName     = "/gibson.tenant.v1.MembershipService/SetCatalogEnabled"
+	MembershipService_SetCatalogPublished_FullMethodName   = "/gibson.tenant.v1.MembershipService/SetCatalogPublished"
+	MembershipService_GetReservedNames_FullMethodName      = "/gibson.tenant.v1.MembershipService/GetReservedNames"
 )
 
 // MembershipServiceClient is the client API for MembershipService service.
@@ -84,7 +85,9 @@ type MembershipServiceClient interface {
 	// account is deleted and every one of their sessions is revoked at once, so
 	// their next request fails immediately rather than waiting for a token to
 	// expire. Their missions and findings stay in the tenant, attributed by the
-	// name and email recorded at the time.
+	// name and email recorded at the time. The agent, tool and plugin
+	// identities that the user owned move to the caller, so they keep working
+	// and a person stays accountable for each one (gibson#568).
 	//
 	// Refused when user_id holds the tenant's owner relation: the Owner cannot
 	// be removed, only transferred out of first (TransferOwnership).
@@ -93,11 +96,17 @@ type MembershipServiceClient interface {
 	// caller ends their own place in their tenant, exactly like RemoveMember
 	// with themselves as the target. Gated on "member" (every tenant role
 	// implies it) rather than "admin", since removing yourself needs no
-	// admin standing.
+	// admin standing. The agent, tool and plugin identities that the caller
+	// owned move to the tenant's Owner (gibson#568).
 	//
 	// Refused when the caller holds the tenant's owner relation: the Owner
 	// cannot leave until ownership is transferred to another tenant user.
 	LeaveTenant(ctx context.Context, in *LeaveTenantRequest, opts ...grpc.CallOption) (*LeaveTenantResponse, error)
+	// ReassignAgentIdentity makes another tenant user the owner of an agent,
+	// tool or plugin identity of the tenant. The new owner is the accountable
+	// person for the identity. The dashboard uses it after RemoveMember, to
+	// hand each identity of the removed user to the right person (gibson#568).
+	ReassignAgentIdentity(ctx context.Context, in *ReassignAgentIdentityRequest, opts ...grpc.CallOption) (*ReassignAgentIdentityResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee
 	// appears in ListMembers with status "invited" until they accept. Idempotent:
@@ -224,6 +233,16 @@ func (c *membershipServiceClient) LeaveTenant(ctx context.Context, in *LeaveTena
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LeaveTenantResponse)
 	err := c.cc.Invoke(ctx, MembershipService_LeaveTenant_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *membershipServiceClient) ReassignAgentIdentity(ctx context.Context, in *ReassignAgentIdentityRequest, opts ...grpc.CallOption) (*ReassignAgentIdentityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReassignAgentIdentityResponse)
+	err := c.cc.Invoke(ctx, MembershipService_ReassignAgentIdentity_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +426,9 @@ type MembershipServiceServer interface {
 	// account is deleted and every one of their sessions is revoked at once, so
 	// their next request fails immediately rather than waiting for a token to
 	// expire. Their missions and findings stay in the tenant, attributed by the
-	// name and email recorded at the time.
+	// name and email recorded at the time. The agent, tool and plugin
+	// identities that the user owned move to the caller, so they keep working
+	// and a person stays accountable for each one (gibson#568).
 	//
 	// Refused when user_id holds the tenant's owner relation: the Owner cannot
 	// be removed, only transferred out of first (TransferOwnership).
@@ -416,11 +437,17 @@ type MembershipServiceServer interface {
 	// caller ends their own place in their tenant, exactly like RemoveMember
 	// with themselves as the target. Gated on "member" (every tenant role
 	// implies it) rather than "admin", since removing yourself needs no
-	// admin standing.
+	// admin standing. The agent, tool and plugin identities that the caller
+	// owned move to the tenant's Owner (gibson#568).
 	//
 	// Refused when the caller holds the tenant's owner relation: the Owner
 	// cannot leave until ownership is transferred to another tenant user.
 	LeaveTenant(context.Context, *LeaveTenantRequest) (*LeaveTenantResponse, error)
+	// ReassignAgentIdentity makes another tenant user the owner of an agent,
+	// tool or plugin identity of the tenant. The new owner is the accountable
+	// person for the identity. The dashboard uses it after RemoveMember, to
+	// hand each identity of the removed user to the right person (gibson#568).
+	ReassignAgentIdentity(context.Context, *ReassignAgentIdentityRequest) (*ReassignAgentIdentityResponse, error)
 	// InviteMember creates a pending invitation for an email address with the
 	// given tenant role and emails the invitee an accept link. The invitee
 	// appears in ListMembers with status "invited" until they accept. Idempotent:
@@ -517,6 +544,9 @@ func (UnimplementedMembershipServiceServer) RemoveMember(context.Context, *Remov
 }
 func (UnimplementedMembershipServiceServer) LeaveTenant(context.Context, *LeaveTenantRequest) (*LeaveTenantResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method LeaveTenant not implemented")
+}
+func (UnimplementedMembershipServiceServer) ReassignAgentIdentity(context.Context, *ReassignAgentIdentityRequest) (*ReassignAgentIdentityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReassignAgentIdentity not implemented")
 }
 func (UnimplementedMembershipServiceServer) InviteMember(context.Context, *InviteMemberRequest) (*InviteMemberResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method InviteMember not implemented")
@@ -670,6 +700,24 @@ func _MembershipService_LeaveTenant_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MembershipServiceServer).LeaveTenant(ctx, req.(*LeaveTenantRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MembershipService_ReassignAgentIdentity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReassignAgentIdentityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MembershipServiceServer).ReassignAgentIdentity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MembershipService_ReassignAgentIdentity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MembershipServiceServer).ReassignAgentIdentity(ctx, req.(*ReassignAgentIdentityRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -970,6 +1018,10 @@ var MembershipService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LeaveTenant",
 			Handler:    _MembershipService_LeaveTenant_Handler,
+		},
+		{
+			MethodName: "ReassignAgentIdentity",
+			Handler:    _MembershipService_ReassignAgentIdentity_Handler,
 		},
 		{
 			MethodName: "InviteMember",

@@ -130,7 +130,10 @@ type TenantAdminServer struct {
 	inviteBaseURL string                   // accept-link origin (GIBSON_APP_URL); when empty no email is sent
 	inviteAPIURL  string                   // API-plane origin (GIBSON_PUBLIC_URL) the invitation email's CLI commands name; when empty the email points at Settings → CLI instead
 	reservedNames ReservedNamesProvider    // optional; GetReservedNames returns empty when nil
-	logger        *slog.Logger
+	// componentOwners moves the enrollment owner of an identity (gibson#568).
+	// Optional; when nil only the FGA owner tuple moves.
+	componentOwners ComponentOwnerStore
+	logger          *slog.Logger
 }
 
 // InvitationMailer sends the member-invitation accept-link email. The concrete
@@ -197,6 +200,9 @@ type TenantAdminConfig struct {
 	InviteAPIURL string
 	// ReservedNames is optional. When nil, GetReservedNames returns empty lists.
 	ReservedNames ReservedNamesProvider
+	// ComponentOwners is optional. When nil, a removal or a reassignment moves
+	// only the FGA owner tuple of an identity, not its enrollment owner.
+	ComponentOwners ComponentOwnerStore
 	// Logger is optional; falls back to slog.Default() when nil.
 	Logger *slog.Logger
 }
@@ -232,23 +238,24 @@ func NewTenantAdminServer(cfg TenantAdminConfig) (*TenantAdminServer, error) {
 		logger = slog.Default()
 	}
 	return &TenantAdminServer{
-		reader:        cfg.Reader,
-		writer:        cfg.Writer,
-		probeFac:      cfg.ProbeFactory,
-		auditor:       cfg.Auditor,
-		reloader:      cfg.Reloader,
-		svc:           cfg.SecretsService,
-		now:           now,
-		authorizer:    cfg.Authorizer,
-		idpClient:     cfg.IdPAdminClient,
-		orgResolver:   cfg.ZitadelOrgResolver,
-		roles:         cfg.Roles,
-		invitations:   cfg.Invitations,
-		inviteMailer:  cfg.InvitationMailer,
-		inviteBaseURL: cfg.InviteBaseURL,
-		inviteAPIURL:  cfg.InviteAPIURL,
-		reservedNames: cfg.ReservedNames,
-		logger:        logger,
+		reader:          cfg.Reader,
+		writer:          cfg.Writer,
+		probeFac:        cfg.ProbeFactory,
+		auditor:         cfg.Auditor,
+		reloader:        cfg.Reloader,
+		svc:             cfg.SecretsService,
+		now:             now,
+		authorizer:      cfg.Authorizer,
+		idpClient:       cfg.IdPAdminClient,
+		orgResolver:     cfg.ZitadelOrgResolver,
+		roles:           cfg.Roles,
+		invitations:     cfg.Invitations,
+		inviteMailer:    cfg.InvitationMailer,
+		inviteBaseURL:   cfg.InviteBaseURL,
+		inviteAPIURL:    cfg.InviteAPIURL,
+		reservedNames:   cfg.ReservedNames,
+		componentOwners: cfg.ComponentOwners,
+		logger:          logger,
 	}, nil
 }
 

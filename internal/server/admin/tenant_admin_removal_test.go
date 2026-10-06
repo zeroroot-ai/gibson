@@ -16,6 +16,9 @@ package admin
 import (
 	"context"
 	"errors"
+	"slices"
+	"sort"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -34,10 +37,109 @@ type removalAuthorizer struct {
 
 	stampErr     error
 	stampedCalls int
+
+	// The identity tuples (gibson#568): principalOwner holds the owner user
+	// of each principal, and principalTenant the tenant it belongs_to.
+	principalOwner  map[string]string
+	principalTenant map[string]string
 }
 
 func newRemovalAuthorizer() *removalAuthorizer {
-	return &removalAuthorizer{ownershipAuthorizer: newOwnershipAuthorizer()}
+	return &removalAuthorizer{
+		ownershipAuthorizer: newOwnershipAuthorizer(),
+		principalOwner:      map[string]string{},
+		principalTenant:     map[string]string{},
+	}
+}
+
+// enroll records an identity the way CreateAgentIdentity writes it: an
+// owner tuple and a belongs_to tuple.
+func (a *removalAuthorizer) enroll(principalID, ownerRef, tenantRef string) {
+	a.principalOwner[principalID] = ownerRef
+	a.principalTenant[principalID] = tenantRef
+}
+
+func (a *removalAuthorizer) Check(ctx context.Context, user, relation, object string) (bool, error) {
+	if relation == "belongs_to" {
+		return a.principalTenant[object] == user, nil
+	}
+	return a.ownershipAuthorizer.Check(ctx, user, relation, object)
+}
+
+func (a *removalAuthorizer) Write(ctx context.Context, tuples []authz.Tuple) error {
+	var rest []authz.Tuple
+	for _, t := range tuples {
+		if principalTypeOf(t.Object) != "" && t.Relation == "owner" {
+			a.principalOwner[t.Object] = t.User
+			continue
+		}
+		rest = append(rest, t)
+	}
+	return a.ownershipAuthorizer.Write(ctx, rest)
+}
+
+func (a *removalAuthorizer) Delete(ctx context.Context, tuples []authz.Tuple) error {
+	var rest []authz.Tuple
+	for _, t := range tuples {
+		if principalTypeOf(t.Object) != "" && t.Relation == "owner" {
+			if a.principalOwner[t.Object] == t.User {
+				delete(a.principalOwner, t.Object)
+			}
+			continue
+		}
+		rest = append(rest, t)
+	}
+	return a.ownershipAuthorizer.Delete(ctx, rest)
+}
+
+func (a *removalAuthorizer) ListObjects(_ context.Context, user, relation, objectType string) ([]string, error) {
+	if relation != "owner" {
+		return nil, nil
+	}
+	var out []string
+	for principal, owner := range a.principalOwner {
+		if owner == user && principalTypeOf(principal) == objectType {
+			out = append(out, principal)
+		}
+	}
+	return out, nil
+}
+
+func (a *removalAuthorizer) ListUsers(_ context.Context, _, object, relation string) ([]string, error) {
+	if relation != "owner" {
+		return nil, nil
+	}
+	if ft, ok := a.tenants[object]; ok && ft.owner != "" {
+		return []string{ft.owner}, nil
+	}
+	return nil, nil
+}
+
+func (a *removalAuthorizer) ListUsersOfType(_ context.Context, _, object, relation, _ string) ([]string, error) {
+	if relation != "owner" {
+		return nil, nil
+	}
+	if owner, ok := a.principalOwner[object]; ok {
+		return []string{owner}, nil
+	}
+	return nil, nil
+}
+
+// recordingOwnerStore records each enrollment owner move.
+type recordingOwnerStore struct {
+	moves map[string]string // principal -> new owner user id
+	err   error
+}
+
+func (r *recordingOwnerStore) ReassignOwner(_ context.Context, _, principalRef, toUserID string) (int64, error) {
+	if r.err != nil {
+		return 0, r.err
+	}
+	if r.moves == nil {
+		r.moves = map[string]string{}
+	}
+	r.moves[principalRef] = toUserID
+	return 1, nil
 }
 
 func (a *removalAuthorizer) WriteConditional(_ context.Context, _ authz.ConditionalTuple) error {
@@ -404,3 +506,162 @@ func TestRemoveMember_StampFailureIsNonFatal(t *testing.T) {
 // idpAdminClientCompileCheck pins that *membersIdPClient still satisfies
 // idp.AdminClient after the removal-recording additions above.
 var _ idp.AdminClient = (*membersIdPClient)(nil)
+
+// ---------------------------------------------------------------------------
+// The identities of a removed user (gibson#568)
+// ---------------------------------------------------------------------------
+
+// TestRemoveMember_MovesTheIdentitiesOfTheRemovedUserToTheCaller: a removed
+// user who enrolled an agent leaves no dead owner. The agent's owner tuple and
+// its enrollment owner move to the admin who removed the user, and an
+// identity of another tenant stays as it is.
+func TestRemoveMember_MovesTheIdentitiesOfTheRemovedUserToTheCaller(t *testing.T) {
+	az := newRemovalAuthorizer()
+	ft := newOwnershipTenant(ownCaller)
+	ft.member["user:carol-id"] = true
+	az.tenants[ownTenantID] = ft
+	az.enroll("agent_principal:a-1", "user:carol-id", ownTenantID)
+	az.enroll("tool_principal:t-1", "user:carol-id", ownTenantID)
+	az.enroll("agent_principal:other", "user:carol-id", "tenant:other")
+	idpC := &membersIdPClient{}
+	srv, _ := newRemovalTestServer(t, az, idpC)
+	owners := &recordingOwnerStore{}
+	srv.componentOwners = owners
+
+	resp, err := srv.RemoveMember(ctxWithTenant(t, ownTenant), &tenantv1.RemoveMemberRequest{UserId: "carol-id"})
+	if err != nil {
+		t.Fatalf("RemoveMember: %v", err)
+	}
+	callerID := strings.TrimPrefix(ownCaller, "user:")
+	if resp.GetNewOwnerUserId() != callerID {
+		t.Errorf("new_owner_user_id = %q, want the caller %q", resp.GetNewOwnerUserId(), callerID)
+	}
+	got := append([]string(nil), resp.GetReassignedPrincipalIds()...)
+	sort.Strings(got)
+	if want := []string{"agent_principal:a-1", "tool_principal:t-1"}; !slices.Equal(got, want) {
+		t.Errorf("reassigned = %v, want %v", got, want)
+	}
+	for _, p := range []string{"agent_principal:a-1", "tool_principal:t-1"} {
+		if az.principalOwner[p] != ownCaller {
+			t.Errorf("%s owner = %q, want the caller %q", p, az.principalOwner[p], ownCaller)
+		}
+		if owners.moves[p] != callerID {
+			t.Errorf("%s enrollment owner = %q, want %q", p, owners.moves[p], callerID)
+		}
+	}
+	if az.principalOwner["agent_principal:other"] != "user:carol-id" {
+		t.Errorf("an identity of another tenant must not move, owner = %q", az.principalOwner["agent_principal:other"])
+	}
+	if len(idpC.deletedHumanUsers) != 1 {
+		t.Errorf("the removal must still delete the account, got %d deletes", len(idpC.deletedHumanUsers))
+	}
+}
+
+// TestLeaveTenant_MovesTheIdentitiesOfTheCallerToTheOwner: a user who leaves
+// hands their identities to the tenant's Owner.
+func TestLeaveTenant_MovesTheIdentitiesOfTheCallerToTheOwner(t *testing.T) {
+	az := newRemovalAuthorizer()
+	ft := newOwnershipTenant("user:owner-x")
+	ft.member[ownCaller] = true
+	az.tenants[ownTenantID] = ft
+	az.enroll("agent_principal:a-1", ownCaller, ownTenantID)
+	srv, _ := newRemovalTestServer(t, az, &membersIdPClient{})
+	owners := &recordingOwnerStore{}
+	srv.componentOwners = owners
+
+	if _, err := srv.LeaveTenant(ctxWithTenant(t, ownTenant), &tenantv1.LeaveTenantRequest{}); err != nil {
+		t.Fatalf("LeaveTenant: %v", err)
+	}
+	if az.principalOwner["agent_principal:a-1"] != "user:owner-x" {
+		t.Errorf("owner = %q, want the tenant Owner", az.principalOwner["agent_principal:a-1"])
+	}
+	if owners.moves["agent_principal:a-1"] != "owner-x" {
+		t.Errorf("enrollment owner = %q, want owner-x", owners.moves["agent_principal:a-1"])
+	}
+}
+
+// TestRemoveMember_AnOwnerMoveErrorStopsBeforeTheAccountDelete: when an
+// identity cannot move, the account is not deleted, so a retry can finish.
+func TestRemoveMember_AnOwnerMoveErrorStopsBeforeTheAccountDelete(t *testing.T) {
+	az := newRemovalAuthorizer()
+	ft := newOwnershipTenant(ownCaller)
+	ft.member["user:carol-id"] = true
+	az.tenants[ownTenantID] = ft
+	az.enroll("agent_principal:a-1", "user:carol-id", ownTenantID)
+	idpC := &membersIdPClient{}
+	srv, _ := newRemovalTestServer(t, az, idpC)
+	srv.componentOwners = &recordingOwnerStore{err: errors.New("db down")}
+
+	_, err := srv.RemoveMember(ctxWithTenant(t, ownTenant), &tenantv1.RemoveMemberRequest{UserId: "carol-id"})
+	if got := grpcCodeOf(err); got != codes.Internal {
+		t.Fatalf("RemoveMember code = %v (err=%v), want Internal", got, err)
+	}
+	if len(idpC.deletedHumanUsers) != 0 {
+		t.Errorf("the account must stay when an identity did not move, got %+v", idpC.deletedHumanUsers)
+	}
+}
+
+func TestRemoveMember_RefusesTheCallerAsTarget(t *testing.T) {
+	az := newRemovalAuthorizer()
+	az.tenants[ownTenantID] = newOwnershipTenant("user:owner-x")
+	srv, _ := newRemovalTestServer(t, az, &membersIdPClient{})
+	_, err := srv.RemoveMember(ctxWithTenant(t, ownTenant), &tenantv1.RemoveMemberRequest{UserId: strings.TrimPrefix(ownCaller, "user:")})
+	if got := grpcCodeOf(err); got != codes.InvalidArgument {
+		t.Fatalf("RemoveMember code = %v (err=%v), want InvalidArgument", got, err)
+	}
+}
+
+func TestReassignAgentIdentity_MovesTheOwnerToATenantUser(t *testing.T) {
+	az := newRemovalAuthorizer()
+	ft := newOwnershipTenant(ownCaller)
+	ft.member["user:dave-id"] = true
+	az.tenants[ownTenantID] = ft
+	az.enroll("agent_principal:a-1", ownCaller, ownTenantID)
+	srv, _ := newRemovalTestServer(t, az, &membersIdPClient{})
+	owners := &recordingOwnerStore{}
+	srv.componentOwners = owners
+
+	_, err := srv.ReassignAgentIdentity(ctxWithTenant(t, ownTenant), &tenantv1.ReassignAgentIdentityRequest{
+		PrincipalId: "agent_principal:a-1", NewOwnerUserId: "dave-id",
+	})
+	if err != nil {
+		t.Fatalf("ReassignAgentIdentity: %v", err)
+	}
+	if az.principalOwner["agent_principal:a-1"] != "user:dave-id" {
+		t.Errorf("owner = %q, want user:dave-id", az.principalOwner["agent_principal:a-1"])
+	}
+	if owners.moves["agent_principal:a-1"] != "dave-id" {
+		t.Errorf("enrollment owner = %q, want dave-id", owners.moves["agent_principal:a-1"])
+	}
+}
+
+func TestReassignAgentIdentity_Refusals(t *testing.T) {
+	az := newRemovalAuthorizer()
+	ft := newOwnershipTenant(ownCaller)
+	ft.member["user:dave-id"] = true
+	az.tenants[ownTenantID] = ft
+	az.enroll("agent_principal:a-1", ownCaller, ownTenantID)
+	az.enroll("agent_principal:foreign", "user:x", "tenant:other")
+	srv, _ := newRemovalTestServer(t, az, &membersIdPClient{})
+	ctx := ctxWithTenant(t, ownTenant)
+
+	for name, tc := range map[string]struct {
+		req  *tenantv1.ReassignAgentIdentityRequest
+		want codes.Code
+	}{
+		"not a principal":         {&tenantv1.ReassignAgentIdentityRequest{PrincipalId: "tenant:acme", NewOwnerUserId: "dave-id"}, codes.InvalidArgument},
+		"a prefixed new owner":    {&tenantv1.ReassignAgentIdentityRequest{PrincipalId: "agent_principal:a-1", NewOwnerUserId: "user:dave-id"}, codes.InvalidArgument},
+		"another tenant identity": {&tenantv1.ReassignAgentIdentityRequest{PrincipalId: "agent_principal:foreign", NewOwnerUserId: "dave-id"}, codes.NotFound},
+		"a user of no tenant":     {&tenantv1.ReassignAgentIdentityRequest{PrincipalId: "agent_principal:a-1", NewOwnerUserId: "stranger"}, codes.InvalidArgument},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := srv.ReassignAgentIdentity(ctx, tc.req)
+			if got := grpcCodeOf(err); got != tc.want {
+				t.Fatalf("code = %v (err=%v), want %v", got, err, tc.want)
+			}
+		})
+	}
+	if az.principalOwner["agent_principal:a-1"] != ownCaller {
+		t.Errorf("a refused call must not move the owner, got %q", az.principalOwner["agent_principal:a-1"])
+	}
+}
