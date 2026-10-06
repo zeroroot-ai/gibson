@@ -111,10 +111,13 @@ func (f *fakeStore) UpdateMemberStatus(context.Context, string, string, bankstor
 
 // fakeLauncher records what the reconciler asked for.
 type fakeLauncher struct {
-	launched  []string
-	stopped   []string
-	launchErr error
-	stopErr   error
+	launched   []string
+	stopped    []string
+	suspended  []string
+	resumed    []string
+	launchErr  error
+	stopErr    error
+	suspendErr error
 }
 
 func (f *fakeLauncher) LaunchMember(_ context.Context, _ string, _ *bankstore.Bank, memberID string) (LaunchedMember, error) {
@@ -133,8 +136,21 @@ func (f *fakeLauncher) StopMember(_ context.Context, _ string, m *bankstore.Memb
 	return f.stopErr
 }
 
+func (f *fakeLauncher) SuspendMember(_ context.Context, _ string, m *bankstore.Member) error {
+	if f.suspendErr != nil {
+		return f.suspendErr
+	}
+	f.suspended = append(f.suspended, m.ID)
+	return nil
+}
+
+func (f *fakeLauncher) ResumeMember(_ context.Context, _ string, m *bankstore.Member) error {
+	f.resumed = append(f.resumed, m.ID)
+	return nil
+}
+
 // recordingEvents captures what a console would have seen.
-type recordingEvents struct{ launched, dead, draining, removed []string }
+type recordingEvents struct{ launched, dead, draining, removed, suspended, resumed []string }
 
 func (e *recordingEvents) MemberLaunched(_ context.Context, _ string, m *bankstore.Member) {
 	e.launched = append(e.launched, m.ID)
@@ -147,6 +163,12 @@ func (e *recordingEvents) MemberDraining(_ context.Context, _ string, m *banksto
 }
 func (e *recordingEvents) MemberRemoved(_ context.Context, _ string, m *bankstore.Member) {
 	e.removed = append(e.removed, m.ID)
+}
+func (e *recordingEvents) MemberSuspended(_ context.Context, _ string, m *bankstore.Member) {
+	e.suspended = append(e.suspended, m.ID)
+}
+func (e *recordingEvents) MemberResumed(_ context.Context, _ string, m *bankstore.Member) {
+	e.resumed = append(e.resumed, m.ID)
 }
 
 var testNow = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -521,6 +543,12 @@ func (c *countingLauncher) LaunchMember(_ context.Context, _ string, b *bankstor
 	return LaunchedMember{SandboxID: "sbx-" + memberID}, nil
 }
 func (c *countingLauncher) StopMember(context.Context, string, *bankstore.Member) error { return nil }
+func (c *countingLauncher) SuspendMember(context.Context, string, *bankstore.Member) error {
+	return nil
+}
+func (c *countingLauncher) ResumeMember(context.Context, string, *bankstore.Member) error {
+	return nil
+}
 
 func TestReconcileTenant_ListFailureIsReported(t *testing.T) {
 	store := newFakeStore()

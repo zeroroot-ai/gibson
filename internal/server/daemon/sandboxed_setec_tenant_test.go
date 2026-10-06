@@ -85,3 +85,36 @@ func TestSetecClient_EachRequestNamesTheTenant(t *testing.T) {
 		t.Errorf("a refused call reached setec: %d requests", len(rec.tenants))
 	}
 }
+
+func (r *recordingSetec) Suspend(_ context.Context, in *setecv1.SuspendRequest, _ ...grpc.CallOption) (*setecv1.SuspendResponse, error) {
+	r.tenants = append(r.tenants, in.GetTenant())
+	return &setecv1.SuspendResponse{}, nil
+}
+
+func (r *recordingSetec) Resume(_ context.Context, in *setecv1.ResumeRequest, _ ...grpc.CallOption) (*setecv1.ResumeResponse, error) {
+	r.tenants = append(r.tenants, in.GetTenant())
+	return &setecv1.ResumeResponse{}, nil
+}
+
+// Suspend and resume name the tenant of the member, and refuse a call with
+// no tenant (gibson#809).
+func TestSetecClient_SuspendAndResumeNameTheTenant(t *testing.T) {
+	ctx := context.Background()
+	rec := &recordingSetec{}
+	c := &setecClient{inner: rec}
+	if err := c.Suspend(ctx, "acme", "sbx-1"); err != nil {
+		t.Fatalf("Suspend: %v", err)
+	}
+	if err := c.Resume(ctx, "acme", "sbx-1"); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if len(rec.tenants) != 2 || rec.tenants[0] != "acme" || rec.tenants[1] != "acme" {
+		t.Errorf("tenants = %v, want [acme acme]", rec.tenants)
+	}
+	if err := c.Suspend(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
+		t.Errorf("Suspend with no tenant: err = %v", err)
+	}
+	if err := c.Resume(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
+		t.Errorf("Resume with no tenant: err = %v", err)
+	}
+}

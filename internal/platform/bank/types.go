@@ -121,12 +121,17 @@ const (
 	MemberDraining MemberState = "draining"
 	// MemberDead — heartbeats stopped or the sandbox died.
 	MemberDead MemberState = "dead"
+	// MemberSuspended — setec checkpointed the member after it was idle, and
+	// it sends no heartbeat. It keeps its workspace and costs no compute. The
+	// reconciler resumes it when jobs wait, and recycles it after 7 days
+	// (ADR-0119, gibson#809).
+	MemberSuspended MemberState = "suspended"
 )
 
 // IsMemberState reports whether s names a member state.
 func IsMemberState(s MemberState) bool {
 	switch s {
-	case MemberLaunching, MemberNeedsSignIn, MemberIdle, MemberBusy, MemberDraining, MemberDead:
+	case MemberLaunching, MemberNeedsSignIn, MemberIdle, MemberBusy, MemberDraining, MemberDead, MemberSuspended:
 		return true
 	default:
 		return false
@@ -173,8 +178,12 @@ type Member struct {
 	ActiveJobIDs  []string
 	ClaudeVersion string
 	LastHeartbeat time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// IdleSince is when the member last reported no job in flight. Zero
+	// means it has work. The reconciler suspends a member idle for 10
+	// minutes (ADR-0119).
+	IdleSince time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CreateInput declares a new bank. The store validates it and fills the

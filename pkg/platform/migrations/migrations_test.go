@@ -13,18 +13,19 @@ import (
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 13: 009 is session_context (component session-context store,
+	// 14: 009 is session_context (component session-context store,
 	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0119,
 	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
 	// provider_config_meta, the default-provider pointer that shadowed
 	// provider_configs.is_default (gibson#505), 013 is timeline_events (the
-	// full history of the Timeline, ADR-0163, gibson#786).
+	// full history of the Timeline, ADR-0163, gibson#786), 014 is the idle
+	// time of a bank member (ADR-0119, gibson#809).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 13 {
-		t.Errorf("tenant: expected 13 up.sql files, got %d", upCount)
+	if upCount != 14 {
+		t.Errorf("tenant: expected 14 up.sql files, got %d", upCount)
 	}
-	if downCount != 13 {
-		t.Errorf("tenant: expected 13 down.sql files, got %d", downCount)
+	if downCount != 14 {
+		t.Errorf("tenant: expected 14 down.sql files, got %d", downCount)
 	}
 }
 
@@ -104,8 +105,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 13 {
-		t.Errorf("TenantMaxVersion: got %d, want 13", v)
+	if v != 14 {
+		t.Errorf("TenantMaxVersion: got %d, want 14", v)
 	}
 }
 

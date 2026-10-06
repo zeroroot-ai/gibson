@@ -62,3 +62,9 @@ func NewSetecAgentLauncher(_ config.SandboxConfig, _ setecSVIDSource, _ trace.Tr
 func NewSetecIdentityVerifier(_ config.SandboxConfig, _ setecSVIDSource) (harness.SandboxIdentityVerifier, error) {
 	return nil, nil
 }
+
+// newSetecSuspender returns (nil, nil) in a build without setec: a bank member
+// is never launched there, so none is suspended.
+func newSetecSuspender(_ config.SandboxConfig, _ setecSVIDSource) (sandboxSuspender, error) {
+	return nil, nil
+}

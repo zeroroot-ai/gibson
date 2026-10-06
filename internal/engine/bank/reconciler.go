@@ -42,6 +42,14 @@ type MemberLauncher interface {
 	// StopMember ends a member's sandbox. It is called after the member has
 	// drained, so it is a teardown, not an interruption.
 	StopMember(ctx context.Context, tenantID string, m *bankstore.Member) error
+
+	// SuspendMember asks setec to checkpoint the sandbox of an idle member
+	// and release its microVM. The member keeps its workspace (ADR-0119).
+	SuspendMember(ctx context.Context, tenantID string, m *bankstore.Member) error
+
+	// ResumeMember asks setec to bring a suspended member back. The member
+	// reports again on its own, so its next heartbeat sets its state.
+	ResumeMember(ctx context.Context, tenantID string, m *bankstore.Member) error
 }
 
 // LaunchedMember is what a launch produced: the mission that backs the member
@@ -105,6 +113,8 @@ type Events interface {
 	MemberDead(ctx context.Context, tenantID string, m *bankstore.Member)
 	MemberDraining(ctx context.Context, tenantID string, m *bankstore.Member)
 	MemberRemoved(ctx context.Context, tenantID string, m *bankstore.Member)
+	MemberSuspended(ctx context.Context, tenantID string, m *bankstore.Member)
+	MemberResumed(ctx context.Context, tenantID string, m *bankstore.Member)
 }
 
 // Config is the constructor input.
@@ -120,9 +130,23 @@ type Config struct {
 	// LaunchTimeout is how long a member that has never reported may take to
 	// come up. Zero takes DefaultLaunchTimeout.
 	LaunchTimeout time.Duration
+	// IdleSuspendAfter is how long a member may have no job before the
+	// reconciler suspends it. Zero takes DefaultIdleSuspendAfter.
+	IdleSuspendAfter time.Duration
+	// SuspendedRecycleAfter is how long a member may stay suspended before
+	// the reconciler stops it. Zero takes DefaultSuspendedRecycleAfter.
+	SuspendedRecycleAfter time.Duration
 	// Now is the clock. Tests replace it; production leaves it nil.
 	Now func() time.Time
 }
+
+// DefaultIdleSuspendAfter is the idle time after which a member is suspended
+// (ADR-0119: "after 10 minutes with no work and no open exec").
+const DefaultIdleSuspendAfter = 10 * time.Minute
+
+// DefaultSuspendedRecycleAfter is how long a suspended member is kept
+// (ADR-0119: "A suspended member is kept 7 days, then recycled").
+const DefaultSuspendedRecycleAfter = 7 * 24 * time.Hour
 
 // DefaultHeartbeatTimeout is three heartbeat intervals. A member reports every
 // ten seconds, so a single missed report is a hiccup and three is a death.
@@ -145,6 +169,8 @@ type Reconciler struct {
 	logger        *slog.Logger
 	heartbeat     time.Duration
 	launchTimeout time.Duration
+	idleAfter     time.Duration
+	recycleAfter  time.Duration
 	now           func() time.Time
 }
 
@@ -170,13 +196,20 @@ func New(cfg Config) (*Reconciler, error) {
 	if cfg.LaunchTimeout <= 0 {
 		cfg.LaunchTimeout = DefaultLaunchTimeout
 	}
+	if cfg.IdleSuspendAfter <= 0 {
+		cfg.IdleSuspendAfter = DefaultIdleSuspendAfter
+	}
+	if cfg.SuspendedRecycleAfter <= 0 {
+		cfg.SuspendedRecycleAfter = DefaultSuspendedRecycleAfter
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
 	return &Reconciler{
 		store: cfg.Store, launcher: cfg.Launcher, jobs: cfg.Jobs, events: cfg.Events,
 		logger:    cfg.Logger.With("component", "bank_reconciler"),
-		heartbeat: cfg.HeartbeatTimeout, launchTimeout: cfg.LaunchTimeout, now: cfg.Now,
+		heartbeat: cfg.HeartbeatTimeout, launchTimeout: cfg.LaunchTimeout,
+		idleAfter: cfg.IdleSuspendAfter, recycleAfter: cfg.SuspendedRecycleAfter, now: cfg.Now,
 	}, nil
 }
 
@@ -218,7 +251,20 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 
 	var failures []error
 	live := make([]*bankstore.Member, 0, len(members))
+	var suspended []*bankstore.Member
 	for _, m := range members {
+		// A suspended member sends no heartbeat, so it is not judged dead. It
+		// is recycled after the keep time instead (ADR-0119).
+		if m.State == bankstore.MemberSuspended {
+			if r.now().Sub(m.UpdatedAt) > r.recycleAfter {
+				if rerr := r.recycle(ctx, tenantID, m); rerr != nil {
+					failures = append(failures, rerr)
+				}
+				continue
+			}
+			suspended = append(suspended, m)
+			continue
+		}
 		if r.isDead(m) {
 			if derr := r.markDead(ctx, tenantID, m); derr != nil {
 				failures = append(failures, derr)
@@ -238,9 +284,11 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 		live = append(live, m)
 	}
 
-	// A bank holds tens of members, never more than int32 can count, so the
-	// narrowing cannot overflow; it is spelled once so the comparisons read.
-	running := int32(len(live)) //nolint:gosec // bounded by the bank's desired count, an int32
+	// A suspended member is still a member of the bank: it counts toward the
+	// running count, so the reconciler does not launch a new member while one
+	// waits to resume. A bank holds tens of members, never more than int32
+	// can count, so the narrowing cannot overflow.
+	running := int32(len(live) + len(suspended)) //nolint:gosec // bounded by the bank's desired count, an int32
 	target, terr := r.targetCount(ctx, tenantID, b)
 	if terr != nil {
 		// Without the queue length the reconciler keeps the desired count,
@@ -251,18 +299,103 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 	}
 	switch {
 	case running > target:
-		if derr := r.drain(ctx, tenantID, live, running-target); derr != nil {
-			failures = append(failures, derr)
+		// The excess goes from the suspended members first: they serve no job.
+		excess := running - target
+		for excess > 0 && len(suspended) > 0 {
+			if rerr := r.recycle(ctx, tenantID, suspended[0]); rerr != nil {
+				failures = append(failures, rerr)
+			}
+			suspended = suspended[1:]
+			excess--
+		}
+		if excess > 0 {
+			if derr := r.drain(ctx, tenantID, live, excess); derr != nil {
+				failures = append(failures, derr)
+			}
 		}
 	case running < target:
 		if lerr := r.launch(ctx, tenantID, b, target-running); lerr != nil {
 			failures = append(failures, lerr)
 		}
 	}
+	if serr := r.suspendOrResume(ctx, tenantID, b, live, suspended); serr != nil {
+		failures = append(failures, serr)
+	}
 	if cerr := r.closeStaleJobs(ctx, tenantID, b); cerr != nil {
 		failures = append(failures, cerr)
 	}
 	return errors.Join(failures...)
+}
+
+// suspendOrResume applies the idle rule of ADR-0119. When jobs wait, it
+// resumes one suspended member for each job cap of waiting jobs. When no job
+// waits, it suspends each idle member that has had no job for the idle time.
+// The queue is read once; a failed read changes no member.
+func (r *Reconciler) suspendOrResume(
+	ctx context.Context, tenantID string, b *bankstore.Bank, live, suspended []*bankstore.Member,
+) error {
+	waiting, err := r.jobs.Unassigned(ctx, tenantID, b.ID)
+	if err != nil {
+		return fmt.Errorf("count the waiting jobs of bank %s: %w", b.ID, err)
+	}
+	var failures []error
+	if waiting > 0 {
+		for _, m := range suspended[:min(len(suspended), int(resumeCount(waiting, b.MaxJobsInFlight)))] {
+			if rerr := r.launcher.ResumeMember(ctx, tenantID, m); rerr != nil {
+				failures = append(failures, fmt.Errorf("resume member %s: %w", m.ID, rerr))
+				continue
+			}
+			r.logger.InfoContext(ctx, "bank member resumed", "member_id", m.ID, "bank_id", m.BankID, "waiting", waiting)
+			if r.events != nil {
+				r.events.MemberResumed(ctx, tenantID, m)
+			}
+		}
+		return errors.Join(failures...)
+	}
+	for _, m := range live {
+		if !r.idleLongEnough(m) {
+			continue
+		}
+		if serr := r.launcher.SuspendMember(ctx, tenantID, m); serr != nil {
+			failures = append(failures, fmt.Errorf("suspend member %s: %w", m.ID, serr))
+			continue
+		}
+		updated, uerr := r.store.SetMemberState(ctx, tenantID, m.ID, bankstore.MemberSuspended)
+		if uerr != nil {
+			failures = append(failures, fmt.Errorf("record suspended member %s: %w", m.ID, uerr))
+			continue
+		}
+		r.logger.InfoContext(ctx, "bank member suspended", "member_id", m.ID, "bank_id", m.BankID)
+		if r.events != nil {
+			r.events.MemberSuspended(ctx, tenantID, updated)
+		}
+	}
+	return errors.Join(failures...)
+}
+
+// idleLongEnough reports a member with no job in flight for the idle time.
+func (r *Reconciler) idleLongEnough(m *bankstore.Member) bool {
+	return m.State == bankstore.MemberIdle && m.JobsInFlight == 0 &&
+		!m.IdleSince.IsZero() && r.now().Sub(m.IdleSince) >= r.idleAfter
+}
+
+// resumeCount is the number of members to resume for waiting jobs: one for
+// each job cap of waiting jobs, rounded up.
+func resumeCount(waiting int64, jobCap int32) int64 {
+	if jobCap < 1 {
+		jobCap = 1
+	}
+	return (waiting + int64(jobCap) - 1) / int64(jobCap)
+}
+
+// recycle stops a suspended member and removes it. The next pass launches a
+// new member when the bank count needs one (ADR-0119).
+func (r *Reconciler) recycle(ctx context.Context, tenantID string, m *bankstore.Member) error {
+	if err := r.launcher.StopMember(ctx, tenantID, m); err != nil {
+		return fmt.Errorf("stop suspended member %s: %w", m.ID, err)
+	}
+	r.logger.InfoContext(ctx, "suspended bank member recycled", "member_id", m.ID, "bank_id", m.BankID)
+	return r.removeMember(ctx, tenantID, m)
 }
 
 // targetCount is the number of members the bank must run in this pass.
