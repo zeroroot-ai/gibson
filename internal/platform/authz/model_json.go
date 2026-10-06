@@ -21,9 +21,8 @@ import (
 )
 
 // ModelJSON returns the embedded OpenFGA authorization model as the JSON the
-// /authorization-models API accepts. The marshal options match
-// cmd/gen-fga-model-json byte for byte, so output from either path is
-// interchangeable.
+// /authorization-models API accepts. `gibson dump-fga-model` prints it for
+// the gibson-fga-init Job of the chart.
 func ModelJSON() (string, error) {
 	return modelJSONFromDSL(modelDSL)
 }

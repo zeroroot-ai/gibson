@@ -78,8 +78,8 @@ The old separately-versioned OCI artifact (`internal-authz-registry:<tag>` + cha
 last manual publish (e.g. `SetSignupProgress`).
 
 The OpenFGA model itself is hand-maintained at `internal/platform/authz/model.fga`
-(compiled to the JSON `gibson-fga-init` loads by `cmd/gen-fga-model-json`,
-which the Helm chart runs to produce the init ConfigMap); the registry
+(compiled to the JSON that the `gibson-fga-init` Job loads by `gibson dump-fga-model`,
+which the Helm chart runs from the daemon image); the registry
 generator no longer emits an FGA stub.
 
 These are **generated artifacts** — do NOT hand-edit them. Run regen instead.

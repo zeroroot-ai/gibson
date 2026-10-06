@@ -28,7 +28,7 @@ import (
 
 // modelDSL is the authoritative OpenFGA model, embedded so the subject-type
 // rules cannot drift from the model the FGA store is loaded with. model.fga is
-// the same file cmd/gen-fga-model-json renders into the Helm chart.
+// the same file `gibson dump-fga-model` renders for the gibson-fga-init Job.
 //
 //go:embed model.fga
 var modelDSL string

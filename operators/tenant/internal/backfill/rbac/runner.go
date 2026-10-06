@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package rbac implements the per-tenant RBAC backfill that previously
-// ran as a standalone CLI (cmd/backfill-rbac/) under a Helm pre-upgrade
-// hook. It is now callable both as a startup Runnable inside the operator
-// (internal/startup/backfills.go) and as the same standalone CLI.
+// Package rbac implements the per-tenant RBAC backfill. It runs as a
+// startup Runnable inside the operator (internal/startup/backfills.go).
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 5.1).
 package rbac

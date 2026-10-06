@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package tiermigrate implements the per-tenant tier migration that
-// previously ran as a standalone CLI (cmd/migrate-tenant-tiers/) under
-// a Helm pre-upgrade hook. It is now callable both as a startup
-// Runnable inside the operator (internal/startup/backfills.go) and as
-// the same standalone CLI.
+// Package tiermigrate implements the per-tenant tier migration. It runs as
+// a startup Runnable inside the operator (internal/startup/backfills.go).
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 5.3).
 package tiermigrate
