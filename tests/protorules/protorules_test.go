@@ -23,6 +23,7 @@ import (
 	// TestEachTrackedProtoIsLoaded fails when a tracked proto file is not in
 	// the registry, so this list cannot go stale with no signal.
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/agentconsole/v1"
+	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/discovery/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"

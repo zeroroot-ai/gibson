@@ -388,7 +388,7 @@ enum SignupStepState {
 // GetSignupStepRequest names one signup attempt.
 message GetSignupStepRequest {
   // attempt_id is the UUID of the signup attempt.
-  string attempt_id = 1;
+  string attempt_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // GetSignupStepResponse carries the state of the step.
