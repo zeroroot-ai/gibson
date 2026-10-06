@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
@@ -29,7 +30,7 @@ import (
 // event the second publish enters during that hold, which the in-flight
 // counter catches. Under the ordered drainer the second publish waits.
 func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
-	eng := brain.NewEngine("acme")
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
 	// The same systems the daemon installs (brain.Registry): the completion
 	// system is what turns the failed work into MissionDone inside the tick.
 	for _, sys := range brain.ExecutorSystems() {

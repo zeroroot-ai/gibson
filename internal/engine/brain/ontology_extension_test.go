@@ -120,7 +120,7 @@ func TestOntologyExtensionProposed_IsPerTenant(t *testing.T) {
 // folding explicitly via e.Tick() so assertions never race a background
 // ticker.
 func newTestEngine() *Engine {
-	return NewEngine("tenant-1")
+	return NewEngine("tenant-1", &memTimelineStore{})
 }
 
 func TestProposeOntologyExtension_InvalidIdentifierIsRejectedFailClosed(t *testing.T) {
@@ -183,7 +183,7 @@ func TestProposeOntologyExtension_ValidProposalIsObservedAndCounted(t *testing.T
 // belief_world_substrate_test's equivalent assertion pattern for
 // BeliefSubstrate.
 func TestOntologyDiscoveryEngine_EngineSatisfiesTheSeam(t *testing.T) {
-	var seam OntologyDiscoveryEngine = NewEngine("tenant-1")
+	var seam OntologyDiscoveryEngine = NewEngine("tenant-1", &memTimelineStore{})
 	err := seam.ProposeOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "Container", "agent-1", "a claim")
 	require.NoError(t, err)
 }

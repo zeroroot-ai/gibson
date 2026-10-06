@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // hypothesisEvents is a small Timeline with two hypotheses. The second event
@@ -41,7 +42,7 @@ func projectHypotheses(t *testing.T, evs []brain.Event) []brain.HypothesisSnapsh
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	eng := reg.For("acme")
 	for _, ev := range evs {
 		eng.Submit(ev)

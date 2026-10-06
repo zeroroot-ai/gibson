@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -45,7 +46,7 @@ func awaitOpenBets(ctx context.Context, t *testing.T, srv *worldServer, want int
 func TestListOpenBets_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
@@ -73,7 +74,7 @@ func TestListOpenBets_TenantScoped(t *testing.T) {
 func TestListOpenBets_ReturnsClaimProposerConfidenceEvidenceRunID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
@@ -114,7 +115,7 @@ func TestListOpenBets_ReturnsClaimProposerConfidenceEvidenceRunID(t *testing.T) 
 func TestListOpenBets_ExcludesSettled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
@@ -140,7 +141,7 @@ func TestListOpenBets_ExcludesSettled(t *testing.T) {
 func TestListOpenBets_ExcludesHypothesesWithNoHypothesisID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
@@ -162,7 +163,7 @@ func TestListOpenBets_ExcludesHypothesesWithNoHypothesisID(t *testing.T) {
 func TestSettleBetByHITL_TruePositive_Settles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -202,7 +203,7 @@ func TestSettleBetByHITL_TruePositive_Settles(t *testing.T) {
 func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -228,7 +229,7 @@ func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 func TestSettleBetByHITL_Dismiss_LabelOnlyNoSettle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -273,7 +274,7 @@ func TestSettleBetByHITL_Dismiss_LabelOnlyNoSettle(t *testing.T) {
 func TestSettleBetByHITL_InvalidVerdict_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -289,7 +290,7 @@ func TestSettleBetByHITL_InvalidVerdict_Errors(t *testing.T) {
 func TestSettleBetByHITL_MissingHypothesisID_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -306,7 +307,7 @@ func TestSettleBetByHITL_MissingHypothesisID_Errors(t *testing.T) {
 func TestSettleBetByHITL_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	if _, err := srv.SettleBetByHITL(context.Background(), &worldpb.SettleBetByHITLRequest{

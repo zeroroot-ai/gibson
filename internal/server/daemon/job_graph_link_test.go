@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
@@ -150,7 +151,7 @@ func TestJobGraphLink_LogsTheInputsItLeftOut(t *testing.T) {
 // registry, so a test that only builds a jobGraphLink by hand never touches
 // them: the submit path and the findings projection both stay unproven.
 func TestNewJobGraphLink_ReadsFindingsFromTheTenantWorld(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	l := newJobGraphLink(reg, testObsLogger().Slog())
 	if l.submit == nil || l.findings == nil {
 		t.Fatal("newJobGraphLink left a seam nil")
@@ -193,7 +194,7 @@ func seedFindingsWorld(t *testing.T, eng *brain.Engine, want int, evs ...brain.E
 func TestOpenFindingsResolver_ScopesToTheRunsTarget(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	eng := reg.For("acme")
 
 	seedFindingsWorld(t, eng, 3,
@@ -219,7 +220,7 @@ func TestOpenFindingsResolver_ScopesToTheRunsTarget(t *testing.T) {
 func TestOpenFindingsResolver_RefusesAnUnknownRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	_, err := openFindingsResolver(reg).OpenFindings(ctx, "acme", "run-nope")
 	if err == nil {
@@ -233,7 +234,7 @@ func TestOpenFindingsResolver_RefusesAnUnknownRun(t *testing.T) {
 func TestOpenFindingsResolver_RefusesAnEmptyRunID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := openFindingsResolver(brain.NewRegistry(ctx)).OpenFindings(ctx, "acme", ""); err == nil {
+	if _, err := openFindingsResolver(brain.NewRegistry(ctx, braintest.StoreFactory())).OpenFindings(ctx, "acme", ""); err == nil {
 		t.Fatal("a job with no mission run has no target to scope by")
 	}
 }
@@ -243,7 +244,7 @@ func TestOpenFindingsResolver_RefusesAnEmptyRunID(t *testing.T) {
 func TestOpenFindingsResolver_NoOpenFindingsIsNotAnError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	eng := reg.For("acme")
 
 	seedFindingsWorld(t, eng, 1,
@@ -264,7 +265,7 @@ func TestOpenFindingsResolver_NoOpenFindingsIsNotAnError(t *testing.T) {
 func TestOpenFindingsResolver_DoesNotCrossTenants(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	seedFindingsWorld(t, reg.For("acme"), 1,
 		brain.MissionCreated{ID: "run-1", TenantID: "acme", TargetID: "target-a"},

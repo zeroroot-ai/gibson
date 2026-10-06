@@ -12,7 +12,7 @@ import (
 // engineWithJoin wires scheduler + join + a dispatcher whose results are JSON
 // objects, so REDUCE and CUSTOM have something structured to read.
 func engineWithJoin(fails map[string]bool, results map[string]string) *Engine {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(JoinSystem)
 	e.AddSystem(func(w *World) []Event {

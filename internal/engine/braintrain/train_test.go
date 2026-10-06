@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // TestRowsFromWorld_LabelledFindingBecomesARow mirrors the end-to-end case
@@ -15,7 +16,7 @@ import (
 // contradiction raises a Finding, a reviewer labels it true_positive, and the
 // World yields one row with the evidence variables and both outcomes true.
 func TestRowsFromWorld_LabelledFindingBecomesARow(t *testing.T) {
-	e := brain.NewEngine("acme")
+	e := brain.NewEngine("acme", braintest.NewMemTimelineStore())
 	e.AddSystem(brain.SurpriseFindingSystem)
 	e.Submit(brain.HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "AAAA", OpenPorts: []int{22},
 		Services: map[int]brain.ServiceInfo{22: {Name: "ssh"}}})

@@ -9,7 +9,7 @@ import (
 
 // richCatalogEngine offers an agent, a tool, and a plugin in the catalog.
 func richCatalogEngine(llm DeciderLLM) (*Engine, *DeciderWorker) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, llm, func(string) []Capability {
 		return []Capability{
 			{Kind: "agent", Name: "exploit"},

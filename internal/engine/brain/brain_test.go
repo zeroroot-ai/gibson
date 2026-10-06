@@ -43,7 +43,7 @@ func TestWorld_FoldAndReplay(t *testing.T) {
 // TestEngine_TickAppliesAndFolds proves the clock-tick loop drains the intake
 // queue into the Timeline and folds it into the World (sweep-to-quiescence).
 func TestEngine_TickAppliesAndFolds(t *testing.T) {
-	e := NewEngine("tenant-1")
+	e := NewEngine("tenant-1", &memTimelineStore{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", OpenPorts: []int{22}})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.2", OpenPorts: []int{443}})
 
@@ -61,7 +61,7 @@ func TestEngine_TickAppliesAndFolds(t *testing.T) {
 // TestEngine_RunDrainsAndStops proves Run applies submitted events on its ticker
 // and performs a final drain on cancellation.
 func TestEngine_RunDrainsAndStops(t *testing.T) {
-	e := NewEngine("tenant-1")
+	e := NewEngine("tenant-1", &memTimelineStore{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { e.Run(ctx); close(done) }()

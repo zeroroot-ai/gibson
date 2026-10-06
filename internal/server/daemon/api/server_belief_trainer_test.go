@@ -23,6 +23,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -53,7 +54,7 @@ func (f *fakeWorlds) For(tenant string) *brain.Engine {
 	if e, ok := f.engines[tenant]; ok {
 		return e
 	}
-	e := brain.NewEngine(tenant)
+	e := brain.NewEngine(tenant, braintest.NewMemTimelineStore())
 	f.engines[tenant] = e
 	return e
 }

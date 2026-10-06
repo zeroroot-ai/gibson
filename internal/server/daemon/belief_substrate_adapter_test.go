@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -43,7 +44,7 @@ func awaitBelief(ctx context.Context, t *testing.T, sub brain.BeliefSubstrate, r
 func TestTenantRoutedBeliefSubstrate_RoutesEachCallByContextTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sub := newTenantRoutedBeliefSubstrate(registry)
 
 	ref := brain.NodeRef{Kind: brain.NodeKindClaim, ID: "shared-id"} // same ref, two tenants
@@ -68,7 +69,7 @@ func TestTenantRoutedBeliefSubstrate_RoutesEachCallByContextTenant(t *testing.T)
 func TestTenantRoutedBeliefSubstrate_NoTenantInContext_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sub := newTenantRoutedBeliefSubstrate(registry)
 	ref := brain.NodeRef{Kind: brain.NodeKindClaim, ID: "x"}
 
@@ -89,7 +90,7 @@ func TestTenantRoutedBeliefSubstrate_NoTenantInContext_Errors(t *testing.T) {
 func TestTenantRoutedBeliefSubstrate_WrapsDelegateErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sub := newTenantRoutedBeliefSubstrate(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 
@@ -116,7 +117,7 @@ func TestTenantRoutedBeliefSubstrate_WrapsDelegateErrors(t *testing.T) {
 func TestWirePlaceBetBeliefSubstrate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	callback := harness.NewCallbackManager(harness.CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	wirePlaceBetBeliefSubstrate(callback, registry)

@@ -83,6 +83,13 @@ func (l lazyTimelinePool) For(ctx context.Context, tenant auth.TenantID) (*datap
 	return conn, nil
 }
 
+// brainStoreFactory is the store factory of each brain registry of the daemon.
+// It reads the data-plane pool at each call, so a registry made before the
+// pool starts builds no engine until the pool is up.
+func (d *daemonImpl) brainStoreFactory() brain.StoreFactory {
+	return timelineStoreFactory(lazyTimelinePool{pool: func() timelinePoolForer { return d.pool }}, d.logger.Slog())
+}
+
 // timelinePoolForer is the narrow interface timelineStoreFactory needs from
 // the data-plane pool. It is satisfied by *datapool.pool (pool_impl.go) and
 // can be faked cheaply in tests without constructing a full Pool.

@@ -17,7 +17,7 @@ import (
 func historyEngine(t *testing.T) (*Engine, *memTimelineStore) {
 	t.Helper()
 	store := &memTimelineStore{}
-	e := NewEngine("t").WithStore(store).WithSnapshotCadence(2)
+	e := NewEngine("t", store).WithSnapshotCadence(2)
 	e.Submit(MissionStarted{ID: "A", Goal: "g"})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", MissionID: "A"})
 	e.Submit(MissionStarted{ID: "B", Goal: "g"})
@@ -50,7 +50,7 @@ func TestEngine_HistoryIsTheFullOrderedHistoryAfterATrim(t *testing.T) {
 
 	// A new engine on the same store hydrates the snapshot and the tail. Its
 	// in-memory Timeline holds only the tail, and its history is still full.
-	fresh := NewEngine("t").WithStore(e.store)
+	fresh := NewEngine("t", e.store)
 	require.NoError(t, fresh.Hydrate(ctx))
 	require.Less(t, len(fresh.Events()), 7, "the in-memory Timeline of a hydrated engine is the tail")
 	freshHistory, err := fresh.History(ctx)
@@ -88,37 +88,6 @@ func TestEngine_HistoryFrameAtFoldsTheFullHistory(t *testing.T) {
 	assert.Len(t, missionB.Snapshot(), 1)
 }
 
-// An engine with no store never trims, so its in-memory Timeline is the full
-// history and the frame methods read it.
-func TestEngine_HistoryOfAnEngineWithNoStoreIsItsTimeline(t *testing.T) {
-	e := NewEngine("t")
-	e.Submit(MissionStarted{ID: "A", Goal: "g"})
-	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.1", MissionID: "A"})
-	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.2"})
-	e.Tick()
-	ctx := context.Background()
-
-	history, err := e.History(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, e.Events(), history)
-
-	missionA, err := e.MissionHistory(ctx, "A")
-	require.NoError(t, err)
-	assert.Equal(t, e.MissionEvents("A"), missionA)
-
-	frame, seq, total, err := e.HistoryFrameAt(ctx, "", 2)
-	require.NoError(t, err)
-	assert.Equal(t, 2, seq)
-	assert.Equal(t, 3, total)
-	assert.Equal(t, e.FrameAt(2).Snapshot(), frame.Snapshot())
-
-	scoped, seq, total, err := e.HistoryFrameAt(ctx, "A", 9)
-	require.NoError(t, err)
-	assert.Equal(t, 2, seq)
-	assert.Equal(t, 2, total)
-	assert.Equal(t, e.MissionFrameAt("A", 2).Snapshot(), scoped.Snapshot())
-}
-
 // historyFailStore fails each history read.
 type historyFailStore struct{ memTimelineStore }
 
@@ -130,7 +99,7 @@ func (*historyFailStore) LoadHistory(context.Context, string) ([]Event, error) {
 
 // A history read that fails is an error for the reader, never a short history.
 func TestEngine_HistoryReturnsTheStoreError(t *testing.T) {
-	e := NewEngine("t").WithStore(&historyFailStore{})
+	e := NewEngine("t", &historyFailStore{})
 	ctx := context.Background()
 
 	_, err := e.History(ctx)

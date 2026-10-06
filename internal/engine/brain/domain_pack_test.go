@@ -172,7 +172,7 @@ func TestDomainPack_MutatingSnapshotNeverAliasesWorldState(t *testing.T) {
 // locked-wrapper counterpart to World.DomainPackSnapshot), mirroring
 // TestEngine_AgentToolCallsAndFlightRecorderPolicy.
 func TestEngine_DomainPacks(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(DomainPackEnabled{Name: "main", Version: 1})
 	e.Tick()
 

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -64,7 +65,7 @@ func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[st
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return &testProofSettlementEngine{
-		engine:     brain.NewRegistry(ctx).For(tenant),
+		engine:     brain.NewRegistry(ctx, braintest.StoreFactory()).For(tenant),
 		tenant:     tenant,
 		predicates: predicates,
 	}

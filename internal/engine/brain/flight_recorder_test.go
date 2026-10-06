@@ -164,7 +164,7 @@ func TestRedactSecrets_LeavesOrdinaryTextAlone(t *testing.T) {
 // used elsewhere) so the dashboard/read-path callers have a tested entry
 // point onto the flight recorder's captured data.
 func TestEngine_AgentToolCallsAndFlightRecorderPolicy(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(FlightRecorderPolicySet{Redact: true, RetentionDays: 7})
 	e.Submit(AgentToolCallObserved{ToolCallID: "tc1", ToolName: "nmap"})
 	e.Tick()

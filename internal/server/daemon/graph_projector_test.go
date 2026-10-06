@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 )
 
@@ -204,7 +205,7 @@ func (f *fakeGraphWriter) UpsertMission(_ context.Context, tenant string, m Miss
 func TestGraphProjector_ProjectsWorldPerTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	reg.For("acme").Submit(brain.HostObserved{
 		ScopeID: "m1", Address: "10.0.0.5", SSHHostKey: "AAAA",

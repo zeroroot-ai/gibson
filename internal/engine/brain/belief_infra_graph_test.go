@@ -42,7 +42,7 @@ func hasEdge(edges []InfraEdge, edgeType, from, to string) bool {
 // carries each relationship kind of the World, with the endpoint ids that the
 // belief substrate uses for a Host.
 func TestInfraGraph_HoldsTheRelationshipsOfTheWorld(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22},
 		Services: map[int]ServiceInfo{22: {Name: "ssh"}}})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.6", OpenPorts: []int{80}})
@@ -112,7 +112,7 @@ func TestInfraGraph_HoldsTheRelationshipsOfTheWorld(t *testing.T) {
 // the two live call sites share: the link of two hosts is an edge of the attack
 // graph, and a host outside the bound takes its edges with it.
 func TestLiveAttackGraph_KeepsTheEdgeBetweenTwoHosts(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
 	e.Submit(HostObserved{ScopeID: "s", Address: "10.0.0.6", OpenPorts: []int{80}})
 	e.Tick()

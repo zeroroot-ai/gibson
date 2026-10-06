@@ -99,7 +99,7 @@ func host(addr string) HostObserved {
 func TestEngine_FailedAppendDoesNotFold(t *testing.T) {
 	noRetryDelay(t)
 	store := &faultyStore{}
-	e := NewEngine("t1").WithStore(store)
+	e := NewEngine("t1", store)
 
 	e.Submit(host("10.0.0.1"))
 	require.Equal(t, 1, e.Tick())
@@ -128,7 +128,7 @@ func TestEngine_AppendRetriesThenFolds(t *testing.T) {
 	noRetryDelay(t)
 	store := &faultyStore{}
 	store.failAppends = appendAttempts - 1
-	e := NewEngine("t1").WithStore(store)
+	e := NewEngine("t1", store)
 
 	e.Submit(host("10.0.0.1"))
 	require.Equal(t, 1, e.Tick())
@@ -144,7 +144,7 @@ func TestEngine_RetryAfterLostReplyWritesOnce(t *testing.T) {
 	noRetryDelay(t)
 	store := &faultyStore{}
 	store.loseReplies = 1
-	e := NewEngine("t1").WithStore(store)
+	e := NewEngine("t1", store)
 
 	e.Submit(host("10.0.0.1"))
 	require.Equal(t, 1, e.Tick())
@@ -167,7 +167,7 @@ func TestEngine_HydrateErrorKeepsNoPartialWorld(t *testing.T) {
 	seed := func(t *testing.T) *faultyStore {
 		t.Helper()
 		store := &faultyStore{}
-		e := NewEngine("t1").WithStore(store).WithSnapshotCadence(2)
+		e := NewEngine("t1", store).WithSnapshotCadence(2)
 		for _, a := range []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"} {
 			e.Submit(host(a))
 		}
@@ -179,7 +179,7 @@ func TestEngine_HydrateErrorKeepsNoPartialWorld(t *testing.T) {
 	t.Run("the tail does not load", func(t *testing.T) {
 		store := seed(t)
 		store.loadErr = errStoreDown
-		e := NewEngine("t1").WithStore(store)
+		e := NewEngine("t1", store)
 		require.ErrorIs(t, e.Hydrate(context.Background()), errStoreDown)
 		require.Empty(t, e.Hosts(), "a failed hydrate must not keep the snapshot part of the World")
 	})
@@ -187,7 +187,7 @@ func TestEngine_HydrateErrorKeepsNoPartialWorld(t *testing.T) {
 	t.Run("the snapshot does not load", func(t *testing.T) {
 		store := seed(t)
 		store.snapErr = errStoreDown
-		e := NewEngine("t1").WithStore(store)
+		e := NewEngine("t1", store)
 		require.ErrorIs(t, e.Hydrate(context.Background()), errStoreDown)
 		require.Empty(t, e.Hosts(), "a replay without the snapshot must not become the World")
 	})
@@ -195,14 +195,14 @@ func TestEngine_HydrateErrorKeepsNoPartialWorld(t *testing.T) {
 	t.Run("the snapshot does not restore", func(t *testing.T) {
 		store := seed(t)
 		store.snap.Data = []byte("not a snapshot")
-		e := NewEngine("t1").WithStore(store)
+		e := NewEngine("t1", store)
 		require.Error(t, e.Hydrate(context.Background()))
 		require.Empty(t, e.Hosts())
 	})
 
 	t.Run("a good store hydrates the full World", func(t *testing.T) {
 		store := seed(t)
-		e := NewEngine("t1").WithStore(store)
+		e := NewEngine("t1", store)
 		require.NoError(t, e.Hydrate(context.Background()))
 		require.Len(t, e.Hosts(), 3)
 	})
@@ -215,14 +215,13 @@ func TestRegistry_FailedHydrateIsRetriedOnNextUse(t *testing.T) {
 	defer cancel()
 
 	store := &faultyStore{}
-	seedEngine := NewEngine("a").WithStore(store)
+	seedEngine := NewEngine("a", store)
 	seedEngine.Submit(host("10.0.0.1"))
 	require.Equal(t, 1, seedEngine.Tick())
 
 	hooks := 0
-	r := NewRegistry(ctx)
+	r := NewRegistry(ctx, func(context.Context, string) (TimelineStore, error) { return store, nil })
 	r.OnEngine(func(*Engine) { hooks++ })
-	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) { return store, nil })
 
 	store.set(func(s *faultyStore) { s.loadErr = errStoreDown })
 	bad := r.For("a")
@@ -250,8 +249,7 @@ func TestRegistry_StoppedEngineIsReplacedFromTheStore(t *testing.T) {
 	defer cancel()
 
 	store := &faultyStore{}
-	r := NewRegistry(ctx)
-	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) { return store, nil })
+	r := NewRegistry(ctx, func(context.Context, string) (TimelineStore, error) { return store, nil })
 
 	first := r.For("a")
 	first.Submit(host("10.0.0.1"))
@@ -278,7 +276,7 @@ func TestEngine_RunReturnsWhenStopped(t *testing.T) {
 	noRetryDelay(t)
 	store := &faultyStore{}
 	store.failAppends = appendAttempts
-	e := NewEngine("t1").WithStore(store)
+	e := NewEngine("t1", store)
 	done := make(chan struct{})
 	go func() {
 		e.Run(context.Background())
@@ -304,12 +302,11 @@ func TestRegistry_StoreFactoryErrorStopsTheEngine(t *testing.T) {
 	calls := 0
 	factoryErr := errStoreDown
 	var factoryStore TimelineStore
-	r := NewRegistry(ctx)
-	r.OnEngine(func(*Engine) { hooks++ })
-	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) {
+	r := NewRegistry(ctx, func(context.Context, string) (TimelineStore, error) {
 		calls++
 		return factoryStore, factoryErr
 	})
+	r.OnEngine(func(*Engine) { hooks++ })
 
 	failed := r.For("a")
 	require.ErrorIs(t, failed.Err(), errStoreDown)

@@ -33,14 +33,16 @@ type Registry struct {
 	engines      map[string]*Engine
 	systems      []System        // installed on every per-tenant engine (e.g. belief, orchestrator)
 	hooks        []func(*Engine) // run once per engine at creation (e.g. WireExecutor)
-	storeFactory StoreFactory    // optional: creates a per-tenant TimelineStore (ADR-0163)
+	storeFactory StoreFactory    // required: creates the durable TimelineStore of each tenant (ADR-0163)
 }
 
-// NewRegistry returns a Registry. The systems are installed on each engine as it
-// is created; they must be stateless w.r.t. a specific engine (they operate on
-// the *World passed at call time), so the same closures serve every tenant.
-func NewRegistry(ctx context.Context, systems ...System) *Registry {
-	return &Registry{ctx: ctx, engines: make(map[string]*Engine), systems: systems}
+// NewRegistry returns a Registry. storeFactory builds the durable TimelineStore
+// of each tenant (ADR-0163), and it is required. The systems are installed on
+// each engine as it is created; they must be stateless w.r.t. a specific engine
+// (they operate on the *World passed at call time), so the same closures serve
+// every tenant.
+func NewRegistry(ctx context.Context, storeFactory StoreFactory, systems ...System) *Registry {
+	return &Registry{ctx: ctx, engines: make(map[string]*Engine), systems: systems, storeFactory: storeFactory}
 }
 
 // OnEngine registers a hook run once for each engine at creation, after its
@@ -53,18 +55,8 @@ func (r *Registry) OnEngine(fn func(*Engine)) {
 	r.hooks = append(r.hooks, fn)
 }
 
-// WithStoreFactory installs a StoreFactory that is called once per new Engine to
-// produce the per-tenant durable TimelineStore (ADR-0163). The factory is called
-// under the registry mutex so it must not block indefinitely or call For(). Set
-// this before the first For() call (i.e. before any engine is created).
-func (r *Registry) WithStoreFactory(f StoreFactory) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.storeFactory = f
-}
-
 // For returns the tenant's Engine, creating and starting its tick loop on first
-// use. On first creation the store factory (if set) is invoked to wire durable
+// use. On first creation the store factory is invoked to wire durable
 // persistence and hydrate the World from the persisted Timeline (ADR-0163).
 // Tenant isolation is structural: each tenant gets its own Engine + World.
 //
@@ -80,26 +72,22 @@ func (r *Registry) For(tenant string) *Engine {
 	if e, ok := r.engines[tenant]; ok {
 		return e
 	}
-	e := NewEngine(tenant)
-	// Wire the durable store and hydrate the World first. Hydrate is a pure fold
+	// Build the durable store and hydrate the World first. Hydrate is a pure fold
 	// (no effects); it submits ResumeFailInFlight events to the intake queue so
 	// the first tick fails dangling in-flight work. A failed hydrate installs no
 	// system and no hook, so nothing runs for an engine that does not serve.
-	if r.storeFactory != nil {
-		store, err := r.storeFactory(r.ctx, tenant)
-		switch {
-		case err != nil:
-			e.stop(fmt.Errorf("brain/registry: the Timeline store of tenant %q: %w", tenant, err))
-			return e
-		case store == nil:
-			e.stop(errNoTimelineStore)
-			return e
-		}
-		e.WithStore(store)
-		if err := e.Hydrate(r.ctx); err != nil {
-			e.stop(err)
-			return e
-		}
+	store, err := r.storeFactory(r.ctx, tenant)
+	if err == nil && store == nil {
+		err = errNoTimelineStore
+	}
+	e := NewEngine(tenant, store)
+	if err != nil {
+		e.stop(fmt.Errorf("brain/registry: the Timeline store of tenant %q: %w", tenant, err))
+		return e
+	}
+	if err := e.Hydrate(r.ctx); err != nil {
+		e.stop(err)
+		return e
 	}
 	for _, s := range r.systems {
 		e.AddSystem(s)

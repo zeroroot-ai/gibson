@@ -42,7 +42,7 @@ func (stubDecider) Decide(w *World) []Decision {
 // completes, it completes the mission. Sweep-to-quiescence settles each tick, and
 // the loop is driven by a pluggable Decider (the LLM lands here later).
 func TestOrchestrator_Loop(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.AddSystem(Orchestrator{Decider: stubDecider{}}.System())
 
 	e.Submit(MissionStarted{ID: "m1", Goal: "exfiltrate PII"})
