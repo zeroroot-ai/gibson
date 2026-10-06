@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
@@ -270,6 +271,60 @@ func TestCatalogPlugins_PodOfTheContract(t *testing.T) {
 }
 
 // The loop reports Provisioning until the Deployment is available, then Ready.
+// cpEgressPolicy reads the CiliumNetworkPolicy of an instance.
+func cpEgressPolicy(namespace, name string) *unstructured.Unstructured {
+	u := ciliumegress.NewPolicy()
+	u.SetNamespace(namespace)
+	u.SetName(name)
+	return u
+}
+
+// TestCatalogPlugins_EgressIsTheHostList: the plugin NetworkPolicy has no
+// egress rule, and the CiliumNetworkPolicy of the instance permits DNS, each
+// host of the catalog entry and the edge of the platform, and nothing else
+// (ADR-0136, D76).
+func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
+	_, c, _ := convergedInstance(t)
+
+	var np networkingv1.NetworkPolicy
+	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &np)
+	if len(np.Spec.Egress) != 0 {
+		t.Errorf("plugin NetworkPolicy egress = %+v, want no rule", np.Spec.Egress)
+	}
+
+	cnp := cpEgressPolicy(cpNamespace, "gibson-plugin-github-egress")
+	cpGet(t, c, client.ObjectKey{Namespace: cpNamespace, Name: cnp.GetName()}, cnp)
+	selector, _, _ := unstructured.NestedStringMap(cnp.Object, "spec", "endpointSelector", "matchLabels")
+	if selector[labelAppName] != "gibson-plugin-github" || selector[labelAppComponent] != pluginComponent {
+		t.Errorf("endpointSelector = %v", selector)
+	}
+	egress, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress")
+	want, err := ciliumegress.Rules([]string{"api.github.com:443", "api.install.example:443"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(egress, want) {
+		t.Errorf("egress = %v, want %v", egress, want)
+	}
+	if cnp.GetLabels()[labelManagedBy] != catalogPluginManagedBy {
+		t.Errorf("labels = %v, want the label of the loop", cnp.GetLabels())
+	}
+}
+
+// TestCatalogPlugins_ABadHostIsRefused: an entry that is not host or
+// host:port makes no instance, so no pod runs with a list that the policy
+// cannot state.
+func TestCatalogPlugins_ABadHostIsRefused(t *testing.T) {
+	wish := cpWish(cpTenant, cpPlugin)
+	wish.EgressAllow = []string{"https://api.github.com/path"}
+	d := &fakeCatalogPluginDaemon{desired: []provision.DesiredCatalogPlugin{wish}}
+	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant))
+	_ = r.converge(context.Background())
+	if cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github"}, &appsv1.Deployment{}) {
+		t.Error("a plugin with a bad host list got a Deployment")
+	}
+}
+
 func TestCatalogPlugins_ReportsThePhase(t *testing.T) {
 	r, c, d := convergedInstance(t)
 	if got := d.lastReport(t); got != (cpReport{cpTenant, cpPlugin, "Provisioning", ""}) {
@@ -392,6 +447,14 @@ func TestCatalogPlugins_PruneRemovesWhatIsNotWanted(t *testing.T) {
 	d.desired = []provision.DesiredCatalogPlugin{cpWish(cpTenant, "github"), cpWish("other", "github")}
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
+	}
+	if cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-gitlab-egress"},
+		cpEgressPolicy(cpNamespace, "gibson-plugin-gitlab-egress")) {
+		t.Error("the egress policy of the disabled plugin still exists")
+	}
+	if !cpExists(t, c, client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-github-egress"},
+		cpEgressPolicy(cpNamespace, "gibson-plugin-github-egress")) {
+		t.Error("the egress policy of the wanted plugin is gone")
 	}
 	for _, obj := range []client.Object{&appsv1.Deployment{}, &networkingv1.NetworkPolicy{}, &corev1.ServiceAccount{}} {
 		if cpExists(t, c, gitlab, obj) {
