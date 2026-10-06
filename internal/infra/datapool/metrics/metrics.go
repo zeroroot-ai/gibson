@@ -4,7 +4,7 @@
 // Package metrics defines and exports all data-plane observability metrics for
 // the Gibson daemon's per-tenant connection pool subsystem.
 //
-// All eight canonical metrics are defined in this single file so there is one
+// All nine canonical metrics are defined in this single file so there is one
 // authoritative source of metric names, label sets, and bucket configurations.
 // No other package in the daemon may declare prometheus.NewCounterVec,
 // NewHistogramVec, or NewGaugeVec for data-plane metrics — call the typed
@@ -136,6 +136,21 @@ var (
 		},
 		[]string{LabelReason},
 	)
+
+	// timelineArchiveErrorsTotal counts the failed copies of Timeline events
+	// from the Redis stream into the Postgres history of a tenant (ADR-0163,
+	// gibson#786). After a failed copy the store does not trim the stream, so
+	// the stream of that tenant grows until the copy works again.
+	//
+	// Alert: any increase is a warning. A steady rate means that the Postgres
+	// database of the tenant refuses the write.
+	timelineArchiveErrorsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gibson_timeline_archive_errors_total",
+			Help: "Number of failed copies of Timeline events from the Redis stream into the Postgres history, labeled by tenant. The stream is not trimmed after a failed copy.",
+		},
+		[]string{LabelTenant},
+	)
 )
 
 func init() {
@@ -152,6 +167,7 @@ func init() {
 		poolInitTotal,
 		poolInitFailuresTotal,
 		dataplaneProvisioningCheckFailuresTotal,
+		timelineArchiveErrorsTotal,
 	} {
 		if err := prometheus.Register(c); err != nil {
 			// AlreadyRegisteredError is benign; surface any other unexpected error
@@ -262,4 +278,11 @@ func IncProvisioningCheckFailure(reason string) {
 		reason = ReasonCRDUnavailable
 	}
 	dataplaneProvisioningCheckFailuresTotal.WithLabelValues(reason).Inc()
+}
+
+// IncTimelineArchiveError increments the Timeline archive error counter for a
+// tenant. The Timeline store calls it when the copy of stream entries into the
+// Postgres history fails, before it returns without a trim.
+func IncTimelineArchiveError(tenant string) {
+	timelineArchiveErrorsTotal.WithLabelValues(tenant).Inc()
 }

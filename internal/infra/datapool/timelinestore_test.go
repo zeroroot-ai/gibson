@@ -6,11 +6,15 @@ package datapool
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
 	miniredis "github.com/alicebob/miniredis/v2"
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -47,12 +51,131 @@ func newTestRedis(t *testing.T) (*miniredis.Miniredis, *goredis.Client) {
 }
 
 // staticAcquire returns an acquire closure that always hands out the same
-// pre-created client with a no-op release. This mirrors the "single live
-// client" scenario used by tests that do not need to exercise pool eviction.
-func staticAcquire(rdb *goredis.Client) func(ctx context.Context) (*goredis.Client, func(), error) {
-	return func(_ context.Context) (*goredis.Client, func(), error) {
-		return rdb, func() {}, nil
+// pre-created client with a no-op release, and one in-memory Postgres history.
+// This mirrors the "single live client" scenario used by tests that do not
+// need to exercise pool eviction.
+func staticAcquire(rdb *goredis.Client) func(ctx context.Context) (TimelineConn, func(), error) {
+	return staticAcquireWith(rdb, &fakeHistorySQL{})
+}
+
+// staticAcquireWith is staticAcquire with the Postgres history as a parameter,
+// for a test that reads the history or makes its writes fail.
+func staticAcquireWith(rdb *goredis.Client, db SQL) func(ctx context.Context) (TimelineConn, func(), error) {
+	return func(_ context.Context) (TimelineConn, func(), error) {
+		return TimelineConn{Redis: rdb, SQL: db}, func() {}, nil
 	}
+}
+
+// fakeHistorySQL is an in-memory timeline_events table. It runs the two
+// statements of the Timeline store: the batch insert that skips a row that is
+// there already, and the ordered page read after a stream id.
+type fakeHistorySQL struct {
+	mu      sync.Mutex
+	rows    []fakeHistoryRow // in (ms, seq) order
+	execErr error            // Exec returns this error while it is set
+	execs   int
+}
+
+type fakeHistoryRow struct {
+	ms, seq int64
+	kind    string
+	event   string
+}
+
+func (f *fakeHistorySQL) Exec(_ context.Context, sql string, args ...any) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.execs++
+	if f.execErr != nil {
+		return 0, f.execErr
+	}
+	if sql != insertHistorySQL || len(args) != 4 {
+		return 0, fmt.Errorf("fakeHistorySQL: unexpected statement %q with %d args", sql, len(args))
+	}
+	ms, _ := args[0].([]int64)
+	seq, _ := args[1].([]int64)
+	kinds, _ := args[2].([]string)
+	events, _ := args[3].([]string)
+	if len(ms) != len(seq) || len(ms) != len(kinds) || len(ms) != len(events) {
+		return 0, errors.New("fakeHistorySQL: the four arrays differ in length")
+	}
+	var inserted int64
+	for i := range ms {
+		exists := false
+		for _, r := range f.rows {
+			if r.ms == ms[i] && r.seq == seq[i] {
+				exists = true
+				break
+			}
+		}
+		if exists {
+			continue
+		}
+		f.rows = append(f.rows, fakeHistoryRow{ms: ms[i], seq: seq[i], kind: kinds[i], event: events[i]})
+		inserted++
+	}
+	sort.Slice(f.rows, func(i, j int) bool {
+		if f.rows[i].ms != f.rows[j].ms {
+			return f.rows[i].ms < f.rows[j].ms
+		}
+		return f.rows[i].seq < f.rows[j].seq
+	})
+	return inserted, nil
+}
+
+func (f *fakeHistorySQL) QueryRow(context.Context, string, ...any) Row {
+	panic("fakeHistorySQL: the Timeline store reads no single row")
+}
+
+func (f *fakeHistorySQL) Query(_ context.Context, sql string, args ...any) (Rows, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sql != selectHistorySQL || len(args) != 3 {
+		return nil, fmt.Errorf("fakeHistorySQL: unexpected query %q with %d args", sql, len(args))
+	}
+	afterMs, _ := args[0].(int64)
+	afterSeq, _ := args[1].(int64)
+	limit, _ := args[2].(int)
+	var page []fakeHistoryRow
+	for _, r := range f.rows {
+		if r.ms > afterMs || (r.ms == afterMs && r.seq > afterSeq) {
+			page = append(page, r)
+			if len(page) == limit {
+				break
+			}
+		}
+	}
+	return &fakeHistoryRows{rows: page, at: -1}, nil
+}
+
+func (f *fakeHistorySQL) kinds() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.rows))
+	for _, r := range f.rows {
+		out = append(out, r.kind)
+	}
+	return out
+}
+
+type fakeHistoryRows struct {
+	rows []fakeHistoryRow
+	at   int
+}
+
+func (r *fakeHistoryRows) Next() bool { r.at++; return r.at < len(r.rows) }
+func (r *fakeHistoryRows) Err() error { return nil }
+func (r *fakeHistoryRows) Close()     {}
+func (r *fakeHistoryRows) Scan(dest ...any) error {
+	row := r.rows[r.at]
+	ms, ok1 := dest[0].(*int64)
+	seq, ok2 := dest[1].(*int64)
+	ev, ok3 := dest[2].(*string)
+	if len(dest) != 3 || !ok1 || !ok2 || !ok3 {
+		return errors.New("fakeHistoryRows: Scan wants (*int64, *int64, *string)")
+	}
+	*ms, *seq, *ev = row.ms, row.seq, row.event
+	return nil
 }
 
 // TestCodecRoundTrip verifies that EncodeEvent / DecodeEvent are inverse for
@@ -105,11 +228,11 @@ func TestCodecRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRedisTimelineStore_AppendLoad verifies that appended events are returned
+// TestTimelineStore_AppendLoad verifies that appended events are returned
 // by LoadForReplay in the correct order.
-func TestRedisTimelineStore_AppendLoad(t *testing.T) {
+func TestTimelineStore_AppendLoad(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-a"
 
@@ -133,15 +256,15 @@ func TestRedisTimelineStore_AppendLoad(t *testing.T) {
 	}
 }
 
-// TestRedisTimelineStore_PerTenantIsolation verifies that two separate
-// RedisTimelineStore instances with different backing clients do not share
+// TestTimelineStore_PerTenantIsolation verifies that two separate
+// TimelineStore instances with different backing clients do not share
 // events, even when the stream key scheme matches the same tenant name.
-func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
+func TestTimelineStore_PerTenantIsolation(t *testing.T) {
 	_, rdbA := newTestRedis(t)
 	_, rdbB := newTestRedis(t)
 
-	storeA := NewRedisTimelineStore(staticAcquire(rdbA))
-	storeB := NewRedisTimelineStore(staticAcquire(rdbB))
+	storeA := NewTimelineStore(staticAcquire(rdbA))
+	storeB := NewTimelineStore(staticAcquire(rdbB))
 	ctx := context.Background()
 	tenant := "shared-tenant-name"
 
@@ -168,7 +291,7 @@ func TestRedisTimelineStore_PerTenantIsolation(t *testing.T) {
 // Engine are written to the store and can be replayed.
 func TestEngine_WithStore_PersistsEvents(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 
 	eng := brain.NewEngine("t1")
 	eng.WithStore(store)
@@ -220,7 +343,7 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 
 	// --- Phase 1: persist a deterministic event sequence ---
 	// We persist events directly to the store (rather than through an Engine)
@@ -306,7 +429,7 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	defer cancel()
 
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 
 	// Append raw events so we can craft an exact "running but never completed"
 	// scenario without running systems.
@@ -369,7 +492,7 @@ func TestRegistry_WithStoreFactory_NoopWhenFactoryNil(t *testing.T) {
 // the loaded snapshot has the same AtSeq and Data as the written one.
 func TestSnapshot_RoundTrip(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-snap-rt"
 
@@ -394,7 +517,7 @@ func TestSnapshot_RoundTrip(t *testing.T) {
 func TestTrimTo_BoundsStream(t *testing.T) {
 	mr, rdb := newTestRedis(t)
 	_ = mr
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	tenant := "tenant-trim"
 
@@ -421,7 +544,7 @@ func TestTrimTo_BoundsStream(t *testing.T) {
 // tail events must equal a World folded from the complete event sequence.
 func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 	ctx := context.Background()
 	const tenant = "tenant-snap-equiv"
 
@@ -487,7 +610,7 @@ func TestSnapshotPlusTailEqualsFullReplay(t *testing.T) {
 // the snapshot nor skipped by the exclusive-after-AtSeq tail replay.
 func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 	_, rdb := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(rdb))
+	store := NewTimelineStore(staticAcquire(rdb))
 	const tenant = "tenant-live-cadence"
 
 	// Cadence of 2 means a snapshot fires after every 2 persisted events, so with
@@ -522,21 +645,21 @@ func TestLiveCadenceSnapshot_HydrateEquivalence(t *testing.T) {
 
 // errAcquire returns an acquire closure that always returns the given error.
 // Used by TestTimelineStore_AcquireError to cover the error branches in each
-// RedisTimelineStore method (lines 54-55, 82-83, 132-133, 151-152, 176-177).
-func errAcquire(err error) func(ctx context.Context) (*goredis.Client, func(), error) {
-	return func(_ context.Context) (*goredis.Client, func(), error) {
-		return nil, nil, err
+// TimelineStore method (lines 54-55, 82-83, 132-133, 151-152, 176-177).
+func errAcquire(err error) func(ctx context.Context) (TimelineConn, func(), error) {
+	return func(_ context.Context) (TimelineConn, func(), error) {
+		return TimelineConn{}, nil, err
 	}
 }
 
 // TestTimelineStore_AcquireError covers the acquire-error early-return branches
-// in all five RedisTimelineStore methods (Append, LoadForReplay, WriteSnapshot,
+// in all five TimelineStore methods (Append, LoadForReplay, WriteSnapshot,
 // LoadSnapshot, TrimTo). Each method must propagate the acquire error wrapped
 // in a descriptive message — none should panic or return a nil error.
 func TestTimelineStore_AcquireError(t *testing.T) {
 	t.Parallel()
 	sentinel := errors.New("pool evicted")
-	store := NewRedisTimelineStore(errAcquire(sentinel))
+	store := NewTimelineStore(errAcquire(sentinel))
 	ctx := context.Background()
 	tenant := "tenant-err"
 
@@ -603,17 +726,17 @@ func TestAcquirePerOp_EvictionRobustness(t *testing.T) {
 	// callCount tracks how many times acquire has been called so we can switch
 	// clients between operations.
 	callCount := 0
-	acquire := func(_ context.Context) (*goredis.Client, func(), error) {
+	acquire := func(_ context.Context) (TimelineConn, func(), error) {
 		callCount++
 		if callCount == 1 {
 			// First op uses rdbA (will be "closed" by eviction after this).
-			return rdbA, func() {}, nil
+			return TimelineConn{Redis: rdbA}, func() {}, nil
 		}
 		// Subsequent ops use rdbB (fresh client from pool after eviction).
-		return rdbB, func() {}, nil
+		return TimelineConn{Redis: rdbB}, func() {}, nil
 	}
 
-	store := NewRedisTimelineStore(acquire)
+	store := NewTimelineStore(acquire)
 
 	// Operation 1: Append via rdbA.
 	ev1 := brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"}
@@ -715,12 +838,12 @@ func TestAssertTimelineAOF_FailsClosedWithoutConfigSupport(t *testing.T) {
 	assert.Contains(t, gErr.Error(), "cannot verify AOF persistence")
 }
 
-// TestRedisTimelineStore_AppendIsIdempotent proves the idempotency key of an
+// TestTimelineStore_AppendIsIdempotent proves the idempotency key of an
 // append (ADR-0163, gibson#724): a second Append with the same key writes
 // nothing and returns the seq of the first, and an Append with no key fails.
-func TestRedisTimelineStore_AppendIsIdempotent(t *testing.T) {
+func TestTimelineStore_AppendIsIdempotent(t *testing.T) {
 	_, client := newTestRedis(t)
-	store := NewRedisTimelineStore(staticAcquire(client))
+	store := NewTimelineStore(staticAcquire(client))
 	ctx := context.Background()
 	const tenant = "tenant-idem"
 
@@ -747,4 +870,316 @@ func TestRedisTimelineStore_AppendIsIdempotent(t *testing.T) {
 
 	_, err = store.Append(ctx, tenant, "", ev)
 	require.Error(t, err, "an append with no idempotency key must fail")
+}
+
+// appendHosts appends n host events and returns the seq of each.
+func appendHosts(t *testing.T, store *TimelineStore, tenant string, from, n int) []string {
+	t.Helper()
+	seqs := make([]string, 0, n)
+	for i := from; i < from+n; i++ {
+		seq, err := store.Append(context.Background(), tenant, uuid.NewString(),
+			brain.HostObserved{ScopeID: "s", Address: fmt.Sprintf("10.0.%d.%d", i/250, i%250)})
+		require.NoError(t, err)
+		seqs = append(seqs, seq)
+	}
+	return seqs
+}
+
+func hostAddresses(t *testing.T, evs []brain.Event) []string {
+	t.Helper()
+	out := make([]string, 0, len(evs))
+	for _, ev := range evs {
+		h, ok := ev.(brain.HostObserved)
+		require.True(t, ok, "unexpected event %T", ev)
+		out = append(out, h.Address)
+	}
+	return out
+}
+
+// TestTimelineStore_TrimKeepsTheFullHistoryInPostgres is the acceptance test
+// of gibson#786. It appends more events than one snapshot covers, trims two
+// times, and reads the full ordered history: the trimmed events from Postgres,
+// then the stream tail.
+func TestTimelineStore_TrimKeepsTheFullHistoryInPostgres(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-history"
+
+	first := appendHosts(t, store, tenant, 0, 120)
+	require.NoError(t, store.TrimTo(ctx, tenant, first[99]), "the first snapshot covers 100 events")
+
+	live, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, 20, "the stream holds the live tail only")
+	require.Len(t, db.kinds(), 100, "Postgres holds each event that the trim removed")
+
+	second := appendHosts(t, store, tenant, 120, 130)
+	require.NoError(t, store.TrimTo(ctx, tenant, second[79]), "the second snapshot covers 100 more")
+
+	live, err = store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, 50)
+	require.Len(t, db.kinds(), 200)
+	for _, kind := range db.kinds() {
+		require.Equal(t, "host.observed", kind, "each row holds the event kind")
+	}
+
+	history, err := store.LoadHistory(ctx, tenant)
+	require.NoError(t, err)
+	want := make([]string, 0, 250)
+	for i := range 250 {
+		want = append(want, fmt.Sprintf("10.0.%d.%d", i/250, i%250))
+	}
+	require.Equal(t, want, hostAddresses(t, history), "the history is each event, one time, in order")
+}
+
+// archiveErrorCount reads gibson_timeline_archive_errors_total for one tenant
+// from the default registry, where the metrics package registers it.
+func archiveErrorCount(t *testing.T, tenant string) float64 {
+	t.Helper()
+	families, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, mf := range families {
+		if mf.GetName() != "gibson_timeline_archive_errors_total" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "tenant" && l.GetValue() == tenant {
+					return m.GetCounter().GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+// TestTimelineStore_FailedHistoryWriteDoesNotTrim proves that the stream keeps
+// each entry when the Postgres write fails, that the error metric counts the
+// failure, and that the next trim copies the entries.
+func TestTimelineStore_FailedHistoryWriteDoesNotTrim(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{execErr: errors.New("postgres is down")}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-history-fail"
+
+	seqs := appendHosts(t, store, tenant, 0, 10)
+	before := archiveErrorCount(t, tenant)
+
+	err := store.TrimTo(ctx, tenant, seqs[5])
+	require.Error(t, err)
+	require.ErrorContains(t, err, "postgres is down")
+	require.InDelta(t, before+1, archiveErrorCount(t, tenant), 1e-9,
+		"the alert metric must count the failed write")
+
+	live, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, 10, "a failed history write must not trim the stream")
+
+	// The database works again: the same trim copies the entries and trims.
+	db.mu.Lock()
+	db.execErr = nil
+	db.mu.Unlock()
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[5]))
+	live, err = store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, 4)
+	require.Len(t, db.kinds(), 6)
+
+	history, err := store.LoadHistory(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, history, 10)
+}
+
+// TestTimelineStore_HistoryCopiedButNotTrimmedIsReadOneTime covers the window
+// between the copy and the trim: an entry that is in Postgres and in the
+// stream is in the history one time, and a second copy writes no second row.
+func TestTimelineStore_HistoryCopiedButNotTrimmedIsReadOneTime(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-history-overlap"
+
+	seqs := appendHosts(t, store, tenant, 0, 8)
+	conn, release, err := store.acquire(ctx)
+	require.NoError(t, err)
+	defer release()
+	// Copy with no trim, two times.
+	require.NoError(t, store.archive(ctx, conn, store.streamKey(tenant), seqs[4]))
+	require.NoError(t, store.archive(ctx, conn, store.streamKey(tenant), seqs[4]))
+	require.Len(t, db.kinds(), 5, "a second copy of the same entries writes nothing")
+
+	history, err := store.LoadHistory(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, history, 8, "an entry in Postgres and in the stream is read one time")
+}
+
+// TestTimelineStore_NoPostgresHandleRefusesTheTrim proves that a store with no
+// Postgres handle never trims: a trim with no history write would lose events.
+func TestTimelineStore_NoPostgresHandleRefusesTheTrim(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	store := NewTimelineStore(staticAcquireWith(rdb, nil))
+	ctx := context.Background()
+	const tenant = "tenant-no-postgres"
+
+	seqs := appendHosts(t, store, tenant, 0, 3)
+	require.Error(t, store.TrimTo(ctx, tenant, seqs[1]))
+	live, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, 3)
+
+	_, err = store.LoadHistory(ctx, tenant)
+	require.Error(t, err)
+}
+
+func TestParseStreamID(t *testing.T) {
+	ms, seq, err := parseStreamID("1751234567890-3")
+	require.NoError(t, err)
+	require.Equal(t, int64(1751234567890), ms)
+	require.Equal(t, int64(3), seq)
+
+	for _, bad := range []string{"", "12", "x-1", "1-y"} {
+		_, _, err := parseStreamID(bad)
+		require.Error(t, err, "stream id %q", bad)
+	}
+}
+
+// TestTimelineStore_ArchiveCopiesMoreThanOneBatch covers the paging of the
+// copy and of the tail read: more entries than one XRANGE batch.
+func TestTimelineStore_ArchiveCopiesMoreThanOneBatch(t *testing.T) {
+	_, rdb := newTestRedis(t)
+	db := &fakeHistorySQL{}
+	store := NewTimelineStore(staticAcquireWith(rdb, db))
+	ctx := context.Background()
+	const tenant = "tenant-history-pages"
+
+	seqs := appendHosts(t, store, tenant, 0, replayBatchSize+5)
+	require.NoError(t, store.TrimTo(ctx, tenant, seqs[replayBatchSize+1]))
+	require.Len(t, db.kinds(), replayBatchSize+2)
+
+	history, err := store.LoadHistory(ctx, tenant)
+	require.NoError(t, err)
+	require.Len(t, history, replayBatchSize+5)
+
+	// A tail of more than one batch.
+	appendHosts(t, store, tenant, replayBatchSize+5, replayBatchSize+1)
+	live, err := store.LoadForReplay(ctx, tenant, "")
+	require.NoError(t, err)
+	require.Len(t, live, replayBatchSize+4)
+}
+
+// TestTimelineStore_BadStreamEntriesStopTheCopy proves that the copy refuses a
+// stream entry that it cannot read, and that the trim then removes nothing.
+func TestTimelineStore_BadStreamEntriesStopTheCopy(t *testing.T) {
+	ctx := context.Background()
+	cases := map[string]map[string]any{
+		"no ev field":     {"other": "x"},
+		"not an envelope": {"ev": "{not json"},
+		"no event kind":   {"ev": `{"payload":{}}`},
+	}
+	for name, values := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, rdb := newTestRedis(t)
+			db := &fakeHistorySQL{}
+			store := NewTimelineStore(staticAcquireWith(rdb, db))
+			const tenant = "tenant-bad-entry"
+			id, err := rdb.XAdd(ctx, &goredis.XAddArgs{Stream: store.streamKey(tenant), Values: values}).Result()
+			require.NoError(t, err)
+
+			require.Error(t, store.TrimTo(ctx, tenant, id))
+			require.Empty(t, db.kinds())
+			n, err := rdb.XLen(ctx, store.streamKey(tenant)).Result()
+			require.NoError(t, err)
+			require.Equal(t, int64(1), n, "a failed copy must not trim")
+
+			_, err = store.LoadForReplay(ctx, tenant, "")
+			require.Error(t, err, "a replay of an unreadable entry fails")
+			_, err = store.LoadHistory(ctx, tenant)
+			require.Error(t, err, "a history read of an unreadable entry fails")
+		})
+	}
+}
+
+// TestTimelineStore_StreamErrorsAreReturned covers a Redis that is gone: the
+// copy, the replay and the history read each return the error.
+func TestTimelineStore_StreamErrorsAreReturned(t *testing.T) {
+	mr, rdb := newTestRedis(t)
+	store := NewTimelineStore(staticAcquireWith(rdb, &fakeHistorySQL{}))
+	ctx := context.Background()
+	const tenant = "tenant-redis-gone"
+	seqs := appendHosts(t, store, tenant, 0, 2)
+	mr.Close()
+
+	require.Error(t, store.TrimTo(ctx, tenant, seqs[0]))
+	_, err := store.LoadForReplay(ctx, tenant, "")
+	require.Error(t, err)
+	_, err = store.LoadHistory(ctx, tenant)
+	require.Error(t, err)
+}
+
+// historyQueryFails is a history table whose reads fail in one of three ways.
+type historyQueryFails struct {
+	fakeHistorySQL
+	mode string
+}
+
+func (h *historyQueryFails) Query(ctx context.Context, sql string, args ...any) (Rows, error) {
+	switch h.mode {
+	case "query":
+		return nil, errors.New("the query failed")
+	case "scan":
+		return &badRows{scanErr: errors.New("the scan failed")}, nil
+	case "rows":
+		return &badRows{iterErr: errors.New("the read failed")}, nil
+	}
+	return h.fakeHistorySQL.Query(ctx, sql, args...)
+}
+
+type badRows struct {
+	scanErr, iterErr error
+	done             bool
+}
+
+func (r *badRows) Next() bool {
+	if r.scanErr == nil || r.done {
+		return false
+	}
+	r.done = true
+	return true
+}
+func (r *badRows) Scan(...any) error { return r.scanErr }
+func (r *badRows) Err() error        { return r.iterErr }
+func (r *badRows) Close()            {}
+
+// TestTimelineStore_HistoryReadErrorsAreReturned covers each failure of the
+// Postgres read: the query, a row scan, the row iteration, a row that does not
+// decode, and an acquire that fails.
+func TestTimelineStore_HistoryReadErrorsAreReturned(t *testing.T) {
+	ctx := context.Background()
+	for _, mode := range []string{"query", "scan", "rows"} {
+		t.Run(mode, func(t *testing.T) {
+			_, rdb := newTestRedis(t)
+			store := NewTimelineStore(staticAcquireWith(rdb, &historyQueryFails{mode: mode}))
+			_, err := store.LoadHistory(ctx, "tenant-read-fails")
+			require.Error(t, err)
+		})
+	}
+
+	t.Run("a row that does not decode", func(t *testing.T) {
+		_, rdb := newTestRedis(t)
+		db := &fakeHistorySQL{rows: []fakeHistoryRow{{ms: 1, seq: 0, kind: "x", event: "{not json"}}}
+		store := NewTimelineStore(staticAcquireWith(rdb, db))
+		_, err := store.LoadHistory(ctx, "tenant-bad-row")
+		require.Error(t, err)
+	})
+
+	t.Run("the acquire fails", func(t *testing.T) {
+		store := NewTimelineStore(errAcquire(errors.New("pool evicted")))
+		_, err := store.LoadHistory(ctx, "tenant-acquire")
+		require.Error(t, err)
+	})
 }
