@@ -341,3 +341,27 @@ func TestPipelineDoubleProvisionIdempotent(t *testing.T) {
 		t.Errorf("expected 4 provision calls (2 per step × 2 runs), got %d: %v", len(called), called)
 	}
 }
+
+// With a Tenant CR, each step emits an event on it.
+func TestPipelineProvision_EmitsEventsOnTheTenant(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = gibsonv1alpha1.AddToScheme(scheme)
+	tenant := &gibsonv1alpha1.Tenant{}
+	tenant.Name = "acme"
+	rec := events.NewFakeRecorder(100)
+	var called []string
+	p := &pipelineProvisioner{
+		cfg: PipelineConfig{
+			K8sClient: fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).WithStatusSubresource(tenant).Build(),
+			Recorder:  rec,
+		},
+		steps: []Step{stubStep("Postgres", &called, nil, nil)},
+		log:   slog.Default(),
+	}
+	if err := p.Provision(context.Background(), "acme", Limits{}); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if len(rec.Events) == 0 {
+		t.Fatal("no event on the Tenant")
+	}
+}
