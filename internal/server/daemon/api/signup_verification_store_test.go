@@ -736,7 +736,7 @@ func TestListPendingApprovals_ReadsTheQueueOldestFirst(t *testing.T) {
 	s, mock, now := newMockStore(t)
 
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
-		WithArgs(SignupApprovalPageSize).
+		WithArgs(SignupApprovalPageSize, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "email", "workspace_name", "tier",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
@@ -744,7 +744,7 @@ func TestListPendingApprovals_ReadsTheQueueOldestFirst(t *testing.T) {
 			AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now).
 			AddRow("reg-2", "attempt-2", "b@example.com", "Beta", "team", "Bob", "M", "user-2", now))
 
-	rows, err := s.ListPendingApprovals(context.Background(), 0)
+	rows, err := s.ListPendingApprovals(context.Background(), 0, 0)
 	if err != nil {
 		t.Fatalf("ListPendingApprovals: %v", err)
 	}
@@ -763,13 +763,13 @@ func TestListPendingApprovals_ReadsTheQueueOldestFirst(t *testing.T) {
 func TestListPendingApprovals_CapsTheLimit(t *testing.T) {
 	s, mock, _ := newMockStore(t)
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
-		WithArgs(SignupApprovalPageSize).
+		WithArgs(SignupApprovalPageSize, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "attempt_id", "email", "workspace_name", "tier",
 			"owner_first_name", "owner_last_name", "owner_user_id", "created_at",
 		}))
 
-	if _, err := s.ListPendingApprovals(context.Background(), 10_000); err != nil {
+	if _, err := s.ListPendingApprovals(context.Background(), 0, 10_000); err != nil {
 		t.Fatalf("ListPendingApprovals: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -781,7 +781,7 @@ func TestListPendingApprovals_QueryFailureIsReported(t *testing.T) {
 	s, mock, _ := newMockStore(t)
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).WillReturnError(errors.New("read failed"))
 
-	if _, err := s.ListPendingApprovals(context.Background(), 0); err == nil {
+	if _, err := s.ListPendingApprovals(context.Background(), 0, 0); err == nil {
 		t.Fatal("a query failure must be reported")
 	}
 }
@@ -791,7 +791,7 @@ func TestListPendingApprovals_ScanFailureIsReported(t *testing.T) {
 	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("reg-1"))
 
-	if _, err := s.ListPendingApprovals(context.Background(), 0); err == nil {
+	if _, err := s.ListPendingApprovals(context.Background(), 0, 0); err == nil {
 		t.Fatal("a row this store cannot read must be reported, not silently dropped")
 	}
 }
@@ -902,7 +902,7 @@ func TestApprovalStoreFailsClosedWithoutADatabase(t *testing.T) {
 	if _, err := s.IssuePendingApproval(context.Background(), IssueParams{}, "user-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("IssuePendingApproval error = %v, want ErrSignupStoreUnavailable", err)
 	}
-	if _, err := s.ListPendingApprovals(context.Background(), 0); !errors.Is(err, ErrSignupStoreUnavailable) {
+	if _, err := s.ListPendingApprovals(context.Background(), 0, 0); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("ListPendingApprovals error = %v, want ErrSignupStoreUnavailable", err)
 	}
 	if _, err := s.ClaimApproval(context.Background(), "x", "admin-1"); !errors.Is(err, ErrSignupStoreUnavailable) {

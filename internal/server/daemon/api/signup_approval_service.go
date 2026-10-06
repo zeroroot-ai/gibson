@@ -52,6 +52,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -210,12 +211,19 @@ func (s *DaemonServer) AdminListPendingRegistrations(ctx context.Context, req *t
 	if s.signupVerifications == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
-	rows, err := s.signupVerifications.ListPendingApprovals(ctx, int(req.GetLimit()))
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	limit = min(limit, SignupApprovalPageSize)
+	rows, err := s.signupVerifications.ListPendingApprovals(ctx, offset, limit)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "AdminListPendingRegistrations: query failed", "error", err.Error())
 		return nil, status.Error(codes.Internal, "failed to read pending registrations")
 	}
-	resp := &tenantv1.AdminListPendingRegistrationsResponse{}
+	resp := &tenantv1.AdminListPendingRegistrationsResponse{
+		NextPageToken: pagetoken.Next(offset, limit, len(rows), -1),
+	}
 	for _, r := range rows {
 		resp.Registrations = append(resp.Registrations, &tenantv1.PendingRegistration{
 			RegistrationId: r.ID,

@@ -28,12 +28,12 @@ type mockAlertStore struct {
 	markAllCount int32
 }
 
-func (m *mockAlertStore) ListAlerts(_ context.Context, _, _ string, unreadOnly bool, _ int) ([]*storedAlert, error) {
+func (m *mockAlertStore) ListAlerts(_ context.Context, _, _ string, unreadOnly bool, _, _ int) ([]*storedAlert, int, error) {
 	if m.listErr != nil {
-		return nil, m.listErr
+		return nil, 0, m.listErr
 	}
 	if !unreadOnly {
-		return m.alerts, nil
+		return m.alerts, len(m.alerts), nil
 	}
 	var unread []*storedAlert
 	for _, a := range m.alerts {
@@ -41,7 +41,7 @@ func (m *mockAlertStore) ListAlerts(_ context.Context, _, _ string, unreadOnly b
 			unread = append(unread, a)
 		}
 	}
-	return unread, nil
+	return unread, len(m.alerts), nil
 }
 
 func (m *mockAlertStore) MarkAlertRead(_ context.Context, _, _, _ string) error {

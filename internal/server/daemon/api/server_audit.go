@@ -81,7 +81,8 @@ func (s *DaemonServer) WithLokiQuerier(lq audit.LokiQuerier) *DaemonServer {
 //
 // Authorization: caller must have FGA admin relation on the tenant.
 // Data source: Loki (if wired) → Redis audit stream (fallback).
-// Pagination: cursor = stream entry ID or Loki nanosecond timestamp.
+// Pagination: page_size and page_token (ADR-0028, rule 3). The token is the
+// Loki nanosecond cursor, opaque to the client.
 //
 // gibsoncheck:allow tenant-from-request — guarded by requireTenantAdmin(ctx, tenantID),
 // which FGA-Checks the caller's subject against the supplied tenant before any query runs.
@@ -99,7 +100,7 @@ func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *tenantv1.ListAu
 		return nil, err
 	}
 
-	limit := int(req.GetLimit())
+	limit := int(req.GetPageSize())
 	if limit <= 0 {
 		limit = 50
 	}
@@ -128,7 +129,7 @@ func (s *DaemonServer) ListAuditEvents(ctx context.Context, req *tenantv1.ListAu
 		FromTime:    fromTime,
 		ToTime:      toTime,
 		Limit:       limit,
-		Cursor:      req.GetCursor(),
+		Cursor:      req.GetPageToken(),
 	}
 
 	// Try Loki first if wired.
@@ -205,8 +206,8 @@ func (s *DaemonServer) auditEntriesToResponse(entries []audit.AuditEntry, nextCu
 		})
 	}
 	return &tenantv1.ListAuditEventsResponse{
-		Events:     events,
-		NextCursor: nextCursor,
+		Events:        events,
+		NextPageToken: nextCursor,
 	}
 }
 

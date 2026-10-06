@@ -702,9 +702,10 @@ func (s *SignupVerificationStore) IssuePendingApproval(ctx context.Context, p Is
 	}, nil
 }
 
-// ListPendingApprovals returns registrations awaiting a decision, oldest
-// first, capped at SignupApprovalPageSize.
-func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, limit int) ([]SignupVerification, error) {
+// ListPendingApprovals returns one page of the registrations awaiting a
+// decision, oldest first: limit rows (capped at SignupApprovalPageSize) after
+// the first offset rows.
+func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, offset, limit int) ([]SignupVerification, error) {
 	db, err := s.handle()
 	if err != nil {
 		return nil, err
@@ -712,15 +713,16 @@ func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, limi
 	if limit <= 0 || limit > SignupApprovalPageSize {
 		limit = SignupApprovalPageSize
 	}
+	offset = max(offset, 0)
 	const q = `
 		SELECT id, attempt_id, email, workspace_name, tier,
 		       owner_first_name, owner_last_name, owner_user_id, created_at
 		  FROM signup_verification
 		 WHERE status = 'pending_approval'
-		 ORDER BY created_at ASC
-		 LIMIT $1
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT $1 OFFSET $2
 	`
-	rows, err := db.QueryContext(ctx, q, limit)
+	rows, err := db.QueryContext(ctx, q, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list pending registrations: %w", err)
 	}

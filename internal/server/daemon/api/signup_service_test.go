@@ -287,7 +287,7 @@ func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssuePa
 	return m.rows[id].SignupVerification, nil
 }
 
-func (m *memVerificationStore) ListPendingApprovals(_ context.Context, limit int) ([]SignupVerification, error) {
+func (m *memVerificationStore) ListPendingApprovals(_ context.Context, offset, limit int) ([]SignupVerification, error) {
 	if m.listPendingErr != nil {
 		return nil, m.listPendingErr
 	}
@@ -298,6 +298,10 @@ func (m *memVerificationStore) ListPendingApprovals(_ context.Context, limit int
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if offset >= len(out) {
+		return nil, nil
+	}
+	out = out[offset:]
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

@@ -159,15 +159,32 @@ func TestListActiveGrants_Pagination(t *testing.T) {
 	srv, _ := newGrantsTestServer(t, grants)
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{Limit: 2, Offset: 1})
+	// Page 1 holds two grants and a next token.
+	first, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{PageSize: 2})
 	if err != nil {
 		t.Fatalf("ListActiveGrants: %v", err)
 	}
-	if resp.GetTotal() != 5 {
-		t.Errorf("want total=5, got %d", resp.GetTotal())
+	if first.GetTotal() != 5 || len(first.GetGrants()) != 2 || first.GetNextPageToken() == "" {
+		t.Fatalf("page 1: total=%d grants=%d next=%q", first.GetTotal(), len(first.GetGrants()), first.GetNextPageToken())
 	}
-	if len(resp.GetGrants()) != 2 {
-		t.Errorf("want 2 paged results, got %d", len(resp.GetGrants()))
+	// The token walks the rest: 2 more, then the last 1 with no next token.
+	second, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{PageSize: 2, PageToken: first.GetNextPageToken()})
+	if err != nil {
+		t.Fatalf("ListActiveGrants page 2: %v", err)
+	}
+	if len(second.GetGrants()) != 2 || second.GetGrants()[0].GetJti() == first.GetGrants()[0].GetJti() {
+		t.Fatalf("page 2 = %v", second.GetGrants())
+	}
+	last, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{PageSize: 2, PageToken: second.GetNextPageToken()})
+	if err != nil {
+		t.Fatalf("ListActiveGrants page 3: %v", err)
+	}
+	if len(last.GetGrants()) != 1 || last.GetNextPageToken() != "" {
+		t.Fatalf("page 3: grants=%d next=%q", len(last.GetGrants()), last.GetNextPageToken())
+	}
+	// A token this server did not write is refused.
+	if _, err := srv.ListActiveGrants(ctx, &tenantv1.ListActiveGrantsRequest{PageToken: "not-a-token"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("bad token: want InvalidArgument, got %v", err)
 	}
 }
 

@@ -36,6 +36,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 )
 
 // GrantInfo is the dashboard-shaped view of one active capability grant.
@@ -213,29 +214,22 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *tenantv1.
 		return out[i].GetExpiresAtUnix() < out[j].GetExpiresAtUnix()
 	})
 
-	// Apply pagination.
-	limit := int(req.GetLimit())
-	if limit <= 0 {
-		limit = 100
+	// Apply pagination (ADR-0028, rule 3).
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	offset := int(req.GetOffset())
-	if offset < 0 {
-		offset = 0
-	}
-	total := int32(len(out))
-	if offset >= len(out) {
+	total := len(out)
+	if offset >= total {
 		out = out[:0]
 	} else {
-		end := offset + limit
-		if end > len(out) {
-			end = len(out)
-		}
-		out = out[offset:end]
+		out = out[offset:min(offset+limit, total)]
 	}
 
 	return &tenantv1.ListActiveGrantsResponse{
-		Grants: out,
-		Total:  total,
+		Grants:        out,
+		Total:         pagetoken.Int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(out), total),
 	}, nil
 }
 
