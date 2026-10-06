@@ -99,14 +99,11 @@ func TestRetention_PruneTenant_MovesTheAnchorAndRemovesOnlyOlderRows(t *testing.
 	mock.ExpectExec("DELETE FROM audit_log WHERE tenant_id = \\$1 AND chain_seq IS NOT NULL AND chain_seq <= \\$2").
 		WithArgs("acme", int64(40)).
 		WillReturnResult(sqlmock.NewResult(0, 40))
-	mock.ExpectExec("DELETE FROM audit_log WHERE tenant_id = \\$1 AND chain_seq IS NULL AND created_at < \\$2").
-		WithArgs("acme", cutoff).
-		WillReturnResult(sqlmock.NewResult(0, 2))
 	mock.ExpectCommit()
 
 	removed, err := r.PruneTenant(context.Background(), "acme")
 	require.NoError(t, err)
-	assert.Equal(t, int64(42), removed)
+	assert.Equal(t, int64(40), removed)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
@@ -119,8 +116,6 @@ func TestRetention_PruneTenant_NothingOld(t *testing.T) {
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
-	mock.ExpectExec("chain_seq IS NULL AND created_at").
-		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	removed, err := r.PruneTenant(context.Background(), "acme")
@@ -141,9 +136,6 @@ func TestRetention_PruneTenant_UsesTheLongerPeriodOfTheInstall(t *testing.T) {
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WithArgs("acme", cutoff).
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
-	mock.ExpectExec("chain_seq IS NULL AND created_at").
-		WithArgs("acme", cutoff).
-		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()
 
 	_, err := r.PruneTenant(context.Background(), "acme")
@@ -165,9 +157,6 @@ func TestRetention_PruneTenant_RollsBackOnEachFailure(t *testing.T) {
 	}
 	anchor := func(m sqlmock.Sqlmock) {
 		m.ExpectExec("INSERT INTO audit_chain_anchor").WillReturnResult(sqlmock.NewResult(0, 1))
-	}
-	delChained := func(m sqlmock.Sqlmock) {
-		m.ExpectExec("chain_seq IS NOT NULL AND chain_seq <=").WillReturnResult(sqlmock.NewResult(0, 3))
 	}
 
 	cases := map[string]func(m sqlmock.Sqlmock){
@@ -193,13 +182,6 @@ func TestRetention_PruneTenant_RollsBackOnEachFailure(t *testing.T) {
 			lastOld(m)
 			anchor(m)
 			m.ExpectExec("chain_seq IS NOT NULL AND chain_seq <=").WillReturnError(assert.AnError)
-		},
-		"delete unchained": func(m sqlmock.Sqlmock) {
-			lock(m)
-			lastOld(m)
-			anchor(m)
-			delChained(m)
-			m.ExpectExec("chain_seq IS NULL AND created_at").WillReturnError(assert.AnError)
 		},
 	}
 	for name, expect := range cases {
@@ -234,7 +216,6 @@ func expectPruneNothing(mock sqlmock.Sqlmock) {
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
-	mock.ExpectExec("chain_seq IS NULL AND created_at").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 }
 
@@ -246,12 +227,19 @@ func TestRetention_Prune_GoesOnAfterOneTenantFails(t *testing.T) {
 	mock.ExpectQuery("SELECT DISTINCT tenant_id FROM audit_log").
 		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow("acme").AddRow("beta"))
 	mock.ExpectBegin().WillReturnError(assert.AnError) // acme fails
-	expectPruneNothing(mock)                           // beta runs
+	// beta runs and removes two rows.
+	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("ORDER  BY chain_seq DESC").
+		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}).AddRow(int64(2), make([]byte, chainHashLen)))
+	mock.ExpectExec("INSERT INTO audit_chain_anchor").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("chain_seq IS NOT NULL AND chain_seq <=").WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
 
 	before := testutil.ToFloat64(auditRetentionErrorsTotal)
 	removed, err := r.Prune(context.Background())
 	require.Error(t, err)
-	assert.Equal(t, int64(1), removed, "the rows of the tenant that passed are counted")
+	assert.Equal(t, int64(2), removed, "the rows of the tenant that passed are counted")
 	assert.InDelta(t, 1, testutil.ToFloat64(auditRetentionErrorsTotal)-before, 0.001)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

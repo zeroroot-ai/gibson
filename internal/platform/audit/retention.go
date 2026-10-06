@@ -13,6 +13,10 @@
 // the chain anchor: the position of the oldest row that remains, and the
 // hash that this row points at. The writer and the verifier start from the
 // anchor, so the chain still verifies after each run.
+//
+// Retention never removes a row that the export did not write to the
+// durable bucket (export.go). A row with no chain position is never
+// exported, so retention keeps it.
 package audit
 
 import (
@@ -208,7 +212,9 @@ func (r *Retention) PruneTenant(ctx context.Context, tenantID string) (int64, er
 
 	// The last chained row that retention removes: the row with the highest
 	// position among the rows before the oldest row inside the period. With
-	// no row inside the period, it is the chain head.
+	// no row inside the period, it is the chain head. A row that the export
+	// did not write to the durable bucket stays (ADR-0113, gibson#764): the
+	// position never passes exported_seq of the tenant.
 	const lastOldQuery = `
 SELECT chain_seq, entry_hash
 FROM   audit_log
@@ -218,6 +224,8 @@ WHERE  tenant_id = $1
          (SELECT MIN(chain_seq) FROM audit_log
           WHERE tenant_id = $1 AND chain_seq IS NOT NULL AND created_at >= $2),
          9223372036854775807)
+  AND  chain_seq <= COALESCE(
+         (SELECT exported_seq FROM audit_export_cursor WHERE tenant_id = $1), 0)
 ORDER  BY chain_seq DESC
 LIMIT  1`
 
@@ -258,19 +266,9 @@ SET first_seq = EXCLUDED.first_seq, prev_hash = EXCLUDED.prev_hash, pruned_at = 
 		removed += n
 	}
 
-	// Rows from before the chain migration have no position. Time alone
-	// decides for them.
-	res, err := tx.ExecContext(ctx,
-		`DELETE FROM audit_log WHERE tenant_id = $1 AND chain_seq IS NULL AND created_at < $2`,
-		tenantID, cutoff)
-	if err != nil {
-		return 0, fmt.Errorf("audit.Retention.PruneTenant: remove unchained rows of tenant %q: %w", tenantID, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("audit.Retention.PruneTenant: count removed rows of tenant %q: %w", tenantID, err)
-	}
-	removed += n
+	// A row from before the chain migration has no position, so the export
+	// never writes it, and retention keeps it. An install made after
+	// migration 022 has no such row.
 
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("audit.Retention.PruneTenant: commit for tenant %q: %w", tenantID, err)
