@@ -6,39 +6,39 @@
 # This file only shrinks. Adding an entry means accepting a declaration
 # nothing reads, so put the reason on a # line above it.
 #
-# measured 2026-10-06: 17 of 35 declarations across 2 packages and 2 files
+# measured 2026-10-06: 17 of 35 declarations across 2 packages and 4 files
 
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.CreateIssueResponse.Issue	# handler.go:89
+field main.CreateIssueResponse.Issue	# handler.go:88
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.GetRepositoryResponse.Repository	# handler.go:52
+field main.GetRepositoryResponse.Repository	# handler.go:51
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Issue.Body	# handler.go:60
+field main.Issue.Body	# handler.go:59
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Issue.HTMLURL	# handler.go:61
+field main.Issue.HTMLURL	# handler.go:60
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Issue.Number	# handler.go:57
+field main.Issue.Number	# handler.go:56
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Issue.State	# handler.go:59
+field main.Issue.State	# handler.go:58
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Issue.Title	# handler.go:58
+field main.Issue.Title	# handler.go:57
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.ListIssuesResponse.Issues	# handler.go:74
+field main.ListIssuesResponse.Issues	# handler.go:73
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.DefaultBranch	# handler.go:44
+field main.Repository.DefaultBranch	# handler.go:43
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.Description	# handler.go:41
+field main.Repository.Description	# handler.go:40
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.Fork	# handler.go:43
+field main.Repository.Fork	# handler.go:42
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.FullName	# handler.go:40
+field main.Repository.FullName	# handler.go:39
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.HTMLURL	# handler.go:47
+field main.Repository.HTMLURL	# handler.go:46
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.ID	# handler.go:39
+field main.Repository.ID	# handler.go:38
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.Language	# handler.go:45
+field main.Repository.Language	# handler.go:44
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.Private	# handler.go:42
+field main.Repository.Private	# handler.go:41
 # consumer: encoding/json. The handler returns this response field to plugin.WithHandler of the SDK, which marshals it.
-field main.Repository.Stargazers	# handler.go:46
+field main.Repository.Stargazers	# handler.go:45
