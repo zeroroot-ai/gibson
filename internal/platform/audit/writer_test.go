@@ -88,7 +88,7 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 // without a cast), and chain_seq/prev_hash/entry_hash carry the per-tenant
 // hash chain that flush() writes on every INSERT (chain.go). Query.List
 // reads id, ..., decision (COALESCE'd), metadata, created_at and orders by
-// created_at DESC.
+// created_at DESC. audit_chain_anchor mirrors 035_audit_retention.up.sql.
 func createAuditSchema(ctx context.Context, db *sql.DB) error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -105,6 +105,12 @@ CREATE TABLE IF NOT EXISTS audit_log (
     chain_seq   BIGINT,
     prev_hash   BYTEA,
     entry_hash  BYTEA
+);
+CREATE TABLE IF NOT EXISTS audit_chain_anchor (
+    tenant_id TEXT        PRIMARY KEY,
+    first_seq BIGINT      NOT NULL CHECK (first_seq >= 1),
+    prev_hash BYTEA       NOT NULL CHECK (octet_length(prev_hash) = 32),
+    pruned_at TIMESTAMPTZ NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS audit_log_tenant_chain_seq_key
     ON audit_log (tenant_id, chain_seq)
@@ -161,8 +167,8 @@ func stopWriter(t *testing.T, w *Writer) {
 // Writer unit tests (no real DB required)
 // ---------------------------------------------------------------------------
 
-// TestWriter_Log_IsNonBlocking verifies that Log() returns as soon as the
-// buffer has space, without waiting for the backpressure deadline.
+// TestWriter_Log_IsNonBlocking verifies that Log() returns at once when the
+// queue has room. nodrop_test.go covers the full queue.
 func TestWriter_Log_IsNonBlocking(t *testing.T) {
 	// Open a DSN that will never be reachable; the Writer is never started so
 	// the DB is never actually dialled.
@@ -173,8 +179,7 @@ func TestWriter_Log_IsNonBlocking(t *testing.T) {
 	w := NewWriter(db, auditSilentLogger())
 	// Do NOT call w.Start() — the background goroutine is not running.
 
-	// Buffer has room, so Log() must take the fast non-blocking-send path
-	// and return well within the enqueueTimeout backpressure window.
+	// The queue has room, so Log() must return at once.
 	ev := auditTestEvent("acme", "test.action")
 
 	done := make(chan struct{})
@@ -189,63 +194,6 @@ func TestWriter_Log_IsNonBlocking(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 		t.Fatal("Log() blocked despite free buffer space")
 	}
-}
-
-// TestWriter_Log_BoundedBlocking_WhenBufferFull verifies that once the
-// buffer is saturated, Log() applies bounded backpressure — it blocks for up
-// to enqueueTimeout waiting for space, then drops — rather than either
-// returning instantly (which would silently discard bursts the flush loop
-// could have absorbed) or blocking indefinitely (which would let a stuck
-// audit backend stall the caller's request path forever). See the Writer
-// package comment for the tradeoff.
-func TestWriter_Log_BoundedBlocking_WhenBufferFull(t *testing.T) {
-	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=require connect_timeout=1")
-	require.NoError(t, err)
-	defer db.Close()
-
-	w := NewWriter(db, auditSilentLogger())
-	// Do NOT call w.Start() — nothing drains the buffer, so Log() must ride
-	// out the full backpressure window before giving up.
-
-	// Fill the buffer directly to avoid Prometheus counter side-effects.
-	ev := auditTestEvent("acme", "test.action")
-	for i := 0; i < writerBufferSize; i++ {
-		w.buffer <- ev
-	}
-
-	start := time.Now()
-	done := make(chan struct{})
-	go func() {
-		w.Log(ev)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		elapsed := time.Since(start)
-		assert.GreaterOrEqual(t, elapsed, enqueueTimeout,
-			"Log() must wait out the full backpressure window before dropping")
-	case <-time.After(enqueueTimeout + 2*time.Second):
-		t.Fatal("Log() blocked well past the backpressure deadline — bounded backpressure is not bounded")
-	}
-}
-
-// TestWriter_Log_BufferOverflow_DropsGracefully verifies that Log() does not
-// panic and the buffer stays at capacity when it is already full.
-func TestWriter_Log_BufferOverflow_DropsGracefully(t *testing.T) {
-	db, err := sql.Open("postgres", "host=localhost port=9999 dbname=noop sslmode=require connect_timeout=1")
-	require.NoError(t, err)
-	defer db.Close()
-
-	w := NewWriter(db, auditSilentLogger())
-
-	ev := auditTestEvent("acme", "overflow.action")
-	for i := 0; i < writerBufferSize; i++ {
-		w.buffer <- ev
-	}
-
-	require.NotPanics(t, func() { w.Log(ev) })
-	assert.Equal(t, writerBufferSize, len(w.buffer), "buffer should remain at capacity")
 }
 
 // ---------------------------------------------------------------------------

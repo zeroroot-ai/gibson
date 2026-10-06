@@ -16,6 +16,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 )
 
 // newTestAuditLogger creates an AuditLogger backed by an in-process miniredis
@@ -31,7 +32,7 @@ func newTestAuditLogger(t *testing.T) *audit.AuditLogger {
 	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return audit.NewAuditLogger(ctx, sc, sl)
+	return audit.NewAuditLogger(ctx, sc, &audittest.Recorder{}, sl)
 }
 
 func TestAuditWriter_SuccessfulWrite(t *testing.T) {
@@ -115,7 +116,7 @@ func TestAuditWriter_CallerUnaffectedByAuditFailure(t *testing.T) {
 	t.Cleanup(cancel)
 
 	sl := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	logger := audit.NewAuditLogger(ctx, sc, sl)
+	logger := audit.NewAuditLogger(ctx, sc, &audittest.Recorder{}, sl)
 	w := NewAuditWriter(logger, sl)
 
 	event := AuditEvent{

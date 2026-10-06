@@ -5,9 +5,10 @@ package audit
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,7 +48,7 @@ func newTestLogger(t *testing.T) (*AuditLogger, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	return NewAuditLogger(ctx, stateClient, logger), cancel
+	return NewAuditLogger(ctx, stateClient, &recordingEmitter{}, logger), cancel
 }
 
 // ctxWithTenant returns a context with the given tenant ID injected.
@@ -70,10 +71,37 @@ func ctxWithTenantAndIdentity(tenant, subject, _ string) context.Context {
 	return auth.WithIdentity(ctx, id)
 }
 
-// drainCounter reads the current value of the auditWriteDropsTotal counter.
-func drainCounter() float64 {
+// recordingEmitter stands in for the durable Postgres writer. It keeps each
+// event that the logger hands to it.
+type recordingEmitter struct {
+	mu     sync.Mutex
+	events []Event
+}
+
+func (r *recordingEmitter) Log(event Event) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+func (r *recordingEmitter) recorded() []Event {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]Event(nil), r.events...)
+}
+
+// durableOf returns the recording emitter of a logger from newTestLogger.
+func durableOf(t *testing.T, al *AuditLogger) *recordingEmitter {
+	t.Helper()
+	rec, ok := al.durable.(*recordingEmitter)
+	require.True(t, ok, "the test logger has no recording emitter")
+	return rec
+}
+
+// tailErrorCounter reads the current value of the auditTailErrorsTotal counter.
+func tailErrorCounter() float64 {
 	m := &dto.Metric{}
-	if err := auditWriteDropsTotal.Write(m); err != nil {
+	if err := auditTailErrorsTotal.Write(m); err != nil {
 		return 0
 	}
 	if m.Counter == nil {
@@ -431,13 +459,13 @@ func TestAuditLogger_Query_EmptyTenant_ReturnsError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// New tests: fire-and-forget resilience
+// The durable copy and the live tail
 // ---------------------------------------------------------------------------
 
 // newBrokenLogger creates an AuditLogger backed by a miniredis instance that
 // is immediately stopped, causing all XADD commands to fail. MaxRetries is
 // set to 0 so the XADD fails on the first attempt without sleeping.
-func newBrokenLogger(t *testing.T) (*AuditLogger, context.CancelFunc) {
+func newBrokenLogger(t *testing.T) *AuditLogger {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -464,43 +492,81 @@ func newBrokenLogger(t *testing.T) (*AuditLogger, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	al := NewAuditLogger(ctx, stateClient, logger)
+	al := NewAuditLogger(ctx, stateClient, &recordingEmitter{}, logger)
 
 	// Stop miniredis so all subsequent XADD commands fail immediately.
 	mr.Close()
 
-	return al, cancel
+	return al
 }
 
-// TestAuditLogger_DropOnXADDError verifies that when the drain goroutine
-// encounters an XADD error, it increments gibson_audit_write_drops_total.
-func TestAuditLogger_DropOnXADDError(t *testing.T) {
-	al, _ := newBrokenLogger(t)
+// TestAuditLogger_EachRecordGoesToTheDurableWriter: the logger hands each
+// record to the durable writer, with each field that the live tail has.
+func TestAuditLogger_EachRecordGoesToTheDurableWriter(t *testing.T) {
+	al, _ := newTestLogger(t)
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
-	before := drainCounter()
+	al.LogWithResult(ctx, "plugin.enable", "plugin", "github", resultFailure, map[string]any{"why": "test"})
+
+	got := durableOf(t, al).recorded()
+	require.Len(t, got, 1, "the durable writer must get the record")
+	ev := got[0]
+	assert.Equal(t, "acme", ev.TenantID)
+	assert.Equal(t, "user-1", ev.ActorID)
+	assert.Equal(t, "user", ev.ActorType)
+	assert.Equal(t, "plugin.enable", ev.Action)
+	assert.Equal(t, "plugin", ev.TargetType)
+	assert.Equal(t, "github", ev.TargetID)
+
+	var meta struct {
+		EntryID string         `json:"entry_id"`
+		Result  string         `json:"result"`
+		Details map[string]any `json:"details"`
+	}
+	require.NoError(t, json.Unmarshal(ev.Metadata, &meta))
+	assert.NotEmpty(t, meta.EntryID)
+	assert.Equal(t, resultFailure, meta.Result)
+	assert.Equal(t, "test", meta.Details["why"])
+
+	// The live tail holds the same record.
+	require.True(t, waitForQueue(al, time.Second))
+	require.Eventually(t, func() bool {
+		entries, err := al.Query(context.Background(), "acme", AuditQueryOptions{})
+		return err == nil && len(entries) == 1 && entries[0].ID == meta.EntryID
+	}, time.Second, 5*time.Millisecond, "the live tail must hold the record")
+}
+
+// TestAuditLogger_ActorlessEntryDoesNotReachTheDurableWriter: a refused
+// entry is written nowhere.
+func TestAuditLogger_ActorlessEntryDoesNotReachTheDurableWriter(t *testing.T) {
+	al, _ := newTestLogger(t)
+	al.Log(ctxWithTenant("acme"), "test.action", "resource", "r1", nil)
+	assert.Empty(t, durableOf(t, al).recorded())
+}
+
+// TestAuditLogger_TailFailureKeepsTheDurableRecord: when Redis refuses the
+// copy for the live tail, the durable writer still has the record. The miss
+// is counted as a tail error.
+func TestAuditLogger_TailFailureKeepsTheDurableRecord(t *testing.T) {
+	al := newBrokenLogger(t)
+
+	before := tailErrorCounter()
 
 	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
-	al.Log(ctx, "test.action", "resource", "r1", nil)
+	require.NotPanics(t, func() {
+		al.Log(ctx, "test.action", "resource", "r1", nil)
+	})
 
-	// Wait for the drain goroutine to process the item and increment the counter.
-	// MaxRetries=0 means no retry delay; 500ms is ample headroom.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if drainCounter()-before >= 1 {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	after := drainCounter()
-	assert.Equal(t, float64(1), after-before,
-		"gibson_audit_write_drops_total must increment by 1 on XADD error")
+	require.Len(t, durableOf(t, al).recorded(), 1, "Postgres must hold the record when Redis is down")
+	require.Eventually(t, func() bool {
+		return tailErrorCounter()-before >= 1
+	}, 2*time.Second, 5*time.Millisecond, "gibson_audit_tail_errors_total must count the miss")
 }
 
-// TestAuditLogger_DropOnQueueFull verifies that when the write queue is
-// already at capacity, Log() drops the entry and increments the counter.
-func TestAuditLogger_DropOnQueueFull(t *testing.T) {
-	// Use a stopped drain context so nothing drains from the queue.
+// TestAuditLogger_FullTailQueueDoesNotHoldTheCaller: the live tail is not
+// the record. A full tail queue does not block Log and does not lose the
+// durable record.
+func TestAuditLogger_FullTailQueueDoesNotHoldTheCaller(t *testing.T) {
 	mr := miniredis.RunT(t)
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
@@ -513,22 +579,17 @@ func TestAuditLogger_DropOnQueueFull(t *testing.T) {
 		Level: slog.LevelError,
 	}))
 
-	// Create a context that we cancel immediately so the drain goroutine exits
-	// and the queue stays full.
+	// Cancel at once, so the drain goroutine exits and the queue stays full.
 	drainCtx, drainCancel := context.WithCancel(context.Background())
-	drainCancel() // cancel immediately so drainLoop exits quickly
+	drainCancel()
 
-	al := NewAuditLogger(drainCtx, stateClient, logger)
-
-	// Wait for drain goroutine to exit (done channel will close).
+	al := NewAuditLogger(drainCtx, stateClient, &recordingEmitter{}, logger)
 	select {
 	case <-al.done:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("drain goroutine did not exit after context cancel")
 	}
 
-	// Fill the queue to capacity with dummy items.
-	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 	dummy := auditWrite{
 		streamKey: "tenant:acme:audit:log",
 		values:    map[string]any{"id": "dummy"},
@@ -537,30 +598,49 @@ func TestAuditLogger_DropOnQueueFull(t *testing.T) {
 		al.writeQueue <- dummy
 	}
 
-	before := drainCounter()
+	before := tailErrorCounter()
 
-	// This Log() call must hit the queue-full path.
-	al.Log(ctx, "overflow.action", "resource", "r1", nil)
+	done := make(chan struct{})
+	go func() {
+		al.Log(ctxWithTenantAndIdentity("acme", "user-1", ""), "overflow.action", "resource", "r1", nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Log blocked on a full live tail queue")
+	}
 
-	after := drainCounter()
-	assert.Equal(t, float64(1), after-before,
-		"gibson_audit_write_drops_total must increment by 1 when queue is full")
+	assert.Len(t, durableOf(t, al).recorded(), 1, "the durable writer must hold the record")
+	assert.InDelta(t, 1, tailErrorCounter()-before, 0.001,
+		"gibson_audit_tail_errors_total must count the record that is not in the tail")
 }
 
-// TestAuditLogger_NoErrorPropagated verifies that Log() does not panic and
-// does not propagate an error to the caller even when the underlying Redis is
-// unreachable.
-func TestAuditLogger_NoErrorPropagated(t *testing.T) {
-	al, _ := newBrokenLogger(t)
+// TestNewAuditLogger_RequiresTheDurableWriter: a logger with no durable
+// writer would keep the record only in a stream that Redis trims.
+func TestNewAuditLogger_RequiresTheDurableWriter(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	stateClient, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = stateClient.Close() })
 
-	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
-
-	// Must not panic.
-	require.NotPanics(t, func() {
-		al.Log(ctx, "test.action", "resource", "r1", nil)
+	require.Panics(t, func() {
+		NewAuditLogger(context.Background(), stateClient, nil, slog.Default())
 	})
+	require.Panics(t, func() {
+		NewAuditLogger(context.Background(), nil, &recordingEmitter{}, slog.Default())
+	}, "a nil state client")
+	require.Panics(t, func() {
+		NewAuditLogger(context.Background(), stateClient, &recordingEmitter{}, nil)
+	}, "a nil logger")
+}
 
-	// Log() returns nothing — no error to check. The test passing without panic
-	// is the verification.
-	_ = errors.New("placeholder to confirm no error return")
+// TestActorTypeFor maps each credential class onto the actor_type column.
+func TestActorTypeFor(t *testing.T) {
+	assert.Equal(t, "user", actorTypeFor(auth.CredentialOIDCUser))
+	assert.Equal(t, "system", actorTypeFor(auth.CredentialClientCredentials))
+	assert.Equal(t, "agent", actorTypeFor(auth.CredentialCapabilityGrant))
+	assert.Equal(t, "user", actorTypeFor(""))
 }

@@ -166,10 +166,10 @@ func (w *AuditWriter) Audit(ctx context.Context, event AuditEvent) {
 	w.write(ctx, event)
 }
 
-// write enqueues the event to the Redis Streams audit logger. It maps
-// AuditEvent fields to the AuditLogger.LogWithResult API. Since
-// LogWithResult is fire-and-forget, write never returns an error — drop
-// accounting is handled inside AuditLogger via gibson_audit_write_drops_total.
+// write hands the event to the audit logger. It maps AuditEvent fields to
+// the AuditLogger.LogWithResult API. The logger puts the record into the
+// queue of the Postgres writer, which drops nothing, so write returns no
+// error.
 func (w *AuditWriter) write(ctx context.Context, event AuditEvent) {
 	now := event.OccurredAt
 	if now.IsZero() {
