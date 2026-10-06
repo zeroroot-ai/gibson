@@ -82,6 +82,10 @@ func TestEnqueueTenantProvisioning_Conflict_AlreadyExisted(t *testing.T) {
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
 		WithArgs("acme", "", "owner@acme.test", "", "enterprise", "pending", "", "", sql.NullTime{}, false).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	// The queued row already matches: the rewrite changes nothing.
+	mock.ExpectQuery("UPDATE pending_tenant_provisioning p").
+		WithArgs("acme", "owner@acme.test", "", "enterprise").
+		WillReturnRows(sqlmock.NewRows([]string{"tier", "owner_email", "workspace_name"}))
 
 	resp, err := srv.EnqueueTenantProvisioning(context.Background(),
 		&daemonoperatorv1.EnqueueTenantProvisioningRequest{
@@ -121,5 +125,74 @@ func TestEnqueueTenantProvisioning_DBError_Internal(t *testing.T) {
 		})
 	if status.Code(err) != codes.Internal {
 		t.Fatalf("want Internal on DB error, got %v", err)
+	}
+}
+
+// TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier is gibson#219: a
+// row queued with a tier that cannot provision sat in the queue for ever, and
+// a chart fix that changed FIRST_TENANT_TIER never reached it. The seed now
+// rewrites a pending row to its current intent.
+func TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	srv := newPendingServer()
+	srv.platformDB = db
+
+	expectEnsureTable(mock)
+	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
+		WithArgs("acme", "", "owner@acme.test", "Acme", "enterprise-deploy", "pending", "", "", sql.NullTime{}).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`UPDATE pending_tenant_provisioning p\s+SET owner_email = \$2, workspace_name = \$3, tier = \$4`).
+		WithArgs("acme", "owner@acme.test", "Acme", "enterprise-deploy").
+		WillReturnRows(sqlmock.NewRows([]string{"tier", "owner_email", "workspace_name"}).
+			AddRow("team", "owner@acme.test", "Acme"))
+
+	resp, err := srv.EnqueueTenantProvisioning(context.Background(),
+		&daemonoperatorv1.EnqueueTenantProvisioningRequest{
+			TenantId:    "acme",
+			DisplayName: "Acme",
+			OwnerEmail:  "owner@acme.test",
+			Tier:        "enterprise-deploy",
+		})
+	if err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	if !resp.GetAlreadyExisted() {
+		t.Errorf("expected already_existed=true for a queued tenant")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("expectations: %v", err)
+	}
+}
+
+// TestEnqueueTenantProvisioning_RewriteError_Internal makes sure that a failed
+// rewrite is not reported as success: the seed retries on the next tick.
+func TestEnqueueTenantProvisioning_RewriteError_Internal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+
+	srv := newPendingServer()
+	srv.platformDB = db
+
+	expectEnsureTable(mock)
+	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("UPDATE pending_tenant_provisioning p").
+		WillReturnError(context.DeadlineExceeded)
+
+	_, err = srv.EnqueueTenantProvisioning(context.Background(),
+		&daemonoperatorv1.EnqueueTenantProvisioningRequest{
+			TenantId:   "acme",
+			OwnerEmail: "owner@acme.test",
+		})
+	if status.Code(err) != codes.Internal {
+		t.Fatalf("want Internal on a rewrite error, got %v", err)
 	}
 }
