@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -116,6 +118,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 		})).To(Or(Succeed(), MatchError(ContainSubstring("already exists"))))
 
 		reconciler = &OIDCClientReconciler{
+			Audit:  (&audittest.Sink{}).Emitter(GinkgoT()),
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
@@ -258,6 +261,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 		defer machineFake.Close()
 
 		machineReconciler := &OIDCClientReconciler{
+			Audit:  (&audittest.Sink{}).Emitter(GinkgoT()),
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
@@ -354,6 +358,7 @@ var _ = Describe("OIDCClient reconciler", func() {
 		defer botFake.Close()
 
 		botReconciler := &OIDCClientReconciler{
+			Audit:  (&audittest.Sink{}).Emitter(GinkgoT()),
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(issuer, pat string) zitadel.Client {
@@ -585,7 +590,7 @@ var _ = Describe("reconcileMachineUserRoles: a Zitadel Remove failure is handled
 			Spec:       gibsonv1alpha1.OIDCClientSpec{ApplicationType: gibsonv1alpha1.OIDCAppTypeMachineUser},
 		}
 		cli := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).WithStatusSubresource(&gibsonv1alpha1.OIDCClient{}).WithObjects(oc).Build()
-		reconciler := &OIDCClientReconciler{Client: cli, Scheme: k8sClient.Scheme()}
+		reconciler := &OIDCClientReconciler{Audit: (&audittest.Sink{}).Emitter(GinkgoT()), Client: cli, Scheme: k8sClient.Scheme()}
 		zc := newFakeMemberZitadelClient()
 		zc.removeIAMErr = errors.New("zitadel unreachable")
 
@@ -603,7 +608,7 @@ var _ = Describe("reconcileMachineUserRoles: a Zitadel Remove failure is handled
 			},
 		}
 		cli := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).WithStatusSubresource(&gibsonv1alpha1.OIDCClient{}).WithObjects(oc).Build()
-		reconciler := &OIDCClientReconciler{Client: cli, Scheme: k8sClient.Scheme()}
+		reconciler := &OIDCClientReconciler{Audit: (&audittest.Sink{}).Emitter(GinkgoT()), Client: cli, Scheme: k8sClient.Scheme()}
 		zc := newFakeMemberZitadelClient()
 		zc.removeOrgErr = errors.New("zitadel unreachable")
 
@@ -644,6 +649,7 @@ var _ = Describe("OIDCClient reconciler: role changes reach an EXISTING machine 
 
 		fake = newFakeMemberZitadelClient()
 		reconciler = &OIDCClientReconciler{
+			Audit:  (&audittest.Sink{}).Emitter(GinkgoT()),
 			Client: k8sClient,
 			Scheme: k8sClient.Scheme(),
 			ZitadelFactory: func(_, _ string) zitadel.Client {

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +30,7 @@ func adminTokenReconciler(t *testing.T, vc *fakeVaultClient, sys *fakeSystemClie
 		Data:       map[string][]byte{"token": []byte("root-token")},
 	}
 	return &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: fake.NewClientBuilder().WithScheme(s).WithObjects(tokenSecret).Build(),
 		Scheme: s,
 		VaultFactory: func(string, vault.TokenFunc) (vault.Client, error) {

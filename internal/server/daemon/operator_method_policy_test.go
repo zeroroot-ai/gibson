@@ -191,18 +191,18 @@ func deniedMethod() string {
 }
 
 // TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced asserts the policed
-// peer set is exactly the two operators: EnvoyID and any browser-path SVID
+// peer set is exactly the three operators: EnvoyID and any browser-path SVID
 // are deliberately absent (they transit Envoy + ext-authz, never this bypass).
 func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
-	// In a PRODUCTION build exactly two peers are policed. A test_fixtures
+	// In a PRODUCTION build exactly three peers are policed. A test_fixtures
 	// build adds the exit-test runner and nothing else — that identity does not
 	// exist in the production binary at all (e2e_peer_policy_stub.go), which is
 	// what keeps this invariant meaningful where it matters. Assert the exact
 	// membership rather than only the count, so a future extra peer in either
 	// build has to be added here deliberately.
-	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD)}
+	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD), platformOperatorSVID(testTD)}
 	if isTestFixturesBuild {
 		want = append(want, "spiffe://example.org/platform/e2e-runner")
 	}
@@ -310,4 +310,17 @@ func TestSpiffeBypassDecision(t *testing.T) {
 		assert.False(t, ok, "a non-allow-listed peer is not bypassed")
 		assert.NoError(t, err, "a non-allow-listed peer must fall through, NOT be denied")
 	})
+}
+
+// TestPlatformOperatorMethodPolicy_OnlyTheAuditRecord pins the platform
+// operator to the one RPC it calls: it sends the audit records of its own
+// changes and nothing else (gibson#583).
+func TestPlatformOperatorMethodPolicy_OnlyTheAuditRecord(t *testing.T) {
+	got := make([]string, 0, 1)
+	for method := range platformOperatorAllowedMethods() {
+		got = append(got, method)
+	}
+	assert.ElementsMatch(t, []string{daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName}, got)
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
+	assert.Equal(t, platformOperatorAllowedMethods(), policies[platformOperatorSVID(testTD)])
 }

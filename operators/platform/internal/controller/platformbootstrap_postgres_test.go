@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,6 +64,7 @@ func TestReconcilePostgresBundle_MissingSecret(t *testing.T) {
 	s := mustScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(s).Build()
 	r := &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
 		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
 			return &fakePG{}, nil
@@ -88,6 +91,7 @@ func TestReconcilePostgresBundle_AppliesOwnerAndGrants(t *testing.T) {
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(suSec).Build()
 	pgcli := &fakePG{}
 	r := &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
 		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
 			return pgcli, nil
@@ -120,6 +124,7 @@ func TestReconcilePostgresBundle_PermissionDenied(t *testing.T) {
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(suSec).Build()
 	r := &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
 		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
 			return &fakePG{failOwnerErr: fmt.Errorf("denied: %w", pg.ErrPermissionDeny)}, nil
@@ -145,6 +150,7 @@ func TestReconcilePostgresBundle_ClusterUnreachable(t *testing.T) {
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(suSec).Build()
 	r := &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
 		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
 			return nil, fmt.Errorf("dial tcp: %w", pg.ErrUnreachable)
@@ -179,6 +185,7 @@ func TestReconcilePostgresBundle_InvalidPassword_TriggersReload(t *testing.T) {
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(suSec).Build()
 	r := &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8),
 		PostgresFactory: func(ctx context.Context, cfg pg.Config) (pg.Client, error) {
 			return nil, fmt.Errorf("ping: %w", pg.ErrInvalidPassword)
@@ -219,7 +226,7 @@ func TestTrimSpaceOnSecretRead(t *testing.T) {
 		Data:       map[string][]byte{"pat": []byte("real-pat-value\n")},
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(patSec).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 
 	v, ok, err := r.readSecretKey(context.Background(), "gibson", gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Key: "pat"})
 	if err != nil {

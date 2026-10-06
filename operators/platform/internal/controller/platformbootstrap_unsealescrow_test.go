@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,7 +33,7 @@ func escrowFixture(t *testing.T, dest gibsonv1alpha1.UnsealEscrowDestination, pa
 		})
 	}
 	cli := b.Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{

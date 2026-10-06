@@ -286,3 +286,20 @@ func TestAdminApproveRegistration_FailureIsRecorded(t *testing.T) {
 		t.Errorf("events = %+v, want a deny record of the failed approval", aw.events)
 	}
 }
+
+// A platform record names the system tenant, and the daemon writes it there
+// (gibson#583).
+func TestEmitAuditEvent_PlatformRecordIsInTheSystemTenant(t *testing.T) {
+	rec := &audittest.Recorder{}
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, rec)
+	ev := stepEvent()
+	ev.TenantId = auth.SystemTenantString
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/platform-operator", Issuer: "spiffe"})
+	if _, err := srv.EmitAuditEvent(ctx, &daemonoperatorv1.EmitAuditEventRequest{Event: ev}); err != nil {
+		t.Fatalf("EmitAuditEvent: %v", err)
+	}
+	if got := rec.Events(); len(got) != 1 || got[0].TenantID != auth.SystemTenantString {
+		t.Fatalf("records = %+v, want one in the system tenant", got)
+	}
+}

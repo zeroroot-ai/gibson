@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,6 +97,7 @@ func newReconcilerWithPAT(t *testing.T, zitadelURL string) *PlatformBootstrapRec
 		Data:       map[string][]byte{"pat": []byte("test-pat")},
 	}).Build()
 	return &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),

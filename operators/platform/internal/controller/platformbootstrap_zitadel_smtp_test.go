@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +65,7 @@ func newSMTPReconciler(t *testing.T, zitadelURL string, objs ...client.Object) *
 	}
 	cli := builder.Build()
 	return &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),

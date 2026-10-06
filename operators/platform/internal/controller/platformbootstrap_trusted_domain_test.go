@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -171,6 +173,7 @@ func TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster(t *testing.T) {
 	fake := &fakeSystemClient{}
 
 	r := &PlatformBootstrapReconciler{
+		Audit: (&audittest.Sink{}).Emitter(t),
 		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
 			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
 			return fake, nil
@@ -220,6 +223,7 @@ func TestReconcileTrustedDomain_ExplicitAPIURL(t *testing.T) {
 
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{
+		Audit: (&audittest.Sink{}).Emitter(t),
 		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
 			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
 			return &fakeSystemClient{existing: []string{testClusterDomain}}, nil
@@ -252,6 +256,7 @@ func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
 
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{
+		Audit: (&audittest.Sink{}).Emitter(t),
 		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
 			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
 			return &fakeSystemClient{}, nil
@@ -271,6 +276,7 @@ func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
 // cannot run, so its condition is False and never Ready (gibson#223).
 func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 	r := &PlatformBootstrapReconciler{
+		Audit: (&audittest.Sink{}).Emitter(t),
 		SystemClientFactory: func(string, string, string, string) (zitadel.SystemClient, error) {
 			t.Fatal("factory must not be called when systemClient is nil")
 			return nil, nil
@@ -312,7 +318,7 @@ func TestReconcileTrustedDomain_ClaimedHostReachesTheWire(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	r := &PlatformBootstrapReconciler{SystemClientFactory: DefaultSystemClientFactory}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), SystemClientFactory: DefaultSystemClientFactory}
 
 	// srv.URL stands in for the cluster Service address: a host that is NOT
 	// the public domain.

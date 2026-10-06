@@ -8,7 +8,6 @@ package audittest
 import (
 	"context"
 	"sync"
-	"testing"
 
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
@@ -51,8 +50,15 @@ func (s *Sink) Events() []audit.Event {
 	return append([]audit.Event(nil), s.events...)
 }
 
+// TB is the part of testing.TB the Sink needs. A Ginkgo spec passes
+// GinkgoT().
+type TB interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
 // Emitter returns a SagaEmitter over s.
-func (s *Sink) Emitter(t testing.TB) *audit.SagaEmitter {
+func (s *Sink) Emitter(t TB) *audit.SagaEmitter {
 	t.Helper()
 	e, err := audit.NewSagaEmitter(s)
 	if err != nil {

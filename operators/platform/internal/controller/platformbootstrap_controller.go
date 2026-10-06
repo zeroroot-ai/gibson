@@ -8,10 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"k8s.io/client-go/util/retry"
 	"os"
+	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/client-go/util/retry"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	fga "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/fga"
 	vault "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/vault"
@@ -112,10 +115,17 @@ type PlatformBootstrapReconciler struct {
 	Now                 func() time.Time
 	PostgresFactory     PostgresClientFactory
 	SystemClientFactory SystemClientFactory
+	// Audit sends the records of the changes of this reconciler to the daemon
+	// (gibson#583). Required. The records wait in the status until the
+	// daemon answers; see pending_audit.go.
+	Audit *audit.SagaEmitter
 }
 
 // SetupWithManager wires the reconciler to the manager.
 func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return errNoAuditEmitter
+	}
 	if r.ZitadelURL == "" {
 		url, err := ZitadelConnectURLFromEnv(os.Getenv)
 		if err != nil {
@@ -188,6 +198,9 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	if err := r.reader().Get(ctx, req.NamespacedName, &pb); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	if r.Audit == nil {
+		return ctrl.Result{}, errNoAuditEmitter
+	}
 
 	if !pb.DeletionTimestamp.IsZero() {
 		return r.reconcileDeletion(ctx, &pb)
@@ -209,6 +222,14 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// The steps, in order. Each records what it did on pb.Status and returns
 	// a non-zero Result or an error to stop the pass there; the comments
 	// above each step say why it sits where it does.
+	// A pass at a generation not yet fully applied changes Zitadel, FGA,
+	// OpenBao or Postgres state, so it keeps an audit record (gibson#583). A
+	// pass at an applied generation is a drift re-check with no new record.
+	recording := pb.Status.ObservedGeneration != pb.Generation
+	recordFields := map[string]string{"generation": strconv.FormatInt(pb.Generation, 10)}
+	if recording {
+		keepPending(&pb.Status.PendingAuditRecords, pendingRecord(audit.ActionPlatformBootstrap, &pb, "", "", recordFields))
+	}
 	steps := []reconcileStep{
 		// Step 0: escrow the OpenBao unseal key.
 		//
@@ -290,6 +311,10 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 	for _, step := range steps {
 		if result, err = step(ctx, &pb, logger); err != nil || !result.IsZero() {
+			if err != nil && recording {
+				keepPending(&pb.Status.PendingAuditRecords,
+					pendingRecord(audit.ActionPlatformBootstrap, &pb, audit.ResultFailure, err.Error(), recordFields))
+			}
 			return result, err
 		}
 	}
@@ -815,6 +840,15 @@ func (r *PlatformBootstrapReconciler) reader() client.Reader {
 // The error surfaces in the controller's "Reconciler error" log line and
 // requeues the object with backoff.
 func (r *PlatformBootstrapReconciler) finish(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, result ctrl.Result, err error) (ctrl.Result, error) {
+	// Send the pending audit records when the daemon answers. A daemon that
+	// does not answer yet only delays them: they stay in the status, and the
+	// resource comes back soon to try again (gibson#583).
+	if ferr := flushPending(ctx, r.Audit, &pb.Status.PendingAuditRecords); ferr != nil {
+		log.FromContext(ctx).V(1).Info("audit records stay pending; the daemon did not accept them", "pending", len(pb.Status.PendingAuditRecords), "err", ferr.Error())
+	}
+	if len(pb.Status.PendingAuditRecords) > 0 && err == nil && (result.RequeueAfter == 0 || result.RequeueAfter > pendingRequeue) {
+		result.RequeueAfter = pendingRequeue
+	}
 	if serr := r.statusUpdate(ctx, pb); serr != nil {
 		if err != nil {
 			return result, fmt.Errorf("%w (and the status write failed: %w)", err, serr)

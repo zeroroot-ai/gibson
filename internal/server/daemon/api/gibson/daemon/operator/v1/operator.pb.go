@@ -544,7 +544,8 @@ type AuditEventMessage struct {
 	// Why the change failed. Set only when result is "failure".
 	Reason string            `protobuf:"bytes,8,opt,name=reason,proto3" json:"reason,omitempty"`
 	Fields map[string]string `protobuf:"bytes,10,rep,name=fields,proto3" json:"fields,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
-	// The tenant that owns the target. Required.
+	// The tenant that owns the target. Required. A platform change names the
+	// system tenant.
 	TenantId string `protobuf:"bytes,11,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	// The kind of the changed object, for example "tenant". Required.
 	TargetType string `protobuf:"bytes,12,opt,name=target_type,json=targetType,proto3" json:"target_type,omitempty"`

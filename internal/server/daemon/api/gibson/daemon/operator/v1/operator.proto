@@ -455,7 +455,8 @@ message AuditEventMessage {
   // Why the change failed. Set only when result is "failure".
   string reason = 8;
   map<string, string> fields = 10;
-  // The tenant that owns the target. Required.
+  // The tenant that owns the target. Required. A platform change names the
+  // system tenant.
   string tenant_id = 11;
   // The kind of the changed object, for example "tenant". Required.
   string target_type = 12;

@@ -704,6 +704,12 @@ type OIDCClientStatusEntry struct {
 
 // PlatformBootstrapStatus is the observed state.
 type PlatformBootstrapStatus struct {
+	// PendingAuditRecords are the audit records of changes the daemon has not
+	// accepted yet (gibson#583). The operator sends them when the daemon
+	// answers, then removes them.
+	// +optional
+	PendingAuditRecords []PendingAuditRecord `json:"pendingAuditRecords,omitempty"`
+
 	// ObservedGeneration mirrors metadata.generation; used to detect
 	// "spec changed, not yet reconciled".
 	// +optional

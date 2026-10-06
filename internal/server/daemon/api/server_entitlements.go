@@ -212,9 +212,14 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1
 	if ev.GetResult() != "" && ev.GetResult() != auditResultFailure {
 		return nil, status.Errorf(codes.InvalidArgument, "result must be empty or %q", auditResultFailure)
 	}
-	tenant, err := auth.NewTenantID(ev.GetTenantId())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
+	// A platform change (the platform operator) belongs to the system tenant.
+	tenant := auth.SystemTenant
+	if ev.GetTenantId() != auth.SystemTenantString {
+		t, err := auth.NewTenantID(ev.GetTenantId())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
+		}
+		tenant = t
 	}
 	actorSource := classifyActorSource(ctx)
 	if actorSource != "operator" && actorSource != "platform" && actorSource != "system" {
