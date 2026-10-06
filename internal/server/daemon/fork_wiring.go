@@ -80,3 +80,30 @@ func (z *lazyForkLedger) Claim(ctx context.Context, jti, fork string) (harness.F
 	}
 	return d, nil
 }
+
+func (z *lazyForkLedger) ReserveForkSeat(ctx context.Context, seat harness.ForkSeat, ttl time.Duration) error {
+	l := z.ledger()
+	if l == nil {
+		return errNoForkStore
+	}
+	if err := l.ReserveForkSeat(ctx, seat, ttl); err != nil {
+		return fmt.Errorf("fork ledger: %w", err)
+	}
+	return nil
+}
+
+func (z *lazyForkLedger) TakeForkSeat(ctx context.Context, missionID, nodeID string) (harness.ForkSeat, bool, error) {
+	l := z.ledger()
+	if l == nil {
+		return harness.ForkSeat{}, false, nil
+	}
+	seat, ok, err := l.TakeForkSeat(ctx, missionID, nodeID)
+	if err != nil {
+		return harness.ForkSeat{}, false, fmt.Errorf("fork ledger: %w", err)
+	}
+	return seat, ok, nil
+}
+
+// The mission operator gives CreateMission the first node of a child that
+// starts from the state of its caller (gibson#803).
+var _ harness.ChildFirstNodeSource = (*missionHarnessAdapter)(nil)

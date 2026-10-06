@@ -3264,6 +3264,20 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
+	// A child that starts from the state of the caller is a fork of the
+	// caller sandbox (ADR-0169, gibson#803). Each check that needs no child
+	// runs first, so a refused fork creates no mission.
+	var forkPlan *callerForkPlan
+	if req.GetStartsFrom() == harnesspb.OriginationStart_ORIGINATION_START_CALLER_STATE {
+		plan, perr := s.planCallerFork(ctx, parentHarness, req)
+		if perr != nil {
+			s.logger.Warn("mission origination refused: the caller cannot be forked",
+				"parent_mission_id", parentMissionID.String(), "error", perr)
+			return nil, perr
+		}
+		forkPlan = plan
+	}
+
 	// Create mission request
 	createReq := &CreateMissionRequest{
 		MissionDefinitionJSON: definitionJSON,
@@ -3290,6 +3304,20 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 				Message: fmt.Sprintf("failed to create mission: %v", err),
 			},
 		}, nil
+	}
+
+	// The bounds of ADR-0063 ran in CreateMission, before the snapshot. A
+	// fork that fails cancels the child, so no child waits for a fork that
+	// does not exist.
+	if forkPlan != nil {
+		if ferr := s.forkCallerForChild(ctx, forkPlan, missionInfo.ID); ferr != nil {
+			if cerr := s.missionManager.Cancel(ctx, missionInfo.ID); cerr != nil {
+				s.logger.Error("cancel the child mission of a failed fork", "mission_id", missionInfo.ID, "error", cerr)
+			}
+			s.logger.Warn("mission origination failed: the caller was not forked",
+				"mission_id", missionInfo.ID, "parent_mission_id", parentMissionID.String(), "error", ferr)
+			return nil, ferr
+		}
 	}
 
 	s.logger.Info("mission originated from inside its parent",

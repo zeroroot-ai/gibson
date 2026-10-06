@@ -31,6 +31,10 @@ type AgentSandboxLauncher interface {
 	// ForkAgent starts the dispatches in forks of a running source sandbox
 	// (ADR-0169).
 	ForkAgent(ctx context.Context, sourceSandboxID string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error)
+	// ForkSandbox forks a running sandbox once and does not follow the
+	// fork. FollowAgent follows it later (gibson#803).
+	ForkSandbox(ctx context.Context, tenant, sourceSandboxID string, spec sandboxed.AgentForkSpec) (string, error)
+	FollowAgent(ctx context.Context, sandboxID, class string, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
 }
 
 // AgentLaunchSpecResolver resolves the per-agent launch spec — image, sandbox
@@ -175,6 +179,13 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		RunTimeout: capRunTimeout(task.Timeout, spec.MaxRuntime),
 	}
 
+	// The first node of a child mission that its caller originated from its
+	// own state runs in the fork of the caller that waits for it (gibson#803).
+	if seat, ok, err := h.takeForkSeat(ctx, task); err != nil {
+		return agent.Result{}, err
+	} else if ok {
+		return h.delegateToAgentViaSeat(ctx, name, task, spec, dispatch, seat)
+	}
 	if task.StartsFrom != "" {
 		return h.delegateToAgentViaFork(ctx, name, task, spec, dispatch)
 	}
