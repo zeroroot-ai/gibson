@@ -175,7 +175,9 @@ func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructi
 
 // TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement
 // proves the adapter reports a predicate as destructive unless the tenant's
-// enabled pack names it as non-destructive (ADR-0132).
+// enabled pack names it as non-destructive (ADR-0132), and that a predicate
+// whose technique is outside the hierarchy of the tenant is not bound
+// (ADR-0135).
 func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -186,8 +188,9 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 	registry.For("acme").Submit(brain.DomainPackEnabled{
 		Name:                     "main",
 		Version:                  1,
-		Predicates:               map[string]string{"read_only": "true", "writes": "true"},
+		Predicates:               map[string]string{"read_only": "true", "writes": "true", "outside": "true"},
 		NonDestructivePredicates: []string{"read_only"},
+		Techniques:               map[string]string{"read_only": "reconnaissance", "writes": "extraction"},
 	})
 	deadline := time.Now().Add(2 * time.Second)
 	for len(registry.For("acme").DomainPacks()) == 0 {
@@ -208,6 +211,11 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 	}
 	if _, destructive, ok, _ := s.DomainPackPredicate(acmeCtx, "unknown"); ok || !destructive {
 		t.Fatalf("an unknown predicate: ok=%v destructive=%v, want false and true", ok, destructive)
+	}
+	// ADR-0135: a predicate whose technique the hierarchy of the tenant does
+	// not hold settles nothing.
+	if _, _, ok, err := s.DomainPackPredicate(acmeCtx, "outside"); ok || err != nil {
+		t.Fatalf("a technique outside the hierarchy: ok=%v err=%v, want false and nil", ok, err)
 	}
 }
 

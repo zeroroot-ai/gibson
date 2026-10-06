@@ -350,6 +350,7 @@ func catalogPack() *DomainPack {
 		Predicates: map[string]string{
 			"exposed_dashboard": `evidence.exists(e, e.type == "http_response" && e.status == 200)`,
 		},
+		Techniques: map[string]string{"exposed_dashboard": "reconnaissance"},
 		Author:     "Zero Root AI",
 		Visibility: PackVisibilityPublic,
 	}
@@ -364,6 +365,22 @@ func TestDomainPack_Validate_AcceptsUnclassifiedCommercialMetadata(t *testing.T)
 	// yet — the zero values must all validate.
 	pack := &DomainPack{Name: "k8s", Version: 1}
 	require.NoError(t, pack.Validate())
+}
+
+// TestDomainPack_Validate_RejectsAPredicateOutsideTheHierarchy is the
+// failing fixture of ADR-0135: a predicate binds a technique that neither
+// the core hierarchy nor the pack holds.
+func TestDomainPack_Validate_RejectsAPredicateOutsideTheHierarchy(t *testing.T) {
+	pack := catalogPack()
+	pack.Predicates["not_a_technique"] = `evidence.exists(e, true)`
+	err := pack.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `predicate technique "not_a_technique" is not a technique of the hierarchy`)
+
+	pack.Techniques["not_a_technique"] = "reconnaissance"
+	require.NoError(t, pack.Validate(), "a technique that the pack adds to the hierarchy is accepted")
+	assert.True(t, pack.HoldsTechnique("not_a_technique"))
+	assert.False(t, pack.HoldsTechnique("still_not_a_technique"))
 }
 
 func TestDomainPack_Validate_RejectsInvalidPredicateTechnique(t *testing.T) {
