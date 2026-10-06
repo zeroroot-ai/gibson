@@ -40,5 +40,13 @@ func seedComponentCatalogGate(
 	if err := reconciler.SeedComponentCatalogGate(ctx, authorizer, catalogRefs, logger); err != nil {
 		return fmt.Errorf("daemon: component catalog gate: %w", err)
 	}
+	listed := make([]reconciler.CatalogRef, 0, len(componentcatalog.Refs()))
+	for _, r := range componentcatalog.Refs() {
+		listed = append(listed, reconciler.CatalogRef{Kind: r.Kind, ID: r.ID})
+	}
+	catalogKinds := []string{authz.KindAgent, authz.KindTool, authz.KindPlugin, authz.KindConnector}
+	if err := reconciler.PruneComponentCatalogGate(ctx, authorizer, catalogKinds, listed, logger); err != nil {
+		return fmt.Errorf("daemon: component catalog gate: %w", err)
+	}
 	return verifyErr
 }

@@ -92,7 +92,7 @@ func TestConnectorInstanceLister(t *testing.T) {
 		}
 	}
 	seed("gitlab", "tenant-acme")
-	seed("osv", "tenant-acme")
+	seed("hosted-fixture", "tenant-acme")
 	seed("gitlab", "tenant-other")
 
 	l := &connectorInstanceLister{kube: kube}

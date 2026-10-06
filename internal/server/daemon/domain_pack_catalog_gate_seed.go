@@ -38,5 +38,8 @@ func seedDomainPackCatalogGate(
 	if err := reconciler.SeedComponentCatalogGate(ctx, authorizer, refs, logger); err != nil {
 		return fmt.Errorf("daemon: domain pack catalog gate: %w", err)
 	}
+	if err := reconciler.PruneComponentCatalogGate(ctx, authorizer, []string{authz.KindDomainPack}, refs, logger); err != nil {
+		return fmt.Errorf("daemon: domain pack catalog gate: %w", err)
+	}
 	return nil
 }

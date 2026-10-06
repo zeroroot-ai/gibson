@@ -86,7 +86,8 @@ func TestListCatalog(t *testing.T) {
 		ids[e.GetId()] = true
 	}
 	assert.True(t, ids["gitlab"], "gitlab must be in the catalog")
-	assert.True(t, ids["osv"], "osv must be in the catalog")
+	assert.True(t, ids["github"], "github must be in the catalog")
+	assert.False(t, ids["osv"], "the OSV prototype left the catalog (gibson#750)")
 
 	_, err = s.ListCatalog(context.Background(), &tenantv1.ListCatalogRequest{})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
@@ -98,18 +99,18 @@ func TestListCatalog(t *testing.T) {
 func TestEnableConnector(t *testing.T) {
 	s := newConnectorService(t)
 
-	resp, err := s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "osv"})
+	resp, err := s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 	require.NoError(t, err)
-	assert.Equal(t, "osv", resp.GetConnector())
+	assert.Equal(t, "gitlab", resp.GetConnector())
 
 	// The CR must exist in the tenant namespace.
 	var ci connectorv1alpha1.ConnectorInstance
 	require.NoError(t, s.kube.Get(context.Background(),
-		client.ObjectKey{Namespace: "tenant-acme", Name: "osv"}, &ci))
-	assert.Equal(t, "osv", ci.Spec.Connector)
+		client.ObjectKey{Namespace: "tenant-acme", Name: "gitlab"}, &ci))
+	assert.Equal(t, "gitlab", ci.Spec.Connector)
 
 	// Enabling the same connector twice is AlreadyExists.
-	_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "osv"})
+	_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 	assert.Equal(t, codes.AlreadyExists, grpcCode(err))
 
 	// An unknown catalog id is NotFound.
@@ -117,21 +118,21 @@ func TestEnableConnector(t *testing.T) {
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 
 	// No tenant in the context is PermissionDenied.
-	_, err = s.EnableConnector(context.Background(), &tenantv1.EnableConnectorRequest{CatalogId: "osv"})
+	_, err = s.EnableConnector(context.Background(), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }
 
 // TestListConnectors covers the success path (only the caller's tenant's
 // connectors are returned) and the missing-tenant PermissionDenied path.
 func TestListConnectors(t *testing.T) {
-	acme := connectorcatalogInstance("osv", "tenant-acme")
+	acme := connectorcatalogInstance("hosted-fixture", "tenant-acme")
 	other := connectorcatalogInstance("gitlab", "tenant-other")
 	s := newConnectorService(t, acme, other)
 
 	resp, err := s.ListConnectors(tenantCtx("acme"), &tenantv1.ListConnectorsRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetConnectors(), 1)
-	assert.Equal(t, "osv", resp.GetConnectors()[0].GetId())
+	assert.Equal(t, "hosted-fixture", resp.GetConnectors()[0].GetId())
 
 	_, err = s.ListConnectors(context.Background(), &tenantv1.ListConnectorsRequest{})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
@@ -141,21 +142,21 @@ func TestListConnectors(t *testing.T) {
 // (NotFound), the empty-connector path (InvalidArgument), and the
 // missing-tenant PermissionDenied path.
 func TestDisableConnector(t *testing.T) {
-	s := newConnectorService(t, connectorcatalogInstance("osv", "tenant-acme"))
+	s := newConnectorService(t, connectorcatalogInstance("hosted-fixture", "tenant-acme"))
 
 	_, err := s.DisableConnector(tenantCtx("acme"),
-		&tenantv1.DisableConnectorRequest{Connector: "osv"})
+		&tenantv1.DisableConnectorRequest{Connector: "hosted-fixture"})
 	require.NoError(t, err)
 
 	// The CR must be gone.
 	var ci connectorv1alpha1.ConnectorInstance
 	getErr := s.kube.Get(context.Background(),
-		client.ObjectKey{Namespace: "tenant-acme", Name: "osv"}, &ci)
+		client.ObjectKey{Namespace: "tenant-acme", Name: "hosted-fixture"}, &ci)
 	require.Error(t, getErr)
 
 	// Disabling a connector that is not enabled is NotFound.
 	_, err = s.DisableConnector(tenantCtx("acme"),
-		&tenantv1.DisableConnectorRequest{Connector: "osv"})
+		&tenantv1.DisableConnectorRequest{Connector: "hosted-fixture"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 
 	// An empty connector name is InvalidArgument.
@@ -165,7 +166,7 @@ func TestDisableConnector(t *testing.T) {
 
 	// No tenant in the context is PermissionDenied.
 	_, err = s.DisableConnector(context.Background(),
-		&tenantv1.DisableConnectorRequest{Connector: "osv"})
+		&tenantv1.DisableConnectorRequest{Connector: "hosted-fixture"})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }
 
@@ -218,13 +219,13 @@ func TestConnectorService_InternalErrors(t *testing.T) {
 	s := newFailingConnectorService(t)
 	ctx := tenantCtx("acme")
 
-	_, err := s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: "osv"})
+	_, err := s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 
 	_, err = s.ListConnectors(ctx, &tenantv1.ListConnectorsRequest{})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 
-	_, err = s.DisableConnector(ctx, &tenantv1.DisableConnectorRequest{Connector: "osv"})
+	_, err = s.DisableConnector(ctx, &tenantv1.DisableConnectorRequest{Connector: "hosted-fixture"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
@@ -254,7 +255,7 @@ func TestCatalogGate(t *testing.T) {
 		_, err := s.ListCatalog(tenantCtx("acme"), &tenantv1.ListCatalogRequest{})
 		assert.Equal(t, codes.Internal, grpcCode(err))
 
-		_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "osv"})
+		_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 		assert.Equal(t, codes.Internal, grpcCode(err))
 	})
 }

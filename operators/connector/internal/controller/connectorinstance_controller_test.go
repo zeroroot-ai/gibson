@@ -175,7 +175,7 @@ func remoteInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance
 // builtin network profile and the connector's image.
 func TestDesiredToolHive_Hosted(t *testing.T) {
 	r := &ConnectorInstanceReconciler{}
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 
 	th, err := r.desiredToolHive(ci)
 	if err != nil {
@@ -197,7 +197,7 @@ func TestDesiredToolHive_Hosted(t *testing.T) {
 // TestDesiredToolHive_HostedNeedsImage rejects a Hosted connector with no image.
 func TestDesiredToolHive_HostedNeedsImage(t *testing.T) {
 	r := &ConnectorInstanceReconciler{}
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.Image = ""
 
 	if _, err := r.desiredToolHive(ci); err == nil {
@@ -263,9 +263,9 @@ func TestDesiredToolHive_RemoteNeedsEndpoint(t *testing.T) {
 // MCPServer are created, and the instance requeues while ToolHive is not yet
 // Running.
 func TestReconcile_HostedCreatesResources(t *testing.T) {
-	r := newReconciler(t, hostedInstance("osv", "tenant-acme"))
+	r := newReconciler(t, hostedInstance("hosted-fixture", "tenant-acme"))
 	ctx := context.Background()
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -273,7 +273,7 @@ func TestReconcile_HostedCreatesResources(t *testing.T) {
 
 	// The owned NetworkPolicy exists.
 	var np networkingv1.NetworkPolicy
-	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: "connector-osv"}, &np); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: "connector-hosted-fixture"}, &np); err != nil {
 		t.Fatalf("networkpolicy not created: %v", err)
 	}
 
@@ -307,12 +307,12 @@ func TestReconcile_NotFoundIsNoOp(t *testing.T) {
 // TestReconcile_DeletionRunsFinalizer removes the finalizer on a deleted
 // instance so Kubernetes can garbage-collect it.
 func TestReconcile_DeletionRunsFinalizer(t *testing.T) {
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	now := metav1.Now()
 	ci.DeletionTimestamp = &now
 	ci.Finalizers = []string{finalizer}
 	r := newReconciler(t, ci)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err != nil {
 		t.Fatalf("reconcile deletion: %v", err)
@@ -433,7 +433,7 @@ func TestReconcileEgressProfile(t *testing.T) {
 
 	// No-op: no egress allow-list means no ConfigMap.
 	r := newReconciler(t)
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	if err := r.reconcileEgressProfile(ctx, ci); err != nil {
 		t.Fatalf("reconcileEgressProfile no-op: %v", err)
 	}
@@ -466,13 +466,13 @@ func TestReconcileEgressProfile(t *testing.T) {
 func TestReconcileNetworkPolicy(t *testing.T) {
 	ctx := context.Background()
 	r := newReconciler(t)
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 
 	if err := r.reconcileNetworkPolicy(ctx, ci); err != nil {
 		t.Fatalf("reconcileNetworkPolicy create: %v", err)
 	}
 	var np networkingv1.NetworkPolicy
-	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: "connector-osv"}, &np); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: "connector-hosted-fixture"}, &np); err != nil {
 		t.Fatalf("networkpolicy not created: %v", err)
 	}
 	if len(np.Spec.Egress) == 0 || len(np.Spec.Ingress) == 0 {
@@ -490,12 +490,12 @@ func TestHelpers(t *testing.T) {
 	if got := credentialSecretName("gitlab"); got != "gitlab-connector-cred" {
 		t.Errorf("credentialSecretName = %q", got)
 	}
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	if hasEgressProfile(ci) {
 		t.Error("no egress allow-list means hasEgressProfile is false")
 	}
 	np := desiredNetworkPolicy(ci)
-	if np.Name != "connector-osv" {
+	if np.Name != "connector-hosted-fixture" {
 		t.Errorf("networkpolicy name = %q", np.Name)
 	}
 }
@@ -549,7 +549,7 @@ func assertServingPhaseBecomesReady(
 // owned MCPServer reports the "Running" serving phase.
 func TestReconcile_RunningBecomesReady(t *testing.T) {
 	assertServingPhaseBecomesReady(
-		t, hostedInstance("osv", "tenant-acme"), kindMCPServer, "Running")
+		t, hostedInstance("hosted-fixture", "tenant-acme"), kindMCPServer, "Running")
 }
 
 // TestReconcile_RemoteReadyBecomesReady flips a Remote connector to Ready once
@@ -611,10 +611,10 @@ func TestReconcile_SecretAuthBecomesReady(t *testing.T) {
 // TestReconcile_InvalidSpecFails records a Failed phase and returns the error
 // when the spec cannot be mapped to a ToolHive resource.
 func TestReconcile_InvalidSpecFails(t *testing.T) {
-	bad := hostedInstance("osv", "tenant-acme")
+	bad := hostedInstance("hosted-fixture", "tenant-acme")
 	bad.Spec.Image = "" // a Hosted connector with no image is invalid
 	r := newReconciler(t, bad)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
 		t.Fatal("an invalid spec must return an error")
@@ -659,14 +659,14 @@ func (e reconcileBoom) Error() string { return string(e) }
 // TestReconcileNetworkPolicy_CreateError wraps a client write failure.
 func TestReconcileNetworkPolicy_CreateError(t *testing.T) {
 	r := failingReconciler(t)
-	if err := r.reconcileNetworkPolicy(context.Background(), hostedInstance("osv", "tenant-acme")); err == nil {
+	if err := r.reconcileNetworkPolicy(context.Background(), hostedInstance("hosted-fixture", "tenant-acme")); err == nil {
 		t.Error("a failed NetworkPolicy create must surface an error")
 	}
 }
 
 // TestReconcileEgressProfile_CreateError wraps a client write failure.
 func TestReconcileEgressProfile_CreateError(t *testing.T) {
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
 	r := failingReconciler(t)
 	if err := r.reconcileEgressProfile(context.Background(), ci); err == nil {
@@ -679,10 +679,10 @@ func TestReconcileEgressProfile_CreateError(t *testing.T) {
 func TestReconcile_NetworkPolicyErrorIsFailed(t *testing.T) {
 	// Seed the instance already carrying the finalizer so the reconcile reaches
 	// the NetworkPolicy step instead of returning after the finalizer update.
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Finalizers = []string{finalizer}
 	r := failingReconciler(t, ci)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
 		t.Fatal("a failed owned-resource write must surface an error")
@@ -725,11 +725,11 @@ func failCreateOfKind(t *testing.T, kind string, seed ...client.Object) *Connect
 
 // TestReconcile_EgressErrorIsFailed fails the egress-profile step.
 func TestReconcile_EgressErrorIsFailed(t *testing.T) {
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Finalizers = []string{finalizer}
 	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
 	r := failCreateOfKind(t, "ConfigMap", ci)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
 		t.Fatal("a failed egress step must return an error")
@@ -739,10 +739,10 @@ func TestReconcile_EgressErrorIsFailed(t *testing.T) {
 
 // TestReconcile_ApplyToolHiveErrorIsFailed fails the ToolHive apply step.
 func TestReconcile_ApplyToolHiveErrorIsFailed(t *testing.T) {
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Finalizers = []string{finalizer}
 	r := failCreateOfKind(t, kindMCPServer, ci)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
 		t.Fatal("a failed ToolHive apply must return an error")
@@ -783,7 +783,7 @@ func failGetReconciler(t *testing.T) *ConnectorInstanceReconciler {
 func TestReconcileHelpers_GetErrorsAreWrapped(t *testing.T) {
 	ctx := context.Background()
 
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
 
 	r := failGetReconciler(t)
@@ -862,7 +862,7 @@ func TestReconcile_DeletionFallsBackToNameAndDefaultClock(t *testing.T) {
 
 // A failed finalizer removal surfaces so the controller retries the update.
 func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
-	ci := deletingInstance(hostedInstance("osv", "tenant-acme"), time.Now())
+	ci := deletingInstance(hostedInstance("hosted-fixture", "tenant-acme"), time.Now())
 	s := testScheme(t)
 	cl := fake.NewClientBuilder().
 		WithScheme(s).
@@ -878,7 +878,7 @@ func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
 		}).
 		Build()
 	r := &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
-	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}})
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}})
 	if err == nil || !strings.Contains(err.Error(), "remove finalizer") {
 		t.Fatalf("err = %v, want a wrapped remove-finalizer error", err)
 	}
@@ -1001,8 +1001,8 @@ func TestReconcile_HealthyCredentialClearsDegraded(t *testing.T) {
 // grant to judge, so the controller does not call the daemon at all.
 func TestReconcile_AuthNoneNeverAsks(t *testing.T) {
 	reader := &fakeAuthReader{}
-	r := newReconcilerWithAuth(t, reader, hostedInstance("osv", "tenant-acme"))
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "osv"}
+	r := newReconcilerWithAuth(t, reader, hostedInstance("hosted-fixture", "tenant-acme"))
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
 
 	got := reconcileToServing(t, r, key, kindMCPServer, "Running")
 
@@ -1109,7 +1109,7 @@ func TestCheckCredential_UnknownStateIsDegraded(t *testing.T) {
 // reader, spec.credentials steered nothing.
 func TestDesiredToolHive_HostedCredentialsReachThePodEnv(t *testing.T) {
 	r := &ConnectorInstanceReconciler{}
-	ci := hostedInstance("osv", "tenant-acme")
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.Credentials = []connectorv1alpha1.CredentialRef{
 		{Key: "osv-api-key"},
 		{Key: "vendor-creds", Property: "token", TargetEnv: "VENDOR_TOKEN"},
@@ -1126,8 +1126,8 @@ func TestDesiredToolHive_HostedCredentialsReachThePodEnv(t *testing.T) {
 	want := []string{"OSV_API_KEY", "VENDOR_TOKEN"}
 	for i, s := range secrets {
 		m := s.(map[string]interface{})
-		if m["name"] != credentialSecretName("osv") || m["key"] != want[i] || m["targetEnvName"] != want[i] {
-			t.Errorf("secrets[%d] = %v, want key and targetEnvName %q from %s", i, m, want[i], credentialSecretName("osv"))
+		if m["name"] != credentialSecretName("hosted-fixture") || m["key"] != want[i] || m["targetEnvName"] != want[i] {
+			t.Errorf("secrets[%d] = %v, want key and targetEnvName %q from %s", i, m, want[i], credentialSecretName("hosted-fixture"))
 		}
 	}
 

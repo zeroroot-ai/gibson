@@ -33,6 +33,7 @@ type recordingAuthorizer struct {
 	listObjects map[listObjectsKey][]string
 	listUsers   map[listUsersKey][]string
 	writes      []authz.Tuple
+	deletes     []authz.Tuple
 }
 
 func (a *recordingAuthorizer) ListObjects(_ context.Context, user, relation, objectType string) ([]string, error) {
@@ -64,7 +65,10 @@ func (a *recordingAuthorizer) Check(context.Context, string, string, string) (bo
 func (a *recordingAuthorizer) BatchCheck(context.Context, []authz.CheckRequest) ([]bool, error) {
 	return nil, nil
 }
-func (a *recordingAuthorizer) Delete(context.Context, []authz.Tuple) error { return nil }
-func (a *recordingAuthorizer) StoreID() string                             { return "" }
-func (a *recordingAuthorizer) ModelID() string                             { return "" }
-func (a *recordingAuthorizer) Close() error                                { return nil }
+func (a *recordingAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
+	a.deletes = append(a.deletes, tuples...)
+	return nil
+}
+func (a *recordingAuthorizer) StoreID() string { return "" }
+func (a *recordingAuthorizer) ModelID() string { return "" }
+func (a *recordingAuthorizer) Close() error    { return nil }
