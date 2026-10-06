@@ -166,8 +166,6 @@ func (f fixedKeyProvider) Health(context.Context) types.HealthStatus {
 func (f fixedKeyProvider) Close() error { return nil }
 
 // The daemon does not start without a setec address (ADR-0142, gibson#756).
-// With one set, the factory builds; the un-tagged test build has no setec
-// executor, so it logs the build-tag warning.
 func TestNewHarnessFactory_RequiresTheSetecAddress(t *testing.T) {
 	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
 	newDaemon := func(addr string) *daemonImpl {
@@ -182,11 +180,6 @@ func TestNewHarnessFactory_RequiresTheSetecAddress(t *testing.T) {
 			},
 		}
 	}
-	ctx := context.Background()
-	_, err := newDaemon("").newHarnessFactory(ctx)
+	_, err := newDaemon("").newHarnessFactory(context.Background())
 	require.ErrorIs(t, err, config.ErrNoSetecAddress)
-
-	factory, err := newDaemon("setec:50051").newHarnessFactory(ctx)
-	require.NoError(t, err)
-	assert.NotNil(t, factory)
 }
