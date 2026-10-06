@@ -36,8 +36,8 @@ permissions:
 jobs:
   policy-guards:
     name: policy-guards
-    uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/vault-auth-method-deny-list.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
   no-monorepo-shortcuts:
-    uses: zeroroot-ai/.github/.github/workflows/no-monorepo-shortcuts.yml@40c67fd77152f2c4924abccbd992dbca065f325b # v0.8.2
+    uses: zeroroot-ai/.github/.github/workflows/no-monorepo-shortcuts.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
   runs-on-lint:
-    uses: zeroroot-ai/.github/.github/workflows/runs-on-lint.yml@40c67fd77152f2c4924abccbd992dbca065f325b # v0.8.2
+    uses: zeroroot-ai/.github/.github/workflows/runs-on-lint.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
