@@ -2000,19 +2000,14 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMiss
 // ResumeMission resumes a paused mission and streams execution events.
 //
 // A resume continues the same run. It never moves a run back to a checkpoint:
-// RewindMission does that, and it starts a new run (ADR-0170). A request that
-// names a checkpoint is refused, so a caller cannot ask for a rewind that this
-// path would ignore.
+// RewindMission does that, and it starts a new run (ADR-0170). The request has
+// no checkpoint field (D67, sdk#254).
 func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream grpc.ServerStreamingServer[daemonpb.ResumeMissionResponse]) error {
 	s.logger.Info("mission resume request received", "mission_id", req.MissionId)
 
 	// Validate mission ID
 	if req.MissionId == "" {
 		return status_grpc.Errorf(codes.InvalidArgument, "mission ID is required")
-	}
-	if req.GetCheckpointId() != "" || req.GetTargetCheckpointId() != "" {
-		return status_grpc.Error(codes.InvalidArgument,
-			"a resume continues the same run and takes no checkpoint; use RewindMission to start a run at a checkpoint")
 	}
 
 	// Subscribe BEFORE resuming so no early lifecycle event can be missed;
