@@ -169,3 +169,21 @@ func TestRegisterComponent_RecordsTheTrustThatTheCatalogStates(t *testing.T) {
 		t.Fatal("the catalog must state a trust for the github plugin, or this test proves nothing")
 	}
 }
+
+// TestCatalogContentTrust_StatesEachValue: the helper returns the trust that
+// the catalog states, and UNSPECIFIED for an entry that it does not list.
+func TestCatalogContentTrust_StatesEachValue(t *testing.T) {
+	cases := []struct {
+		kind, name string
+		want       componentpb.ContentTrust
+	}{
+		{"plugin", "github", componentpb.ContentTrust_CONTENT_TRUST_TRUSTED},
+		{"tool", "nmap", componentpb.ContentTrust_CONTENT_TRUST_UNTRUSTED},
+		{"tool", "not-in-the-catalog", componentpb.ContentTrust_CONTENT_TRUST_UNSPECIFIED},
+	}
+	for _, tc := range cases {
+		if got := catalogContentTrust(tc.kind, tc.name); got != tc.want {
+			t.Errorf("catalogContentTrust(%q, %q) = %v; want %v", tc.kind, tc.name, got, tc.want)
+		}
+	}
+}
