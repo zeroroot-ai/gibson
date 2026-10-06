@@ -72,9 +72,9 @@ func (s *DaemonServer) ListTargets(ctx context.Context, req *daemonpb.ListTarget
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.Internal, "ListTargets: no tenant in context")
 	}
-	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
 	}
 	targets, err := s.targetService.List(ctx, tenantID, protoTargetFilter(req.GetFilter(), offset, limit))
 	if err != nil {

@@ -1447,9 +1447,9 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissio
 // disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
 	tenant := auth.TenantStringFromContext(ctx)
-	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
 	}
 
 	s.logger.Debug("mission list request received",
@@ -2098,9 +2098,9 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 	if req.Name == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
 	}
-	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
 	}
 	s.logger.Debug("mission history request received",
 		"name", req.Name,
@@ -2208,9 +2208,9 @@ func (s *DaemonServer) GetComponentLogs(req *daemonpb.GetComponentLogsRequest, s
 
 // ListMissionDefinitions returns all installed mission definitions.
 func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb.ListMissionDefinitionsRequest) (*daemonpb.ListMissionDefinitionsResponse, error) {
-	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
 	if err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
 	}
 	s.logger.Debug("list mission definitions request received",
 		"page_size", limit,
