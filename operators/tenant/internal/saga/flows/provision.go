@@ -58,6 +58,10 @@ type ProvisionDeps struct {
 	// daemon returns FailedPrecondition on every authenticated list
 	// call. Spec issue #45.
 	WriteTenantBrokerConfig WriteTenantBrokerConfigDeps
+
+	// BeliefTrainer configures the nightly belief trainer CronJob that the
+	// operator creates in each tenant namespace (ADR-0106, gibson#616).
+	BeliefTrainer BeliefTrainerConfig
 }
 
 // ProvisionSteps returns the ordered saga steps for provisioning a Tenant.
@@ -74,13 +78,15 @@ type ProvisionDeps struct {
 // delegate to the SAME provisioners those steps used, so behaviour is preserved.
 //
 // The retained saga owns only the foundation steps that have no owning sub-CRD:
-// the per-tenant Redis keyspace (InitRedisKeyspace) and the tenant-name publish
-// (PublishTenantName). The per-tenant namespace is contributed by the
+// the per-tenant Redis keyspace (InitRedisKeyspace), the tenant-name publish
+// (PublishTenantName) and the belief trainer CronJob (EnsureBeliefTrainer,
+// gibson#616). The per-tenant namespace is contributed by the
 // NamespaceProvisioner ahead of these (see TenantReconciler.provisioningSteps).
 func ProvisionSteps(deps ProvisionDeps) []saga.Step {
 	return []saga.Step{
 		newInitRedisStep(deps),
 		newPublishTenantNameStep(deps),
+		newBeliefTrainerStep(deps),
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga/flows"
 )
 
 // Operator ServiceAccount identity. The Helm chart creates this SA in
@@ -291,7 +292,10 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 		Spec: networkingv1.NetworkPolicySpec{
 			// Every pod in the tenant namespace EXCEPT the per-tenant
 			// Neo4j pod, which is governed solely by its own
-			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0112).
+			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0112),
+			// and the belief trainer pod, which is governed solely by its
+			// belief-trainer policy: egress to the daemon gRPC port and DNS,
+			// and no ingress (gibson#616).
 			//
 			// This exclusion is load-bearing, not cosmetic. Kubernetes
 			// unions the effect of every policy that selects a pod, so
@@ -308,7 +312,7 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 				MatchExpressions: []metav1.LabelSelectorRequirement{{
 					Key:      "app.kubernetes.io/component",
 					Operator: metav1.LabelSelectorOpNotIn,
-					Values:   []string{dataplane.ComponentTenantNeo4j},
+					Values:   []string{dataplane.ComponentTenantNeo4j, flows.ComponentBeliefTrainer},
 				}},
 			},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},

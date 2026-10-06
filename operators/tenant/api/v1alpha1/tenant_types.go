@@ -261,6 +261,12 @@ const (
 	// with Reason=Deleted by the teardown step on Tenant CR delete.
 	ConditionTenantNamePublished = "TenantNamePublished"
 
+	// ConditionBeliefTrainerReady is set True after the operator has created
+	// or updated the belief trainer CronJob of the tenant and its
+	// NetworkPolicy (ADR-0106, gibson#616). Both carry an owner reference to
+	// the Tenant, so a tenant delete removes them.
+	ConditionBeliefTrainerReady = "BeliefTrainerReady"
+
 	// ConditionSecretsBackendReady is set True after the operator has
 	// provisioned the per-tenant Vault namespace (Enterprise) or
 	// path-prefix + ACL policy (Community) for this tenant per spec

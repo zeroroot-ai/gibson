@@ -90,6 +90,13 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
 			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
 			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
+			// The belief training exit test (gibson#616,
+			// tests/e2e/belief_training_test.go): label an item of the review
+			// queue so the tenant has a training row, then read the pinned
+			// belief version of the next mission.
+			"/gibson.world.v1.WorldService/ListReviewQueue": true,
+			"/gibson.world.v1.WorldService/SubmitLabel":     true,
+			"/gibson.world.v1.WorldService/ListMissions":    true,
 		},
 	}
 }

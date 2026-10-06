@@ -56,6 +56,10 @@ FORBIDDEN=(
   roles
   rolebindings
   leases
+  # gibson#616: the belief trainer CronJob of each tenant. The grant lives in
+  # the chart ClusterRole gibson-tenant-operator-tenant-namespace, bound into
+  # each tenant namespace only.
+  cronjobs
 )
 
 # scan_markers reports a forbidden resource in any +kubebuilder:rbac marker under

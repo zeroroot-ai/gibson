@@ -555,6 +555,15 @@ func main() {
 
 	brokerConfigDeps := buildWriteTenantBrokerConfigDeps(setupLog)
 
+	// The nightly belief trainer CronJob of each tenant (ADR-0106,
+	// gibson#616). Every value is required: the operator does not start
+	// without them.
+	beliefTrainer, err := beliefTrainerConfigFromEnv(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "belief trainer config")
+		os.Exit(1)
+	}
+
 	deps := flows.ProvisionDeps{
 		K8sClient:               mgr.GetClient(),
 		FGA:                     fgaClient,
@@ -564,6 +573,7 @@ func main() {
 		Vault:                   vaultAdminClient,
 		SignupProgress:          signupProgressClient,
 		WriteTenantBrokerConfig: brokerConfigDeps,
+		BeliefTrainer:           beliefTrainer,
 	}
 
 	// Build the declarative secrets-backend provisioner (E8/gibson#802). It
