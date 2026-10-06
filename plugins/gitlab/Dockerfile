@@ -9,7 +9,9 @@
 # the image has to carry it. Copying LICENSE into each plugin directory instead
 # would make a second source of truth that drifts. The plugin module is its own
 # Go module: the build copies only plugins/gitlab/, never the gibson module.
-FROM golang:1.26.8-alpine@sha256:51a7c389a5ddaf82f527191a1e9bff9928655130a44e4975dd1d7e0acf59f1ae AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
+ARG GOTOOLCHAIN=local
+ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 
 WORKDIR /build
 COPY plugins/gitlab/go.mod plugins/gitlab/go.sum* ./
@@ -29,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 # static-debian13:nonroot index below ships 2026c-0+deb13u1. Move the digest
 # here when a scanner names a package in this image; never dismiss the alert.
 # Same fix shape as cve-triage#34 and gibson#462.
-FROM gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
 
 COPY --from=builder /out/gitlab /gitlab
 COPY plugins/gitlab/plugin.yaml /etc/gibson/plugin.yaml

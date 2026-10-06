@@ -125,10 +125,10 @@ func TestCreateIssue(t *testing.T) {
 	gh := clientFor(t, c)
 
 	got, err := createIssue(context.Background(), gh, CreateIssueRequest{
-		Owner: "zeroroot-ai",
-		Repo:  "gibson",
-		Title: "Session affinity regression",
-		Body:  "Two tool calls landed in different sandboxes.",
+		Owner:  "zeroroot-ai",
+		Repo:   "gibson",
+		Title:  "Session affinity regression",
+		Body:   "Two tool calls landed in different sandboxes.",
 		Labels: []string{"bug"},
 	})
 	if err != nil {
