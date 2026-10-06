@@ -187,11 +187,11 @@ func (w *neo4jGraphWriter) execExpectingRow(
 	wrote, err := conn.Neo4j.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
 		res, txErr := tx.Run(ctx, cypher, params)
 		if txErr != nil {
-			return nil, txErr
+			return nil, fmt.Errorf("run: %w", txErr)
 		}
 		hasRow := res.Next(ctx)
 		if _, consumeErr := res.Consume(ctx); consumeErr != nil {
-			return nil, consumeErr
+			return nil, fmt.Errorf("consume: %w", consumeErr)
 		}
 		return hasRow, nil
 	})
