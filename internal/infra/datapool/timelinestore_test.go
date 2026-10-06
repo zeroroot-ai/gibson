@@ -378,8 +378,8 @@ func TestHydrate_EquivalenceAfterRestart(t *testing.T) {
 	// Count subscribers fired during Hydrate (must be 0 — ADR-0109).
 	replayDispatchCount := 0
 	r := brain.NewRegistry(ctx)
-	r.WithStoreFactory(func(_ context.Context, _ string) brain.TimelineStore {
-		return store
+	r.WithStoreFactory(func(_ context.Context, _ string) (brain.TimelineStore, error) {
+		return store, nil
 	})
 	// Subscribe BEFORE For() so the hook is installed before hydration.
 	r.OnEngine(func(e *brain.Engine) {
@@ -446,8 +446,8 @@ func TestHydrate_InFlightWorkFailedOnRestart(t *testing.T) {
 	// Hydrate: Registry.For creates a fresh engine, calls Hydrate which replays
 	// the timeline and submits ResumeFailInFlight events to the intake queue.
 	r := brain.NewRegistry(ctx)
-	r.WithStoreFactory(func(_ context.Context, _ string) brain.TimelineStore {
-		return store
+	r.WithStoreFactory(func(_ context.Context, _ string) (brain.TimelineStore, error) {
+		return store, nil
 	})
 	eng := r.For(tenant) // hydrates; intake queue now has a WorkCompleted{Err:"interrupted:..."}
 

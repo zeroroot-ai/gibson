@@ -840,7 +840,7 @@ func TestWorldService_HistoryErrorIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx)
-	reg.WithStoreFactory(func(context.Context, string) brain.TimelineStore { return historyDownStore{} })
+	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return historyDownStore{}, nil })
 	srv := NewWorldServer(reg, nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
