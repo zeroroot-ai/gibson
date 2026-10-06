@@ -53,6 +53,14 @@ const DefaultSystemBackplaneInterval = 30 * time.Second
 // history reset; the tenant operator still writes the parent tuple this
 // enumerates, which is why the seed lives here and not at enrolment: one
 // writer, per tenant, not one per enrolling principal.
+//
+// The one exception (owner decision of 2026-10-05, gibson#718). A tenant
+// admin enables each catalog entry (ADR-0136): SetCatalogEnabled, or
+// EnableConnector for a connector. This tuple on component:_system is the
+// one tenant_enabled tuple that a new tenant gets with no admin action.
+// component:_system is not a catalog entry: it is the backplane that each
+// enrolled component calls. No other tenant_enabled tuple may be seeded.
+// TestNewTenant_GetsExactlyOneSeededTenantEnabledTuple holds this rule.
 func SeedSystemBackplaneBaseline(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger) (int, error) {
 	tenants, err := authorizer.ListUsersOfType(ctx, "system_tenant", platformObject, "parent", "tenant")
 	if err != nil {
