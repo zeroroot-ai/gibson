@@ -125,3 +125,67 @@ func TestForkAgent_FailuresLeaveNoFork(t *testing.T) {
 		t.Fatalf("killed = %v; want the one fork that setec started", *killed)
 	}
 }
+
+// A forkable source returns at its result line, with the sandbox left
+// running, and its process gets GIBSON_FORKABLE=1.
+func TestLaunchAgent_ForkableSourceParksAtTheResultLine(t *testing.T) {
+	waitStarted := make(chan struct{}, 2)
+	var env map[string]string
+	c := &mockClient{
+		launch: func(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
+			env = req.Env
+			return LaunchResponse{SandboxID: "ns/src/u0"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			return &fixedLogs{chunks: [][]byte{[]byte(`{"type":"result","success":true,"output":"mapped"}` + "\n")}}, nil
+		},
+		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+			waitStarted <- struct{}{}
+			<-ctx.Done() // a parked source does not end
+			return WaitResponse{}, ctx.Err()
+		},
+		kill: func(context.Context, string) error { t.Error("a parked source must not be killed"); return nil },
+	}
+	out, err := newAgentLauncher(t, c).LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme", Forkable: true})
+	if err != nil {
+		t.Fatalf("LaunchAgent: %v", err)
+	}
+	if !out.Parked || out.Result == nil || out.Result.Output != "mapped" || out.SandboxID != "ns/src/u0" {
+		t.Fatalf("outcome = %+v", out)
+	}
+	if env[EnvForkable] != "1" {
+		t.Fatalf("env %s = %q, want 1", EnvForkable, env[EnvForkable])
+	}
+}
+
+// A forkable source that exits before a result line is read takes the
+// normal path: an old sdk exits after its result line.
+func TestLaunchAgent_ForkableSourceThatExitsTakesTheNormalPath(t *testing.T) {
+	c := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "s"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) { return &fixedLogs{}, nil },
+		wait:      func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 3}, nil },
+		kill:      func(context.Context, string) error { return nil },
+	}
+	out, err := newAgentLauncher(t, c).LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme", Forkable: true})
+	if err != nil {
+		t.Fatalf("LaunchAgent: %v", err)
+	}
+	if out.Parked || out.ExitCode != 3 {
+		t.Fatalf("outcome = %+v; want the exit of the sandbox", out)
+	}
+}
+
+// An OnForked error kills each fork and returns.
+func TestForkAgent_RecordFailureKillsTheForks(t *testing.T) {
+	c, _, killed := forkClient([]string{"ns/f1/u1"}, nil)
+	spec := AgentForkSpec{OnForked: func(ForkResponse) error { return errors.New("ledger down") }}
+	if _, err := newAgentLauncher(t, c).ForkAgent(context.Background(), "src", spec, []AgentDispatch{{Tenant: "acme"}}); err == nil {
+		t.Fatal("want the record error")
+	}
+	if len(*killed) != 1 {
+		t.Fatalf("killed = %v; want the fork", *killed)
+	}
+}

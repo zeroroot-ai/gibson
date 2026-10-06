@@ -55,6 +55,11 @@ type AgentForkSpec struct {
 	NetworkMode string
 	Egress      []EgressRule
 	SnapshotTTL time.Duration
+
+	// OnForked runs after setec started the forks and before a fork can call
+	// back. The caller records the fork ids there (D74). An error kills each
+	// fork, and ForkAgent returns it.
+	OnForked func(ForkResponse) error
 }
 
 // ForkRun is the outcome of one fork request.
@@ -128,6 +133,14 @@ func (l *AgentLauncher) ForkAgent(ctx context.Context, sourceSandboxID string, s
 			fmt.Sprintf("agent fork: setec started %d forks, want %d", len(resp.SandboxIDs), len(dispatches)))
 	}
 	span.SetAttributes(attribute.String("setec.snapshot", resp.Snapshot))
+	if spec.OnForked != nil {
+		if err := spec.OnForked(resp); err != nil {
+			for _, id := range resp.SandboxIDs {
+				l.kill(ctx, tenant, id)
+			}
+			return ForkRun{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "record the forks of "+sourceSandboxID, err)
+		}
+	}
 
 	run := ForkRun{
 		Snapshot: resp.Snapshot,
@@ -158,4 +171,38 @@ func (l *AgentLauncher) followFork(ctx context.Context, tenant, sandboxID, class
 		runTimeout = d.RunTimeout
 	}
 	return l.followRun(ctx, tenant, sandboxID, class, runTimeout, d)
+}
+
+// EnvForkable tells a process that a later node may fork it (sdk#248).
+const EnvForkable = "GIBSON_FORKABLE"
+
+// parkPoll is how often the launcher looks for the result line of a
+// forkable source.
+const parkPoll = 200 * time.Millisecond
+
+// awaitParkedResult returns when the forkable source wrote its result line,
+// with parked true. It returns parked false when the sandbox ends first or
+// ctx ends, and the caller then waits for the terminal phase as for any run.
+func (l *AgentLauncher) awaitParkedResult(ctx context.Context, tenant, sandboxID string, rb *ring) (AgentRunResult, bool) {
+	ended := make(chan struct{})
+	waitCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	go func() {
+		defer close(ended)
+		_, _ = l.client.Wait(waitCtx, tenant, sandboxID)
+	}()
+	tick := time.NewTicker(parkPoll)
+	defer tick.Stop()
+	for {
+		if r := parseTerminalResult(rb.bytes()); r != nil {
+			return AgentRunResult{SandboxID: sandboxID, Result: r, Parked: true, LogTail: rb.tail(32)}, true
+		}
+		select {
+		case <-ended:
+			return AgentRunResult{}, false
+		case <-ctx.Done():
+			return AgentRunResult{}, false
+		case <-tick.C:
+		}
+	}
 }

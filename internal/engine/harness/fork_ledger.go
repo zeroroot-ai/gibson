@@ -34,6 +34,10 @@ type ForkDispatch struct {
 // can refuse the grant of a source outside the source sandbox and serve
 // each fork its own dispatch once.
 type ForkLedger interface {
+	// BeginFork marks the grant of a source as forked before setec starts
+	// the forks. From then on the grant works only in the source sandbox, and
+	// a claim that comes before RecordForks gets ErrForkPending.
+	BeginFork(ctx context.Context, sourceJTI, sourceSandboxID string, ttl time.Duration) error
 	// RecordForks records the forks of the source sandbox whose grant has
 	// the id sourceJTI. ttl bounds how long the record lives.
 	RecordForks(ctx context.Context, sourceJTI, sourceSandboxID string, forks []ForkDispatch, ttl time.Duration) error
@@ -47,6 +51,10 @@ type ForkLedger interface {
 // ErrNotAFork refuses a claim for a sandbox that is not a fork of the grant.
 var ErrNotAFork = errors.New("harness: the sandbox is not a fork of this grant")
 
+// ErrForkPending answers a claim that comes before the forks are recorded.
+// The fork retries.
+var ErrForkPending = errors.New("harness: the forks of this grant are not recorded yet")
+
 // ErrForkClaimed refuses a second claim of one fork.
 var ErrForkClaimed = errors.New("harness: the fork was already claimed")
 
@@ -55,15 +63,30 @@ var ErrForkClaimed = errors.New("harness: the fork was already claimed")
 // field "source" names the source sandbox, "d:<fork id>" holds the dispatch
 // of a fork, and "c:<fork id>" marks a claimed fork.
 type RedisForkLedger struct {
-	client *redis.Client
+	client redis.UniversalClient
 }
 
 // NewRedisForkLedger returns a ledger over client.
-func NewRedisForkLedger(client *redis.Client) *RedisForkLedger {
+func NewRedisForkLedger(client redis.UniversalClient) *RedisForkLedger {
 	return &RedisForkLedger{client: client}
 }
 
 func forkLedgerKey(jti string) string { return "gibson:fork:" + jti }
+
+// BeginFork implements ForkLedger.
+func (l *RedisForkLedger) BeginFork(ctx context.Context, sourceJTI, sourceSandboxID string, ttl time.Duration) error {
+	if sourceJTI == "" || sourceSandboxID == "" {
+		return errors.New("harness: a fork record needs the grant id and the source sandbox")
+	}
+	key := forkLedgerKey(sourceJTI)
+	pipe := l.client.TxPipeline()
+	pipe.HSet(ctx, key, "source", sourceSandboxID, "pending", 1)
+	pipe.Expire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("begin fork record: %w", err)
+	}
+	return nil
+}
 
 // RecordForks implements ForkLedger.
 func (l *RedisForkLedger) RecordForks(ctx context.Context, sourceJTI, sourceSandboxID string, forks []ForkDispatch, ttl time.Duration) error {
@@ -82,6 +105,7 @@ func (l *RedisForkLedger) RecordForks(ctx context.Context, sourceJTI, sourceSand
 	key := forkLedgerKey(sourceJTI)
 	pipe := l.client.TxPipeline()
 	pipe.HSet(ctx, key, fields)
+	pipe.HDel(ctx, key, "pending")
 	pipe.Expire(ctx, key, ttl)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("record forks: %w", err)
@@ -106,6 +130,13 @@ func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkSandboxID st
 	key := forkLedgerKey(sourceJTI)
 	raw, err := l.client.HGet(ctx, key, "d:"+forkSandboxID).Bytes()
 	if errors.Is(err, redis.Nil) {
+		pending, perr := l.client.HExists(ctx, key, "pending").Result()
+		if perr != nil {
+			return ForkDispatch{}, fmt.Errorf("read fork record: %w", perr)
+		}
+		if pending {
+			return ForkDispatch{}, ErrForkPending
+		}
 		return ForkDispatch{}, ErrNotAFork
 	}
 	if err != nil {

@@ -200,6 +200,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			d.logger.Warn(ctx, warn, "error", launchErr)
 		} else {
 			config.AgentLauncher = launcher
+			config.Forks = d.forks
 			// AgentLaunchSpecResolver reads a sandboxed agent's launch spec
 			// (image, sandbox class, egress ceiling, model) from its signed
 			// catalog manifest (gibson#1597, ADR-0136/0116). An agent with no

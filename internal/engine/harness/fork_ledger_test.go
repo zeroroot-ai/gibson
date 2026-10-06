@@ -149,3 +149,28 @@ func TestCheckForkGrant_LedgerDown(t *testing.T) {
 		t.Fatalf("err = %v, want Unavailable", err)
 	}
 }
+
+// A claim between BeginFork and RecordForks gets ErrForkPending, and the
+// grant already counts as forked.
+func TestRedisForkLedger_PendingFork(t *testing.T) {
+	l, _ := newForkLedger(t)
+	ctx := context.Background()
+	if err := l.BeginFork(ctx, "jti-p", "ns/src/u0", time.Hour); err != nil {
+		t.Fatalf("BeginFork: %v", err)
+	}
+	if _, forked, _ := l.ForkedSource(ctx, "jti-p"); !forked {
+		t.Fatal("a begun fork must count as forked")
+	}
+	if _, err := l.Claim(ctx, "jti-p", "f1"); !errors.Is(err, ErrForkPending) {
+		t.Fatalf("claim before record: err = %v, want ErrForkPending", err)
+	}
+	if err := l.RecordForks(ctx, "jti-p", "ns/src/u0", []ForkDispatch{{SandboxID: "f1"}}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.Claim(ctx, "jti-p", "f2"); !errors.Is(err, ErrNotAFork) {
+		t.Fatalf("after record: err = %v, want ErrNotAFork", err)
+	}
+	if err := l.BeginFork(ctx, "", "s", time.Hour); err == nil {
+		t.Fatal("BeginFork with no grant id must fail")
+	}
+}

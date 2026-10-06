@@ -171,6 +171,11 @@ type AgentDispatch struct {
 	// session at thirty minutes no matter what its node declared, which is what
 	// made an always-on agent impossible (gibson#1602).
 	RunTimeout time.Duration
+
+	// Forkable marks the source of a later node (ADR-0169, D74). The process
+	// gets GIBSON_FORKABLE=1 and parks after its result line, and the
+	// launcher returns at that line and leaves the sandbox running.
+	Forkable bool
 }
 
 // EventPublisher registers a running agent instance and returns a live sink for
@@ -222,6 +227,10 @@ type AgentRunResult struct {
 	// Result is the terminal result line of the agent. It is nil when the
 	// agent wrote none.
 	Result *AgentTerminalResult
+
+	// Parked is true for a forkable source whose node ended at its result
+	// line. Its sandbox still runs, so a later node can fork it (D74).
+	Parked bool
 }
 
 // AgentTerminalResult is the structured result of one sandboxed agent run.
@@ -448,6 +457,18 @@ func (l *AgentLauncher) followRun(ctx context.Context, tenant, sandboxID, class 
 	// run that has already ended.
 	terminal := make(chan struct{})
 	logsDone := l.streamAgentLogsAsync(waitCtx, tenant, sandboxID, ringBuf, publish, terminal)
+
+	// A forkable source parks after its result line and does not exit
+	// (D74). Its node ends at the result line, and the sandbox stays for the
+	// later node that forks it.
+	if dispatch.Forkable {
+		if res, parked := l.awaitParkedResult(waitCtx, tenant, sandboxID, ringBuf); parked {
+			close(terminal)
+			cancel()
+			<-logsDone
+			return res, nil
+		}
+	}
 
 	// Wait for the terminal phase.
 	waitCtx2, waitSpan := l.tracer.Start(waitCtx, "setec.wait")
