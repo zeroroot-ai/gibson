@@ -380,16 +380,24 @@ func TestRedis_AuthzRegistry(t *testing.T) {
 		})
 	}
 
-	// GetSignupProgress is deliberately unauthenticated (pre-login signup flow).
-	t.Run("GetSignupProgress_legitimately_unauthenticated", func(t *testing.T) {
-		t.Parallel()
-		entry, ok := registry.Registry["/gibson.tenant.v1.UserService/GetSignupProgress"]
-		require.True(t, ok, "GetSignupProgress must be in authz registry")
-		assert.True(t, entry.Unauthenticated,
-			"GetSignupProgress is legitimately unauthenticated (pre-login signup flow)")
-		assert.Empty(t, entry.Relation,
-			"unauthenticated RPC must have no FGA relation")
-	})
+	// The signup-progress RPCs run before the person has a tenant. They
+	// accept the service identity of the dashboard only, through a rule on
+	// the system object, so they need no tenant (D11, gibson#761).
+	for _, method := range []string{
+		"/gibson.tenant.v1.UserService/GetSignupProgress",
+		"/gibson.tenant.v1.UserService/SetSignupProgress",
+	} {
+		t.Run(method+"_requires_the_dashboard_service_identity", func(t *testing.T) {
+			t.Parallel()
+			entry, ok := registry.Registry[method]
+			require.True(t, ok, "%s must be in the authz registry", method)
+			assert.False(t, entry.Unauthenticated, "%s must not be unauthenticated", method)
+			assert.Equal(t, "signup_service", entry.Relation)
+			assert.Equal(t, "system_tenant", entry.ObjectDeriver)
+			assert.Equal(t, registry.IdentityService, entry.AllowedIdentities,
+				"%s accepts a service identity only", method)
+		})
+	}
 }
 
 // ============================================================================

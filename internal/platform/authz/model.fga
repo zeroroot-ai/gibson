@@ -315,6 +315,17 @@ type system_tenant
     # Tuple shape:
     #   user:<platform-owner-zitadel-user-id> | platform_owner | system_tenant:_system
     define platform_owner: [user]
+    # signup_service — the service identity of the dashboard server, and no
+    # other caller (D11, gibson#761). It gates the two signup-progress RPCs
+    # (UserService.GetSignupProgress and SetSignupProgress), which run before
+    # any tenant exists. It is not platform_operator: the dashboard holds no
+    # cross-tenant privilege (hosted#191). Written at install by the
+    # gibson-fga-init Job from the dashboard machine user in the
+    # gibson-sa-identity-map ConfigMap.
+    #
+    # Tuple shape:
+    #   user:<dashboard-machine-user-numeric-sub> | signup_service | system_tenant:_system
+    define signup_service: [user]
     # parent: the set of tenants registered under the platform. Enumeration-only
     # (NOT referenced by any computed/authz relation) — it lets the catalog
     # fan-out reconciler list every tenant via

@@ -134,7 +134,7 @@ service MembershipService {
   // (if new) and projects full membership (FGA tuple + per-tenant org
   // membership), transitioning the member to "active". The token is the
   // capability, so this RPC is unauthenticated (the invitee is not yet a
-  // member of any tenant) — exactly like GetSignupProgress.
+  // member of any tenant).
   rpc AcceptInvitation(AcceptInvitationRequest) returns (AcceptInvitationResponse) {
     option (gibson.auth.v1.authz) = {
       unauthenticated: true

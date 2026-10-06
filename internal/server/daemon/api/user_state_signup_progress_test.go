@@ -52,7 +52,7 @@ func setProgress(t *testing.T, srv *DaemonServer, attemptID string, ttlSeconds i
 }
 
 // attemptID builds a distinct well-formed UUID per index. The handler only
-// checks the shape, which is the point: shape is all an unauthenticated caller
+// checks the shape, which is the point: shape is all a caller
 // has to satisfy, so the cap cannot rely on ids being hard to produce.
 func attemptID(i int) string {
 	return fmt.Sprintf("00000000-0000-4000-8000-%012d", i)

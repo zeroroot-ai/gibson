@@ -344,6 +344,14 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 			return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), nil //nolint:nilerr // an FGA error denies via CheckResponse, not a Go error; every deny path in this handler returns a nil Go error
 		}
 		id.Tenant = headerTenant
+	case id.CredentialType == headers.CredentialClientCredentials && regOK &&
+		regEntry.DerivesSystemObject():
+		// A service account with no tenant header, on a rule whose object is
+		// the system tenant. FGA decides it with no tenant: the object is
+		// system_tenant:_system, so the relation on that one object is the
+		// whole decision. The dashboard reaches the signup-progress RPCs
+		// this way, before the person has a tenant (gibson#761). id.Tenant
+		// stays empty.
 	default:
 		// Neither an OIDC user's resolved tenant nor a service account's
 		// header tenant is present.

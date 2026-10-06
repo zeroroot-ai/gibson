@@ -3109,11 +3109,11 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.UserService/GetSignupProgress": {
 		Service:           "gibson.tenant.v1.UserService",
-		Relation:          "",
-		ObjectType:        "",
-		ObjectDeriver:     "",
-		AllowedIdentities: 0,
-		Unauthenticated:   true,
+		Relation:          "signup_service",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityService,
+		Unauthenticated:   false,
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/GetUserActivity": {
@@ -3280,11 +3280,11 @@ var Registry = map[string]Entry{
 	},
 	"/gibson.tenant.v1.UserService/SetSignupProgress": {
 		Service:           "gibson.tenant.v1.UserService",
-		Relation:          "",
-		ObjectType:        "",
-		ObjectDeriver:     "",
-		AllowedIdentities: 0,
-		Unauthenticated:   true,
+		Relation:          "signup_service",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityService,
+		Unauthenticated:   false,
 		Self:              false,
 	},
 	"/gibson.tenant.v1.UserService/StageAttachment": {

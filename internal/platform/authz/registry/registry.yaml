@@ -2166,7 +2166,11 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.UserService/GetSignupProgress":
-    unauthenticated: true
+    relation: "signup_service"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - SERVICE
   "/gibson.tenant.v1.UserService/GetUserActivity":
     relation: "member"
     object_type: "tenant"
@@ -2292,7 +2296,11 @@ entries:
       - USER
       - SERVICE
   "/gibson.tenant.v1.UserService/SetSignupProgress":
-    unauthenticated: true
+    relation: "signup_service"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - SERVICE
   "/gibson.tenant.v1.UserService/StageAttachment":
     relation: "member"
     object_type: "tenant"
