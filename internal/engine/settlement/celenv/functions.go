@@ -45,8 +45,9 @@ const (
 //   - jsonPath(text, path) -> dyn: the value gjson's path syntax selects out
 //     of text, or null if text is not valid JSON or path selects nothing.
 //   - httpStatus(evidence_item) -> int: the status code of an http_response
-//     evidence item, or -1 if the item is not an http_response or its
-//     content will not decode.
+//     evidence item, or of the daemon's record of a tool call (a log item
+//     whose content is the tool result JSON with a top-level status_code).
+//     It is -1 for any other item, or when the content will not decode.
 //   - markerPresent(evidence, marker) -> bool: true iff at least one
 //     evidence item's evidenceText contains marker as an exact,
 //     case-sensitive substring (the deterministic check behind "proof of
@@ -114,19 +115,68 @@ func httpStatusImpl(v ref.Val) ref.Val {
 		return notApplicable
 	}
 	typ, _ := item["type"].(string)
-	if finding.EvidenceType(typ) != finding.EvidenceHTTPResponse {
+	switch finding.EvidenceType(typ) {
+	case finding.EvidenceHTTPResponse:
+		content, ok := item["content"].(map[string]any)
+		if !ok {
+			return notApplicable
+		}
+		// JSON numbers decode to float64 through normalizeContent's round-trip.
+		code, ok := content["status_code"].(float64)
+		if !ok {
+			return notApplicable
+		}
+		return types.Int(int64(code))
+
+	case finding.EvidenceLog:
+		// The daemon's record of a tool call (gibson#810): content is the
+		// JSON the tool returned, with proto field names. An HTTP tool
+		// reports the response status in its top-level status_code field.
+		code, ok := recordedStatusCode(item["content"])
+		if !ok {
+			return notApplicable
+		}
+		return types.Int(code)
+
+	default:
 		return notApplicable
 	}
-	content, ok := item["content"].(map[string]any)
-	if !ok {
-		return notApplicable
+}
+
+// recordedStatusCode reads the top-level status_code of a recorded tool
+// result. The content is the JSON text that the flight recorder stored, or
+// the object it decodes to. Anything that is not a JSON object with an
+// integral status_code in the HTTP range is not applicable.
+func recordedStatusCode(content any) (int64, bool) {
+	var raw string
+	switch c := content.(type) {
+	case string:
+		raw = c
+	case map[string]any:
+		data, err := json.Marshal(c)
+		if err != nil {
+			return 0, false
+		}
+		raw = string(data)
+	default:
+		return 0, false
 	}
-	// JSON numbers decode to float64 through normalizeContent's round-trip.
-	code, ok := content["status_code"].(float64)
-	if !ok {
-		return notApplicable
+	if !gjson.Valid(raw) {
+		return 0, false
 	}
-	return types.Int(int64(code))
+	root := gjson.Parse(raw)
+	if !root.IsObject() {
+		return 0, false
+	}
+	field := root.Get("status_code")
+	if field.Type != gjson.Number {
+		return 0, false
+	}
+	code := field.Float()
+	if code != float64(int64(code)) || code < 100 || code > 599 {
+		return 0, false
+	}
+	return int64(code), true
 }
 
 func regexMatchImpl(textVal, patternVal ref.Val) ref.Val {
