@@ -214,21 +214,26 @@ func (e *Engine) InfraGraph() ([]InfraNode, []InfraEdge) {
 }
 
 // LiveAttackGraph derives the acyclic attack graph of the tenant World
-// (ADR-0129): LiveEnablementGraph with its cycles cut. The planner uses it. It
-// is the one way that the planner gets an attack graph, so no path can leave
-// the relationships of the World out (gibson#697).
+// (ADR-0129): DeriveAttackGraph over the bounded infra graph. The planner uses
+// it. It is the one way that the planner gets an attack graph, so no path can
+// leave the relationships of the World out (gibson#697).
 func LiveAttackGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.BeliefSchemaRegistry) AttackGraph {
-	return BreakCycles(LiveEnablementGraph(eng, hosts, registry))
+	nodes, edges := boundedInfraGraph(eng, hosts)
+	return DeriveAttackGraph(nodes, edges, registry)
 }
 
 // LiveEnablementGraph is the uncut enablement graph of the tenant World. The
 // belief engine slices it and breaks the cycles of each slice (gibson#700).
-//
-// hosts bounds the Host nodes of the graph: the belief engine passes each host
-// of the World, and the planner passes the ambient slice of the mission. An
-// edge to a host outside the bound has no endpoint in the graph, and
-// EnablementGraph drops it.
 func LiveEnablementGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.BeliefSchemaRegistry) AttackGraph {
+	nodes, edges := boundedInfraGraph(eng, hosts)
+	return EnablementGraph(nodes, edges, registry)
+}
+
+// boundedInfraGraph returns the infra graph of the tenant World with only the
+// Host nodes of hosts. The belief engine passes each host of the World, and
+// the planner passes the ambient slice of the mission. An edge to a host
+// outside the bound has no endpoint in the graph, and EnablementGraph drops it.
+func boundedInfraGraph(eng *Engine, hosts []HostSnapshot) ([]InfraNode, []InfraEdge) {
 	nodes, edges := eng.InfraGraph()
 
 	inBound := make(map[string]struct{}, len(hosts))
@@ -244,5 +249,5 @@ func LiveEnablementGraph(eng *Engine, hosts []HostSnapshot, registry *ontology.B
 		}
 		bounded = append(bounded, n)
 	}
-	return EnablementGraph(bounded, edges, registry)
+	return bounded, edges
 }
