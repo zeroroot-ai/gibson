@@ -105,7 +105,7 @@ func TestRegisterComponent_NoOntologyExtension_Skips(t *testing.T) {
 	svc := newTestServiceWithReasoner(stub)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "tenant-abc")
-	req := &componentpb.RegisterComponentRequest{Kind: "tool", Name: "nmap"}
+	req := &componentpb.RegisterComponentRequest{Kind: "tool", Name: "portscan"}
 
 	resp, err := svc.RegisterComponent(ctx, req)
 	require.NoError(t, err)
@@ -125,7 +125,7 @@ func TestRegisterComponent_OntologyExtension_Registers(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "tenant-abc")
 	req := &componentpb.RegisterComponentRequest{
 		Kind: "tool",
-		Name: "nmap",
+		Name: "portscan",
 		OntologyExtension: &graphragpb.OntologyExtension{
 			Prefixes: map[string]string{"mycorp": "https://mycorp.example/"},
 			Hierarchies: []*graphragpb.HierarchyDef{
@@ -144,9 +144,9 @@ func TestRegisterComponent_OntologyExtension_Registers(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
-	require.Contains(t, stub.registered, "nmap",
+	require.Contains(t, stub.registered, "portscan",
 		"reasoner must see the extension keyed by component name")
-	got := stub.registered["nmap"]
+	got := stub.registered["portscan"]
 	assert.Equal(t, map[string]string{"mycorp": "https://mycorp.example/"}, got.Prefixes)
 	require.Len(t, got.Hierarchies, 1)
 	assert.Equal(t, "mycorp:LeakedKey", got.Hierarchies[0].Label)
@@ -170,7 +170,7 @@ func TestRegisterComponent_OntologyExtension_ReasonerErrorIsSoft(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "tenant-abc")
 	req := &componentpb.RegisterComponentRequest{
 		Kind: "tool",
-		Name: "nmap",
+		Name: "portscan",
 		OntologyExtension: &graphragpb.OntologyExtension{
 			Prefixes: map[string]string{"x": "https://x.example/"},
 		},

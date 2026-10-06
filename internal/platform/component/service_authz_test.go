@@ -128,7 +128,7 @@ func TestRegisterComponent_NilAuthorizer_NoPanic(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	assert.NotPanics(t, func() {
-		resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "nmap"))
+		resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "portscan"))
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.GetInstanceId())
 	})
@@ -161,7 +161,7 @@ func TestRegisterComponent_SystemTenant_WritesOwnershipTuple(t *testing.T) {
 	// auth.ContextWithTenantString rejects "_system" (reserved); use WithTenant
 	// with auth.SystemTenant directly.
 	ctx := auth.WithTenant(context.Background(), auth.SystemTenant)
-	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "httpx"))
+	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "webprobe"))
 
 	require.NoError(t, err)
 	assert.NotEmpty(t, resp.GetInstanceId())
@@ -169,7 +169,7 @@ func TestRegisterComponent_SystemTenant_WritesOwnershipTuple(t *testing.T) {
 	require.Len(t, mock.writtenTuples, 1)
 	assert.Equal(t, "tenant:_system", mock.writtenTuples[0].User)
 	assert.Equal(t, "owner", mock.writtenTuples[0].Relation)
-	assert.Equal(t, "component:tool/httpx", mock.writtenTuples[0].Object)
+	assert.Equal(t, "component:tool/webprobe", mock.writtenTuples[0].Object)
 }
 
 // ListUsersOfType is unused by this package's tests. It exists because the

@@ -255,13 +255,13 @@ func TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord(t *testing.T)
 	}
 }
 
-// TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity is the
-// failing fixture for the rule that a catalog plugin name is not free
-// (ADR-0066). A token-enrolled caller and a caller with no enrollment record
-// are refused under the name "github". The attested workload checks in. A
-// token-enrolled caller keeps every name the catalog does not list.
-func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T) {
-	ctx := credCallerCtx(t, "plugin_principal:310000000000000001", "primary")
+// TestRegisterComponent_CatalogNameNeedsAnAttestedIdentity is the failing
+// fixture for the rule that a catalog name is not free (ADR-0066, ADR-0097).
+// For each kind (agent, tool, plugin), a token-enrolled caller and a caller
+// with no enrollment record are refused under the name of a catalog entry of
+// that kind. The attested workload checks in. A token-enrolled caller keeps
+// every name the catalog does not list.
+func TestRegisterComponent_CatalogNameNeedsAnAttestedIdentity(t *testing.T) {
 	newSvc := func(r EnrollmentReader) (*ComponentServiceServer, *attestedRegistry) {
 		reg := &attestedRegistry{}
 		svc := NewComponentServiceServer(reg, &noopWorkQueue{}, testLogger(), nil, nil, nil, nil)
@@ -271,33 +271,40 @@ func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T
 		return svc, reg
 	}
 
-	for name, reader := range map[string]EnrollmentReader{
-		"token enrollment": enrollmentAnswer{attested: false},
-		"no reader":        nil,
-	} {
-		svc, reg := newSvc(reader)
-		_, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "github"))
-		if status.Code(err) != codes.PermissionDenied {
-			t.Fatalf("%s: err = %v, want PermissionDenied", name, err)
+	catalogNames := []struct {
+		kind, name, principal string
+	}{
+		{"agent", "claude", "agent_principal:310000000000000001"},
+		{"tool", "nmap", "tool_principal:310000000000000001"},
+		{"plugin", "github", "plugin_principal:310000000000000001"},
+	}
+	for _, c := range catalogNames {
+		ctx := credCallerCtx(t, c.principal, "primary")
+		for name, reader := range map[string]EnrollmentReader{
+			"token enrollment": enrollmentAnswer{attested: false},
+			"no reader":        nil,
+		} {
+			svc, reg := newSvc(reader)
+			_, err := svc.RegisterComponent(ctx, minimalRegisterReq(c.kind, c.name))
+			if status.Code(err) != codes.PermissionDenied {
+				t.Fatalf("%s %s/%s: err = %v, want PermissionDenied", name, c.kind, c.name, err)
+			}
+			if reg.got.Name != "" {
+				t.Fatalf("%s %s/%s: the refused check-in reached the registry", name, c.kind, c.name)
+			}
 		}
-		if reg.got.Name != "" {
-			t.Fatalf("%s: the refused check-in reached the registry", name)
+
+		svc, reg := newSvc(enrollmentAnswer{attested: true})
+		if _, err := svc.RegisterComponent(ctx, minimalRegisterReq(c.kind, c.name)); err != nil {
+			t.Fatalf("the attested workload %s/%s: %v", c.kind, c.name, err)
 		}
-	}
+		if !reg.got.Attested {
+			t.Fatalf("the attested workload %s/%s must be recorded as attested", c.kind, c.name)
+		}
 
-	svc, reg := newSvc(enrollmentAnswer{attested: true})
-	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "github")); err != nil {
-		t.Fatalf("the attested workload: %v", err)
-	}
-	if !reg.got.Attested {
-		t.Fatal("the attested workload must be recorded as attested")
-	}
-
-	svc, _ = newSvc(enrollmentAnswer{attested: false})
-	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "my-own-plugin")); err != nil {
-		t.Fatalf("a name the catalog does not list: %v", err)
-	}
-	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("agent", "claude")); err != nil {
-		t.Fatalf("the rule covers plugins only: %v", err)
+		svc, _ = newSvc(enrollmentAnswer{attested: false})
+		if _, err := svc.RegisterComponent(ctx, minimalRegisterReq(c.kind, "my-own-"+c.kind)); err != nil {
+			t.Fatalf("a %s name the catalog does not list: %v", c.kind, err)
+		}
 	}
 }
