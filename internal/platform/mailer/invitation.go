@@ -144,7 +144,7 @@ type OwnerWelcomeEmail struct {
 // for an invitation.
 func (s *InvitationSender) SendOwnerWelcome(ctx context.Context, w OwnerWelcomeEmail) error {
 	if s == nil || s.m == nil {
-		return fmt.Errorf("mailer: invitation sender not configured")
+		return errors.New("mailer: invitation sender not configured")
 	}
 	inv := InvitationEmail{To: w.To, TenantID: w.TenantID, Role: "owner", AppURL: w.AppURL, APIURL: w.APIURL}
 	steps := invitationSteps(inv)
