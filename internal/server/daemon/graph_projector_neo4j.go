@@ -882,12 +882,6 @@ func (w *neo4jGraphWriter) exec(ctx context.Context, tenant, cypher string, para
 		return fmt.Errorf("graph projector: pool.For(%s): %w", tenant, err)
 	}
 	defer conn.Release()
-	if conn.Neo4j == nil {
-		// Neo4j is not configured for this tenant; there is nothing to project
-		// into. Not an error — this is what the CreateMission handler did before
-		// its MERGE moved here, and it is the right answer for every projection.
-		return nil
-	}
 	if err := w.ensureSchema(ctx, tenant, conn.Neo4j); err != nil {
 		return err
 	}

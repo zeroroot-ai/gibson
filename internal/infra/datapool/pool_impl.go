@@ -79,6 +79,9 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	if keyProvider == nil {
 		return nil, fmt.Errorf("datapool: NewPool: keyProvider is required")
 	}
+	if err := validateStoreConfig(cfg); err != nil {
+		return nil, fmt.Errorf("datapool: NewPool: %w", err)
+	}
 
 	// Load the master KEK once at startup. If the KMS is unreachable, fail
 	// fast — the daemon should not start without a functional key provider.
@@ -107,11 +110,9 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	pg := newPgPerTenant(cfg)
 
 	var rp *redisPerTenant
-	if cfg.RedisAddr != "" {
-		rp, err = newRedisPerTenant(cfg.RedisAddr, cfg.RedisPassword)
-		if err != nil {
-			return nil, fmt.Errorf("datapool: NewPool: redis init: %w", err)
-		}
+	rp, err = newRedisPerTenant(cfg.RedisAddr, cfg.RedisPassword)
+	if err != nil {
+		return nil, fmt.Errorf("datapool: NewPool: redis init: %w", err)
 	}
 
 	var n4j *neo4jPerTenant
@@ -154,9 +155,6 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	// VectorStoreAddr shares the same Redis Stack instance as the cache/session
 	// Redis (same addr, same password); the per-tenant index name is read from
 	// VectorCredentials at tenant/<id>/infra/vector by the caller's DSN resolver.
-	if err := validateVectorConfig(cfg); err != nil {
-		return nil, fmt.Errorf("datapool: NewPool: %w", err)
-	}
 	if cfg.VectorStoreAddr != "" {
 		vectorDriver, err := vectordb.NewRedisVSSDriver(vectordb.RedisConfig{
 			Addr:     cfg.VectorStoreAddr,
@@ -344,7 +342,6 @@ func (p *pool) initTenant(ctx context.Context, tenant auth.TenantID, tenantKEK [
 	}
 	dpmetrics.IncPoolInit(tenantStr, dpmetrics.StorePostgres)
 
-	// Redis is optional; skip if not configured.
 	if p.redisPool != nil {
 		if _, err := p.redisPool.ForTenant(ctx, tenant); err != nil {
 			var npErr *NotProvisionedError
@@ -473,5 +470,22 @@ func attachVector(ctx context.Context, src vectorSource, conn *Conn) error {
 		return fmt.Errorf("datapool: For: vector: %w", err)
 	}
 	conn.Vector = vc
+	return nil
+}
+
+// validateStoreConfig refuses a config that gives a tenant connection without
+// one of its stores. Each Conn carries the Redis client and the Neo4j session
+// of its tenant, so a reader of a Conn never checks for a missing store
+// ([[0003]]). The vector pair is checked first, and no check dials anything.
+func validateStoreConfig(cfg Config) error {
+	if err := validateVectorConfig(cfg); err != nil {
+		return err
+	}
+	if cfg.RedisAddr == "" {
+		return errors.New("RedisAddr is required: each tenant connection carries its Redis client")
+	}
+	if cfg.Neo4jResolver == nil && cfg.Neo4jURI == "" {
+		return errors.New("a Neo4j resolver or URI is required: each tenant connection carries its Neo4j session")
+	}
 	return nil
 }
