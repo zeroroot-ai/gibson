@@ -190,42 +190,45 @@ type TargetInfo struct {
 	Provider   string         `json:"provider,omitempty"`
 	Connection map[string]any `json:"connection,omitempty"` // Schema-based connection parameters
 	Metadata   map[string]any `json:"metadata,omitempty"`
-
-	// Deprecated: Use Connection["url"] instead. Kept for backward compatibility.
-	URL string `json:"url,omitempty"`
-	// Deprecated: Use Connection["headers"] instead. Kept for backward compatibility.
-	Headers map[string]string `json:"headers,omitempty"`
 }
 
-// NewTargetInfo creates a new target info with the given ID, name, URL, and type.
-// Provider, headers, and metadata are initialized to empty/default values.
-// For targets with connection parameters, use NewTargetInfoFull instead.
+// NewTargetInfo creates a new target info with the given ID, name, URL, and
+// type. A non-empty URL is stored as Connection["url"], the one place that
+// holds the address of a target. For targets with more connection
+// parameters, use NewTargetInfoFull instead.
 func NewTargetInfo(id types.ID, name, url, targetType string) TargetInfo {
-	return TargetInfo{
-		ID:       id,
-		Name:     name,
-		URL:      url,
-		Type:     targetType,
-		Provider: "",
-		Headers:  make(map[string]string),
-		Metadata: make(map[string]any),
-	}
+	return NewTargetInfoFull(id, name, url, targetType, nil)
 }
 
 // NewTargetInfoFull creates a new target info with full connection parameters.
 // This constructor should be used when creating TargetInfo from a Target entity
-// that has schema-based connection configuration.
+// that has schema-based connection configuration. A non-empty URL is stored
+// as Connection["url"] when the connection does not already name one.
 func NewTargetInfoFull(id types.ID, name, url, targetType string, connection map[string]any) TargetInfo {
+	conn := make(map[string]any, len(connection)+1)
+	for k, v := range connection {
+		conn[k] = v
+	}
+	if _, has := conn["url"]; !has && url != "" {
+		conn["url"] = url
+	}
 	return TargetInfo{
 		ID:         id,
 		Name:       name,
-		URL:        url,
 		Type:       targetType,
 		Provider:   "",
-		Connection: connection,
-		Headers:    make(map[string]string),
+		Connection: conn,
 		Metadata:   make(map[string]any),
 	}
+}
+
+// URL returns the address of the target, from Connection["url"]. It returns
+// "" when the connection names no URL.
+func (t TargetInfo) URL() string {
+	if u, ok := t.Connection["url"].(string); ok {
+		return u
+	}
+	return ""
 }
 
 // GetConnection returns the connection parameters for this target.
@@ -237,26 +240,6 @@ func (t TargetInfo) GetConnection() map[string]any {
 // WithProvider sets the provider for this target
 func (t TargetInfo) WithProvider(provider string) TargetInfo {
 	t.Provider = provider
-	return t
-}
-
-// WithHeader adds a header key-value pair
-func (t TargetInfo) WithHeader(key, value string) TargetInfo {
-	if t.Headers == nil {
-		t.Headers = make(map[string]string)
-	}
-	t.Headers[key] = value
-	return t
-}
-
-// WithHeaders sets multiple headers at once
-func (t TargetInfo) WithHeaders(headers map[string]string) TargetInfo {
-	if t.Headers == nil {
-		t.Headers = make(map[string]string)
-	}
-	for k, v := range headers {
-		t.Headers[k] = v
-	}
 	return t
 }
 

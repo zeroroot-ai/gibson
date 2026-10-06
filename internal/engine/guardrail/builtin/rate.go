@@ -102,7 +102,7 @@ func (r *RateLimiter) CheckInput(ctx context.Context, input guardrail.GuardrailI
 		// Extract domain from URL
 		domain := ""
 		if input.TargetInfo != nil {
-			domain = r.extractDomain(input.TargetInfo.URL)
+			domain = r.extractDomain(input.TargetInfo.URL())
 		} else {
 			domain = "default"
 		}

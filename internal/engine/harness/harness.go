@@ -736,10 +736,7 @@ type AgentHarness interface {
 	//
 	// Example:
 	//   target := harness.Target()
-	//   req, _ := http.NewRequest("GET", target.URL, nil)
-	//   for k, v := range target.Headers {
-	//       req.Header.Set(k, v)
-	//   }
+	//   req, _ := http.NewRequest("GET", target.URL(), nil)
 	Target() TargetInfo
 
 	// ForTarget returns a view of this harness whose Target() is the given
@@ -795,7 +792,7 @@ type AgentHarness interface {
 	//
 	// Example:
 	//   harness.Logger().Info("Starting reconnaissance",
-	//       "target", target.URL,
+	//       "target", target.URL(),
 	//       "method", "subdomain_enumeration")
 	Logger() *slog.Logger
 

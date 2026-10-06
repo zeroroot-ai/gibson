@@ -165,11 +165,10 @@ func TestNewTargetInfo(t *testing.T) {
 
 	assert.Equal(t, id, target.ID)
 	assert.Equal(t, "test-target", target.Name)
-	assert.Equal(t, "https://example.com", target.URL)
+	assert.Equal(t, "https://example.com", target.URL())
+	assert.Equal(t, map[string]any{"url": "https://example.com"}, target.Connection)
 	assert.Equal(t, "web", target.Type)
 	assert.Empty(t, target.Provider)
-	assert.NotNil(t, target.Headers)
-	assert.Empty(t, target.Headers)
 	assert.NotNil(t, target.Metadata)
 	assert.Empty(t, target.Metadata)
 }
@@ -181,79 +180,6 @@ func TestTargetInfo_WithProvider(t *testing.T) {
 
 	assert.Equal(t, "aws", target.Provider)
 	assert.Equal(t, "test-target", target.Name)
-}
-
-func TestTargetInfo_WithHeader(t *testing.T) {
-	id := types.NewID()
-	target := NewTargetInfo(id, "test-target", "https://example.com", "web").
-		WithHeader("Authorization", "Bearer token123").
-		WithHeader("User-Agent", "Gibson/1.0")
-
-	assert.Equal(t, "Bearer token123", target.Headers["Authorization"])
-	assert.Equal(t, "Gibson/1.0", target.Headers["User-Agent"])
-	assert.Len(t, target.Headers, 2)
-}
-
-func TestTargetInfo_WithHeader_InitializesMap(t *testing.T) {
-	// Create target without initializing headers
-	target := TargetInfo{
-		ID:   types.NewID(),
-		Name: "test",
-		URL:  "https://example.com",
-		Type: "web",
-	}
-
-	// Should initialize the map
-	target = target.WithHeader("Authorization", "Bearer token")
-	assert.NotNil(t, target.Headers)
-	assert.Equal(t, "Bearer token", target.Headers["Authorization"])
-}
-
-func TestTargetInfo_WithHeaders(t *testing.T) {
-	id := types.NewID()
-	headers := map[string]string{
-		"Authorization": "Bearer token123",
-		"User-Agent":    "Gibson/1.0",
-		"Accept":        "application/json",
-	}
-
-	target := NewTargetInfo(id, "test-target", "https://example.com", "web").
-		WithHeaders(headers)
-
-	assert.Equal(t, "Bearer token123", target.Headers["Authorization"])
-	assert.Equal(t, "Gibson/1.0", target.Headers["User-Agent"])
-	assert.Equal(t, "application/json", target.Headers["Accept"])
-	assert.Len(t, target.Headers, 3)
-}
-
-func TestTargetInfo_WithHeaders_Merges(t *testing.T) {
-	id := types.NewID()
-	target := NewTargetInfo(id, "test-target", "https://example.com", "web").
-		WithHeader("Existing", "header").
-		WithHeaders(map[string]string{
-			"New1": "value1",
-			"New2": "value2",
-		})
-
-	assert.Equal(t, "header", target.Headers["Existing"])
-	assert.Equal(t, "value1", target.Headers["New1"])
-	assert.Equal(t, "value2", target.Headers["New2"])
-	assert.Len(t, target.Headers, 3)
-}
-
-func TestTargetInfo_WithHeaders_InitializesMap(t *testing.T) {
-	// Create target without initializing headers
-	target := TargetInfo{
-		ID:   types.NewID(),
-		Name: "test",
-		URL:  "https://example.com",
-		Type: "web",
-	}
-
-	// Should initialize the map
-	target = target.WithHeaders(map[string]string{"Auth": "token"})
-	assert.NotNil(t, target.Headers)
-	assert.Equal(t, "token", target.Headers["Auth"])
 }
 
 func TestTargetInfo_WithMetadata(t *testing.T) {
@@ -272,10 +198,10 @@ func TestTargetInfo_WithMetadata(t *testing.T) {
 func TestTargetInfo_WithMetadata_InitializesMap(t *testing.T) {
 	// Create target without initializing metadata
 	target := TargetInfo{
-		ID:   types.NewID(),
-		Name: "test",
-		URL:  "https://example.com",
-		Type: "web",
+		ID:         types.NewID(),
+		Name:       "test",
+		Connection: map[string]any{"url": "https://example.com"},
+		Type:       "web",
 	}
 
 	// Should initialize the map
@@ -288,14 +214,10 @@ func TestTargetInfo_Chaining(t *testing.T) {
 	id := types.NewID()
 	target := NewTargetInfo(id, "test-target", "https://example.com", "web").
 		WithProvider("aws").
-		WithHeader("Authorization", "Bearer token").
-		WithHeaders(map[string]string{"Accept": "application/json"}).
 		WithMetadata("region", "us-west-2").
 		WithMetadata("environment", "production")
 
 	assert.Equal(t, "aws", target.Provider)
-	assert.Equal(t, "Bearer token", target.Headers["Authorization"])
-	assert.Equal(t, "application/json", target.Headers["Accept"])
 	assert.Equal(t, "us-west-2", target.Metadata["region"])
 	assert.Equal(t, "production", target.Metadata["environment"])
 }
@@ -304,7 +226,6 @@ func TestTargetInfo_JSON_Serialization(t *testing.T) {
 	id := types.NewID()
 	original := NewTargetInfo(id, "test-target", "https://example.com", "web").
 		WithProvider("aws").
-		WithHeader("Authorization", "Bearer token").
 		WithMetadata("key", "value")
 
 	// Marshal to JSON
@@ -319,10 +240,9 @@ func TestTargetInfo_JSON_Serialization(t *testing.T) {
 	// Verify all fields
 	assert.Equal(t, original.ID, decoded.ID)
 	assert.Equal(t, original.Name, decoded.Name)
-	assert.Equal(t, original.URL, decoded.URL)
+	assert.Equal(t, original.URL(), decoded.URL())
 	assert.Equal(t, original.Type, decoded.Type)
 	assert.Equal(t, original.Provider, decoded.Provider)
-	assert.Equal(t, original.Headers, decoded.Headers)
 	assert.Equal(t, original.Metadata, decoded.Metadata)
 }
 
@@ -339,7 +259,7 @@ func TestTargetInfo_JSON_EmptyFields(t *testing.T) {
 
 	assert.Equal(t, target.ID, decoded.ID)
 	assert.Equal(t, target.Name, decoded.Name)
-	assert.Equal(t, target.URL, decoded.URL)
+	assert.Equal(t, target.URL(), decoded.URL())
 	assert.Equal(t, target.Type, decoded.Type)
 }
 
@@ -381,35 +301,6 @@ func TestTargetInfo_ComplexMetadata(t *testing.T) {
 	assert.Equal(t, []int{1, 2, 3}, array)
 }
 
-func TestTargetInfo_MultipleHeadersMerge(t *testing.T) {
-	id := types.NewID()
-	target := NewTargetInfo(id, "test", "https://example.com", "web").
-		WithHeaders(map[string]string{
-			"Header1": "value1",
-			"Header2": "value2",
-		}).
-		WithHeaders(map[string]string{
-			"Header3": "value3",
-			"Header4": "value4",
-		})
-
-	assert.Len(t, target.Headers, 4)
-	assert.Equal(t, "value1", target.Headers["Header1"])
-	assert.Equal(t, "value2", target.Headers["Header2"])
-	assert.Equal(t, "value3", target.Headers["Header3"])
-	assert.Equal(t, "value4", target.Headers["Header4"])
-}
-
-func TestTargetInfo_HeaderOverwrite(t *testing.T) {
-	id := types.NewID()
-	target := NewTargetInfo(id, "test", "https://example.com", "web").
-		WithHeader("Authorization", "Bearer token1").
-		WithHeader("Authorization", "Bearer token2")
-
-	// Second call should overwrite
-	assert.Equal(t, "Bearer token2", target.Headers["Authorization"])
-}
-
 func TestMissionContext_EmptyConstraints(t *testing.T) {
 	id := types.NewID()
 	ctx := NewMissionContext(id, "test", "agent").
@@ -417,15 +308,6 @@ func TestMissionContext_EmptyConstraints(t *testing.T) {
 
 	// WithConstraints with no args creates nil, which is semantically empty
 	assert.Empty(t, ctx.Constraints)
-}
-
-func TestTargetInfo_EmptyHeaders(t *testing.T) {
-	id := types.NewID()
-	target := NewTargetInfo(id, "test", "https://example.com", "web").
-		WithHeaders(map[string]string{})
-
-	assert.NotNil(t, target.Headers)
-	assert.Empty(t, target.Headers)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -497,4 +379,22 @@ func TestMissionContext_NodeSlotOverrides_JSONRoundTrip(t *testing.T) {
 	require.Contains(t, decoded.NodeSlotOverrides, "primary")
 	assert.Equal(t, "anthropic", decoded.NodeSlotOverrides["primary"].Provider)
 	assert.Equal(t, "claude", decoded.NodeSlotOverrides["primary"].Model)
+}
+
+// TestNewTargetInfoFull_TheConnectionURLWins proves that Connection["url"] is
+// the one place for the address of a target: a URL in the connection is kept,
+// and the url argument fills it only when it is absent.
+func TestNewTargetInfoFull_TheConnectionURLWins(t *testing.T) {
+	id := types.NewID()
+	conn := map[string]any{"url": "https://from-connection.example", "port": 8443}
+
+	target := NewTargetInfoFull(id, "t", "https://from-argument.example", "web", conn)
+	assert.Equal(t, "https://from-connection.example", target.URL())
+	assert.Equal(t, 8443, target.Connection["port"])
+
+	target.Connection["url"] = "changed"
+	assert.Equal(t, "https://from-connection.example", conn["url"], "the constructor must not share the caller's map")
+
+	empty := NewTargetInfoFull(id, "t", "", "web", nil)
+	assert.Empty(t, empty.URL())
 }

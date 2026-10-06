@@ -22,7 +22,7 @@ func TestRateLimiter_BasicRateLimiting(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
@@ -68,7 +68,7 @@ func TestRateLimiter_BurstCapacity(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
@@ -105,13 +105,13 @@ func TestRateLimiter_PerTargetIsolation(t *testing.T) {
 
 	input1 := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
 	input2 := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://other.com/api",
+			Connection: map[string]any{"url": "https://other.com/api"},
 		},
 	}
 
@@ -160,13 +160,13 @@ func TestRateLimiter_GlobalLimit(t *testing.T) {
 
 	input1 := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
 	input2 := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://other.com/api",
+			Connection: map[string]any{"url": "https://other.com/api"},
 		},
 	}
 
@@ -228,7 +228,7 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: "https://example.com/api",
+					Connection: map[string]any{"url": "https://example.com/api"},
 				},
 			}
 
@@ -281,7 +281,7 @@ func TestRateLimiter_RetryAfterMetadata(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
@@ -361,7 +361,7 @@ func TestRateLimiter_DefaultBurstSize(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "https://example.com/api",
+			Connection: map[string]any{"url": "https://example.com/api"},
 		},
 	}
 
@@ -419,7 +419,7 @@ func TestRateLimiter_MissingURL(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "",
+			Connection: map[string]any{"url": ""},
 		},
 	}
 
@@ -463,7 +463,7 @@ func TestRateLimiter_PerTargetMultipleDomains(t *testing.T) {
 	for _, domain := range domains {
 		input := guardrail.GuardrailInput{
 			TargetInfo: &harness.TargetInfo{
-				URL: domain,
+				Connection: map[string]any{"url": domain},
 			},
 		}
 
