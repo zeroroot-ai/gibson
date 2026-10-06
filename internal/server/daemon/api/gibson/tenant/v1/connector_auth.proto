@@ -133,6 +133,10 @@ message StartConnectorAuthorizationRequest {
   // the OAuth authorization-server metadata from it (RFC 8414), and also tries
   // the RFC 9728 protected-resource document off it.
   string instance_url = 2 [(buf.validate.field).string = { max_len: 4096 }];
+  // idempotency_key makes a retry safe (ADR-0028). A second request with the
+  // same key returns the result of the first request and does the work one
+  // time. An empty key turns the protection off for the call.
+  string idempotency_key = 3 [(buf.validate.field).string = { max_len: 128 }];
 }
 
 message StartConnectorAuthorizationResponse {

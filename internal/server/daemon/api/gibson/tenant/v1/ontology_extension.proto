@@ -106,6 +106,10 @@ message RejectOntologyExtensionProposalResponse {}
 message SubmitOntologyExtensionUpstreamRequest {
   OntologyProposalKind kind = 1 [(buf.validate.field).enum = { defined_only: true }];
   string label = 2 [(buf.validate.field).string = { max_len: 4096 }];
+  // idempotency_key makes a retry safe (ADR-0028). A second request with the
+  // same key returns the result of the first request and does the work one
+  // time. An empty key turns the protection off for the call.
+  string idempotency_key = 3 [(buf.validate.field).string = { max_len: 128 }];
 }
 
 // SubmitOntologyExtensionUpstreamResponse carries the rendered SDK Domain
