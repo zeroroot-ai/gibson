@@ -125,6 +125,7 @@ func TestProvisionSteps_NamesStableContract(t *testing.T) {
 	want := []string{
 		"InitRedisKeyspace",
 		"PublishTenantName",
+		"EnsureBeliefTrainer",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf(
