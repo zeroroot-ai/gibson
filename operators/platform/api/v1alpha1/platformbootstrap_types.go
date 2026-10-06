@@ -737,11 +737,12 @@ type PlatformBootstrapStatus struct {
 	// +optional
 	SMTPProviderID string `json:"smtpProviderID,omitempty"`
 
-	// SMTPSettingsHash is a hash of the last-applied SMTP settings, including
-	// the password. Zitadel never returns a stored password, so this is the
-	// only way the reconciler can detect a password change and know to
+	// SMTPSettingsHash is a fingerprint of the last-applied SMTP settings,
+	// including the password. Zitadel never returns a stored password, so this
+	// is the only way the reconciler can detect a password change and know to
 	// re-apply it; a mismatch (or an id whose live settings otherwise differ)
-	// triggers a repair on the next reconcile.
+	// triggers a repair on the next reconcile. The password goes through
+	// Argon2id, so a reader of the status cannot test password guesses fast.
 	// +optional
 	SMTPSettingsHash string `json:"smtpSettingsHash,omitempty"`
 
