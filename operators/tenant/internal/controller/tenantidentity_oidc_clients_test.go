@@ -20,7 +20,6 @@ import (
 
 func platformBootstrap() *platformv1alpha1.PlatformBootstrap {
 	pb := &platformv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
-	pb.Spec.Zitadel.Issuer = "https://idp.example.test"
 	pb.Spec.Zitadel.AdminTokenRef = platformv1alpha1.SecretKeyRef{Name: "zitadel-admin-pat", Namespace: "gibson"}
 	pb.Spec.Zitadel.Project.Name = "gibson"
 	return pb
@@ -47,7 +46,7 @@ func newOIDCFixture(t *testing.T, entries []gibsonv1alpha1.TenantIdentityOIDCCli
 		WithInterceptorFuncs(funcs).
 		Build()
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
 	return &oidcFixture{c: c, r: r, ti: ti}
 }
 
@@ -107,7 +106,7 @@ func TestTenantIdentity_MintsDeclaredOIDCClients(t *testing.T) {
 	f.reconcile(t, 2)
 
 	portal := f.oidcClient(t, "acme-identity-portal")
-	if portal.Spec.ClientName != "acme/portal" || portal.Spec.ZitadelURL != "https://idp.example.test" ||
+	if portal.Spec.ClientName != "acme/portal" || portal.Spec.ZitadelURL != "http://gibson-zitadel:8080" ||
 		portal.Spec.ProjectRef.Name != "gibson" || portal.Spec.AdminTokenRef.Name != "zitadel-admin-pat" {
 		t.Errorf("portal spec = %+v, want the bootstrap's issuer, token and project", portal.Spec)
 	}
@@ -250,7 +249,7 @@ func TestTenantIdentity_OIDCClientsNeedTheBootstrap(t *testing.T) {
 	ti.Spec.OIDCClients = []gibsonv1alpha1.TenantIdentityOIDCClient{{Name: "portal"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).WithObjects(ti).Build()
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatal(err)
 	}

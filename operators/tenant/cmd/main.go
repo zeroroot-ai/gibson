@@ -877,6 +877,7 @@ func main() {
 	if err := (&controller.TenantIdentityReconciler{
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
+		ZitadelURL:  zw.endpoint.BaseURL(),
 		Provisioner: identityProvisioner,
 		OrgMapping:  orgMappingSeeder,
 	}).SetupWithManager(mgr); err != nil {
