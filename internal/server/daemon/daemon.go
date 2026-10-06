@@ -1020,6 +1020,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
+	d.brainRegistry.WithStoreFactory(timelineStoreFactory(lazyTimelinePool{pool: func() timelinePoolForer { return d.pool }}, d.logger.Slog()))
 	// Belief inference runs in-process (ADR-0134) but still off the tick, since
 	// exact variable elimination is not free: BeliefSystem asks for a score when
 	// a host's evidence changes, and the worker WireBelief installs answers with
@@ -1391,13 +1392,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				d.pool = p
 				d.logger.Info(ctx, "data-plane pool initialized (Phase D)")
 
-				// Wire the durable Timeline store into the brain registry (ADR-0163,
-				// gibson#1114). Now that the data-plane pool is available we can resolve
-				// a per-tenant Redis client for each new engine. The factory is
-				// invoked lazily inside Registry.For on first tenant touch — not at
-				// daemon start — so the pool is guaranteed to be set by the time it runs.
-				// If pool.For fails (tenant not provisioned) the engine operates
-				// in-memory only for that tenant, matching the pre-#1113 behavior.
+				// The brain registry got its durable Timeline store factory when
+				// Start created it (ADR-0163). The factory reads this pool at each
+				// new engine; with no pool, or a failed pool.For, the registry
+				// builds no engine for the tenant. No engine runs in memory only.
 				if d.brainRegistry != nil {
 					// Boot guard (gibson#1119): refuse to start unless the
 					// data-plane Redis positively confirms AOF persistence —
@@ -1405,8 +1403,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					if aofErr := assertTimelineDurability(ctx, poolCfg.RedisAddr, poolCfg.RedisPassword, datapool.AssertTimelineAOF, d.logger.Slog()); aofErr != nil {
 						return aofErr
 					}
-					d.brainRegistry.WithStoreFactory(timelineStoreFactory(d.pool, d.logger.Slog()))
-					d.logger.Info(ctx, "brain registry: durable Timeline store factory wired (ADR-0163, #1114)")
 				}
 			}
 

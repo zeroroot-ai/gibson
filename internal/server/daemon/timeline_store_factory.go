@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -27,17 +28,17 @@ import (
 // is lost on the next Redis restart. deploy#1063 owns the chart side
 // (appendonly=yes on the shared redis-stack).
 //
-// redisAddr == "" is the one tolerated skip: with no data-plane Redis
-// configured there is no Redis-backed Timeline to guard — engines run
-// in-memory only, which is already loud in the store-factory logs.
+// redisAddr == "" is an error too. Each tenant has one durable Timeline
+// (ADR-0163), and a required dependency is never optional (ADR-0003), so a
+// daemon with no data-plane Redis does not start.
 //
 // check is the actual AOF probe — production passes
 // datapool.AssertTimelineAOF; tests substitute a stub because miniredis
 // cannot answer CONFIG GET appendonly=yes.
 func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword string, check func(ctx context.Context, addr, password string) error, log *slog.Logger) error {
 	if redisAddr == "" {
-		log.WarnContext(ctx, "timeline durability boot guard skipped: no data-plane redis addr configured; engines will run in-memory only")
-		return nil
+		log.ErrorContext(ctx, "timeline durability boot guard FAILED: no data-plane Redis address is set; refusing to start, because each tenant needs a durable Timeline (ADR-0163)")
+		return errNoTimelineRedis
 	}
 	if err := check(ctx, redisAddr, redisPassword); err != nil {
 		log.ErrorContext(ctx, "timeline durability boot guard FAILED: cannot confirm Redis AOF persistence; refusing to start rather than serve a Timeline that would be lost on Redis restart (gibson#1119, ADR-0163)",
@@ -50,6 +51,36 @@ func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword stri
 		"redis_addr", redisAddr,
 	)
 	return nil
+}
+
+// errNoTimelineRedis reports a daemon with no data-plane Redis address. The
+// durable Timeline of each tenant lives in that Redis.
+var errNoTimelineRedis = errors.New("timeline durability boot guard: no data-plane Redis address is set; " +
+	"each tenant needs a durable Timeline (ADR-0163)")
+
+// errNoDataPool reports a tenant engine asked for before the data-plane pool
+// exists. The Timeline of each tenant lives in that pool, so the registry
+// builds no engine for the tenant, and the next call tries again (ADR-0163).
+var errNoDataPool = errors.New("the data-plane pool is not up, so the tenant has no durable Timeline")
+
+// lazyTimelinePool reads the data-plane pool at each call. The daemon gives
+// the brain registry its store factory when it creates the registry, before
+// the pool starts, so no tenant engine ever runs without a durable Timeline:
+// with no pool, the factory fails and the registry builds no engine.
+type lazyTimelinePool struct {
+	pool func() timelinePoolForer
+}
+
+func (l lazyTimelinePool) For(ctx context.Context, tenant auth.TenantID) (*datapool.Conn, error) {
+	p := l.pool()
+	if p == nil {
+		return nil, errNoDataPool
+	}
+	conn, err := p.For(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("timeline pool: %w", err)
+	}
+	return conn, nil
 }
 
 // timelinePoolForer is the narrow interface timelineStoreFactory needs from
