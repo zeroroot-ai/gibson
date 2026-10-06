@@ -13,6 +13,8 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
+	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -44,6 +46,10 @@ type fakeBeliefArtifacts struct {
 	current map[string]int64
 	stored  map[string]map[int64]bool
 	err     error
+	// versionErr fails Version only. badModel makes Version return a belief
+	// model that does not parse.
+	versionErr error
+	badModel   bool
 }
 
 func newFakeBeliefArtifacts() *fakeBeliefArtifacts {
@@ -80,10 +86,16 @@ func (f *fakeBeliefArtifacts) Version(_ context.Context, tenant string, v int64)
 	if f.err != nil {
 		return nil, nil, false, f.err
 	}
+	if f.versionErr != nil {
+		return nil, nil, false, f.versionErr
+	}
 	if !f.stored[tenant][v] {
 		return nil, nil, false, nil
 	}
 	label := fmt.Sprintf("tenant-%s-v%d", tenant, v)
+	if f.badModel {
+		return []byte(`{"version":"broken"}`), testEdgePosteriors(label), true, nil
+	}
 	return testBeliefModel(label), testEdgePosteriors(label), true, nil
 }
 
@@ -147,6 +159,13 @@ func TestTenantBeliefs_EachTenantGetsItsOwnVersion(t *testing.T) {
 	}
 	if got := (tenantEdgePosteriors{acmeTB}).Posterior("RESOLVES_TO").Mean(); got != 8.0/12.0 {
 		t.Errorf("acme engine RESOLVES_TO mean = %v, want %v", got, 8.0/12.0)
+	}
+	prior := brain.UninformativeEdgePosteriors{}.Posterior("")
+	if got := (tenantEdgePosteriors{acmeTB}).InNodeStrength("Host", "exploitable", "reachable"); got != prior {
+		t.Errorf("acme engine unfitted in-node strength = %+v, want the prior %+v", got, prior)
+	}
+	if got := (tenantEdgePosteriors{acmeTB}).Leak("Host", "exploitable"); got != prior {
+		t.Errorf("acme engine unfitted leak = %+v, want the prior %+v", got, prior)
 	}
 	if got := (tenantBeliefProvider{b.forTenant("globex")}).Version(); got != "base-v1" {
 		t.Errorf("globex engine belief version = %q, want base-v1", got)
@@ -275,5 +294,100 @@ func TestTenantBeliefs_AReplayReadsThePinnedVersion(t *testing.T) {
 	}
 	if got != "tenant-acme-v1" {
 		t.Fatalf("the replay of m1 reads belief version %q, want the pinned tenant-acme-v1", got)
+	}
+}
+
+// initTenantBeliefs builds the source and starts its loop. Before the
+// platform database opens, a pin fails instead of using a default.
+func TestInitTenantBeliefs_RefusesAPinBeforeTheDatabaseOpens(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &daemonImpl{
+		config: &config.Config{Belief: config.BeliefConfig{ReloadInterval: time.Hour}},
+		logger: observability.NewLogger(observability.ConfigFromEnv()),
+	}
+	if err := d.initTenantBeliefs(ctx, testSchema(t)); err != nil {
+		t.Fatalf("initTenantBeliefs: %v", err)
+	}
+	if d.tenantBeliefs == nil {
+		t.Fatal("initTenantBeliefs set no tenant belief source")
+	}
+	if _, _, err := d.tenantBeliefs.Pin(ctx, "acme"); !errors.Is(err, errNoBeliefArtifacts) {
+		t.Fatalf("Pin before the database opens = %v, want errNoBeliefArtifacts", err)
+	}
+}
+
+// The reload loop swaps an idle tenant without a restart, and it stops when
+// its context ends.
+func TestTenantBeliefs_RunSwapsWithoutARestart(t *testing.T) {
+	store := newFakeBeliefArtifacts()
+	b := testTenantBeliefs(t, testSchema(t), store)
+	_, release := mustPin(t, b, "acme")
+	release()
+	store.makeCurrent("acme", 5)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		b.Run(ctx, 5*time.Millisecond)
+		close(done)
+	}()
+	tb := b.forTenant("acme")
+	deadline := time.Now().Add(2 * time.Second)
+	for (tenantBeliefProvider{tb}).Version() != "tenant-acme-v5" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := (tenantBeliefProvider{tb}).Version(); got != "tenant-acme-v5" {
+		t.Fatalf("the loop did not swap the tenant: engine scores with %q", got)
+	}
+
+	// A failed refresh keeps the active version.
+	store.mu.Lock()
+	store.err = errors.New("postgres is down")
+	store.mu.Unlock()
+	time.Sleep(20 * time.Millisecond)
+	if got := (tenantBeliefProvider{tb}).Version(); got != "tenant-acme-v5" {
+		t.Fatalf("a failed refresh changed the active version to %q", got)
+	}
+	cancel()
+	<-done
+}
+
+// A refresh with no known tenant reads nothing.
+func TestTenantBeliefs_RefreshWithNoTenantReadsNothing(t *testing.T) {
+	store := newFakeBeliefArtifacts()
+	store.err = errors.New("must not be read")
+	b := testTenantBeliefs(t, testSchema(t), store)
+	if err := b.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh with no tenant: %v", err)
+	}
+}
+
+// A version that the store cannot read, or that does not parse, fails the pin
+// and leaves the tenant unloaded, so the next pin tries again.
+func TestTenantBeliefs_ABadVersionFailsThePin(t *testing.T) {
+	store := newFakeBeliefArtifacts()
+	store.makeCurrent("acme", 1)
+	store.versionErr = errors.New("row read failed")
+	b := testTenantBeliefs(t, testSchema(t), store)
+	if _, _, err := b.Pin(context.Background(), "acme"); err == nil {
+		t.Fatal("Pin succeeded while the version read failed")
+	}
+
+	store.mu.Lock()
+	store.versionErr = nil
+	store.badModel = true
+	store.mu.Unlock()
+	if _, _, err := b.Pin(context.Background(), "acme"); err == nil {
+		t.Fatal("Pin succeeded with a belief model that does not parse")
+	}
+
+	store.mu.Lock()
+	store.badModel = false
+	store.mu.Unlock()
+	if label, release := mustPin(t, b, "acme"); label != "tenant-acme-v1" {
+		t.Fatalf("Pin after the store recovered = %q, want tenant-acme-v1", label)
+	} else {
+		release()
 	}
 }
