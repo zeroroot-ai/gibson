@@ -101,6 +101,16 @@ func (s *DaemonServer) GetBeliefTrainingData(
 		Rows:         make([]*daemonoperatorv1.BeliefTrainingRow, 0, len(rows)),
 		EdgeOutcomes: make([]*daemonoperatorv1.EdgeOutcomeCount, 0, len(edges)),
 	}
+	// The trainer seeds a tenant that has no version with its base model
+	// (gibson#31). A read that fails must not look like "no version", or
+	// each run would store the base again.
+	if db := s.entitlementsDB(); db != nil {
+		_, _, found, err := beliefartifact.NewStore(db).Current(ctx, req.GetTenantId())
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "read the current belief version: %v", err)
+		}
+		resp.HasCurrentVersion = found
+	}
 	for _, r := range rows {
 		resp.Rows = append(resp.Rows, &daemonoperatorv1.BeliefTrainingRow{Vars: r})
 	}

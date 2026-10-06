@@ -108,7 +108,8 @@ func TestBeliefTrainerRPCs_OnlyTheTrainerOfTheTenant(t *testing.T) {
 
 // The trainer of the tenant reads the rows and the edge counts of the World.
 func TestGetBeliefTrainingData_ReadsTheWorld(t *testing.T) {
-	srv, _, worlds := trainerServer(t)
+	srv, mock, worlds := trainerServer(t)
+	mock.ExpectQuery("SELECT belief_model, version").WithArgs("acme").WillReturnError(sql.ErrNoRows)
 	e := worlds.For("acme")
 	e.Submit(brain.EdgeOutcomeObserved{EdgeType: "ssh->root", Success: true})
 	e.Submit(brain.EdgeOutcomeObserved{EdgeType: "ssh->root", Success: false})
@@ -129,6 +130,32 @@ func TestGetBeliefTrainingData_ReadsTheWorld(t *testing.T) {
 	}
 	if _, ok := worlds.engines["globex"]; ok {
 		t.Error("the read touched the World of another tenant")
+	}
+	if resp.GetHasCurrentVersion() {
+		t.Error("a tenant with no stored version reports one")
+	}
+}
+
+// gibson#31: the response says whether the tenant has a current version, so
+// a trainer with a curated base seeds only a tenant that has none. A read
+// that fails is an error, never "no version".
+func TestGetBeliefTrainingData_ReportsTheCurrentVersion(t *testing.T) {
+	srv, mock, _ := trainerServer(t)
+	mock.ExpectQuery("SELECT belief_model, version").WithArgs("acme").
+		WillReturnRows(sqlmock.NewRows([]string{"belief_model", "version"}).AddRow(baseModelJSON(t), int64(3)))
+	resp, err := srv.GetBeliefTrainingData(tlsPeerCtx(t, trainerOfAcme),
+		&daemonoperatorv1.GetBeliefTrainingDataRequest{TenantId: "acme"})
+	if err != nil {
+		t.Fatalf("GetBeliefTrainingData: %v", err)
+	}
+	if !resp.GetHasCurrentVersion() {
+		t.Error("a tenant with a current version reports none")
+	}
+
+	mock.ExpectQuery("SELECT belief_model, version").WithArgs("acme").WillReturnError(errors.New("db down"))
+	if _, err := srv.GetBeliefTrainingData(tlsPeerCtx(t, trainerOfAcme),
+		&daemonoperatorv1.GetBeliefTrainingDataRequest{TenantId: "acme"}); status.Code(err) != codes.Internal {
+		t.Errorf("a failed version read: code %v, want Internal", status.Code(err))
 	}
 }
 

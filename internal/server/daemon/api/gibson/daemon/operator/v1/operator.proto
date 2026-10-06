@@ -698,6 +698,10 @@ message GetBeliefTrainingDataResponse {
   repeated BeliefTrainingRow rows = 1;
   // edge_outcomes are in edge_type order.
   repeated EdgeOutcomeCount edge_outcomes = 2;
+  // has_current_version is true when the tenant has a current belief
+  // version. A trainer with a curated base model stores that base as the
+  // first version of a tenant that has none and no outcome yet (gibson#31).
+  bool has_current_version = 3;
 }
 
 message StoreBeliefArtifactRequest {
