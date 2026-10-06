@@ -104,8 +104,8 @@ func (p *CohereProvider) CredentialSchema() []llm.CredentialField { return Coher
 
 func CohereCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "api_key", Label: "Cohere API Key", Required: true, Secret: true},
-		{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.cohere.com/compatibility/v1"},
+		{Key: "api_key", Label: "Cohere API Key", Required: true, Secret: true, Type: llm.FieldPassword},
+		{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.cohere.com/compatibility/v1", Type: llm.FieldURL},
 	}
 }
 

@@ -1063,6 +1063,26 @@ func (s *DaemonServer) ListProviderModels(ctx context.Context, req *tenantv1.Lis
 	}, nil
 }
 
+// credentialFieldTypeToProto maps the input kind of a credential field to the
+// proto enum (gibson#701). A kind with no mapping gives UNSPECIFIED, and
+// TestEveryCredentialFieldHasAType fails on it.
+func credentialFieldTypeToProto(t llm.CredentialFieldType) tenantv1.CredentialFieldType {
+	switch t {
+	case llm.FieldText:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_TEXT
+	case llm.FieldPassword:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_PASSWORD
+	case llm.FieldURL:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_URL
+	case llm.FieldRegion:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_REGION
+	case llm.FieldBool:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_BOOL
+	default:
+		return tenantv1.CredentialFieldType_CREDENTIAL_FIELD_TYPE_UNSPECIFIED
+	}
+}
+
 // descriptorToProto translates the in-Go ProviderDescriptor to its proto
 // equivalent. Chat models go to default_models; embedding models (those whose
 // Features contain "embedding") go to embedding_models. A model may appear in
@@ -1078,6 +1098,7 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 			Secret:      c.Secret,
 			Placeholder: c.Placeholder,
 			Help:        c.Help,
+			Type:        credentialFieldTypeToProto(c.Type),
 		})
 	}
 

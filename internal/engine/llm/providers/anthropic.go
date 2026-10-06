@@ -152,17 +152,17 @@ func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*Anthropic
 // VertexCredentialSchema is the form schema for a Google Vertex provider.
 func VertexCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "vertex_project_id", Label: "Google Cloud Project ID", Required: true, Help: "The project the Vertex models are served from."},
-		{Key: "vertex_region", Label: "Vertex Region", Required: true, Placeholder: "us-east5"},
-		{Key: "google_application_credentials_json", Label: "Service Account JSON", Required: true, Secret: true, Help: "The whole service-account key document. It is written to a file inside the sandbox, never on the daemon."},
+		{Key: "vertex_project_id", Label: "Google Cloud Project ID", Required: true, Help: "The project the Vertex models are served from.", Type: llm.FieldText},
+		{Key: "vertex_region", Label: "Vertex Region", Required: true, Placeholder: "us-east5", Type: llm.FieldRegion},
+		{Key: "google_application_credentials_json", Label: "Service Account JSON", Required: true, Secret: true, Help: "The whole service-account key document. It is written to a file inside the sandbox, never on the daemon.", Type: llm.FieldPassword},
 	}
 }
 
 // FoundryCredentialSchema is the form schema for a Microsoft Foundry provider.
 func FoundryCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
-		{Key: "foundry_api_key", Label: "Foundry API Key", Required: true, Secret: true},
-		{Key: "foundry_resource", Label: "Foundry Resource Name", Required: true, Help: "The resource that serves the endpoint, e.g. my-resource in my-resource.services.ai.azure.com."},
+		{Key: "foundry_api_key", Label: "Foundry API Key", Required: true, Secret: true, Type: llm.FieldPassword},
+		{Key: "foundry_resource", Label: "Foundry Resource Name", Required: true, Help: "The resource that serves the endpoint, e.g. my-resource in my-resource.services.ai.azure.com.", Type: llm.FieldText},
 	}
 }
 
