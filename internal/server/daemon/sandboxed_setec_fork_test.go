@@ -33,7 +33,6 @@ func (f *forkingSetec) Fork(_ context.Context, in *setecv1.ForkRequest, _ ...grp
 	return &setecv1.ForkResponse{Snapshot: "snap-1", SandboxIds: []string{"ns/f1/u1", "ns/f2/u2"}}, nil
 }
 
-
 // A fork names the tenant, the count, the snapshot lifetime and the network
 // of the request (ADR-0169).
 func TestSetecClient_ForkMapsTheRequest(t *testing.T) {
