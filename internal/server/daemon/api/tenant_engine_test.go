@@ -44,7 +44,7 @@ func (failingTimelineStore) TrimTo(context.Context, string, string) error { retu
 
 func stoppedRegistry() *brain.Registry {
 	reg := brain.NewRegistry(context.Background())
-	reg.WithStoreFactory(func(context.Context, string) brain.TimelineStore { return failingTimelineStore{} })
+	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return failingTimelineStore{}, nil })
 	return reg
 }
 

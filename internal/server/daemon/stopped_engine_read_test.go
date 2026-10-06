@@ -47,7 +47,7 @@ func (downStore) TrimTo(context.Context, string, string) error { return errDownS
 func downRegistry(t *testing.T) *brain.Registry {
 	t.Helper()
 	reg := brain.NewRegistry(context.Background())
-	reg.WithStoreFactory(func(context.Context, string) brain.TimelineStore { return downStore{} })
+	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return downStore{}, nil })
 	return reg
 }
 

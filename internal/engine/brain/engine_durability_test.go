@@ -222,7 +222,7 @@ func TestRegistry_FailedHydrateIsRetriedOnNextUse(t *testing.T) {
 	hooks := 0
 	r := NewRegistry(ctx)
 	r.OnEngine(func(*Engine) { hooks++ })
-	r.WithStoreFactory(func(context.Context, string) TimelineStore { return store })
+	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) { return store, nil })
 
 	store.set(func(s *faultyStore) { s.loadErr = errStoreDown })
 	bad := r.For("a")
@@ -251,7 +251,7 @@ func TestRegistry_StoppedEngineIsReplacedFromTheStore(t *testing.T) {
 
 	store := &faultyStore{}
 	r := NewRegistry(ctx)
-	r.WithStoreFactory(func(context.Context, string) TimelineStore { return store })
+	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) { return store, nil })
 
 	first := r.For("a")
 	first.Submit(host("10.0.0.1"))
@@ -291,4 +291,40 @@ func TestEngine_RunReturnsWhenStopped(t *testing.T) {
 		t.Fatal("Run did not return after the engine stopped")
 	}
 	require.ErrorIs(t, e.Err(), errStoreDown)
+}
+
+// gibson#726: a store factory that fails, or that returns no store, gives a
+// stopped engine whose Err names the cause. The Registry does not keep it, no
+// hook runs, and the next call tries the factory again.
+func TestRegistry_StoreFactoryErrorStopsTheEngine(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hooks := 0
+	calls := 0
+	factoryErr := errStoreDown
+	var factoryStore TimelineStore
+	r := NewRegistry(ctx)
+	r.OnEngine(func(*Engine) { hooks++ })
+	r.WithStoreFactory(func(context.Context, string) (TimelineStore, error) {
+		calls++
+		return factoryStore, factoryErr
+	})
+
+	failed := r.For("a")
+	require.ErrorIs(t, failed.Err(), errStoreDown)
+	require.ErrorContains(t, failed.Err(), `tenant "a"`)
+	require.Empty(t, r.Tenants(), "the Registry must not keep an engine with no store")
+	require.Zero(t, hooks)
+
+	factoryErr = nil
+	empty := r.For("a")
+	require.ErrorIs(t, empty.Err(), errNoTimelineStore, "a nil store with no error is refused")
+	require.Empty(t, r.Tenants())
+
+	factoryStore = &faultyStore{}
+	good := r.For("a")
+	require.NoError(t, good.Err())
+	require.Equal(t, 1, hooks)
+	require.Equal(t, 3, calls, "each call after a failure tries the factory again")
 }

@@ -5,15 +5,23 @@ package brain
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 	"sync"
 )
 
-// StoreFactory creates a TimelineStore bound to the given tenant. It is called
-// once per new Engine, just before the tick loop starts. A nil return means
-// "no durable store for this tenant" — the engine operates in-memory only.
+// StoreFactory creates the durable TimelineStore of the given tenant (ADR-0163).
+// It is called once per new Engine, just before the tick loop starts. A tenant
+// has one durable Timeline, so a factory that cannot build the store returns
+// an error, and Registry.For builds no serving engine for that tenant. A nil
+// store with no error is a programming error, and For treats it the same way.
 // The factory must not block indefinitely; it is invoked under the registry mutex.
-type StoreFactory func(ctx context.Context, tenant string) TimelineStore
+type StoreFactory func(ctx context.Context, tenant string) (TimelineStore, error)
+
+// errNoTimelineStore is the cause of a stopped engine whose store factory
+// returned a nil store and no error.
+var errNoTimelineStore = errors.New("brain/registry: the store factory returned no Timeline store")
 
 // Registry holds one brain Engine per tenant and runs each engine's tick loop.
 // It is the daemon's entry point to the brain: live, per-tenant Worlds (ADR-0101:
@@ -49,8 +57,6 @@ func (r *Registry) OnEngine(fn func(*Engine)) {
 // produce the per-tenant durable TimelineStore (ADR-0163). The factory is called
 // under the registry mutex so it must not block indefinitely or call For(). Set
 // this before the first For() call (i.e. before any engine is created).
-//
-// If the factory returns nil the engine operates in-memory only (backward-compat).
 func (r *Registry) WithStoreFactory(f StoreFactory) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -62,8 +68,9 @@ func (r *Registry) WithStoreFactory(f StoreFactory) {
 // persistence and hydrate the World from the persisted Timeline (ADR-0163).
 // Tenant isolation is structural: each tenant gets its own Engine + World.
 //
-// When the hydrate fails, For returns a stopped engine whose Err is the cause.
-// For does not keep that engine, so the next call tries the hydrate again. An
+// When the store factory or the hydrate fails, For returns a stopped engine
+// whose Err is the cause. For does not keep that engine, so the next call tries
+// again. An
 // engine that stops later (a durable append failed) also leaves the Registry,
 // and the next call builds a new engine from the durable store. A caller that
 // serves data to a user must check Err first.
@@ -79,12 +86,19 @@ func (r *Registry) For(tenant string) *Engine {
 	// the first tick fails dangling in-flight work. A failed hydrate installs no
 	// system and no hook, so nothing runs for an engine that does not serve.
 	if r.storeFactory != nil {
-		if store := r.storeFactory(r.ctx, tenant); store != nil {
-			e.WithStore(store)
-			if err := e.Hydrate(r.ctx); err != nil {
-				e.stop(err)
-				return e
-			}
+		store, err := r.storeFactory(r.ctx, tenant)
+		switch {
+		case err != nil:
+			e.stop(fmt.Errorf("brain/registry: the Timeline store of tenant %q: %w", tenant, err))
+			return e
+		case store == nil:
+			e.stop(errNoTimelineStore)
+			return e
+		}
+		e.WithStore(store)
+		if err := e.Hydrate(r.ctx); err != nil {
+			e.stop(err)
+			return e
 		}
 	}
 	for _, s := range r.systems {

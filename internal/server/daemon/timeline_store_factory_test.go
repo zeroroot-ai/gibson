@@ -71,7 +71,8 @@ func TestTimelineStoreFactory_ValidTenant(t *testing.T) {
 	pool := &fakePool{conn: conn}
 	factory := timelineStoreFactory(pool, discardSlog())
 
-	store := factory(context.Background(), "acme")
+	store, err := factory(context.Background(), "acme")
+	require.NoError(t, err)
 	require.NotNil(t, store, "valid tenant + healthy pool must produce a non-nil TimelineStore")
 
 	// Confirm the per-op acquire closure works by doing a real Append.
@@ -82,8 +83,8 @@ func TestTimelineStoreFactory_ValidTenant(t *testing.T) {
 }
 
 // TestTimelineStoreFactory_InvalidTenant verifies that a tenant string that
-// fails auth.NewTenantID (upper-case, spaces) causes the factory to return nil
-// so the brain engine falls back to in-memory mode.
+// fails auth.NewTenantID (upper-case, spaces) makes the factory return an
+// error, so the registry builds no serving engine (gibson#726).
 // Covers the idErr != nil branch (lines 1134-1140 in original daemon.go,
 // now in timeline_store_factory.go).
 func TestTimelineStoreFactory_InvalidTenant(t *testing.T) {
@@ -96,13 +97,13 @@ func TestTimelineStoreFactory_InvalidTenant(t *testing.T) {
 	factory := timelineStoreFactory(pool, discardSlog())
 
 	// Upper-case letters and spaces are rejected by NewTenantID.
-	store := factory(context.Background(), "INVALID TENANT")
-	assert.Nil(t, store, "invalid tenant ID must cause the factory to return nil")
+	store, err := factory(context.Background(), "INVALID TENANT")
+	require.Error(t, err, "an invalid tenant ID must make the factory fail")
+	assert.Nil(t, store)
 }
 
 // TestTimelineStoreFactory_PoolForError verifies that a pool.For failure
-// during the probe acquire causes the factory to return nil so the brain
-// engine falls back to in-memory mode.
+// during the probe acquire makes the factory return that error (gibson#726).
 // Covers the probeErr != nil branch (lines 1146-1152 in original daemon.go,
 // now in timeline_store_factory.go).
 func TestTimelineStoreFactory_PoolForError(t *testing.T) {
@@ -111,8 +112,9 @@ func TestTimelineStoreFactory_PoolForError(t *testing.T) {
 	pool := &fakePool{err: errors.New("tenant not provisioned")}
 	factory := timelineStoreFactory(pool, discardSlog())
 
-	store := factory(context.Background(), "acme")
-	assert.Nil(t, store, "pool.For probe error must cause the factory to return nil")
+	store, err := factory(context.Background(), "acme")
+	require.ErrorContains(t, err, "tenant not provisioned")
+	assert.Nil(t, store)
 }
 
 // TestAssertTimelineDurability_SkipsWhenNoRedisConfigured verifies the one
@@ -190,8 +192,9 @@ func (p *flakyPool) For(context.Context, auth.TenantID) (*datapool.Conn, error) 
 func TestTimelineStoreFactory_AcquireErrorIsReturned(t *testing.T) {
 	conn, cleanup := newMiniredisConn(t)
 	defer cleanup()
-	store := timelineStoreFactory(&flakyPool{conn: conn}, discardSlog())(context.Background(), "acme")
+	store, err := timelineStoreFactory(&flakyPool{conn: conn}, discardSlog())(context.Background(), "acme")
+	require.NoError(t, err)
 	require.NotNil(t, store)
-	_, err := store.Append(context.Background(), "acme", "key-1", brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
+	_, err = store.Append(context.Background(), "acme", "key-1", brain.HostObserved{ScopeID: "s", Address: "10.0.0.1"})
 	require.ErrorContains(t, err, "the pool is gone")
 }

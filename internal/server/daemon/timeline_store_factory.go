@@ -64,9 +64,9 @@ type timelinePoolForer interface {
 // tenant touch. It preserves the exact runtime behavior that was previously
 // inlined in daemon.go:
 //
-//   - Invalid tenant string (fails auth.NewTenantID) → logs a warning, returns nil
-//     (engine operates in-memory only for that tenant).
-//   - pool.For probe fails → logs a warning, returns nil (same fallback).
+//   - Invalid tenant string (fails auth.NewTenantID) → returns the error, and
+//     brain.Registry.For builds no serving engine for that tenant (gibson#726).
+//   - pool.For probe fails → returns the error (same result).
 //   - Probe succeeds → builds a per-op acquire closure and returns a
 //     *datapool.TimelineStore so the idle evictor can never close the
 //     client underneath a long-lived reference (gibson#1114, ADR-0163).
@@ -74,27 +74,27 @@ type timelinePoolForer interface {
 // Extraction rationale: moving the closure body here makes it directly
 // testable without launching a full daemon (the factory only needs a
 // timelinePoolForer, not a *daemonImpl).
-func timelineStoreFactory(pool timelinePoolForer, log *slog.Logger) func(ctx context.Context, tenant string) brain.TimelineStore {
-	return func(storeCtx context.Context, tenant string) brain.TimelineStore {
+func timelineStoreFactory(pool timelinePoolForer, log *slog.Logger) brain.StoreFactory {
+	return func(storeCtx context.Context, tenant string) (brain.TimelineStore, error) {
 		tenantID, idErr := auth.NewTenantID(tenant)
 		if idErr != nil {
-			log.WarnContext(storeCtx, "brain/registry: store factory: invalid tenant id; engine will run in-memory only",
+			log.WarnContext(storeCtx, "brain/registry: store factory: invalid tenant id; no engine for the tenant",
 				"tenant", tenant,
 				"err", idErr,
 			)
-			return nil
+			return nil, fmt.Errorf("brain/timeline: invalid tenant id %q: %w", tenant, idErr)
 		}
 
 		// Validate that the tenant's data-plane is provisioned by doing a probe
 		// acquire now; if pool.For fails we surface the error immediately and
-		// fall back to in-memory mode for this tenant (matching pre-#1113 behavior).
+		// return it, so the registry builds no serving engine (gibson#726).
 		probeConn, probeErr := pool.For(storeCtx, tenantID)
 		if probeErr != nil {
-			log.WarnContext(storeCtx, "brain/registry: store factory: pool.For probe failed; engine will run in-memory only",
+			log.WarnContext(storeCtx, "brain/registry: store factory: pool.For probe failed; no engine for the tenant",
 				"tenant", tenant,
 				"err", probeErr,
 			)
-			return nil
+			return nil, fmt.Errorf("brain/timeline: pool.For probe of tenant %q: %w", tenant, probeErr)
 		}
 		probeConn.Release()
 
@@ -112,6 +112,6 @@ func timelineStoreFactory(pool timelinePoolForer, log *slog.Logger) func(ctx con
 			// (ADR-0163, gibson#786).
 			return datapool.TimelineConn{Redis: conn.Redis, SQL: conn.SQL()}, conn.Release, nil
 		}
-		return datapool.NewTimelineStore(acquire)
+		return datapool.NewTimelineStore(acquire), nil
 	}
 }
