@@ -1,3 +1,4 @@
 # The tool names that the fixture MCP server serves, in order (gibson#811).
 echo
 add
+probe_egress
