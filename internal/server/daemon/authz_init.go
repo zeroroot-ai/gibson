@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	pcauthz "github.com/zeroroot-ai/gibson/internal/infra/authz"
@@ -36,7 +37,20 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 	d.logger.Info(ctx, "authorization service: initializing",
 		"provider", cfg.Provider,
 		"endpoint", cfg.Fga.Endpoint,
+		"tls", cfg.Fga.TLS.Enabled,
 	)
+
+	// authz.fga.tls.enabled is the one TLS switch for the FGA client. An
+	// https endpoint with the switch off would still dial TLS through the
+	// process-wide trust store, so the switch would not decide. Refuse it,
+	// and refuse TLS without a CA, before the ID wait below.
+	if !cfg.Fga.TLS.Enabled && strings.HasPrefix(cfg.Fga.Endpoint, "https://") {
+		return fmt.Errorf("authorization service: authz.fga.endpoint %s is https, but authz.fga.tls.enabled is false; "+
+			"set authz.fga.tls.enabled and authz.fga.tls.ca_file", cfg.Fga.Endpoint)
+	}
+	if cfg.Fga.TLS.Enabled && cfg.Fga.TLS.CAFile == "" {
+		return fmt.Errorf("authorization service: authz.fga.tls.enabled is true, but authz.fga.tls.ca_file is empty")
+	}
 
 	// Resolve store/model IDs from config → env vars (chart projects the
 	// gibson-fga-config ConfigMap via envFrom per ADR-0023). ResolveWithRetry
@@ -87,6 +101,7 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 		ModelID:    modelID,
 		TimeoutMs:  cfg.Fga.TimeoutMs,
 		TLSEnabled: cfg.Fga.TLS.Enabled,
+		TLSCAFile:  cfg.Fga.TLS.CAFile,
 		Logger:     d.logger.Slog(),
 	})
 	if err != nil {

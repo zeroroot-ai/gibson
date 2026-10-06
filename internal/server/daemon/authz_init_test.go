@@ -84,3 +84,31 @@ func TestInitAuthorizer_TimeoutAtTheEnvoyBudget(t *testing.T) {
 	assert.Contains(t, err.Error(), "internal/infra/authz.EnvoyExtAuthzBudgetDefault")
 	assert.NotContains(t, err.Error(), "platform-clients")
 }
+
+// TestInitAuthorizer_FGATLSSettingDecides verifies that authz.fga.tls.enabled
+// is the one TLS switch for the FGA client: the daemon refuses to start when
+// TLS is on with no CA, and when the endpoint is https with TLS off.
+func TestInitAuthorizer_FGATLSSettingDecides(t *testing.T) {
+	cases := map[string]config.FgaTLSConfig{
+		"tls on, no CA":     {Enabled: true},
+		"tls off, https":    {Enabled: false},
+		"tls on, CA absent": {Enabled: true, CAFile: t.TempDir() + "/absent.crt"},
+	}
+	for name, tlsCfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.Authz.Fga.Endpoint = "https://192.0.2.1:8080"
+			cfg.Authz.Fga.TimeoutMs = 100
+			cfg.Authz.Fga.StoreID = "fake-store"
+			cfg.Authz.Fga.ModelID = "fake-model"
+			cfg.Authz.Fga.TLS = tlsCfg
+
+			err := newMinimalDaemon(cfg).initAuthorizer(context.Background())
+
+			require.Error(t, err)
+			assert.Contains(t, strings.ToLower(err.Error()), "fga")
+			assert.NotContains(t, err.Error(), "connectivity probe",
+				"the TLS setting must fail before any dial")
+		})
+	}
+}
