@@ -113,6 +113,11 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 		Tenant:           tenantID,
 		AgentName:        b.AgentName,
 		Env:              memberEnv(b, memberID, spec.Model),
+		// A member that moved to another node after a node loss is told the
+		// time of the state that it resumed from (ADR-0119, setec#237).
+		OnResumed: func(r sandboxed.SessionRecovery) {
+			l.daemon.memberControl.ReportRecovery(tenantID, memberID, r.StateTaken)
+		},
 	})
 	if err != nil {
 		return bankengine.LaunchedMember{}, fmt.Errorf("launch member %s of bank %s: %w", memberID, b.ID, err)

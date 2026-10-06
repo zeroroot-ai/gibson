@@ -63,7 +63,7 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/zeroroot-ai/ast-checks v0.8.0
 	github.com/zeroroot-ai/sdk v0.199.0
-	github.com/zeroroot-ai/setec v0.122.0
+	github.com/zeroroot-ai/setec v0.124.0
 	github.com/zeroroot-ai/testfixtures v0.3.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
 	go.opentelemetry.io/otel v1.47.0

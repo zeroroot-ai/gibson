@@ -176,6 +176,11 @@ type AgentDispatch struct {
 	// gets GIBSON_FORKABLE=1 and parks after its result line, and the
 	// launcher returns at that line and leaves the sandbox running.
 	Forkable bool
+
+	// OnResumed receives each new recovery of a member sandbox, for example a
+	// resume on another node after a node loss (ADR-0119, setec#237).
+	// LaunchMember requires it.
+	OnResumed func(SessionRecovery)
 }
 
 // EventPublisher registers a running agent instance and returns a live sink for

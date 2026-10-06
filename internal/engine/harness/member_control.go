@@ -92,6 +92,34 @@ func (c *MemberControl) enqueue(tenantID, memberID string, kind jobpb.InputKind,
 	})
 }
 
+// RecoveryJobID is the job id of a recovery event. It names no job: the
+// member reads it as a notice about its own sandbox (ADR-0119).
+const RecoveryJobID = "recovered"
+
+// ReportRecovery queues the notice that the sandbox of a member recovered,
+// for example on another node after a node loss (ADR-0119, setec#237). A
+// resume names the time of the state that the member continues from. A
+// restart from the workspace says that no process state survived.
+func (c *MemberControl) ReportRecovery(tenantID, memberID string, stateTaken time.Time) {
+	message := "restarted from the workspace; no process state survived"
+	if !stateTaken.IsZero() {
+		message = "resumed from the state of " + stateTaken.UTC().Format(time.RFC3339Nano)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.seq++
+	key := controlKey(tenantID, memberID)
+	c.queues[key] = append(c.queues[key], controlInput{
+		queued: c.now(),
+		input: &jobpb.Input{
+			Id: "control-" + strconv.FormatInt(c.seq, 10), JobId: RecoveryJobID,
+			Kind: jobpb.InputKind_INPUT_KIND_TURN, Message: message,
+			Sender: &commonpb.Principal{Kind: commonpb.Principal_KIND_SERVICE, Id: "gibson-daemon"},
+			SentAt: timestamppb.New(c.now()),
+		},
+	})
+}
+
 // Drain takes every live control input for a member, oldest first, and
 // forgets them. An input older than the TTL is dropped unseen.
 func (c *MemberControl) Drain(tenantID, memberID string) []*jobpb.Input {

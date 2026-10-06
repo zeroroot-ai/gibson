@@ -21,6 +21,7 @@ type memberClient struct {
 	runtime   string
 	launchErr error
 	ended     chan struct{}
+	recovery  SessionRecovery
 }
 
 func newMemberClient() *memberClient {
@@ -95,7 +96,8 @@ func TestLaunchMember_ReturnsWhileTheSandboxRuns(t *testing.T) {
 	}
 
 	run, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{
-		Grant: "base-grant", CallbackEndpoint: "cb:443", MissionID: "bank-1", MissionRunID: "run-1",
+		OnResumed: func(SessionRecovery) {},
+		Grant:     "base-grant", CallbackEndpoint: "cb:443", MissionID: "bank-1", MissionRunID: "run-1",
 		AgentRunID: "m-1", Tenant: "acme", AgentName: "claude",
 		Env: map[string]string{"GIBSON_MEMBER_ID": "m-1", "GIBSON_BANK_ID": "bank-1"},
 	})
@@ -152,12 +154,12 @@ func TestLaunchMember_RefusesWhatIsNotAMember(t *testing.T) {
 	}
 	spec := memberSpec()
 	spec.Mode = "oneshot"
-	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme"}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme", OnResumed: func(SessionRecovery) {}}); err == nil {
 		t.Error("a one-shot spec must be refused")
 	}
 	spec = memberSpec()
 	spec.Command = nil
-	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme"}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme", OnResumed: func(SessionRecovery) {}}); err == nil {
 		t.Error("a spec with no command must be refused")
 	}
 	if len(client.launched) != 0 {
@@ -174,7 +176,7 @@ func TestLaunchMember_KillsASandboxItCannotTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{Tenant: "acme"}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{Tenant: "acme", OnResumed: func(SessionRecovery) {}}); err == nil {
 		t.Fatal("an unisolated runtime must be refused")
 	}
 	if killed := client.killedIDs(); len(killed) != 1 || killed[0] != "sbx-member-1" {
@@ -184,7 +186,7 @@ func TestLaunchMember_KillsASandboxItCannotTrust(t *testing.T) {
 	client = newMemberClient()
 	client.launchErr = errors.New("setec is down")
 	l, _ = NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
-	if _, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{Tenant: "acme"}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{Tenant: "acme", OnResumed: func(SessionRecovery) {}}); err == nil {
 		t.Fatal("a launch failure must be reported")
 	}
 }
@@ -234,4 +236,13 @@ func TestLaunchMember_FollowerEndsAtTheLifetime(t *testing.T) {
 
 func (c *memberClient) Fork(context.Context, ForkRequest) (ForkResponse, error) {
 	return ForkResponse{}, errors.New("memberClient: fork is not used here")
+}
+
+func (c *memberClient) Recovery(context.Context, string, string) (SessionRecovery, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.recovery.Count == 0 {
+		return SessionRecovery{}, false, nil
+	}
+	return c.recovery, true, nil
 }
