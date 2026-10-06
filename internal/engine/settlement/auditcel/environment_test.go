@@ -37,7 +37,7 @@ func TestRule_Matches(t *testing.T) {
 	}
 	for expr, want := range cases {
 		t.Run(expr, func(t *testing.T) {
-			r, err := Compile(expr)
+			r, err := compile(t, expr)
 			require.NoError(t, err)
 			got, err := r.Match(context.Background(), sampleEvent)
 			require.NoError(t, err)
@@ -58,7 +58,7 @@ func TestRule_FailsToCompile(t *testing.T) {
 	}
 	for name, expr := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := Compile(expr)
+			_, err := compile(t, expr)
 			require.Error(t, err)
 		})
 	}
@@ -72,7 +72,7 @@ func TestProofPredicateCannotReadTheAuditEvent(t *testing.T) {
 }
 
 func TestMatch_CancelledContext(t *testing.T) {
-	r, err := Compile(`true`)
+	r, err := compile(t, `true`)
 	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -149,4 +149,12 @@ func TestNISTPack(t *testing.T) {
 	matched, err = rules["ac-2"].Match(context.Background(), grant)
 	require.NoError(t, err)
 	assert.False(t, matched)
+}
+
+// compile compiles expr against a new audit event environment.
+func compile(t *testing.T, expr string) (*CompiledRule, error) {
+	t.Helper()
+	env, err := NewEnv()
+	require.NoError(t, err)
+	return CompileWithEnv(env, expr)
 }

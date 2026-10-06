@@ -89,16 +89,6 @@ type CompiledRule struct {
 	prg  cel.Program
 }
 
-// Compile compiles expr against a new audit event environment. Prefer
-// CompileWithEnv when more than one rule is compiled.
-func Compile(expr string) (*CompiledRule, error) {
-	env, err := NewEnv()
-	if err != nil {
-		return nil, err
-	}
-	return CompileWithEnv(env, expr)
-}
-
 // CompileWithEnv compiles expr against env, which comes from NewEnv. It
 // refuses an empty expression, a syntax error, a reference to a variable,
 // a field or a function that env does not declare, and an expression whose
