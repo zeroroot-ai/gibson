@@ -118,3 +118,71 @@ ORDER BY plugin_id`
 	}
 	return out, nil
 }
+
+// ListAll returns every enabled plugin of every tenant, in (tenant, plugin)
+// order. It has no tenant predicate on purpose: only the tenant operator
+// reads it, through an RPC that every other caller is refused.
+func (s *Store) ListAll(ctx context.Context) ([]Plugin, error) {
+	const query = `
+SELECT tenant_id, plugin_id, phase, last_error
+FROM   tenant_catalog_plugins
+ORDER BY tenant_id, plugin_id`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("catalogplugin: ListAll: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Plugin
+	for rows.Next() {
+		var p Plugin
+		if err := rows.Scan(&p.TenantID, &p.PluginID, &p.Phase, &p.LastError); err != nil {
+			return nil, fmt.Errorf("catalogplugin: ListAll: scan: %w", err)
+		}
+		out = append(out, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalogplugin: ListAll: %w", err)
+	}
+	return out, nil
+}
+
+// IsEnabled reports whether tenantID enabled pluginID. The daemon asks it
+// before it accepts the identity of a plugin instance, so an instance of a
+// plugin that the tenant did not enable, or disabled, gets no credential.
+func (s *Store) IsEnabled(ctx context.Context, tenantID, pluginID string) (bool, error) {
+	if tenantID == "" || pluginID == "" {
+		return false, errors.New("catalogplugin: IsEnabled: tenant and plugin are required")
+	}
+	const query = `
+SELECT EXISTS (
+  SELECT 1 FROM tenant_catalog_plugins WHERE tenant_id = $1 AND plugin_id = $2
+)`
+	var enabled bool
+	if err := s.db.QueryRowContext(ctx, query, tenantID, pluginID).Scan(&enabled); err != nil {
+		return false, fmt.Errorf("catalogplugin: IsEnabled %s/%s: %w", tenantID, pluginID, err)
+	}
+	return enabled, nil
+}
+
+// ReportStatus records the state the tenant operator reports for one tenant's
+// instance. It returns false when the tenant did not enable the plugin: a
+// report never creates a row, because a row is what a tenant wants.
+func (s *Store) ReportStatus(ctx context.Context, tenantID, pluginID, phase, lastError string) (bool, error) {
+	if tenantID == "" || pluginID == "" || phase == "" {
+		return false, errors.New("catalogplugin: ReportStatus: tenant, plugin and phase are required")
+	}
+	const query = `
+UPDATE tenant_catalog_plugins
+SET    phase = $3, last_error = $4, reported_at = NOW()
+WHERE  tenant_id = $1 AND plugin_id = $2`
+	res, err := s.db.ExecContext(ctx, query, tenantID, pluginID, phase, lastError)
+	if err != nil {
+		return false, fmt.Errorf("catalogplugin: ReportStatus %s/%s: %w", tenantID, pluginID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("catalogplugin: ReportStatus %s/%s: rows affected: %w", tenantID, pluginID, err)
+	}
+	return n > 0, nil
+}

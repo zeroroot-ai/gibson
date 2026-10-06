@@ -719,6 +719,21 @@ func main() {
 		}
 		setupLog.Info("operator-pull admin tenant CRUD enabled (drains daemon admin-op queue)")
 
+		// Catalog plugins for each tenant (gibson#815): pull the plugins that
+		// each tenant enabled and run one instance for each pair, in the
+		// namespace tenant-<tenant>-plugins. SetupWithManager refuses a config
+		// with a required value missing, so the operator does not start
+		// without the values that the chart gives it.
+		if err := (&controller.CatalogPluginRunnable{
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
+			Config: controller.CatalogPluginConfigFromEnv(os.Getenv),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register the catalog plugin runnable")
+			os.Exit(1)
+		}
+		setupLog.Info("catalog plugin loop enabled (one plugin instance for each tenant)")
+
 		// First-tenant seed (gibson#1496): on a fresh self-hosted install the
 		// interactive AdminProvisionTenant RPC cannot run — it is gated by a
 		// session-revocation check no headless caller satisfies — so the

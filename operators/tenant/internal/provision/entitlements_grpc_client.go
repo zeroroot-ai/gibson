@@ -397,3 +397,57 @@ func (c *EntitlementsGRPCClient) SetAgentEnrollmentLimits(ctx context.Context, t
 	}
 	return nil
 }
+
+// DesiredCatalogPlugin is one plugin instance the daemon wants the operator to
+// run: the catalog plugin PluginID, for the tenant TenantID (gibson#815).
+type DesiredCatalogPlugin struct {
+	TenantID string
+	PluginID string
+	// Image is the image of the plugin, pinned by digest, from the catalog of
+	// the daemon.
+	Image string
+	// EgressAllow is the egress list of the catalog entry, as "host:port".
+	EgressAllow []string
+}
+
+// ListDesiredCatalogPlugins pulls every (tenant, catalog plugin) pair a tenant
+// enabled. The operator runs one instance for each pair.
+func (c *EntitlementsGRPCClient) ListDesiredCatalogPlugins(ctx context.Context) ([]DesiredCatalogPlugin, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.ListDesiredCatalogPlugins(authedCtx, &operatorv1.ListDesiredCatalogPluginsRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("list desired catalog plugins: %w", err)
+	}
+	out := make([]DesiredCatalogPlugin, 0, len(resp.GetPlugins()))
+	for _, p := range resp.GetPlugins() {
+		out = append(out, DesiredCatalogPlugin{
+			TenantID:    p.GetTenantId(),
+			PluginID:    p.GetPluginId(),
+			Image:       p.GetImage(),
+			EgressAllow: p.GetEgressAllow(),
+		})
+	}
+	return out, nil
+}
+
+// ReportCatalogPluginStatus reports the state of one tenant's plugin instance
+// to the daemon.
+func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, tenantID, pluginID, phase, lastError string) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.ReportCatalogPluginStatus(authedCtx, &operatorv1.ReportCatalogPluginStatusRequest{
+		TenantId:  tenantID,
+		PluginId:  pluginID,
+		Phase:     phase,
+		LastError: lastError,
+	})
+	if err != nil {
+		return fmt.Errorf("report catalog plugin status %s/%s: %w", tenantID, pluginID, err)
+	}
+	return nil
+}

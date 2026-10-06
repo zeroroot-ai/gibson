@@ -684,6 +684,10 @@ type PluginEntry struct {
 	ID          string
 	DisplayName string
 	Description string
+	// Image is the image of the plugin, pinned by digest.
+	Image string
+	// EgressAllow is the egress list of the entry, as "host:port".
+	EgressAllow []string
 }
 
 // ListPlugins returns the catalog plugins, in the order of the catalog.
@@ -697,6 +701,8 @@ func ListPlugins() []PluginEntry {
 			ID:          catalog[i].ID,
 			DisplayName: catalog[i].DisplayName,
 			Description: catalog[i].Description,
+			Image:       catalog[i].plugin.Image,
+			EgressAllow: append([]string(nil), catalog[i].EgressAllow...),
 		})
 	}
 	return out
