@@ -176,7 +176,7 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	// The task-grant scope check runs AFTER the auth interceptor: it compares
 	// the grant's tenant and mission against the identity that interceptor
 	// placed on the context and the ContextInfo in the body (gibson#1605).
-	grantUnary, grantStream := taskGrantScopeInterceptors(s.service.taskGrantVerifier, s.logger)
+	grantUnary, grantStream := taskGrantScopeInterceptors(s.service.taskGrantVerifier, s.service.forkLedger, s.logger)
 	serverOpts := []grpc.ServerOption{
 		// Mirror the main daemon listener's 16 MiB message ceilings
 		// (internal/server/daemon/grpc.go maxDaemonRecvMsgBytes): the

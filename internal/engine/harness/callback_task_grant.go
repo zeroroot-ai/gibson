@@ -170,16 +170,22 @@ func tokenType(token string) string {
 // checkTaskGrantScope on every callback RPC. They run after the SDK auth
 // interceptor, because the tenant they compare against is the one that
 // interceptor placed on the context.
-func taskGrantScopeInterceptors(get func() TaskGrantVerifier, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+//
+// forks, when set, also refuses the grant of a forked source outside the
+// source sandbox (checkForkGrant).
+func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks ForkLedger, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
 	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		scoped, err := checkTaskGrantScope(ctx, req, get, info.FullMethod, logger)
 		if err != nil {
 			return nil, err
 		}
+		if err := checkForkGrant(scoped, forks, info.FullMethod, logger); err != nil {
+			return nil, err
+		}
 		return handler(scoped, req)
 	}
 	stream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		return handler(srv, &taskGrantScopedStream{ServerStream: ss, get: get, method: info.FullMethod, logger: logger})
+		return handler(srv, &taskGrantScopedStream{ServerStream: ss, get: get, forks: forks, method: info.FullMethod, logger: logger})
 	}
 	return unary, stream
 }
@@ -190,6 +196,7 @@ func taskGrantScopeInterceptors(get func() TaskGrantVerifier, logger *slog.Logge
 type taskGrantScopedStream struct {
 	grpc.ServerStream
 	get    func() TaskGrantVerifier
+	forks  ForkLedger
 	method string
 	logger *slog.Logger
 	// scoped is the request context with the verified claims, set on the
@@ -212,6 +219,9 @@ func (s *taskGrantScopedStream) RecvMsg(m any) error {
 	}
 	scoped, err := checkTaskGrantScope(s.ServerStream.Context(), m, s.get, s.method, s.logger)
 	if err != nil {
+		return err
+	}
+	if err := checkForkGrant(scoped, s.forks, s.method, s.logger); err != nil {
 		return err
 	}
 	s.scoped = scoped

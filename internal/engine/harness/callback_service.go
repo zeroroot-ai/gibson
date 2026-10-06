@@ -172,6 +172,11 @@ type HarnessCallbackService struct {
 	// WithTaskGrantVerifier.
 	taskGrantVerifier func() TaskGrantVerifier
 
+	// forkLedger records the forks of each source grant (ADR-0169, D74).
+	// The callback interceptors refuse the grant of a forked source outside
+	// the source sandbox, and ClaimFork serves each fork its dispatch.
+	forkLedger ForkLedger
+
 	// jobs is the job store the member-facing callbacks read and write
 	// (ADR-0119, gibson#1711). Nil means this daemon serves no banks, and
 	// every member callback says so rather than failing obscurely.
