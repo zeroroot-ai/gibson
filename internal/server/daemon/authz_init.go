@@ -69,7 +69,7 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 	if fgaTimeout >= pcauthz.EnvoyExtAuthzBudgetDefault {
 		return fmt.Errorf(
 			"authorization service: FGA per-call timeout (%s) must be strictly less than the Envoy ext_authz budget (%s) — "+
-				"a timeout at or above the budget defeats the per-call floor (platform-clients/authz.EnvoyExtAuthzBudgetDefault=%s); "+
+				"a timeout at or above the budget defeats the per-call floor (internal/infra/authz.EnvoyExtAuthzBudgetDefault=%s); "+
 				"set authz.fga.timeoutMs to a value strictly below %d ms",
 			fgaTimeout, pcauthz.EnvoyExtAuthzBudgetDefault, pcauthz.EnvoyExtAuthzBudgetDefault,
 			pcauthz.EnvoyExtAuthzBudgetDefault.Milliseconds(),

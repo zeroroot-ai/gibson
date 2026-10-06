@@ -68,3 +68,19 @@ func TestInitAuthorizer_NoSilentFallback(t *testing.T) {
 
 	require.Error(t, err, "FGA unreachable must produce an error (no silent fallback)")
 }
+
+// TestInitAuthorizer_TimeoutAtTheEnvoyBudget: a per-call timeout at the
+// Envoy budget stops the start. The error names internal/infra/authz, not
+// the removed platform-clients module (gibson#997).
+func TestInitAuthorizer_TimeoutAtTheEnvoyBudget(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Authz.Fga.Endpoint = "192.0.2.1:8080"
+	cfg.Authz.Fga.TimeoutMs = 5000
+	cfg.Authz.Fga.StoreID = "fake-store"
+	cfg.Authz.Fga.ModelID = "fake-model"
+
+	err := newMinimalDaemon(cfg).initAuthorizer(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "internal/infra/authz.EnvoyExtAuthzBudgetDefault")
+	assert.NotContains(t, err.Error(), "platform-clients")
+}

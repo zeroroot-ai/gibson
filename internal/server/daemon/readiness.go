@@ -31,6 +31,8 @@ import (
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/sdk/auth"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // secretsBrokerHealthChecker is the narrow slice of *secrets.Registry the
@@ -135,4 +137,30 @@ func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 	}
 
 	return probes
+}
+
+// readinessRegistrar is the part of the SDK health server that
+// registerPlatformReadinessProbes uses.
+type readinessRegistrar interface {
+	RegisterReadinessCheck(name string, check healthhttp.CheckFunc)
+}
+
+// registerPlatformReadinessProbes registers each internal/infra/readiness
+// probe with the /readyz handler. Each probe gets the "pc_" prefix, so it
+// shows distinctly in the /readyz JSON and does not collide with the
+// "authz_fga" SDK probe.
+func (d *daemonImpl) registerPlatformReadinessProbes(ctx context.Context, reg readinessRegistrar, probes []pcreadiness.Probe) {
+	for _, probe := range probes {
+		name := probe.Name()
+		reg.RegisterReadinessCheck("pc_"+name, func(checkCtx context.Context) sdktypes.HealthStatus {
+			if err := probe.Check(checkCtx); err != nil {
+				return sdktypes.NewDegradedStatus(
+					"internal/infra/readiness probe '"+name+"' failed: "+err.Error(),
+					nil,
+				)
+			}
+			return sdktypes.NewHealthyStatus("internal/infra/readiness probe '" + name + "' passed")
+		})
+	}
+	d.logger.Debug(ctx, "registered internal/infra readiness probes", "count", len(probes))
 }
