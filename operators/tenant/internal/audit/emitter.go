@@ -258,10 +258,9 @@ const (
 type SagaOutcome string
 
 const (
-	OutcomeOk          SagaOutcome = "ok"
-	OutcomeFailed      SagaOutcome = "failed"
-	OutcomeRateLimited SagaOutcome = "rate_limited"
-	OutcomeLocked      SagaOutcome = "locked"
+	OutcomeOk     SagaOutcome = "ok"
+	OutcomeFailed SagaOutcome = "failed"
+	OutcomeLocked SagaOutcome = "locked"
 )
 
 // SagaAuditEvent is the JSON payload written inside the [audit.tenant-operator]

@@ -40,16 +40,11 @@ type ClientCapability = psaga.ClientCapability
 // Re-exported capability constants — flows reference these from their
 // RequiredClients() implementations.
 const (
-	CapabilityPostgresAdmin = psaga.CapabilityPostgresAdmin
-	CapabilityVaultAdmin    = psaga.CapabilityVaultAdmin
-	CapabilityVaultTransit  = psaga.CapabilityVaultTransit
-	CapabilityKubernetes    = psaga.CapabilityKubernetes
-	CapabilityZitadelAdmin  = psaga.CapabilityZitadelAdmin
-	CapabilityFGA           = psaga.CapabilityFGA
-	CapabilityRedisAdmin    = psaga.CapabilityRedisAdmin
-	CapabilityQdrantAdmin   = psaga.CapabilityQdrantAdmin
-	CapabilityDaemonGRPC    = psaga.CapabilityDaemonGRPC
-	CapabilitySMTP          = psaga.CapabilitySMTP
+	CapabilityVaultAdmin = psaga.CapabilityVaultAdmin
+	CapabilityKubernetes = psaga.CapabilityKubernetes
+	CapabilityFGA        = psaga.CapabilityFGA
+	CapabilityRedisAdmin = psaga.CapabilityRedisAdmin
+	CapabilityDaemonGRPC = psaga.CapabilityDaemonGRPC
 )
 
 // Deps is re-exported so cmd/main.go can build the unified bag without

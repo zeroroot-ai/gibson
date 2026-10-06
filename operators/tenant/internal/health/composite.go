@@ -13,9 +13,6 @@ import (
 )
 
 const (
-	// CompositeTimeout is the outer budget for all sub-checks running concurrently.
-	CompositeTimeout = 2 * time.Second
-
 	statusOK      = "ok"
 	statusSkipped = "skipped"
 )

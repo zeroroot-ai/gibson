@@ -20,16 +20,8 @@ import (
 
 // Standard condition reasons. Values delegated to platform/saga.
 const (
-	ReasonPending          = psaga.ReasonPending
-	ReasonInProgress       = psaga.ReasonInProgress
-	ReasonReady            = psaga.ReasonReady
-	ReasonSkipped          = psaga.ReasonSkipped
-	ReasonUnreachable      = psaga.ReasonUnreachable
-	ReasonRateLimited      = psaga.ReasonRateLimited
-	ReasonConflict         = psaga.ReasonConflict
-	ReasonInvalidSpec      = psaga.ReasonInvalidSpec
-	ReasonAllStepsComplete = psaga.ReasonAllStepsComplete
-	ReasonStepFailed       = psaga.ReasonStepFailed
+	ReasonSkipped    = psaga.ReasonSkipped
+	ReasonStepFailed = psaga.ReasonStepFailed
 )
 
 // IsConditionTrue delegates to platform/saga.IsConditionTrue.

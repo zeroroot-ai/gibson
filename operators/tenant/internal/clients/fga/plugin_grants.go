@@ -75,13 +75,3 @@ func WritePluginCanInvokeGrant(ctx context.Context, fgaClient Client, pluginName
 	}
 	return nil
 }
-
-// PluginInstall is a minimal descriptor of an existing plugin install used
-// by BackfillPluginCanInvokeGrants.
-type PluginInstall struct {
-	// PluginName is the manifest.metadata.name of the registered plugin
-	// (matches AgentEnrollment.Spec.AgentName for plugin enrollments).
-	PluginName string
-	// TenantID is the tenant this plugin install belongs to.
-	TenantID string
-}
