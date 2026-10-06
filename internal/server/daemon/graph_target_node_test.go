@@ -192,7 +192,7 @@ func TestBootstrapVocabularyIsInTheTaxonomy(t *testing.T) {
 // run with no constraint behind it, so the derived identity gibson#528
 // introduced was convention rather than enforcement.
 func TestTheMissionGraphLabelsCarryAUniquenessConstraintOnTheirMergeKey(t *testing.T) {
-	ddl := strings.Join(constraintStatements(taxonomy.Global), "\n")
+	ddl := strings.Join(mustConstraintStatements(t, taxonomy.Global), "\n")
 	for _, label := range []string{"MissionNode", "MissionRun", "Target"} {
 		want := "FOR (n:" + label + ") REQUIRE n.id IS UNIQUE"
 		if !strings.Contains(ddl, want) {

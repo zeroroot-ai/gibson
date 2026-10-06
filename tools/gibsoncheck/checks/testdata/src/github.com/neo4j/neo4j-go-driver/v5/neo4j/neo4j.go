@@ -21,3 +21,9 @@ type SessionWithContext interface {
 	ExecuteWrite(ctx context.Context, fn func(ManagedTransaction) (any, error)) (any, error)
 	BeginTransaction(ctx context.Context) (ExplicitTransaction, error)
 }
+
+// ExecuteQuery is a stub of the driver's one-call query function. Its query
+// parameter is named query, as in the driver.
+func ExecuteQuery(ctx context.Context, query string, params map[string]any) (any, error) {
+	return nil, nil
+}
