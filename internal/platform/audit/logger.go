@@ -212,14 +212,14 @@ func NewAuditLogger(ctx context.Context, client *state.StateClient, durable Dura
 
 // drainLoop is the background goroutine that issues the XADD commands of the
 // live tail. It exits when ctx is cancelled, closing l.done.
-func (l *AuditLogger) drainLoop(ctx context.Context) {
-	defer close(l.done)
+func (a *AuditLogger) drainLoop(ctx context.Context) {
+	defer close(a.done)
 	for {
 		select {
-		case item := <-l.writeQueue:
-			if err := l.doXAdd(ctx, item); err != nil {
+		case item := <-a.writeQueue:
+			if err := a.doXAdd(ctx, item); err != nil {
 				auditTailErrorsTotal.Inc()
-				l.logger.Warn("audit: the record did not reach the live tail, Postgres holds it",
+				a.logger.Warn("audit: the record did not reach the live tail, Postgres holds it",
 					slog.String("stream", item.streamKey),
 					slog.String("entry_id", item.entry.ID),
 					slog.String("tenant_id", item.entry.TenantID),
@@ -237,8 +237,8 @@ func (l *AuditLogger) drainLoop(ctx context.Context) {
 // ctx is the drainLoop's lifecycle context; passing it to XAdd ensures that
 // an in-flight write is cancelled promptly when the logger is shut down,
 // preventing a race between the background goroutine and client teardown.
-func (l *AuditLogger) doXAdd(ctx context.Context, item auditWrite) error {
-	_, err := l.client.Client().XAdd(ctx, &redis.XAddArgs{
+func (a *AuditLogger) doXAdd(ctx context.Context, item auditWrite) error {
+	_, err := a.client.Client().XAdd(ctx, &redis.XAddArgs{
 		Stream: item.streamKey,
 		MaxLen: auditStreamMaxLen,
 		Approx: true,
