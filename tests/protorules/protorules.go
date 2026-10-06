@@ -2,7 +2,9 @@
 // Copyright 2026 Zero Root AI
 
 // Package protorules checks that each request message of a daemon-local
-// service states its field rules (ADR-0028, rule 1, gibson#696).
+// service states its field rules (ADR-0028, rule 1, gibson#696), and that each
+// request that creates something or starts work has an idempotency_key
+// (ADR-0028, rule 2, gibson#694).
 //
 // The daemon runs protovalidate on each request before the handler runs. The
 // interceptor can check only a rule that a proto states. A string field with
@@ -16,7 +18,9 @@ package protorules
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -74,4 +78,64 @@ func HasFieldRule(field protoreflect.FieldDescriptor, xt protoreflect.ExtensionT
 		return false
 	}
 	return proto.HasExtension(opts, xt)
+}
+
+// IdempotencyKeyField is the name of the request field that the idempotency
+// interceptor of the daemon reads (ADR-0028, rule 2, gibson#694).
+const IdempotencyKeyField = "idempotency_key"
+
+// startVerb matches an RPC name or a request message name that creates
+// something or starts work. The verb is a full word: RunnerStatus is not a
+// match.
+var startVerb = regexp.MustCompile(`^(Create|Run|Start|Submit)([A-Z0-9]|$)`)
+
+// MissingIdempotencyKeys returns one line for each request of the file that
+// creates something or starts work and has no string field idempotency_key.
+// Two kinds of request are checked: the request message of each RPC whose
+// name starts with Create, Run, Start or Submit, and each message whose name
+// is one of these verbs, a name, and Request. The lines are sorted.
+//
+// No allowlist exists. A request that must not have the field needs a
+// different verb.
+func MissingIdempotencyKeys(file protoreflect.FileDescriptor) []string {
+	var out []string
+	seen := map[protoreflect.FullName]bool{}
+	check := func(msg protoreflect.MessageDescriptor, why string) {
+		if seen[msg.FullName()] {
+			return
+		}
+		seen[msg.FullName()] = true
+		if hasIdempotencyKey(msg) {
+			return
+		}
+		out = append(out, fmt.Sprintf("%s: %s (%s) has no string field %s",
+			file.Path(), msg.FullName(), why, IdempotencyKeyField))
+	}
+	services := file.Services()
+	for i := range services.Len() {
+		methods := services.Get(i).Methods()
+		for j := range methods.Len() {
+			method := methods.Get(j)
+			if startVerb.MatchString(string(method.Name())) {
+				check(method.Input(), "the request of "+string(method.FullName()))
+			}
+		}
+	}
+	messages := file.Messages()
+	for i := range messages.Len() {
+		msg := messages.Get(i)
+		name := string(msg.Name())
+		if startVerb.MatchString(name) && strings.HasSuffix(name, "Request") {
+			check(msg, "a request message with a start verb")
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// hasIdempotencyKey reports whether the message has a singular string field
+// idempotency_key.
+func hasIdempotencyKey(msg protoreflect.MessageDescriptor) bool {
+	field := msg.Fields().ByName(IdempotencyKeyField)
+	return field != nil && field.Kind() == protoreflect.StringKind && !field.IsList() && !field.IsMap()
 }
