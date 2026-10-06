@@ -49,7 +49,9 @@ func TestListPendingDestructiveActions_TenantScoped(t *testing.T) {
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
-	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"}); err != nil {
+	if _, err := q.Request("acme", brain.DestructiveAuthorizationRequest{
+		HypothesisID: "hyp-1", BlastRadius: "one host: db-01", Reversibility: brain.ReversibilityIrreversible,
+	}); err != nil {
 		t.Fatalf("Request: %v", err)
 	}
 
@@ -57,6 +59,14 @@ func TestListPendingDestructiveActions_TenantScoped(t *testing.T) {
 	resp := awaitPending(tctx, t, srv, 1)
 	if resp.Actions[0].ActionId != "hyp-1" || resp.Actions[0].HypothesisId != "hyp-1" {
 		t.Fatalf("unexpected pending action: %+v", resp.Actions[0])
+	}
+	// The approver reads what the agent reported about the action
+	// (gibson#706).
+	if got := resp.Actions[0].GetBlastRadius(); got != "one host: db-01" {
+		t.Errorf("blast_radius = %q; want the text of the agent", got)
+	}
+	if got := resp.Actions[0].GetReversibility(); got != destructiveauthzv1.Reversibility_REVERSIBILITY_IRREVERSIBLE {
+		t.Errorf("reversibility = %v; want IRREVERSIBLE", got)
 	}
 
 	// No tenant in context -> PermissionDenied.
