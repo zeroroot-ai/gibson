@@ -147,8 +147,9 @@ func init() {
 // When ENTITLEMENTS_ENDPOINT is set it returns a caching gRPC-client Provider
 // that calls the commercial EntitlementsService over SPIFFE mTLS (Option B,
 // gibson#1028). The billing service's SPIFFE ID is read from
-// ENTITLEMENTS_BILLING_SVID (defaults to permissive AuthorizeAny when unset —
-// tighten in production by setting the full "spiffe://…" SVID). The SPIRE
+// ENTITLEMENTS_BILLING_SVID and is required: with the endpoint set and the ID
+// empty, the remote construction fails, so the seam takes its fail-safe
+// (blocked in SaaS mode). The SPIRE
 // Workload API socket is read from SPIFFE_ENDPOINT_SOCKET (the go-spiffe
 // conventional env var; the chart mounts it via CSI).
 //
