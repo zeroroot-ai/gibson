@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -141,5 +142,80 @@ func TestCallToolProtoStream_UsesTheSameDispatch(t *testing.T) {
 	}
 	if q.gotKind != "tool" {
 		t.Fatalf("enqueued kind = %q; want tool", q.gotKind)
+	}
+}
+
+// TestCallToolProto_DiscoveryFailureIsAnExecutionFailure: a registry error
+// stops the dispatch with the typed error. It is not a missing tool.
+func TestCallToolProto_DiscoveryFailureIsAnExecutionFailure(t *testing.T) {
+	h, _ := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+	h.componentRegistry = &gateFakeRegistry{discoverErr: errors.New("registry down")}
+	h.workQueue = &queueFake{}
+
+	err := h.CallToolProto(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{})
+	if code := gibsonCode(t, err); code != ErrHarnessToolExecutionFailed {
+		t.Fatalf("code = %q; want %q", code, ErrHarnessToolExecutionFailed)
+	}
+}
+
+// recordingStreamCallback records the events of a streamed tool call.
+type recordingStreamCallback struct {
+	partials int
+	errs     []error
+}
+
+func (c *recordingStreamCallback) OnProgress(int, string, string) {}
+func (c *recordingStreamCallback) OnPartial(proto.Message, bool)  { c.partials++ }
+func (c *recordingStreamCallback) OnWarning(string, string)       {}
+func (c *recordingStreamCallback) OnError(err error, _ bool)      { c.errs = append(c.errs, err) }
+
+// TestCallToolProtoStream_ErrorReachesTheCallback: the error of the unary
+// dispatch reaches the callback once and returns.
+func TestCallToolProtoStream_ErrorReachesTheCallback(t *testing.T) {
+	h, _ := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+	h.componentRegistry = &gateFakeRegistry{}
+	h.workQueue = &queueFake{}
+	cb := &recordingStreamCallback{}
+
+	err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, cb)
+	if code := gibsonCode(t, err); code != ErrHarnessToolNotFound {
+		t.Fatalf("code = %q; want %q", code, ErrHarnessToolNotFound)
+	}
+	if len(cb.errs) != 1 || cb.partials != 0 {
+		t.Fatalf("callback got %d errors and %d partials; want 1 and 0", len(cb.errs), cb.partials)
+	}
+}
+
+// TestCallToolProtoStream_NilMessageIsRefused: a nil request or response is
+// an execution failure, and no dispatch starts.
+func TestCallToolProtoStream_NilMessageIsRefused(t *testing.T) {
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+
+	err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", nil, &wrapperspb.StringValue{}, nil)
+	if code := gibsonCode(t, err); code != ErrHarnessToolExecutionFailed {
+		t.Fatalf("code = %q; want %q", code, ErrHarnessToolExecutionFailed)
+	}
+	if spy.discoverToolCalled {
+		t.Fatal("a refused call reached the registry adapter")
+	}
+}
+
+// TestCallToolProtoStream_ResultReachesTheCallback: the result of the unary
+// dispatch reaches the callback as one partial event.
+func TestCallToolProtoStream_ResultReachesTheCallback(t *testing.T) {
+	h, _ := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
+	h.workQueue = &queueFake{result: []byte(`"out"`)}
+	h.metrics = &NoOpMetricsRecorder{}
+	cb := &recordingStreamCallback{}
+	out := &wrapperspb.StringValue{}
+
+	if err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), out, cb); err != nil {
+		t.Fatalf("CallToolProtoStream: %v", err)
+	}
+	if cb.partials != 1 || len(cb.errs) != 0 {
+		t.Fatalf("callback got %d partials and %d errors; want 1 and 0", cb.partials, len(cb.errs))
+	}
+	if out.GetValue() != "out" {
+		t.Fatalf("output = %q; want out", out.GetValue())
 	}
 }

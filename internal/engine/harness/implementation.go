@@ -787,11 +787,8 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 	if h.componentRegistry == nil {
 		return notFound
 	}
+	// authorizeToolDispatch refused a call with no tenant before this point.
 	tenant := auth.TenantStringFromContext(ctx)
-	if tenant == "" {
-		return types.NewError(ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool %q: no tenant in context", name))
-	}
 	instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
 	if discErr != nil {
 		return types.WrapError(ErrHarnessToolExecutionFailed,

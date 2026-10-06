@@ -125,3 +125,23 @@ func newStreamCaptureSvc(t *testing.T, captured *[]capturedTool, toolErr error) 
 	}
 	return svc, mockHarness, contextInfo
 }
+
+// failingStreamSendServer is a stream whose Send fails.
+type failingStreamSendServer struct {
+	fakeStreamSendServer
+}
+
+func (f *failingStreamSendServer) Send(*harnesspb.CallToolProtoStreamResponse) error {
+	return errors.New("stream closed")
+}
+
+// TestCallToolProtoStream_SendFailureReturnsAnError proves that a terminal
+// event that the stream does not take is an error of the call.
+func TestCallToolProtoStream_SendFailureReturnsAnError(t *testing.T) {
+	var captured []capturedTool
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	stream := &failingStreamSendServer{fakeStreamSendServer{ctx: testCtxWithTenant()}}
+
+	err := svc.CallToolProtoStream(streamRequest(contextInfo), stream)
+	require.ErrorContains(t, err, "send the terminal tool event")
+}
