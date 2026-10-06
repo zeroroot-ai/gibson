@@ -420,23 +420,6 @@ func (p *pool) evictTenant(tenant auth.TenantID) {
 	p.tenantEntries.Delete(tenant)
 }
 
-// lastAccess returns the last time a Conn for this tenant was released.
-func (p *pool) lastAccess(tenant auth.TenantID) time.Time {
-	if v, ok := p.tenantEntries.Load(tenant); ok {
-		ns := v.(*tenantEntry).lastReleased.Load()
-		return time.Unix(0, ns)
-	}
-	return time.Time{}
-}
-
-// activeConnCount returns the number of currently checked-out Conns for tenant.
-func (p *pool) activeConnCount(tenant auth.TenantID) int64 {
-	if v, ok := p.tenantEntries.Load(tenant); ok {
-		return v.(*tenantEntry).activeConns.Load()
-	}
-	return 0
-}
-
 // staticNeo4jResolver is a backward-compat resolver that returns the same
 // endpoint for every tenant. Used when Neo4jURI is set in Config but no
 // Neo4jResolver is provided (legacy single-URI deployments and tests that

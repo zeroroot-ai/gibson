@@ -116,14 +116,6 @@ type config struct {
 
 type attribute struct{ key, value string }
 
-// WithOTLPEndpoint sets the OTLP gRPC endpoint (e.g. "localhost:4317").
-// If not set, Init uses the OTEL_EXPORTER_OTLP_ENDPOINT environment variable.
-// If neither is present, a no-op exporter is used so the provider is still
-// usable in environments without a collector.
-func WithOTLPEndpoint(endpoint string) Option {
-	return func(c *config) { c.otlpEndpoint = endpoint }
-}
-
 // WithLogLevel sets the minimum slog level. Defaults to slog.LevelInfo.
 func WithLogLevel(level slog.Level) Option {
 	return func(c *config) { c.logLevel = level }

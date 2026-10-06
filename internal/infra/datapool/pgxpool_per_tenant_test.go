@@ -17,50 +17,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-func TestSanitizeForPostgres_Valid(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"acme", "acme"},
-		{"bigcorp", "bigcorp"},
-		{"tenant1", "tenant1"},
-		{"my-tenant", "my_tenant"}, // hyphens → underscores
-		{"a-b-c", "a_b_c"},         // multiple hyphens
-		{"abc123", "abc123"},
-		{"a1b2c3", "a1b2c3"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			got, err := sanitizeForPostgres(tc.input)
-			require.NoError(t, err)
-			assert.Equal(t, tc.expected, got)
-		})
-	}
-}
-
-func TestSanitizeForPostgres_Rejects(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-	}{
-		{"empty", ""},
-		{"uppercase", "ACME"},
-		{"space", "my tenant"},
-		{"semicolon", "tenant;drop"},
-		{"singlequote", "tenant'drop"},
-		{"slash", "tenant/drop"},
-		{"dot", "tenant.corp"},
-		{"unicode", "tenanté"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := sanitizeForPostgres(tc.input)
-			require.Error(t, err)
-		})
-	}
-}
-
 // TestDerivePostgresPassword_* removed in spec
 // tenant-provisioning-unification-phase2 Phase 6.2 — daemon no longer
 // derives the Postgres password locally; the DSN comes from Vault via

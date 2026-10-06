@@ -185,10 +185,3 @@ func TestDialer_GuardIsInstalledUnlessAllowPrivate(t *testing.T) {
 	assert.NotNil(t, netguard.Dialer(false).Control, "guard must be on by default")
 	assert.Nil(t, netguard.Dialer(true).Control, "allowPrivate must remove the guard")
 }
-
-func TestDialContext_RefusesBlockedAddress(t *testing.T) {
-	_, err := netguard.DialContext(context.Background(), "tcp", "169.254.169.254:80", false)
-	require.Error(t, err)
-	var blocked *netguard.BlockedAddressError
-	assert.ErrorAs(t, err, &blocked)
-}

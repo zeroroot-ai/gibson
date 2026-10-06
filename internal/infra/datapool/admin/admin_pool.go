@@ -281,10 +281,3 @@ func (ap *AdminPool) Close() error {
 	}
 	return nil
 }
-
-// TenantPool returns the underlying per-tenant Pool. This is exposed so that
-// admin.ForEachTenant can acquire per-tenant Conns without holding a reference
-// directly.
-func (ap *AdminPool) TenantPool() datapool.Pool {
-	return ap.tenantPool
-}

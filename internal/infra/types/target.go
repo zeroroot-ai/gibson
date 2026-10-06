@@ -72,28 +72,6 @@ func (t *TargetType) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// AllTargetTypes returns a slice containing all valid TargetType values
-func AllTargetTypes() []TargetType {
-	return []TargetType{
-		TargetTypeLLMChat,
-		TargetTypeLLMAPI,
-		TargetTypeRAG,
-		TargetTypeAgent,
-		TargetTypeEmbedding,
-		TargetTypeMultimodal,
-		TargetTypeCustom,
-	}
-}
-
-// ParseTargetType parses a string into a TargetType, returning an error if invalid
-func ParseTargetType(s string) (TargetType, error) {
-	t := TargetType(s)
-	if !t.IsValid() {
-		return "", fmt.Errorf("invalid target type: %s", s)
-	}
-	return t, nil
-}
-
 // Provider represents the LLM service provider
 type Provider string
 
@@ -306,15 +284,6 @@ type TargetFilter struct {
 	Tags     []string
 	Limit    int
 	Offset   int
-}
-
-// NewTargetFilter creates a new TargetFilter with default values
-func NewTargetFilter() *TargetFilter {
-	return &TargetFilter{
-		Tags:   []string{},
-		Limit:  100, // default limit
-		Offset: 0,
-	}
 }
 
 // WithProvider sets the Provider filter

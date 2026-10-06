@@ -59,15 +59,6 @@ type runRecoveryHook struct {
 	logger *slog.Logger
 }
 
-// NewRunRecoveryHook returns the production RecoveryHook. logger may be
-// nil, in which case slog.Default() is used.
-func NewRunRecoveryHook(logger *slog.Logger) RecoveryHook {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &runRecoveryHook{logger: logger}
-}
-
 func (h *runRecoveryHook) Run(ctx context.Context, tenant auth.TenantID, conn *Conn) error {
 	if conn == nil {
 		return fmt.Errorf("recovery_hook: nil conn")

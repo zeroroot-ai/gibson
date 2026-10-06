@@ -173,16 +173,3 @@ func sanitizeForNeo4j(tenantID string) (string, error) {
 	}
 	return replaced, nil
 }
-
-// isNeo4jDBNotExist returns true if the error indicates a Neo4j database
-// does not exist. Neo4j surfaces this as an error message containing
-// "database does not exist" or Neo4j error code Neo.ClientError.Database.DatabaseNotFound.
-func isNeo4jDBNotExist(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "database does not exist") ||
-		strings.Contains(msg, "DatabaseNotFound") ||
-		strings.Contains(msg, "Neo.ClientError.Database.DatabaseNotFound")
-}

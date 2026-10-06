@@ -39,22 +39,6 @@ var pgxPoolProductionOpts = pcpools.PgxPoolOptions{
 // hyphens with underscores here.
 var pgSanitizeRE = regexp.MustCompile(`[^a-z0-9_]`)
 
-// sanitizeForPostgres converts a tenant ID string to a safe Postgres
-// identifier component. Hyphens are replaced with underscores. Any character
-// outside [a-z0-9_] is rejected (returns an error) to prevent injection.
-func sanitizeForPostgres(tenantID string) (string, error) {
-	if tenantID == "" {
-		return "", fmt.Errorf("datapool: postgres: empty tenant ID")
-	}
-	// Replace hyphens with underscores (hyphens are valid in TenantID but
-	// not in unquoted Postgres identifiers).
-	replaced := strings.ReplaceAll(tenantID, "-", "_")
-	if pgSanitizeRE.MatchString(replaced) {
-		return "", fmt.Errorf("datapool: postgres: tenant ID %q contains characters unsafe for Postgres identifiers after sanitization", tenantID)
-	}
-	return replaced, nil
-}
-
 // pgPerTenant manages a per-tenant cache of *pgxpool.Pool. Each tenant's
 // pool is connected to the tenant's dedicated Postgres database.
 type pgPerTenant struct {
