@@ -33,10 +33,12 @@ import (
 // mission records the earlier run and the checkpoint as its parent, as a
 // Timeline event (brain.MissionRewound).
 //
-// This is the state mode. A sandbox snapshot at the end of a node (the
-// sandbox mode) waits for gibson#802. Until then no checkpoint has a
-// snapshot, and the node of a rewind starts in a fresh sandbox with the files
-// of the workspace, as the ADR states for a checkpoint without a snapshot.
+// In the sandbox checkpoint mode each agent node leaves a snapshot when it
+// ends, and its WorkCompleted event names it. A rewind to such a checkpoint
+// puts the snapshot on MissionRewound, and the start node of the new run
+// starts from it (harness delegateToAgentViaRestore, D80). A checkpoint with
+// no snapshot, the state mode, starts the node in a fresh sandbox with the
+// files of the workspace.
 
 // rewindNamespace scopes the deterministic ids of rewound missions.
 var rewindNamespace = uuid.MustParse("7d3b0c64-2a8e-4f0e-9a4f-5f2d8f0a1c70")

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1"
@@ -107,5 +109,56 @@ func TestSetecClient_Recovery(t *testing.T) {
 	}
 	if _, _, err := c.Recovery(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
 		t.Fatalf("no tenant: err = %v", err)
+	}
+}
+
+// snapshottingSetec records the Snapshot and Launch requests.
+type snapshottingSetec struct {
+	setecv1.SandboxServiceClient
+	snap      *setecv1.SnapshotRequest
+	launch    *setecv1.LaunchRequest
+	launchErr error
+}
+
+func (s *snapshottingSetec) Snapshot(_ context.Context, in *setecv1.SnapshotRequest, _ ...grpc.CallOption) (*setecv1.SnapshotResponse, error) {
+	s.snap = in
+	return &setecv1.SnapshotResponse{Snapshot: "snap-1"}, nil
+}
+
+func (s *snapshottingSetec) Launch(_ context.Context, in *setecv1.LaunchRequest, _ ...grpc.CallOption) (*setecv1.LaunchResponse, error) {
+	s.launch = in
+	if s.launchErr != nil {
+		return nil, s.launchErr
+	}
+	return &setecv1.LaunchResponse{SandboxId: "ns/r1/u1"}, nil
+}
+
+// Snapshot names the tenant and the life, and a launch from a snapshot
+// sends no class, image or size, and the network of the request (setec#242).
+func TestSetecClient_SnapshotAndRestore(t *testing.T) {
+	ctx := context.Background()
+	rec := &snapshottingSetec{}
+	c := &setecClient{inner: rec}
+	snap, err := c.Snapshot(ctx, "acme", "ns/n1/u1", 7*24*time.Hour)
+	if err != nil || snap != "snap-1" || rec.snap.GetTenant() != "acme" || rec.snap.GetTtlSeconds() != 7*24*3600 {
+		t.Fatalf("Snapshot = %q %v, request %v", snap, err, rec.snap)
+	}
+	if _, err := c.Snapshot(ctx, "", "s", time.Hour); !errors.Is(err, errNoTenant) {
+		t.Fatalf("no tenant: err = %v", err)
+	}
+	resp, err := c.Launch(ctx, sandboxed.LaunchRequest{
+		Tenant: "acme", FromSnapshot: "snap-1", NetworkMode: sandboxed.NetworkModeNone, Timeout: time.Minute,
+	})
+	if err != nil || resp.SandboxID != "ns/r1/u1" {
+		t.Fatalf("Launch = %+v %v", resp, err)
+	}
+	got := rec.launch
+	if got.GetFromSnapshot() != "snap-1" || got.GetSandboxClass() != "" || got.GetImage() != "" || got.GetResources() != nil ||
+		got.GetNetwork().GetMode() != sandboxed.NetworkModeNone {
+		t.Fatalf("launch request = %v", got)
+	}
+	gone := &setecClient{inner: &snapshottingSetec{launchErr: status.Error(codes.NotFound, "no snapshot")}}
+	if _, err := gone.Launch(ctx, sandboxed.LaunchRequest{Tenant: "acme", FromSnapshot: "old"}); !errors.Is(err, sandboxed.ErrSnapshotGone) {
+		t.Fatalf("gone snapshot: err = %v", err)
 	}
 }
