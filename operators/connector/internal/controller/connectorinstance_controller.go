@@ -41,9 +41,9 @@ const (
 	finalizer = "gibson.zeroroot.ai/connector-cleanup"
 
 	// revokeDeadline bounds the finalizer's retry on a failing revoke. Past it
-	// the finalizer releases with a logged warning rather than wedging the
-	// delete forever behind a daemon that is down: the credential Secret is
-	// already gone with the CR, and the grant is reported for manual revoke.
+	// the finalizer writes an unrevoked grant record and releases, rather
+	// than wedging the delete forever behind a daemon that is down. The
+	// retry loop (UnrevokedGrantsRunnable) revokes the recorded grant later.
 	revokeDeadline = 10 * time.Minute
 
 	// tenantNamespacePrefix is the fixed prefix of a per-tenant namespace
@@ -344,7 +344,8 @@ func (r *ConnectorInstanceReconciler) checkCredential(
 // finalize revokes the connector's grant through the daemon and releases the
 // finalizer (ADR-0061). A failing revoke is retried with backoff until
 // revokeDeadline has passed since the delete, then the finalizer releases
-// with a logged warning so the delete never wedges. A connector with no
+// after it writes a durable record of the grant (recordUnrevokedGrant), so
+// the delete never wedges and the grant stays visible. A connector with no
 // vendor credential (auth none) has no grant and skips the revoke.
 func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connectorv1alpha1.ConnectorInstance) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(ci, finalizer) {
@@ -362,8 +363,14 @@ func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connecto
 				// Returning the error requeues with the controller's backoff.
 				return ctrl.Result{}, fmt.Errorf("revoke connector grant: %w", err)
 			}
-			logger.Error(err, "releasing the finalizer without a confirmed grant revoke; revoke the grant by hand",
-				"connector", ci.Spec.Connector, "deadline", revokeDeadline.String())
+			// The finalizer releases, so a delete never wedges. The record
+			// keeps the grant visible, and the retry loop revokes it later.
+			tenant, connector := grantOwner(ci)
+			if recErr := recordUnrevokedGrant(ctx, r.Client, ci, tenant, connector, r.now()); recErr != nil {
+				return ctrl.Result{}, recErr
+			}
+			logger.Error(err, "releasing the finalizer without a confirmed grant revoke; the retry loop revokes the recorded grant",
+				"connector", connector, "deadline", revokeDeadline.String())
 		} else {
 			setCondition(ci, condRevoked, metav1.ConditionTrue, "Revoked", "the connector grant is revoked")
 		}
@@ -388,15 +395,21 @@ func (r *ConnectorInstanceReconciler) revokeGrant(ctx context.Context, ci *conne
 	if !strings.HasPrefix(ci.Namespace, tenantNamespacePrefix) {
 		return fmt.Errorf("namespace %q is not a tenant namespace", ci.Namespace)
 	}
-	connector := ci.Spec.Connector
-	if connector == "" {
-		connector = ci.Name
-	}
-	tenantID := strings.TrimPrefix(ci.Namespace, tenantNamespacePrefix)
+	tenantID, connector := grantOwner(ci)
 	if err := r.Revoker.Revoke(ctx, tenantID, connector); err != nil {
 		return fmt.Errorf("daemon revoke for %s/%s: %w", tenantID, connector, err)
 	}
 	return nil
+}
+
+// grantOwner returns the tenant and the connector of the grant of ci. The
+// tenant comes from the namespace (tenant-<id>).
+func grantOwner(ci *connectorv1alpha1.ConnectorInstance) (tenant, connector string) {
+	connector = ci.Spec.Connector
+	if connector == "" {
+		connector = ci.Name
+	}
+	return strings.TrimPrefix(ci.Namespace, tenantNamespacePrefix), connector
 }
 
 func (r *ConnectorInstanceReconciler) now() time.Time {
