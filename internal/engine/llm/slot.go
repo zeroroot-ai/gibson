@@ -140,7 +140,6 @@ func (m *DefaultSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDef
 		picked := modelgate.Candidate{
 			Provider: config.Provider,
 			Model:    config.Model,
-			Rank:     0,
 		}
 		permitted, ferr := m.modelFilter.Permitted(ctx, []modelgate.Candidate{picked})
 		if ferr != nil {

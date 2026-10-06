@@ -332,23 +332,6 @@ func (p *DefaultQueryPipeline) filterByNodeType(results []GraphRAGResult, nodeTy
 // QueryPipelineOptions contains advanced options for query processing.
 // Allows fine-tuning of the pipeline behavior per-query.
 type QueryPipelineOptions struct {
-	// SkipEmbedding skips embedding generation (query must have pre-computed embedding).
-	SkipEmbedding bool
-
-	// SkipGraph disables graph traversal (vector-only query).
-	SkipGraph bool
-
-	// MaxGraphStartPoints limits the number of vector results to expand from.
-	MaxGraphStartPoints int
-
-	// EnableGracefulDegradation allows falling back to vector-only on graph errors.
-	EnableGracefulDegradation bool
-
-	// FetchFullNodes fetches complete node data (including all properties).
-	FetchFullNodes bool
-
-	// IncludeMetadata includes query metadata in results.
-	IncludeMetadata bool
 }
 
 // WithOptions creates a new processor with custom pipeline options.

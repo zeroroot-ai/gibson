@@ -132,8 +132,7 @@ func GroundSlice(nodes []NodeSpec, enablement []EnablementCause) ([]Factor, erro
 // VariableBelief is one variable's posterior, mirroring the
 // {"true": p, "false": 1-p} shape ground.solve_slice returns per variable.
 type VariableBelief struct {
-	True  float64
-	False float64
+	True float64
 }
 
 // SolveSlice grounds the slice and returns every declared variable's
@@ -172,7 +171,6 @@ func SolveSlice(nodes []NodeSpec, enablement []EnablementCause, evidence map[str
 				if observed == "true" {
 					vb.True = 1.0
 				} else {
-					vb.False = 1.0
 				}
 				nodeOut[varName] = vb
 				continue
@@ -187,7 +185,7 @@ func SolveSlice(nodes []NodeSpec, enablement []EnablementCause, evidence map[str
 			if err != nil {
 				return nil, err
 			}
-			nodeOut[varName] = VariableBelief{True: result["true"], False: result["false"]}
+			nodeOut[varName] = VariableBelief{True: result["true"]}
 		}
 		out[node.NodeID] = nodeOut
 	}

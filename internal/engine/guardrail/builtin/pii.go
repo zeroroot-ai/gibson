@@ -50,7 +50,6 @@ type PIIDetector struct {
 // piiMatch represents a detected PII occurrence.
 type piiMatch struct {
 	Pattern PIIPattern
-	Match   string
 	Start   int
 	End     int
 }
@@ -190,7 +189,6 @@ func (p *PIIDetector) detectPII(content string) []piiMatch {
 
 			matches = append(matches, piiMatch{
 				Pattern: pattern,
-				Match:   matchStr,
 				Start:   match[0],
 				End:     match[1],
 			})
@@ -210,7 +208,6 @@ func (p *PIIDetector) detectPII(content string) []piiMatch {
 
 			matches = append(matches, piiMatch{
 				Pattern: PIIPattern(name),
-				Match:   matchStr,
 				Start:   match[0],
 				End:     match[1],
 			})

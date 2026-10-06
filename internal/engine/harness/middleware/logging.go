@@ -3,10 +3,6 @@
 
 package middleware
 
-import (
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-)
-
 // Level defines the verbosity level for logging middleware.
 // Higher levels include all information from lower levels.
 type Level int
@@ -37,9 +33,6 @@ const (
 
 // CompletionRequest represents a completion operation request.
 type CompletionRequest struct {
-	Slot     string
-	Messages []llm.Message
-	Tools    []llm.ToolDef // Only populated for CompleteWithTools
 }
 
 // TaskInfo holds basic task information for logging.

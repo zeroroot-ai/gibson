@@ -24,12 +24,10 @@ const (
 // It includes error code, message, underlying cause, query context, and
 // additional context for debugging and error handling.
 type GraphRAGError struct {
-	Code      GraphRAGErrorCode // Error code for programmatic handling
-	Message   string            // Human-readable error message
-	Cause     error             // Underlying error (if any)
-	Query     string            // Query that caused the error (if applicable)
-	Context   map[string]any    // Additional context for debugging
-	Retryable bool              // Whether the operation can be retried
+	Code    GraphRAGErrorCode // Error code for programmatic handling
+	Message string            // Human-readable error message
+	Cause   error             // Underlying error (if any)
+	Context map[string]any    // Additional context for debugging
 }
 
 // Error implements the error interface, returning a formatted error message.
@@ -70,7 +68,6 @@ func (e *GraphRAGError) WithContext(key string, value any) *GraphRAGError {
 // WithQuery adds the query that caused the error.
 // Returns the error for method chaining.
 func (e *GraphRAGError) WithQuery(query string) *GraphRAGError {
-	e.Query = query
 	return e
 }
 
@@ -80,11 +77,10 @@ func (e *GraphRAGError) WithQuery(query string) *GraphRAGError {
 // This is typically non-retryable as the query itself may be invalid.
 func NewQueryError(message string, cause error) *GraphRAGError {
 	return &GraphRAGError{
-		Code:      ErrCodeQueryFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: false,
+		Code:    ErrCodeQueryFailed,
+		Message: message,
+		Cause:   cause,
+		Context: make(map[string]any),
 	}
 }
 
@@ -97,7 +93,6 @@ func NewNodeNotFoundError(nodeID string) *GraphRAGError {
 		Context: map[string]any{
 			"node_id": nodeID,
 		},
-		Retryable: false,
 	}
 }
 
@@ -105,11 +100,10 @@ func NewNodeNotFoundError(nodeID string) *GraphRAGError {
 // This may be retryable depending on the cause (e.g., rate limits vs invalid input).
 func NewEmbeddingError(message string, cause error, retryable bool) *GraphRAGError {
 	return &GraphRAGError{
-		Code:      ErrCodeEmbeddingFailed,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: retryable,
+		Code:    ErrCodeEmbeddingFailed,
+		Message: message,
+		Cause:   cause,
+		Context: make(map[string]any),
 	}
 }
 
@@ -117,10 +111,9 @@ func NewEmbeddingError(message string, cause error, retryable bool) *GraphRAGErr
 // This is non-retryable as the query needs to be fixed.
 func NewInvalidQueryError(message string) *GraphRAGError {
 	return &GraphRAGError{
-		Code:      ErrCodeInvalidQuery,
-		Message:   message,
-		Context:   make(map[string]any),
-		Retryable: false,
+		Code:    ErrCodeInvalidQuery,
+		Message: message,
+		Context: make(map[string]any),
 	}
 }
 
@@ -128,10 +121,9 @@ func NewInvalidQueryError(message string) *GraphRAGError {
 // This is non-retryable as the configuration needs to be fixed.
 func NewConfigError(message string, cause error) *GraphRAGError {
 	return &GraphRAGError{
-		Code:      ErrCodeInvalidConfig,
-		Message:   message,
-		Cause:     cause,
-		Context:   make(map[string]any),
-		Retryable: false,
+		Code:    ErrCodeInvalidConfig,
+		Message: message,
+		Cause:   cause,
+		Context: make(map[string]any),
 	}
 }

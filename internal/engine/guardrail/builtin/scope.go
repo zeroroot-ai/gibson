@@ -15,9 +15,8 @@ import (
 
 // ScopeValidatorConfig configures the scope validator
 type ScopeValidatorConfig struct {
-	AllowedDomains   []string // e.g., ["example.com", "*.api.example.com"]
-	BlockedPaths     []string // e.g., ["/admin/*", "/internal/*"]
-	RespectRobotsTxt bool     // Future: check robots.txt
+	AllowedDomains []string // e.g., ["example.com", "*.api.example.com"]
+	BlockedPaths   []string // e.g., ["/admin/*", "/internal/*"]
 }
 
 // ScopeValidator validates that requests are within allowed scope

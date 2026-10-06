@@ -14,7 +14,6 @@ import (
 //
 // Thread-safety: All methods use read-write locks to ensure safe concurrent access.
 type Deduplicator struct {
-	mu        sync.RWMutex
-	hashIndex map[string]types.ID           // hash -> finding ID
-	findings  map[types.ID]*EnhancedFinding // finding ID -> finding
+	mu       sync.RWMutex
+	findings map[types.ID]*EnhancedFinding // finding ID -> finding
 }

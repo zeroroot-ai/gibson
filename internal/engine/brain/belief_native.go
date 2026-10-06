@@ -121,10 +121,9 @@ type PriorProvider interface {
 // novel entries were {"reason": ...} only, so these three fields were already
 // always zero-valued in practice before this port and remain so here).
 type NovelNode struct {
-	HostID   uint64
-	Address  string
-	Evidence BeliefEvidence
-	Reason   string // e.g. "unknown variable: svc_weird"
+	HostID  uint64
+	Address string
+	Reason  string // e.g. "unknown variable: svc_weird"
 }
 
 // NodePrior is an LLM-estimated prior for a novel node, each value in [0,1].

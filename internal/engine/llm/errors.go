@@ -206,7 +206,6 @@ func NewProviderUnauthorizedError(providerName string, cause error) *types.Gibso
 type StructuredOutputError struct {
 	Op       string // Operation that failed (e.g., "parse", "validate", "unmarshal")
 	Provider string // Provider name
-	Raw      string // Raw response if available for debugging
 	Err      error  // Underlying error
 }
 
@@ -265,7 +264,6 @@ func NewParseError(provider, raw string, position int, err error) *ParseError {
 		StructuredOutputError: StructuredOutputError{
 			Op:       "parse",
 			Provider: provider,
-			Raw:      raw,
 			Err:      err,
 		},
 		Position: position,
@@ -280,7 +278,6 @@ func NewUnmarshalError(provider, raw, targetType string, err error) *UnmarshalEr
 		StructuredOutputError: StructuredOutputError{
 			Op:       "unmarshal",
 			Provider: provider,
-			Raw:      raw,
 			Err:      err,
 		},
 		TargetType: targetType,
@@ -293,7 +290,6 @@ func NewStructuredOutputError(op, provider, raw string, err error) *StructuredOu
 	return &StructuredOutputError{
 		Op:       op,
 		Provider: provider,
-		Raw:      raw,
 		Err:      err,
 	}
 }

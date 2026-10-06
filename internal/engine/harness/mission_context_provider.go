@@ -79,9 +79,6 @@ type MissionExecutionContext struct {
 	// IsResumed indicates if this run was resumed from a checkpoint.
 	IsResumed bool
 
-	// ResumedFromNode is the mission node ID where execution resumed (empty if not resumed).
-	ResumedFromNode string
-
 	// PreviousRunID links to the prior run (nil if this is the first run).
 	PreviousRunID *types.ID
 
@@ -153,7 +150,6 @@ func (p *DefaultMissionContextProvider) GetContext(ctx context.Context) (*Missio
 
 	// Set resumed node if applicable
 	if execCtx.IsResumed && p.currentMission.Checkpoint != nil {
-		execCtx.ResumedFromNode = p.currentMission.Checkpoint.LastNodeID
 	}
 
 	// Get previous run information if available

@@ -320,12 +320,6 @@ func CompleteStructured[T any](
 // StructuredResponse contains the result of a structured completion request
 // when using explicit schemas instead of the generic CompleteStructured[T] method.
 type StructuredResponse struct {
-	// Data contains the parsed JSON as a map
-	Data map[string]any
-	// RawJSON contains the raw JSON string from the LLM response
-	RawJSON string
-	// TokenUsage contains token counts for the request
-	TokenUsage llm.TokenUsage
 }
 
 // CompleteWithSchema performs a structured completion using an explicit schema.
@@ -602,11 +596,7 @@ func (h *DefaultAgentHarness) CompleteWithSchema(
 		"input_tokens", resp.Usage.PromptTokens,
 		"output_tokens", resp.Usage.CompletionTokens)
 
-	return &StructuredResponse{
-		Data:       data,
-		RawJSON:    resp.RawJSON,
-		TokenUsage: tokenUsage,
-	}, nil
+	return &StructuredResponse{}, nil
 }
 
 // convertToSDKSchema converts internal schema.JSON to sdk/types.JSONSchema.
