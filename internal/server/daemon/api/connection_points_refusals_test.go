@@ -166,7 +166,7 @@ func TestRequireActiveTenant_CacheAndReadFailure(t *testing.T) {
 
 	mock.ExpectQuery("SELECT activation FROM tenant_status").WithArgs("acme").
 		WillReturnRows(sqlmock.NewRows([]string{"activation"}).AddRow("suspended"))
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		wantCode(t, "suspended", srv.requireActiveTenant(context.Background(), "acme"), codes.FailedPrecondition)
 	}
 
