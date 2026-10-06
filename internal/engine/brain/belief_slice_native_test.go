@@ -271,6 +271,22 @@ type fakePinnedPosteriors struct {
 	version     string
 	posteriors  map[string]EdgeStrengthPosterior
 	defaultBeta EdgeStrengthPosterior
+	inNode      map[string]EdgeStrengthPosterior // key kind/child<-parent
+	leaks       map[string]EdgeStrengthPosterior // key kind/variable
+}
+
+func (f fakePinnedPosteriors) InNodeStrength(kind, child, parent string) EdgeStrengthPosterior {
+	if p, ok := f.inNode[kind+"/"+child+"<-"+parent]; ok {
+		return p
+	}
+	return EdgeStrengthPosterior{Alpha: 1, Beta: 1}
+}
+
+func (f fakePinnedPosteriors) Leak(kind, variable string) EdgeStrengthPosterior {
+	if p, ok := f.leaks[kind+"/"+variable]; ok {
+		return p
+	}
+	return EdgeStrengthPosterior{Alpha: 1, Beta: 1}
 }
 
 func (f fakePinnedPosteriors) Posterior(edgeType string) EdgeStrengthPosterior {
@@ -330,10 +346,9 @@ func TestGroundAttackGraph_PinnedPosteriorFallsBackForAnUnfittedEdgeType(t *test
 	assert.InDelta(t, UninformativePriorStrength, causes[0].Strength, 1e-12)
 }
 
-func TestGroundAttackGraph_PinnedPosteriorNeverChangesIntraNodeStrength(t *testing.T) {
-	// ADR-0137 scopes the learned posterior to ENABLEMENT edges only; an
-	// intra-node DependsOn cause keeps UninformativePriorStrength even when a
-	// posterior is pinned.
+// gibson#720: inference reads the fitted in-node strength and leak of a pinned
+// artifact, and an enablement edge posterior leaves them alone.
+func TestGroundAttackGraph_PinnedPosteriorSetsIntraNodeStrengthAndLeak(t *testing.T) {
 	reg := ontology.NewBeliefSchemaRegistry()
 	require.NoError(t, reg.RegisterExtension("core/belief-schema", ontology.SeedBeliefSchemaExtension()))
 
@@ -343,16 +358,21 @@ func TestGroundAttackGraph_PinnedPosteriorNeverChangesIntraNodeStrength(t *testi
 		},
 	}
 	posteriors := fakePinnedPosteriors{
-		version:    "tenant-acme-edges-v1",
+		version:    "tenant-acme-v1",
 		posteriors: map[string]EdgeStrengthPosterior{"RESOLVES_TO": {Alpha: 9, Beta: 1}},
+		inNode:     map[string]EdgeStrengthPosterior{"Host/exploitable<-reachable": {Alpha: 8, Beta: 2}},
+		leaks:      map[string]EdgeStrengthPosterior{"Host/exploitable": {Alpha: 1, Beta: 9}},
 	}
 
 	nodes, _ := groundAttackGraph(graph, reg, posteriors)
 	require.Len(t, nodes, 1)
 	exploitable, ok := nodes[0].Variables["exploitable"]
 	require.True(t, ok)
-	assert.InDelta(t, UninformativePriorStrength, exploitable.Leak, 1e-9)
-	assert.InDelta(t, UninformativePriorStrength, exploitable.DependsOn["reachable"], 1e-9)
+	assert.InDelta(t, 0.1, exploitable.Leak, 1e-9)
+	assert.InDelta(t, 0.8, exploitable.DependsOn["reachable"], 1e-9)
+	// A strength the artifact did not fit stays at the uninformative mean.
+	assert.InDelta(t, UninformativePriorStrength, nodes[0].Variables["juicy"].DependsOn["exploitable"], 1e-9)
+	assert.InDelta(t, UninformativePriorStrength, nodes[0].Variables["reachable"].Leak, 1e-9)
 }
 
 func TestNativeSliceBelief_PinnedPosteriorStampsItsVersionOntoEveryScoredNode(t *testing.T) {

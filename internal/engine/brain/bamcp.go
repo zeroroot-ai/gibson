@@ -199,8 +199,14 @@ type EdgeStrengthPosteriorProvider interface {
 type PinnedEdgeStrengthPosteriorProvider interface {
 	EdgeStrengthPosteriorProvider
 	// Version identifies the fitted artifact this provider's posteriors came
-	// from (e.g. "tenant-acme-edges-v3").
+	// from (e.g. "tenant-acme-v3").
 	Version() string
+	// InNodeStrength is the fitted posterior of the strength of parent on
+	// child inside one node of kind, and Leak is the fitted posterior of the
+	// leak of variable in a node of kind (gibson#720). Each falls back to the
+	// uninformative Beta(1,1) when the artifact has no fitted value.
+	InNodeStrength(kind, child, parent string) EdgeStrengthPosterior
+	Leak(kind, variable string) EdgeStrengthPosterior
 }
 
 // UninformativeEdgePosteriors is the cold-start EdgeStrengthPosteriorProvider:
@@ -653,10 +659,10 @@ func (t *bamcpTree) rollout(step int) float64 {
 }
 
 // bamcpVar is one grounded belief variable, ready for ancestral (generative)
-// sampling: its ground name, its fixed-strength intra-node causes (ADR-0137
-// scopes the learned posterior to ENABLEMENT edges only, so an intra-node
-// DependsOn parent keeps UninformativePriorStrength here exactly as
-// groundAttackGraph already gives it for exact inference), and its cross-node
+// sampling: its ground name, its fixed-strength intra-node causes (an
+// intra-node DependsOn parent and the leak keep UninformativePriorStrength
+// here; exact inference reads their fitted posteriors since gibson#720, and
+// the planner does not yet), and its cross-node
 // enablement causes, each still carrying its edge TYPE so bamcpSampleWorld
 // can Thompson-sample the right posterior for it.
 type bamcpVar struct {

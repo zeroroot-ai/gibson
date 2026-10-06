@@ -14,6 +14,11 @@ package ontology
 // naming convention for taxonomy YAML extensions (loader.go).
 const coreBeliefSchemaExtensionName = "core/belief-schema"
 
+// HostNodeType is the node type of a host in the core belief schema. The
+// belief trainer fits the in-node strengths of this node type from its host
+// rows (gibson#720).
+const HostNodeType = "Host"
+
 // SeedBeliefSchemaExtension returns the seed belief-PRM schema:
 //
 //   - Host is belief-bearing with the three seed variables from ADR-0129,
@@ -46,7 +51,7 @@ func SeedBeliefSchemaExtension() BeliefSchemaExtension {
 	return BeliefSchemaExtension{
 		Nodes: []NodeBeliefSchema{
 			{
-				NodeType: "Host",
+				NodeType: HostNodeType,
 				Variables: []BeliefVariable{
 					{Name: "reachable"},
 					{Name: "exploitable", DependsOn: []string{"reachable"}},

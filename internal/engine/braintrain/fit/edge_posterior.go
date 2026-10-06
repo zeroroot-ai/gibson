@@ -25,13 +25,18 @@ type OutcomeCount struct {
 	Failures  float64
 }
 
-// EdgePosteriorArtifact is the fitted Beta posterior of each enablement edge
-// type (ADR-0137, gibson#395). It is one of the two artifacts of a tenant
-// version. braintrain.EdgePosteriorProvider gives the runtime view of it.
+// EdgePosteriorArtifact holds the fitted Beta posterior of each learned
+// noisy-OR strength (ADR-0137): each enablement edge type (gibson#395), each
+// dependency inside one node, and the leak of each variable (gibson#720). It
+// is one of the two artifacts of a tenant version.
+// braintrain.EdgePosteriorProvider gives the runtime view of it.
 type EdgePosteriorArtifact struct {
 	Version     string                   `json:"version"`
 	Description string                   `json:"description,omitempty"`
 	Posteriors  map[string]BetaPosterior `json:"posteriors"`
+	// InNode is keyed by InNodeKey, and Leaks by LeakKey (strengths.go).
+	InNode map[string]BetaPosterior `json:"in_node,omitempty"`
+	Leaks  map[string]BetaPosterior `json:"leaks,omitempty"`
 }
 
 // EdgePosteriors adds the outcome counts of each edge type to the
@@ -76,20 +81,26 @@ func ParseEdgePosteriorArtifact(raw []byte) (*EdgePosteriorArtifact, error) {
 }
 
 // Validate reports whether a has a version and a valid Beta shape (both
-// parameters above 0) for each edge type.
+// parameters above 0) for each strength.
 func (a *EdgePosteriorArtifact) Validate() error {
 	if a.Version == "" {
 		return errors.New("fit: edge posterior artifact has no version")
 	}
-	types := make([]string, 0, len(a.Posteriors))
-	for t := range a.Posteriors {
-		types = append(types, t)
-	}
-	sort.Strings(types)
-	for _, t := range types {
-		if p := a.Posteriors[t]; p.Alpha <= 0 || p.Beta <= 0 {
-			return fmt.Errorf("fit: edge posterior artifact %q: edge type %q has a non-positive Beta shape (alpha=%v, beta=%v)",
-				a.Version, t, p.Alpha, p.Beta)
+	for _, group := range []struct {
+		kind string
+		set  map[string]BetaPosterior
+	}{{"edge type", a.Posteriors}, {"in-node strength", a.InNode}, {"leak", a.Leaks}} {
+		kind, set := group.kind, group.set
+		keys := make([]string, 0, len(set))
+		for k := range set {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if p := set[k]; p.Alpha <= 0 || p.Beta <= 0 {
+				return fmt.Errorf("fit: edge posterior artifact %q: %s %q has a non-positive Beta shape (alpha=%v, beta=%v)",
+					a.Version, kind, k, p.Alpha, p.Beta)
+			}
 		}
 	}
 	return nil

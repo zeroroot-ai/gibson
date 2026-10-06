@@ -40,15 +40,26 @@ func LoadEdgePosteriorArtifact(path string) (*fit.EdgePosteriorArtifact, error) 
 }
 
 // EdgePosteriorProvider returns a brain.PinnedEdgeStrengthPosteriorProvider
-// backed by the fitted posteriors of a, identified by a.Version. An edge type
-// with no fitted row falls back to brain.UninformativeEdgePosteriors: never a
+// backed by the fitted posteriors of a, identified by a.Version: each
+// enablement edge type, each in-node strength and each leak. A strength with
+// no fitted row falls back to brain.UninformativeEdgePosteriors: never a
 // hand-authored number, and never a hard error.
 func EdgePosteriorProvider(a *fit.EdgePosteriorArtifact) brain.PinnedEdgeStrengthPosteriorProvider {
-	posteriors := make(map[string]brain.EdgeStrengthPosterior, len(a.Posteriors))
-	for edgeType, p := range a.Posteriors {
-		posteriors[edgeType] = brain.EdgeStrengthPosterior{Alpha: p.Alpha, Beta: p.Beta}
+	return &loadedEdgePosteriors{
+		version:    a.Version,
+		posteriors: toBrain(a.Posteriors),
+		inNode:     toBrain(a.InNode),
+		leaks:      toBrain(a.Leaks),
 	}
-	return &loadedEdgePosteriors{version: a.Version, posteriors: posteriors}
+}
+
+// toBrain converts fitted posteriors to the runtime type.
+func toBrain(in map[string]fit.BetaPosterior) map[string]brain.EdgeStrengthPosterior {
+	out := make(map[string]brain.EdgeStrengthPosterior, len(in))
+	for k, p := range in {
+		out[k] = brain.EdgeStrengthPosterior{Alpha: p.Alpha, Beta: p.Beta}
+	}
+	return out
 }
 
 // loadedEdgePosteriors is the brain.PinnedEdgeStrengthPosteriorProvider that
@@ -56,14 +67,31 @@ func EdgePosteriorProvider(a *fit.EdgePosteriorArtifact) brain.PinnedEdgeStrengt
 type loadedEdgePosteriors struct {
 	version    string
 	posteriors map[string]brain.EdgeStrengthPosterior
+	inNode     map[string]brain.EdgeStrengthPosterior
+	leaks      map[string]brain.EdgeStrengthPosterior
+}
+
+// lookup returns the fitted posterior at key, or the uninformative prior.
+func lookup(m map[string]brain.EdgeStrengthPosterior, key string) brain.EdgeStrengthPosterior {
+	if p, ok := m[key]; ok {
+		return p
+	}
+	return brain.UninformativeEdgePosteriors{}.Posterior(key)
 }
 
 // Posterior implements brain.EdgeStrengthPosteriorProvider.
 func (l *loadedEdgePosteriors) Posterior(edgeType string) brain.EdgeStrengthPosterior {
-	if p, ok := l.posteriors[edgeType]; ok {
-		return p
-	}
-	return brain.UninformativeEdgePosteriors{}.Posterior(edgeType)
+	return lookup(l.posteriors, edgeType)
+}
+
+// InNodeStrength implements brain.PinnedEdgeStrengthPosteriorProvider.
+func (l *loadedEdgePosteriors) InNodeStrength(kind, child, parent string) brain.EdgeStrengthPosterior {
+	return lookup(l.inNode, fit.InNodeKey(kind, child, parent))
+}
+
+// Leak implements brain.PinnedEdgeStrengthPosteriorProvider.
+func (l *loadedEdgePosteriors) Leak(kind, variable string) brain.EdgeStrengthPosterior {
+	return lookup(l.leaks, fit.LeakKey(kind, variable))
 }
 
 // Version implements brain.PinnedEdgeStrengthPosteriorProvider.
