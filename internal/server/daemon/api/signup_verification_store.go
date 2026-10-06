@@ -109,14 +109,14 @@ const (
 		   AND expires_at > $4
 		RETURNING id, attempt_id, email, workspace_name, tier,
 		          owner_first_name, owner_last_name, expires_at,
-		          stripe_customer_id, completion_attempts
+		          completion_attempts
 	`
 
 	// getByVerifiedSessionStatement resolves a live completion session.
 	getByVerifiedSessionStatement = `
 		SELECT id, attempt_id, email, workspace_name, tier,
 		       owner_first_name, owner_last_name, expires_at,
-		       stripe_customer_id, completion_attempts
+		       completion_attempts
 		  FROM signup_verification
 		 WHERE verified_session_hash = $1
 		   AND status = 'verified'
@@ -133,7 +133,7 @@ const (
 		   AND completion_attempts < $3
 		RETURNING id, attempt_id, email, workspace_name, tier,
 		          owner_first_name, owner_last_name, expires_at,
-		          stripe_customer_id, completion_attempts
+		          completion_attempts
 	`
 
 	// markConsumedStatement spends a session for good.
@@ -154,7 +154,7 @@ const (
 		 WHERE id = $1 AND status = 'pending_approval'
 		RETURNING id, attempt_id, email, workspace_name, tier,
 		          owner_first_name, owner_last_name, expires_at,
-		          stripe_customer_id, completion_attempts, owner_user_id
+		          completion_attempts, owner_user_id
 	`
 
 	// rejectRegistrationStatement is the refusal, with the same
@@ -166,7 +166,7 @@ const (
 		 WHERE id = $1 AND status = 'pending_approval'
 		RETURNING id, attempt_id, email, workspace_name, tier,
 		          owner_first_name, owner_last_name, expires_at,
-		          stripe_customer_id, completion_attempts, owner_user_id
+		          completion_attempts, owner_user_id
 	`
 
 	// releaseApprovalStatement puts a claimed registration back in the queue
@@ -197,20 +197,19 @@ var ErrSignupStoreUnavailable = errors.New("signup verification store not config
 // SignupVerification is a row as callers see it. It never carries token
 // material — only hashes live in the database and neither is returned.
 type SignupVerification struct {
-	ID               string
-	AttemptID        string
-	Email            string
-	WorkspaceName    string
-	Tier             string
-	OwnerFirstName   string
-	OwnerLastName    string
-	Status           string
-	ExpiresAt        time.Time
-	StripeCustomerID string
-	CompletionCount  int
-	SendCount        int
-	LastSentAt       time.Time
-	CreatedAt        time.Time
+	ID              string
+	AttemptID       string
+	Email           string
+	WorkspaceName   string
+	Tier            string
+	OwnerFirstName  string
+	OwnerLastName   string
+	Status          string
+	ExpiresAt       time.Time
+	CompletionCount int
+	SendCount       int
+	LastSentAt      time.Time
+	CreatedAt       time.Time
 
 	// OwnerUserID is the identity-provider user created at registration time
 	// on the approval rung. Empty on the open rung, where the user is created
@@ -447,7 +446,7 @@ func (s *SignupVerificationStore) RedeemToken(ctx context.Context, rawToken stri
 	).Scan(
 		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
-		&out.StripeCustomerID, &out.CompletionCount,
+		&out.CompletionCount,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -479,7 +478,7 @@ func (s *SignupVerificationStore) GetByVerifiedSession(ctx context.Context, rawS
 	err = db.QueryRowContext(ctx, getByVerifiedSessionStatement, platformtoken.Hash(rawSession), s.clock()).Scan(
 		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
-		&out.StripeCustomerID, &out.CompletionCount,
+		&out.CompletionCount,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -489,60 +488,6 @@ func (s *SignupVerificationStore) GetByVerifiedSession(ctx context.Context, rawS
 	}
 	out.Status = signupStatusVerified
 	return out, nil
-}
-
-// AttachStripeCustomer records the billing customer created for a verified
-// session. Only reachable after redemption, which is why a customer object now
-// always carries an address someone proved they control.
-//
-// The customer id is bound to the session, both ways, in the statement itself:
-//
-//   - One customer per session. Once a session names a customer, only that
-//     same id may be written again (a card retry re-attaching is idempotent);
-//     a different id is refused. Without this, a customer that completion
-//     later reads could be swapped after the fact.
-//   - One session per customer. A customer id already recorded against a
-//     different signup cannot be claimed here. Without this, the id — which is
-//     a plain caller-supplied string, and the thing resolveSignupPlan takes as
-//     evidence that a paid plan has a billing customer behind it — could name
-//     someone else's.
-//
-// Both are predicates on the UPDATE rather than a read-then-write, so two
-// concurrent attaches cannot both pass. A refusal is zero rows affected and
-// surfaces as ErrSignupVerificationNotFound, which the handler answers with
-// the same denial as every other dead session — no oracle for which customer
-// ids exist.
-func (s *SignupVerificationStore) AttachStripeCustomer(ctx context.Context, rawSession, customerID string) error {
-	db, err := s.handle()
-	if err != nil {
-		return err
-	}
-	if rawSession == "" || customerID == "" {
-		return ErrSignupVerificationNotFound
-	}
-	now := s.clock()
-	const q = `
-		UPDATE signup_verification
-		   SET stripe_customer_id = $2, updated_at = $3
-		 WHERE verified_session_hash = $1
-		   AND status = 'verified'
-		   AND verified_session_expires_at > $3
-		   AND stripe_customer_id IN ('', $2)
-		   AND NOT EXISTS (
-		         SELECT 1
-		           FROM signup_verification other
-		          WHERE other.stripe_customer_id = $2
-		            AND other.verified_session_hash IS DISTINCT FROM $1
-		       )
-	`
-	res, err := db.ExecContext(ctx, q, platformtoken.Hash(rawSession), customerID, now)
-	if err != nil {
-		return fmt.Errorf("attach stripe customer: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n != 1 {
-		return ErrSignupVerificationNotFound
-	}
-	return nil
 }
 
 // ClaimCompletion reserves one completion attempt against a verified session
@@ -568,7 +513,7 @@ func (s *SignupVerificationStore) ClaimCompletion(ctx context.Context, rawSessio
 	err = db.QueryRowContext(ctx, claimCompletionStatement, platformtoken.Hash(rawSession), now, SignupMaxCompletionAttempts).Scan(
 		&out.ID, &out.AttemptID, &out.Email, &out.WorkspaceName, &out.Tier,
 		&out.OwnerFirstName, &out.OwnerLastName, &out.ExpiresAt,
-		&out.StripeCustomerID, &out.CompletionCount,
+		&out.CompletionCount,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -669,7 +614,6 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			expires_at                  TIMESTAMPTZ NOT NULL,
 			verified_session_hash       TEXT UNIQUE,
 			verified_session_expires_at TIMESTAMPTZ,
-			stripe_customer_id          TEXT NOT NULL DEFAULT '',
 			completion_attempts         INT NOT NULL DEFAULT 0,
 			send_count                  INT NOT NULL DEFAULT 0,
 			last_sent_at                TIMESTAMPTZ,
@@ -833,7 +777,7 @@ func (s *SignupVerificationStore) decideRegistration(
 	err = db.QueryRowContext(ctx, stmt, id, decidedBy, s.clock()).Scan(
 		&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
 		&r.OwnerFirstName, &r.OwnerLastName, &r.ExpiresAt,
-		&r.StripeCustomerID, &r.CompletionCount, &r.OwnerUserID,
+		&r.CompletionCount, &r.OwnerUserID,
 	)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

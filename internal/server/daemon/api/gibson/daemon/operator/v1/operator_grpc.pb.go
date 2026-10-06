@@ -115,17 +115,6 @@ type DaemonOperatorServiceClient interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(ctx context.Context, in *AckTenantProvisionedRequest, opts ...grpc.CallOption) (*AckTenantProvisionedResponse, error)
-	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
-	// daemon's platform Postgres (tenant_status table) so the dashboard can read
-	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
-	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
-	// reconciler calls this best-effort after each status patch; the daemon
-	// cannot read the CR itself, so the operator is the sole source of this
-	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
-	//
-	// Note: billing_active is NOT carried here — it is owned by the dashboard
-	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
-	// must not be clobbered by an operator status report.
 	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
 	// declares (spec.maxRuntime) so the daemon can bound that agent's
 	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the
@@ -439,17 +428,6 @@ type DaemonOperatorServiceServer interface {
 	// existence-check makes the re-create a no-op. Idempotent: acking an
 	// already-done or unknown tenant_id is a no-op success.
 	AckTenantProvisioned(context.Context, *AckTenantProvisionedRequest) (*AckTenantProvisionedResponse, error)
-	// ReportTenantStatus upserts the operator-observed Tenant CR status into the
-	// daemon's platform Postgres (tenant_status table) so the dashboard can read
-	// provisioning status via gibson.tenant.v1.TenantProvisioningService instead
-	// of the Kubernetes API (ADR-0023, dashboard#813). The operator's Tenant
-	// reconciler calls this best-effort after each status patch; the daemon
-	// cannot read the CR itself, so the operator is the sole source of this
-	// snapshot. Idempotent: re-reporting the same status is a no-op upsert.
-	//
-	// Note: billing_active is NOT carried here — it is owned by the dashboard
-	// billing webhook via TenantProvisioningService.SetTenantBillingActive and
-	// must not be clobbered by an operator status report.
 	// SetAgentEnrollmentLimits records the runtime cap an AgentEnrollment
 	// declares (spec.maxRuntime) so the daemon can bound that agent's
 	// sandboxed runs. The daemon cannot read the CR itself (ADR-0023), so the

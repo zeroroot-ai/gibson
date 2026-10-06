@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -13,6 +14,8 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
+	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -238,17 +241,51 @@ func allowedMethodsOf(policy map[string]operatorMethodDecision) map[string]bool 
 // ext-authz and never uses this bypass, so it must never appear here or in
 // AllowedPeerIDs. A new direct-dial peer must be given an explicit method
 // policy here before it can be added to AllowedPeerIDs.
-func spiffePeerMethodPolicies() map[string]map[string]bool {
+func spiffePeerMethodPolicies(callers api.ConnectionPointCallers) map[string]map[string]bool {
 	policies := map[string]map[string]bool{
 		tenantOperatorSVID:    operatorAllowedMethods(),
 		connectorOperatorSVID: connectorOperatorAllowedMethods(),
 	}
+	policies = mergePeerPolicies(policies, connectionPointPeerPolicies(callers))
 	// The exit-test runner is a direct-dial peer that exists ONLY in binaries
 	// built with -tags=test_fixtures. In a production build the function below
 	// is the no-op stub and this loop adds nothing, so the broad method access
 	// an e2e suite needs can never reach a production daemon — not by config,
 	// not by an operator mistake, because the identity is not in the binary.
 	return mergePeerPolicies(policies, e2ePeerMethodPolicies())
+}
+
+// connectionPointPeerPolicies gives each configured caller of the neutral
+// connection points (ADR-0060, D41, D54) exactly its own methods. One SVID
+// may hold both roles, so the two sets are joined for it. An empty caller
+// gets no entry.
+func connectionPointPeerPolicies(callers api.ConnectionPointCallers) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	add := func(svid string, methods ...string) {
+		if svid == "" {
+			return
+		}
+		if out[svid] == nil {
+			out[svid] = map[string]bool{}
+		}
+		for _, m := range methods {
+			out[svid][m] = true
+		}
+	}
+	add(callers.SignupStepCompleter, connectionv1.ConnectionPointService_CompleteSignupStep_FullMethodName)
+	add(callers.TenantActivation,
+		connectionv1.ConnectionPointService_SetTenantActivation_FullMethodName,
+		connectionv1.ConnectionPointService_ListTenantUsage_FullMethodName)
+	return out
+}
+
+// connectionPointCallersFromEnv reads the two caller identities of the
+// connection points.
+func connectionPointCallersFromEnv() api.ConnectionPointCallers {
+	return api.ConnectionPointCallers{
+		SignupStepCompleter: strings.TrimSpace(os.Getenv(api.EnvSignupStepCompleterSVID)),
+		TenantActivation:    strings.TrimSpace(os.Getenv(api.EnvTenantActivationSVID)),
+	}
 }
 
 // mergePeerPolicies folds extra peers into base and returns base.

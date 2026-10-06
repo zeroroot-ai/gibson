@@ -23,8 +23,14 @@ syntax = "proto3";
 //     RequestEmailVerification  → one expiring verification row + one email
 //     RedeemEmailVerification   → the emailed token is exchanged for a short
 //                                 completion session
-//     Signup                    → identity, billing and provisioning, all of it
+//     Signup                    → identity and provisioning, all of it
 //                                 strictly after that proof
+//
+//   With a signup step URL in config (GIBSON_SIGNUP_STEP_URL), Signup holds the
+//   new tenant as waiting and returns an opaque step token. A component outside
+//   this repository runs the step and reports it done through
+//   gibson.daemon.connection.v1.ConnectionPointService.CompleteSignupStep. With
+//   no URL, signup never waits (ADR-0060, D54).
 //
 //   The APPROVAL rung (ADR-0074, gibson#22) replaces that round trip with one
 //   Register call and an administrator's decision. It is a different proof of
@@ -91,17 +97,8 @@ service SignupService {
     };
   }
 
-  // AttachSignupCustomer records the billing customer created for a verified
-  // signup session, so the completion path does not have to trust the client
-  // for the customer id.
-  //
-  // Only reachable with a live verified session, which is what keeps billing
-  // objects from existing for unproven addresses.
-  rpc AttachSignupCustomer(AttachSignupCustomerRequest) returns (AttachSignupCustomerResponse) {
-    option (gibson.auth.v1.authz) = {
-      unauthenticated: true
-    };
-  }
+  // AttachSignupCustomer was removed (ADR-0060, D54): the daemon learns no
+  // billing customer. The neutral signup step replaces it.
 
   // Signup completes a verified signup: it creates the founding-owner Zitadel
   // human user with the supplied password and enqueues the tenant for
@@ -118,7 +115,20 @@ service SignupService {
   //
   // The session is consumed on success, so the completion cookie cannot be
   // replayed into a second tenant.
+  //
+  // With a signup step configured, the tenant waits for the step and the
+  // response carries step_url and step_token.
   rpc Signup(SignupRequest) returns (SignupResponse) {
+    option (gibson.auth.v1.authz) = {
+      unauthenticated: true
+    };
+  }
+
+  // GetSignupStep reports the state of the external signup step of one
+  // signup attempt. The attempt id is the capability, as for
+  // GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+  // the answer does not tell a caller which attempts exist.
+  rpc GetSignupStep(GetSignupStepRequest) returns (GetSignupStepResponse) {
     option (gibson.auth.v1.authz) = {
       unauthenticated: true
     };
@@ -286,20 +296,6 @@ message RedeemEmailVerificationResponse {
   string tier = 5;
 }
 
-// AttachSignupCustomerRequest pins a billing customer to a verified session.
-message AttachSignupCustomerRequest {
-  string verified_session_token = 1;
-  string stripe_customer_id = 2;
-
-  // client_ip — see RequestEmailVerificationRequest.client_ip. This RPC writes
-  // to Postgres on every call and is unauthenticated, so it draws on a budget
-  // like the other three rather than being the one unmetered door.
-  string client_ip = 3;
-}
-
-// AttachSignupCustomerResponse is empty.
-message AttachSignupCustomerResponse {}
-
 // SignupRequest completes a verified signup.
 //
 // Note what is NOT here: owner_email, workspace_name, tier, owner names,
@@ -362,4 +358,39 @@ message SignupResponse {
   // the request. Additive: field 4 is free and no reserved range covers it
   // (gibson#1325).
   string plan_id = 4;
+
+  // step_url is where the browser goes for the external signup step. Empty
+  // when no step is configured: the tenant does not wait.
+  string step_url = 5;
+
+  // step_token is the opaque token of this signup for the external step. The
+  // browser carries it to step_url. Empty when step_url is empty. Only its
+  // hash is persisted daemon-side.
+  string step_token = 6;
+}
+
+// SignupStepState is the state of the external signup step.
+enum SignupStepState {
+  // SIGNUP_STEP_STATE_UNSPECIFIED is never sent.
+  SIGNUP_STEP_STATE_UNSPECIFIED = 0;
+  // SIGNUP_STEP_STATE_NONE: the signup has no step, or the attempt is unknown.
+  SIGNUP_STEP_STATE_NONE = 1;
+  // SIGNUP_STEP_STATE_WAITING: the tenant waits for the step.
+  SIGNUP_STEP_STATE_WAITING = 2;
+  // SIGNUP_STEP_STATE_DONE: the step is done and provisioning continues.
+  SIGNUP_STEP_STATE_DONE = 3;
+  // SIGNUP_STEP_STATE_FAILED: the step failed. The same token can still
+  // complete it until the token expires.
+  SIGNUP_STEP_STATE_FAILED = 4;
+}
+
+// GetSignupStepRequest names one signup attempt.
+message GetSignupStepRequest {
+  // attempt_id is the UUID of the signup attempt.
+  string attempt_id = 1;
+}
+
+// GetSignupStepResponse carries the state of the step.
+message GetSignupStepResponse {
+  SignupStepState state = 1;
 }

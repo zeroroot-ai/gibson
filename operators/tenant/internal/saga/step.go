@@ -48,7 +48,6 @@ const (
 	CapabilityFGA           = psaga.CapabilityFGA
 	CapabilityRedisAdmin    = psaga.CapabilityRedisAdmin
 	CapabilityQdrantAdmin   = psaga.CapabilityQdrantAdmin
-	CapabilityStripe        = psaga.CapabilityStripe
 	CapabilityDaemonGRPC    = psaga.CapabilityDaemonGRPC
 	CapabilitySMTP          = psaga.CapabilitySMTP
 )

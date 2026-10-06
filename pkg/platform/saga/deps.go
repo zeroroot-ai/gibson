@@ -43,9 +43,6 @@ type Deps struct {
 	// Qdrant is the Qdrant HTTP admin client.
 	Qdrant QdrantAdminClient
 
-	// Stripe is the Stripe API client.
-	Stripe StripeClient
-
 	// DaemonGRPC is the Connect-RPC client to gibson's PlatformOperatorService.
 	DaemonGRPC DaemonGRPCClient
 
@@ -77,8 +74,6 @@ func (d *Deps) Has(c ClientCapability) bool {
 		return d.Redis != nil
 	case CapabilityQdrantAdmin:
 		return d.Qdrant != nil
-	case CapabilityStripe:
-		return d.Stripe != nil
 	case CapabilityDaemonGRPC:
 		return d.DaemonGRPC != nil
 	case CapabilitySMTP:
@@ -105,7 +100,6 @@ type (
 	FGAClient           any
 	RedisAdminClient    any
 	QdrantAdminClient   any
-	StripeClient        any
 	DaemonGRPCClient    any
 	MailerClient        any
 )

@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+// Package gibson.daemon.connection.v1 — ConnectionPointService: the neutral
+// connection points of the platform (ADR-0060, D41, D54).
+//
+// A component outside this repository can run a signup step, start or stop a
+// tenant, and read the usage of each tenant. The platform does not know what
+// that component is. With no component configured, signup never waits, each
+// tenant is active when it exists, and no caller reaches these RPCs.
+//
+// Authorization: each RPC accepts one configured SPIFFE identity, read from
+// the TLS peer of the call. GIBSON_SIGNUP_STEP_COMPLETER_SVID may call
+// CompleteSignupStep. GIBSON_TENANT_ACTIVATION_SVID may call
+// SetTenantActivation and ListTenantUsage. A call through Envoy carries the
+// SVID of Envoy and is refused. The registry rule below is the second gate:
+// only a platform operator passes it on the browser path.
+package gibson.daemon.connection.v1;
+
+option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1;connectionv1";
+
+import "gibson/auth/v1/options.proto";
+
+// ConnectionPointService holds the neutral connection points.
+service ConnectionPointService {
+  // CompleteSignupStep reports the outcome of the external signup step of one
+  // signup. The step token identifies the signup. DONE releases the tenant to
+  // provisioning. FAILED keeps it waiting, and a later DONE with the same
+  // token is still accepted until the token expires.
+  //
+  // Errors: NotFound (unknown or expired token), PermissionDenied (the caller
+  // is not the configured SPIFFE identity), InvalidArgument.
+  rpc CompleteSignupStep(CompleteSignupStepRequest) returns (CompleteSignupStepResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
+    };
+  }
+
+  // SetTenantActivation tells the platform that a tenant is active or
+  // suspended. A tenant that no call has named is active.
+  //
+  // Errors: NotFound (no such tenant), PermissionDenied, InvalidArgument.
+  rpc SetTenantActivation(SetTenantActivationRequest) returns (SetTenantActivationResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
+    };
+  }
+
+  // ListTenantUsage returns the usage of each tenant in the current budget
+  // period. The period is the one the budget counters of the platform use.
+  //
+  // Errors: PermissionDenied, Unavailable.
+  rpc ListTenantUsage(ListTenantUsageRequest) returns (ListTenantUsageResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
+    };
+  }
+}
+
+// SignupStepOutcome is the result of the external signup step.
+enum SignupStepOutcome {
+  // SIGNUP_STEP_OUTCOME_UNSPECIFIED is refused.
+  SIGNUP_STEP_OUTCOME_UNSPECIFIED = 0;
+  // SIGNUP_STEP_OUTCOME_DONE: the step is done.
+  SIGNUP_STEP_OUTCOME_DONE = 1;
+  // SIGNUP_STEP_OUTCOME_FAILED: the step failed.
+  SIGNUP_STEP_OUTCOME_FAILED = 2;
+}
+
+// CompleteSignupStepRequest carries the opaque token and the outcome.
+message CompleteSignupStepRequest {
+  // step_token is the token that SignupResponse.step_token returned.
+  string step_token = 1;
+  // outcome is the result of the step.
+  SignupStepOutcome outcome = 2;
+}
+
+// CompleteSignupStepResponse is empty.
+message CompleteSignupStepResponse {}
+
+// TenantActivationState is the activation state of a tenant.
+enum TenantActivationState {
+  // TENANT_ACTIVATION_STATE_UNSPECIFIED is refused.
+  TENANT_ACTIVATION_STATE_UNSPECIFIED = 0;
+  // TENANT_ACTIVATION_STATE_ACTIVE: the tenant can run work.
+  TENANT_ACTIVATION_STATE_ACTIVE = 1;
+  // TENANT_ACTIVATION_STATE_SUSPENDED: the tenant cannot start new work.
+  TENANT_ACTIVATION_STATE_SUSPENDED = 2;
+}
+
+// SetTenantActivationRequest names a tenant and its new state.
+message SetTenantActivationRequest {
+  // tenant_id is the tenant slug.
+  string tenant_id = 1;
+  // state is the new activation state.
+  TenantActivationState state = 2;
+}
+
+// SetTenantActivationResponse reports whether the state changed.
+message SetTenantActivationResponse {
+  // changed is true when the stored state was different before the call.
+  bool changed = 1;
+}
+
+// ListTenantUsageRequest carries no fields.
+message ListTenantUsageRequest {}
+
+// TenantUsage is the usage of one tenant in the current budget period.
+message TenantUsage {
+  string tenant_id = 1;
+  int64 tokens = 2;
+  int64 cost_usd_cents = 3;
+}
+
+// ListTenantUsageResponse carries one row for each tenant.
+message ListTenantUsageResponse {
+  repeated TenantUsage tenants = 1;
+  // period_start_unix and period_end_unix bound the budget period, in seconds.
+  int64 period_start_unix = 2;
+  int64 period_end_unix = 3;
+}

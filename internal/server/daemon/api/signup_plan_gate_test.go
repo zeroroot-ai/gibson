@@ -25,16 +25,16 @@ import (
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
-// requestVerifiedSession drives phase 1 and 2 of the flow (RequestEmailVerification,
-// RedeemEmailVerification, and — when stripeCustomerID is non-empty —
-// AttachSignupCustomer) and returns the resulting verified session token.
+// requestVerifiedSession drives phase 1 and 2 of the flow
+// (RequestEmailVerification and RedeemEmailVerification) and returns the
+// resulting verified session token.
 //
 // The plan gate resolves against the verification row, not the Signup
-// request — SignupRequest carries neither a tier nor a billing-customer id,
+// request — SignupRequest carries no tier,
 // exactly so a caller cannot self-select a paid tier on the completion call.
 // So exercising the gate means routing the tier through phase 1 (the
 // RequestEmailVerification tier field) rather than stapling it onto Signup.
-func requestVerifiedSession(t *testing.T, h *signupHarness, tier, stripeCustomerID string) string {
+func requestVerifiedSession(t *testing.T, h *signupHarness, tier string) string {
 	t.Helper()
 	req := validRequestReq()
 	req.Tier = tier
@@ -52,17 +52,7 @@ func requestVerifiedSession(t *testing.T, h *signupHarness, tier, stripeCustomer
 	if err != nil {
 		t.Fatalf("RedeemEmailVerification(tier=%q): %v", tier, err)
 	}
-	session := resp.GetVerifiedSessionToken()
-
-	if stripeCustomerID != "" {
-		if _, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-			VerifiedSessionToken: session,
-			StripeCustomerId:     stripeCustomerID,
-		}); err != nil {
-			t.Fatalf("AttachSignupCustomer(tier=%q): %v", tier, err)
-		}
-	}
-	return session
+	return resp.GetVerifiedSessionToken()
 }
 
 // signupWithSession completes Signup for a session obtained from
@@ -100,7 +90,7 @@ func TestSignup_RejectsNonCanonicalTier(t *testing.T) {
 	} {
 		t.Run(tier, func(t *testing.T) {
 			h := planGateHarness(t)
-			session := requestVerifiedSession(t, h, tier, "cus_1")
+			session := requestVerifiedSession(t, h, tier)
 
 			_, err := signupWithSession(t, h, session)
 			if got := status.Code(err); got != codes.InvalidArgument {
@@ -111,11 +101,10 @@ func TestSignup_RejectsNonCanonicalTier(t *testing.T) {
 }
 
 // TestSignup_RejectsContactSalesPlan is the direct free-enterprise-tier
-// regression: enterprise-deploy is priced contact-sales, has no Stripe product
-// and no trial, and must never be reachable through self-serve signup.
+// regression: enterprise-deploy is priced contact-sales and has no trial, and must never be reachable through self-serve signup.
 func TestSignup_RejectsContactSalesPlan(t *testing.T) {
 	h := planGateHarness(t)
-	session := requestVerifiedSession(t, h, "enterprise-deploy", "cus_1")
+	session := requestVerifiedSession(t, h, "enterprise-deploy")
 
 	_, err := signupWithSession(t, h, session)
 	if got := status.Code(err); got != codes.PermissionDenied {
@@ -123,34 +112,37 @@ func TestSignup_RejectsContactSalesPlan(t *testing.T) {
 	}
 }
 
-// TestSignup_PaidPlanRequiresBillingCustomerWhenEntitlementsRequired covers
-// rule 3 of the gate: on a deployment that enforces entitlements (the SaaS
-// overlay), a paid plan may not be requested without having gone through
-// payment setup.
-func TestSignup_PaidPlanRequiresBillingCustomerWhenEntitlementsRequired(t *testing.T) {
+// TestSignup_PaidPlanNeedsTheStepWhenEntitlementsRequired covers rule 3 of the
+// gate: on a deployment that enforces entitlements, a paid plan needs the
+// external signup step. With no step configured, nothing can confirm it.
+func TestSignup_PaidPlanNeedsTheStepWhenEntitlementsRequired(t *testing.T) {
 	t.Setenv(entitlements.RequiredKnob, "true")
 	h := planGateHarness(t)
-	session := requestVerifiedSession(t, h, "enterprise", "")
+	session := requestVerifiedSession(t, h, "enterprise")
 
 	_, err := signupWithSession(t, h, session)
 	if got := status.Code(err); got != codes.PermissionDenied {
-		t.Fatalf("Signup(tier=enterprise, no customer) code = %v, want PermissionDenied", got)
+		t.Fatalf("Signup(tier=enterprise, no step) code = %v, want PermissionDenied", got)
 	}
 }
 
-// TestSignup_PaidPlanAllowedOnPremWithoutBilling pins ADR-0074: the billing
-// seam is bypassable on-prem, so a self-hosted install (entitlements knob
-// unset) must not need a Stripe customer to sign up.
-func TestSignup_PaidPlanAllowedOnPremWithoutBilling(t *testing.T) {
+// TestSignup_PaidPlanAllowedOnPremWithoutStep pins ADR-0074: the seam is
+// bypassable on-prem, so a self-hosted install (entitlements knob unset) signs
+// up with no step.
+func TestSignup_PaidPlanAllowedOnPremWithoutStep(t *testing.T) {
 	t.Setenv(entitlements.RequiredKnob, "")
 	h := newSignupHarness(t)
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
 	}
-	session := requestVerifiedSession(t, h, "team", "")
+	session := requestVerifiedSession(t, h, "team")
 
-	if _, err := signupWithSession(t, h, session); err != nil {
-		t.Fatalf("on-prem signup without a billing customer must succeed, got: %v", err)
+	resp, err := signupWithSession(t, h, session)
+	if err != nil {
+		t.Fatalf("on-prem signup without a step must succeed, got: %v", err)
+	}
+	if resp.GetStepUrl() != "" || resp.GetStepToken() != "" {
+		t.Fatalf("a signup with no step configured got step_url %q and a token", resp.GetStepUrl())
 	}
 }
 
@@ -164,39 +156,40 @@ func TestSignup_AcceptsCanonicalSelfServePlans(t *testing.T) {
 			h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 				return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
 			}
-			session := requestVerifiedSession(t, h, tier, "cus_1")
+			h.srv.WithSignupStepURL("https://step.example/start")
+			session := requestVerifiedSession(t, h, tier)
 
-			if _, err := signupWithSession(t, h, session); err != nil {
+			resp, err := signupWithSession(t, h, session)
+			if err != nil {
 				t.Fatalf("Signup(tier=%q) must succeed, got: %v", tier, err)
+			}
+			if resp.GetStepUrl() != "https://step.example/start" || resp.GetStepToken() == "" {
+				t.Fatalf("Signup(tier=%q) with a step configured returned no step", tier)
 			}
 		})
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Provisioning drain — the billing-active read
+// Provisioning drain
 // ---------------------------------------------------------------------------
 
 // TestWithholdPendingTenant is the decision table for the drain gate.
 func TestWithholdPendingTenant(t *testing.T) {
 	tests := []struct {
-		name           string
-		tier           string
-		billingActive  bool
-		enforceBilling bool
-		wantWithheld   bool
+		name         string
+		tier         string
+		enforce      bool
+		wantWithheld bool
 	}{
-		{"self-hosted never withholds", "enterprise", false, false, false},
-		{"paid plan without billing is withheld", "enterprise", false, true, true},
-		{"paid plan with billing drains", "enterprise", true, true, false},
-		{"cheapest paid plan is gated too", "team", false, true, true},
-		{"unpriceable tier is withheld", "enterprise-plus", true, true, true},
-		{"empty tier is withheld", "", true, true, true},
-		{"contact-sales plan is not Stripe-billed and drains", "enterprise-deploy", false, true, false},
+		{"self-hosted never withholds", "enterprise-plus", false, false},
+		{"a canonical plan drains", "enterprise", true, false},
+		{"unpriceable tier is withheld", "enterprise-plus", true, true},
+		{"empty tier is withheld", "", true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			reason, withheld := withholdPendingTenant(tc.tier, tc.billingActive, tc.enforceBilling)
+			reason, withheld := withholdPendingTenant(tc.tier, tc.enforce)
 			if withheld != tc.wantWithheld {
 				t.Fatalf("withhold = %v (%q), want %v", withheld, reason, tc.wantWithheld)
 			}
@@ -207,48 +200,9 @@ func TestWithholdPendingTenant(t *testing.T) {
 	}
 }
 
-// TestListPendingTenantProvisioning_WithholdsUnpaidPaidTier is the end-to-end
-// regression: a tenant queued at a paid plan is not handed to the operator
-// until billing_active is recorded. Before the fix billing_active had no reader
-// anywhere on the provisioning path.
-func TestListPendingTenantProvisioning_WithholdsUnpaidPaidTier(t *testing.T) {
-	t.Setenv(entitlements.RequiredKnob, "true")
-
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-
-	srv := newPendingServer()
-	srv.platformDB = db
-
-	expectEnsureTable(mock)
-	expectEnsureTenantStatusTable(mock)
-	rows := sqlmock.NewRows([]string{
-		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier",
-		"stripe_customer_id", "billing_active",
-	}).
-		AddRow("paid", "u-1", "owner@paid.test", "Paid Inc", "enterprise", "cus_1", true).
-		AddRow("unpaid", "u-2", "owner@unpaid.test", "Unpaid Inc", "enterprise", "cus_2", false)
-	mock.ExpectQuery("FROM pending_tenant_provisioning p").WillReturnRows(rows)
-
-	resp, err := srv.ListPendingTenantProvisioning(context.Background(),
-		&daemonoperatorv1.ListPendingTenantProvisioningRequest{})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(resp.GetPending()) != 1 {
-		t.Fatalf("expected only the paid tenant to drain, got %d rows: %+v", len(resp.GetPending()), resp.GetPending())
-	}
-	if got := resp.GetPending()[0].GetTenantId(); got != "paid" {
-		t.Errorf("drained tenant = %q, want \"paid\"", got)
-	}
-}
-
 // TestListPendingTenantProvisioning_SelfHostedDrainsEverything pins ADR-0074:
-// with the entitlements knob unset there is no billing to enforce and the
-// queue drains unchanged.
+// with the entitlements knob unset the queue drains unchanged, even a tier
+// that does not resolve.
 func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) {
 	t.Setenv(entitlements.RequiredKnob, "")
 
@@ -262,12 +216,10 @@ func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) 
 	srv.platformDB = db
 
 	expectEnsureTable(mock)
-	expectEnsureTenantStatusTable(mock)
 	rows := sqlmock.NewRows([]string{
 		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier",
-		"stripe_customer_id", "billing_active",
-	}).AddRow("unpaid", "u-2", "owner@unpaid.test", "Unpaid Inc", "enterprise", "", false)
-	mock.ExpectQuery("FROM pending_tenant_provisioning p").WillReturnRows(rows)
+	}).AddRow("acme", "u-2", "owner@acme.test", "Acme Inc", "enterprise-plus")
+	mock.ExpectQuery("FROM pending_tenant_provisioning").WillReturnRows(rows)
 
 	resp, err := srv.ListPendingTenantProvisioning(context.Background(),
 		&daemonoperatorv1.ListPendingTenantProvisioningRequest{})

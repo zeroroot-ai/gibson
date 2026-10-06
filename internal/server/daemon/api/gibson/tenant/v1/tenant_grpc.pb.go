@@ -48,7 +48,6 @@ const (
 	TenantService_ListMissionDrafts_FullMethodName     = "/gibson.tenant.v1.TenantService/ListMissionDrafts"
 	TenantService_GetMissionDraft_FullMethodName       = "/gibson.tenant.v1.TenantService/GetMissionDraft"
 	TenantService_DeleteMissionDraft_FullMethodName    = "/gibson.tenant.v1.TenantService/DeleteMissionDraft"
-	TenantService_GetTenantBilling_FullMethodName      = "/gibson.tenant.v1.TenantService/GetTenantBilling"
 )
 
 // TenantServiceClient is the client API for TenantService service.
@@ -82,21 +81,6 @@ type TenantServiceClient interface {
 	// DeleteMissionDraft removes a saved draft. Idempotent: deleting a missing
 	// draft returns OK.
 	DeleteMissionDraft(ctx context.Context, in *DeleteMissionDraftRequest, opts ...grpc.CallOption) (*DeleteMissionDraftResponse, error)
-	// GetTenantBilling returns the CALLING tenant's own billing identifiers — the
-	// Stripe customer id, the billing-active flag and the Zitadel org slug — for
-	// the billing-portal surface (dashboard#1016).
-	//
-	// These fields used to be served by the unauthenticated
-	// TenantProvisioningService.GetTenantProvisioningStatus behind an in-handler
-	// "same authenticated tenant" redaction. That gate was unsatisfiable: an
-	// unauthenticated-mode RPC never has its tenant resolved by ext-authz
-	// (skipTenantResolution), so the own-tenant branch could not fire for ANY
-	// caller and the billing portal 400'd for every tenant (gibson#1339). The
-	// read is moved here, to a rule-mode RPC whose tenant_from_identity object
-	// deriver lets ext-authz + FGA enforce same-tenant BEFORE the handler runs.
-	// There is deliberately no tenant_id in the request — the tenant is the
-	// caller's own identity, so there is nothing for a caller to spoof.
-	GetTenantBilling(ctx context.Context, in *GetTenantBillingRequest, opts ...grpc.CallOption) (*GetTenantBillingResponse, error)
 }
 
 type tenantServiceClient struct {
@@ -207,16 +191,6 @@ func (c *tenantServiceClient) DeleteMissionDraft(ctx context.Context, in *Delete
 	return out, nil
 }
 
-func (c *tenantServiceClient) GetTenantBilling(ctx context.Context, in *GetTenantBillingRequest, opts ...grpc.CallOption) (*GetTenantBillingResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetTenantBillingResponse)
-	err := c.cc.Invoke(ctx, TenantService_GetTenantBilling_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // TenantServiceServer is the server API for TenantService service.
 // All implementations must embed UnimplementedTenantServiceServer
 // for forward compatibility.
@@ -248,21 +222,6 @@ type TenantServiceServer interface {
 	// DeleteMissionDraft removes a saved draft. Idempotent: deleting a missing
 	// draft returns OK.
 	DeleteMissionDraft(context.Context, *DeleteMissionDraftRequest) (*DeleteMissionDraftResponse, error)
-	// GetTenantBilling returns the CALLING tenant's own billing identifiers — the
-	// Stripe customer id, the billing-active flag and the Zitadel org slug — for
-	// the billing-portal surface (dashboard#1016).
-	//
-	// These fields used to be served by the unauthenticated
-	// TenantProvisioningService.GetTenantProvisioningStatus behind an in-handler
-	// "same authenticated tenant" redaction. That gate was unsatisfiable: an
-	// unauthenticated-mode RPC never has its tenant resolved by ext-authz
-	// (skipTenantResolution), so the own-tenant branch could not fire for ANY
-	// caller and the billing portal 400'd for every tenant (gibson#1339). The
-	// read is moved here, to a rule-mode RPC whose tenant_from_identity object
-	// deriver lets ext-authz + FGA enforce same-tenant BEFORE the handler runs.
-	// There is deliberately no tenant_id in the request — the tenant is the
-	// caller's own identity, so there is nothing for a caller to spoof.
-	GetTenantBilling(context.Context, *GetTenantBillingRequest) (*GetTenantBillingResponse, error)
 	mustEmbedUnimplementedTenantServiceServer()
 }
 
@@ -302,9 +261,6 @@ func (UnimplementedTenantServiceServer) GetMissionDraft(context.Context, *GetMis
 }
 func (UnimplementedTenantServiceServer) DeleteMissionDraft(context.Context, *DeleteMissionDraftRequest) (*DeleteMissionDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteMissionDraft not implemented")
-}
-func (UnimplementedTenantServiceServer) GetTenantBilling(context.Context, *GetTenantBillingRequest) (*GetTenantBillingResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetTenantBilling not implemented")
 }
 func (UnimplementedTenantServiceServer) mustEmbedUnimplementedTenantServiceServer() {}
 func (UnimplementedTenantServiceServer) testEmbeddedByValue()                       {}
@@ -507,24 +463,6 @@ func _TenantService_DeleteMissionDraft_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
-func _TenantService_GetTenantBilling_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetTenantBillingRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(TenantServiceServer).GetTenantBilling(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: TenantService_GetTenantBilling_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(TenantServiceServer).GetTenantBilling(ctx, req.(*GetTenantBillingRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // TenantService_ServiceDesc is the grpc.ServiceDesc for TenantService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -571,10 +509,6 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteMissionDraft",
 			Handler:    _TenantService_DeleteMissionDraft_Handler,
-		},
-		{
-			MethodName: "GetTenantBilling",
-			Handler:    _TenantService_GetTenantBilling_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

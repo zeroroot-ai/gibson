@@ -13,10 +13,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -71,7 +67,6 @@ func TestSignupLimits_EveryRPCHasAPeerIndependentBudget(t *testing.T) {
 	sets := map[string][]signupLimit{
 		"RequestEmailVerification": requestVerificationLimits("a@b.c", "203.0.113.7"),
 		"RedeemEmailVerification":  redeemLimits("203.0.113.7"),
-		"AttachSignupCustomer":     attachCustomerLimits("203.0.113.7"),
 		"Signup":                   completeLimits("203.0.113.7"),
 	}
 	for rpc, limits := range sets {
@@ -90,7 +85,6 @@ func TestSignupLimits_EveryRPCHasAPeerIndependentBudget(t *testing.T) {
 			forged := map[string][]signupLimit{
 				"RequestEmailVerification": requestVerificationLimits("a@b.c", "198.51.100.4"),
 				"RedeemEmailVerification":  redeemLimits("198.51.100.4"),
-				"AttachSignupCustomer":     attachCustomerLimits("198.51.100.4"),
 				"Signup":                   completeLimits("198.51.100.4"),
 			}[rpc]
 			var forgedGlobal string
@@ -138,84 +132,3 @@ func TestSignupLimits_ForgedClientIPStillSpendsTheSharedBudget(t *testing.T) {
 // ---------------------------------------------------------------------------
 // AttachSignupCustomer
 // ---------------------------------------------------------------------------
-
-// TestAttachSignupCustomer_RejectsNonCustomerIdentifiers keeps arbitrary
-// caller text out of a column that flows on to the provisioning row and the
-// tenant-status row.
-func TestAttachSignupCustomer_RejectsNonCustomerIdentifiers(t *testing.T) {
-	h := newSignupHarness(t)
-	session := h.requestAndRedeem(t)
-
-	bad := []string{
-		"sub_123",                    // a different Stripe object
-		"cus_",                       // prefix only
-		"cus_123 OR 1=1",             // not an identifier at all
-		"cus_123\nX",                 // embedded newline
-		strings.Repeat("cus_1", 100), // absurd length
-	}
-	for _, id := range bad {
-		_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-			VerifiedSessionToken: session,
-			StripeCustomerId:     id,
-		})
-		require.Equal(t, codes.InvalidArgument, status.Code(err), "%q was accepted as a customer id", id)
-	}
-
-	// The control: a well-formed id still attaches.
-	_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-		VerifiedSessionToken: session,
-		StripeCustomerId:     "cus_NffrFeUfNV2Hib",
-	})
-	require.NoError(t, err)
-}
-
-// TestAttachSignupCustomer_BindsOneCustomerToOneSession pins the ownership
-// rule the handler previously had none of: the id is not merely well-formed,
-// it belongs to this signup and to no other. resolveSignupPlan reads it as the
-// evidence that a paid plan has a billing customer behind it.
-func TestAttachSignupCustomer_BindsOneCustomerToOneSession(t *testing.T) {
-	h := newSignupHarness(t)
-	mine := h.requestAndRedeem(t)
-
-	attach := func(session, customer string) error {
-		_, err := h.srv.AttachSignupCustomer(context.Background(), &tenantv1.AttachSignupCustomerRequest{
-			VerifiedSessionToken: session,
-			StripeCustomerId:     customer,
-		})
-		return err
-	}
-
-	require.NoError(t, attach(mine, "cus_mine"))
-
-	t.Run("re-attaching the same customer is idempotent", func(t *testing.T) {
-		require.NoError(t, attach(mine, "cus_mine"), "a card retry must not be refused")
-	})
-
-	t.Run("the session's customer cannot be swapped", func(t *testing.T) {
-		err := attach(mine, "cus_other")
-		require.Equal(t, codes.PermissionDenied, status.Code(err),
-			"a live session's customer must not be replaceable after the fact")
-		row, err := h.store.GetByVerifiedSession(context.Background(), mine)
-		require.NoError(t, err)
-		require.Equal(t, "cus_mine", row.StripeCustomerID)
-	})
-
-	t.Run("another signup cannot claim a customer already in use", func(t *testing.T) {
-		// A second signup, in the same store, that proved a different address.
-		second := validRequestReq()
-		second.AttemptId = "0d5b7d2a-2a4f-4d1e-9a63-9f2f5f1a77c1"
-		second.OwnerEmail = "someone-else@example.test"
-		_, err := h.srv.RequestEmailVerification(context.Background(), second)
-		require.NoError(t, err)
-		require.Len(t, h.mail.verifications, 2)
-		theirToken := tokenFromLink(t, h.mail.verifications[1].ContinueURL)
-		redeemed, err := h.srv.RedeemEmailVerification(context.Background(), &tenantv1.RedeemEmailVerificationRequest{
-			Token: theirToken, ClientIp: "198.51.100.4",
-		})
-		require.NoError(t, err)
-
-		err = attach(redeemed.GetVerifiedSessionToken(), "cus_mine")
-		require.Equal(t, codes.PermissionDenied, status.Code(err),
-			"a customer already bound to another signup must not be claimable")
-	})
-}

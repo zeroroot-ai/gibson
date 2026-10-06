@@ -104,7 +104,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	// The plan gate runs at approval time, where it decides provisioning. It
 	// runs here too, so a request for a plan no self-serve registration may
 	// have is refused at the door instead of filling an administrator's queue.
-	if _, err := s.resolveSignupPlan(req.GetTier(), ""); err != nil {
+	if _, err := s.resolveSignupPlan(req.GetTier(), false); err != nil {
 		return nil, err
 	}
 
@@ -293,10 +293,9 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 	}
 
 	// The same server-side plan gate the open rung runs, from the same
-	// function. StripeCustomerID is empty on this rung, so a paid plan is
-	// refused where the deployment enforces entitlements — which is correct:
-	// nobody paid.
-	plan, err := s.resolveSignupPlan(row.Tier, row.StripeCustomerID)
+	// function. This rung has no external step, so a paid plan is refused
+	// where the deployment enforces entitlements.
+	plan, err := s.resolveSignupPlan(row.Tier, false)
 	if err != nil {
 		s.logger.WarnContext(ctx, "AdminApproveRegistration: plan gate refused the registration",
 			"registration_id", row.ID, "requested_tier", row.Tier, "error", err.Error())
@@ -318,7 +317,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		OwnerEmail:    row.Email,
 		WorkspaceName: row.WorkspaceName,
 		Tier:          plan.ID,
-	}); err != nil {
+	}, nil); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: enqueue pending tenant provisioning failed",
 			"registration_id", row.ID, "tenant_id", slug, "error", err.Error())
 		// The owner can sign in now and has no workspace. Deactivate again so

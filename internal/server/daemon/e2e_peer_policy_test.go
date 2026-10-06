@@ -4,6 +4,8 @@
 package daemon
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
+
 	"strings"
 	"testing"
 )
@@ -19,7 +21,7 @@ import (
 // cannot be talked into accepting it — not by config, not by an operator
 // mistake, because there is no policy for it in the binary.
 func TestE2EPeerPolicy_AbsentFromProductionBuilds(t *testing.T) {
-	policies := spiffePeerMethodPolicies()
+	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
 
 	var e2e []string
 	for id := range policies {
@@ -43,7 +45,7 @@ func TestE2EPeerPolicy_AbsentFromProductionBuilds(t *testing.T) {
 // not disturb the two real control-plane peers. Losing one would silently
 // un-authorise the tenant-operator or connector-operator.
 func TestSpiffePeerMethodPolicies_KeepsTheShippedPeers(t *testing.T) {
-	policies := spiffePeerMethodPolicies()
+	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
 	for _, want := range []string{tenantOperatorSVID, connectorOperatorSVID} {
 		methods, ok := policies[want]
 		if !ok {

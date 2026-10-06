@@ -60,6 +60,9 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/WatchComponentEvents,can_poll_work,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
 /gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
+/gibson.daemon.connection.v1.ConnectionPointService/CompleteSignupStep,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
+/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
+/gibson.daemon.connection.v1.ConnectionPointService/SetTenantActivation,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/DenyDestructiveAction,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ListPendingDestructiveActions,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
@@ -239,7 +242,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.session.v1.SessionService/RevokeMySession,member,tenant,tenant_from_identity,USER,gibson/session/v1/session.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminApproveRegistration,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminDeleteTenant,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
-/gibson.tenant.v1.AdminTenantService/AdminGetTenantBilling,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminProvisionTenant,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminRejectRegistration,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
@@ -312,18 +314,16 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.ProviderService/SetDefaultProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/TestProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/UpdateProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
-/gibson.tenant.v1.SignupService/AttachSignupCustomer,,,,,gibson/tenant/v1/signup.proto,unauthenticated
+/gibson.tenant.v1.SignupService/GetSignupStep,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/RedeemEmailVerification,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/Register,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/RequestEmailVerification,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/Signup,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
-/gibson.tenant.v1.TenantProvisioningService/SetTenantBillingActive,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
 /gibson.tenant.v1.TenantService/DeleteMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ExportFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
-/gibson.tenant.v1.TenantService/GetTenantBilling,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantQuota,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantQuotaUsage,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ListAuditEvents,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule

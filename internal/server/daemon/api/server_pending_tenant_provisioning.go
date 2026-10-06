@@ -41,7 +41,10 @@ import (
 // Returns (false, nil) when no platform DB is configured: enqueue is best-effort
 // in dev/kind where Postgres may be absent, and the caller logs rather than
 // failing the signup.
-func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *daemonoperatorv1.PendingTenant) (bool, error) {
+//
+// hold, when not nil, puts the row in status 'waiting_step': the operator does
+// not see it until the external signup step is done (signup_step.go).
+func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold) (bool, error) {
 	db := s.entitlementsDB()
 	if db == nil {
 		return false, nil
@@ -51,13 +54,21 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 	}
 	const q = `
 		INSERT INTO pending_tenant_provisioning
-			(tenant_id, owner_user_id, owner_email, workspace_name, tier, stripe_customer_id, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW(), NOW())
+			(tenant_id, owner_user_id, owner_email, workspace_name, tier, status,
+			 attempt_id, step_token_hash, step_expires_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		ON CONFLICT (tenant_id) DO NOTHING
 	`
+	queueStatus, attemptID, tokenHash := "pending", "", ""
+	var expiresAt sql.NullTime
+	if hold != nil {
+		queueStatus, attemptID, tokenHash = "waiting_step", hold.attemptID, hold.tokenHash
+		expiresAt = sql.NullTime{Time: hold.expiresAt, Valid: true}
+	}
 	res, err := db.ExecContext(ctx, q,
 		p.GetTenantId(), p.GetOwnerUserId(), p.GetOwnerEmail(),
-		p.GetWorkspaceName(), p.GetTier(), p.GetStripeCustomerId(),
+		p.GetWorkspaceName(), p.GetTier(), queueStatus,
+		attemptID, tokenHash, expiresAt,
 	)
 	if err != nil {
 		return false, fmt.Errorf("insert pending_tenant_provisioning: %w", err)
@@ -71,27 +82,17 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 // enforced by ext-authz). The daemon never reads Kubernetes here — it only
 // returns queue rows for the operator to act on.
 //
-// # Billing gate
+// # Gates
 //
-// This is the platform's read point for billing_active on the provisioning
-// path. billing_active is recorded by the Stripe-webhook path
-// (SetTenantBillingActive) and echoed to the operator by ReportTenantStatus,
-// which stamps the gibson.zeroroot.ai/billing-active CR annotation from it —
-// but before this gate NOTHING consumed either the column or the annotation,
-// so a paid-tier tenant provisioned whether or not it was ever paid for.
+// Only rows in status 'pending' are listed. A signup that waits for the
+// external signup step is in status 'waiting_step' or 'step_failed', so the
+// operator does not see it until ConnectionPointService.CompleteSignupStep
+// reports the step done (ADR-0060, D54).
 //
-// When the deployment enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true,
-// the SaaS overlay) a pending row whose plan is paid is WITHHELD from the drain
-// until billing_active is true. Withheld rows are left in the queue at
-// status='pending' and logged, so they drain automatically on the next operator
-// poll after billing activates — nothing is dropped, and a stalled tenant is
-// visible in the daemon log rather than silently provisioned for free.
-//
-// A pending row whose tier does not resolve to a canonical plan is also
-// withheld: an unrecognised tier cannot be priced, so it fails closed.
-//
-// Self-hosted installs leave GIBSON_ENTITLEMENTS_REQUIRED unset and are
-// unaffected (ADR-0074: the billing seam is bypassable on-prem by design).
+// When the deployment enforces entitlements (GIBSON_ENTITLEMENTS_REQUIRED=true)
+// a pending row whose tier does not resolve to a canonical plan is withheld:
+// an unrecognised tier cannot be priced, so it fails closed. Withheld rows stay
+// in the queue and are logged.
 func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
@@ -100,21 +101,11 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	// tenant_status is joined below; make sure it exists on a freshly-pointed
-	// DB for the same reason the pending table is ensured above.
-	if err := ensureTenantStatusTable(ctx, db); err != nil {
-		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
-	}
-	// LEFT JOIN so a tenant the operator has not reported on yet (no
-	// tenant_status row) reads as billing_active=false rather than vanishing
-	// from the queue.
 	const q = `
-		SELECT p.tenant_id, p.owner_user_id, p.owner_email, p.workspace_name, p.tier,
-		       p.stripe_customer_id, COALESCE(s.billing_active, FALSE)
-		FROM pending_tenant_provisioning p
-		LEFT JOIN tenant_status s ON s.tenant_id = p.tenant_id
-		WHERE p.status = 'pending'
-		ORDER BY p.created_at ASC
+		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier
+		FROM pending_tenant_provisioning
+		WHERE status = 'pending'
+		ORDER BY created_at ASC
 	`
 	rows, err := db.QueryContext(ctx, q)
 	if err != nil {
@@ -122,22 +113,18 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 	}
 	defer func() { _ = rows.Close() }()
 
-	enforceBilling := entitlements.Required()
+	enforce := entitlements.Required()
 
 	out := &daemonoperatorv1.ListPendingTenantProvisioningResponse{}
 	for rows.Next() {
-		var (
-			p             daemonoperatorv1.PendingTenant
-			billingActive bool
-		)
+		var p daemonoperatorv1.PendingTenant
 		if err := rows.Scan(
 			&p.TenantId, &p.OwnerUserId, &p.OwnerEmail,
-			&p.WorkspaceName, &p.Tier, &p.StripeCustomerId,
-			&billingActive,
+			&p.WorkspaceName, &p.Tier,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan pending row: %v", err)
 		}
-		if reason, withhold := withholdPendingTenant(p.GetTier(), billingActive, enforceBilling); withhold {
+		if reason, withhold := withholdPendingTenant(p.GetTier(), enforce); withhold {
 			s.logger.Warn("pending tenant withheld from provisioning drain",
 				"tenant_id", p.GetTenantId(),
 				"tier", p.GetTier(),
@@ -157,18 +144,14 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 // operator, returning a human-readable reason when it may not.
 //
 // It is a pure function so the decision table is unit-testable without a
-// database. enforceBilling is entitlements.Required() at the call site.
-func withholdPendingTenant(tier string, billingActive, enforceBilling bool) (reason string, withhold bool) {
-	if !enforceBilling {
-		// Self-hosted / OSS: no billing to enforce (ADR-0074).
+// database. enforce is entitlements.Required() at the call site.
+func withholdPendingTenant(tier string, enforce bool) (reason string, withhold bool) {
+	if !enforce {
+		// Self-hosted / OSS: no entitlements to enforce (ADR-0074).
 		return "", false
 	}
-	plan, ok := plans.Lookup(tier)
-	if !ok {
+	if _, ok := plans.Lookup(tier); !ok {
 		return "tier does not resolve to a canonical plan", true
-	}
-	if plan.Paid && !billingActive {
-		return "paid plan without an active billing record", true
 	}
 	return "", false
 }
@@ -213,10 +196,12 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 			owner_email        TEXT NOT NULL,
 			workspace_name     TEXT NOT NULL,
 			tier               TEXT NOT NULL,
-			stripe_customer_id TEXT NOT NULL DEFAULT '',
 			status             TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT pending_tenant_provisioning_status_check
-				CHECK (status IN ('pending', 'claimed', 'done')),
+				CHECK (status IN ('waiting_step', 'step_failed', 'pending', 'claimed', 'done')),
+			attempt_id         TEXT NOT NULL DEFAULT '',
+			step_token_hash    TEXT NOT NULL DEFAULT '',
+			step_expires_at    TIMESTAMPTZ,
 			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)
@@ -261,7 +246,7 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 		OwnerEmail:    req.GetOwnerEmail(),
 		WorkspaceName: req.GetDisplayName(),
 		Tier:          tier,
-	})
+	}, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}
