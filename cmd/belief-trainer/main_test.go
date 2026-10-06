@@ -191,7 +191,10 @@ func TestRun_RequiresTenantAndDaemon(t *testing.T) {
 }
 
 // The owner decision of gibson#614: the trainer talks only to the daemon. Its
-// binary imports no Redis client and no Postgres driver.
+// binary imports no Redis client and no Postgres driver. The standard library
+// package database/sql is no driver: without one it cannot open a database.
+// The ontology package that the trainer reads its belief schema from imports
+// it.
 func TestTrainerImportsNoDataStore(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", ".").Output()
 	require.NoError(t, err)
@@ -201,8 +204,5 @@ func TestTrainerImportsNoDataStore(t *testing.T) {
 		for _, banned := range []string{"github.com/redis/", "github.com/jackc/", "github.com/lib/pq"} {
 			assert.False(t, strings.HasPrefix(dep, banned), "the trainer imports %s", dep)
 		}
-		// database/sql/driver is allowed: an ID type implements its Valuer
-		// interface. The connection pool, database/sql, is not.
-		assert.NotEqual(t, "database/sql", dep, "the trainer imports database/sql")
 	}
 }
