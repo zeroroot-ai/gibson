@@ -4,7 +4,7 @@
 .PHONY: check-no-tracked-binaries
 .PHONY: check-no-payment-vendor
 .PHONY: check-plugin-modules
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-rules-enforced check-service-names check-proto-rules check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-rules-enforced check-service-names check-proto-rules check-proto-breaking check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -720,7 +720,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-plugin-modules check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-plugin-modules check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules check-proto-breaking
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # check-comment-paths asserts that a repo-relative path named in a comment exists.
@@ -755,6 +755,13 @@ check-service-names:
 check-proto-rules:
 	@echo "Checking the field rules of the daemon-local protos..."
 	$(GOTEST) -count=1 ./tests/protorules/
+
+# check-proto-breaking runs `buf breaking` with the WIRE_JSON rule on the
+# daemon-local protos against origin/main (ADR-0028, gibson#698). Its selftest
+# runs first: a renumbered field must fail.
+check-proto-breaking:
+	@BUF=$(BUF) bash scripts/check-proto-breaking.sh --selftest
+	@BUF=$(BUF) bash scripts/check-proto-breaking.sh
 
 # check-rules-enforced asserts every docs/rules.yaml conforms to the shared
 # schema in the SDK, that each rule's enforced_by names a guard that exists —
