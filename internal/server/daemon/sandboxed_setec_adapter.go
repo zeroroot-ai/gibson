@@ -40,8 +40,10 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1"
 
@@ -189,6 +191,9 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	// dev deployments without a KMS still function — intentional degraded mode.
 	if req.Tenant == "" {
 		return sandboxed.LaunchResponse{}, errNoTenant
+	}
+	if req.FromSnapshot != "" {
+		return c.launchFromSnapshot(ctx, req)
 	}
 	env, err := c.wrapEnv(req.Tenant, req.Env)
 	if err != nil {
@@ -457,4 +462,43 @@ func (c *setecClient) Recovery(ctx context.Context, tenant, sandboxID string) (s
 		out.StateTaken = time.Unix(0, ns).UTC()
 	}
 	return out, true, nil
+}
+
+// launchFromSnapshot starts a sandbox from a snapshot of the tenant
+// (setec#242). The class, the image and the size come from the snapshot, so
+// the request sends none of them. The sandbox gets the network of the
+// request, never the network of the source. A snapshot that setec no longer
+// has is sandboxed.ErrSnapshotGone.
+func (c *setecClient) launchFromSnapshot(ctx context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
+	pbReq := &setecv1.LaunchRequest{
+		Tenant:       req.Tenant,
+		FromSnapshot: req.FromSnapshot,
+		Network:      setecNetwork(req.NetworkMode, req.Egress),
+	}
+	if req.Timeout > 0 {
+		pbReq.Lifecycle = &setecv1.Lifecycle{Timeout: req.Timeout.String()}
+	}
+	resp, err := c.inner.Launch(ctx, pbReq)
+	if status.Code(err) == codes.NotFound {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: launch from %s: %w", req.FromSnapshot, sandboxed.ErrSnapshotGone)
+	}
+	if err != nil {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: launch from %s: %w", req.FromSnapshot, err)
+	}
+	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+}
+
+// Snapshot takes a snapshot of a running sandbox of the tenant that lives
+// for ttl (setec#242). Zero takes the setec default of 7 days.
+func (c *setecClient) Snapshot(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error) {
+	if tenant == "" {
+		return "", errNoTenant
+	}
+	resp, err := c.inner.Snapshot(ctx, &setecv1.SnapshotRequest{
+		Tenant: tenant, SandboxId: sandboxID, TtlSeconds: int64(ttl / time.Second),
+	})
+	if err != nil {
+		return "", fmt.Errorf("setec: snapshot %s: %w", sandboxID, err)
+	}
+	return resp.GetSnapshot(), nil
 }

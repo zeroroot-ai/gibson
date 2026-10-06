@@ -82,8 +82,8 @@ func TestDelegateToAgent_StartsFromForksTheParkedSource(t *testing.T) {
 	if meta["snapshot"] != "snap-9" || meta["starts_from"] != "recon" {
 		t.Fatalf("result metadata = %v", meta)
 	}
-	d, err := ledger.Claim(context.Background(), "jti-src", "ns/fork-1/u1")
-	if err != nil || d.NodeID != "exploit" || d.Grant == "" {
+	d, err := ledger.Claim(context.Background(), "ns/fork-1/u1")
+	if err != nil || d.NodeID != "exploit" || d.Tenant == "" || d.AgentName == "" {
 		t.Fatalf("claim = %+v, %v", d, err)
 	}
 }

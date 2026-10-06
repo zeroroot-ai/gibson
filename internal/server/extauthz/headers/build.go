@@ -82,6 +82,10 @@ const (
 	// authenticated with its self-signed Capability-Grant JWT (ADR-0045).
 	// Mirrors the SDK's auth.CredentialCapabilityGrant.
 	CredentialCapabilityGrant = "capability-grant"
+	// CredentialSandboxIdentity is a fork or a restored sandbox that calls
+	// ClaimFork with its setec identity token only (D80). The daemon
+	// verifies the token and accepts this credential on ClaimFork only.
+	CredentialSandboxIdentity = "sandbox-identity"
 )
 
 // Issuer values emitted in the HeaderIssuer header. Mirror the SDK's

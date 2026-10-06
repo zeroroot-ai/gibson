@@ -39,10 +39,10 @@ func TestRedisForkLedger_ForkSeat(t *testing.T) {
 	if src, forked, _ := l.ForkedSource(ctx, "jti-c"); !forked || src != "ns/src-1/u0" {
 		t.Fatalf("the grant of the caller must count as forked: %q %v", src, forked)
 	}
-	if _, err := l.Claim(ctx, "jti-c", "ns/fork-1/u1"); !errors.Is(err, ErrForkPending) {
+	if _, err := l.Claim(ctx, "ns/fork-1/u1"); !errors.Is(err, ErrForkPending) {
 		t.Fatalf("claim before the dispatch: err = %v, want ErrForkPending", err)
 	}
-	if _, err := l.Claim(ctx, "jti-c", "ns/fork-9/u9"); !errors.Is(err, ErrNotAFork) {
+	if _, err := l.Claim(ctx, "ns/fork-9/u9"); !errors.Is(err, ErrNotAFork) {
 		t.Fatalf("claim of another sandbox: err = %v, want ErrNotAFork", err)
 	}
 	got, ok, err := l.TakeForkSeat(ctx, "child-1", "exploit")
@@ -52,10 +52,10 @@ func TestRedisForkLedger_ForkSeat(t *testing.T) {
 	if _, ok, _ := l.TakeForkSeat(ctx, "child-1", "exploit"); ok {
 		t.Fatal("a seat must be taken once")
 	}
-	if err := l.RecordForks(ctx, "jti-c", seat.SourceSandboxID, []ForkDispatch{{SandboxID: seat.SandboxID, NodeID: "exploit", Grant: "g"}}, time.Hour); err != nil {
+	if err := l.RecordForks(ctx, "jti-c", seat.SourceSandboxID, []ForkDispatch{{SandboxID: seat.SandboxID, Tenant: "acme", NodeID: "exploit"}}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := l.Claim(ctx, "jti-c", "ns/fork-1/u1"); err != nil || d.NodeID != "exploit" {
+	if d, err := l.Claim(ctx, "ns/fork-1/u1"); err != nil || d.NodeID != "exploit" {
 		t.Fatalf("claim after the dispatch = %+v, %v", d, err)
 	}
 	if err := l.ReserveForkSeat(ctx, ForkSeat{MissionID: "m"}, time.Hour); err == nil {
@@ -68,17 +68,17 @@ func TestClaimFork_WaitsForTheDispatch(t *testing.T) {
 	s, l := claimService(t)
 	ctx := context.Background()
 	if err := l.ReserveForkSeat(ctx, ForkSeat{
-		MissionID: "child-1", NodeID: "exploit", SandboxID: "ns/fork-1/u1",
+		MissionID: "child-1", NodeID: "exploit", SandboxID: "ns/fork-1/u1", Tenant: "acme",
 		SourceSandboxID: "ns/src-1/u0", SourceJTI: "jti-c",
 	}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	go func() {
 		time.Sleep(100 * time.Millisecond)
-		_ = l.RecordForks(ctx, "jti-c", "ns/src-1/u0", []ForkDispatch{{SandboxID: "ns/fork-1/u1", NodeID: "exploit", Grant: "g-child"}}, time.Hour)
+		_ = l.RecordForks(ctx, "jti-c", "ns/src-1/u0", []ForkDispatch{{SandboxID: "ns/fork-1/u1", Tenant: "acme", NodeID: "exploit"}}, time.Hour)
 	}()
-	resp, err := s.ClaimFork(forkCtx("jti-c", "tok-fork-1", ""), &harnesspb.ClaimForkRequest{})
-	if err != nil || resp.GetGrant() != "g-child" || resp.GetNodeId() != "exploit" {
+	resp, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
+	if err != nil || resp.GetGrant() == "" || resp.GetNodeId() != "exploit" {
 		t.Fatalf("ClaimFork = %v, %v", resp, err)
 	}
 }
@@ -149,8 +149,8 @@ func TestDelegateToAgent_RunsInTheWaitingFork(t *testing.T) {
 	if meta["forked_from_sandbox"] != "ns/src-1/u0" {
 		t.Fatalf("result metadata = %v", meta)
 	}
-	d, err := ledger.Claim(context.Background(), "jti-c", "ns/fork-1/u1")
-	if err != nil || d.NodeID != "exploit" || d.Grant == "" || d.TaskB64 == "" {
+	d, err := ledger.Claim(context.Background(), "ns/fork-1/u1")
+	if err != nil || d.NodeID != "exploit" || d.Tenant == "" || d.AgentName != "zerocool" || d.TaskB64 == "" {
 		t.Fatalf("claim = %+v, %v", d, err)
 	}
 

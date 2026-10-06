@@ -638,6 +638,8 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithMemberControl(d.memberControl),
 		harness.WithTaskGrantVerifier(d.taskGrantVerifier),
 		harness.WithForkLedger(d.forks.Ledger),
+		// A claimed fork gets a new grant for its task (D80).
+		harness.WithForkGrantMinter(harness.NewForkGrantMinter(func() *capabilitygrant.Minter { return d.cgMinter })),
 		harness.WithSandboxIdentityVerifier(identityVerifier),
 		harness.WithSessionSandboxes(
 			sandboxed.NewSessionRegistry(sessionClient, sandboxed.SessionSpec{

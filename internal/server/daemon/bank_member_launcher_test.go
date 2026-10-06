@@ -280,3 +280,7 @@ func (c *memberSandboxClient) Fork(context.Context, sandboxed.ForkRequest) (sand
 func (c *memberSandboxClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
 	return sandboxed.SessionRecovery{}, false, nil
 }
+
+func (c *memberSandboxClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("memberSandboxClient: snapshot is not used here")
+}

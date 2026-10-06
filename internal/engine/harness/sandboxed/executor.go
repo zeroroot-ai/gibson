@@ -94,6 +94,10 @@ type SandboxClient interface {
 	// Recovery returns the most recent recovery of a sandbox of the tenant
 	// (setec#237). recovered is false for a sandbox that never recovered.
 	Recovery(ctx context.Context, tenant, sandboxID string) (r SessionRecovery, recovered bool, err error)
+
+	// Snapshot takes a snapshot of a running sandbox of the tenant that
+	// outlives the sandbox for ttl (setec#242).
+	Snapshot(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error)
 }
 
 // SessionRecovery is one recovery of a sandbox (setec#237).
@@ -146,7 +150,16 @@ type LaunchRequest struct {
 	// wins over the rule above: NetworkModeExternalOnly, NetworkModeAllowList
 	// with the Egress rules, or NetworkModeNone. Empty keeps the rule above.
 	NetworkMode string
+
+	// FromSnapshot names a snapshot that Snapshot took. The sandbox loads it
+	// with a new identity and the network of this request (setec#242). The
+	// class, the image and the size come from the snapshot.
+	FromSnapshot string
 }
+
+// ErrSnapshotGone answers a launch from a snapshot that no longer exists.
+// The caller starts a fresh sandbox instead (ADR-0170).
+var ErrSnapshotGone = errors.New("sandboxed: the snapshot no longer exists")
 
 // The setec network modes that a launch can name (zeroroot-ai/setec#200).
 const (

@@ -350,3 +350,7 @@ func (c *setecRoundtripClient) Fork(context.Context, sandboxed.ForkRequest) (san
 func (c *setecRoundtripClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
 	return sandboxed.SessionRecovery{}, false, nil
 }
+
+func (c *setecRoundtripClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("setecRoundtripClient: snapshot is not used here")
+}

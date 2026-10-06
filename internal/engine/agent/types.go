@@ -53,6 +53,14 @@ type Task struct {
 	// Forkable marks a node that a later node names in starts_from. Its
 	// sandbox parks after the result line, so the later node can fork it.
 	Forkable bool `json:"forkable,omitempty"`
+
+	// Checkpoint marks a node of a mission in the sandbox checkpoint mode:
+	// its sandbox leaves a snapshot when the node ends (ADR-0170).
+	Checkpoint bool `json:"checkpoint,omitempty"`
+
+	// FromSnapshot names the snapshot that the node of a rewind starts from
+	// (ADR-0170). Empty starts a fresh sandbox.
+	FromSnapshot string `json:"from_snapshot,omitempty"`
 }
 
 // NodeNetwork is the network scope of one mission node.

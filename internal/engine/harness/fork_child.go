@@ -147,7 +147,8 @@ func (h *DefaultAgentHarness) delegateToAgentViaSeat(
 	}
 	err := h.forks.Ledger.RecordForks(ctx, seat.SourceJTI, seat.SourceSandboxID, []ForkDispatch{{
 		SandboxID:    seat.SandboxID,
-		Grant:        dispatch.Grant,
+		Tenant:       dispatch.Tenant,
+		AgentName:    name,
 		MissionID:    dispatch.MissionID,
 		MissionRunID: dispatch.MissionRunID,
 		AgentRunID:   dispatch.AgentRunID,

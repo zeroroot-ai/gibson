@@ -25,7 +25,13 @@ func TestLazyForkLedger_NoStateClient(t *testing.T) {
 	if err := z.RecordForks(ctx, "j", "s", nil, time.Hour); !errors.Is(err, errNoForkStore) {
 		t.Errorf("RecordForks: err = %v", err)
 	}
-	if _, err := z.Claim(ctx, "j", "f"); !errors.Is(err, errNoForkStore) {
+	if err := z.RecordStart(ctx, harness.ForkDispatch{}, time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Errorf("RecordStart: err = %v", err)
+	}
+	if _, err := z.ClaimTarget(ctx, "f"); !errors.Is(err, errNoForkStore) {
+		t.Errorf("ClaimTarget: err = %v", err)
+	}
+	if _, err := z.Claim(ctx, "f"); !errors.Is(err, errNoForkStore) {
 		t.Errorf("Claim: err = %v", err)
 	}
 	if _, forked, err := z.ForkedSource(ctx, "j"); forked || err != nil {
@@ -48,13 +54,16 @@ func TestLazyForkLedger_UsesTheStateClient(t *testing.T) {
 	if err := z.BeginFork(ctx, "j", "ns/src/u", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := z.RecordForks(ctx, "j", "ns/src/u", []harness.ForkDispatch{{SandboxID: "f", NodeID: "n"}}, time.Hour); err != nil {
+	if err := z.RecordForks(ctx, "j", "ns/src/u", []harness.ForkDispatch{{SandboxID: "ns/f/u", Tenant: "acme", NodeID: "n"}}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if src, forked, err := z.ForkedSource(ctx, "j"); !forked || err != nil || src != "ns/src/u" {
 		t.Fatalf("ForkedSource = %q %v %v", src, forked, err)
 	}
-	if d, err := z.Claim(ctx, "j", "f"); err != nil || d.NodeID != "n" {
+	if tg, err := z.ClaimTarget(ctx, "f"); err != nil || tg.SandboxID != "ns/f/u" {
+		t.Fatalf("ClaimTarget = %+v %v", tg, err)
+	}
+	if d, err := z.Claim(ctx, "f"); err != nil || d.NodeID != "n" {
 		t.Fatalf("Claim = %+v %v", d, err)
 	}
 }

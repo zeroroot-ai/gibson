@@ -187,6 +187,9 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	if method == claimForkMethod {
+		return claimForkResponse(ctx, s, httpHeaders), nil
+	}
 
 	tok, err := identityFromJWTPayload(httpHeaders, s.humans)
 	if err != nil {
