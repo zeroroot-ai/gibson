@@ -34,7 +34,8 @@ type MemTimelineStore struct {
 	history []brain.Event
 	next    int
 	lastKey string
-	snap    *brain.WorldSnapshot
+	snap    brain.WorldSnapshot
+	hasSnap bool
 }
 
 var _ brain.TimelineStore = (*MemTimelineStore)(nil)
@@ -91,8 +92,8 @@ func (s *MemTimelineStore) LoadHistory(_ context.Context, _ string) ([]brain.Eve
 func (s *MemTimelineStore) WriteSnapshot(_ context.Context, _ string, snap brain.WorldSnapshot) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cp := snap
-	s.snap = &cp
+	s.snap = snap
+	s.hasSnap = true
 	return snap.AtSeq, nil
 }
 
@@ -100,10 +101,10 @@ func (s *MemTimelineStore) WriteSnapshot(_ context.Context, _ string, snap brain
 func (s *MemTimelineStore) LoadSnapshot(_ context.Context, _ string) (*brain.WorldSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.snap == nil {
+	if !s.hasSnap {
 		return nil, nil
 	}
-	cp := *s.snap
+	cp := s.snap
 	return &cp, nil
 }
 
