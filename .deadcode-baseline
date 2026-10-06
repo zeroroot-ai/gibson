@@ -279,9 +279,6 @@ operators/tenant/internal/audit/emitter.go	emitter.write
 operators/tenant/internal/clients/fga/secrets_grants.go	BackfillSecretResolveGrants
 operators/tenant/internal/clients/signupprogress/redis.go	NewRedisClientFromRedis
 operators/tenant/internal/dataplane/client/client.go	PerTenantKinds
-operators/tenant/internal/health/composite.go	Composite.Run
-operators/tenant/internal/health/composite.go	Composite.ServeHTTP
-operators/tenant/internal/health/composite.go	compositeError.Error
 operators/tenant/internal/provision/entitlements_client.go	EntitlementsHTTPClient.SetTenantZitadelOrg
 operators/tenant/internal/provision/entitlements_client.go	EntitlementsHTTPClient.post
 operators/tenant/internal/saga/conditions.go	IsConditionTrue

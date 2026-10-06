@@ -37,27 +37,3 @@ func (p ProcessState) IsValid() bool {
 // component.yaml schema until gibson#555; the status checker is its one
 // remaining producer.
 type HealthCheckProtocol string
-
-// HealthCheckResult represents the result of a health check operation.
-// It contains detailed information about the health check status,
-// protocol used, timing, and any errors encountered.
-type HealthCheckResult struct {
-	// Status indicates the health check result.
-	// Valid values: "SERVING", "NOT_SERVING", "UNKNOWN", "ERROR"
-	Status string
-
-	// Protocol is the health check protocol that was used
-	Protocol HealthCheckProtocol
-
-	// Error contains the error message if the health check failed.
-	// Empty string if the health check succeeded.
-	Error string
-}
-
-// LogError represents an error found in component logs.
-// This is used to track recent errors for debugging purposes.
-type LogError struct {
-
-	// Message is the error message content
-	Message string
-}

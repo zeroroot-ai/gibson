@@ -126,5 +126,3 @@ func TestWritePluginCanInvokeGrant_PropagatesOtherErrors(t *testing.T) {
 		t.Errorf("expected ErrUnreachable in chain, got: %v", err)
 	}
 }
-
-// ---- BackfillPluginCanInvokeGrants tests ----

@@ -71,5 +71,3 @@ func (e *ComponentError) Is(target error) bool {
 	}
 	return false
 }
-
-// Helper constructors for common error scenarios
