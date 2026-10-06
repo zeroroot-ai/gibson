@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
@@ -53,6 +54,14 @@ func missionDefinitionToProjected(
 ) (brain.MissionProjected, fanOutOrigins, error) {
 	if def == nil {
 		return brain.MissionProjected{}, nil, errors.New("nil mission definition")
+	}
+
+	// 0. Each target of the run must be resolved. The network scope of each
+	// node reads the address of its bound target (gibson#865).
+	for _, t := range targets {
+		if t.Target == nil {
+			return brain.MissionProjected{}, nil, fmt.Errorf("mission %q: target %q did not resolve", def.GetId(), t.ID)
+		}
 	}
 
 	// 1. Flatten parallel sub-nodes into the node set (they become real nodes).
@@ -142,6 +151,11 @@ func missionDefinitionToProjected(
 	nodes, err := buildWorkNodes(allNodes, deps, instanceSet(forEachInstances), concurrencyGroups(allNodes, forEachInstances))
 	if err != nil {
 		return brain.MissionProjected{}, nil, err
+	}
+
+	// 6. The network scope of each node (owner decision S6, gibson#865).
+	for i := range nodes {
+		nodes[i].Network = nodeNetwork(allNodes[nodes[i].ID], boundTargets(nodes[i].ID, targets, origins))
 	}
 
 	return brain.MissionProjected{
@@ -406,6 +420,42 @@ func nodeTimeout(n *missionpb.MissionNode) time.Duration {
 		return v
 	}
 	return 0
+}
+
+// nodeNetwork is the network scope of one node: its research flag and the
+// addresses of the targets bound to it. The harness turns it into the network
+// mode and the allow list of each sandbox in the node.
+//
+// A node that the mission author does not mark research reaches its targets
+// and the daemon only. The agent reaches its model through the callback
+// endpoint of the daemon, so the scope names no provider host.
+func nodeNetwork(n *missionpb.MissionNode, targets []string) *agent.NodeNetwork {
+	return &agent.NodeNetwork{Research: n.GetResearch(), Targets: targets}
+}
+
+// boundTargets returns the address of each target bound to the node id. A
+// for_each instance is bound to its one target. Each other node is bound to
+// the primary target of the run, which is the target that submit binds. Each
+// target is resolved: missionDefinitionToProjected refuses a run with a target
+// that did not resolve. A target with no address is left out: the scope never
+// widens on a missing value.
+func boundTargets(id string, targets []forEachTarget, origins fanOutOrigins) []string {
+	if len(targets) == 0 {
+		return nil
+	}
+	bound := targets[0]
+	if o, ok := origins[id]; ok {
+		for _, t := range targets {
+			if t.ID == o.TargetID {
+				bound = t
+				break
+			}
+		}
+	}
+	if addr := targetbind.URLOf(bound.Target); addr != "" {
+		return []string{addr}
+	}
+	return nil
 }
 
 // deciderSlotFrom maps the mission's optional decider_slot (gibson#850) into the
