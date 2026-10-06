@@ -114,8 +114,11 @@ func TestRewindMission_PassesTheRequestAndAudits(t *testing.T) {
 		t.Fatalf("daemon request = %+v", got)
 	}
 	evs := aw.recorded()
-	if len(evs) != 1 || evs[0].Action != "mission.rewound" || evs[0].TargetID != "m-2" {
-		t.Fatalf("audit = %+v, want one mission.rewound event for m-2", evs)
+	// The durable request record comes first, then the record of the new run
+	// (gibson#676).
+	if len(evs) != 2 || evs[0].Action != "mission.rewind_requested" || evs[0].TargetID != "m-1" ||
+		evs[1].Action != "mission.rewound" || evs[1].TargetID != "m-2" {
+		t.Fatalf("audit = %+v, want the request record for m-1 then mission.rewound for m-2", evs)
 	}
 }
 

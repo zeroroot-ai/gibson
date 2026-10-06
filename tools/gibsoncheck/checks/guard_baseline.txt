@@ -45,7 +45,6 @@ constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|rost
 constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|rosterAuthorizer.ListUsers
 constant-verdict-double|github.com/zeroroot-ai/gibson/internal/server/admin|tenantScopeAuthorizer.Check
 fga-list-users|github.com/zeroroot-ai/gibson/internal/server/daemon/api|RevokeAgentIdentity#R3
-privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|emitGrantAudit@IdentityFromContext
 privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|ListMembers@TenantFromContext
 privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/admin|SetBrokerConfig@IdentityFromContext
 privileged-fallback|github.com/zeroroot-ai/gibson/internal/server/daemon|SubmitLabel@ActingUserFromContext

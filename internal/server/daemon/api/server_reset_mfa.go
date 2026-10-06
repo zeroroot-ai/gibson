@@ -85,9 +85,25 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 		return nil, status.Error(codes.NotFound, "user not found in tenant")
 	}
 
+	// The record is durable before the reset starts, and a failed reset gets
+	// a second record with the result (gibson#676).
+	if err := s.auditLogger.Record(ctx, auditActionTenantUserMFAReset, "user", target, map[string]any{
+		"target_user_id": target,
+		"phase":          "requested",
+	}); err != nil {
+		s.logger.ErrorContext(ctx, "ResetUserMFA: durable audit write failed", "error", err.Error())
+		return nil, status.Error(codes.Unavailable, "the audit record of the reset could not be written; nothing changed")
+	}
+	failed := func(err error) (*tenantv1.ResetUserMFAResponse, error) {
+		s.auditLogger.LogWithResult(ctx, auditActionTenantUserMFAReset, "user", target, "failure", map[string]any{
+			"target_user_id": target,
+		})
+		return nil, err
+	}
+
 	sessionsRes, err := s.idpAdminClient.RevokeUserSessions(ctx, target)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "revoke sessions: %v", err)
+		return failed(status.Errorf(codes.Internal, "revoke sessions: %v", err))
 	}
 	// Ending the IdP sessions does not end the access tokens already issued:
 	// they are signed JWTs, valid until they expire. The FGA revocation stamp
@@ -95,12 +111,12 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 	// target's old sessions are refused, so a failed stamp fails the call
 	// (hosted#208).
 	if err := s.stampSessionRevocation(ctx, target, tenant); err != nil {
-		return nil, status.Errorf(codes.Internal, "revoke tokens: %v", err)
+		return failed(status.Errorf(codes.Internal, "revoke tokens: %v", err))
 	}
 
 	factorsRes, err := s.idpAdminClient.ClearHumanFactors(ctx, target)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "clear MFA factors: %v", err)
+		return failed(status.Errorf(codes.Internal, "clear MFA factors: %v", err))
 	}
 
 	notified := false

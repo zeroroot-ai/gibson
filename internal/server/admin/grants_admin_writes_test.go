@@ -33,6 +33,8 @@ type stubAuthorizer struct {
 	present map[string]bool
 	wrote   []authz.Tuple
 	deleted []authz.Tuple
+	// writeErr fails Write and Delete when set.
+	writeErr error
 
 	// listUsersOfType, when non-nil, canned-answers both ListUsers and
 	// ListUsersOfType, keyed on ALL of objectType, object, relation, AND the
@@ -94,10 +96,16 @@ func (s *stubAuthorizer) BatchCheck(_ context.Context, checks []authz.CheckReque
 	return out, nil
 }
 func (s *stubAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
 	s.wrote = append(s.wrote, tuples...)
 	return nil
 }
 func (s *stubAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
+	if s.writeErr != nil {
+		return s.writeErr
+	}
 	s.deleted = append(s.deleted, tuples...)
 	return nil
 }

@@ -55,6 +55,14 @@ func (s *DaemonServer) RewindMission(ctx context.Context, req *daemonpb.RewindMi
 	if req.Instruction != nil && req.GetInstruction() == "" {
 		return nil, status_grpc.Error(codes.InvalidArgument, "instruction must not be empty when it is set")
 	}
+	// The request record is durable before the new run starts. When it
+	// cannot be written, no run starts (gibson#676).
+	if s.tenantAdminAuditWriter != nil {
+		if err := s.tenantAdminAuditWriter.WriteSync(ctx, rewindAuditEvent(ctx, "mission.rewind_requested", req.GetMissionId(), req.GetCheckpointId(), req.GetMissionId())); err != nil {
+			s.logger.Error("mission rewind: durable audit write failed", "error", err.Error())
+			return nil, status_grpc.Error(codes.Unavailable, "the audit record of the rewind could not be written; no run started")
+		}
+	}
 	newID, err := s.daemon.RewindMission(ctx, RewindRequest{
 		MissionID:      req.GetMissionId(),
 		CheckpointID:   req.GetCheckpointId(),
@@ -90,20 +98,28 @@ func (s *DaemonServer) emitRewindAudit(ctx context.Context, parentID, checkpoint
 		"caller_subject", subject,
 	)
 	if s.tenantAdminAuditWriter != nil {
-		meta, err := json.Marshal(map[string]string{
-			"parent_mission_id":    parentID,
-			"parent_checkpoint_id": checkpointID,
-		})
-		if err == nil {
-			s.tenantAdminAuditWriter.Log(audit.Event{
-				TenantID:   tenantID,
-				ActorID:    subject,
-				ActorType:  "user",
-				Action:     "mission.rewound",
-				TargetType: "mission",
-				TargetID:   newID,
-				Metadata:   meta,
-			})
-		}
+		s.tenantAdminAuditWriter.Log(rewindAuditEvent(ctx, "mission.rewound", parentID, checkpointID, newID))
+	}
+}
+
+// rewindAuditEvent is the audit event of a rewind of parentID at
+// checkpointID. The target is the mission named by targetID.
+func rewindAuditEvent(ctx context.Context, action, parentID, checkpointID, targetID string) audit.Event {
+	subject := ""
+	if id, err := auth.IdentityFromContext(ctx); err == nil {
+		subject = id.Subject
+	}
+	meta, _ := json.Marshal(map[string]string{
+		"parent_mission_id":    parentID,
+		"parent_checkpoint_id": checkpointID,
+	})
+	return audit.Event{
+		TenantID:   auth.TenantStringFromContext(ctx),
+		ActorID:    subject,
+		ActorType:  "user",
+		Action:     action,
+		TargetType: "mission",
+		TargetID:   targetID,
+		Metadata:   meta,
 	}
 }

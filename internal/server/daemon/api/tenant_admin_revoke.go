@@ -88,8 +88,34 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 		)
 	}
 
+	// The audit record is durable before the revoke takes effect. When it
+	// cannot be written, nothing is revoked (gibson#676).
+	revoked := audit.Event{
+		TenantID:   tenantID,
+		ActorID:    callerID.Subject,
+		ActorType:  "user",
+		Action:     "agent_identity.revoked",
+		TargetType: fgaType,
+		TargetID:   accountID,
+		Decision:   "allow",
+	}
+	if s.tenantAdminAuditWriter != nil {
+		if err := s.tenantAdminAuditWriter.WriteSync(ctx, revoked); err != nil {
+			s.logger.ErrorContext(ctx, "RevokeAgentIdentity: durable audit write failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Unavailable, "the audit record could not be written; nothing was revoked")
+		}
+	}
+
 	// Delete the service account from the IdP.
 	if err := s.idpAdminClient.DeleteServiceAccount(ctx, accountID); err != nil {
+		if s.tenantAdminAuditWriter != nil {
+			failed := revoked
+			failed.Decision = "deny"
+			s.tenantAdminAuditWriter.Log(failed)
+		}
 		if errors.Is(err, idp.ErrNotFound) {
 			// Already deleted — idempotent NotFound.
 			return nil, status_grpc.Error(codes.NotFound, "principal not found or already revoked")
@@ -126,19 +152,6 @@ func (s *DaemonServer) RevokeAgentIdentity(ctx context.Context, req *tenantpb.Re
 			slog.String("principal_id", req.PrincipalId),
 			slog.String("error", derr.Error()),
 		)
-	}
-
-	// Emit audit event.
-	if s.tenantAdminAuditWriter != nil {
-		s.tenantAdminAuditWriter.Log(audit.Event{
-			TenantID:   tenantID,
-			ActorID:    callerID.Subject,
-			ActorType:  "user",
-			Action:     "agent_identity.revoked",
-			TargetType: fgaType,
-			TargetID:   accountID,
-			Decision:   "allow",
-		})
 	}
 
 	s.logger.InfoContext(ctx, "agent identity revoked",

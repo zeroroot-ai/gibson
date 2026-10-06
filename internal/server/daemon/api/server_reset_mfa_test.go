@@ -140,20 +140,33 @@ func TestResetUserMFA_WritesAuditRecord(t *testing.T) {
 		if err != nil {
 			t.Fatalf("audit Query: %v", err)
 		}
-		if len(entries) > 0 {
+		if len(entries) >= 2 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	if len(entries) != 1 {
-		t.Fatalf("expected one %s record for tenant acme, got %d", auditActionTenantUserMFAReset, len(entries))
+	// Two records: the durable one written before the reset starts, and the
+	// one with the outcome (gibson#676).
+	if len(entries) != 2 {
+		t.Fatalf("expected two %s records for tenant acme, got %d", auditActionTenantUserMFAReset, len(entries))
 	}
-	e := entries[0]
+	var requested, done *audit.AuditEntry
+	for i := range entries {
+		if entries[i].Details["phase"] == "requested" {
+			requested = &entries[i]
+		} else {
+			done = &entries[i]
+		}
+	}
+	if requested == nil || done == nil {
+		t.Fatalf("records = %+v, want one requested and one outcome", entries)
+	}
+	e := *done
 	if e.ActorID != "admin1" || e.Resource != "user" || e.ResourceID != "bob" {
 		t.Errorf("record = actor %q resource %q/%q, want admin1 user/bob", e.ActorID, e.Resource, e.ResourceID)
 	}
-	if e.Details["target_user_id"] != "bob" {
-		t.Errorf("details.target_user_id = %v, want bob", e.Details["target_user_id"])
+	if e.Details["target_user_id"] != "bob" || requested.Details["target_user_id"] != "bob" {
+		t.Errorf("details.target_user_id = %v / %v, want bob", e.Details["target_user_id"], requested.Details["target_user_id"])
 	}
 	if e.Details["notified"] != true {
 		t.Errorf("details.notified = %v, want true", e.Details["notified"])
