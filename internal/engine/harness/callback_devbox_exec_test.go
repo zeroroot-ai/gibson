@@ -80,12 +80,12 @@ func (c *scriptedSessionClient) LaunchSession(context.Context, sandboxed.Session
 	return sandboxed.LaunchResponse{SandboxID: "ns/sb/uid"}, nil
 }
 
-func (c *scriptedSessionClient) Exec(_ context.Context, _ string, argv []string) (sandboxed.ExecStream, error) {
+func (c *scriptedSessionClient) Exec(_ context.Context, _, _ string, argv []string) (sandboxed.ExecStream, error) {
 	c.gotArgv = argv
 	return c.stream, nil
 }
 
-func (c *scriptedSessionClient) Kill(context.Context, string) error { return nil }
+func (c *scriptedSessionClient) Kill(context.Context, string, string) error { return nil }
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -310,10 +310,10 @@ type failingClient struct {
 func (c *failingClient) LaunchSession(context.Context, sandboxed.SessionLaunchRequest) (sandboxed.LaunchResponse, error) {
 	return sandboxed.LaunchResponse{SandboxID: "ns/sb/uid"}, nil
 }
-func (c *failingClient) Exec(context.Context, string, []string) (sandboxed.ExecStream, error) {
+func (c *failingClient) Exec(context.Context, string, string, []string) (sandboxed.ExecStream, error) {
 	return c.stream, nil
 }
-func (c *failingClient) Kill(context.Context, string) error { return nil }
+func (c *failingClient) Kill(context.Context, string, string) error { return nil }
 
 func TestDevboxExec_RejectsOversizedArgv(t *testing.T) {
 	argv := make([]string, maxDevboxArgv+1)

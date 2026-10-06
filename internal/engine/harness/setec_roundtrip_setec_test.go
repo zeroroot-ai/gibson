@@ -132,7 +132,6 @@ func TestSetecRoundTrip_UntrustedToolExecutesViaSandbox(t *testing.T) {
 	exec, err := sandboxed.New(sandboxed.Config{
 		Client:       client,
 		Logger:       slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		Tenant:       "e2e",
 		CallTimeout:  4 * time.Minute,
 		SandboxClass: env.sandboxClass,
 	})
@@ -181,7 +180,7 @@ func TestSetecRoundTrip_UntrustedDeniedWhenNotSandboxed(t *testing.T) {
 
 	client := newSetecRoundtripClient(t, env)
 	exec, err := sandboxed.New(sandboxed.Config{
-		Client: client, Logger: slog.Default(), Tenant: "e2e", CallTimeout: time.Minute,
+		Client: client, Logger: slog.Default(), CallTimeout: time.Minute,
 		SandboxClass: env.sandboxClass,
 	})
 	if err != nil {
@@ -308,7 +307,7 @@ func (c *setecRoundtripClient) Launch(ctx context.Context, req sandboxed.LaunchR
 	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
 }
 
-func (c *setecRoundtripClient) StreamLogs(ctx context.Context, sandboxID string) (sandboxed.LogStream, error) {
+func (c *setecRoundtripClient) StreamLogs(ctx context.Context, _, sandboxID string) (sandboxed.LogStream, error) {
 	stream, err := c.inner.StreamLogs(ctx, &setecv1.StreamLogsRequest{SandboxId: sandboxID, Follow: true})
 	if err != nil {
 		return nil, err
@@ -316,7 +315,7 @@ func (c *setecRoundtripClient) StreamLogs(ctx context.Context, sandboxID string)
 	return &setecRoundtripLogStream{inner: stream}, nil
 }
 
-func (c *setecRoundtripClient) Wait(ctx context.Context, sandboxID string) (sandboxed.WaitResponse, error) {
+func (c *setecRoundtripClient) Wait(ctx context.Context, _, sandboxID string) (sandboxed.WaitResponse, error) {
 	resp, err := c.inner.Wait(ctx, &setecv1.WaitRequest{SandboxId: sandboxID})
 	if err != nil {
 		return sandboxed.WaitResponse{}, err
@@ -324,7 +323,7 @@ func (c *setecRoundtripClient) Wait(ctx context.Context, sandboxID string) (sand
 	return sandboxed.WaitResponse{ExitCode: resp.GetExitCode(), Reason: resp.GetReason()}, nil
 }
 
-func (c *setecRoundtripClient) Kill(ctx context.Context, sandboxID string) error {
+func (c *setecRoundtripClient) Kill(ctx context.Context, _, sandboxID string) error {
 	_, err := c.inner.Kill(ctx, &setecv1.KillRequest{SandboxId: sandboxID})
 	return err
 }

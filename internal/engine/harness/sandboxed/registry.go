@@ -46,17 +46,17 @@ type ToolSpec struct {
 
 	// Live carries the per-call scope the running-sandbox console keys by.
 	// Like Egress it is dispatch-time scope, not catalog data: the caller
-	// fills it from the request it is serving. An empty Tenant disables
-	// registration entirely — the console keys by CUSTOMER tenant, and a run
-	// whose tenant is unknown must never surface on someone else's wall.
+	// fills it from the request it is serving. Its Tenant also names the
+	// setec namespace of the launch, so a call with an empty Tenant does not
+	// launch (ADR-0142).
 	Live LiveScope
 }
 
 // LiveScope is the identity a sandbox run is enumerated under by the
 // read-only running-sandbox console (ADR-0116 S11).
 type LiveScope struct {
-	// Tenant is the CUSTOMER tenant that owns the run. Never the setec infra
-	// tenant the launcher itself authenticates as.
+	// Tenant is the CUSTOMER tenant that owns the run. setec gets it on each
+	// request (ADR-0142).
 	Tenant string
 	// MissionID and MissionRunID scope the run to its mission, so the console
 	// can link back. Empty for a call outside a mission.

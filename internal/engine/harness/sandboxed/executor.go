@@ -74,14 +74,17 @@ const (
 )
 
 // SandboxClient is the minimal gRPC surface the executor needs from Setec.
+// Each call names the customer tenant of the caller. setec keeps one
+// namespace for each pair of client and tenant, and it does not derive the
+// tenant from the caller certificate (ADR-0142, gibson#756).
 // It is implemented by an adapter around Setec's generated gRPC client —
 // the adapter lives in the daemon-startup wiring so this package does not
 // import setec's proto package directly.
 type SandboxClient interface {
 	Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error)
-	StreamLogs(ctx context.Context, sandboxID string) (LogStream, error)
-	Wait(ctx context.Context, sandboxID string) (WaitResponse, error)
-	Kill(ctx context.Context, sandboxID string) error
+	StreamLogs(ctx context.Context, tenant, sandboxID string) (LogStream, error)
+	Wait(ctx context.Context, tenant, sandboxID string) (WaitResponse, error)
+	Kill(ctx context.Context, tenant, sandboxID string) error
 }
 
 // LaunchRequest is the data the executor passes to Setec's Launch RPC.
@@ -92,7 +95,7 @@ type LaunchRequest struct {
 	Env     map[string]string
 	VCPU    int32
 	Memory  string
-	Tenant  string // informational; tenancy is resolved by Setec from client cert CN
+	Tenant  string // the customer tenant of the caller; required (ADR-0142)
 	Timeout time.Duration
 
 	// SandboxClass names the setec SandboxClass this launch must run under.
@@ -179,7 +182,6 @@ type Executor struct {
 	client             SandboxClient
 	tracer             trace.Tracer
 	logger             *slog.Logger
-	tenant             string
 	sandboxClass       string
 	callTimeout        time.Duration
 	discoveryProcessor DiscoveryProcessor // optional; nil disables graph persistence
@@ -194,7 +196,6 @@ type Config struct {
 	Client      SandboxClient
 	Tracer      trace.Tracer
 	Logger      *slog.Logger
-	Tenant      string
 	CallTimeout time.Duration // defaults to 5m when zero
 
 	// SandboxClass is the setec SandboxClass every tool launch runs under.
@@ -216,9 +217,6 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("sandboxed.New: Client is required")
 	}
-	if cfg.Tenant == "" {
-		return nil, errors.New("sandboxed.New: Tenant is required")
-	}
 	if cfg.SandboxClass == "" {
 		return nil, errors.New("sandboxed.New: SandboxClass is required (ADR-0052: gibson must name the isolation posture, not inherit the cluster default)")
 	}
@@ -235,7 +233,6 @@ func New(cfg Config) (*Executor, error) {
 		client:             cfg.Client,
 		tracer:             cfg.Tracer,
 		logger:             cfg.Logger,
-		tenant:             cfg.Tenant,
 		sandboxClass:       cfg.SandboxClass,
 		callTimeout:        cfg.CallTimeout,
 		discoveryProcessor: cfg.DiscoveryProcessor,
@@ -250,13 +247,20 @@ func New(cfg Config) (*Executor, error) {
 func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec ToolSpec, request, response proto.Message) error {
 	ctx, span := e.tracer.Start(ctx, "harness.sandboxed.execute")
 	defer span.End()
+	// The customer tenant of the call names the setec namespace (ADR-0142).
+	// A call with no tenant does not launch.
+	tenant := spec.Live.Tenant
 	span.SetAttributes(
 		attribute.String("gibson.tool.name", toolName),
-		attribute.String("setec.tenant", e.tenant),
+		attribute.String("setec.tenant", tenant),
 	)
 	if spec.Image == "" {
 		return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 			fmt.Sprintf("tool %q: empty image in ToolSpec", toolName), nil)
+	}
+	if tenant == "" {
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("tool %q: the call names no tenant", toolName), nil)
 	}
 
 	// 1. Marshal + size-check + b64 encode request.
@@ -290,7 +294,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 		Env:          env,
 		VCPU:         spec.VCPU,
 		Memory:       spec.Memory,
-		Tenant:       e.tenant,
+		Tenant:       tenant,
 		SandboxClass: e.sandboxClass,
 		Timeout:      e.callTimeout + killGrace,
 		Egress:       spec.Egress,
@@ -305,13 +309,11 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 
 	// Register this call as a live instance so the read-only console can
 	// follow it, exactly as the agent launcher does (ADR-0116 S11). The key
-	// is the CUSTOMER tenant the caller supplied, never e.tenant — that is
-	// the setec infra tenant this launcher authenticates as, and keying by
-	// it would show every tenant's tool runs to everyone. No scope means no
-	// registration. The run id is the sandbox id: a tool call is one launch,
+	// is the CUSTOMER tenant the caller supplied. The run id is the sandbox
+	// id: a tool call is one launch,
 	// and an agent run id would collide across the calls it makes.
 	var publish func([]byte)
-	if e.events != nil && spec.Live.Tenant != "" {
+	if e.events != nil {
 		var finish func()
 		publish, finish = e.events.RegisterInstance(spec.Live.Tenant, LiveInstance{
 			RunID:         runIDFromSandboxID(launchResp.SandboxID),
@@ -331,8 +333,8 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	// isolation we could not confirm is killed, not used: the tool inside it
 	// is untrusted by construction and must not execute without a boundary.
 	if isoErr := VerifyIsolation(e.sandboxClass, launchResp); isoErr != nil {
-		killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = e.client.Kill(killCtx, launchResp.SandboxID)
+		killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
 		killCancel()
 		return types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("tool %q sandbox %s refused", toolName, launchResp.SandboxID), isoErr)
@@ -344,12 +346,12 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	defer cancel()
 
 	ringBuf := newRing(logBufferLimit)
-	logsDone := e.streamLogsAsync(waitCtx, launchResp.SandboxID, toolName, ringBuf, publish)
+	logsDone := e.streamLogsAsync(waitCtx, tenant, launchResp.SandboxID, toolName, ringBuf, publish)
 
 	// 5. Wait.
 	waitSpan := trace.SpanFromContext(waitCtx)
 	waitCtx2, waitSpanNested := e.tracer.Start(waitCtx, "setec.wait")
-	waitResp, waitErr := e.client.Wait(waitCtx2, launchResp.SandboxID)
+	waitResp, waitErr := e.client.Wait(waitCtx2, tenant, launchResp.SandboxID)
 	waitSpanNested.End()
 	_ = waitSpan // keep for future attribute plumbing
 
@@ -359,8 +361,8 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	if waitErr != nil {
 		if errors.Is(waitErr, context.DeadlineExceeded) {
 			// Best-effort kill so Setec reaps the sandbox rather than letting it run.
-			killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			_ = e.client.Kill(killCtx, launchResp.SandboxID)
+			killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
 			killCancel()
 			return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
 				fmt.Sprintf("tool %q sandbox %s exceeded %s call timeout",
@@ -457,11 +459,11 @@ func (e *Executor) processDiscoveryAsync(toolName string, execCtx ingest.ExecCon
 // ring buffer AND to the harness logger (so operators see sandbox output in
 // Gibson's normal log pipeline), and returns a channel that closes when the
 // stream drains.
-func (e *Executor) streamLogsAsync(ctx context.Context, sandboxID, toolName string, rb *ring, publish func([]byte)) <-chan struct{} {
+func (e *Executor) streamLogsAsync(ctx context.Context, tenant, sandboxID, toolName string, rb *ring, publish func([]byte)) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		stream, err := e.client.StreamLogs(ctx, sandboxID)
+		stream, err := e.client.StreamLogs(ctx, tenant, sandboxID)
 		if err != nil {
 			e.logger.Warn("sandbox stream logs failed",
 				"tool", toolName, "sandbox_id", sandboxID, "error", err)

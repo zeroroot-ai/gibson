@@ -88,7 +88,7 @@ func TestVerifyIsolation(t *testing.T) {
 // that was never told which isolation posture to ask for cannot be built, so
 // there is no code path that launches a tool under the cluster default.
 func TestNew_RequiresSandboxClass(t *testing.T) {
-	_, err := New(Config{Client: &mockClient{}, Tenant: "gibson-dev"})
+	_, err := New(Config{Client: &mockClient{}})
 	if err == nil {
 		t.Fatal("New with no SandboxClass succeeded; want an error")
 	}

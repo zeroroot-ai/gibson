@@ -43,11 +43,11 @@ func (f *fakeSessionClient) LaunchSession(ctx context.Context, _ SessionLaunchRe
 	return LaunchResponse{SandboxID: fmt.Sprintf("ns/sb-%d/uid", n)}, nil
 }
 
-func (f *fakeSessionClient) Exec(_ context.Context, sandboxID string, argv []string) (ExecStream, error) {
+func (f *fakeSessionClient) Exec(_ context.Context, _, sandboxID string, argv []string) (ExecStream, error) {
 	return &fakeExecStream{sandboxID: sandboxID, argv: argv}, nil
 }
 
-func (f *fakeSessionClient) Kill(_ context.Context, sandboxID string) error {
+func (f *fakeSessionClient) Kill(_ context.Context, _, sandboxID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.killed = append(f.killed, sandboxID)
@@ -346,7 +346,7 @@ func TestSessionRegistry_ReleaseSurfacesKillFailure(t *testing.T) {
 
 type killFailClient struct{ fakeSessionClient }
 
-func (c *killFailClient) Kill(context.Context, string) error {
+func (c *killFailClient) Kill(context.Context, string, string) error {
 	return errors.New("sandbox already gone")
 }
 

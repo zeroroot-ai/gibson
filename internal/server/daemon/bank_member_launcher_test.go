@@ -30,16 +30,16 @@ func (c *memberSandboxClient) Launch(_ context.Context, req sandboxed.LaunchRequ
 	return sandboxed.LaunchResponse{SandboxID: "sbx-1", Runtime: "gvisor"}, nil
 }
 
-func (c *memberSandboxClient) StreamLogs(context.Context, string) (sandboxed.LogStream, error) {
+func (c *memberSandboxClient) StreamLogs(context.Context, string, string) (sandboxed.LogStream, error) {
 	return eofLogs{}, nil
 }
 
-func (c *memberSandboxClient) Wait(ctx context.Context, _ string) (sandboxed.WaitResponse, error) {
+func (c *memberSandboxClient) Wait(ctx context.Context, _, _ string) (sandboxed.WaitResponse, error) {
 	<-ctx.Done()
 	return sandboxed.WaitResponse{}, fmt.Errorf("wait: %w", ctx.Err())
 }
 
-func (c *memberSandboxClient) Kill(_ context.Context, id string) error {
+func (c *memberSandboxClient) Kill(_ context.Context, _, id string) error {
 	c.killed = append(c.killed, id)
 	return nil
 }
@@ -71,7 +71,7 @@ func (r *memberSpecResolver) ResolveAgentLaunchSpec(ctx context.Context, req har
 
 func memberTestDaemon(t *testing.T, client sandboxed.SandboxClient, resolver harness.AgentLaunchSpecResolver) *daemonImpl {
 	t.Helper()
-	launcher, err := sandboxed.NewAgentLauncher(sandboxed.AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	launcher, err := sandboxed.NewAgentLauncher(sandboxed.AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}

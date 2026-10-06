@@ -17,7 +17,6 @@ func newAgentLauncher(t *testing.T, c SandboxClient) *AgentLauncher {
 	t.Helper()
 	l, err := NewAgentLauncher(AgentLauncherConfig{
 		Client:       c,
-		Tenant:       "gibson-dev",
 		SandboxClass: "agent",
 		RunTimeout:   5 * time.Second,
 	})
@@ -35,17 +34,14 @@ var agentSpec = AgentLaunchSpec{
 	Model:  "claude-test",
 }
 
-// TestNewAgentLauncher_RequiresClassTenantClient asserts the fail-closed
-// constructor guards: a launcher may never be built without a client, tenant,
-// or an explicit sandbox class (ADR-0052).
-func TestNewAgentLauncher_RequiresClassTenantClient(t *testing.T) {
-	if _, err := NewAgentLauncher(AgentLauncherConfig{Tenant: "t", SandboxClass: "agent"}); err == nil {
+// TestNewAgentLauncher_RequiresClassAndClient asserts the fail-closed
+// constructor guards: a launcher may never be built without a client or an
+// explicit sandbox class (ADR-0052). The tenant comes from each dispatch.
+func TestNewAgentLauncher_RequiresClassAndClient(t *testing.T) {
+	if _, err := NewAgentLauncher(AgentLauncherConfig{SandboxClass: "agent"}); err == nil {
 		t.Error("want error when Client is nil")
 	}
-	if _, err := NewAgentLauncher(AgentLauncherConfig{Client: &mockClient{}, SandboxClass: "agent"}); err == nil {
-		t.Error("want error when Tenant is empty")
-	}
-	if _, err := NewAgentLauncher(AgentLauncherConfig{Client: &mockClient{}, Tenant: "t"}); err == nil {
+	if _, err := NewAgentLauncher(AgentLauncherConfig{Client: &mockClient{}}); err == nil {
 		t.Error("want error when SandboxClass is empty")
 	}
 }
@@ -80,6 +76,7 @@ func TestLaunchAgent_LaunchesStreamsAndWaits(t *testing.T) {
 	l := newAgentLauncher(t, c)
 
 	dispatch := AgentDispatch{
+		Tenant:           "acme",
 		Grant:            "cg-jwt-token",
 		CallbackEndpoint: "gibson:50001",
 		MissionID:        "m1",
@@ -142,7 +139,7 @@ func TestLaunchAgent_SpecClassOverridesDefault(t *testing.T) {
 
 	spec := agentSpec
 	spec.SandboxClass = "agent-high-assurance"
-	if _, err := l.LaunchAgent(context.Background(), spec, AgentDispatch{}); err != nil {
+	if _, err := l.LaunchAgent(context.Background(), spec, AgentDispatch{Tenant: "acme"}); err != nil {
 		t.Fatalf("LaunchAgent: %v", err)
 	}
 	if gotClass != "agent-high-assurance" {
@@ -160,7 +157,7 @@ func TestLaunchAgent_EmptyImageRejected(t *testing.T) {
 		},
 	}
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{}, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{}, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("want error for empty image")
 	}
 }
@@ -181,7 +178,7 @@ func TestLaunchAgent_NonZeroExitSurfaced(t *testing.T) {
 		kill: func(_ context.Context, _ string) error { return nil },
 	}
 	l := newAgentLauncher(t, c)
-	out, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{})
+	out, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme"})
 	if err != nil {
 		t.Fatalf("LaunchAgent should return the terminal outcome, not an error: %v", err)
 	}
@@ -199,7 +196,7 @@ func TestLaunchAgent_LaunchFailurePropagates(t *testing.T) {
 		},
 	}
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("want error when Launch fails")
 	}
 }
@@ -238,7 +235,7 @@ func agentStreamClient(streamLog func(context.Context, string) (LogStream, error
 func TestLaunchAgent_StreamLogsError(t *testing.T) {
 	c := agentStreamClient(func(context.Context, string) (LogStream, error) { return nil, errStreamRecv })
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{}); err != nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{Tenant: "acme"}); err != nil {
 		t.Fatalf("StreamLogs error must not fail the run: %v", err)
 	}
 }
@@ -248,7 +245,7 @@ func TestLaunchAgent_StreamLogsError(t *testing.T) {
 func TestLaunchAgent_LogRecvError(t *testing.T) {
 	c := agentStreamClient(func(context.Context, string) (LogStream, error) { return erroringLogs{}, nil })
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{}); err != nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{Tenant: "acme"}); err != nil {
 		t.Fatalf("recv error must not fail the run: %v", err)
 	}
 }
@@ -282,7 +279,7 @@ func TestLaunchAgent_VerifyIsolationFail(t *testing.T) {
 	)
 	c.kill = func(context.Context, string) error { killed = true; return nil }
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("an isolation mismatch must be refused")
 	}
 	if !killed {
@@ -300,7 +297,7 @@ func TestLaunchAgent_WaitTimeout(t *testing.T) {
 	ctx := trace.ContextWithSpanContext(context.Background(), trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID: trace.TraceID{1}, SpanID: trace.SpanID{2}, TraceFlags: trace.FlagsSampled,
 	}))
-	if _, err := l.LaunchAgent(ctx, AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{TaskB64: "dGFzaw=="}); err == nil {
+	if _, err := l.LaunchAgent(ctx, AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{Tenant: "acme", TaskB64: "dGFzaw=="}); err == nil {
 		t.Fatal("a wait timeout must error")
 	}
 }
@@ -311,7 +308,7 @@ func TestLaunchAgent_WaitError(t *testing.T) {
 		return WaitResponse{}, errStreamRecv
 	}, nil)
 	l := newAgentLauncher(t, c)
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:x"}, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("a wait error must surface")
 	}
 }
@@ -330,7 +327,7 @@ func TestLaunchAgent_MemberModeReachesTheSandbox(t *testing.T) {
 		wait:      func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 0}, nil },
 		kill:      func(context.Context, string) error { return nil },
 	}
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "acme", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatalf("NewAgentLauncher: %v", err)
 	}
@@ -368,7 +365,7 @@ func TestLaunchAgent_CarriesTheSandboxMarker(t *testing.T) {
 	l := newAgentLauncher(t, c)
 	spec := agentSpec
 	spec.Env = map[string]string{envSandbox: "none"}
-	dispatch := AgentDispatch{Grant: "g", Env: map[string]string{envSandbox: "docker"}}
+	dispatch := AgentDispatch{Tenant: "acme", Grant: "g", Env: map[string]string{envSandbox: "docker"}}
 	if _, err := l.LaunchAgent(context.Background(), spec, dispatch); err != nil {
 		t.Fatalf("LaunchAgent: %v", err)
 	}
@@ -418,7 +415,7 @@ func TestLaunchAgent_ReturnsTheTerminalResultLine(t *testing.T) {
 		},
 		kill: func(_ context.Context, _ string) error { return nil },
 	}
-	out, err := newAgentLauncher(t, c).LaunchAgent(context.Background(), agentSpec, AgentDispatch{})
+	out, err := newAgentLauncher(t, c).LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme"})
 	if err != nil {
 		t.Fatalf("LaunchAgent: %v", err)
 	}

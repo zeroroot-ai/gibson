@@ -121,7 +121,6 @@ func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, lo
 		Client:             client,
 		Tracer:             tracer,
 		Logger:             logger,
-		Tenant:             cfg.Setec.Tenant,
 		SandboxClass:       cfg.Setec.SandboxClass,
 		CallTimeout:        cfg.Setec.CallTimeout,
 		DiscoveryProcessor: sbxDiscovery,
@@ -281,7 +280,9 @@ func wrapSecretEnvVars(masterKEK []byte, tenantID sdkauth.TenantID, env map[stri
 	return out, nil
 }
 
-func (c *setecClient) StreamLogs(ctx context.Context, sandboxID string) (sandboxed.LogStream, error) {
+// The tenant argument of StreamLogs, Wait and Kill reaches the wire in
+// gibson#756 step 3. LaunchRequest.Tenant does too.
+func (c *setecClient) StreamLogs(ctx context.Context, _, sandboxID string) (sandboxed.LogStream, error) {
 	stream, err := c.inner.StreamLogs(ctx, &setecv1.StreamLogsRequest{SandboxId: sandboxID, Follow: true})
 	if err != nil {
 		return nil, err
@@ -289,7 +290,7 @@ func (c *setecClient) StreamLogs(ctx context.Context, sandboxID string) (sandbox
 	return &setecLogStream{inner: stream}, nil
 }
 
-func (c *setecClient) Wait(ctx context.Context, sandboxID string) (sandboxed.WaitResponse, error) {
+func (c *setecClient) Wait(ctx context.Context, _, sandboxID string) (sandboxed.WaitResponse, error) {
 	resp, err := c.inner.Wait(ctx, &setecv1.WaitRequest{SandboxId: sandboxID})
 	if err != nil {
 		return sandboxed.WaitResponse{}, err
@@ -300,7 +301,7 @@ func (c *setecClient) Wait(ctx context.Context, sandboxID string) (sandboxed.Wai
 	}, nil
 }
 
-func (c *setecClient) Kill(ctx context.Context, sandboxID string) error {
+func (c *setecClient) Kill(ctx context.Context, _, sandboxID string) error {
 	_, err := c.inner.Kill(ctx, &setecv1.KillRequest{SandboxId: sandboxID})
 	return err
 }
