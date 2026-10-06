@@ -24,17 +24,14 @@ import (
 // Each underlying Vault API call is itself idempotent (the policy and
 // role write endpoints are upserts). Re-running for an
 // already-provisioned tenant is a no-op.
-//
-// Always returns EditionEnterprise. The typed return preserves the
-// upstream saga's recording shape; see Edition's godoc.
-func (c *httpClient) EnsureTenantNamespace(ctx context.Context, tenantID string) (Edition, error) {
+func (c *httpClient) EnsureTenantNamespace(ctx context.Context, tenantID string) error {
 	if err := validateTenantID(tenantID); err != nil {
-		return EditionUnknown, err
+		return err
 	}
 	if err := c.ensureNamespace(ctx, tenantID); err != nil {
-		return EditionUnknown, err
+		return err
 	}
-	return EditionEnterprise, nil
+	return nil
 }
 
 // DeleteTenantNamespace implements AdminClient. Idempotent: 404s are

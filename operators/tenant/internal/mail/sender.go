@@ -409,9 +409,3 @@ func (s *SMTPSender) deliver(client *smtp.Client, auth smtp.Auth, to string, bod
 	}
 	return client.Quit()
 }
-
-// NullSender discards all mail. Useful for dev mode without SMTP.
-type NullSender struct{}
-
-func (NullSender) SendInvitation(_ context.Context, _ InvitationMessage) error { return nil }
-func (NullSender) SendWelcome(_ context.Context, _ WelcomeMessage) error       { return nil }

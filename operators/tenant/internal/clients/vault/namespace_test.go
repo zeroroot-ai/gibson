@@ -349,12 +349,8 @@ func TestEnsureTenantNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ed, err := c.EnsureTenantNamespace(context.Background(), "acme")
-	if err != nil {
+	if err := c.EnsureTenantNamespace(context.Background(), "acme"); err != nil {
 		t.Fatalf("EnsureTenantNamespace: %v", err)
-	}
-	if ed != EditionEnterprise {
-		t.Fatalf("expected EditionEnterprise, got %q", ed)
 	}
 	if !fv.existingNamespaces["tenant-acme"] {
 		t.Fatalf("expected namespace tenant-acme; have %v", fv.existingNamespaces)
@@ -388,13 +384,9 @@ func TestEnsureTenantNamespace(t *testing.T) {
 		t.Errorf("bound_audiences[0]: got %v, want %q", ba[0], "gibson-saas")
 	}
 
-	// Idempotency: rerun returns nil and same Edition.
-	ed2, err := c.EnsureTenantNamespace(context.Background(), "acme")
-	if err != nil {
+	// Idempotency: a rerun returns nil.
+	if err := c.EnsureTenantNamespace(context.Background(), "acme"); err != nil {
 		t.Fatalf("idempotent rerun: %v", err)
-	}
-	if ed2 != EditionEnterprise {
-		t.Fatalf("expected EditionEnterprise on idempotent retry, got %q", ed2)
 	}
 }
 
@@ -414,7 +406,7 @@ func TestEnsureTenantNamespace_RequiresJWTBoundAudience(t *testing.T) {
 
 	// JWTBoundAudience intentionally left empty.
 	c, _ := New(Config{Address: srv.URL, AdminToken: "tok", HTTPClient: srv.Client()})
-	_, err := c.EnsureTenantNamespace(context.Background(), "tenant-noaud")
+	err := c.EnsureTenantNamespace(context.Background(), "tenant-noaud")
 	if err == nil {
 		t.Fatal("expected error from EnsureTenantNamespace with empty JWTBoundAudience")
 	}
@@ -439,7 +431,7 @@ func TestEnsureTenantNamespace_RejectsInvalidID(t *testing.T) {
 	c, _ := New(Config{Address: srv.URL, AdminToken: "tok", HTTPClient: srv.Client()})
 	for _, bad := range []string{"", "Has-Capital", "has/slash", "has space", "has_underscore"} {
 		t.Run(bad, func(t *testing.T) {
-			_, err := c.EnsureTenantNamespace(context.Background(), bad)
+			err := c.EnsureTenantNamespace(context.Background(), bad)
 			if err == nil {
 				t.Fatalf("expected error for tenantID %q", bad)
 			}
@@ -462,7 +454,7 @@ func TestDeleteTenantNamespace_Idempotent(t *testing.T) {
 		JWTBoundAudience: "gibson-saas",
 		HTTPClient:       srv.Client(),
 	})
-	if _, err := c.EnsureTenantNamespace(context.Background(), "ent"); err != nil {
+	if err := c.EnsureTenantNamespace(context.Background(), "ent"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.DeleteTenantNamespace(context.Background(), "ent"); err != nil {
@@ -560,7 +552,7 @@ func TestTenantNamespaceHeader(t *testing.T) {
 		JWTBoundAudience: "gibson-saas",
 		HTTPClient:       srv.Client(),
 	})
-	if _, err := c.EnsureTenantNamespace(context.Background(), "hdr"); err != nil {
+	if err := c.EnsureTenantNamespace(context.Background(), "hdr"); err != nil {
 		t.Fatal(err)
 	}
 	// Verify the mount and policy calls were namespace-scoped (the fake
