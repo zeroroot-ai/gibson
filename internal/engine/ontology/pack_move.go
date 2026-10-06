@@ -215,3 +215,13 @@ func CatalogWithImports(ctx context.Context, store *ImportStore) (*DomainPackCat
 	sort.Slice(packs, func(i, j int) bool { return packs[i].Name < packs[j].Name })
 	return newCheckedCatalog(packs)
 }
+
+// InstallCatalog returns the catalog of this install: the embedded pack
+// files and the imported packs in db. The daemon calls it at start.
+func InstallCatalog(ctx context.Context, db *sql.DB) (*DomainPackCatalog, error) {
+	store, err := NewImportStore(db)
+	if err != nil {
+		return nil, err
+	}
+	return CatalogWithImports(ctx, store)
+}

@@ -138,11 +138,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// visible and enable-able; it ships default-off (ADR-0133), so
 	// a fresh tenant's World carries none of its bindings until that tenant's
 	// admin calls EnableDomainPack.
-	imports, err := ontology.NewImportStore(d.platformDB)
-	if err != nil {
-		return nil, fmt.Errorf("domain pack catalog: %w", err)
-	}
-	catalog, err := ontology.CatalogWithImports(ctx, imports)
+	catalog, err := ontology.InstallCatalog(ctx, d.platformDB)
 	if err != nil {
 		return nil, fmt.Errorf("domain pack catalog: %w", err)
 	}

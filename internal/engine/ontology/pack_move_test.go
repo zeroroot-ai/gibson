@@ -115,3 +115,67 @@ func TestCatalogWithImports(t *testing.T) {
 		require.Error(t, err)
 	})
 }
+
+func TestImportStore_ErrorPaths(t *testing.T) {
+	newStore := func(t *testing.T) (*ImportStore, sqlmock.Sqlmock) {
+		t.Helper()
+		db, mock, err := sqlmock.New()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = db.Close() })
+		s, err := NewImportStore(db)
+		require.NoError(t, err)
+		return s, mock
+	}
+	ctx := context.Background()
+	t.Run("the row count is unknown", func(t *testing.T) {
+		s, mock := newStore(t)
+		mock.ExpectExec("INSERT INTO domain_pack_imports").WillReturnResult(sqlmock.NewErrorResult(assert.AnError))
+		require.ErrorIs(t, s.Save(ctx, &DomainPack{Name: "p", Version: 1}, "owner"), assert.AnError)
+	})
+	t.Run("the list query fails", func(t *testing.T) {
+		s, mock := newStore(t)
+		mock.ExpectQuery("FROM domain_pack_imports").WillReturnError(assert.AnError)
+		_, err := s.List(ctx)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+	t.Run("a row does not scan", func(t *testing.T) {
+		s, mock := newStore(t)
+		mock.ExpectQuery("FROM domain_pack_imports").
+			WillReturnRows(sqlmock.NewRows([]string{"name", "pack_json"}).AddRow(nil, []byte(`{}`)))
+		_, err := s.List(ctx)
+		require.ErrorContains(t, err, "scan imported pack")
+	})
+	t.Run("the row set fails", func(t *testing.T) {
+		s, mock := newStore(t)
+		mock.ExpectQuery("FROM domain_pack_imports").
+			WillReturnRows(sqlmock.NewRows([]string{"name", "pack_json"}).
+				AddRow("k8s", []byte(`{"name":"k8s","version":1}`)).RowError(0, assert.AnError))
+		_, err := s.List(ctx)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+	t.Run("the catalog stops on a list failure", func(t *testing.T) {
+		s, mock := newStore(t)
+		mock.ExpectQuery("FROM domain_pack_imports").WillReturnError(assert.AnError)
+		_, err := CatalogWithImports(ctx, s)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+}
+
+func TestInstallCatalog(t *testing.T) {
+	_, err := InstallCatalog(context.Background(), nil)
+	require.Error(t, err, "no database")
+
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectQuery("FROM domain_pack_imports").WillReturnRows(sqlmock.NewRows([]string{"name", "pack_json"}))
+	c, err := InstallCatalog(context.Background(), db)
+	require.NoError(t, err)
+	_, ok := c.Get(MainDomainPackName)
+	assert.True(t, ok)
+}
+
+func TestExportTenantExtensions_RefusesABadLabel(t *testing.T) {
+	_, err := ExportTenantExtensions("k8s", 1, "acme", []string{"bad label"}, nil)
+	require.Error(t, err)
+}
