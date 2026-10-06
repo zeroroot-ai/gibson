@@ -3,7 +3,11 @@
 
 package brain
 
-import "time"
+import (
+	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+)
 
 // WorkNode is one node of a CUE mission's work-graph, in brain-native form (the
 // daemon translates a gibson.mission.v1.MissionDefinition into these — the brain
@@ -52,6 +56,12 @@ type WorkNode struct {
 	// max_concurrency bounded nothing at all.
 	Group string
 	Limit int
+
+	// Network is the network scope of the node (owner decision S6,
+	// gibson#865): its research flag and the targets bound to it. The daemon
+	// sets it for each node it projects. Nil keeps the egress of the catalog
+	// manifest.
+	Network *agent.NodeNetwork
 }
 
 // MissionProjected is the launch event for a scripted CUE mission (ADR-0101): the
@@ -120,6 +130,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			DependentsRunOnFailure: n.DependentsRunOnFailure,
 			Group:                  n.Group,
 			Limit:                  n.Limit,
+			Network:                n.Network,
 		})
 	}
 }

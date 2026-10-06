@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/mlange-42/ark/ecs"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 // WorkState is the lifecycle state of a unit of work.
@@ -81,6 +83,11 @@ type WorkItem struct {
 	// no ceiling.
 	Group string
 	Limit int
+
+	// Network is the network scope of the node (gibson#865). It lives on the
+	// WorkItem for the same reason Timeout does: a snapshot restore and a
+	// retry hand the same scope back to the dispatcher.
+	Network *agent.NodeNetwork
 }
 
 // WorkDispatched records that a unit of work was launched. It does not block;
@@ -102,6 +109,9 @@ type WorkDispatched struct {
 	// must hand the scheduler the same ceiling (gibson#538).
 	Group string
 	Limit int
+	// Network carries the network scope of the node to the dispatch
+	// effect-handler, for the same reason Timeout does (gibson#865).
+	Network *agent.NodeNetwork
 }
 
 func (WorkDispatched) Kind() string { return "work.dispatched" }
@@ -156,6 +166,9 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.Limit > 0 {
 			wi.Group, wi.Limit = e.Group, e.Limit
 		}
+		if e.Network != nil {
+			wi.Network = e.Network
+		}
 		return
 	}
 	w.work.NewEntity(&WorkItem{
@@ -169,6 +182,7 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		Timeout:   e.Timeout,
 		Group:     e.Group,
 		Limit:     e.Limit,
+		Network:   e.Network,
 	})
 	// A fresh dispatch under an open Decider decision is one of that decision's
 	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
@@ -234,6 +248,9 @@ type WorkSnapshot struct {
 	// members off this snapshot (gibson#538).
 	Group string
 	Limit int
+	// Network mirrors WorkItem.Network; the scheduler hands it to the
+	// dispatch (gibson#865).
+	Network *agent.NodeNetwork
 	// CompletedSeq mirrors WorkItem.CompletedSeq (gibson#543).
 	CompletedSeq uint64
 }
@@ -260,6 +277,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			DependentsRunOnFailure: wi.DependentsRunOnFailure,
 			Group:                  wi.Group,
 			Limit:                  wi.Limit,
+			Network:                wi.Network,
 			CompletedSeq:           wi.CompletedSeq,
 		})
 	}

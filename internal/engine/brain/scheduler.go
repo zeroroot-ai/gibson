@@ -65,6 +65,7 @@ func SchedulerSystem(w *World) []Event {
 			Timeout:   wi.Timeout,
 			Group:     wi.Group,
 			Limit:     wi.Limit,
+			Network:   wi.Network,
 		})
 	}
 	return out
