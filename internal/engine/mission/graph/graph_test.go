@@ -491,3 +491,109 @@ func TestValidate_SoundDefinitionIsNil(t *testing.T) {
 		t.Fatal("nil definition must be refused")
 	}
 }
+
+// agentFrom is an agent node that starts from an earlier node (gibson#802).
+func agentFrom(id, name, startsFrom string) *missionv1.MissionNode {
+	n := agent(id, name)
+	n.StartsFrom = startsFrom
+	return n
+}
+
+// A node may start from an earlier node: the ancestor's snapshot exists when
+// the node starts (ADR-0169).
+func TestProject_StartsFrom_AncestorIsAccepted(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{
+			"scan":    agent("scan", "recon"),
+			"exploit": agentFrom("exploit", "attacker", "scan"),
+		},
+		Edges: []*missionv1.MissionEdge{{From: "scan", To: "exploit"}},
+	}
+	mustProject(t, def, nil)
+}
+
+func TestProject_StartsFrom_Refusals(t *testing.T) {
+	cases := map[string]struct {
+		def    *missionv1.MissionDefinition
+		node   string
+		from   string
+		reason string
+	}{
+		"does not exist": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{"a": agentFrom("a", "x", "ghost")},
+			},
+			node: "a", from: "ghost", reason: "does not exist",
+		},
+		"itself": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{
+					"a": agent("a", "x"),
+					"b": agentFrom("b", "y", "b"),
+				},
+				Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}},
+			},
+			node: "b", from: "b", reason: "is the node itself",
+		},
+		"a later node": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{
+					"first":  agentFrom("first", "x", "second"),
+					"second": agent("second", "y"),
+				},
+				Edges: []*missionv1.MissionEdge{{From: "first", To: "second"}},
+			},
+			node: "first", from: "second", reason: "does not run before it",
+		},
+		"a node on another branch": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{
+					"root":  agent("root", "r"),
+					"left":  agent("left", "l"),
+					"right": agentFrom("right", "x", "left"),
+				},
+				Edges: []*missionv1.MissionEdge{{From: "root", To: "left"}, {From: "root", To: "right"}},
+			},
+			node: "right", from: "left", reason: "does not run before it",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := graph.Project(tc.def, nil)
+			ve, ok := err.(*graph.ValidationError)
+			if !ok {
+				t.Fatalf("want *ValidationError, got %T %v", err, err)
+			}
+			if len(ve.StartsFrom) != 1 {
+				t.Fatalf("want one starts_from refusal, got %+v", ve.StartsFrom)
+			}
+			r := ve.StartsFrom[0]
+			if r.Node != tc.node || r.StartsFrom != tc.from || r.Reason != tc.reason {
+				t.Fatalf("refusal = %+v, want node %q from %q reason %q", r, tc.node, tc.from, tc.reason)
+			}
+			if !strings.Contains(err.Error(), tc.reason) {
+				t.Errorf("error text %q omits the reason %q", err.Error(), tc.reason)
+			}
+		})
+	}
+}
+
+// A for_each template node may carry starts_from: the ancestry check reads
+// the flattened node set, so it treats the template like any other node.
+func TestProject_StartsFrom_CycleSkipsTheCheck(t *testing.T) {
+	def := &missionv1.MissionDefinition{
+		Nodes: map[string]*missionv1.MissionNode{
+			"a": agent("a", "x"),
+			"b": agentFrom("b", "y", "a"),
+		},
+		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "a"}},
+	}
+	_, err := graph.Project(def, nil)
+	ve, ok := err.(*graph.ValidationError)
+	if !ok || len(ve.Cycles) == 0 {
+		t.Fatalf("want a cycle refusal, got %T %v", err, err)
+	}
+	if len(ve.StartsFrom) != 0 {
+		t.Errorf("a cyclic definition must skip the starts_from ancestry check, got %+v", ve.StartsFrom)
+	}
+}
