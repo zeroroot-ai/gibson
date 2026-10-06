@@ -40,7 +40,6 @@ import (
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	"github.com/zeroroot-ai/gibson/pkg/version"
 	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
@@ -1227,9 +1226,8 @@ func (s *DaemonServer) Connect(ctx context.Context, req *daemonpb.ConnectRequest
 	}
 
 	return &daemonpb.ConnectResponse{
-		DaemonVersion: version.Version,
-		SessionId:     sessionID,
-		GrpcAddress:   status.GRPCAddress,
+		SessionId:   sessionID,
+		GrpcAddress: status.GRPCAddress,
 	}, nil
 }
 
@@ -1571,9 +1569,7 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *daemonpb.GetAgen
 			Health:       agentStatus.Agent.Health,
 			LastSeen:     agentStatus.Agent.LastSeen.Unix(),
 		},
-		Active:        agentStatus.Active,
-		CurrentTask:   agentStatus.CurrentTask,
-		TaskStartTime: agentStatus.TaskStartTime.Unix(),
+		Active: agentStatus.Active,
 	}, nil
 }
 
@@ -1735,41 +1731,6 @@ func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.Ser
 						Error:     event.MissionEvent.Error,
 					},
 				}
-			} else if event.AgentEvent != nil {
-				protoEvent.Event = &daemonpb.SubscribeResponse_AgentEvent{
-					AgentEvent: &daemonpb.AgentEvent{
-						EventType: event.AgentEvent.EventType,
-						Timestamp: event.AgentEvent.Timestamp.Unix(),
-						AgentId:   event.AgentEvent.AgentID,
-						AgentName: event.AgentEvent.AgentName,
-						Message:   event.AgentEvent.Message,
-						Data:      StringToTypedMap(event.AgentEvent.Data),
-					},
-				}
-			} else if event.FindingEvent != nil {
-				protoEvent.Event = &daemonpb.SubscribeResponse_FindingEvent{
-					FindingEvent: &daemonpb.FindingEvent{
-						EventType: event.FindingEvent.EventType,
-						Timestamp: event.FindingEvent.Timestamp.Unix(),
-						Finding: &daemonpb.FindingInfo{
-							Id:          event.FindingEvent.Finding.ID,
-							Title:       event.FindingEvent.Finding.Title,
-							Severity:    event.FindingEvent.Finding.Severity,
-							Category:    event.FindingEvent.Finding.Category,
-							Description: event.FindingEvent.Finding.Description,
-							Technique:   event.FindingEvent.Finding.Technique,
-							Evidence:    event.FindingEvent.Finding.Evidence,
-							Timestamp:   event.FindingEvent.Finding.Timestamp.Unix(),
-						},
-						MissionId: event.FindingEvent.MissionID,
-					},
-				}
-			} else if event.ToolEvent != nil {
-				protoEvent.Event = convertToToolEvent(event.ToolEvent)
-			} else if event.LLMEvent != nil {
-				protoEvent.Event = convertToLLMEvent(event.LLMEvent)
-			} else if event.OrchestratorEvent != nil {
-				protoEvent.Event = convertToOrchestratorEvent(event.OrchestratorEvent)
 			}
 
 			// Send event to client
@@ -1778,84 +1739,6 @@ func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.Ser
 				return status_grpc.Errorf(codes.Internal, "failed to send event: %v", err)
 			}
 		}
-	}
-}
-
-// convertToToolEvent converts internal ToolEventData to proto ToolEvent oneof wrapper.
-func convertToToolEvent(data *ToolEventData) *daemonpb.SubscribeResponse_ToolEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_ToolEvent{
-		ToolEvent: &daemonpb.ToolEvent{
-			EventType:       data.EventType,
-			Timestamp:       data.Timestamp.Unix(),
-			ToolName:        data.ToolName,
-			AgentId:         data.AgentID,
-			AgentName:       data.AgentName,
-			MissionId:       data.MissionID,
-			Message:         data.Message,
-			Duration:        data.Duration,
-			Progress:        data.Progress,
-			Error:           data.Error,
-			ErrorCode:       data.ErrorCode,
-			Warning:         data.Warning,
-			WarningSeverity: data.WarningSeverity,
-		},
-	}
-}
-
-// convertToLLMEvent converts internal LLMEventData to proto LLMEvent oneof wrapper.
-func convertToLLMEvent(data *LLMEventData) *daemonpb.SubscribeResponse_LlmEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_LlmEvent{
-		LlmEvent: &daemonpb.LLMEvent{
-			EventType:        data.EventType,
-			Timestamp:        data.Timestamp.Unix(),
-			AgentId:          data.AgentID,
-			AgentName:        data.AgentName,
-			Model:            data.Model,
-			Slot:             data.Slot,
-			MessageCount:     int32(data.MessageCount),
-			PromptTokens:     int32(data.PromptTokens),
-			CompletionTokens: int32(data.CompletionTokens),
-			TotalTokens:      int32(data.TotalTokens),
-			DurationMs:       data.Duration,
-			Cached:           data.Cached,
-			Error:            data.Error,
-			ErrorCode:        data.ErrorCode,
-			WillRetry:        data.WillRetry,
-		},
-	}
-}
-
-// convertToOrchestratorEvent converts internal OrchestratorEventData to proto OrchestratorEvent oneof wrapper.
-func convertToOrchestratorEvent(data *OrchestratorEventData) *daemonpb.SubscribeResponse_OrchestratorEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_OrchestratorEvent{
-		OrchestratorEvent: &daemonpb.OrchestratorEvent{
-			EventType:       data.EventType,
-			Timestamp:       data.Timestamp.Unix(),
-			MissionId:       data.MissionID,
-			Iteration:       int32(data.Iteration),
-			Action:          data.Action,
-			TargetNodeId:    data.TargetNodeID,
-			TargetAgentName: data.TargetAgentName,
-			Confidence:      data.Confidence,
-			Reasoning:       data.Reasoning,
-			TokensUsed:      int32(data.TokensUsed),
-			LatencyMs:       data.Latency,
-			ApprovalId:      data.ApprovalID,
-			Risk:            data.Risk,
-			TimeoutSeconds:  int32(data.Timeout),
-		},
 	}
 }
 
@@ -2132,7 +2015,6 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 			CreatedAt:     run.CreatedAt,
 			CompletedAt:   run.CompletedAt,
 			FindingsCount: int32(run.FindingsCount),
-			PreviousRunId: run.PreviousRunID,
 			TraceId:       run.TraceID,
 		}
 		protoRuns[i].ParentMissionId = run.ParentMissionID
@@ -2569,7 +2451,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	role := pickHighestRole(isOwner, isAdmin, isWriter)
 	effectiveAdmin := isOwner || isAdmin
 
-	// Component grants and team memberships were previously sourced from the
+	// Component grants were previously sourced from the
 	// provisioner package; those features now live in the tenant-operator
 	// control plane. Returning empty slices keeps the proto response valid.
 	return &daemonpb.GetMyPermissionsResponse{
@@ -2577,7 +2459,6 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		Role:            role,
 		IsAdmin:         effectiveAdmin,
 		ComponentGrants: nil,
-		TeamMemberships: nil,
 	}, nil
 }
 

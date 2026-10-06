@@ -78,16 +78,15 @@ func (a *ComponentAccess) EffectiveWriteEnabled() bool {
 // PluginCatalogEntry describes a plugin available to a tenant, combining
 // registry info with access status.
 type PluginCatalogEntry struct {
-	Name          string   `json:"name"`
-	Version       string   `json:"version"`
-	Description   string   `json:"description"`
-	Methods       []string `json:"methods"`
-	ConfigSchema  string   `json:"config_schema,omitempty"` // JSON Schema
-	Enabled       bool     `json:"enabled"`
-	Configured    bool     `json:"configured"`
-	HealthStatus  string   `json:"health_status"`
-	Source        string   `json:"source"` // "platform" or "self-hosted"
-	InstanceCount int      `json:"instance_count"`
+	Name         string   `json:"name"`
+	Version      string   `json:"version"`
+	Description  string   `json:"description"`
+	Methods      []string `json:"methods"`
+	ConfigSchema string   `json:"config_schema,omitempty"` // JSON Schema
+	Enabled      bool     `json:"enabled"`
+	Configured   bool     `json:"configured"`
+	HealthStatus string   `json:"health_status"`
+	Source       string   `json:"source"` // "platform" or "self-hosted"
 }
 
 // encryptedConfig holds the encrypted form of a component's per-tenant config.
@@ -468,11 +467,10 @@ func (s *RedisComponentAccessStore) ListAvailablePlugins(ctx context.Context, te
 	systemByName := aggregateByName(systemPlugins)
 	for name, instances := range systemByName {
 		entry := PluginCatalogEntry{
-			Name:          name,
-			Version:       instances[0].Version,
-			Source:        "platform",
-			InstanceCount: len(instances),
-			HealthStatus:  "unknown",
+			Name:         name,
+			Version:      instances[0].Version,
+			Source:       "platform",
+			HealthStatus: "unknown",
 		}
 
 		// Enrich from metadata.
@@ -503,13 +501,12 @@ func (s *RedisComponentAccessStore) ListAvailablePlugins(ctx context.Context, te
 		}
 
 		entry := PluginCatalogEntry{
-			Name:          name,
-			Version:       instances[0].Version,
-			Source:        "self-hosted",
-			Enabled:       true,
-			Configured:    true,
-			InstanceCount: len(instances),
-			HealthStatus:  "unknown",
+			Name:         name,
+			Version:      instances[0].Version,
+			Source:       "self-hosted",
+			Enabled:      true,
+			Configured:   true,
+			HealthStatus: "unknown",
 		}
 
 		if desc, ok := instances[0].Metadata["description"]; ok {

@@ -88,10 +88,7 @@ func (s *HarnessCallbackService) ProposeOntologyExtension(
 	if err := s.ontologyDiscovery.ProposeOntologyExtension(ctx, kind, label, proposer, claim); err != nil {
 		var invalid *taxonomy.InvalidProposalError
 		if errors.As(err, &invalid) {
-			return &harnesspb.ProposeOntologyExtensionResponse{
-				Accepted:        false,
-				RejectionReason: invalid.Error(),
-			}, nil
+			return &harnesspb.ProposeOntologyExtensionResponse{Accepted: false}, nil
 		}
 		return nil, status.Errorf(codes.Internal, "ProposeOntologyExtension: %v", err)
 	}

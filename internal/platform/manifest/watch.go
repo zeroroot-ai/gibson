@@ -12,7 +12,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // WatchHub multiplexes a single Redis psubscribe stream across many
@@ -155,7 +154,6 @@ func (h *WatchHub) dispatch(channel, payload string) {
 		EventType: manifestpb.ManifestInvalidationEvent_EVENT_TYPE_INVALIDATED,
 		TenantId:  tenantID,
 		Reason:    payload,
-		EmittedAt: timestamppb.Now(),
 	}
 
 	h.mu.Lock()
@@ -185,13 +183,12 @@ func (h *WatchHub) dispatch(channel, payload string) {
 	}
 }
 
-// BuildHeartbeat returns the EmittedAt-stamped HEARTBEAT event the
+// BuildHeartbeat returns the HEARTBEAT event the
 // per-connection handler sends on its ticker.
 func BuildHeartbeat(tenantID string) *manifestpb.ManifestInvalidationEvent {
 	return &manifestpb.ManifestInvalidationEvent{
 		EventType: manifestpb.ManifestInvalidationEvent_EVENT_TYPE_HEARTBEAT,
 		TenantId:  tenantID,
-		EmittedAt: timestamppb.Now(),
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -121,6 +122,16 @@ type ManifestValidationError struct {
 	Line    int32
 	Code    string
 	Message string
+}
+
+// joinValidationErrors renders the validation errors into the status message
+// of the refusal: "field (code): message", separated by "; ".
+func joinValidationErrors(errs []ManifestValidationError) string {
+	parts := make([]string, 0, len(errs))
+	for _, e := range errs {
+		parts = append(parts, fmt.Sprintf("%s (%s): %s", e.Field, e.Code, e.Message))
+	}
+	return strings.Join(parts, "; ")
 }
 
 // ZitadelPluginPrincipalClient is the narrow contract for creating /
@@ -330,29 +341,12 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 	// --- Step 1: validate manifest --------------------------------------
 	manifest, vErrs := s.validator.Validate(req.GetManifestYaml())
 	if len(vErrs) > 0 {
-		out := make([]*tenantv1.PluginManifestValidationError, 0, len(vErrs))
-		for _, e := range vErrs {
-			out = append(out, &tenantv1.PluginManifestValidationError{
-				Field:   e.Field,
-				Line:    e.Line,
-				Code:    e.Code,
-				Message: e.Message,
-			})
-		}
-		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "manifest validation failed")
+		return nil, status.Errorf(codes.InvalidArgument, "manifest validation failed: %s", joinValidationErrors(vErrs))
 	}
 
 	// Cross-check: every declared secret must have exactly one binding.
 	if vErrs := crossCheckBindings(manifest.DeclaredSecrets, req.GetBindings()); len(vErrs) > 0 {
-		out := make([]*tenantv1.PluginManifestValidationError, 0, len(vErrs))
-		for _, e := range vErrs {
-			out = append(out, &tenantv1.PluginManifestValidationError{
-				Field:   e.Field,
-				Code:    e.Code,
-				Message: e.Message,
-			})
-		}
-		return &tenantv1.RegisterPluginResponse{ValidationErrors: out}, status.Error(codes.InvalidArgument, "binding cross-check failed")
+		return nil, status.Errorf(codes.InvalidArgument, "binding cross-check failed: %s", joinValidationErrors(vErrs))
 	}
 
 	if req.GetDryRun() {
@@ -397,7 +391,7 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 	}
 
 	// --- Step 4: Zitadel principal --------------------------------------
-	principalID, bootstrapToken, expiresAt, err := s.zitadel.CreatePrincipal(ctx, tenant, installID, manifest.Name, s.bootstrapTTL)
+	principalID, bootstrapToken, _, err := s.zitadel.CreatePrincipal(ctx, tenant, installID, manifest.Name, s.bootstrapTTL)
 	if err != nil {
 		doRollback(err)
 		return nil, status.Errorf(codes.Internal, "create plugin principal: %v", err)
@@ -450,10 +444,8 @@ func (s *PluginsAdminServer) RegisterPlugin(ctx context.Context, req *tenantv1.R
 	})
 
 	resp := &tenantv1.RegisterPluginResponse{
-		InstallId:                   installID,
-		PluginPrincipalId:           principalID,
-		BootstrapToken:              bootstrapToken,
-		BootstrapTokenExpiresAtUnix: expiresAt.Unix(),
+		InstallId:      installID,
+		BootstrapToken: bootstrapToken,
 	}
 	return resp, nil
 }

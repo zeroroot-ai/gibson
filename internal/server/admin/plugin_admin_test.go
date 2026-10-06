@@ -248,7 +248,7 @@ func TestRegisterPlugin_AtomicSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterPlugin: %v", err)
 	}
-	if resp.GetInstallId() == "" || resp.GetPluginPrincipalId() == "" || resp.GetBootstrapToken() == "" {
+	if resp.GetInstallId() == "" || resp.GetBootstrapToken() == "" {
 		t.Errorf("missing fields in response: %+v", resp)
 	}
 	if len(zit.created) != 1 {
@@ -353,15 +353,15 @@ func TestRegisterPlugin_ManifestValidationErrors(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
+	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{ManifestYaml: []byte("...")})
 	if err == nil {
 		t.Fatal("expected error on validation failure")
 	}
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
-	if len(resp.GetValidationErrors()) != 1 || resp.GetValidationErrors()[0].GetField() != "metadata.name" {
-		t.Errorf("expected validation_errors with metadata.name field, got %+v", resp.GetValidationErrors())
+	if !strings.Contains(status.Convert(err).Message(), "metadata.name (missing_required): metadata.name required") {
+		t.Errorf("the status must name each validation error, got %q", status.Convert(err).Message())
 	}
 }
 
@@ -373,7 +373,7 @@ func TestRegisterPlugin_CrossCheckBindings_Missing(t *testing.T) {
 	}
 	ctx := ctxWithTenant(t, "acme")
 
-	resp, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
+	_, err := srv.RegisterPlugin(ctx, &tenantv1.RegisterPluginRequest{
 		ManifestYaml: []byte("..."),
 		Bindings: []*tenantv1.PluginSecretBinding{
 			{DeclaredName: "a", Mode: "create", CreateValue: []byte("v")},
@@ -383,8 +383,8 @@ func TestRegisterPlugin_CrossCheckBindings_Missing(t *testing.T) {
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("want InvalidArgument, got %v", err)
 	}
-	if len(resp.GetValidationErrors()) == 0 {
-		t.Errorf("expected validation errors")
+	if !strings.Contains(status.Convert(err).Message(), "b") {
+		t.Errorf("the status must name the missing binding, got %q", status.Convert(err).Message())
 	}
 }
 

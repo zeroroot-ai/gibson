@@ -17,7 +17,4 @@ func TestWatchHub_HeartbeatBuilder(t *testing.T) {
 	if ev.TenantId != "tenant-a" {
 		t.Fatalf("tenant = %q", ev.TenantId)
 	}
-	if ev.EmittedAt == nil {
-		t.Fatalf("EmittedAt should be set")
-	}
 }
