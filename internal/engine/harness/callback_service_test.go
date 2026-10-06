@@ -483,6 +483,8 @@ type mockHarnessWithResolver struct {
 	// forTargetID records what ForTarget was asked for, so a test can assert a
 	// scope reader followed the per-target view.
 	forTargetID string
+	// queryPluginHook, when set, runs on each QueryPlugin call.
+	queryPluginHook func()
 }
 
 func (m *mockHarnessWithResolver) GetToolDescriptor(ctx context.Context, name string) (*ToolDescriptor, error) {
@@ -538,6 +540,9 @@ func (m *mockHarnessWithResolver) ListTools() []ToolDescriptor {
 }
 
 func (m *mockHarnessWithResolver) QueryPlugin(ctx context.Context, componentName string, method string, params map[string]any) (any, error) {
+	if m.queryPluginHook != nil {
+		m.queryPluginHook()
+	}
 	return nil, fmt.Errorf("not implemented")
 }
 

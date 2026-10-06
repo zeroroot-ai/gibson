@@ -13,14 +13,15 @@ import (
 )
 
 type fakeQuerier struct {
+	gotTenant          string
 	gotName, gotMethod string
 	gotParams          map[string]any
 	ret                any
 	err                error
 }
 
-func (f *fakeQuerier) QueryPlugin(_ context.Context, name, method string, params map[string]any) (any, error) {
-	f.gotName, f.gotMethod, f.gotParams = name, method, params
+func (f *fakeQuerier) CallConnectorTool(_ context.Context, tenant, connector, tool string, params map[string]any) (any, error) {
+	f.gotTenant, f.gotName, f.gotMethod, f.gotParams = tenant, connector, tool, params
 	return f.ret, f.err
 }
 
@@ -54,8 +55,9 @@ func allowAll(ids ...string) fakeAuthz {
 	return fakeAuthz{allow: m}
 }
 
-// invoke_tool decodes the canonical id, passes the can_invoke gate, and
-// dispatches to the plugin method, forwarding the LLM args and returning result.
+// invoke_tool decodes the canonical id, passes the can_execute gate, and
+// dispatches to the connector of the same id for the tenant of the caller,
+// forwarding the LLM args and returning the result.
 func TestInvoke_AuthorizedDecodesAndDispatches(t *testing.T) {
 	q := &fakeQuerier{ret: map[string]any{"issue": 42}}
 	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q)
@@ -67,6 +69,9 @@ func TestInvoke_AuthorizedDecodesAndDispatches(t *testing.T) {
 	}
 	if q.gotName != "gitlab" || q.gotMethod != "create_issue" {
 		t.Fatalf("dispatched to %s.%s, want gitlab.create_issue", q.gotName, q.gotMethod)
+	}
+	if q.gotTenant != "acme" {
+		t.Fatalf("dispatched for tenant %q, want the tenant of the caller", q.gotTenant)
 	}
 	if q.gotParams["title"] != "broken pipeline" {
 		t.Fatalf("params not passed through: %+v", q.gotParams)
@@ -129,7 +134,7 @@ func TestAuthorize_NativeToolThenDispatchRefusesIt(t *testing.T) {
 	if tid.Source != toolid.SourceNative || tid.Tool != "nmap" {
 		t.Fatalf("tid = %+v; want native nmap", tid)
 	}
-	if _, err := h.Dispatch(context.Background(), tid, nil); !errors.Is(err, ErrNativeID) {
+	if _, err := h.Dispatch(context.Background(), catalog.Caller{}, tid, nil); !errors.Is(err, ErrNativeID) {
 		t.Fatalf("Dispatch err = %v; want ErrNativeID", err)
 	}
 	if q.gotName != "" {

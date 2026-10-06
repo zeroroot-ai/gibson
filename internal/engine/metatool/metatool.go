@@ -4,22 +4,21 @@
 // Package metatool implements the two agent-facing meta-tools from ADR-0065:
 // search_tools (discovery over the FGA-scoped connector catalog) and
 // invoke_tool (deterministic id → dispatch). An mcp:<connector>:<tool> id goes
-// to PluginInvoke{plugin_name, method}. The harness sends a native:<tool> id
-// to its tool call handler: the sandbox path or the work queue path.
+// to that connector through MCP; the daemon is the one MCP client. The
+// harness sends a native:<tool> id to its tool call handler: the sandbox path
+// or the work queue path.
 //
 // Binding thousands of MCP tools to the LLM as native function names does not
 // scale and forbids structured ids, so at MCP scale the agent loop presents
 // exactly two tools — search_tools and invoke_tool — and the daemon resolves the
-// canonical id behind them. The id↔(plugin, method) mapping is owned solely by
-// package toolid.
+// canonical id behind them. The id rules are owned solely by package toolid.
 //
 // Authorization: invoke_tool re-checks can_execute with the *same* authorizer the
 // catalog search uses, so "searchable == invocable" holds. This is not
-// redundant — invoke_tool dispatches in-process via QueryPlugin, which does not
-// pass through the per-plugin ext-authz gate, and a confused or hostile agent
-// may pass an id it never obtained from search_tools. The determinism boundary
-// (id → install → pinned schema → arg validation → FGA → call) is preserved;
-// only selection and argument fill are probabilistic, over a narrowed surface.
+// redundant: the daemon makes the call itself, so no gateway check runs on
+// it, and a confused or hostile agent may pass an id it never obtained from
+// search_tools. The component that the check reads is the component that the
+// call reaches.
 package metatool
 
 import (
@@ -47,10 +46,11 @@ var ErrNativeID = errors.New("metatool: a native tool id goes to the tool call h
 // requested tool. Callers map it to a permission-denied result.
 var ErrUnauthorized = errors.New("metatool: not authorized to invoke tool")
 
-// PluginQuerier invokes a plugin method with JSON-object params and returns the
-// JSON-decodable result. Satisfied by the daemon AgentHarness.QueryPlugin.
-type PluginQuerier interface {
-	QueryPlugin(ctx context.Context, name, method string, params map[string]any) (any, error)
+// ConnectorCaller calls one tool of one connector of a tenant through MCP
+// and returns the JSON-decodable result. The daemon is the one MCP client
+// (ADR-0065); component.ConnectorMCP satisfies this.
+type ConnectorCaller interface {
+	CallConnectorTool(ctx context.Context, tenant, connector, tool string, args map[string]any) (any, error)
 }
 
 // Searcher returns the ranked, authz-filtered, tenant-scoped catalog candidates
@@ -63,16 +63,16 @@ type Searcher interface {
 // plugin-method machinery. It holds no state beyond its collaborators and is safe
 // for concurrent use if they are.
 type Handler struct {
-	search  Searcher
-	authz   catalog.Authorizer
-	querier PluginQuerier
+	search     Searcher
+	authz      catalog.Authorizer
+	connectors ConnectorCaller
 }
 
 // NewHandler constructs a Handler. Any collaborator may be nil; the dependent
 // meta-tool then fails closed with a configuration error rather than panicking,
 // so a partially-wired daemon degrades loudly.
-func NewHandler(search Searcher, authz catalog.Authorizer, querier PluginQuerier) *Handler {
-	return &Handler{search: search, authz: authz, querier: querier}
+func NewHandler(search Searcher, authz catalog.Authorizer, connectors ConnectorCaller) *Handler {
+	return &Handler{search: search, authz: authz, connectors: connectors}
 }
 
 // Search runs the discovery meta-tool, returning the narrowed candidate set the
@@ -91,7 +91,7 @@ func (h *Handler) Invoke(ctx context.Context, caller catalog.Caller, id string, 
 	if err != nil {
 		return nil, err
 	}
-	return h.Dispatch(ctx, tid, args)
+	return h.Dispatch(ctx, caller, tid, args)
 }
 
 // Authorize decodes the canonical id and re-checks can_execute (ADR-0067: on
@@ -116,18 +116,19 @@ func (h *Handler) Authorize(ctx context.Context, caller catalog.Caller, id strin
 	return tid, nil
 }
 
-// Dispatch sends an authorized mcp id to the plugin-method path. args is the
-// LLM-supplied argument object, passed through unchanged for the validation
-// that QueryPlugin performs. A native id returns ErrNativeID.
-func (h *Handler) Dispatch(ctx context.Context, tid toolid.ID, args map[string]any) (any, error) {
-	name, method, ok := tid.PluginRef()
-	if !ok {
+// Dispatch sends an authorized mcp:<connector>:<tool> id to that connector
+// of the tenant of the caller. The object of the can_execute check in
+// Authorize and the target of the call are the same component (ADR-0067).
+// args is the LLM-supplied argument object, passed through unchanged. A
+// native id returns ErrNativeID.
+func (h *Handler) Dispatch(ctx context.Context, caller catalog.Caller, tid toolid.ID, args map[string]any) (any, error) {
+	if tid.Source != toolid.SourceMCP {
 		return nil, ErrNativeID
 	}
-	if h.querier == nil {
+	if h.connectors == nil {
 		return nil, errors.New("metatool: the connector dispatch is not configured")
 	}
-	result, err := h.querier.QueryPlugin(ctx, name, method, args)
+	result, err := h.connectors.CallConnectorTool(ctx, caller.Tenant, tid.Connector, tid.Tool, args)
 	if err != nil {
 		return nil, fmt.Errorf("metatool: invoke %q: %w", tid.Canonical(), err)
 	}

@@ -123,9 +123,9 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(
-		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry), authorizer),
+		catalog.NewEngine(component.NewCatalogToolLister(s.componentRegistry, s.connectors), authorizer),
 		authorizer,
-		h,
+		s.connectors,
 	)
 	caller := catalog.Caller{Subject: "user:" + state.UserID, Tenant: state.TenantID}
 
@@ -233,7 +233,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 	}
 	var result any
 	if err == nil {
-		result, err = h.Dispatch(ctx, tid, in.Args)
+		result, err = h.Dispatch(ctx, caller, tid, in.Args)
 	}
 	if err != nil {
 		code := commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT

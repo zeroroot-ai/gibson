@@ -32,68 +32,70 @@ func find(entries []catalog.ToolEntry, source toolid.Source, connector, tool str
 	return nil
 }
 
-// A plugin expands to one mcp entry per method (carrying the description); a tool
-// to one native entry; an agent is skipped.
+type fakeConnectorTools struct {
+	tools []catalog.ToolEntry
+	err   error
+}
+
+func (f fakeConnectorTools) ListConnectorTools(context.Context, string) ([]catalog.ToolEntry, error) {
+	return f.tools, f.err
+}
+
+// A tool expands to one native entry, each connector tool to one mcp entry,
+// and an agent and a plugin to nothing. A plugin has no MCP (ADR-0065), so a
+// plugin method is not an mcp: entry, also when a connector has its name.
 func TestCatalogToolLister_Expands(t *testing.T) {
 	reg := fakeTenantLister{comps: []component.ComponentInfo{
 		{
 			Kind: "plugin", Name: "gitlab",
-			Methods: []component.MethodInfo{
-				{Name: "create_issue", Description: "open a GitLab issue", InputSchemaJSON: `{"type":"object"}`},
-				{Name: "list_issues", Description: "list GitLab issues"},
-			},
+			Methods: []component.MethodInfo{{Name: "list_issues", Description: "a plugin method"}},
 		},
 		{Kind: "tool", Name: "nmap", Description: "network scanner", InputSchemaJSON: []byte(`{"x":1}`)},
 		{Kind: "agent", Name: "recon-agent"},
 	}}
+	connectors := fakeConnectorTools{tools: []catalog.ToolEntry{
+		{Source: toolid.SourceMCP, Connector: "gitlab", Tool: "create_issue", Description: "open a GitLab issue", InputSchema: []byte(`{"type":"object"}`)},
+	}}
 
-	got, err := component.NewCatalogToolLister(reg).ListTools(context.Background(), "acme")
+	got, err := component.NewCatalogToolLister(reg, connectors).ListTools(context.Background(), "acme")
 	if err != nil {
 		t.Fatalf("ListTools error: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d entries, want 3 (2 plugin methods + 1 native, agent skipped): %+v", len(got), got)
+	if len(got) != 2 {
+		t.Fatalf("got %d entries, want 2 (1 native + 1 connector tool): %+v", len(got), got)
 	}
-
-	mr := find(got, toolid.SourceMCP, "gitlab", "create_issue")
-	if mr == nil {
-		t.Fatalf("missing mcp:gitlab:create_issue")
+	if mr := find(got, toolid.SourceMCP, "gitlab", "create_issue"); mr == nil || mr.Description != "open a GitLab issue" {
+		t.Fatalf("connector tool entry wrong: %+v", mr)
 	}
-	if mr.Description != "open a GitLab issue" {
-		t.Fatalf("description not carried: %q", mr.Description)
+	if find(got, toolid.SourceMCP, "gitlab", "list_issues") != nil {
+		t.Fatal("a plugin method must not be an mcp: entry")
 	}
-	if string(mr.InputSchema) != `{"type":"object"}` {
-		t.Fatalf("input schema not carried: %q", string(mr.InputSchema))
-	}
-
-	if find(got, toolid.SourceMCP, "gitlab", "list_issues") == nil {
-		t.Fatalf("missing mcp:gitlab:list_issues")
-	}
-
-	nat := find(got, toolid.SourceNative, "", "nmap")
-	if nat == nil || nat.Description != "network scanner" {
+	if nat := find(got, toolid.SourceNative, "", "nmap"); nat == nil || nat.Description != "network scanner" {
 		t.Fatalf("native nmap entry wrong: %+v", nat)
-	}
-
-	if find(got, toolid.SourceMCP, "recon-agent", "") != nil {
-		t.Fatalf("agent component should be skipped")
 	}
 }
 
-func TestCatalogToolLister_PluginWithNoMethodsYieldsNothing(t *testing.T) {
-	reg := fakeTenantLister{comps: []component.ComponentInfo{{Kind: "plugin", Name: "empty"}}}
-	got, err := component.NewCatalogToolLister(reg).ListTools(context.Background(), "acme")
-	if err != nil {
-		t.Fatalf("error: %v", err)
+// With no connector source, the lister lists the native tools only.
+func TestCatalogToolLister_NoConnectorSource(t *testing.T) {
+	reg := fakeTenantLister{comps: []component.ComponentInfo{{Kind: "tool", Name: "nmap"}}}
+	got, err := component.NewCatalogToolLister(reg, nil).ListTools(context.Background(), "acme")
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %+v, %v; want the one native entry", got, err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("plugin with no method descriptors should yield 0 entries, got %d", len(got))
+}
+
+// An error of the connector source reaches the caller.
+func TestCatalogToolLister_PropagatesConnectorError(t *testing.T) {
+	boom := errors.New("mcp down")
+	_, err := component.NewCatalogToolLister(fakeTenantLister{}, fakeConnectorTools{err: boom}).ListTools(context.Background(), "acme")
+	if !errors.Is(err, boom) {
+		t.Fatalf("connector error not propagated: %v", err)
 	}
 }
 
 func TestCatalogToolLister_PropagatesError(t *testing.T) {
 	boom := errors.New("redis down")
-	_, err := component.NewCatalogToolLister(fakeTenantLister{err: boom}).ListTools(context.Background(), "acme")
+	_, err := component.NewCatalogToolLister(fakeTenantLister{err: boom}, nil).ListTools(context.Background(), "acme")
 	if !errors.Is(err, boom) {
 		t.Fatalf("registry error not propagated: %v", err)
 	}
@@ -101,5 +103,5 @@ func TestCatalogToolLister_PropagatesError(t *testing.T) {
 
 // Satisfies the catalog.ToolLister interface the engine depends on.
 func TestCatalogToolLister_SatisfiesInterface(t *testing.T) {
-	var _ catalog.ToolLister = component.NewCatalogToolLister(fakeTenantLister{})
+	var _ catalog.ToolLister = component.NewCatalogToolLister(fakeTenantLister{}, nil)
 }

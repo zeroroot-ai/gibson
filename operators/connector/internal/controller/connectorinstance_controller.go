@@ -61,7 +61,7 @@ const (
 	kindMCPRemoteProxy = "MCPRemoteProxy"
 
 	// proxyPort is the port the ToolHive proxy Service exposes.
-	proxyPort = 8080
+	proxyPort = connectorv1alpha1.ProxyPort
 
 	condProvisioned = "Provisioned"
 	condReady       = "Ready"
@@ -184,8 +184,7 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	phase, _, _ := unstructured.NestedString(live.Object, "status", "phase")
 	ci.Status.ToolHiveKind = th.GetKind()
 	ci.Status.ToolHiveName = th.GetName()
-	ci.Status.ProxyURL = fmt.Sprintf(
-		"http://mcp-%s-proxy.%s.svc.cluster.local:%d/mcp", ci.Name, ci.Namespace, proxyPort)
+	ci.Status.ProxyURL = connectorv1alpha1.ProxyURL(ci.Name, ci.Namespace)
 	ci.Status.ObservedGeneration = ci.Generation
 	ci.Status.LastError = ""
 	setCondition(&ci, condProvisioned, metav1.ConditionTrue, "Applied",

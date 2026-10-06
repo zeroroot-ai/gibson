@@ -478,6 +478,11 @@ type daemonImpl struct {
 	// by buildPluginSVIDEnroller; closed on shutdown.
 	spiffeJWTSource *workloadapi.JWTSource
 
+	// connectorMCP is the one MCP client of the daemon (ADR-0065). Built
+	// once by connectorMCPClient.
+	connectorMCP     *component.ConnectorMCP
+	connectorMCPOnce sync.Once
+
 	// callbackPeerSVIDs is the parsed allowlist of peer SPIFFE IDs the harness
 	// callback listener accepts, sourced from GIBSON_CALLBACK_PEER_SVIDS at
 	// startup. Empty when SPIFFE is not configured. When SPIFFE IS configured
@@ -614,6 +619,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	callbackOpts = append(callbackOpts,
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
+		harness.WithConnectors(d.connectorMCPClient()),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),

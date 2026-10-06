@@ -235,6 +235,12 @@ type HarnessCallbackService struct {
 	// nil, SearchTools returns Unavailable.
 	componentRegistry component.ComponentRegistry
 
+	// connectors is the one MCP client of the daemon (ADR-0065). search_tools
+	// lists the tools of the connectors of a tenant through it, and
+	// invoke_tool calls an mcp:<connector>:<tool> id through it. Nil lists no
+	// connector tool, and an mcp: call fails closed.
+	connectors ConnectorClient
+
 	// componentAuthzMetrics emits counters for every component Authorize decision.
 	// When nil, metrics are not emitted (no-op).
 	componentAuthzMetrics ComponentAuthzMetrics
