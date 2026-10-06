@@ -231,17 +231,21 @@ func (p *pool) For(ctx context.Context, tenant auth.TenantID) (*Conn, error) {
 		KEK:      tenantKEK,
 	}
 
-	rc, err := p.redisPool.ForTenant(ctx, tenant)
-	if err != nil {
-		return zeroKEKOnErr(fmt.Errorf("datapool: For: redis: %w", err))
+	if p.redisPool != nil {
+		rc, err := p.redisPool.ForTenant(ctx, tenant)
+		if err != nil {
+			return zeroKEKOnErr(fmt.Errorf("datapool: For: redis: %w", err))
+		}
+		conn.Redis = rc
 	}
-	conn.Redis = rc
 
-	sess, err := p.neo4j.ForTenant(ctx, tenant)
-	if err != nil {
-		return zeroKEKOnErr(fmt.Errorf("datapool: For: neo4j: %w", err))
+	if p.neo4j != nil {
+		sess, err := p.neo4j.ForTenant(ctx, tenant)
+		if err != nil {
+			return zeroKEKOnErr(fmt.Errorf("datapool: For: neo4j: %w", err))
+		}
+		conn.Neo4j = sess
 	}
-	conn.Neo4j = sess
 
 	// The vector handle is the one sub-store whose absence must not refuse the
 	// Conn. A tenant provisioned before the RediSearch step, or one whose index
@@ -338,16 +342,18 @@ func (p *pool) initTenant(ctx context.Context, tenant auth.TenantID, tenantKEK [
 	}
 	dpmetrics.IncPoolInit(tenantStr, dpmetrics.StorePostgres)
 
-	if _, err := p.redisPool.ForTenant(ctx, tenant); err != nil {
-		var npErr *NotProvisionedError
-		if errors.As(err, &npErr) {
-			dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "not_provisioned")
-			return npErr
+	if p.redisPool != nil {
+		if _, err := p.redisPool.ForTenant(ctx, tenant); err != nil {
+			var npErr *NotProvisionedError
+			if errors.As(err, &npErr) {
+				dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "not_provisioned")
+				return npErr
+			}
+			dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "conn_error")
+			return fmt.Errorf("datapool: tenant %s init: redis: %w", tenant, err)
 		}
-		dpmetrics.IncPoolInitFailure(tenantStr, dpmetrics.StoreRedis, "conn_error")
-		return fmt.Errorf("datapool: tenant %s init: redis: %w", tenant, err)
+		dpmetrics.IncPoolInit(tenantStr, dpmetrics.StoreRedis)
 	}
-	dpmetrics.IncPoolInit(tenantStr, dpmetrics.StoreRedis)
 
 	return nil
 }
