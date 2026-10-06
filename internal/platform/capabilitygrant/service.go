@@ -387,6 +387,27 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 		enrollment.BootstrapTokenHash = bootstrapCredentialHash(bootstrapCredential)
 	}
 
+	// The audit record is durable before the identity exists (ADR-0113,
+	// gibson#676). A failed write fails the registration.
+	meta, _ := json.Marshal(map[string]any{
+		"agent_name":       agentName,
+		"agent_mode":       mode,
+		"bootstrap_type":   bootstrapType,
+		"capability_count": len(caps),
+	})
+	registered := audit.Event{
+		TenantID:   tenantID,
+		ActorID:    ownerUserID,
+		ActorType:  "user",
+		Action:     "agent_registered",
+		TargetType: "agent",
+		TargetID:   agentID,
+		Metadata:   json.RawMessage(meta),
+	}
+	if err := s.auditWriter.WriteSync(ctx, registered); err != nil {
+		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: audit: %w", err)
+	}
+
 	if err := s.store.Enroll(ctx, enrollment); err != nil {
 		switch {
 		case errors.Is(err, ErrBootstrapCredentialConsumed):
@@ -400,25 +421,9 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 				slog.String("host_id", hostID),
 			)
 		}
+		s.recordFailure(ctx, registered, err)
 		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: enroll: %w", err)
 	}
-
-	// Emit audit event.
-	meta, _ := json.Marshal(map[string]any{
-		"agent_name":       agentName,
-		"agent_mode":       mode,
-		"bootstrap_type":   bootstrapType,
-		"capability_count": len(caps),
-	})
-	s.auditWriter.Log(audit.Event{
-		TenantID:   tenantID,
-		ActorID:    ownerUserID,
-		ActorType:  "user",
-		Action:     "agent_registered",
-		TargetType: "agent",
-		TargetID:   agentID,
-		Metadata:   json.RawMessage(meta),
-	})
 
 	s.logger.InfoContext(ctx, "capabilitygrant: agent registered",
 		slog.String("agent_id", agentID),
@@ -723,18 +728,24 @@ func (s *CapabilityGrantService) RevokeCapabilityGrant(
 		return errors.New("capabilitygrant: RevokeCapabilityGrant: tenant_id is required")
 	}
 
-	if err := s.store.RevokeAgent(ctx, tenantID, agentID); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeCapabilityGrant: %w", err)
-	}
-
-	s.auditWriter.Log(audit.Event{
+	// The audit record is durable before the revocation takes effect
+	// (ADR-0113, gibson#676). A failed write fails the revocation.
+	revoked := audit.Event{
 		TenantID:   tenantID,
 		ActorID:    actorID,
 		ActorType:  "user",
 		Action:     "agent_revoked",
 		TargetType: "agent",
 		TargetID:   agentID,
-	})
+	}
+	if err := s.auditWriter.WriteSync(ctx, revoked); err != nil {
+		return fmt.Errorf("capabilitygrant: RevokeCapabilityGrant: audit: %w", err)
+	}
+
+	if err := s.store.RevokeAgent(ctx, tenantID, agentID); err != nil {
+		s.recordFailure(ctx, revoked, err)
+		return fmt.Errorf("capabilitygrant: RevokeCapabilityGrant: %w", err)
+	}
 
 	s.logger.InfoContext(ctx, "capabilitygrant: agent revoked",
 		slog.String("agent_id", agentID),
@@ -984,4 +995,27 @@ func stripFGATypePrefix(s, typeName string) string {
 		return s[len(prefix):]
 	}
 	return s
+}
+
+// recordFailure writes the second audit record of a state change whose
+// action failed. The action already failed, so a write error is logged and
+// the caller still gets the error of the action.
+func (s *CapabilityGrantService) recordFailure(ctx context.Context, ev audit.Event, cause error) {
+	if err := s.auditWriter.WriteSync(ctx, failedAction(ev, cause)); err != nil {
+		s.logger.ErrorContext(ctx, "capabilitygrant: the failure record of an action was not written",
+			slog.String("action", ev.Action),
+			slog.String("target_id", ev.TargetID),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// failedAction is the second audit record of a state change whose action
+// failed after its first record was durable (gibson#676). It names the
+// same action and target, with the decision "deny" and the cause.
+func failedAction(ev audit.Event, cause error) audit.Event {
+	meta, _ := json.Marshal(map[string]any{"result": "failure", "error": cause.Error()})
+	ev.Decision = "deny"
+	ev.Metadata = json.RawMessage(meta)
+	return ev
 }
