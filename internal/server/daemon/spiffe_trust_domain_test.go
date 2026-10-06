@@ -8,6 +8,7 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
@@ -43,6 +44,24 @@ func TestRequireSPIFFETrustDomain(t *testing.T) {
 	for name, td := range map[string]string{"empty": "", "invalid": "Not A Domain", "other domain": "other.example"} {
 		if err := requireSPIFFETrustDomain(td, envoy); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestDaemonSPIFFETrustDomainComesFromConfig(t *testing.T) {
+	withTD := func(td string) *daemonImpl {
+		return &daemonImpl{config: &config.Config{Auth: config.AuthConfig{SPIFFE: &config.SPIFFEConfig{TrustDomain: td}}}}
+	}
+	if got := withTD("example.org").spiffeTrustDomain(); got != testTD {
+		t.Errorf("configured trust domain = %q, want %q", got.Name(), testTD.Name())
+	}
+	for name, d := range map[string]*daemonImpl{
+		"no config":    {},
+		"no spiffe":    {config: &config.Config{}},
+		"invalid name": withTD("Not A Domain"),
+	} {
+		if got := d.spiffeTrustDomain(); !got.IsZero() {
+			t.Errorf("%s: trust domain = %q, want the zero value", name, got.Name())
 		}
 	}
 }
