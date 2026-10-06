@@ -14,7 +14,6 @@ description: >-
 spec:
   runtime: setec
   image: ghcr.io/zeroroot-ai/zerocool-agent@sha256:37f6fecc5577de79c7632e03361d23f98cbe16abe7855f0913c5b35dcaf877ab
-  svid: spiffe://zeroroot.ai/agent/zerocool
   dispatchMode: sandboxed
   # Untrusted: the agent reads content the platform does not control, so it
   # runs only in a sandbox.

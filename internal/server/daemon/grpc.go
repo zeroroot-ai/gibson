@@ -205,14 +205,29 @@ func looseIdentityFromMD(ctx context.Context) (context.Context, error) {
 // tenant of its tenant-scoped assertions through x-gibson-identity-tenant;
 // e2ePeerTenant yields the zero tenant for every other peer and in every
 // production build (e2e_peer_policy.go and its stub).
-func spiffePeerIdentity(ctx context.Context, svid string) auth.Identity {
+func spiffePeerIdentity(ctx context.Context, svid string, td spiffeid.TrustDomain) auth.Identity {
 	md, _ := grpcmetadata.FromIncomingContext(ctx)
 	return auth.Identity{
 		Subject:        svid,
 		Issuer:         auth.Issuer("spiffe"),
 		CredentialType: auth.CredentialType("spiffe"),
-		Tenant:         e2ePeerTenant(svid, md),
+		Tenant:         e2ePeerTenant(svid, md, td),
 	}
+}
+
+// spiffeTrustDomain is the SPIFFE trust domain of the install, from
+// auth.spiffe.trust_domain (ADR-0164). It is zero when SPIFFE is not
+// configured; the start check of initSPIFFEX509Source refuses an empty or
+// invalid value when SPIFFE is on.
+func (d *daemonImpl) spiffeTrustDomain() spiffeid.TrustDomain {
+	if d.config == nil || d.config.Auth.SPIFFE == nil {
+		return spiffeid.TrustDomain{}
+	}
+	td, err := spiffeid.TrustDomainFromString(d.config.Auth.SPIFFE.TrustDomain)
+	if err != nil {
+		return spiffeid.TrustDomain{}
+	}
+	return td
 }
 
 // spiffeBypassFunc matches the signature of the spiffePlatformBypass closure
@@ -466,7 +481,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// RPC surface (the recurring gibson#621/#949/#1043 omission bug). A
 	// reconciliation test pins the allowed set to exactly the operator's actual
 	// call set (least privilege).
-	spiffeMethodAllowlist := spiffePeerMethodPolicies(connectionPointCallersFromEnv())
+	spiffeMethodAllowlist := spiffePeerMethodPolicies(d.spiffeTrustDomain(), connectionPointCallersFromEnv())
 	// Fail loud at startup (gibson#1052): every configured direct-dial peer in
 	// AllowedPeerIDs MUST have an explicit method policy. An allow-listed peer
 	// with no policy previously fell through to UNRESTRICTED method access
@@ -510,7 +525,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if trainerAllow, terr := trainerBypassDecision(svid, method, d.trainerTrustDomain()); terr != nil {
 			return ctx, false, terr
 		} else if trainerAllow {
-			return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid)), true, nil
+			return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid, d.spiffeTrustDomain())), true, nil
 		}
 		allow, err := spiffeBypassDecision(svid, method, d.config.Auth.SPIFFE.AllowedPeerIDs, spiffeMethodAllowlist)
 		if err != nil {
@@ -519,7 +534,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if !allow {
 			return ctx, false, nil
 		}
-		return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid)), true, nil
+		return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid, d.spiffeTrustDomain())), true, nil
 	}
 
 	registryAwareUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
@@ -1496,7 +1511,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// through GetConnectorCredential and writes the Secret (gibson#663). The
 	// handler serves the direct-dial connector operator SVID only.
 	if d.secretsService != nil {
-		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID)
+		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID(d.spiffeTrustDomain()))
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,

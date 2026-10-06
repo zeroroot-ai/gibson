@@ -192,7 +192,7 @@ func deniedMethod() string {
 // peer set is exactly the two operators: EnvoyID and any browser-path SVID
 // are deliberately absent (they transit Envoy + ext-authz, never this bypass).
 func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
 	// In a PRODUCTION build exactly two peers are policed. A test_fixtures
 	// build adds the exit-test runner and nothing else — that identity does not
@@ -200,9 +200,9 @@ func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 	// what keeps this invariant meaningful where it matters. Assert the exact
 	// membership rather than only the count, so a future extra peer in either
 	// build has to be added here deliberately.
-	want := []string{tenantOperatorSVID, connectorOperatorSVID}
+	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD)}
 	if isTestFixturesBuild {
-		want = append(want, "spiffe://zeroroot.ai/platform/e2e-runner")
+		want = append(want, "spiffe://example.org/platform/e2e-runner")
 	}
 	got := make([]string, 0, len(policies))
 	for id := range policies {
@@ -211,13 +211,13 @@ func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 	sort.Strings(want)
 	sort.Strings(got)
 	require.Equal(t, want, got, "the policed direct-dial peers are a closed set")
-	methods, ok := policies[tenantOperatorSVID]
+	methods, ok := policies[tenantOperatorSVID(testTD)]
 	require.True(t, ok, "tenant-operator must have an explicit method policy")
 	assert.True(t, methods[allowedMethod()], "tenant-operator policy must permit its allowed methods")
 	assert.False(t, methods[deniedMethod()], "tenant-operator policy must not permit operator-denied methods")
 
 	revoke := daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName
-	connMethods, ok := policies[connectorOperatorSVID]
+	connMethods, ok := policies[connectorOperatorSVID(testTD)]
 	require.True(t, ok, "connector-operator must have an explicit method policy")
 	assert.True(t, connMethods[revoke], "connector-operator policy must permit RevokeConnectorGrant")
 	assert.False(t, connMethods[allowedMethod()], "connector-operator policy must not permit tenant-operator methods")
@@ -229,7 +229,7 @@ func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 // the daemon refuse to start, while a policed peer (tenant-operator) and an
 // empty list pass.
 func TestValidateAllowedPeerPolicies(t *testing.T) {
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
 	t.Run("empty allow-list passes", func(t *testing.T) {
 		assert.NoError(t, validateAllowedPeerPolicies(nil, policies))
@@ -237,7 +237,7 @@ func TestValidateAllowedPeerPolicies(t *testing.T) {
 	})
 
 	t.Run("policed tenant-operator passes", func(t *testing.T) {
-		assert.NoError(t, validateAllowedPeerPolicies([]string{tenantOperatorSVID}, policies))
+		assert.NoError(t, validateAllowedPeerPolicies([]string{tenantOperatorSVID(testTD)}, policies))
 	})
 
 	t.Run("unpoliced peer fails loud", func(t *testing.T) {
@@ -250,10 +250,10 @@ func TestValidateAllowedPeerPolicies(t *testing.T) {
 
 	t.Run("policed + unpoliced mix fails and names the unpoliced peer", func(t *testing.T) {
 		err := validateAllowedPeerPolicies(
-			[]string{tenantOperatorSVID, "spiffe://zeroroot.ai/platform/daemon"}, policies)
+			[]string{tenantOperatorSVID(testTD), "spiffe://zeroroot.ai/platform/daemon"}, policies)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "spiffe://zeroroot.ai/platform/daemon")
-		assert.NotContains(t, err.Error(), tenantOperatorSVID,
+		assert.NotContains(t, err.Error(), tenantOperatorSVID(testTD),
 			"only the unpoliced peer should be reported")
 	})
 }
@@ -265,24 +265,24 @@ func TestValidateAllowedPeerPolicies(t *testing.T) {
 //   - a non-allow-listed SVID (EnvoyID / browser path) falls through to the
 //     ext-authz header path (matched=false, no error).
 func TestSpiffeBypassDecision(t *testing.T) {
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
-	allowed := []string{tenantOperatorSVID}
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
+	allowed := []string{tenantOperatorSVID(testTD)}
 
 	t.Run("tenant-operator allowed method is authorised", func(t *testing.T) {
-		ok, err := spiffeBypassDecision(tenantOperatorSVID, allowedMethod(), allowed, policies)
+		ok, err := spiffeBypassDecision(tenantOperatorSVID(testTD), allowedMethod(), allowed, policies)
 		require.NoError(t, err)
 		assert.True(t, ok, "policed peer calling an allowed method must be authorised")
 	})
 
 	t.Run("tenant-operator denied method is PermissionDenied", func(t *testing.T) {
-		ok, err := spiffeBypassDecision(tenantOperatorSVID, deniedMethod(), allowed, policies)
+		ok, err := spiffeBypassDecision(tenantOperatorSVID(testTD), deniedMethod(), allowed, policies)
 		assert.False(t, ok)
 		require.Error(t, err)
 		assert.Equal(t, grpccodes.PermissionDenied, grpcstatus.Code(err))
 	})
 
 	t.Run("tenant-operator unknown method is PermissionDenied", func(t *testing.T) {
-		ok, err := spiffeBypassDecision(tenantOperatorSVID,
+		ok, err := spiffeBypassDecision(tenantOperatorSVID(testTD),
 			"/gibson.daemon.operator.v1.DaemonOperatorService/NoSuchMethod", allowed, policies)
 		assert.False(t, ok)
 		require.Error(t, err)
@@ -294,7 +294,7 @@ func TestSpiffeBypassDecision(t *testing.T) {
 		// The peer is allow-listed at the TLS layer but has NO method policy —
 		// the gibson#1052 fail-open gap. It must be denied, not granted.
 		ok, err := spiffeBypassDecision(unpoliced, allowedMethod(),
-			[]string{tenantOperatorSVID, unpoliced}, policies)
+			[]string{tenantOperatorSVID(testTD), unpoliced}, policies)
 		assert.False(t, ok, "an unpoliced allowed peer must NOT be granted bypass access")
 		require.Error(t, err, "an unpoliced allowed peer must be denied")
 		assert.Equal(t, grpccodes.PermissionDenied, grpcstatus.Code(err))

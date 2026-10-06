@@ -22,6 +22,7 @@
 package daemon
 
 import (
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"log/slog"
 	"os"
 	"strings"
@@ -33,7 +34,7 @@ import (
 // e2eRunnerSVID is the exit-test suite's identity. The deploy chart registers a
 // ClusterSPIFFEID for the runner's ServiceAccount that mints exactly this ID,
 // and lists it in allowedPeerIDs for the kind test profile only.
-const e2eRunnerSVID = "spiffe://zeroroot.ai/platform/e2e-runner"
+func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2e-runner") }
 
 // e2ePeerMethodPolicies grants the exit-test runner the methods its assertions
 // need, and only those.
@@ -46,9 +47,9 @@ const e2eRunnerSVID = "spiffe://zeroroot.ai/platform/e2e-runner"
 // actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
-func e2ePeerMethodPolicies() map[string]map[string]bool {
+func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 	return map[string]map[string]bool{
-		e2eRunnerSVID: {
+		e2eRunnerSVID(td): {
 			// Per-tenant enablement — the gate the tool/agent tests toggle.
 			"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": true,
 			// Mission definition + run: how a tool or agent is actually dispatched.
@@ -102,8 +103,8 @@ func e2ePeerMethodPolicies() map[string]map[string]bool {
 // and the daemon takes it at face value because the SVID already proves who
 // is asking and this file exists only in the fixture build. A malformed or
 // absent header yields the zero tenant, which the handler refuses as before.
-func e2ePeerTenant(svid string, md grpcmetadata.MD) auth.TenantID {
-	if svid != e2eRunnerSVID {
+func e2ePeerTenant(svid string, md grpcmetadata.MD, td spiffeid.TrustDomain) auth.TenantID {
+	if svid != e2eRunnerSVID(td) {
 		return auth.TenantID{}
 	}
 	vals := md.Get(auth.HeaderTenant)
@@ -120,7 +121,9 @@ func e2ePeerTenant(svid string, md grpcmetadata.MD) auth.TenantID {
 // e2eRunnerFGAUser is the runner's FGA subject: the shape callbackFGAUser
 // (internal/engine/harness/callback_credential_authz.go) and ext-authz's
 // IdentityComponent branch give a SPIFFE subject with no principal type.
-var e2eRunnerFGAUser = "user:" + strings.TrimPrefix(e2eRunnerSVID, "spiffe://")
+func e2eRunnerFGAUser(td spiffeid.TrustDomain) string {
+	return "user:" + strings.TrimPrefix(e2eRunnerSVID(td), "spiffe://")
+}
 
 // e2eRunnerTenancy names the membership the exit-test runner holds: its FGA
 // user and the platform tenant, when the fixture is on.
@@ -138,7 +141,7 @@ var e2eRunnerFGAUser = "user:" + strings.TrimPrefix(e2eRunnerSVID, "spiffe://")
 // under test. Two gates, as everywhere in this file: the build tag and
 // GIBSON_TEST_FIXTURES_ENABLED=true. An empty tenant (GIBSON_PLATFORM_TENANT
 // unset) yields nothing and says so.
-func e2eRunnerTenancy(logger *slog.Logger) (user, tenant string, ok bool) {
+func e2eRunnerTenancy(logger *slog.Logger, td spiffeid.TrustDomain) (user, tenant string, ok bool) {
 	if os.Getenv("GIBSON_TEST_FIXTURES_ENABLED") != "true" {
 		return "", "", false
 	}
@@ -147,5 +150,5 @@ func e2eRunnerTenancy(logger *slog.Logger) (user, tenant string, ok bool) {
 		logger.Warn("test fixtures: GIBSON_PLATFORM_TENANT is unset, so the e2e runner is a member of no tenant and every run it starts stops at the dispatch gate")
 		return "", "", false
 	}
-	return e2eRunnerFGAUser, tenant, true
+	return e2eRunnerFGAUser(td), tenant, true
 }

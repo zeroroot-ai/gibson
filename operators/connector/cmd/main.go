@@ -28,10 +28,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
 )
 
-// defaultDaemonSVID is the platform daemon's SPIFFE ID the operator pins at
-// the mTLS handshake (ADR-0002). GIBSON_DAEMON_SPIFFE_ID overrides it.
-const defaultDaemonSVID = "spiffe://zeroroot.ai/platform/daemon"
-
 // wireReconciler registers the ConnectorInstance controller on the manager
 // with the daemon client it needs: the finalizer revokes the grant on delete
 // (ADR-0061) and the controller reads the credential state so the CR
@@ -53,7 +49,9 @@ func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
 // address is required: an operator that cannot reach the daemon can neither
 // revoke a grant (ADR-0061) nor tell whether a credential is still alive
 // (ADR-0061), so it fails at boot rather than silently leaving
-// grants alive after every delete. The SVID defaults to the platform daemon.
+// grants alive after every delete. The daemon SVID is required too: it holds
+// the trust domain of the install, and no code holds that as a literal
+// (ADR-0164).
 func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 	addr = getenv("GIBSON_DAEMON_GRPC_ADDRESS")
 	if addr == "" {
@@ -61,7 +59,7 @@ func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 	}
 	svid = getenv("GIBSON_DAEMON_SPIFFE_ID")
 	if svid == "" {
-		svid = defaultDaemonSVID
+		return "", "", errors.New("GIBSON_DAEMON_SPIFFE_ID is required: it names the daemon in the trust domain of the install (ADR-0164)")
 	}
 	return addr, svid, nil
 }

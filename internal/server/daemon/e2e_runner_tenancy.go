@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
@@ -16,8 +18,8 @@ import (
 // production build names none, so this writes nothing there. A failed seed is
 // logged: the runner then stops at the dispatch gate, and the daemon log says
 // why (gibson#14).
-func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger) {
-	if user, tenant, ok := e2eRunnerTenancy(logger); ok && authorizer != nil {
+func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger, td spiffeid.TrustDomain) {
+	if user, tenant, ok := e2eRunnerTenancy(logger, td); ok && authorizer != nil {
 		seedTenantMembership(ctx, authorizer, user, tenant, logger)
 	}
 }

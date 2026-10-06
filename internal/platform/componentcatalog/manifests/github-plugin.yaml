@@ -25,7 +25,6 @@ egressAllow:
 spec:
   runtime: pod
   image: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:c3b4321097fd8f643f44a7f5a61a80efd4b87103dce9c3743bf0cef06455aff4
-  svid: spiffe://zeroroot.ai/plugin/github
   # Trusted, and four facts make it so. We wrote the code. The image is signed
   # and pinned by digest. The plugin passes the content it handles through and
   # does not execute or interpret it. Its egress is the one host above. An

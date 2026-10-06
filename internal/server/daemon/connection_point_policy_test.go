@@ -15,7 +15,7 @@ import (
 func TestConnectionPointPeerPolicies(t *testing.T) {
 	const completer = "spiffe://zeroroot.ai/component/step-completer"
 	const activation = "spiffe://zeroroot.ai/component/activation"
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{
 		SignupStepCompleter: completer,
 		TenantActivation:    activation,
 	})
@@ -29,7 +29,7 @@ func TestConnectionPointPeerPolicies(t *testing.T) {
 		!got[connectionv1.ConnectionPointService_ListTenantUsage_FullMethodName] {
 		t.Fatalf("activation methods = %v, want SetTenantActivation and ListTenantUsage", got)
 	}
-	if policies[tenantOperatorSVID][connectionv1.ConnectionPointService_SetTenantActivation_FullMethodName] {
+	if policies[tenantOperatorSVID(testTD)][connectionv1.ConnectionPointService_SetTenantActivation_FullMethodName] {
 		t.Fatal("the tenant operator must not reach a connection point")
 	}
 }

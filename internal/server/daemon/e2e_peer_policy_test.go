@@ -21,7 +21,7 @@ import (
 // cannot be talked into accepting it — not by config, not by an operator
 // mistake, because there is no policy for it in the binary.
 func TestE2EPeerPolicy_AbsentFromProductionBuilds(t *testing.T) {
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
 	var e2e []string
 	for id := range policies {
@@ -45,8 +45,8 @@ func TestE2EPeerPolicy_AbsentFromProductionBuilds(t *testing.T) {
 // not disturb the two real control-plane peers. Losing one would silently
 // un-authorise the tenant-operator or connector-operator.
 func TestSpiffePeerMethodPolicies_KeepsTheShippedPeers(t *testing.T) {
-	policies := spiffePeerMethodPolicies(api.ConnectionPointCallers{})
-	for _, want := range []string{tenantOperatorSVID, connectorOperatorSVID} {
+	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
+	for _, want := range []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD)} {
 		methods, ok := policies[want]
 		if !ok {
 			t.Errorf("%s lost its method policy; that peer would be denied at request time", want)
@@ -65,8 +65,8 @@ func TestSpiffePeerMethodPolicies_KeepsTheShippedPeers(t *testing.T) {
 func TestValidateAllowedPeerPolicies_RefusesAnUnpolicedPeer(t *testing.T) {
 	const unpoliced = "spiffe://zeroroot.ai/platform/e2e-runner"
 	err := validateAllowedPeerPolicies(
-		[]string{tenantOperatorSVID, unpoliced},
-		map[string]map[string]bool{tenantOperatorSVID: operatorAllowedMethods()},
+		[]string{tenantOperatorSVID(testTD), unpoliced},
+		map[string]map[string]bool{tenantOperatorSVID(testTD): operatorAllowedMethods()},
 	)
 	if err == nil {
 		t.Fatal("an allow-listed peer with no method policy must fail the daemon at boot")
@@ -82,18 +82,18 @@ func TestValidateAllowedPeerPolicies_RefusesAnUnpolicedPeer(t *testing.T) {
 // control-plane peer's method policy.
 func TestMergePeerPolicies(t *testing.T) {
 	base := map[string]map[string]bool{
-		tenantOperatorSVID: {"/a": true},
+		tenantOperatorSVID(testTD): {"/a": true},
 	}
 
 	// nil extra — the production shape — must leave base untouched.
 	got := mergePeerPolicies(base, nil)
-	if len(got) != 1 || !got[tenantOperatorSVID]["/a"] {
+	if len(got) != 1 || !got[tenantOperatorSVID(testTD)]["/a"] {
 		t.Fatalf("a nil extra map must leave the shipped peers alone, got %v", got)
 	}
 
 	// a test-build extra is added alongside, not instead of.
 	got = mergePeerPolicies(base, map[string]map[string]bool{"spiffe://x/e2e": {"/b": true}})
-	if !got[tenantOperatorSVID]["/a"] {
+	if !got[tenantOperatorSVID(testTD)]["/a"] {
 		t.Error("merging an extra peer must not disturb an existing one")
 	}
 	if !got["spiffe://x/e2e"]["/b"] {

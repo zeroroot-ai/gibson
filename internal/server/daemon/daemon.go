@@ -694,6 +694,13 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 		return nil
 	}
 
+	// The Envoy SVID and the trust domain are checked before the dial, so a
+	// bad config fails without a workload API.
+	envoyID, configuredTD, err := spiffeStartIdentity(d.config.Auth.SPIFFE, os.Getenv)
+	if err != nil {
+		return err
+	}
+
 	socketAddr := "unix://" + d.config.Auth.SPIFFE.WorkloadAPISocket
 	source, err := workloadapi.NewX509Source(ctx,
 		workloadapi.WithClientOptions(
@@ -707,50 +714,6 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 				"spec: critical-tls-no-fallbacks Requirement 1.5",
 			err, d.config.Auth.SPIFFE.WorkloadAPISocket,
 		)
-	}
-
-	// Validate the configured Envoy SVID — the daemon refuses to start without
-	// it (mirrors the previous in-line validation at grpc.go:330-342 before
-	// Component 4 hoisted the source open out of buildGRPCServer).
-	envoyID := d.config.Auth.SPIFFE.EnvoyID
-	if envoyID == "" {
-		envoyID = os.Getenv("GIBSON_SPIFFE_ENVOY_ID")
-	}
-	if envoyID == "" {
-		_ = source.Close()
-		return fmt.Errorf(
-			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
-				"the daemon will not accept any mTLS connections. " +
-				"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
-				"(e.g. spiffe://zeroroot.ai/ns/gibson/sa/envoy). " +
-				"Spec: admin-services-completion Requirement 6.1")
-	}
-	parsedEnvoyID, parseErr := spiffeid.FromString(envoyID)
-	if parseErr != nil {
-		_ = source.Close()
-		return fmt.Errorf(
-			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID=%q is not a valid SPIFFE ID: %w",
-			envoyID, parseErr)
-	}
-
-	// Validate trust domain: every peer SVID and the Envoy SVID must live under
-	// the configured trust domain. An empty TrustDomain config is allowed for
-	// backward compat — when set, mismatches are rejected.
-	configuredTD := strings.TrimSpace(d.config.Auth.SPIFFE.TrustDomain)
-	if configuredTD != "" {
-		td, tdErr := spiffeid.TrustDomainFromString(configuredTD)
-		if tdErr != nil {
-			_ = source.Close()
-			return fmt.Errorf(
-				"cfg.Auth.SPIFFE.TrustDomain=%q is not a valid SPIFFE trust domain: %w",
-				configuredTD, tdErr)
-		}
-		if !parsedEnvoyID.MemberOf(td) {
-			_ = source.Close()
-			return fmt.Errorf(
-				"GIBSON_SPIFFE_ENVOY_ID=%q is not in the configured trust domain %q",
-				envoyID, configuredTD)
-		}
 	}
 
 	// ADR-0002: read the additional inbound-peer-SVID allow-list (today: the
@@ -929,9 +892,6 @@ func resolvePluginSVIDBinding(tenantID, trustDomain, workloadSocket string, cgWi
 		return pluginSVIDBinding{}, "SPIFFE-SVID plugin enrollment configured (GIBSON_PLATFORM_TENANT set) but the SPIFFE workload API is not; SVID enrollment disabled", false
 	}
 	tdStr := strings.TrimSpace(trustDomain)
-	if tdStr == "" {
-		tdStr = "zeroroot.ai"
-	}
 	td, err := spiffeid.TrustDomainFromString(tdStr)
 	if err != nil {
 		return pluginSVIDBinding{}, fmt.Sprintf("invalid SPIFFE trust domain %q; SVID plugin enrollment disabled: %v", tdStr, err), false
@@ -2084,7 +2044,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// tenant, so the dispatch gate judges its runs the way it judges a
 		// member's (gibson#14). A production build writes nothing here. The
 		// fixture logs its own failure.
-		seedE2ERunnerTenancy(ctx, d.authorizer, d.logger.Slog())
+		seedE2ERunnerTenancy(ctx, d.authorizer, d.logger.Slog(), d.spiffeTrustDomain())
 	}
 
 	// Start the connector token refresher — mints fresh vendor access tokens
@@ -2500,4 +2460,52 @@ func withConnectionPointPeers(allowed []string, configuredTD string, callers ...
 		out = append(out, raw)
 	}
 	return out, nil
+}
+
+// requireSPIFFETrustDomain refuses an empty or invalid trust domain, and an
+// Envoy SVID outside it (ADR-0164). No code holds the trust domain as a
+// literal, so the daemon has no default for it.
+// spiffeStartIdentity reads the Envoy SVID (from the config, else from
+// GIBSON_SPIFFE_ENVOY_ID) and the trust domain of the install, and checks
+// both. The daemon refuses to start without them: it accepts no mTLS
+// connection without the Envoy SVID, and each platform SPIFFE ID it checks
+// is built from the trust domain (ADR-0164).
+func spiffeStartIdentity(cfg *config.SPIFFEConfig, getenv func(string) string) (envoyID, trustDomain string, err error) {
+	envoyID = cfg.EnvoyID
+	if envoyID == "" {
+		envoyID = getenv("GIBSON_SPIFFE_ENVOY_ID")
+	}
+	if envoyID == "" {
+		return "", "", errors.New(
+			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID is not set; " +
+				"the daemon will not accept any mTLS connections. " +
+				"Set GIBSON_SPIFFE_ENVOY_ID to the Envoy sidecar's SPIFFE SVID " +
+				"(e.g. spiffe://example.org/ns/gibson/sa/envoy). " +
+				"Spec: admin-services-completion Requirement 6.1")
+	}
+	parsed, err := spiffeid.FromString(envoyID)
+	if err != nil {
+		return "", "", fmt.Errorf(
+			"SPIFFE mTLS is enabled but GIBSON_SPIFFE_ENVOY_ID=%q is not a valid SPIFFE ID: %w",
+			envoyID, err)
+	}
+	trustDomain = strings.TrimSpace(cfg.TrustDomain)
+	if err := requireSPIFFETrustDomain(trustDomain, parsed); err != nil {
+		return "", "", err
+	}
+	return envoyID, trustDomain, nil
+}
+
+func requireSPIFFETrustDomain(configured string, envoy spiffeid.ID) error {
+	if configured == "" {
+		return errors.New("auth.spiffe.trust_domain is required: each install has its own SPIFFE trust domain (ADR-0164)")
+	}
+	td, err := spiffeid.TrustDomainFromString(configured)
+	if err != nil {
+		return fmt.Errorf("auth.spiffe.trust_domain=%q is not a valid SPIFFE trust domain: %w", configured, err)
+	}
+	if !envoy.MemberOf(td) {
+		return fmt.Errorf("GIBSON_SPIFFE_ENVOY_ID=%q is not in the configured trust domain %q", envoy.String(), configured)
+	}
+	return nil
 }

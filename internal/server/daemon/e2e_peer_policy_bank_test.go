@@ -12,7 +12,7 @@ import "testing"
 // does not name is denied at the daemon and the exit test reads red for a
 // reason that has nothing to do with banks (gibson#13, run 35436962740).
 func TestE2EPeerPolicy_CoversTheBankExitTest(t *testing.T) {
-	policy := e2ePeerMethodPolicies()[e2eRunnerSVID]
+	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
 	for _, m := range []string{
 		"/gibson.tenant.v1.ProviderService/CreateProvider",
 		"/gibson.tenant.v1.ProviderService/DeleteProvider",

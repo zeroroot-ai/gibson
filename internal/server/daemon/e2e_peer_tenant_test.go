@@ -17,16 +17,16 @@ import (
 // yields the zero tenant.
 func TestE2EPeerTenant(t *testing.T) {
 	md := grpcmetadata.Pairs(auth.HeaderTenant, "acme")
-	if got := e2ePeerTenant(e2eRunnerSVID, md); got.String() != "acme" {
+	if got := e2ePeerTenant(e2eRunnerSVID(testTD), md, testTD); got.String() != "acme" {
 		t.Fatalf("runner with header: %v", got)
 	}
-	if got := e2ePeerTenant("spiffe://zeroroot.ai/platform/tenant-operator", md); got != (auth.TenantID{}) {
+	if got := e2ePeerTenant("spiffe://zeroroot.ai/platform/tenant-operator", md, testTD); got != (auth.TenantID{}) {
 		t.Fatalf("another peer must not assert a tenant: %v", got)
 	}
-	if got := e2ePeerTenant(e2eRunnerSVID, grpcmetadata.MD{}); got != (auth.TenantID{}) {
+	if got := e2ePeerTenant(e2eRunnerSVID(testTD), grpcmetadata.MD{}, testTD); got != (auth.TenantID{}) {
 		t.Fatalf("no header: %v", got)
 	}
-	if got := e2ePeerTenant(e2eRunnerSVID, grpcmetadata.Pairs(auth.HeaderTenant, "not a tenant!")); got != (auth.TenantID{}) {
+	if got := e2ePeerTenant(e2eRunnerSVID(testTD), grpcmetadata.Pairs(auth.HeaderTenant, "not a tenant!"), testTD); got != (auth.TenantID{}) {
 		t.Fatalf("malformed header: %v", got)
 	}
 }

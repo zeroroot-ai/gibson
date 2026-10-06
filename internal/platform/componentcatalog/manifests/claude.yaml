@@ -20,7 +20,6 @@ spec:
   #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
   #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
   image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:6ff9ea109c8a8ab4d2f3d039a670dbb5fa67ae2a87d401dfba0e47677d31f98b
-  svid: spiffe://zeroroot.ai/agent/claude
   dispatchMode: sandboxed
   # Untrusted: the agent reads content the platform does not control, so it
   # runs only in a sandbox.
