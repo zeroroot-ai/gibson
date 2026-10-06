@@ -1541,11 +1541,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// non-nil after Start() (gibson#246).
 		grantsAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 		grantsAuditWriter.Start(ctx)
+		// WriteSecretGrants (dashboard#174) needs the secrets of the tenant
+		// to refuse a name the tenant does not own. Without the secrets stack
+		// it answers Unimplemented.
+		var secretNames admin.SecretNameLister
+		if d.secretsService != nil {
+			secretNames = &secretNameListerAdapter{svc: d.secretsService}
+		}
 		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
 			Reader:      noopGrantsReader{},
 			Authorizer:  d.authorizer,
 			Lookup:      lookup,
 			AuditWriter: grantsAuditWriter,
+			SecretNames: secretNames,
 			Logger:      d.logger.Slog(),
 		})
 		if gaErr != nil {

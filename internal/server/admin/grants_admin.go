@@ -86,6 +86,10 @@ type GrantsAdminServer struct {
 	// (a warning is logged so the lack-of-audit is observable).
 	auditWriter audit.DurableWriter
 
+	// secretNames lists the secrets of a tenant for WriteSecretGrants
+	// (secret_grants.go). The RPC returns Unimplemented when it is nil.
+	secretNames SecretNameLister
+
 	logger *slog.Logger
 	now    func() time.Time
 }
@@ -108,6 +112,9 @@ type GrantsAdminConfig struct {
 	// write or delete. When nil, writes proceed but audit is logged-only.
 	AuditWriter audit.DurableWriter
 
+	// SecretNames enables WriteSecretGrants. It needs Authorizer and Lookup.
+	SecretNames SecretNameLister
+
 	Logger *slog.Logger
 	Now    func() time.Time
 }
@@ -120,6 +127,9 @@ func NewGrantsAdminServer(cfg GrantsAdminConfig) (*GrantsAdminServer, error) {
 	}
 	if (cfg.Authorizer != nil) != (cfg.Lookup != nil) {
 		return nil, errors.New("grants admin: Authorizer and Lookup must be supplied together")
+	}
+	if cfg.SecretNames != nil && cfg.Authorizer == nil {
+		return nil, errors.New("grants admin: WriteSecretGrants needs an Authorizer and a Lookup")
 	}
 	now := cfg.Now
 	if now == nil {
@@ -134,6 +144,7 @@ func NewGrantsAdminServer(cfg GrantsAdminConfig) (*GrantsAdminServer, error) {
 		authorizer:  cfg.Authorizer,
 		lookup:      cfg.Lookup,
 		auditWriter: cfg.AuditWriter,
+		secretNames: cfg.SecretNames,
 		logger:      logger,
 		now:         now,
 	}, nil

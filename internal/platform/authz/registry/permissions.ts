@@ -2820,6 +2820,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.GrantsService/WriteSecretGrants": {
+    method: "/gibson.tenant.v1.GrantsService/WriteSecretGrants",
+    service: "gibson.tenant.v1.GrantsService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.MembershipService/AcceptInvitation": {
     method: "/gibson.tenant.v1.MembershipService/AcceptInvitation",
     service: "gibson.tenant.v1.MembershipService",

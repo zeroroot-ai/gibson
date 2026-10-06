@@ -279,6 +279,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.GrantsService/DeleteAgentGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.GrantsService/ListActiveGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.GrantsService/WriteAgentGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
+/gibson.tenant.v1.GrantsService/WriteSecretGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.MembershipService/AcceptInvitation,,,,,gibson/tenant/v1/membership.proto,unauthenticated
 /gibson.tenant.v1.MembershipService/AddTeamMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/CancelInvitation,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule

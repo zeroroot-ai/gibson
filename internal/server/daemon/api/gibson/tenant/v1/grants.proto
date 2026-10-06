@@ -52,6 +52,21 @@ service GrantsService {
       allowed_identities: 1  // USER
     };
   }
+  // WriteSecretGrants grants a plugin principal can_resolve on named secrets
+  // of the caller's tenant (ADR-0097, dashboard#174). Secret access is
+  // assigned by a tenant admin, never declared by the component
+  // (gibson#554). Only a plugin_principal can hold can_resolve (model.fga),
+  // so an agent or tool target is refused. Each secret must exist in the
+  // caller's tenant. Idempotent, and each new grant emits a
+  // `secret_grant_added` audit event before it takes effect.
+  rpc WriteSecretGrants(WriteSecretGrantsRequest) returns (WriteSecretGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -110,4 +125,21 @@ message DeleteAgentGrantsRequest {
 message DeleteAgentGrantsResponse {
   int32 deleted = 1;
   int32 not_present = 2;
+}
+
+// WriteSecretGrantsRequest names a plugin principal and the secrets it may
+// resolve. An empty secret_names is valid and writes nothing.
+message WriteSecretGrantsRequest {
+  // target_principal_id is "plugin_principal:<id>" in the caller's tenant.
+  string target_principal_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // secret_names are names of secrets that the caller's tenant owns.
+  repeated string secret_names = 2 [(buf.validate.field).repeated = {
+    max_items: 64
+    items: { string: { min_len: 1, max_len: 1024 } }
+  }];
+}
+
+message WriteSecretGrantsResponse {
+  int32 written = 1;
+  int32 already_present = 2;
 }
