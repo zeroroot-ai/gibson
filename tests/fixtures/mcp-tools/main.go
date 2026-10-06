@@ -5,13 +5,19 @@
 // test (gibson#811). It speaks the streamable HTTP transport on /mcp, on the
 // port in MCP_PORT (8080 by default, the port that the connector operator
 // gives ToolHive). It answers
-// initialize and tools/list. The tool names are the contract that the test
-// checks, in tests/fixtures/mcp-tools/expected-tools.txt.
+// initialize, tools/list and tools/call of probe_egress. The tool names are
+// the contract that the test checks, in tests/fixtures/mcp-tools/expected-tools.txt.
+//
+// probe_egress dials an address from inside the connector pod and says
+// whether the connection opened. The exit test uses it to prove that the
+// egress of a connector follows its host list (gibson#758).
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -29,12 +35,49 @@ var tools = []map[string]any{
 		"description": "Return the sum of two numbers.",
 		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"a": map[string]any{"type": "number"}, "b": map[string]any{"type": "number"}}},
 	},
+	{
+		"name":        "probe_egress",
+		"description": "Open a TCP connection to host:port from the connector pod and say whether it opened.",
+		"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"address": map[string]any{"type": "string"}}},
+	},
+}
+
+// probeTimeout bounds one probe. A connection that the network policy drops
+// times out instead of being refused, so the bound is the answer.
+const probeTimeout = 5 * time.Second
+
+// dialer opens the probe connection. Tests replace it.
+var dialer = func(ctx context.Context, address string) error {
+	conn, err := (&net.Dialer{Timeout: probeTimeout}).DialContext(ctx, "tcp", address)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
+}
+
+// probeEgress answers a tools/call of probe_egress with "reachable" or
+// "unreachable: <reason>".
+func probeEgress(ctx context.Context, args map[string]any) map[string]any {
+	address, _ := args["address"].(string)
+	text := "reachable"
+	if address == "" {
+		text = "unreachable: no address"
+	} else if err := dialer(ctx, address); err != nil {
+		text = "unreachable: " + err.Error()
+	}
+	return map[string]any{"content": []map[string]any{{"type": "text", "text": text}}}
+}
+
+type callParams struct {
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
 }
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
 }
 
 // handle answers one JSON-RPC message of the MCP streamable HTTP transport.
@@ -66,6 +109,14 @@ func handle(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{"tools": tools}
 	case "ping":
 		result = map[string]any{}
+	case "tools/call":
+		var p callParams
+		if err := json.Unmarshal(req.Params, &p); err != nil || p.Name != "probe_egress" {
+			writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": req.ID,
+				"error": map[string]any{"code": -32602, "message": "only probe_egress can be called"}})
+			return
+		}
+		result = probeEgress(r.Context(), p.Arguments)
 	default:
 		writeJSON(w, map[string]any{"jsonrpc": "2.0", "id": req.ID,
 			"error": map[string]any{"code": -32601, "message": "method not found"}})
