@@ -706,8 +706,8 @@ func TestGithubPluginManifest(t *testing.T) {
 			image = ir.Image
 		}
 	}
-	if !strings.HasPrefix(image, "ghcr.io/zeroroot-ai/integrations/github@sha256:") {
-		t.Errorf("plugin/github image = %q; want the first-party integrations image pinned by digest", image)
+	if !strings.HasPrefix(image, "ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:") {
+		t.Errorf("plugin/github image = %q; want the first-party image that gibson builds from plugins/github, pinned by digest", image)
 	}
 }
 

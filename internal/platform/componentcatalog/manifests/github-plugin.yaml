@@ -12,8 +12,7 @@
 # plugin image and writes the image line below through a pull request, with
 # the source tree it built from (gibson#790). No person edits the image line.
 # The exit test .github/workflows/exit-test-tool-dispatch.yml deploys this
-# image. Until the first build from plugins/github, the pin is the last image
-# that the integrations CI published.
+# image.
 # plugin-source-tree: 2501b3f89e25e4b206205c84b420add1490dae70
 id: github
 kind: plugin
