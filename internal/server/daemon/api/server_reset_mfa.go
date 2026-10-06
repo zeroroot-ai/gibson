@@ -87,7 +87,7 @@ func (s *DaemonServer) ResetUserMFA(ctx context.Context, req *tenantv1.ResetUser
 
 	// The record is durable before the reset starts, and a failed reset gets
 	// a second record with the result (gibson#676).
-	if err := s.auditLogger.Record(ctx, auditActionTenantUserMFAReset, "user", target, map[string]any{
+	if _, err := s.auditLogger.Record(ctx, auditActionTenantUserMFAReset, "user", target, map[string]any{
 		"target_user_id": target,
 		"phase":          "requested",
 	}); err != nil {

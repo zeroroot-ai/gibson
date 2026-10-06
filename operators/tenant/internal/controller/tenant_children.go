@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 )
 
 // E8/gibson#805 — finalizer-based teardown + dependency-ordered reconciliation.
@@ -102,6 +103,11 @@ func newChild(kind childKind, tenant *gibsonv1alpha1.Tenant) client.Object {
 		Name:            childName(tenant),
 		Namespace:       ns,
 		OwnerReferences: []metav1.OwnerReference{tenantOwnerRef(tenant)},
+	}
+	// The child carries the audit link of the request that created the
+	// Tenant, so the records of the child name the same request (gibson#583).
+	if id := audit.CorrelationIDOf(tenant); id != "" {
+		meta.Annotations = map[string]string{audit.AnnotationCorrelationID: id}
 	}
 	switch kind {
 	case childIdentity:
@@ -317,6 +323,9 @@ func (r *TenantReconciler) deleteChild(ctx context.Context, kind childKind, tena
 		return false, fmt.Errorf("get %s for tenant %q: %w", childKindName(kind), tenant.Name, getErr)
 	}
 	if existing.GetDeletionTimestamp().IsZero() {
+		if err := stampCorrelationID(ctx, r.Client, existing, audit.CorrelationIDOf(tenant)); err != nil {
+			return false, fmt.Errorf("stamp %s for tenant %q: %w", childKindName(kind), tenant.Name, err)
+		}
 		if delErr := r.Delete(ctx, existing); delErr != nil {
 			if apierrors.IsNotFound(delErr) {
 				return true, nil
@@ -340,6 +349,31 @@ func (r *TenantReconciler) syncDataPlaneResources(ctx context.Context, tdp *gibs
 	tdp.Spec.Resources = tenant.Spec.Resources.DeepCopy()
 	if err := r.Update(ctx, tdp); err != nil {
 		return fmt.Errorf("update TenantDataPlane resources for tenant %q: %w", tenant.Name, err)
+	}
+	return nil
+}
+
+// stampCorrelationID sets the audit link of a request on obj before the
+// operator changes or deletes obj for that request, so the records of the
+// change name the request (gibson#583). An empty id removes a stale link:
+// the change then has no recorded human request behind it.
+func stampCorrelationID(ctx context.Context, c client.Client, obj client.Object, id string) error {
+	if audit.CorrelationIDOf(obj) == id {
+		return nil
+	}
+	patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+	annotations := obj.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	if id == "" {
+		delete(annotations, audit.AnnotationCorrelationID)
+	} else {
+		annotations[audit.AnnotationCorrelationID] = id
+	}
+	obj.SetAnnotations(annotations)
+	if err := c.Patch(ctx, obj, patch); err != nil {
+		return fmt.Errorf("stamp the correlation id: %w", err)
 	}
 	return nil
 }

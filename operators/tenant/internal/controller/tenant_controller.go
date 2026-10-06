@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
@@ -24,10 +23,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
-
-// ctxKeyCorrelationID is the typed context key for storing the correlation ID
-// threaded from the dashboard annotation through to runner log fields and audit.
-type ctxKeyCorrelationID struct{}
 
 // childRequeueInterval is how soon the Tenant reconciler comes back to advance
 // dependency-ordered child creation/teardown (E8/gibson#805) when no watch event
@@ -175,22 +170,13 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// --- Correlation-ID propagation (Task 20.1) ---
-	// Read the ID stamped by the dashboard on applyTenant. When absent (e.g.
-	// CRs created directly via kubectl), generate a fresh UUID and warn so
-	// operators know the ID was not dashboard-originated.
-	corrID := ""
-	if annotations := tenant.GetAnnotations(); annotations != nil {
-		corrID = annotations[saga.AnnotationCorrelationID]
-	}
-	if corrID == "" {
-		corrID = uuid.New().String()
-		log.Info("missing correlation-id annotation, generated fresh one",
-			"correlationId", corrID)
-	}
-	ctx = context.WithValue(ctx, ctxKeyCorrelationID{}, corrID)
-	// Also store in the saga package's typed key so runner's correlationIDFromCtx
-	// can read it even when called without the controller wrapper (e.g. tests).
+	// --- Correlation-ID propagation (gibson#583) ---
+	// The id is the daemon audit record of the human request that created or
+	// changed this tenant. The operator stamps it from the daemon queue entry
+	// (PendingProvisioningRunnable, TenantAdminOpsRunnable). With no stamp,
+	// no recorded human request is behind this pass, and the operator records
+	// carry no correlation id: the operator is the only actor.
+	corrID := audit.CorrelationIDOf(&tenant)
 	ctx = saga.CtxWithCorrelationID(ctx, corrID)
 	log = log.WithValues("correlationId", corrID)
 

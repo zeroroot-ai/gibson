@@ -273,7 +273,7 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 // BEFORE the change takes effect. The change fails when the record cannot be
 // written, so no provider change exists without its record (gibson#676).
 func (s *DaemonServer) recordProviderAudit(ctx context.Context, tenantID, action, providerName string) error {
-	if err := s.auditLogger.Record(ctx, action, "provider", providerName, map[string]any{
+	if _, err := s.auditLogger.Record(ctx, action, "provider", providerName, map[string]any{
 		"tenant_id": tenantID,
 	}); err != nil {
 		s.logger.Error("provider audit: durable write failed", "action", action, "error", err.Error())

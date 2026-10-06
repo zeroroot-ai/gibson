@@ -24,6 +24,7 @@ import (
 
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
@@ -307,9 +308,9 @@ func newAuditCapturingRunner(t *testing.T, fakeClient client.Client, sink *audit
 	return saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t), sink.Emitter(t))
 }
 
-// TestReconcile_CorrelationID_FromAnnotation verifies that when the Tenant CR
-// carries a gibson.zeroroot.ai/correlation-id annotation, the Reconcile loop threads it
-// into audit events emitted by the runner.
+// TestReconcile_CorrelationID_FromAnnotation: a Tenant stamped with the id of
+// the daemon audit record of a human request carries that id into each
+// operator record, which links the records to the human actor (gibson#583).
 func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 	const wantCorrID = "test-correlation-xyz-123"
 	tenant := &gibsonv1alpha1.Tenant{
@@ -317,7 +318,7 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 			Name:       "corr-test",
 			Finalizers: []string{gibsonv1alpha1.TenantFinalizer},
 			Annotations: map[string]string{
-				saga.AnnotationCorrelationID: wantCorrID,
+				audit.AnnotationCorrelationID: wantCorrID,
 			},
 		},
 		Spec: gibsonv1alpha1.TenantSpec{
@@ -363,10 +364,10 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 	}
 }
 
-// TestReconcile_CorrelationID_GeneratedWhenMissing verifies that when the
-// Tenant CR has no annotation, Reconcile generates a fresh UUID and the audit
-// events carry a non-empty correlationId.
-func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
+// TestReconcile_CorrelationID_EmptyWhenMissing: a Tenant with no stamp has no
+// recorded human request behind it. Its records carry no correlation id, so
+// the operator is the only actor they name (gibson#583).
+func TestReconcile_CorrelationID_EmptyWhenMissing(t *testing.T) {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "no-corr",
@@ -410,8 +411,8 @@ func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
 		t.Fatal("expected audit records, got none")
 	}
 	for _, ev := range records {
-		if ev.Fields["correlation_id"] == "" {
-			t.Errorf("expected non-empty generated correlation_id in audit record, got empty (record: %+v)", ev)
+		if id, ok := ev.Fields["correlation_id"]; ok {
+			t.Errorf("a Tenant with no stamp got correlation_id %q (record: %+v)", id, ev)
 		}
 	}
 }

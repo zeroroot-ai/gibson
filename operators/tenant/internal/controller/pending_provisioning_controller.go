@@ -39,6 +39,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
 
@@ -248,7 +249,8 @@ func tenantNamespace(slug string) string {
 func (r *PendingProvisioningRunnable) createTenant(ctx context.Context, p provision.PendingTenant) error {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: p.TenantID,
+			Name:        p.TenantID,
+			Annotations: requestAnnotations(p.AuditRecordID),
 		},
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: p.WorkspaceName,
@@ -277,4 +279,14 @@ func (r *PendingProvisioningRunnable) SetupWithManager(mgr manager.Manager) erro
 		r.Client = mgr.GetClient()
 	}
 	return mgr.Add(r)
+}
+
+// requestAnnotations returns the annotations that link a new Tenant to the
+// daemon audit record of the request that created it, or nil when the
+// request has no record (gibson#583).
+func requestAnnotations(auditRecordID string) map[string]string {
+	if auditRecordID == "" {
+		return nil
+	}
+	return map[string]string{audit.AnnotationCorrelationID: auditRecordID}
 }

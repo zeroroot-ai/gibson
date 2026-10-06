@@ -55,8 +55,8 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 	const q = `
 		INSERT INTO pending_tenant_provisioning
 			(tenant_id, owner_user_id, owner_email, workspace_name, tier, status,
-			 attempt_id, step_token_hash, step_expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+			 attempt_id, step_token_hash, step_expires_at, audit_record_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
 		ON CONFLICT (tenant_id) DO NOTHING
 	`
 	queueStatus, attemptID, tokenHash := "pending", "", ""
@@ -68,7 +68,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 	res, err := db.ExecContext(ctx, q,
 		p.GetTenantId(), p.GetOwnerUserId(), p.GetOwnerEmail(),
 		p.GetWorkspaceName(), p.GetTier(), queueStatus,
-		attemptID, tokenHash, expiresAt,
+		attemptID, tokenHash, expiresAt, p.GetAuditRecordId(),
 	)
 	if err != nil {
 		return false, fmt.Errorf("insert pending_tenant_provisioning: %w", err)
@@ -102,7 +102,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
 	const q = `
-		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier
+		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier, audit_record_id
 		FROM pending_tenant_provisioning
 		WHERE status = 'pending'
 		ORDER BY created_at ASC
@@ -120,7 +120,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 		var p daemonoperatorv1.PendingTenant
 		if err := rows.Scan(
 			&p.TenantId, &p.OwnerUserId, &p.OwnerEmail,
-			&p.WorkspaceName, &p.Tier,
+			&p.WorkspaceName, &p.Tier, &p.AuditRecordId,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan pending row: %v", err)
 		}
@@ -202,6 +202,7 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 			attempt_id         TEXT NOT NULL DEFAULT '',
 			step_token_hash    TEXT NOT NULL DEFAULT '',
 			step_expires_at    TIMESTAMPTZ,
+			audit_record_id    TEXT NOT NULL DEFAULT '',
 			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)

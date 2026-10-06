@@ -294,22 +294,26 @@ func (a *AuditLogger) LogWithResult(
 // When the action then fails, record the failure with LogWithResult and
 // the result "failure".
 //
+// Record returns the id of the record (the entry_id of its metadata). A
+// caller that hands the request to another component passes the id with it,
+// so the records of that component name the request (gibson#583).
+//
 // Record returns ErrNoActor when the context carries no actor identity,
 // and the error of the durable write when Postgres does not accept it.
 func (a *AuditLogger) Record(
 	ctx context.Context,
 	action, resource, resourceID string,
 	details map[string]any,
-) error {
+) (string, error) {
 	rec, ok := a.build(ctx, action, resource, resourceID, resultSuccess, details)
 	if !ok {
-		return ErrNoActor
+		return "", ErrNoActor
 	}
 	if err := a.durable.WriteSync(ctx, rec.event); err != nil {
-		return fmt.Errorf("audit: record %q: %w", action, err)
+		return "", fmt.Errorf("audit: record %q: %w", action, err)
 	}
 	a.tail(rec)
-	return nil
+	return rec.entry.ID, nil
 }
 
 // ErrNoActor is returned by Record for a context with no actor identity.

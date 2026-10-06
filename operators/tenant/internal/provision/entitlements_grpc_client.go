@@ -199,6 +199,9 @@ type PendingTenant struct {
 	OwnerEmail    string
 	WorkspaceName string
 	Tier          string
+	// AuditRecordID is the daemon audit record of the human request that
+	// queued this tenant, or "" when no human request is behind it (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
@@ -222,6 +225,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 			OwnerEmail:    p.GetOwnerEmail(),
 			WorkspaceName: p.GetWorkspaceName(),
 			Tier:          p.GetTier(),
+			AuditRecordID: p.GetAuditRecordId(),
 		})
 	}
 	return out, nil
@@ -311,6 +315,9 @@ type TenantAdminOp struct {
 	OwnerEmail     string
 	Tier           string
 	TierSet        bool
+	// AuditRecordID is the daemon audit record of the admin request behind
+	// this op (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantOps returns the daemon's queue of admin tenant CRUD ops
@@ -337,6 +344,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]Te
 			OwnerEmail:     op.GetOwnerEmail(),
 			Tier:           op.GetTier(),
 			TierSet:        op.GetTierSet(),
+			AuditRecordID:  op.GetAuditRecordId(),
 		})
 	}
 	return out, nil

@@ -97,18 +97,26 @@ func (s *DaemonServer) AdminProvisionTenant(ctx context.Context, req *tenantv1.A
 	if tier == "" {
 		tier = defaultProvisionTier
 	}
+	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminProvision, req.GetTenantId(), map[string]any{
+		"display_name": req.GetDisplayName(), "owner_email": req.GetOwnerEmail(), "tier": tier,
+	})
+	if err != nil {
+		return nil, err
+	}
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status, created_at, updated_at)
-		SELECT $1, $2, 'provision', $3, TRUE, $4, $5, TRUE, 'pending', NOW(), NOW()
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			 audit_record_id, created_at, updated_at)
+		SELECT $1, $2, 'provision', $3, TRUE, $4, $5, TRUE, 'pending', $6, NOW(), NOW()
 		WHERE NOT EXISTS (
 			SELECT 1 FROM tenant_admin_ops
 			WHERE tenant_id = $2 AND op_type = 'provision' AND status = 'pending'
 		)
 	`
-	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId(), req.GetDisplayName(), req.GetOwnerEmail(), tier)
+	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId(), req.GetDisplayName(), req.GetOwnerEmail(), tier, rec.id)
 	if err != nil {
+		rec.failed(ctx, err)
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
 	}
 	queued := true
@@ -162,15 +170,24 @@ func (s *DaemonServer) AdminUpdateTenant(ctx context.Context, req *tenantv1.Admi
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
+	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminUpdate, req.GetTenantId(), map[string]any{
+		"display_name": req.GetDisplayName(), "display_name_set": req.GetDisplayNameSet(),
+		"tier": req.GetTier(), "tier_set": req.GetTierSet(),
+	})
+	if err != nil {
+		return nil, err
+	}
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status, created_at, updated_at)
-		VALUES ($1, $2, 'update', $3, $4, '', $5, $6, 'pending', NOW(), NOW())
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			 audit_record_id, created_at, updated_at)
+		VALUES ($1, $2, 'update', $3, $4, '', $5, $6, 'pending', $7, NOW(), NOW())
 	`
 	if _, err := db.ExecContext(ctx, q,
-		opID, req.GetTenantId(), req.GetDisplayName(), req.GetDisplayNameSet(), req.GetTier(), req.GetTierSet(),
+		opID, req.GetTenantId(), req.GetDisplayName(), req.GetDisplayNameSet(), req.GetTier(), req.GetTierSet(), rec.id,
 	); err != nil {
+		rec.failed(ctx, err)
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
 	}
 	return &tenantv1.AdminUpdateTenantResponse{OpId: opID}, nil
@@ -197,24 +214,78 @@ func (s *DaemonServer) AdminDeleteTenant(ctx context.Context, req *tenantv1.Admi
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
+	rec, err := s.recordTenantRequest(ctx, auditActionTenantAdminDelete, req.GetTenantId(), nil)
+	if err != nil {
+		return nil, err
+	}
 	opID := uuid.NewString()
 	const q = `
 		INSERT INTO tenant_admin_ops
-			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status, created_at, updated_at)
-		SELECT $1, $2, 'delete', '', FALSE, '', '', FALSE, 'pending', NOW(), NOW()
+			(op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set, status,
+			 audit_record_id, created_at, updated_at)
+		SELECT $1, $2, 'delete', '', FALSE, '', '', FALSE, 'pending', $3, NOW(), NOW()
 		WHERE NOT EXISTS (
 			SELECT 1 FROM tenant_admin_ops
 			WHERE tenant_id = $2 AND op_type = 'delete' AND status = 'pending'
 		)
 	`
-	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId())
+	res, err := db.ExecContext(ctx, q, opID, req.GetTenantId(), rec.id)
 	if err != nil {
+		rec.failed(ctx, err)
 		return nil, status.Errorf(codes.Internal, "insert tenant_admin_ops: %v", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return &tenantv1.AdminDeleteTenantResponse{}, nil
 	}
 	return &tenantv1.AdminDeleteTenantResponse{OpId: opID}, nil
+}
+
+// Audit actions of the admin requests on a tenant (gibson#583).
+const (
+	auditActionTenantAdminProvision = "tenant.admin_provision_requested"
+	auditActionTenantAdminUpdate    = "tenant.admin_update_requested"
+	auditActionTenantAdminDelete    = "tenant.admin_delete_requested"
+)
+
+// tenantRequestRecord is the durable audit record of one human request on a
+// tenant. Its id goes into the queue entry, and the tenant-operator stamps it
+// on the Tenant, so each operator record of the change names this request
+// and its human actor (gibson#583).
+type tenantRequestRecord struct {
+	s        *DaemonServer
+	tenant   auth.TenantID
+	action   string
+	tenantID string
+	id       string
+}
+
+// recordTenantRequest writes the record of a request on tenantID before the
+// request is queued, under the tenant it names. When the record is not
+// written, the request is refused and nothing is queued (D15, gibson#676).
+func (s *DaemonServer) recordTenantRequest(ctx context.Context, action, tenantID string, details map[string]any) (*tenantRequestRecord, error) {
+	if s.auditLogger == nil {
+		return nil, status.Error(codes.Unavailable, "audit logger not configured: a tenant request is not queued without its audit record")
+	}
+	tenant, err := auth.NewTenantID(tenantID)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
+	}
+	tctx := auth.ContextWithTenant(ctx, tenant)
+	id, err := s.auditLogger.Record(tctx, action, "tenant", tenantID, details)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "tenant request: durable audit write failed", "action", action, "tenant_id", tenantID, "error", err.Error())
+		return nil, status.Error(codes.Unavailable, "the audit record of the request could not be written; nothing changed")
+	}
+	return &tenantRequestRecord{s: s, tenant: tenant, action: action, tenantID: tenantID, id: id}, nil
+}
+
+// failed writes the second record of a request that was recorded and then
+// not queued.
+func (r *tenantRequestRecord) failed(ctx context.Context, cause error) {
+	r.s.auditLogger.LogWithResult(auth.ContextWithTenant(ctx, r.tenant), r.action, "tenant", r.tenantID, "failure", map[string]any{
+		"request_record_id": r.id,
+		"reason":            cause.Error(),
+	})
 }
 
 // --- DaemonOperatorService (operator-facing) -----------------------------
@@ -232,7 +303,8 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, _ *daemonoperat
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
 	const q = `
-		SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set
+		SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,
+		       audit_record_id
 		FROM tenant_admin_ops
 		WHERE status = 'pending'
 		ORDER BY created_at ASC
@@ -248,7 +320,7 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, _ *daemonoperat
 		var op daemonoperatorv1.TenantOp
 		if err := rows.Scan(
 			&op.OpId, &op.TenantId, &op.OpType, &op.DisplayName,
-			&op.DisplayNameSet, &op.OwnerEmail, &op.Tier, &op.TierSet,
+			&op.DisplayNameSet, &op.OwnerEmail, &op.Tier, &op.TierSet, &op.AuditRecordId,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan tenant_admin_op row: %v", err)
 		}
@@ -304,6 +376,7 @@ func ensureTenantAdminOpsTable(ctx context.Context, db *sql.DB) error {
 			status             TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT tenant_admin_ops_status_check
 				CHECK (status IN ('pending', 'done')),
+			audit_record_id    TEXT NOT NULL DEFAULT '',
 			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 		)

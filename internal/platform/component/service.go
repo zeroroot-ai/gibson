@@ -2377,7 +2377,7 @@ func (s *ComponentServiceServer) recordPluginChange(ctx context.Context, action,
 	if s.auditLog == nil {
 		return status.Errorf(codes.FailedPrecondition, "%s %q: the audit log is not wired on this server", action, plugin)
 	}
-	if err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
+	if _, err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
 		s.logger.ErrorContext(ctx, "plugin change refused: the audit record is not durable",
 			slog.String("action", action),
 			slog.String("plugin_name", plugin),

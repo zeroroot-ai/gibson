@@ -172,28 +172,27 @@ func (t *Taker) Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool
 // create writes the audit record of the backup, then creates the Backup.
 // With no record, it creates nothing. A failed create gets a second record.
 func (t *Taker) create(ctx context.Context, name string, tenant *gibsonv1alpha1.Tenant) error {
-	ev := audit.Event{
-		Action:     audit.ActionLastBackup,
-		TenantID:   tenant.Name,
-		TargetType: "tenant",
-		TargetID:   tenant.Name,
-		Fields: map[string]string{
-			"backup":           t.namespace + "/" + name,
-			"tenant_namespace": TenantNamespace(tenant.Name),
-			"tenant_uid":       string(tenant.UID),
-		},
-	}
-	if err := t.audit.Record(ctx, ev); err != nil {
-		return t.fail("audit", fmt.Errorf("finalbackup: Backup %s/%s not created: %w", t.namespace, name, err))
-	}
-	if cErr := t.client.Create(ctx, Build(name, t.namespace, tenant)); cErr != nil {
-		err := fmt.Errorf("finalbackup: create Backup %s/%s: %w", t.namespace, name, cErr)
-		if aErr := t.audit.RecordFailure(ctx, ev, err); aErr != nil {
-			err = errors.Join(err, aErr)
+	ev := audit.ObjectEvent(audit.ActionLastBackup, tenant, map[string]string{
+		"backup":           t.namespace + "/" + name,
+		"tenant_namespace": TenantNamespace(tenant.Name),
+		"tenant_uid":       string(tenant.UID),
+	})
+	created := false
+	err := t.audit.Change(ctx, ev, func() error {
+		created = true
+		if cErr := t.client.Create(ctx, Build(name, t.namespace, tenant)); cErr != nil {
+			return fmt.Errorf("finalbackup: create Backup %s/%s: %w", t.namespace, name, cErr)
 		}
+		return nil
+	})
+	switch {
+	case err == nil:
+		return nil
+	case !created:
+		return t.fail("audit", fmt.Errorf("finalbackup: Backup %s/%s not created: %w", t.namespace, name, err))
+	default:
 		return t.fail("create", err)
 	}
-	return nil
 }
 
 // fail counts one failure and returns err unchanged.

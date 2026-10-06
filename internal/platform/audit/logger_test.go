@@ -661,10 +661,13 @@ func TestRecord_WritesDurablyThenTails(t *testing.T) {
 	al, _ := newTestLogger(t)
 	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
 
-	require.NoError(t, al.Record(ctx, "agent_grant_added", "agent_grant", "agent_principal:a", map[string]any{"k": "v"}))
+	id, err := al.Record(ctx, "agent_grant_added", "agent_grant", "agent_principal:a", map[string]any{"k": "v"})
+	require.NoError(t, err)
 	got := durableOf(t, al).recorded()
 	require.Len(t, got, 1)
 	assert.Equal(t, "agent_grant_added", got[0].Action)
+	assert.NotEmpty(t, id)
+	assert.Contains(t, string(got[0].Metadata), `"entry_id":"`+id+`"`, "the returned id is the entry_id of the durable record")
 	require.Eventually(t, func() bool {
 		entries, err := al.Query(context.Background(), "acme", AuditQueryOptions{})
 		return err == nil && len(entries) == 1
@@ -678,7 +681,7 @@ func TestRecord_ReturnsTheDurableError(t *testing.T) {
 	al, _ := newTestLogger(t)
 	durableOf(t, al).syncErr = errors.New("postgres down")
 
-	err := al.Record(ctxWithTenantAndIdentity("acme", "user-1", ""), "agent_grant_added", "agent_grant", "a", nil)
+	_, err := al.Record(ctxWithTenantAndIdentity("acme", "user-1", ""), "agent_grant_added", "agent_grant", "a", nil)
 	require.ErrorContains(t, err, "postgres down")
 	time.Sleep(50 * time.Millisecond)
 	entries, qerr := al.Query(context.Background(), "acme", AuditQueryOptions{})
@@ -688,6 +691,7 @@ func TestRecord_ReturnsTheDurableError(t *testing.T) {
 
 func TestRecord_RefusesAContextWithNoActor(t *testing.T) {
 	al, _ := newTestLogger(t)
-	require.ErrorIs(t, al.Record(ctxWithTenant("acme"), "x", "r", "id", nil), ErrNoActor)
+	_, err := al.Record(ctxWithTenant("acme"), "x", "r", "id", nil)
+	require.ErrorIs(t, err, ErrNoActor)
 	assert.Empty(t, durableOf(t, al).recorded())
 }

@@ -15,6 +15,7 @@ import (
 
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 )
 
@@ -46,7 +47,7 @@ func newOIDCFixture(t *testing.T, entries []gibsonv1alpha1.TenantIdentityOIDCCli
 		WithInterceptorFuncs(funcs).
 		Build()
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
 	return &oidcFixture{c: c, r: r, ti: ti}
 }
 
@@ -249,7 +250,7 @@ func TestTenantIdentity_OIDCClientsNeedTheBootstrap(t *testing.T) {
 	ti.Spec.OIDCClients = []gibsonv1alpha1.TenantIdentityOIDCClient{{Name: "portal"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&gibsonv1alpha1.TenantIdentity{}).WithObjects(ti).Build()
 	stub := &stubIdentityProvisioner{result: identity.Result{OrgID: "org-123", Slug: "acme"}}
-	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
+	r := &TenantIdentityReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub, OrgMapping: &stubOrgMapping{}, ZitadelURL: "http://gibson-zitadel:8080"}
 	if _, err := reconcileTI(t, r, "acme-identity"); err != nil {
 		t.Fatal(err)
 	}

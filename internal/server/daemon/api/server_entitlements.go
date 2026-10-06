@@ -239,7 +239,7 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1
 	}
 	// The record is durable before the RPC answers, so the caller learns
 	// when its audit record is lost and makes no change (gibson#676).
-	if err := s.auditLogger.Record(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), details); err != nil {
+	if _, err := s.auditLogger.Record(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), details); err != nil {
 		s.logger.ErrorContext(ctx, "EmitAuditEvent: durable write failed", "error", err.Error())
 		return nil, status.Error(codes.Unavailable, "the audit record could not be written; try again")
 	}

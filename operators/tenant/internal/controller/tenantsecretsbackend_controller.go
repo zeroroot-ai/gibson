@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +21,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/secrets"
 )
 
@@ -49,6 +53,10 @@ type TenantSecretsBackendReconciler struct {
 	// secrets.New(...)); a nil here fails loud so a misconfigured operator
 	// crash-loops rather than silently no-op'ing provisioning.
 	Provisioner secrets.Provisioner
+
+	// Audit writes the record of each OpenBao change before the change
+	// (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantsecretsbackends,verbs=get;list;watch;create;update;patch;delete
@@ -81,6 +89,13 @@ func (r *TenantSecretsBackendReconciler) Reconcile(ctx context.Context, req ctrl
 		return r.fail(ctx, &tsb, "secrets provisioner unset (operator misconfigured)")
 	}
 
+	if r.Audit == nil {
+		// Fail loud, same as a nil Provisioner: no OpenBao change happens
+		// without its audit record (gibson#583).
+		log.Error(clients.ErrInvalidInput, "audit emitter unset (operator misconfigured)")
+		return r.fail(ctx, &tsb, "audit emitter unset (operator misconfigured)")
+	}
+
 	// Deletion path: run teardown, then drop the finalizer.
 	if !tsb.DeletionTimestamp.IsZero() {
 		return r.reconcileDelete(ctx, &tsb)
@@ -109,7 +124,31 @@ func (r *TenantSecretsBackendReconciler) Reconcile(ctx context.Context, req ctrl
 		}
 	}
 
-	if err := r.Provisioner.Provision(ctx, tsb.Spec.TenantID); err != nil {
+	// The OpenBao change is recorded first (gibson#583). A drift-check pass
+	// (already Ready at this generation) writes no new record.
+	provisioned := false
+	change := func() error {
+		provisioned = true
+		return r.Provisioner.Provision(ctx, tsb.Spec.TenantID)
+	}
+	var err error
+	if alreadyReady {
+		err = change()
+	} else {
+		err = r.Audit.Change(ctx, audit.ObjectEvent(audit.ActionSecretsBackendProvision, &tsb, map[string]string{
+			"generation": strconv.FormatInt(tsb.Generation, 10),
+		}), change)
+	}
+	if err != nil && !provisioned {
+		// The audit record was not written, so nothing changed.
+		log.Error(err, "secrets-backend audit record failed; nothing changed", "tenant", tsb.Spec.TenantID)
+		r.emit(&tsb, "Warning", "AuditRecordFailed", err.Error())
+		if _, ferr := r.fail(ctx, &tsb, "audit record: "+err.Error()); ferr != nil {
+			return ctrl.Result{}, ferr
+		}
+		return ctrl.Result{}, err
+	}
+	if err != nil {
 		log.Error(err, "secrets-backend provision failed", "tenant", tsb.Spec.TenantID)
 		r.emit(&tsb, "Warning", "ProvisionFailed", err.Error())
 		if _, ferr := r.fail(ctx, &tsb, err.Error()); ferr != nil {
@@ -143,7 +182,13 @@ func (r *TenantSecretsBackendReconciler) reconcileDelete(ctx context.Context, ts
 	_ = r.patchStatus(ctx, tsb, base)
 
 	if r.Provisioner != nil {
-		if err := r.Provisioner.Deprovision(ctx, tsb.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+		ev := audit.ObjectEvent(audit.ActionSecretsBackendDeprovision, tsb, nil)
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Provisioner.Deprovision(ctx, tsb.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
+				return err
+			}
+			return nil
+		}); err != nil {
 			log.Error(err, "secrets-backend deprovision failed; keeping finalizer for retry", "tenant", tsb.Spec.TenantID)
 			r.emit(tsb, "Warning", "DeprovisionFailed", err.Error())
 			return ctrl.Result{}, err
@@ -266,6 +311,9 @@ func setSecretsBackendReadyCondition(tsb *gibsonv1alpha1.TenantSecretsBackend, s
 // Spec changes (generation bump), creates, and deletes still reconcile
 // immediately; the 10-minute RequeueAfter handles drift-correction resyncs.
 func (r *TenantSecretsBackendReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant secrets backend reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantsecretsbackend-controller")
 	}

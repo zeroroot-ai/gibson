@@ -30,6 +30,18 @@ const (
 	// ActionLastBackup is the record before the last backup of a deleted
 	// tenant is created (ADR-0075).
 	ActionLastBackup = "operator.last_backup"
+	// ActionIdentityProvision is the record before the operator creates or
+	// corrects the Zitadel organization of a tenant.
+	ActionIdentityProvision = "operator.identity_provision"
+	// ActionIdentityDeprovision is the record before the operator deletes the
+	// Zitadel organization of a tenant.
+	ActionIdentityDeprovision = "operator.identity_deprovision"
+	// ActionSecretsBackendProvision is the record before the operator creates
+	// or corrects the OpenBao namespace of a tenant.
+	ActionSecretsBackendProvision = "operator.secrets_backend_provision"
+	// ActionSecretsBackendDeprovision is the record before the operator
+	// deletes the OpenBao namespace of a tenant.
+	ActionSecretsBackendDeprovision = "operator.secrets_backend_deprovision"
 )
 
 // ResultFailure is the result of the second record of a change that failed.

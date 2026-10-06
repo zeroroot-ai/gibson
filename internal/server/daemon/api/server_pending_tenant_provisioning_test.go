@@ -55,7 +55,7 @@ func TestEnqueuePendingTenantProvisioning_InsertsRow(t *testing.T) {
 
 	expectEnsureTable(mock)
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}).
+		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}, "").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{
@@ -89,7 +89,7 @@ func TestEnqueuePendingTenantProvisioning_IdempotentConflict(t *testing.T) {
 	expectEnsureTable(mock)
 	// ON CONFLICT DO NOTHING → 0 rows affected on a retry of the same tenant.
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}).
+		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{
@@ -131,10 +131,10 @@ func TestListPendingTenantProvisioning_ReturnsRows(t *testing.T) {
 	// The drain gate is inert here because the entitlements knob is unset
 	// (self-hosted posture).
 	rows := sqlmock.NewRows([]string{
-		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier",
+		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id",
 	}).
-		AddRow("acme", "u-1", "owner@acme.test", "Acme Inc", "team").
-		AddRow("globex", "u-2", "ceo@globex.test", "Globex", "org")
+		AddRow("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "rec-1").
+		AddRow("globex", "u-2", "ceo@globex.test", "Globex", "org", "")
 	mock.ExpectQuery("FROM pending_tenant_provisioning").
 		WillReturnRows(rows)
 
@@ -146,7 +146,7 @@ func TestListPendingTenantProvisioning_ReturnsRows(t *testing.T) {
 		t.Fatalf("expected 2 pending rows, got %d", len(resp.GetPending()))
 	}
 	first := resp.GetPending()[0]
-	if first.GetTenantId() != "acme" || first.GetTier() != "team" {
+	if first.GetTenantId() != "acme" || first.GetTier() != "team" || first.GetAuditRecordId() != "rec-1" {
 		t.Errorf("unexpected first row: %+v", first)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

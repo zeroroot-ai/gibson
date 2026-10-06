@@ -128,13 +128,6 @@ func wrapBestEffort(steps []Step) []Step {
 // conditions on operator restart so a fresh retry is attempted.
 const blockedClearWindow = time.Hour
 
-// AnnotationCorrelationID is the annotation key on Tenant objects used to
-// propagate a request correlation ID into saga audit events. The propagation
-// task (task 17.3) stamps this annotation; Runner reads it here so the audit
-// trail links back to the originating API call. If absent, correlationId is
-// emitted as an empty string — the field is always present for Loki parsing.
-const AnnotationCorrelationID = "gibson.zeroroot.ai/correlation-id"
-
 // ReasonSagaFailed is the Reason on a Blocked status condition that the
 // platform runner sets when a saga step exhausts its retry budget. Only
 // conditions carrying this reason are auto-cleared by ClearStaleBlocked
@@ -406,7 +399,7 @@ func (r *Runner) RunForDeletion(ctx context.Context, obj ConditionedObject, step
 	// The upstream psaga.Runner.ContinueOnBlocked flag (gibson#255) is
 	// the cleaner long-term home for this behavior; this wrapper is the
 	// in-repo bridge until that flag lands across all consumers.
-	result := pr.Run(ctx, obj, wrapBestEffort(r.wrapWithAudit(wrapWithTimeouts(steps), corrID, finalPhase)), finalPhase)
+	result := pr.Run(ctx, obj, wrapBestEffort(r.wrapWithAudit(wrapWithTimeouts(steps), finalPhase)), finalPhase)
 
 	log := r.Log.WithValues(
 		"object", objName,
@@ -486,7 +479,7 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 		Clock:           r.Clock,
 	}
 
-	result := pr.Run(ctx, obj, r.wrapWithAudit(wrapWithTimeouts(steps), corrID, finalPhase), finalPhase)
+	result := pr.Run(ctx, obj, r.wrapWithAudit(wrapWithTimeouts(steps), finalPhase), finalPhase)
 
 	log := r.Log.WithValues(
 		"object", objName,
@@ -587,7 +580,7 @@ func (metricsHookAdapter) ObserveReconcile(kind, outcome string, duration time.D
 // ctxKeyCorrelationID is the typed context key used to pass the correlation
 // ID from the controller through to the runner's log fields and audit
 // events. Unexported so callers either use CtxWithCorrelationID or rely on
-// the AnnotationCorrelationID fallback in correlationIDFromCtx.
+// the audit.AnnotationCorrelationID fallback in correlationIDFromCtx.
 type ctxKeyCorrelationID struct{}
 
 // CtxWithCorrelationID stores the correlation ID in ctx using the saga
@@ -604,7 +597,7 @@ func correlationIDFromCtx(ctx context.Context, obj ConditionedObject) string {
 		return id
 	}
 	if annotations := obj.GetAnnotations(); annotations != nil {
-		return annotations[AnnotationCorrelationID]
+		return annotations[audit.AnnotationCorrelationID]
 	}
 	return ""
 }

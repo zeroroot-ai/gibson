@@ -861,6 +861,7 @@ func main() {
 		Client:      mgr.GetClient(),
 		Scheme:      mgr.GetScheme(),
 		Provisioner: secretsProvisioner,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantSecretsBackend")
 		os.Exit(1)
@@ -877,6 +878,7 @@ func main() {
 		ZitadelURL:  zw.endpoint.BaseURL(),
 		Provisioner: identityProvisioner,
 		OrgMapping:  orgMappingSeeder,
+		Audit:       sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantIdentity")
 		os.Exit(1)
