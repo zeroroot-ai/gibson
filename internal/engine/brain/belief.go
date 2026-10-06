@@ -256,10 +256,25 @@ func demonstratedExploitByHost(w *World) map[string]bool {
 // host's evidence digest, so the belief recomputes; a finding on another host, or
 // a re-raise carrying nothing new, leaves the digest unchanged and is suppressed.
 func BeliefSystem(w *World) []Event {
+	var out []Event
+	forEachHostEvidence(w, func(h *Host, ev BeliefEvidence) {
+		if evidenceDigest(ev) == h.EvidenceDigest {
+			return
+		}
+		out = append(out, BeliefScoreRequested{HostID: h.ID, Evidence: ev})
+	})
+	return out
+}
+
+// forEachHostEvidence calls fn with each host and the belief evidence it
+// presents: its own ports and services (evidenceOf) plus the finding-derived
+// evidence that correlates to the same host (gibson#478). BeliefSystem and
+// BeliefEvidenceByHost both read the evidence here, so inference and training
+// see the same evidence for one host.
+func forEachHostEvidence(w *World, fn func(h *Host, ev BeliefEvidence)) {
 	critical, high := findingSeverityByHost(w)
 	exploited := demonstratedExploitByHost(w)
 
-	var out []Event
 	q := ecs.NewFilter1[Host](w.ecs).Query()
 	for q.Next() {
 		h := q.Get()
@@ -268,11 +283,19 @@ func BeliefSystem(w *World) []Event {
 		ev.FindingCritical = critical[key]
 		ev.FindingHigh = high[key]
 		ev.ExploitDemonstrated = exploited[key]
-		if evidenceDigest(ev) == h.EvidenceDigest {
-			continue
-		}
-		out = append(out, BeliefScoreRequested{HostID: h.ID, Evidence: ev})
+		fn(h, ev)
 	}
+}
+
+// BeliefEvidenceByHost returns the belief evidence of each host, keyed by the
+// stable host id. The belief trainer derives its training rows from it
+// (braintrain.RowsFromWorld, gibson#614), so a row holds exactly the evidence
+// that inference scores.
+func (w *World) BeliefEvidenceByHost() map[uint64]BeliefEvidence {
+	out := make(map[uint64]BeliefEvidence)
+	forEachHostEvidence(w, func(h *Host, ev BeliefEvidence) {
+		out[h.ID] = ev
+	})
 	return out
 }
 

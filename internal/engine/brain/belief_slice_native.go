@@ -29,7 +29,7 @@ import (
 // enablement cause uses the SAME constant only until a per-edge-type Beta
 // posterior is pinned (gibson#395, ADR-0137): when
 // NativeSliceBeliefProvider is given a non-nil PinnedEdgeStrengthPosteriorProvider
-// (braintrain.EdgePosteriorArtifact.Provider(), fit offline by braintrain from
+// (braintrain.EdgePosteriorProvider, fit offline by braintrain from
 // recorded outcomes), groundAttackGraph reads that edge type's posterior MEAN
 // instead — the grounding STRUCTURE (which variable is a cause of which)
 // never changes, only the strength number plugged into
@@ -227,7 +227,7 @@ func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistr
 // Beta posterior MEAN (gibson#395, ADR-0137 — the other of "one
 // output, two uses" is bamcp.go Thompson-sampling the same posterior). A
 // pinned provider with no fitted row for edgeType still returns a
-// posterior — braintrain.EdgePosteriorArtifact.Provider() falls back to
+// posterior — braintrain.EdgePosteriorProvider falls back to
 // UninformativeEdgePosteriors internally, so its Mean() is exactly
 // UninformativePriorStrength too; this function never needs to special-case
 // "known type" vs "unknown type" itself.

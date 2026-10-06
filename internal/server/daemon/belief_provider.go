@@ -87,8 +87,7 @@ func resolveSliceBeliefProvider(registry *ontology.BeliefSchemaRegistry, posteri
 // fitted one.
 //
 // GIBSON_EDGE_POSTERIOR_PATH optionally names a braintrain-emitted
-// EdgePosteriorArtifact JSON file (e.g. cmd/belief-trainer's -edge-out
-// output, mounted the same way GIBSON_BELIEF_MODEL_PATH mounts a curated CPT
+// fit.EdgePosteriorArtifact JSON file (mounted the same way GIBSON_BELIEF_MODEL_PATH mounts a curated CPT
 // model). Unset returns a nil provider: production may have no recorded
 // outcomes yet (this issue's documented data caveat), and a nil provider is
 // exactly "no posterior pinned" — NativeSliceBeliefProvider and
@@ -103,7 +102,7 @@ func resolveEdgePosteriorProvider() (brain.PinnedEdgeStrengthPosteriorProvider, 
 	if err != nil {
 		return nil, fmt.Errorf("resolve edge posterior provider: %w", err)
 	}
-	return art.Provider(), nil
+	return braintrain.EdgePosteriorProvider(art), nil
 }
 
 // newBeliefSchemaRegistry builds the ontology belief-PRM schema registry

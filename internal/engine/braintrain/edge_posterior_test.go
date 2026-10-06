@@ -9,14 +9,15 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit"
 )
 
 // fittedArtifact is what the trainer wrote for a known fixture: RESOLVES_TO
 // saw 7 successes and 3 failures on a Beta(1,1) prior, AFFECTS saw 1 success.
-func fittedArtifact() *EdgePosteriorArtifact {
-	return &EdgePosteriorArtifact{
+func fittedArtifact() *fit.EdgePosteriorArtifact {
+	return &fit.EdgePosteriorArtifact{
 		Version: "test-v1",
-		Posteriors: map[string]edgePosteriorJSON{
+		Posteriors: map[string]fit.BetaPosterior{
 			"RESOLVES_TO": {Alpha: 8, Beta: 4},
 			"AFFECTS":     {Alpha: 2, Beta: 1},
 		},
@@ -47,7 +48,7 @@ func TestLoadEdgePosteriorArtifact_RejectsANonPositiveBetaShape(t *testing.T) {
 }
 
 func TestEdgePosteriorArtifact_Provider_MeanMatchesFittedAlphaBeta(t *testing.T) {
-	p := fittedArtifact().Provider()
+	p := EdgePosteriorProvider(fittedArtifact())
 	if got, want := p.Version(), "test-v1"; got != want {
 		t.Fatalf("Provider().Version() = %q, want %q", got, want)
 	}
@@ -58,7 +59,7 @@ func TestEdgePosteriorArtifact_Provider_MeanMatchesFittedAlphaBeta(t *testing.T)
 }
 
 func TestEdgePosteriorArtifact_Provider_FallsBackToUninformativeForAnUnfittedEdgeType(t *testing.T) {
-	got := fittedArtifact().Provider().Posterior("NEVER_OBSERVED")
+	got := EdgePosteriorProvider(fittedArtifact()).Posterior("NEVER_OBSERVED")
 	want := brain.UninformativeEdgePosteriors{}.Posterior("NEVER_OBSERVED")
 	if got != want {
 		t.Fatalf("fallback posterior = %+v, want %+v (uninformative)", got, want)
@@ -79,5 +80,20 @@ func TestLoadEdgePosteriorArtifact_InvalidJSONErrors(t *testing.T) {
 	}
 	if _, err := LoadEdgePosteriorArtifact(path); err == nil {
 		t.Fatal("expected an error for invalid JSON")
+	}
+}
+
+func TestLoadEdgePosteriorArtifact_LoadsAValidFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "edges.json")
+	const raw = `{"version":"tenant-acme-v1","posteriors":{"RESOLVES_TO":{"alpha":8,"beta":4}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := LoadEdgePosteriorArtifact(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := EdgePosteriorProvider(a).Posterior("RESOLVES_TO"); got.Alpha != 8 || got.Beta != 4 {
+		t.Errorf("posterior = %+v, want Beta(8,4)", got)
 	}
 }

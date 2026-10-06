@@ -266,7 +266,7 @@ func TestNativeSliceBelief_Version(t *testing.T) {
 // -----------------------------------------------------------------------
 
 // fakePinnedPosteriors is a minimal PinnedEdgeStrengthPosteriorProvider test
-// double standing in for braintrain.EdgePosteriorArtifact.Provider().
+// double standing in for braintrain.EdgePosteriorProvider.
 type fakePinnedPosteriors struct {
 	version     string
 	posteriors  map[string]EdgeStrengthPosterior

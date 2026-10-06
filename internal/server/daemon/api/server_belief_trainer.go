@@ -26,6 +26,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
+	"github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit"
 	"github.com/zeroroot-ai/gibson/internal/platform/beliefartifact"
 	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
@@ -84,12 +85,12 @@ func (s *DaemonServer) GetBeliefTrainingData(
 		return nil, status.Errorf(codes.Unavailable, "the World of the tenant is not available: %v", err)
 	}
 	var (
-		rows  []braintrain.Row
+		rows  []fit.Row
 		edges map[string]brain.EdgeOutcomeCount
 	)
 	engine.ReadWorld(func(w *brain.World) {
-		// The trainer restricts the rows to the variables of its base model.
-		rows = braintrain.RowsFromWorld(w, nil)
+		// The trainer fits only the variables of its base model.
+		rows = braintrain.RowsFromWorld(w)
 		edges = w.EdgeOutcomeCounts()
 	})
 	resp := &daemonoperatorv1.GetBeliefTrainingDataResponse{
