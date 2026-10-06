@@ -60,7 +60,8 @@ func (c *compTestCircuit) Execute(_, _ string, fn func() error) error { return f
 
 type compTestAuditor struct{}
 
-func (a *compTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent) {}
+func (a *compTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent)        {}
+func (a *compTestAuditor) Record(_ context.Context, _ secrets.AuditEvent) error { return nil }
 
 func buildCompTestService(t *testing.T, val []byte, err error) *secrets.Service {
 	t.Helper()

@@ -115,6 +115,10 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	}
 }
 
+// connectorTokenFreshenerActor is the audit actor of a background token
+// refresh.
+const connectorTokenFreshenerActor = "system:connector-token-freshener"
+
 // connectorTokenFreshener implements reconciler.TokenFreshener over the
 // platform refresher.
 type connectorTokenFreshener struct {
@@ -124,7 +128,14 @@ type connectorTokenFreshener struct {
 }
 
 func (f *connectorTokenFreshener) EnsureFresh(ctx context.Context, tenant auth.TenantID, connector string) (bool, error) {
-	refreshed, err := f.refresher.EnsureFresh(auth.WithTenant(ctx, tenant), connector)
+	// The refresh writes secrets, and each secret write records its actor
+	// first (gibson#676). This loop has no caller, so the daemon is the actor.
+	ctx = auth.WithIdentity(auth.WithTenant(ctx, tenant), auth.Identity{
+		Subject:        connectorTokenFreshenerActor,
+		Tenant:         tenant,
+		CredentialType: auth.CredentialClientCredentials,
+	})
+	refreshed, err := f.refresher.EnsureFresh(ctx, connector)
 	if errors.Is(err, connectorauth.ErrNoGrant) {
 		// A registered connector nobody has authorized yet is a normal
 		// state — the status RPC reports it as UNAUTHORIZED; the loop stays

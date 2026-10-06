@@ -316,6 +316,14 @@ func (s *ConnectorAuthAdminServer) FinishAuthorization(ctx context.Context, stat
 	// The callback carries no auth context; scope by the tenant recorded when
 	// the (authenticated) Start ran.
 	ctx = auth.WithTenant(ctx, tenant)
+	if id, idErr := auth.IdentityFromContext(ctx); idErr != nil || id.Subject == "" {
+		// The secret write records its actor first (gibson#676). The actor
+		// is the human who started the flow.
+		ctx = auth.WithIdentity(ctx, auth.Identity{
+			Subject: strings.TrimPrefix(pa.AuthorizedBy, "user:"),
+			Tenant:  tenant,
+		})
+	}
 
 	grant, err := connectorauth.ExchangeCode(ctx, s.client, pa, code, s.now)
 	if err != nil {

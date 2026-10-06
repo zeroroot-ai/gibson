@@ -64,7 +64,8 @@ func (c *credStoreTestCircuit) Execute(_, _ string, fn func() error) error { ret
 // credStoreTestAuditor implements secrets.ServiceAuditWriter, discarding events.
 type credStoreTestAuditor struct{}
 
-func (a *credStoreTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent) {}
+func (a *credStoreTestAuditor) Audit(_ context.Context, _ secrets.AuditEvent)        {}
+func (a *credStoreTestAuditor) Record(_ context.Context, _ secrets.AuditEvent) error { return nil }
 
 // buildTestSecretsService constructs a *secrets.Service with a fake broker returning
 // the given bytes/error from Get.
