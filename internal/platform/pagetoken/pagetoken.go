@@ -64,16 +64,6 @@ func Next(offset, limit, returned, total int) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(prefix + strconv.Itoa(end)))
 }
 
-// Slice returns the window [offset, offset+limit) of items and the token of
-// the next page, for a handler that holds the whole list.
-func Slice[T any](items []T, offset, limit int) (page []T, next string) {
-	if offset >= len(items) {
-		return items[:0], ""
-	}
-	end := min(offset+limit, len(items))
-	return items[offset:end], Next(offset, limit, end-offset, len(items))
-}
-
 // Int32 returns n for a total field of a list response. A value outside the
 // int32 range is clamped, never wrapped.
 func Int32(n int) int32 {

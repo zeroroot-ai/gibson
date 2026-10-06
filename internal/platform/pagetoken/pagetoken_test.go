@@ -40,7 +40,9 @@ func TestSlice_TwoPagesGiveEachItemOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Window: %v", err)
 		}
-		page, next := Slice(items, off, lim)
+		end := min(off+lim, len(items))
+		page := items[off:end]
+		next := Next(off, lim, len(page), len(items))
 		pages++
 		for _, v := range page {
 			seen[v]++
@@ -58,8 +60,8 @@ func TestSlice_TwoPagesGiveEachItemOnce(t *testing.T) {
 			t.Fatalf("item %d seen %d times", v, seen[v])
 		}
 	}
-	if page, next := Slice(items, 9, 3); len(page) != 0 || next != "" {
-		t.Fatalf("past the end = %v, %q", page, next)
+	if next := Next(9, 3, 0, len(items)); next != "" {
+		t.Fatalf("past the end has a next token %q", next)
 	}
 }
 
