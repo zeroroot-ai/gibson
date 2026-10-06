@@ -85,7 +85,6 @@ func newSignInPolicyTestBootstrap() *gibsonv1alpha1.PlatformBootstrap {
 		ObjectMeta: metav1.ObjectMeta{Name: "gibson"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
 			Zitadel: gibsonv1alpha1.ZitadelSpec{
-				Issuer:        "https://app.example.com",
 				AdminTokenRef: gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Namespace: defaultChildNamespace, Key: "pat"},
 				Project:       gibsonv1alpha1.ZitadelProjectSpec{Name: "gibson", EnsureExists: true},
 			},

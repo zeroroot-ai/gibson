@@ -542,12 +542,6 @@ spec:
                       with a scheme or a port is refused. Equivalent to the
                       ZITADEL_EXTERNAL_DOMAIN env used by the OIDCClient reconciler.
                     type: string
-                  issuer:
-                    description: |-
-                      Issuer is the OIDC issuer URL the platform uses for both browser
-                      and in-cluster traffic (forge Host header as needed).
-                    pattern: ^https?://
-                    type: string
                   loginBranding:
                     description: |-
                       LoginBranding is the declared brand of the login pages. The
@@ -695,9 +689,9 @@ spec:
                           System API is an instance-superuser surface and must never leave the
                           cluster, so no ingress route needs to publish it.
 
-                          The public issuer (spec.zitadel.issuer) is deliberately NOT a valid
-                          value here — dialling it sends instance-superuser traffic out to the
-                          internet-facing edge and back.
+                          The public origin is deliberately NOT a valid value here — dialling it
+                          sends instance-superuser traffic out to the internet-facing edge and
+                          back.
 
                           Resolution order when empty:
                            1. the ZITADEL_URL env var on the operator Pod, then
@@ -733,7 +727,6 @@ spec:
                     type: object
                 required:
                 - adminTokenRef
-                - issuer
                 - project
                 type: object
             required:

@@ -80,7 +80,7 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 			"WaitingForAdminToken", "Zitadel admin token Secret not yet materialised")
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
-	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	zc := r.ZitadelFactory(r.ZitadelURL, pat)
 
 	projectID, err := zc.GetProjectIDByName(ctx, pb.Spec.Zitadel.Project.Name)
 	if err != nil {

@@ -123,7 +123,6 @@ func basePlatformOwnerCR(zitadelURL string) *gibsonv1alpha1.PlatformBootstrap {
 		ObjectMeta: metav1.ObjectMeta{Name: "platform"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
 			Zitadel: gibsonv1alpha1.ZitadelSpec{
-				Issuer:         zitadelURL,
 				ExternalDomain: "app.example.test",
 				AdminTokenRef:  gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Namespace: "gibson", Key: "pat"},
 				Project:        gibsonv1alpha1.ZitadelProjectSpec{Name: "gibson"},

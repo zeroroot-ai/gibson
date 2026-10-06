@@ -80,7 +80,6 @@ func newTestPlatformBootstrap(ensureExists bool) *gibsonv1alpha1.PlatformBootstr
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
 			Zitadel: gibsonv1alpha1.ZitadelSpec{
-				Issuer:        "https://zitadel.example.invalid",
 				AdminTokenRef: gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Key: "pat"},
 				Project:       gibsonv1alpha1.ZitadelProjectSpec{Name: "gibson", EnsureExists: ensureExists},
 			},

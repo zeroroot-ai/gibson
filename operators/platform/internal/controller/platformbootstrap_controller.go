@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"k8s.io/client-go/util/retry"
+	"os"
 	"strings"
 	"time"
 
@@ -95,9 +96,14 @@ type PlatformBootstrapReconciler struct {
 	// already recorded: identity run 36680224658 mailed the Platform owner's
 	// setup link twice one second apart that way. Nil in tests, where the
 	// fake client has no cache and Client serves both reads.
-	APIReader      client.Reader
-	Scheme         *runtime.Scheme
-	Recorder       record.EventRecorder
+	APIReader client.Reader
+	Scheme    *runtime.Scheme
+	Recorder  record.EventRecorder
+	// ZitadelURL is the in-cluster address the operator connects to: the
+	// connect base of ZITADEL_URL (ADR-0092, gibson#665). Empty means
+	// SetupWithManager reads it from the environment, and a start with no
+	// valid ZITADEL_URL fails.
+	ZitadelURL     string
 	ZitadelFactory ZitadelClientFactory
 	FGAFactory     FGAClientFactory
 	VaultFactory   VaultClientFactory
@@ -110,6 +116,13 @@ type PlatformBootstrapReconciler struct {
 
 // SetupWithManager wires the reconciler to the manager.
 func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.ZitadelURL == "" {
+		url, err := ZitadelConnectURLFromEnv(os.Getenv)
+		if err != nil {
+			return fmt.Errorf("platformbootstrap: ZitadelURL is required: %w", err)
+		}
+		r.ZitadelURL = url
+	}
 	if r.ZitadelFactory == nil {
 		r.ZitadelFactory = DefaultZitadelClientFactory
 	}
@@ -298,7 +311,7 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelProject(ctx context.Contex
 			"WaitingForAdminToken", "Zitadel admin token Secret not yet materialised")
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
-	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	zc := r.ZitadelFactory(r.ZitadelURL, pat)
 	var projectID string
 	if pb.Spec.Zitadel.Project.EnsureExists {
 		id, err := zc.EnsureProject(ctx, pb.Spec.Zitadel.Project.Name)
@@ -419,7 +432,7 @@ func (r *PlatformBootstrapReconciler) reconcileOIDCChildren(ctx context.Context,
 				return err
 			}
 			child.Spec = gibsonv1alpha1.OIDCClientSpec{
-				ZitadelURL:                 pb.Spec.Zitadel.Issuer,
+				ZitadelURL:                 r.ZitadelURL,
 				AdminTokenRef:              pb.Spec.Zitadel.AdminTokenRef,
 				ProjectRef:                 gibsonv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
 				ClientName:                 oidcClientDisplayName(ref),

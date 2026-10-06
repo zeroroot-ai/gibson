@@ -57,6 +57,11 @@ type TenantIdentityReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
 
+	// ZitadelURL is the in-cluster Zitadel address that each minted
+	// OIDCClient names: the connect base of the operator's ZITADEL_URL
+	// (ADR-0092). No custom resource holds it (gibson#665).
+	ZitadelURL string
+
 	// Provisioner is the shared identity pipeline. Always non-nil in production
 	// (buildIdentityProvisioner in cmd/main.go always returns identity.New(...));
 	// a nil here fails loud so a misconfigured operator crash-loops rather than
@@ -346,7 +351,7 @@ func (r *TenantIdentityReconciler) reconcileOIDCClients(ctx context.Context, ti 
 			if err := controllerutil.SetControllerReference(ti, child, r.Scheme); err != nil {
 				return fmt.Errorf("own OIDCClient %s: %w", name, err)
 			}
-			child.Spec = oidcClientSpecFor(ti, entry, pb)
+			child.Spec = oidcClientSpecFor(ti, entry, pb, r.ZitadelURL)
 			return nil
 		}); err != nil {
 			return false, fmt.Errorf("apply OIDCClient %s: %w", name, err)
@@ -393,9 +398,9 @@ func oidcClientChildName(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1
 // authorization-code flow), a service client otherwise, in the platform
 // project every tenant org is granted (ADR-0093). The minted client secret
 // lands in a Secret beside the TenantIdentity.
-func oidcClientSpecFor(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1.TenantIdentityOIDCClient, pb platformv1alpha1.PlatformBootstrap) platformv1alpha1.OIDCClientSpec {
+func oidcClientSpecFor(ti *gibsonv1alpha1.TenantIdentity, entry gibsonv1alpha1.TenantIdentityOIDCClient, pb platformv1alpha1.PlatformBootstrap, zitadelURL string) platformv1alpha1.OIDCClientSpec {
 	spec := platformv1alpha1.OIDCClientSpec{
-		ZitadelURL:      pb.Spec.Zitadel.Issuer,
+		ZitadelURL:      zitadelURL,
 		AdminTokenRef:   pb.Spec.Zitadel.AdminTokenRef,
 		ProjectRef:      platformv1alpha1.ProjectReference{Name: pb.Spec.Zitadel.Project.Name},
 		ClientName:      ti.Spec.TenantID + "/" + entry.Name,

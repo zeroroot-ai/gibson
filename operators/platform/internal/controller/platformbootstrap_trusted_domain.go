@@ -148,7 +148,7 @@ func systemAPIBaseURL(specAPIURL, clusterDomain string) string {
 // systemAPIClaimedHost resolves the public host the System API client claims
 // with the x-zitadel-instance-host header: spec.zitadel.externalDomain, and
 // ZITADEL_EXTERNAL_DOMAIN when the spec leaves it empty. It is never derived
-// from spec.zitadel.issuer, which holds a connect address on every profile.
+// from the connect address of the operator (ZITADEL_URL).
 // An empty or ported result is refused by the client constructor.
 func systemAPIClaimedHost(specExternalDomain string) string {
 	if specExternalDomain != "" {

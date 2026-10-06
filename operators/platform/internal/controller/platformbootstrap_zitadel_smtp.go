@@ -83,7 +83,7 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelSMTP(ctx context.Context, 
 
 	cfg := desiredSMTPProviderConfig(spec, user, password)
 	hashHex := smtpSettingsHash(cfg)
-	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	zc := r.ZitadelFactory(r.ZitadelURL, pat)
 
 	lookup, resolveOK, result, err := r.resolveSMTPProvider(ctx, zc, pb)
 	if !resolveOK {

@@ -81,7 +81,7 @@ func (r *PlatformBootstrapReconciler) reconcileLoginBranding(ctx context.Context
 			"WaitingForAdminToken", "Zitadel admin token Secret not yet materialised")
 		return
 	}
-	zc := r.ZitadelFactory(pb.Spec.Zitadel.Issuer, pat)
+	zc := r.ZitadelFactory(r.ZitadelURL, pat)
 	changed, err := applyLoginBranding(ctx, zc, b)
 	if err != nil {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionLoginBrandingReady, metav1.ConditionFalse,
