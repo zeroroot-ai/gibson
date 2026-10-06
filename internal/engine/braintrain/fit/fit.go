@@ -48,7 +48,7 @@ func Fit(base beliefvi.ModelArtifact, rows []Row, version string) (beliefvi.Mode
 	for name, spec := range base.CPDs {
 		fitted, err := fitCPD(name, spec, rows)
 		if err != nil {
-			return beliefvi.ModelArtifact{}, fmt.Errorf("fit: CPT of %q: %w", name, err)
+			return beliefvi.ModelArtifact{}, fmt.Errorf("fit: the table of %q: %w", name, err)
 		}
 		out.CPDs[name] = fitted
 	}
