@@ -649,7 +649,7 @@ func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event,
 	}
 	evs, err := e.History(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("brain/engine: history of mission %q: %w", missionID, err)
 	}
 	return MissionSlice(evs, missionID), nil
 }
