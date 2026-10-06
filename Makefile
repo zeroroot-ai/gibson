@@ -394,6 +394,14 @@ check-plugin-modules:
 	@bash scripts/check-plugin-modules.sh
 	@for d in plugins/*/; do (cd "$$d" && $(GOCMD) vet ./... && $(GOCMD) test ./...) || exit 1; done
 
+# lint-unwired-plugins runs the unwired counter of ast-checks in each plugin
+# module against its .unwired-baseline.txt, which only shrinks (gibson#956).
+# Self-test first.
+.PHONY: lint-unwired-plugins
+lint-unwired-plugins:
+	@bash scripts/lint-unwired-plugins.sh --selftest
+	@bash scripts/lint-unwired-plugins.sh
+
 # check-bringup-diagnostics proves the Argo bringup dumper still reports a failed
 # hook Job and stays silent on a healthy Application. It runs for real only on
 # main, against a cluster that is gone by the time anyone reads the log.
@@ -720,7 +728,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-plugin-modules check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules check-proto-breaking
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-plugin-modules lint-unwired-plugins check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules check-proto-breaking
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # check-comment-paths asserts that a repo-relative path named in a comment exists.

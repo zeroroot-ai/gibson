@@ -105,11 +105,12 @@ jobs:
           CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
           echo "Changed files:"
           echo "${CHANGED}"
-          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^tools/gibsoncheck/|^internal/platform/authz/registry/|^\.github/workflows/gibsoncheck\.yml$'; then
-            echo "relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+          # The guards run unless every changed path is Markdown: a list of
+          # relevant paths missed a guard input such as a plugin baseline
+          # (gibson#956), as go-ci missed an embedded file. One rule, one
+          # script, and its fixture runs first.
+          bash scripts/__tests__/go-relevant-changes.test.sh
+          echo "relevant=$(echo "${CHANGED}" | bash scripts/go-relevant-changes.sh)" >> "$GITHUB_OUTPUT"
 
   analyze:
     needs: changes
@@ -250,6 +251,16 @@ jobs:
         run: |
           bash scripts/check-plugin-modules.sh --selftest
           bash scripts/check-plugin-modules.sh
+
+      # gibson#956: no plugin module adds a declaration that nothing reads.
+      # The counter needs the Go toolchain of the root go.mod.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Check the unwired declarations of the plugin modules
+        run: |
+          bash scripts/lint-unwired-plugins.sh --selftest
+          bash scripts/lint-unwired-plugins.sh
 
       # attic#15: on 2026-09-05 the tree tracked four ELF executables (92 MB).
       # Keyed by file magic, so a binary under any new name fails the same way.
