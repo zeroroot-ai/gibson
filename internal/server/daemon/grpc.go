@@ -2719,18 +2719,6 @@ func (d *daemonImpl) RewindMission(ctx context.Context, req api.RewindRequest) (
 	return d.missionManager.Rewind(ctx, req)
 }
 
-// BuildComponent is not supported; component store has been removed.
-func (d *daemonImpl) BuildComponent(ctx context.Context, kind string, name string) (api.BuildComponentResult, error) {
-	d.logger.Warn(ctx, "BuildComponent called but component store has been removed", "kind", kind, "name", name)
-	return api.BuildComponentResult{}, fmt.Errorf("component build is not available")
-}
-
-// ShowComponent is not supported; component store has been removed.
-func (d *daemonImpl) ShowComponent(ctx context.Context, kind string, name string) (api.ComponentInfoInternal, error) {
-	d.logger.Warn(ctx, "ShowComponent called but component store has been removed", "kind", kind, "name", name)
-	return api.ComponentInfoInternal{}, fmt.Errorf("component store is not available")
-}
-
 // GetComponentLogs streams log entries for a component using the log tailer.
 func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	d.logger.Debug(ctx, "GetComponentLogs called", "kind", kind, "name", name, "follow", follow, "lines", lines)

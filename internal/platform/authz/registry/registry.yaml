@@ -620,13 +620,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.daemon.v1.DaemonService/BuildComponent":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
   "/gibson.daemon.v1.DaemonService/CompleteMissionCUE":
     relation: "writer"
     object_type: "tenant"
@@ -841,13 +834,6 @@ entries:
       - SERVICE
   "/gibson.daemon.v1.DaemonService/SaveMissionLayout":
     relation: "writer"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-      - SERVICE
-  "/gibson.daemon.v1.DaemonService/ShowComponent":
-    relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

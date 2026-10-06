@@ -557,14 +557,14 @@ func (h *DefaultAgentHarness) GetMissionResults(ctx context.Context, missionID s
 func toGibsonMissionFilter(filter *sdkmission.MissionFilter) (*MissionFilter, error) {
 	if filter == nil {
 		return &MissionFilter{
-			Limit:  100, // Default limit
-			Offset: 0,
+			Limit: 100, // Default limit
 		}, nil
 	}
 
+	// The sdk filter has no offset (ADR-0028, rule 3): an in-process caller
+	// reads from the first mission.
 	gibsonFilter := &MissionFilter{
-		Limit:  filter.Limit,
-		Offset: filter.Offset,
+		Limit: filter.Limit,
 	}
 
 	// Convert status if provided
