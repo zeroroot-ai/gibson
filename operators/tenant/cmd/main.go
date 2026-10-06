@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Command main runs the tenant operator: it provisions and tears down each
+// tenant of the platform.
 package main
 
 import (

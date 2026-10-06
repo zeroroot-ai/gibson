@@ -4,8 +4,8 @@
 package controller
 
 import (
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/onsi/ginkgo/v2"
+	"github.com/onsi/gomega"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -23,8 +23,8 @@ import (
 // the CronJob and its NetworkPolicy: the garbage collector of a cluster
 // deletes a dependent whose owner is gone. envtest runs no garbage
 // collector, so this spec proves the owner reference, not the collection.
-var _ = Describe("belief trainer provisioning", func() {
-	It("creates the CronJob and its NetworkPolicy, owned by the Tenant", func() {
+var _ = ginkgo.Describe("belief trainer provisioning", func() {
+	ginkgo.It("creates the CronJob and its NetworkPolicy, owned by the Tenant", func() {
 		tenant := &gibsonv1alpha1.Tenant{
 			ObjectMeta: metav1.ObjectMeta{Name: "trainer-envtest"},
 			Spec: gibsonv1alpha1.TenantSpec{
@@ -33,37 +33,37 @@ var _ = Describe("belief trainer provisioning", func() {
 				Tier:        "team",
 			},
 		}
-		Expect(k8sClient.Create(ctx, tenant)).To(Succeed())
+		gomega.Expect(k8sClient.Create(ctx, tenant)).To(gomega.Succeed())
 		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-trainer-envtest"}}
-		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		gomega.Expect(k8sClient.Create(ctx, ns)).To(gomega.Succeed())
 		tenant.Status.Namespace = ns.Name
 
 		cfg, err := flows.NewBeliefTrainerConfig("ghcr.io/zeroroot-ai/gibson:test",
 			"gibson.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson")
-		Expect(err).NotTo(HaveOccurred())
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		var ran bool
 		for _, step := range flows.ProvisionSteps(flows.ProvisionDeps{K8sClient: k8sClient, BeliefTrainer: cfg}) {
 			if step.Name() != "EnsureBeliefTrainer" {
 				continue
 			}
 			done, err := step.Provision(ctx, tenant, nil)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(done).To(BeTrue())
+			gomega.Expect(err).NotTo(gomega.HaveOccurred())
+			gomega.Expect(done).To(gomega.BeTrue())
 			ran = true
 		}
-		Expect(ran).To(BeTrue(), "ProvisionSteps has no EnsureBeliefTrainer step")
+		gomega.Expect(ran).To(gomega.BeTrue(), "ProvisionSteps has no EnsureBeliefTrainer step")
 
 		key := types.NamespacedName{Namespace: ns.Name, Name: flows.BeliefTrainerName}
 		var cj batchv1.CronJob
-		Expect(k8sClient.Get(ctx, key, &cj)).To(Succeed())
-		Expect(cj.Spec.ConcurrencyPolicy).To(Equal(batchv1.ForbidConcurrent))
-		Expect(cj.OwnerReferences).To(HaveLen(1))
-		Expect(cj.OwnerReferences[0].UID).To(Equal(tenant.UID))
-		Expect(cj.OwnerReferences[0].Kind).To(Equal("Tenant"))
+		gomega.Expect(k8sClient.Get(ctx, key, &cj)).To(gomega.Succeed())
+		gomega.Expect(cj.Spec.ConcurrencyPolicy).To(gomega.Equal(batchv1.ForbidConcurrent))
+		gomega.Expect(cj.OwnerReferences).To(gomega.HaveLen(1))
+		gomega.Expect(cj.OwnerReferences[0].UID).To(gomega.Equal(tenant.UID))
+		gomega.Expect(cj.OwnerReferences[0].Kind).To(gomega.Equal("Tenant"))
 
 		var np networkingv1.NetworkPolicy
-		Expect(k8sClient.Get(ctx, key, &np)).To(Succeed())
-		Expect(np.OwnerReferences).To(HaveLen(1))
-		Expect(np.OwnerReferences[0].UID).To(Equal(tenant.UID))
+		gomega.Expect(k8sClient.Get(ctx, key, &np)).To(gomega.Succeed())
+		gomega.Expect(np.OwnerReferences).To(gomega.HaveLen(1))
+		gomega.Expect(np.OwnerReferences[0].UID).To(gomega.Equal(tenant.UID))
 	})
 })

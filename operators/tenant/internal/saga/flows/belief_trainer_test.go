@@ -91,61 +91,8 @@ func TestEnsureBeliefTrainer_CreatesTheCronJobAndItsPolicy(t *testing.T) {
 		t.Fatalf("Provision = %v, %v; want done", done, err)
 	}
 
-	var cj batchv1.CronJob
-	if err := c.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: BeliefTrainerName}, &cj); err != nil {
-		t.Fatalf("get CronJob: %v", err)
-	}
-	if cj.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
-		t.Errorf("concurrencyPolicy = %q, want Forbid", cj.Spec.ConcurrencyPolicy)
-	}
-	assertTenantOwner(t, cj.OwnerReferences)
-	pod := cj.Spec.JobTemplate.Spec.Template
-	if pod.Labels[labelComponent] != ComponentBeliefTrainer || pod.Labels[labelTenant] != "acme" {
-		t.Errorf("pod labels = %v, want the trainer component and tenant acme", pod.Labels)
-	}
-	if len(pod.Spec.Containers) != 1 {
-		t.Fatalf("pod has %d containers, want 1", len(pod.Spec.Containers))
-	}
-	ctr := pod.Spec.Containers[0]
-	if ctr.Image != "ghcr.io/zeroroot-ai/gibson:v1.2.3" {
-		t.Errorf("image = %q", ctr.Image)
-	}
-	if !slices.Equal(ctr.Command, []string{"belief-trainer", "-tenant", "acme"}) {
-		t.Errorf("command = %v", ctr.Command)
-	}
-	env := map[string]string{}
-	for _, e := range ctr.Env {
-		env[e.Name] = e.Value
-	}
-	if env["GIBSON_DAEMON_GRPC_ADDRESS"] == "" || env["GIBSON_DAEMON_SPIFFE_ID"] == "" || env["SPIFFE_ENDPOINT_SOCKET"] == "" {
-		t.Errorf("env = %v, want the daemon address, the daemon SVID and the SPIRE socket", env)
-	}
-	for _, e := range ctr.Env {
-		if e.ValueFrom != nil {
-			t.Errorf("env %s reads a Secret or a ConfigMap; the trainer holds no credential", e.Name)
-		}
-	}
-	assertSecurePod(t, pod.Spec, ctr)
-
-	var np networkingv1.NetworkPolicy
-	if err := c.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: BeliefTrainerName}, &np); err != nil {
-		t.Fatalf("get NetworkPolicy: %v", err)
-	}
-	assertTenantOwner(t, np.OwnerReferences)
-	if len(np.Spec.Ingress) != 0 {
-		t.Errorf("the trainer policy admits ingress: %+v", np.Spec.Ingress)
-	}
-	if len(np.Spec.Egress) != 2 {
-		t.Fatalf("egress rules = %d, want the daemon and DNS", len(np.Spec.Egress))
-	}
-	daemon := np.Spec.Egress[0]
-	if len(daemon.Ports) != 1 || daemon.Ports[0].Port.IntVal != 50051 {
-		t.Errorf("daemon egress ports = %+v, want 50051 from the daemon address", daemon.Ports)
-	}
-	if peer := daemon.To[0]; peer.NamespaceSelector == nil || peer.PodSelector == nil ||
-		peer.PodSelector.MatchLabels[labelComponent] != "daemon" {
-		t.Errorf("daemon peer = %+v, want the daemon pods of the platform namespace", peer)
-	}
+	assertTrainerCronJob(t, c)
+	assertTrainerPolicy(t, c)
 
 	// A second run updates in place and stays done.
 	if done, err := step.Provision(ctx, tenant, nil); err != nil || !done {
@@ -196,5 +143,71 @@ func assertSecurePod(t *testing.T, spec corev1.PodSpec, ctr corev1.Container) {
 		if v.CSI == nil || v.CSI.Driver != "csi.spiffe.io" {
 			t.Errorf("volume %s is not the SPIFFE CSI socket", v.Name)
 		}
+	}
+}
+
+// assertTrainerCronJob checks the CronJob that Provision created.
+func assertTrainerCronJob(t *testing.T, c client.Client) {
+	t.Helper()
+	ctx := context.Background()
+	var cj batchv1.CronJob
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: BeliefTrainerName}, &cj); err != nil {
+		t.Fatalf("get CronJob: %v", err)
+	}
+	if cj.Spec.ConcurrencyPolicy != batchv1.ForbidConcurrent {
+		t.Errorf("concurrencyPolicy = %q, want Forbid", cj.Spec.ConcurrencyPolicy)
+	}
+	assertTenantOwner(t, cj.OwnerReferences)
+	pod := cj.Spec.JobTemplate.Spec.Template
+	if pod.Labels[labelComponent] != ComponentBeliefTrainer || pod.Labels[labelTenant] != "acme" {
+		t.Errorf("pod labels = %v, want the trainer component and tenant acme", pod.Labels)
+	}
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("pod has %d containers, want 1", len(pod.Spec.Containers))
+	}
+	ctr := pod.Spec.Containers[0]
+	if ctr.Image != "ghcr.io/zeroroot-ai/gibson:v1.2.3" {
+		t.Errorf("image = %q", ctr.Image)
+	}
+	if !slices.Equal(ctr.Command, []string{"belief-trainer", "-tenant", "acme"}) {
+		t.Errorf("command = %v", ctr.Command)
+	}
+	env := map[string]string{}
+	for _, e := range ctr.Env {
+		env[e.Name] = e.Value
+	}
+	if env["GIBSON_DAEMON_GRPC_ADDRESS"] == "" || env["GIBSON_DAEMON_SPIFFE_ID"] == "" || env["SPIFFE_ENDPOINT_SOCKET"] == "" {
+		t.Errorf("env = %v, want the daemon address, the daemon SVID and the SPIRE socket", env)
+	}
+	for _, e := range ctr.Env {
+		if e.ValueFrom != nil {
+			t.Errorf("env %s reads a Secret or a ConfigMap; the trainer holds no credential", e.Name)
+		}
+	}
+	assertSecurePod(t, pod.Spec, ctr)
+}
+
+// assertTrainerPolicy checks the NetworkPolicy that Provision created.
+func assertTrainerPolicy(t *testing.T, c client.Client) {
+	t.Helper()
+	ctx := context.Background()
+	var np networkingv1.NetworkPolicy
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: BeliefTrainerName}, &np); err != nil {
+		t.Fatalf("get NetworkPolicy: %v", err)
+	}
+	assertTenantOwner(t, np.OwnerReferences)
+	if len(np.Spec.Ingress) != 0 {
+		t.Errorf("the trainer policy admits ingress: %+v", np.Spec.Ingress)
+	}
+	if len(np.Spec.Egress) != 2 {
+		t.Fatalf("egress rules = %d, want the daemon and DNS", len(np.Spec.Egress))
+	}
+	daemon := np.Spec.Egress[0]
+	if len(daemon.Ports) != 1 || daemon.Ports[0].Port.IntVal != 50051 {
+		t.Errorf("daemon egress ports = %+v, want 50051 from the daemon address", daemon.Ports)
+	}
+	if peer := daemon.To[0]; peer.NamespaceSelector == nil || peer.PodSelector == nil ||
+		peer.PodSelector.MatchLabels[labelComponent] != "daemon" {
+		t.Errorf("daemon peer = %+v, want the daemon pods of the platform namespace", peer)
 	}
 }
