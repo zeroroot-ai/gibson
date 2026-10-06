@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 func manifestFSWith(files map[string]string) fstest.MapFS {
@@ -78,6 +80,48 @@ func TestLoad_FailLoud(t *testing.T) {
 			_, err := load(manifestFSWith(map[string]string{"m.yaml": tc.body}))
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want error containing %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// TestLoad_RefusesADomainPackManifest: a Domain Pack is an authorization
+// object type, not a catalog component kind (gibson#735). The loader refuses
+// a domainpack manifest, with an empty spec or with a spec, and the error
+// names the four kinds that the loader accepts.
+func TestLoad_RefusesADomainPackManifest(t *testing.T) {
+	if !authz.IsComponentKind(authz.KindDomainPack) {
+		t.Fatal("precondition: the authorization model has the kind domainpack")
+	}
+	for name, body := range map[string]string{
+		"empty spec": "id: nist-800-53-r5\nkind: domainpack\nspec: {}\n",
+		"with spec":  "id: nist-800-53-r5\nkind: domainpack\nspec:\n  contentTrust: trusted\n  image: ghcr.io/x@sha256:a\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := load(manifestFSWith(map[string]string{"m.yaml": body}))
+			if err == nil {
+				t.Fatal("the loader accepted a domainpack manifest")
+			}
+			const want = `kind "domainpack" must be one of agent, tool, plugin, connector`
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error = %v, want it to contain %q", err, want)
+			}
+		})
+	}
+}
+
+// TestManifestKinds_EachKindHasASpecCheck: each kind that the loader accepts
+// reaches its own spec check. A manifest of each kind with an empty spec
+// fails in that check, not in the kind check.
+func TestManifestKinds_EachKindHasASpecCheck(t *testing.T) {
+	for _, kind := range manifestKinds {
+		t.Run(kind, func(t *testing.T) {
+			_, err := load(manifestFSWith(map[string]string{"m.yaml": "id: x\nkind: " + kind + "\nspec: {}\n"}))
+			if err == nil {
+				t.Fatalf("an empty %s spec loaded: the kind has no spec check", kind)
+			}
+			if strings.Contains(err.Error(), "must be one of agent") {
+				t.Fatalf("the loader refused its own kind %s: %v", kind, err)
 			}
 		})
 	}
