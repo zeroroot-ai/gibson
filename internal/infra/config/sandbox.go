@@ -67,7 +67,6 @@ type SandboxDevboxConfig struct {
 // frontend that this daemon dispatches sandboxed tool calls into.
 type SandboxSetecConfig struct {
 	Address     string              `mapstructure:"address" yaml:"address"`
-	Tenant      string              `mapstructure:"tenant" yaml:"tenant"`
 	CallTimeout time.Duration       `mapstructure:"call_timeout" yaml:"call_timeout"`
 	MTLS        component.TLSConfig `mapstructure:"mtls" yaml:"mtls"`
 
@@ -153,9 +152,6 @@ func (c *SandboxConfig) Validate() error {
 	}
 	if c.Setec.Address == "" {
 		return fmt.Errorf("sandbox.setec.address is required when sandbox.enabled=true")
-	}
-	if c.Setec.Tenant == "" {
-		return fmt.Errorf("sandbox.setec.tenant is required when sandbox.enabled=true")
 	}
 	if c.Setec.CallTimeout <= 0 {
 		c.Setec.CallTimeout = 5 * time.Minute
