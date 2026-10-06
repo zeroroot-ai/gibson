@@ -1,0 +1,16 @@
+# The fixture Hosted connector of the exit test (gibson#811). The catalog has
+# no Hosted connector after gibson#750, so the test applies this
+# ConnectorInstance directly. The image is built from tests/fixtures/mcp-tools
+# in the run and loaded into kind, and it never leaves the run.
+apiVersion: gibson.zeroroot.ai/v1alpha1
+kind: ConnectorInstance
+metadata:
+  name: fixture-mcp-tools
+  namespace: tenant-connector-e2e
+spec:
+  connector: fixture-mcp-tools
+  shape: Hosted
+  runtime: pod
+  image: ghcr.io/zeroroot-ai/gibson-fixture-mcp-tools:e2e
+  transport: streamable-http
+  auth: none
