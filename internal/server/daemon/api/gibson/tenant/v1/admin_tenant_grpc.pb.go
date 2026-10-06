@@ -57,6 +57,7 @@ const (
 	AdminTenantService_AdminListPendingRegistrations_FullMethodName = "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations"
 	AdminTenantService_AdminApproveRegistration_FullMethodName      = "/gibson.tenant.v1.AdminTenantService/AdminApproveRegistration"
 	AdminTenantService_AdminRejectRegistration_FullMethodName       = "/gibson.tenant.v1.AdminTenantService/AdminRejectRegistration"
+	AdminTenantService_AdminGetPlatformHealth_FullMethodName        = "/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth"
 )
 
 // AdminTenantServiceClient is the client API for AdminTenantService service.
@@ -111,6 +112,13 @@ type AdminTenantServiceClient interface {
 	// stays deactivated, so the person can never sign in, and no tenant is
 	// created. Attributable in the same way as an approval.
 	AdminRejectRegistration(ctx context.Context, in *AdminRejectRegistrationRequest, opts ...grpc.CallOption) (*AdminRejectRegistrationResponse, error)
+	// AdminGetPlatformHealth reports the state of the platform planes that a
+	// healthy-looking cluster can hide (hosted#174). Today it reports the
+	// secret plane: the daemon asks the secret source of the platform to
+	// answer now. When the source stops answering, the pods keep running on
+	// the Secrets that were written earlier, so only an active probe shows it.
+	// The Platform owner reads it in the dashboard.
+	AdminGetPlatformHealth(ctx context.Context, in *AdminGetPlatformHealthRequest, opts ...grpc.CallOption) (*AdminGetPlatformHealthResponse, error)
 }
 
 type adminTenantServiceClient struct {
@@ -181,6 +189,16 @@ func (c *adminTenantServiceClient) AdminRejectRegistration(ctx context.Context, 
 	return out, nil
 }
 
+func (c *adminTenantServiceClient) AdminGetPlatformHealth(ctx context.Context, in *AdminGetPlatformHealthRequest, opts ...grpc.CallOption) (*AdminGetPlatformHealthResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminGetPlatformHealthResponse)
+	err := c.cc.Invoke(ctx, AdminTenantService_AdminGetPlatformHealth_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminTenantServiceServer is the server API for AdminTenantService service.
 // All implementations must embed UnimplementedAdminTenantServiceServer
 // for forward compatibility.
@@ -233,6 +251,13 @@ type AdminTenantServiceServer interface {
 	// stays deactivated, so the person can never sign in, and no tenant is
 	// created. Attributable in the same way as an approval.
 	AdminRejectRegistration(context.Context, *AdminRejectRegistrationRequest) (*AdminRejectRegistrationResponse, error)
+	// AdminGetPlatformHealth reports the state of the platform planes that a
+	// healthy-looking cluster can hide (hosted#174). Today it reports the
+	// secret plane: the daemon asks the secret source of the platform to
+	// answer now. When the source stops answering, the pods keep running on
+	// the Secrets that were written earlier, so only an active probe shows it.
+	// The Platform owner reads it in the dashboard.
+	AdminGetPlatformHealth(context.Context, *AdminGetPlatformHealthRequest) (*AdminGetPlatformHealthResponse, error)
 	mustEmbedUnimplementedAdminTenantServiceServer()
 }
 
@@ -260,6 +285,9 @@ func (UnimplementedAdminTenantServiceServer) AdminApproveRegistration(context.Co
 }
 func (UnimplementedAdminTenantServiceServer) AdminRejectRegistration(context.Context, *AdminRejectRegistrationRequest) (*AdminRejectRegistrationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminRejectRegistration not implemented")
+}
+func (UnimplementedAdminTenantServiceServer) AdminGetPlatformHealth(context.Context, *AdminGetPlatformHealthRequest) (*AdminGetPlatformHealthResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminGetPlatformHealth not implemented")
 }
 func (UnimplementedAdminTenantServiceServer) mustEmbedUnimplementedAdminTenantServiceServer() {}
 func (UnimplementedAdminTenantServiceServer) testEmbeddedByValue()                            {}
@@ -390,6 +418,24 @@ func _AdminTenantService_AdminRejectRegistration_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminTenantService_AdminGetPlatformHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminGetPlatformHealthRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminTenantServiceServer).AdminGetPlatformHealth(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminTenantService_AdminGetPlatformHealth_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminTenantServiceServer).AdminGetPlatformHealth(ctx, req.(*AdminGetPlatformHealthRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminTenantService_ServiceDesc is the grpc.ServiceDesc for AdminTenantService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -420,6 +466,10 @@ var AdminTenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminRejectRegistration",
 			Handler:    _AdminTenantService_AdminRejectRegistration_Handler,
+		},
+		{
+			MethodName: "AdminGetPlatformHealth",
+			Handler:    _AdminTenantService_AdminGetPlatformHealth_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

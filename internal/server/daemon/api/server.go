@@ -283,6 +283,11 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 4.6).
 	modelGateInvalidator modelGateInvalidator
 
+	// secretPlaneProbe backs AdminGetPlatformHealth (hosted#174). Wired via
+	// WithSecretPlaneProbe. When nil the RPC reports the secret plane as
+	// UNKNOWN, never as healthy.
+	secretPlaneProbe SecretPlaneProbe
+
 	// auditQuery backs ListModelResolutionEvents. May be nil; when nil
 	// the RPC returns an empty response rather than Unimplemented.
 	// Spec: llm-user-attribution-governance (Requirement 4.9).

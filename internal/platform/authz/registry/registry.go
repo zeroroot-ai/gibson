@@ -2261,6 +2261,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth": {
+		Service:           "gibson.tenant.v1.AdminTenantService",
+		Relation:          "platform_owner",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations": {
 		Service:           "gibson.tenant.v1.AdminTenantService",
 		Relation:          "platform_owner",

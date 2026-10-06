@@ -715,6 +715,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	// The Platform owner's health view asks the secret source to answer
+	// (hosted#174). Without a broker registry the plane reads UNKNOWN.
+	if d.secretsRegistry != nil {
+		daemonSvc.WithSecretPlaneProbe(&secretPlaneProbeAdapter{registry: d.secretsRegistry})
+	}
 	auditLogger, err := wireDaemonAudit(ctx, d.stateClient, d.platformDB, d.logger.Slog(), daemonSvc)
 	if err != nil {
 		return nil, err

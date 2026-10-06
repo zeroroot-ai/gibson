@@ -1583,6 +1583,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth":
+    relation: "platform_owner"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations":
     relation: "platform_owner"
     object_type: "system_tenant"

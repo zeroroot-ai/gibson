@@ -2490,6 +2490,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth": {
+    method: "/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth",
+    service: "gibson.tenant.v1.AdminTenantService",
+    relation: "platform_owner",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations": {
     method: "/gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations",
     service: "gibson.tenant.v1.AdminTenantService",
