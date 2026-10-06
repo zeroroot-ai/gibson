@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
@@ -156,7 +157,8 @@ func firstMetadata(ctx context.Context, key string) string {
 // is the sandbox that setec verifies from the token, never the sandbox_id of
 // the request: a sandbox_id that names another sandbox is refused. A sandbox
 // that is not a fork of that grant gets PERMISSION_DENIED, and a second
-// claim of one fork gets ALREADY_EXISTS.
+// claim of one fork gets ALREADY_EXISTS. A fork whose dispatch is not
+// recorded yet waits in the call (awaitForkClaim).
 func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.ClaimForkRequest) (*harnesspb.ClaimForkResponse, error) {
 	claims, ok := TaskGrantClaimsFromContext(ctx)
 	if !ok || claims.JTI == "" {
@@ -172,14 +174,14 @@ func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.C
 	if !namesSandbox(req.GetSandboxId(), caller) {
 		return nil, status.Error(codes.PermissionDenied, "the sandbox_id of the request names another sandbox than the identity token")
 	}
-	d, err := s.forkLedger.Claim(ctx, claims.JTI, caller)
+	d, err := s.awaitForkClaim(ctx, claims.JTI, caller)
 	switch {
 	case errors.Is(err, ErrNotAFork):
 		return nil, status.Error(codes.PermissionDenied, "the sandbox is not a fork of this grant")
 	case errors.Is(err, ErrForkClaimed):
 		return nil, status.Error(codes.AlreadyExists, "the fork was already claimed")
 	case errors.Is(err, ErrForkPending):
-		return nil, status.Error(codes.Unavailable, "the forks of this grant are not recorded yet; retry")
+		return nil, status.Error(codes.DeadlineExceeded, "the dispatch of this fork was not recorded in time")
 	case err != nil:
 		s.logger.Error("ClaimFork: fork ledger failed", "error", err)
 		return nil, status.Error(codes.Unavailable, "the fork record cannot be read")
@@ -197,6 +199,39 @@ func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.C
 		Model:        d.Model,
 		Task:         task,
 	}, nil
+}
+
+// forkClaimWait bounds how long ClaimFork waits for the dispatch of a
+// pending fork, and forkClaimPoll is how often it looks. A fork of a caller
+// (gibson#803) waits until the first node of the child mission is
+// dispatched, so the bound is the park bound of the sdk.
+var (
+	forkClaimWait = fork.DefaultParkTimeout
+	forkClaimPoll = 250 * time.Millisecond
+)
+
+// awaitForkClaim claims the dispatch of a fork. While the dispatch is not
+// recorded it waits, until forkClaimWait or the end of ctx, so the fork
+// parks in the call and not in a retry loop of its own.
+func (s *HarnessCallbackService) awaitForkClaim(ctx context.Context, jti, sandboxID string) (ForkDispatch, error) {
+	deadline := time.NewTimer(forkClaimWait)
+	defer deadline.Stop()
+	for {
+		d, err := s.forkLedger.Claim(ctx, jti, sandboxID)
+		if err == nil {
+			return d, nil
+		}
+		if !errors.Is(err, ErrForkPending) {
+			return ForkDispatch{}, fmt.Errorf("claim fork %s: %w", sandboxID, err)
+		}
+		select {
+		case <-ctx.Done():
+			return ForkDispatch{}, ErrForkPending
+		case <-deadline.C:
+			return ForkDispatch{}, ErrForkPending
+		case <-time.After(forkClaimPoll):
+		}
+	}
 }
 
 // forkTask decodes the base64 protojson task of a fork dispatch.

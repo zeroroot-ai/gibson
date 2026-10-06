@@ -189,3 +189,56 @@ func TestForkAgent_RecordFailureKillsTheForks(t *testing.T) {
 		t.Fatalf("killed = %v; want the fork", *killed)
 	}
 }
+
+// ForkSandbox forks once with the network of the request and does not
+// follow the fork. FollowAgent follows it later to its result line.
+func TestForkSandbox_ThenFollowAgent(t *testing.T) {
+	c, got, killed := forkClient([]string{"ns/f1/u1"}, nil)
+	l := newAgentLauncher(t, c)
+	var recorded []string
+	spec := AgentForkSpec{
+		NetworkMode: NetworkModeNone,
+		OnForked: func(r ForkResponse) error {
+			recorded = r.SandboxIDs
+			return nil
+		},
+	}
+	id, err := l.ForkSandbox(context.Background(), "acme", "ns/src/u0", spec)
+	if err != nil || id != "ns/f1/u1" {
+		t.Fatalf("ForkSandbox = %q, %v", id, err)
+	}
+	if got.Count != 1 || got.Tenant != "acme" || got.NetworkMode != NetworkModeNone || len(recorded) != 1 {
+		t.Fatalf("fork request = %+v, recorded = %v", *got, recorded)
+	}
+	res, err := l.FollowAgent(context.Background(), id, "", AgentDispatch{Tenant: "acme"})
+	if err != nil || res.Result == nil || res.Result.Output != "ns/f1/u1" {
+		t.Fatalf("FollowAgent = %+v, %v", res, err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("killed = %v", *killed)
+	}
+}
+
+// Each refusal of ForkSandbox and FollowAgent, and a failed record kills the
+// fork.
+func TestForkSandbox_Refusals(t *testing.T) {
+	ctx := context.Background()
+	c, _, killed := forkClient([]string{"ns/f1/u1"}, nil)
+	l := newAgentLauncher(t, c)
+	if _, err := l.ForkSandbox(ctx, "acme", "", AgentForkSpec{}); err == nil {
+		t.Error("no source: want an error")
+	}
+	if _, err := l.ForkSandbox(ctx, "", "ns/src/u0", AgentForkSpec{}); err == nil {
+		t.Error("no tenant: want an error")
+	}
+	if _, err := l.FollowAgent(ctx, "", "", AgentDispatch{Tenant: "acme"}); err == nil {
+		t.Error("follow with no sandbox: want an error")
+	}
+	if _, err := l.FollowAgent(ctx, "ns/f1/u1", "", AgentDispatch{}); err == nil {
+		t.Error("follow with no tenant: want an error")
+	}
+	_, err := l.ForkSandbox(ctx, "acme", "ns/src/u0", AgentForkSpec{OnForked: func(ForkResponse) error { return errors.New("redis down") }})
+	if err == nil || len(*killed) != 1 || (*killed)[0] != "ns/f1/u1" {
+		t.Fatalf("record failure: err = %v, killed = %v", err, *killed)
+	}
+}
