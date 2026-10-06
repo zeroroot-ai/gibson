@@ -50,6 +50,9 @@ on:
       - 'pkg/platform/migrations/**'
       - 'pkg/billing/entitlements/**'
       - 'tests/e2e/tool_dispatch_test.go'
+      # The Hosted connector start test (gibson#811).
+      - 'operators/connector/**'
+      - 'tests/fixtures/mcp-tools/**'
       - 'tests/e2e/helpers/**'
       # The plugin secret revocation half (gibson#154): the event stream,
       # the admin RPC that revokes, and the suite.
@@ -283,7 +286,7 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
                     -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
             case "$img" in *:e2e-tool) echo "daemon image is $img"; break;; esac
@@ -299,7 +302,7 @@ jobs:
           # reports the PIPELINE as failed even though the match succeeded, so
           # the check can never pass. Read into a variable and match the string.
           # Poll too: the line lands a few seconds after the Pod is Ready.
-          for i in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             logs=$(kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 2>/dev/null || true)
             case "$logs" in
               *"sandboxed tool executor wired"*) echo "daemon wired the sandboxed tool executor"; break ;;
@@ -329,6 +332,45 @@ jobs:
       # verified live, and authz.enabled=false does not change it because that
       # disables authorization, not transport. The suite therefore needs an
       # attested SVID, which means being a pod in the mesh.
+      # A Hosted connector starts and serves its tool list (ADR-0080,
+      # gibson#811). The catalog has no Hosted connector after gibson#750, so
+      # the test applies a fixture ConnectorInstance. Its MCP server is built
+      # from tests/fixtures/mcp-tools in this run and loaded into kind. The
+      # connector operator turns it into a ToolHive MCPServer, and the test
+      # calls tools/list through the ToolHive proxy and compares the names.
+      - name: Start the fixture Hosted connector and read its tool list
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          IMG=ghcr.io/zeroroot-ai/gibson-fixture-mcp-tools:e2e
+          docker build -f tests/fixtures/mcp-tools/Dockerfile -t "$IMG" .
+          kind load docker-image "$IMG" --name "$CLUSTER"
+          kubectl create namespace tenant-connector-e2e --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -f tests/fixtures/mcp-tools/connector.yaml
+          phase=""
+          for _ in $(seq 1 60); do
+            phase=$(kubectl -n tenant-connector-e2e get connectorinstance fixture-mcp-tools -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            [ "$phase" = Ready ] && break
+            sleep 10
+          done
+          if [ "$phase" != Ready ]; then
+            echo "::error::the fixture connector did not reach Ready (phase '${phase}')"
+            kubectl -n tenant-connector-e2e get connectorinstance,mcpserver,pods -o wide || true
+            kubectl -n tenant-connector-e2e describe connectorinstance fixture-mcp-tools || true
+            kubectl -n tenant-connector-e2e logs -l app.kubernetes.io/instance=fixture-mcp-tools --all-containers --tail=100 || true
+            exit 1
+          fi
+          kubectl -n tenant-connector-e2e port-forward svc/mcp-fixture-mcp-tools-proxy 18080:8080 >/tmp/pf.log 2>&1 &
+          pf=$!
+          for _ in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:18080/ && break
+            sleep 1
+          done
+          status=0
+          bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18080/mcp || status=$?
+          kill "$pf" || true
+          exit "$status"
+
       - name: Build the e2e suite into an image
         id: suite-image
         working-directory: gibson
