@@ -289,7 +289,8 @@ func TestEntitlementsSeam_BudgetEnforcerObservesProviderLimits(t *testing.T) {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	p := newSeamProvider(t, addr, 60*time.Second)
-	enf := budget.NewEnforcer(rdb, logger, nil, nil, p)
+	noTeams := func(context.Context, string, string) ([]string, error) { return nil, nil }
+	enf := budget.NewEnforcer(rdb, logger, noTeams, nil, p)
 
 	ctx := auth.ContextWithTenantString(context.Background(), tenant)
 	ctx = auth.ContextWithActingUser(ctx, user)
