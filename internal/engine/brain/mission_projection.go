@@ -62,6 +62,11 @@ type WorkNode struct {
 	// sets it for each node it projects. Nil keeps the egress of the catalog
 	// manifest.
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
 }
 
 // MissionProjected is the launch event for a scripted CUE mission (ADR-0101): the
@@ -131,6 +136,8 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			Group:                  n.Group,
 			Limit:                  n.Limit,
 			Network:                n.Network,
+			StartsFrom:             n.StartsFrom,
+			Forkable:               n.Forkable,
 		})
 	}
 }

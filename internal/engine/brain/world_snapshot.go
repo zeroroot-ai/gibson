@@ -211,15 +211,17 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay work items. WorkDispatched creates them as running with Attempts=1.
 	for _, wi := range data.Work {
 		dsp := WorkDispatched{
-			ID:        wi.ID,
-			MissionID: wi.MissionID,
-			ItemKind:  wi.Kind,
-			Target:    wi.Target,
-			Input:     wi.Input,
-			Timeout:   wi.Timeout,
-			Group:     wi.Group,
-			Limit:     wi.Limit,
-			Network:   wi.Network,
+			ID:         wi.ID,
+			MissionID:  wi.MissionID,
+			ItemKind:   wi.Kind,
+			Target:     wi.Target,
+			Input:      wi.Input,
+			Timeout:    wi.Timeout,
+			Group:      wi.Group,
+			Limit:      wi.Limit,
+			Network:    wi.Network,
+			StartsFrom: wi.StartsFrom,
+			Forkable:   wi.Forkable,
 		}
 		Reduce(w, dsp)
 		switch wi.State {
