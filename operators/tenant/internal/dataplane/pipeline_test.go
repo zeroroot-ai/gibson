@@ -365,3 +365,24 @@ func TestPipelineProvision_EmitsEventsOnTheTenant(t *testing.T) {
 		t.Fatal("no event on the Tenant")
 	}
 }
+
+// With every dependency, New builds the five steps in order.
+func TestNew_BuildsTheFiveSteps(t *testing.T) {
+	scheme := runtime.NewScheme()
+	p, err := New(PipelineConfig{
+		Postgres:  &pgProvisioner{},
+		Neo4j:     &Neo4jProvisioner{},
+		Redis:     &redisProvisioner{},
+		Vector:    &redisVSSProvisioner{},
+		KEK:       &KEKInitProvisioner{},
+		K8sClient: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Recorder:  events.NewFakeRecorder(1),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pp, ok := p.(*pipelineProvisioner)
+	if !ok || len(pp.steps) != 5 || pp.steps[0].Name != "Postgres" || pp.steps[4].Name != "KEKInit" {
+		t.Fatalf("pipeline = %+v", p)
+	}
+}
