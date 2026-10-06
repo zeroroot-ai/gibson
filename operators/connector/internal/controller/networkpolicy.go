@@ -32,10 +32,10 @@ import (
 // so it covers both the proxy pod and the server pod.
 //
 // NetworkPolicies union, so this ADDS to the default-deny baseline; it does not
-// replace it. Egress to a vendor host is confined at the HTTPS layer by the
-// ToolHive permission profile (see egressprofile.go); the egress rule here only
-// permits outbound 443 to public addresses and blocks the private ranges, so a
-// connector cannot reach an in-cluster service (SSRF containment).
+// replace it. It has no egress rule to a public address: the egress to a
+// vendor host is the CiliumNetworkPolicy of the connector, which names each
+// host of spec.egressAllow (ciliumpolicy.go). An allow-all rule here would win
+// over that list, because allow rules union.
 
 const (
 	daemonNamespace = "gibson"
@@ -107,20 +107,6 @@ func desiredNetworkPolicy(ci *connectorv1alpha1.ConnectorInstance) *networkingv1
 				{To: daemonPeer, Ports: []networkingv1.NetworkPolicyPort{
 					tcp(mcpProxyPort), tcp(50002), tcp(50100),
 				}},
-				// The vendor API over HTTPS, public addresses only. The ToolHive
-				// permission profile confines this to the declared hosts; this
-				// rule blocks the private ranges so a connector cannot reach an
-				// in-cluster service.
-				{
-					To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{
-						CIDR: "0.0.0.0/0",
-						Except: []string{
-							"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-							"169.254.0.0/16", "100.64.0.0/10",
-						},
-					}}},
-					Ports: []networkingv1.NetworkPolicyPort{tcp(443)},
-				},
 			},
 		},
 	}

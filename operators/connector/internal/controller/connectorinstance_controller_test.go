@@ -48,6 +48,8 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPServer+"List"),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy+"List"),
+		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy),
+		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy+"List"),
 	} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 	}
