@@ -52,11 +52,6 @@ func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.P
 	return []component.PluginInfo{}, nil
 }
 
-// Stub implementations for other ComponentDiscovery interface methods
-func (m *mockComponentDiscovery) DiscoverAgent(ctx context.Context, name string) (agent.Agent, error) {
-	return nil, fmt.Errorf("not implemented in mock")
-}
-
 func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
 	return nil, fmt.Errorf("not implemented in mock")
 }
