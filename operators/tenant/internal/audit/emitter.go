@@ -257,6 +257,7 @@ const (
 // SagaOutcome enumerates the outcome tokens, matching the dashboard shape.
 type SagaOutcome string
 
+// The outcome tokens of a saga audit event.
 const (
 	OutcomeOk     SagaOutcome = "ok"
 	OutcomeFailed SagaOutcome = "failed"
