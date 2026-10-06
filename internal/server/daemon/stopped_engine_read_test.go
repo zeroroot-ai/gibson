@@ -34,6 +34,10 @@ func (downStore) WriteSnapshot(context.Context, string, brain.WorldSnapshot) (st
 	return "", errDownStore
 }
 
+func (downStore) LoadHistory(context.Context, string) ([]brain.Event, error) {
+	return nil, errDownStore
+}
+
 func (downStore) LoadSnapshot(context.Context, string) (*brain.WorldSnapshot, error) {
 	return nil, errDownStore
 }
