@@ -11,8 +11,10 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	sdkmission "github.com/zeroroot-ai/sdk/mission"
 	"go.opentelemetry.io/otel/trace/noop"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // mockMissionOperator is a full mock implementation of MissionOperator for testing.
@@ -302,8 +304,8 @@ func TestCreateMission(t *testing.T) {
 		Metadata: map[string]any{
 			"priority": "high",
 		},
-		Constraints: &sdkmission.MissionConstraints{
-			MaxDuration: time.Hour,
+		Constraints: &missionv1.MissionConstraints{
+			MaxDuration: durationpb.New(time.Hour),
 			MaxTokens:   100000,
 			MaxCost:     10.0,
 			MaxFindings: 100,
@@ -979,8 +981,8 @@ func TestEndToEndMissionFlow(t *testing.T) {
 	opts := &sdkmission.CreateMissionOpts{
 		Name: "Integration Test Mission",
 		Tags: []string{"test", "integration"},
-		Constraints: &sdkmission.MissionConstraints{
-			MaxDuration: time.Hour,
+		Constraints: &missionv1.MissionConstraints{
+			MaxDuration: durationpb.New(time.Hour),
 			MaxTokens:   50000,
 		},
 	}

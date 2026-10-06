@@ -12,7 +12,7 @@ import (
 	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/finding"
 	sdkmission "github.com/zeroroot-ai/sdk/mission"
-	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/proto"
 )
 
 // Mission management implementation for DefaultAgentHarness.
@@ -97,16 +97,10 @@ func (h *DefaultAgentHarness) CreateMission(ctx context.Context, wf any, targetI
 		req.Metadata = opts.Metadata
 		req.Tags = opts.Tags
 
-		// Convert SDK constraints to harness constraints
+		// The sdk uses the platform constraint type (ADR-0004), so each
+		// field passes through. A clone keeps the caller's message unchanged.
 		if opts.Constraints != nil {
-			req.Constraints = &missionv1.MissionConstraints{
-				MaxTokens:   opts.Constraints.MaxTokens,
-				MaxCost:     opts.Constraints.MaxCost,
-				MaxFindings: int32(opts.Constraints.MaxFindings), //nolint:gosec // G115: a finding cap far below 2^31
-			}
-			if opts.Constraints.MaxDuration > 0 {
-				req.Constraints.MaxDuration = durationpb.New(opts.Constraints.MaxDuration)
-			}
+			req.Constraints, _ = proto.Clone(opts.Constraints).(*missionv1.MissionConstraints)
 		}
 	}
 
