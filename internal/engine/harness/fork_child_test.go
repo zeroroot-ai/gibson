@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/sdk/fork"
 	"strings"
 	"testing"
 	"time"
@@ -239,7 +240,7 @@ func forkOriginCtx(t *testing.T, token string) context.Context {
 	}
 	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant})
 	if token != "" {
-		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(SandboxIdentityHeader, token))
+		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, token))
 	}
 	return ctx
 }
