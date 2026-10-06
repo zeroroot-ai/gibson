@@ -19,22 +19,6 @@ import (
 	"time"
 )
 
-// TestRunSignupJanitor_NoStoreIsANoOp — safe to call unconditionally at
-// startup even when self-serve signup, and its store, are not wired.
-func TestRunSignupJanitor_NoStoreIsANoOp(t *testing.T) {
-	s := &DaemonServer{logger: testSlogLogger}
-	done := make(chan struct{})
-	go func() {
-		s.RunSignupJanitor(context.Background())
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("RunSignupJanitor did not return immediately with no store wired")
-	}
-}
-
 // TestRunSignupJanitor_SweepsOnceThenStopsOnCancellation proves the two
 // properties the interval alone can't: an immediate sweep on start, and a
 // clean exit on context cancellation without waiting for the next tick.

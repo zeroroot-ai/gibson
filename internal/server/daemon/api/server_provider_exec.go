@@ -135,15 +135,12 @@ func (s *DaemonServer) WithAuditQuery(q auditQueryIface) *DaemonServer {
 	return s
 }
 
-// enforceBudgetCheck runs the budget Check if an enforcer is wired and
-// maps an exceedance error to a gRPC ResourceExhausted status carrying
-// a gibson.budget.v1.BudgetExceeded detail so SDK callers can decode it
-// via llm.IsBudgetExceeded. Returns (nil, nil) when the call is allowed
-// OR when no enforcer is configured.
+// enforceBudgetCheck runs the budget Check and maps an exceedance error to a
+// gRPC ResourceExhausted status carrying a gibson.budget.v1.BudgetExceeded
+// detail so SDK callers can decode it via llm.IsBudgetExceeded. It returns nil
+// when the call is allowed. The enforcer is required: the daemon wires it at
+// start ([[0003]]).
 func (s *DaemonServer) enforceBudgetCheck(ctx context.Context, estimatedTokens int64) error {
-	if s.budgetEnforcer == nil {
-		return nil
-	}
 	_, err := s.budgetEnforcer.Check(ctx, estimatedTokens)
 	if err == nil {
 		return nil
@@ -380,7 +377,7 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// increment counters. Cost accounting can be added later from the
 	// provider's pricing table; for now pass 0 cents.
 	// Spec: llm-user-attribution-governance Requirement 3.10.
-	if s.budgetEnforcer != nil && resp != nil {
+	if resp != nil {
 		totalTokens := int64(resp.Usage.PromptTokens) + int64(resp.Usage.CompletionTokens)
 		if totalTokens > 0 {
 			if recErr := s.budgetEnforcer.Record(ctx, totalTokens, 0); recErr != nil {

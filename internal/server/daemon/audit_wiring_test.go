@@ -42,14 +42,7 @@ func auditWiringDB(t *testing.T) *sql.DB {
 // service receives the logger that is returned, so the daemon and component
 // services share one writer (hosted#206).
 func TestWireDaemonAudit_HandsOneLoggerToTheService(t *testing.T) {
-	mr := miniredis.RunT(t)
-	cfg := state.DefaultConfig()
-	cfg.URL = "redis://" + mr.Addr()
-	sc, err := state.NewStateClient(cfg)
-	if err != nil {
-		t.Fatalf("state client: %v", err)
-	}
-	t.Cleanup(func() { _ = sc.Close() })
+	sc := auditWiringStateClient(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -66,18 +59,29 @@ func TestWireDaemonAudit_HandsOneLoggerToTheService(t *testing.T) {
 	}
 }
 
-// TestWireDaemonAudit_NoStateClientWiresNothing: no state client, no stream;
-// the service is left without a logger so the RPCs that need one refuse.
-func TestWireDaemonAudit_NoStateClientWiresNothing(t *testing.T) {
+// auditWiringStateClient is a state client on an in-memory Redis.
+func auditWiringStateClient(t *testing.T) *state.StateClient {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatalf("state client: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	return sc
+}
+
+// TestWireDaemonAudit_RequiresTheStateClient: the state client carries the
+// live tail, so the wiring refuses to run without it, and the service gets
+// no logger.
+func TestWireDaemonAudit_RequiresTheStateClient(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	sink := &recordingAuditSink{}
-	al, err := wireDaemonAudit(ctx, nil, auditWiringDB(t), slog.Default(), sink)
-	if err != nil {
-		t.Fatalf("wireDaemonAudit: %v", err)
-	}
-	if al != nil {
-		t.Fatal("expected no logger without a state client")
+	if _, err := wireDaemonAudit(ctx, nil, auditWiringDB(t), slog.Default(), sink); err == nil {
+		t.Fatal("expected an error with no state client")
 	}
 	if sink.got != nil {
 		t.Fatal("the service must not receive a logger without a state client")
@@ -119,7 +123,7 @@ func TestWireDaemonAudit_StartsTheExport(t *testing.T) {
 	setExportEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	if _, err := wireDaemonAudit(ctx, nil, auditWiringDB(t), slog.Default(), &recordingAuditSink{}); err != nil {
+	if _, err := wireDaemonAudit(ctx, auditWiringStateClient(t), auditWiringDB(t), slog.Default(), &recordingAuditSink{}); err != nil {
 		t.Fatalf("wireDaemonAudit: %v", err)
 	}
 }

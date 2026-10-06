@@ -34,9 +34,8 @@ type auditSink interface {
 // from GIBSON_AUDIT_RETENTION_MONTHS. A period under 13 months is an error,
 // and the daemon does not start.
 //
-// A daemon with no state client has no live tail, and returns a nil logger:
-// the service then refuses the RPCs that need the record instead of
-// pretending.
+// The state client is required: it carries the live tail, and the daemon
+// does not start without it.
 func wireDaemonAudit(
 	ctx context.Context,
 	sc *state.StateClient,
@@ -63,8 +62,7 @@ func wireDaemonAudit(
 	}
 
 	if sc == nil {
-		logger.WarnContext(ctx, "no state client: the audit log is not wired, and the RPCs that require a record refuse")
-		return nil, nil
+		return nil, errors.New("audit wiring: the state client is required, it carries the live tail of the audit log")
 	}
 	al := audit.NewAuditLogger(ctx, sc, newStartedAuditWriter(ctx, db, logger), logger)
 	svc.WithAuditLogger(al)

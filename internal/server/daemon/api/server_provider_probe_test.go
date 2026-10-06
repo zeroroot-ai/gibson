@@ -51,7 +51,7 @@ func stubErrorEmbedderFactory(_ embedder.Config) (embedder.Embedder, error) {
 // TestGetSupportedProviders_OpenAI_HasEmbeddingModels verifies the openai
 // descriptor surfaces embedding models in the new embedding_models field.
 func TestGetSupportedProviders_OpenAI_HasEmbeddingModels(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -79,7 +79,7 @@ func TestGetSupportedProviders_OpenAI_HasEmbeddingModels(t *testing.T) {
 // TestGetSupportedProviders_Bedrock_HasEmbeddingModels verifies bedrock
 // advertises its Titan/Cohere embedding models.
 func TestGetSupportedProviders_Bedrock_HasEmbeddingModels(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
 
@@ -104,7 +104,7 @@ func TestGetSupportedProviders_Bedrock_HasEmbeddingModels(t *testing.T) {
 // TestGetSupportedProviders_Anthropic_NoEmbeddingModels verifies that
 // Anthropic (chat-only) has no embedding_models entry.
 func TestGetSupportedProviders_Anthropic_NoEmbeddingModels(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
 
@@ -121,7 +121,7 @@ func TestGetSupportedProviders_Anthropic_NoEmbeddingModels(t *testing.T) {
 // the catalogue as an embedding-only provider with no default_models but with
 // embedding_models.
 func TestGetSupportedProviders_Voyage_EmbeddingOnly(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
 
@@ -140,7 +140,7 @@ func TestGetSupportedProviders_Voyage_EmbeddingOnly(t *testing.T) {
 // TestGetSupportedProviders_ModelDescriptorCapabilities verifies that chat
 // models in the catalogue carry CAPABILITY_CHAT on their descriptor.
 func TestGetSupportedProviders_ModelDescriptorCapabilities(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
 
@@ -164,7 +164,7 @@ func TestGetSupportedProviders_ModelDescriptorCapabilities(t *testing.T) {
 // provider (no CAPABILITY_EMBEDDING) does not run the embedding probe.
 func TestTestProvider_ChatOnly_NoEmbeddingProbe(t *testing.T) {
 	var embedderCalled bool
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(func(_ embedder.Config) (embedder.Embedder, error) {
 		embedderCalled = true
 		return embedder.NewMockEmbedder(), nil
@@ -194,7 +194,7 @@ func TestTestProvider_ChatOnly_NoEmbeddingProbe(t *testing.T) {
 // provider declares CAPABILITY_EMBEDDING + default_embedding_model, the
 // embedding probe is run and the dimension is returned.
 func TestTestProvider_EmbeddingCapability_ProbeSuccess(t *testing.T) { //nolint:dupl // success/failure pair differs only in factory stub and assertions
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubSuccessEmbedderFactory)
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
 		return &stubMockProvider{}, nil
@@ -226,7 +226,7 @@ func TestTestProvider_EmbeddingCapability_ProbeSuccess(t *testing.T) { //nolint:
 // embedding probe fails for a dual-capability provider, the chat result is
 // still returned with ok=true and embedding_ok=false.
 func TestTestProvider_EmbeddingCapability_ProbeFailure(t *testing.T) { //nolint:dupl // success/failure pair differs only in factory stub and assertions
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubErrorEmbedderFactory)
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
 		return &stubMockProvider{}, nil
@@ -258,7 +258,7 @@ func TestTestProvider_EmbeddingCapability_ProbeFailure(t *testing.T) { //nolint:
 // TestTestProvider_EmbeddingOnly_ProbeSuccess verifies that voyage (embedding-
 // only) runs only the embedding probe and returns ok=true on success.
 func TestTestProvider_EmbeddingOnly_ProbeSuccess(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubSuccessEmbedderFactory)
 
 	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
@@ -281,7 +281,7 @@ func TestTestProvider_EmbeddingOnly_ProbeSuccess(t *testing.T) {
 // TestTestProvider_EmbeddingOnly_ProbeFailure verifies that a failed embedding
 // probe returns ok=false for embedding-only providers.
 func TestTestProvider_EmbeddingOnly_ProbeFailure(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubErrorEmbedderFactory)
 
 	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
@@ -308,7 +308,7 @@ func TestTestProvider_EmbeddingOnly_ProbeFailure(t *testing.T) {
 // TestProbeProvider_MissingType_InvalidArgument verifies that an empty type
 // returns codes.InvalidArgument.
 func TestProbeProvider_MissingType_InvalidArgument(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
@@ -316,7 +316,7 @@ func TestProbeProvider_MissingType_InvalidArgument(t *testing.T) {
 
 // TestProbeProvider_UnknownType_InvalidArgument verifies unknown type rejects.
 func TestProbeProvider_UnknownType_InvalidArgument(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{
 		Type: "notreal",
 	})
@@ -327,7 +327,7 @@ func TestProbeProvider_UnknownType_InvalidArgument(t *testing.T) {
 // TestProbeProvider_EmbeddingOnly_NoModel_NotOK verifies voyage without a
 // model returns ok=false with a clear error.
 func TestProbeProvider_EmbeddingOnly_NoModel_NotOK(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	resp, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{
 		Type:        "voyage",
 		Credentials: map[string]string{"api_key": "pa-test"},
@@ -342,7 +342,7 @@ func TestProbeProvider_EmbeddingOnly_NoModel_NotOK(t *testing.T) {
 // TestProbeProvider_EmbeddingOnly_Success verifies voyage probe returns
 // ok=true + dimension when the factory succeeds.
 func TestProbeProvider_EmbeddingOnly_Success(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubSuccessEmbedderFactory)
 
 	resp, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{
@@ -360,7 +360,7 @@ func TestProbeProvider_EmbeddingOnly_Success(t *testing.T) {
 // TestProbeProvider_EmbeddingOnly_Failure verifies voyage probe returns
 // ok=false + error when the factory fails.
 func TestProbeProvider_EmbeddingOnly_Failure(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithEmbedderFactory(stubErrorEmbedderFactory)
 
 	resp, err := s.ProbeProvider(tenantCtx("acme"), &tenantv1.ProbeProviderRequest{
@@ -377,7 +377,7 @@ func TestProbeProvider_EmbeddingOnly_Failure(t *testing.T) {
 // TestProbeProvider_ChatProvider_Success verifies a chat provider probe
 // returns ok=true when the factory + stubMockProvider succeed.
 func TestProbeProvider_ChatProvider_Success(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
 		return &stubMockProvider{}, nil
 	})
@@ -396,7 +396,7 @@ func TestProbeProvider_ChatProvider_Success(t *testing.T) {
 // TestProbeProvider_ChatProvider_WithEmbeddingModel adds an embedding dimension
 // to the response when default_embedding_model is supplied.
 func TestProbeProvider_ChatProvider_WithEmbeddingModel(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
 		return &stubMockProvider{}, nil
 	})
@@ -417,7 +417,7 @@ func TestProbeProvider_ChatProvider_WithEmbeddingModel(t *testing.T) {
 // TestProbeProvider_UnauthenticatedContext_Unauthenticated verifies a missing
 // tenant context returns codes.Unauthenticated.
 func TestProbeProvider_UnauthenticatedContext_Unauthenticated(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.ProbeProvider(context.Background(), &tenantv1.ProbeProviderRequest{
 		Type: "openai",
 	})

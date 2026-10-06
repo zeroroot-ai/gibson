@@ -190,7 +190,7 @@ func TestSubmitOntologyExtensionUpstream_WritesTheFragmentAsAnAuditRecord(t *tes
 
 	// A caller with a tenant and no subject gets no record with an empty actor.
 	w.err = nil
-	_, err = s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+	_, err = s.SubmitOntologyExtensionUpstream(auth.ContextWithTenantString(context.Background(), "acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
 	})
 	assert.Equal(t, codes.Unauthenticated, grpcCode(err))

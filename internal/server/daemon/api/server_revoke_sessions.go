@@ -85,10 +85,6 @@ func (s *DaemonServer) canRevokeSessions(ctx context.Context, callerSubject, cal
 	if callerSubject == targetUserID {
 		return true, nil
 	}
-	if s.authorizer == nil {
-		// No FGA wired → only self is permitted (fail-closed).
-		return false, nil
-	}
 	if callerTenant == "" {
 		return false, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
@@ -154,13 +150,11 @@ func (s *DaemonServer) canRevokeSessions(ctx context.Context, callerSubject, cal
 //     revocation immediately for that tenant.
 //
 // It uses the optional authz.ConditionalWriter interface; an authorizer
-// without it stamps nothing and returns nil. Every write is attempted and
+// without it stamps nothing and returns nil. The authorizer itself is
+// required: FGA is required at start. Every write is attempted and
 // logged; the first failure is returned, so a caller that promises old
 // sessions are refused (ResetUserMFA) can fail instead of lying.
 func (s *DaemonServer) stampSessionRevocation(ctx context.Context, target, tenantSlug string) error {
-	if s.authorizer == nil {
-		return nil
-	}
 	cw, ok := s.authorizer.(authz.ConditionalWriter)
 	if !ok {
 		return nil

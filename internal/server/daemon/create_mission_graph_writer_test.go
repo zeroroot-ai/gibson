@@ -157,36 +157,3 @@ func TestCreateMission_MaterializesViaGraphWriter(t *testing.T) {
 		t.Errorf("UpsertMission got Name %q, want recon-1", got.Name)
 	}
 }
-
-// TestCreateMission_NilGraphWriter_Skipped proves the nil-graphWriter guard:
-// when the daemon has not wired a GraphWriter (e.g. Neo4j disabled), the
-// background goroutine must return early rather than nil-panic.
-func TestCreateMission_NilGraphWriter_Skipped(t *testing.T) {
-	rdb := redisJSONClientForMissionTest(t)
-
-	tenant := auth.MustNewTenantID("acme")
-	ctx := auth.WithTenant(context.Background(), tenant)
-
-	target := &types.Target{ID: types.NewID(), TenantID: tenant.String(), Name: "t1"}
-	targets := &fakeTargetStoreForMission{target: target}
-	pool := &mockPool{conn: &datapool.Conn{Redis: rdb}}
-
-	d := &daemonImpl{
-		logger:      testObsLogger(),
-		targetStore: targets,
-		pool:        pool,
-		graphWriter: nil,
-	}
-
-	missionDefinitionID := types.NewID().String()
-	if _, err := d.CreateMission(ctx, api.CreateMissionData{
-		Name:                "recon-2",
-		TargetID:            target.ID.String(),
-		MissionDefinitionID: missionDefinitionID,
-	}); err != nil {
-		t.Fatalf("CreateMission with no graph writer configured: %v", err)
-	}
-	// Give the background goroutine a moment to run; there is nothing to
-	// assert beyond "no panic" since graphWriter is nil.
-	time.Sleep(20 * time.Millisecond)
-}

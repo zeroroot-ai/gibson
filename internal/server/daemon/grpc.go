@@ -1220,8 +1220,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			return nil, err
 		}
 
-		// Age out abandoned verification rows. Cancellation via ctx; a nil
-		// store makes the loop a no-op.
+		// Age out abandoned verification rows. Cancellation via ctx. The
+		// store is wired above exactly when the platform database is set.
 		if d.platformDB != nil {
 			go daemonSvc.RunSignupJanitor(ctx)
 		}
@@ -3112,9 +3112,6 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer bgCancel()
 
-		if d.graphWriter == nil {
-			return
-		}
 		if mergeErr := d.graphWriter.UpsertMission(bgCtx, tenantForMission.String(), MissionProjection{
 			ID:        missionIDStr,
 			Name:      missionName,

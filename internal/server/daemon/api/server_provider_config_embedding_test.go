@@ -72,7 +72,7 @@ func TestCreateProvider_RoundTripsEmbeddingFields(t *testing.T) {
 		DefaultEmbeddingModel: "text-embedding-3-small",
 	}
 	store := &mockProviderStore{createOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 
 	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
@@ -100,7 +100,7 @@ func TestCreateProvider_RoundTripsEmbeddingFields(t *testing.T) {
 // onboarding-quality validation: an embedding-capable provider must declare a
 // default_embedding_model.
 func TestCreateProvider_EmbeddingWithoutModel_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         "openai",
@@ -117,7 +117,7 @@ func TestCreateProvider_EmbeddingWithoutModel_InvalidArgument(t *testing.T) {
 // embedding model with no known vector dimension is rejected at write time — a
 // wrong dimension would silently fail RediSearch whole-document indexing.
 func TestCreateProvider_EmbeddingUnknownModel_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:                  "mystery",
@@ -135,7 +135,7 @@ func TestCreateProvider_EmbeddingUnknownModel_InvalidArgument(t *testing.T) {
 func TestCreateProvider_ChatOnly_NoEmbeddingValidation(t *testing.T) {
 	cfg := fakeProviderRecord("anthropic")
 	store := &mockProviderStore{createOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         "anthropic",
@@ -200,7 +200,7 @@ func TestResolveTenantEmbedder_Configured_ReturnsEmbedder(t *testing.T) {
 // the per-tenant embedder cache so a newly-configured provider is picked up.
 func TestCreateProvider_InvalidatesEmbedderCache(t *testing.T) {
 	stub := &stubEmbedderResolver{}
-	s := serverWithStore(&mockProviderStore{createOut: fakeProviderRecord("openai")})
+	s := serverWithStore(t, &mockProviderStore{createOut: fakeProviderRecord("openai")})
 	s.WithEmbedderResolver(stub)
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "openai", Type: "openai"},
