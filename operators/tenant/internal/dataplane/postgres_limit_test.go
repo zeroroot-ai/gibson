@@ -82,7 +82,8 @@ func TestPipeline_PostgresStepCallsTheProvisioner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgresProvisioner: %v", err)
 	}
-	p := New(PipelineConfig{Postgres: pg})
+	p := &pipelineProvisioner{cfg: PipelineConfig{Postgres: pg}}
+	p.steps = p.buildSteps()
 	err = p.steps[0].Provision(context.Background(), "acme", Limits{PostgresConnectionLimit: 7})
 	if err == nil || !strings.Contains(err.Error(), "admin connect") {
 		t.Fatalf("err = %v, want the Postgres provisioner's connect failure", err)

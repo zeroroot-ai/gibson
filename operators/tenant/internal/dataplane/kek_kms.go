@@ -6,8 +6,7 @@
 // Spec: helm-eks-readiness-and-pg-split Phase 5 (T5.1).
 //
 // Production EKS deployments select this deriver when GIBSON_KMS_KEY_ARN
-// is set (cmd/main.go and cmd/backfill-credentials/main.go select-and-fall-
-// through chain). The plaintext master KEK never enters the operator
+// is set (the select-and-fall-through chain of cmd/main.go). The plaintext master KEK never enters the operator
 // process memory; KMS performs the HMAC operation server-side.
 //
 // Mechanism: AWS KMS GenerateMac with HMAC_SHA_256 over the tenant ID

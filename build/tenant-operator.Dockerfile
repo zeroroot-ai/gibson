@@ -44,11 +44,6 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./operators/tenant/cmd
-# backfill-credentials is the chart's pre-upgrade Helm hook entrypoint
-# (Spec tenant-provisioning-unification-phase2 Requirement 8.5).
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o backfill-credentials ./operators/tenant/cmd/backfill-credentials
 # backfill-rbac is the pre-upgrade Helm hook for spec
 # secrets-blast-radius-reduction — ensures every existing tenant's
 # namespace has the per-tenant Role+RoleBinding before the chart
@@ -69,7 +64,6 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/backfill-credentials .
 COPY --from=builder /workspace/backfill-rbac .
 COPY --from=builder /workspace/migrate-tenant-tiers .
 USER 65532:65532

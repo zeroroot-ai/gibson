@@ -6,7 +6,13 @@ package dataplane
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
@@ -31,12 +37,32 @@ func stubStep(name string, called *[]string, provErr, rbErr error) Step {
 }
 
 // buildTestPipeline constructs a pipelineProvisioner whose steps are replaced
-// with the provided stubs. The K8sClient and Recorder are left nil so CRD
-// updates are skipped (no envtest needed).
+// with the provided stubs. The Kubernetes client is a fake that holds no
+// Tenant, so the pipeline finds no CR to update.
 func buildTestPipeline(steps []Step) *pipelineProvisioner {
-	p := New(PipelineConfig{})
-	p.steps = steps
-	return p
+	scheme := runtime.NewScheme()
+	_ = gibsonv1alpha1.AddToScheme(scheme)
+	return &pipelineProvisioner{
+		cfg: PipelineConfig{
+			K8sClient: fake.NewClientBuilder().WithScheme(scheme).Build(),
+			Recorder:  events.NewFakeRecorder(100),
+		},
+		steps: steps,
+		log:   slog.Default(),
+	}
+}
+
+// The pipeline refuses a missing store, client or recorder (gibson#681).
+func TestNew_RequiresEveryDependency(t *testing.T) {
+	_, err := New(PipelineConfig{})
+	if err == nil {
+		t.Fatal("New with no dependency succeeded")
+	}
+	for _, name := range []string{"Postgres", "Neo4j", "Redis", "Vector", "KEK", "K8sClient", "Recorder"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name %s", err, name)
+		}
+	}
 }
 
 func TestPipelineProvisionHappyPath(t *testing.T) {

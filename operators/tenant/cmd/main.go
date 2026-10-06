@@ -1138,59 +1138,57 @@ func buildDataPlaneProvisioner(
 	cfg.Neo4j = n4j
 
 	// --- Redis ---
+	// Redis and the vector index are required stores of each tenant
+	// (ADR-0003, gibson#681): the operator does not start without them.
 	redisAddr := os.Getenv("DATAPLANE_REDIS_ADDR")
-	if redisAddr != "" {
-		rp, err := dataplane.NewRedisProvisioner(dataplane.RedisProvisionerConfig{
-			Addr:     redisAddr,
-			Password: os.Getenv("DATAPLANE_REDIS_PASSWORD"),
-			// VaultClient writes per-tenant Redis credentials to
-			// tenant-<id>/infra/redis. Without this the daemon's
-			// secrets broker has no way to discover the per-tenant
-			// logical DB index allocated by the operator
-			// (tenant-operator#189).
-			VaultClient: vaultClient,
-		})
-		if err != nil {
-			log.Error(err, "redis provisioner init failed — Redis step will be skipped")
-		} else {
-			cfg.Redis = rp
-		}
-	} else {
-		log.Info("DATAPLANE_REDIS_ADDR not configured — Redis data-plane step will be skipped")
+	if redisAddr == "" {
+		log.Error(nil, "DATAPLANE_REDIS_ADDR is required — operator will not start")
+		os.Exit(1)
 	}
+	rp, err := dataplane.NewRedisProvisioner(dataplane.RedisProvisionerConfig{
+		Addr:     redisAddr,
+		Password: os.Getenv("DATAPLANE_REDIS_PASSWORD"),
+		// VaultClient writes per-tenant Redis credentials to
+		// tenant-<id>/infra/redis. Without this the daemon's
+		// secrets broker has no way to discover the per-tenant
+		// logical DB index allocated by the operator
+		// (tenant-operator#189).
+		VaultClient: vaultClient,
+	})
+	if err != nil {
+		log.Error(err, "redis provisioner init failed — operator will not start")
+		os.Exit(1)
+	}
+	cfg.Redis = rp
 
 	// --- Vector (Redis VSS) ---
 	// Provisioned against the same Redis server as the Redis data-plane step.
 	// The provisioner creates a per-tenant RediSearch HNSW index and writes
 	// the index name to Vault so the daemon can resolve it at runtime via the
 	// secrets broker (tenant-operator#238).
-	if redisAddr != "" {
-		vp, err := dataplane.NewRedisVSSProvisioner(dataplane.RedisVSSConfig{
-			Addr:        redisAddr,
-			Password:    os.Getenv("DATAPLANE_REDIS_PASSWORD"),
-			VaultClient: vaultClient,
-		})
-		if err != nil {
-			log.Error(err, "Redis VSS provisioner init failed — Vector step will be skipped")
-		} else {
-			cfg.Vector = vp
-		}
-	} else {
-		log.Info("DATAPLANE_REDIS_ADDR not configured — Vector data-plane step will be skipped")
+	vp, err := dataplane.NewRedisVSSProvisioner(dataplane.RedisVSSConfig{
+		Addr:        redisAddr,
+		Password:    os.Getenv("DATAPLANE_REDIS_PASSWORD"),
+		VaultClient: vaultClient,
+	})
+	if err != nil {
+		log.Error(err, "Redis VSS provisioner init failed — operator will not start")
+		os.Exit(1)
 	}
+	cfg.Vector = vp
 
 	// --- KEK init ---
 	// The KEKInitProvisioner is a marker step that validates derivation
-	// works for a fresh tenant ID. With the KEKDeriver abstraction,
-	// the marker just exercises the deriver — Phase 2.2 of spec
-	// tenant-provisioning-unification-phase2.
-	if kekDeriver != nil {
-		cfg.KEK = &dataplane.KEKInitProvisioner{KEKDeriver: kekDeriver}
-	} else {
-		log.Info("KEKDeriver not configured — KEK init step will be skipped")
-	}
+	// works for a fresh tenant ID. buildKEKDeriver exits on error above, so
+	// the deriver is always set here.
+	cfg.KEK = &dataplane.KEKInitProvisioner{KEKDeriver: kekDeriver}
 
-	return dataplane.New(cfg), transitClient
+	pipeline, err := dataplane.New(cfg)
+	if err != nil {
+		log.Error(err, "data-plane pipeline init failed — operator will not start")
+		os.Exit(1)
+	}
+	return pipeline, transitClient
 }
 
 // buildKEKDeriver constructs the per-tenant KEKDeriver. Source order:
