@@ -31,6 +31,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
@@ -153,13 +154,15 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.Lis
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
 
-	limit := int(req.GetLimit())
-	if limit <= 0 {
-		limit = 50
+	// The page window (ADR-0028, rule 3). A page_size of 0 keeps the default
+	// of this list, 50.
+	pageSize := req.GetPageSize()
+	if pageSize == 0 {
+		pageSize = 50
 	}
-	offset := int(req.GetOffset())
-	if offset < 0 {
-		offset = 0
+	offset, limit, err := pagetoken.Window(pageSize, req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
 	// Build the broker-side filter prefix. Tenant secrets are stored
@@ -195,8 +198,9 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.Lis
 	}
 
 	return &secretsv1.ListSecretsResponse{
-		Secrets: out,
-		Total:   int32(len(out) + offset),
+		Secrets:       out,
+		Total:         int32(len(out) + offset),
+		NextPageToken: pagetoken.Next(offset, limit, len(out), -1),
 	}, nil
 }
 

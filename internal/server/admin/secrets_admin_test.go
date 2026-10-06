@@ -331,6 +331,26 @@ func TestListSecrets_ReturnsMetadataOnly(t *testing.T) {
 	}
 }
 
+// A page token that the daemon did not write is InvalidArgument, and a full
+// page carries a next page token (ADR-0028, rule 3).
+func TestListSecrets_PageTokens(t *testing.T) {
+	srv, broker, _, _, _ := newTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+	broker.store["cred:a"] = []byte("av")
+	broker.store["cred:b"] = []byte("bv")
+
+	if _, err := srv.ListSecrets(ctx, &secretsv1.ListSecretsRequest{PageToken: "x"}); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("bad token: code %v, want InvalidArgument", status.Code(err))
+	}
+	resp, err := srv.ListSecrets(ctx, &secretsv1.ListSecretsRequest{PageSize: 1})
+	if err != nil {
+		t.Fatalf("ListSecrets: %v", err)
+	}
+	if len(resp.GetSecrets()) == 1 && resp.GetNextPageToken() == "" {
+		t.Error("a full page has no next page token")
+	}
+}
+
 func TestGetMissionAudit_AggregatesByRef(t *testing.T) {
 	srv, _, _, _, q := newTestServer(t)
 	ctx := ctxWithTenant(t, "acme")
