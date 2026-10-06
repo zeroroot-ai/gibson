@@ -44,6 +44,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -269,7 +270,7 @@ func (s *DaemonServer) AdminApproveRegistration(ctx context.Context, req *tenant
 			s.logger.ErrorContext(ctx, "AdminApproveRegistration: releasing the claimed registration failed; it will not return to the queue",
 				"registration_id", row.ID, "error", rerr.Error())
 		}
-		return nil, err
+		return nil, status.Error(codes.Unavailable, "the audit record of the decision could not be written; the registration is back in the queue")
 	}
 
 	resp, aerr := s.applyRegistrationApproval(ctx, row)
@@ -384,7 +385,7 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 	// pending row to record first. A failed record fails the call so the
 	// operator sees it (gibson#676).
 	if err := s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.rejected", req.GetReason()); err != nil {
-		return nil, err
+		return nil, status.Error(codes.Unavailable, "the audit record of the decision could not be written")
 	}
 	s.logger.InfoContext(ctx, "AdminRejectRegistration: registration refused",
 		"registration_id", row.ID)
@@ -439,7 +440,7 @@ func (s *DaemonServer) recordRegistrationDecision(ctx context.Context, decidedBy
 		if err := s.tenantAdminAuditWriter.WriteSync(ctx, s.registrationDecisionEvent(ctx, decidedBy, row, action, reason)); err != nil {
 			s.logger.ErrorContext(ctx, "registration decision: durable audit write failed",
 				"registration_id", row.ID, "error", err.Error())
-			return status.Error(codes.Unavailable, "the audit record of the decision could not be written")
+			return fmt.Errorf("registration decision %s: %w", action, err)
 		}
 	}
 	return nil

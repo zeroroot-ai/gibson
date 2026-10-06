@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -374,12 +375,12 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 		toWrite = append(toWrite, tuples[i])
 	}
 
-	actor, err := grantActor(ctx)
-	if err != nil {
-		return nil, err
+	actor, ok := grantActor(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
 	if err := s.recordGrantAudit(ctx, actor, callerTenant, target.PrincipalID, "agent_grant_added", toWrite); err != nil {
-		return nil, err
+		return nil, status.Error(codes.Unavailable, "the audit record of the grant change could not be written; nothing changed")
 	}
 	if len(toWrite) > 0 {
 		if err := s.authorizer.Write(ctx, toWrite); err != nil {
@@ -440,12 +441,12 @@ func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *tenantv1
 		toDelete = append(toDelete, tuples[i])
 	}
 
-	actor, err := grantActor(ctx)
-	if err != nil {
-		return nil, err
+	actor, ok := grantActor(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no caller identity in context")
 	}
 	if err := s.recordGrantAudit(ctx, actor, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete); err != nil {
-		return nil, err
+		return nil, status.Error(codes.Unavailable, "the audit record of the grant change could not be written; nothing changed")
 	}
 	if len(toDelete) > 0 {
 		if err := s.authorizer.Delete(ctx, toDelete); err != nil {
@@ -542,12 +543,12 @@ func validateGrantTuples(grants []*tenantv1.GrantTuple, targetKind identitypb.Pr
 }
 
 // grantActor is the subject of the caller, the actor of a grant change.
-func grantActor(ctx context.Context) (string, error) {
+func grantActor(ctx context.Context) (string, bool) {
 	id, err := auth.IdentityFromContext(ctx)
 	if err != nil || id.Subject == "" {
-		return "", status.Error(codes.PermissionDenied, "no caller identity in context")
+		return "", false
 	}
-	return id.Subject, nil
+	return id.Subject, true
 }
 
 // grantAuditEvents builds one audit event per tuple written or deleted.
@@ -588,7 +589,7 @@ func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, actor, tenant,
 			continue
 		}
 		if err := s.auditWriter.WriteSync(ctx, evt); err != nil {
-			return status.Errorf(codes.Unavailable, "the audit record of %s could not be written; nothing changed", action)
+			return fmt.Errorf("grants admin: audit record of %s: %w", action, err)
 		}
 	}
 	return nil

@@ -284,7 +284,7 @@ func (s *DaemonServer) recordProviderAudit(ctx context.Context, tenantID, action
 		"tenant_id": tenantID,
 	}); err != nil {
 		s.logger.Error("provider audit: durable write failed", "action", action, "error", err.Error())
-		return status_grpc.Errorf(codes.Unavailable, "the audit record of %s could not be written; nothing changed", action)
+		return fmt.Errorf("provider audit %s: %w", action, err)
 	}
 	return nil
 }
@@ -361,7 +361,7 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderCreated, req.GetInput().GetName()); err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
 	cfg, err := s.providerConfig.Create(ctx, tenantID, fromProtoInput(req.GetInput()))
 	if err != nil {
@@ -406,7 +406,7 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderUpdated, req.GetName()); err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
 	cfg, err := s.providerConfig.Update(ctx, tenantID, req.GetName(), fromProtoInput(req.GetInput()))
 	if err != nil {
@@ -436,7 +436,7 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 	}
 	name := req.GetName()
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderDeleted, name); err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
 	if err := s.providerConfig.Delete(ctx, tenantID, name); err != nil {
 		s.recordProviderFailure(ctx, tenantID, auditProviderDeleted, name)
@@ -780,7 +780,7 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 	}
 	name := req.GetName()
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderDefaultChanged, name); err != nil {
-		return nil, err
+		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
 	if err := s.providerConfig.SetDefault(ctx, tenantID, name); err != nil {
 		s.recordProviderFailure(ctx, tenantID, auditProviderDefaultChanged, name)
