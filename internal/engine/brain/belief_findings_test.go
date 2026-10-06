@@ -131,8 +131,9 @@ func TestBeliefEvidenceByHost_MatchesTheScoredEvidence(t *testing.T) {
 	if !ok {
 		t.Fatal("the host has no evidence")
 	}
-	var requested []BeliefEvidence
-	for _, e := range BeliefSystem(w) {
+	events := BeliefSystem(w)
+	requested := make([]BeliefEvidence, 0, len(events))
+	for _, e := range events {
 		requested = append(requested, e.(BeliefScoreRequested).Evidence)
 	}
 	if len(requested) != 1 || evidenceDigest(requested[0]) != evidenceDigest(ev) {
