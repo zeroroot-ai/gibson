@@ -9,7 +9,7 @@ package api
 // Test strategy:
 //   - All tests are pure in-process; no Redis, no real LLM API, no network.
 //   - mockProviderStore injects deterministic responses.
-//   - mockAuditLogger captures emitted events so tests can assert audit coverage.
+//   - auditedServer wires an audit logger over audittest.Recorder.
 //   - auth.ContextWithTenant injects a tenant without spinning up the interceptor.
 //   - TestProvider uses a factory-injected mock provider to avoid any network calls.
 
@@ -97,25 +97,6 @@ func (m *mockProviderStore) Resolve(_ context.Context, _ string, _ string) (*pro
 }
 
 // ---------------------------------------------------------------------------
-// mockAuditLogger
-// ---------------------------------------------------------------------------
-
-// mockAuditLogger captures emitted audit events.
-type mockAuditLogger struct {
-	events []auditEvent
-}
-
-type auditEvent struct {
-	action     string
-	resource   string
-	resourceID string
-}
-
-func (m *mockAuditLogger) Log(_ context.Context, action, resource, resourceID string, _ map[string]any) {
-	m.events = append(m.events, auditEvent{action: action, resource: resource, resourceID: resourceID})
-}
-
-// ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
@@ -151,13 +132,6 @@ func serverWithStore(t *testing.T, store providerConfigStoreIface) *DaemonServer
 	s := auditedServer(t)
 	s.providerConfig = store
 	return s
-}
-
-// serverWithStoreAndAudit returns a DaemonServer with store and an audit
-// logger. The second value is unused by the callers.
-func serverWithStoreAndAudit(t *testing.T, store providerConfigStoreIface) (*DaemonServer, *mockAuditLogger) {
-	t.Helper()
-	return serverWithStore(t, store), nil
 }
 
 // ---------------------------------------------------------------------------
