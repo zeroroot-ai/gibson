@@ -423,7 +423,7 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 	}
 	modelID := os.Getenv("EXT_AUTHZ_FGA_MODEL_ID")
 	if modelID == "" {
-		log.Error("EXT_AUTHZ_FGA_MODEL_ID required (internal/infra/authz FGAClient requires an authorization model ID)")
+		log.Error("EXT_AUTHZ_FGA_MODEL_ID required (platform-clients FGAClient requires an authorization model ID)")
 		os.Exit(1)
 	}
 
@@ -437,7 +437,7 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 		Logger:         log,
 	})
 	if err != nil {
-		log.Error("create internal/infra/authz FGA client", "addr", fgaAddr, "err", err)
+		log.Error("create platform-clients FGA client", "addr", fgaAddr, "err", err)
 		os.Exit(1)
 	}
 
@@ -452,7 +452,7 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 			"addr", fgaAddr, "err", err)
 		os.Exit(1)
 	}
-	log.Info("OpenFGA client (internal/infra/authz) connected and self-check passed",
+	log.Info("OpenFGA client (platform-clients/authz) connected and self-check passed",
 		"addr", fgaAddr, "store_id", storeID, "model_id", modelID,
 		"per_call_timeout", perCallTimeout.String())
 	return fga.NewChecker(client, reg), client

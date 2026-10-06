@@ -1905,14 +1905,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.healthServer.RegisterReadinessCheck("pc_"+name, func(checkCtx context.Context) sdktypes.HealthStatus {
 			if err := p.Check(checkCtx); err != nil {
 				return sdktypes.NewDegradedStatus(
-					"internal/infra/readiness probe '"+name+"' failed: "+err.Error(),
+					"platform-clients/readiness probe '"+name+"' failed: "+err.Error(),
 					nil,
 				)
 			}
-			return sdktypes.NewHealthyStatus("internal/infra/readiness probe '" + name + "' passed")
+			return sdktypes.NewHealthyStatus("platform-clients/readiness probe '" + name + "' passed")
 		})
 	}
-	d.logger.Debug(ctx, "registered internal/infra/readiness probes (pc_postgres, pc_authz_fga)")
+	d.logger.Debug(ctx, "registered platform-clients readiness probes (pc_postgres, pc_authz_fga)")
 
 	// Start health server via healthSubsystem.
 	d.healthSys = newHealthSubsystem(d.healthServer, d.logger)
