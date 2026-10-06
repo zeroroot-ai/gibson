@@ -192,6 +192,8 @@ func TestRegisterCapabilityGrant_RefusesAReplayedCredential(t *testing.T) {
 	m.mock.ExpectExec("INSERT INTO capability_grant_bootstrap_consumptions").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectRollback()
+	// The failure record of the action (gibson#676).
+	m.expectAuditRecord()
 
 	_, err := m.register(context.Background(), "acme", "cred-abc")
 	require.Error(t, err)
@@ -300,6 +302,8 @@ func TestRegisterCapabilityGrant_RefusesAHostItMayNotClaim(t *testing.T) {
 	m.mock.ExpectExec("INSERT INTO capability_grant_hosts").
 		WillReturnResult(sqlmock.NewResult(0, 0)) // guard refused the update
 	m.mock.ExpectRollback()
+	// The failure record of the action (gibson#676).
+	m.expectAuditRecord()
 
 	_, err := m.register(context.Background(), "acme", "cred-abc")
 	require.Error(t, err)
@@ -322,6 +326,8 @@ func TestRegisterCapabilityGrant_AgentInsertRequiresALiveHostInTenant(t *testing
 	m.mock.ExpectExec("FROM capability_grant_hosts h WHERE h.id = $2::text AND h.tenant_id = $3::text AND h.status <> 'revoked'").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectRollback()
+	// The failure record of the action (gibson#676).
+	m.expectAuditRecord()
 
 	_, err := m.register(context.Background(), "acme", "cred-abc")
 	require.Error(t, err)
@@ -388,6 +394,8 @@ func TestRevokeCapabilityGrant_RefusesAnotherTenantsAgent(t *testing.T) {
 		WithArgs("agt_deadbeef", "acme").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectRollback()
+	// The failure record of the action (gibson#676).
+	m.expectAuditRecord()
 
 	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
 	require.Error(t, err)

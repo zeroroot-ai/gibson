@@ -298,7 +298,8 @@ func (s *ComponentServiceServer) emitCounter() *emitbounds.TaskCounter {
 // corresponding RPCs returning codes.Unimplemented until the subsystems are
 // wired (tasks 5.3–5.5).
 //
-// auditLog may be nil; when nil, audit events are silently skipped.
+// auditLog may be nil; when nil, each plugin change is refused, because a
+// change needs its durable audit record first (gibson#676).
 func NewComponentServiceServer(
 	registry ComponentRegistry,
 	queue WorkQueue,
@@ -2371,10 +2372,10 @@ func checkInMetadata(md map[string]string) map[string]string {
 
 // recordPluginChange writes the audit record of a plugin change before the
 // change takes effect (ADR-0113, gibson#676). A failed write fails the
-// change. A server with no audit logger records nothing.
+// change. A server with no audit logger refuses the change.
 func (s *ComponentServiceServer) recordPluginChange(ctx context.Context, action, plugin string) error {
 	if s.auditLog == nil {
-		return nil
+		return status.Errorf(codes.FailedPrecondition, "%s %q: the audit log is not wired on this server", action, plugin)
 	}
 	if err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
 		s.logger.ErrorContext(ctx, "plugin change refused: the audit record is not durable",
@@ -2388,10 +2389,8 @@ func (s *ComponentServiceServer) recordPluginChange(ctx context.Context, action,
 }
 
 // recordPluginFailure writes the second audit record of a plugin change
-// whose action failed after its first record was durable.
+// whose action failed after its first record was durable. recordPluginChange
+// refused the change when no audit logger is wired, so one is wired here.
 func (s *ComponentServiceServer) recordPluginFailure(ctx context.Context, action, plugin string, cause error) {
-	if s.auditLog == nil {
-		return
-	}
 	s.auditLog.LogWithResult(ctx, action, "plugin", plugin, "failure", map[string]any{"error": cause.Error()})
 }

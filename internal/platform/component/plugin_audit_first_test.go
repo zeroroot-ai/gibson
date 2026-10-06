@@ -89,3 +89,16 @@ func TestPluginChange_RecordsFirstAndRecordsAFailure(t *testing.T) {
 	assert.Equal(t, []string{"plugin.enable", "plugin.config.update", "plugin.config.update", "plugin.disable"}, actions)
 	assert.Contains(t, string(events[2].Metadata), "failure", "the second record names the failure")
 }
+
+// A server with no audit logger refuses a plugin change. It never changes
+// state with no record (gibson#676).
+func TestPluginChange_NoAuditLoggerRefuses(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
+	srv := accessServer(store)
+	ctx := adminCtx(t)
+
+	_, err := srv.EnablePlugin(ctx, &componentpb.EnablePluginRequest{PluginName: "gitlab"})
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	_, err = store.GetAccess(ctx, "tenant-a", "gitlab")
+	assert.ErrorIs(t, err, ErrComponentNotEnabled)
+}

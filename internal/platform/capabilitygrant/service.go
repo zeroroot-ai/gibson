@@ -421,7 +421,7 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 				slog.String("host_id", hostID),
 			)
 		}
-		s.auditWriter.Log(failedAction(registered, err))
+		s.recordFailure(ctx, registered, err)
 		return nil, fmt.Errorf("capabilitygrant: RegisterCapabilityGrant: enroll: %w", err)
 	}
 
@@ -743,7 +743,7 @@ func (s *CapabilityGrantService) RevokeCapabilityGrant(
 	}
 
 	if err := s.store.RevokeAgent(ctx, tenantID, agentID); err != nil {
-		s.auditWriter.Log(failedAction(revoked, err))
+		s.recordFailure(ctx, revoked, err)
 		return fmt.Errorf("capabilitygrant: RevokeCapabilityGrant: %w", err)
 	}
 
@@ -995,6 +995,19 @@ func stripFGATypePrefix(s, typeName string) string {
 		return s[len(prefix):]
 	}
 	return s
+}
+
+// recordFailure writes the second audit record of a state change whose
+// action failed. The action already failed, so a write error is logged and
+// the caller still gets the error of the action.
+func (s *CapabilityGrantService) recordFailure(ctx context.Context, ev audit.Event, cause error) {
+	if err := s.auditWriter.WriteSync(ctx, failedAction(ev, cause)); err != nil {
+		s.logger.ErrorContext(ctx, "capabilitygrant: the failure record of an action was not written",
+			slog.String("action", ev.Action),
+			slog.String("target_id", ev.TargetID),
+			slog.String("error", err.Error()),
+		)
+	}
 }
 
 // failedAction is the second audit record of a state change whose action
