@@ -3,8 +3,8 @@
 
 package harness
 
-// authorize_testfixtures_test.go — envtest-widening coverage for the
-// HarnessCallbackService.Authorize RPC handler using testfixtures fakes.
+// authorize_handler_test.go: coverage for the
+// HarnessCallbackService.Authorize RPC handler with an in-memory tuple set.
 //
 // Prior to this file the Authorize handler had zero tests; this is the first
 // vertical slice through all four observable outcomes:
@@ -14,14 +14,9 @@ package harness
 //  3. Run not found — authzStore returns ErrRunNotFound → gRPC NotFound.
 //  4. Mission inactive — run has status "completed" → gRPC FailedPrecondition.
 //
-// The testfixtures fakes used here:
-//   - testfixtures/fga.FakeStore — powers the componentAuthorizer fake
-//
-// testfixtures/audit.FakeEmitter used to be listed here too, constructed and
-// immediately discarded "to exercise the import path for future callers". It
-// asserted nothing: the Authorize handler audits through slog and gibson has no
-// Emit interface the fake could satisfy, so there were no future callers to
-// prepare for. The package is deleted in testfixtures v0.3.0.
+// The fake authorizer keeps its tuples in a map in this file. It used the
+// FakeStore of the testfixtures module, which had no other consumer, so the
+// store moved here and the module left go.mod (D78).
 //
 // Slice 5.6 of the production-readiness epic (gibson#183).
 
@@ -30,66 +25,83 @@ import (
 	"errors"
 	"log/slog"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	tfxfga "github.com/zeroroot-ai/testfixtures/fga"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // ---------------------------------------------------------------------------
-// fgaBackedAuthorizer: minimal authz.Authorizer backed by testfixtures/fga.FakeStore.
+// fgaBackedAuthorizer: minimal authz.Authorizer backed by an in-memory tuple set.
 //
 // Only Check, Write, and the no-op stubs are needed by Authorize tests.
 // ---------------------------------------------------------------------------
 
+// fgaTuple is the (user, relation, object) key of the tuple set.
+type fgaTuple struct {
+	user, relation, object string
+}
+
 type fgaBackedAuthorizer struct {
-	store *tfxfga.FakeStore
+	mu     sync.Mutex
+	tuples map[fgaTuple]struct{}
 }
 
 func newFGABackedAuthorizer() *fgaBackedAuthorizer {
-	return &fgaBackedAuthorizer{store: tfxfga.NewFakeStore()}
+	return &fgaBackedAuthorizer{tuples: make(map[fgaTuple]struct{})}
+}
+
+func (a *fgaBackedAuthorizer) has(t fgaTuple) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.tuples[t]
+	return ok
+}
+
+func (a *fgaBackedAuthorizer) put(t fgaTuple) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.tuples[t] = struct{}{}
+}
+
+func (a *fgaBackedAuthorizer) drop(t fgaTuple) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.tuples, t)
 }
 
 // Seed writes a tuple into the underlying FakeStore so Check returns true.
 func (a *fgaBackedAuthorizer) Seed(user, relation, object string) {
-	a.store.Write(context.Background(), tfxfga.Tuple{User: user, Relation: relation, Object: object}) //nolint:errcheck
+	a.put(fgaTuple{user: user, relation: relation, object: object})
 }
 
 func (a *fgaBackedAuthorizer) Check(_ context.Context, user, relation, object string) (bool, error) {
-	return a.store.Check(context.Background(), tfxfga.Tuple{
-		User: user, Relation: relation, Object: object,
-	})
+	return a.has(fgaTuple{user: user, relation: relation, object: object}), nil
 }
 
 func (a *fgaBackedAuthorizer) BatchCheck(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
 	out := make([]bool, len(checks))
 	for i, c := range checks {
-		ok, err := a.store.Check(context.Background(), tfxfga.Tuple{
-			User: c.User, Relation: c.Relation, Object: c.Object,
-		})
-		if err != nil {
-			return nil, err
-		}
-		out[i] = ok
+		out[i] = a.has(fgaTuple{user: c.User, relation: c.Relation, object: c.Object})
 	}
 	return out, nil
 }
 
 func (a *fgaBackedAuthorizer) Write(_ context.Context, tuples []authz.Tuple) error {
 	for _, t := range tuples {
-		a.store.Write(context.Background(), tfxfga.Tuple{User: t.User, Relation: t.Relation, Object: t.Object}) //nolint:errcheck
+		a.put(fgaTuple{user: t.User, relation: t.Relation, object: t.Object})
 	}
 	return nil
 }
 
 func (a *fgaBackedAuthorizer) Delete(_ context.Context, tuples []authz.Tuple) error {
 	for _, t := range tuples {
-		a.store.Delete(context.Background(), tfxfga.Tuple{User: t.User, Relation: t.Relation, Object: t.Object}) //nolint:errcheck
+		a.drop(fgaTuple{user: t.User, relation: t.Relation, object: t.Object})
 	}
 	return nil
 }
