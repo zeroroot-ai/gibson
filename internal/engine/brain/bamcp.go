@@ -142,22 +142,6 @@ const (
 	// value commits to the first good move sooner. A larger value spends
 	// more simulations on moves that look worse.
 	DefaultBAMCPExploration = 10.0
-
-	// uninformativeBetaAlpha/uninformativeBetaBeta are the cold-start Beta
-	// prior parameters BAMCP Thompson-samples for an enablement-edge type
-	// braintrain (gibson#395, not yet built) has no fitted posterior for.
-	// ADR-0137 names Beta(1,1) (uniform) or Jeffreys Beta(1/2,1/2)
-	// as the two defensible uninformative choices, both mean 0.5 -- the same
-	// mean UninformativePriorStrength already encodes for exact inference
-	// (belief_slice_native.go). Beta(1,1) is picked over Jeffreys here
-	// specifically because BAMCP SAMPLES this prior on every rollout rather
-	// than only reading its mean: Jeffreys is U-shaped (density concentrates
-	// near 0 and 1), which would make an untrained edge type's sampled
-	// strength swing to the extremes far more often than the flat uniform
-	// prior -- the same "no data yet, do not overclaim" caution ADR-0137
-	// applies to the mean, extended to the SHAPE of what gets sampled.
-	uninformativeBetaAlpha = 1.0
-	uninformativeBetaBeta  = 1.0
 )
 
 // EdgeStrengthPosterior is the Beta(Alpha, Beta) posterior BAMCP Thompson-
@@ -192,7 +176,7 @@ func (p EdgeStrengthPosterior) Mean() float64 {
 
 // EdgeStrengthPosteriorProvider supplies BAMCP's per-edge-type Beta
 // posterior. UninformativeEdgePosteriors is the cold-start implementation;
-// braintrain.EdgePosteriorArtifact.Provider() (gibson#395) is the fitted one,
+// braintrain.EdgePosteriorProvider (gibson#395) is the fitted one,
 // built offline from recorded outcomes -- see this file's own doc comment for
 // why swapping it in touches only NewBAMCPPlanner's caller, never the
 // rollout code.
@@ -202,8 +186,8 @@ type EdgeStrengthPosteriorProvider interface {
 
 // PinnedEdgeStrengthPosteriorProvider is an EdgeStrengthPosteriorProvider
 // fitted from a versioned artifact (ADR-0137, gibson#395):
-// braintrain's per-tenant edge-posterior artifact, versioned exactly like the
-// belief-CPT model (braintrain.NextVersion / braintrain.NextEdgePosteriorVersion).
+// braintrain's per-tenant edge-posterior artifact, stored as one version of
+// the tenant with the belief-CPT model (beliefartifact.Store, gibson#614).
 // NativeSliceBeliefProvider (belief_slice_native.go) accepts this richer
 // interface, not the plain EdgeStrengthPosteriorProvider BAMCP uses, because
 // it stamps Version() onto every scored node's Belief.Model -- ADR-0134's
@@ -226,7 +210,7 @@ type UninformativeEdgePosteriors struct{}
 
 // Posterior implements EdgeStrengthPosteriorProvider.
 func (UninformativeEdgePosteriors) Posterior(string) EdgeStrengthPosterior {
-	return EdgeStrengthPosterior{Alpha: uninformativeBetaAlpha, Beta: uninformativeBetaBeta}
+	return EdgeStrengthPosterior{Alpha: beliefvi.UninformativeBetaAlpha, Beta: beliefvi.UninformativeBetaBeta}
 }
 
 // BAMCPConfig names every tunable of a BAMCP rollout (ADR-0126

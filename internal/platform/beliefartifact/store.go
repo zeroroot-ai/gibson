@@ -41,6 +41,10 @@ func NewStore(db *sql.DB) *Store {
 // version is one more than the highest version of the tenant; two concurrent
 // writes for one tenant cannot get the same version, because the key refuses
 // the second insert.
+//
+// Put writes the version string "tenant-<tenant>-v<version>" into the version
+// field of both artifacts, so a stored artifact names the row that holds it.
+// The trainer cannot know the number before the insert.
 func (s *Store) Put(ctx context.Context, tenantID string, beliefModel, edgePosteriors []byte) (int64, error) {
 	if tenantID == "" {
 		return 0, errors.New("beliefartifact: Put: tenant is required")
@@ -53,9 +57,12 @@ func (s *Store) Put(ctx context.Context, tenantID string, beliefModel, edgePoste
 	}
 	const query = `
 INSERT INTO tenant_belief_artifacts (tenant_id, version, belief_model, edge_posteriors)
-SELECT $1, COALESCE(MAX(version), 0) + 1, $2::jsonb, $3::jsonb
-FROM   tenant_belief_artifacts
-WHERE  tenant_id = $1
+SELECT $1, n.version,
+       jsonb_set($2::jsonb, '{version}', to_jsonb('tenant-' || $1::text || '-v' || n.version::text)),
+       jsonb_set($3::jsonb, '{version}', to_jsonb('tenant-' || $1::text || '-v' || n.version::text))
+FROM  (SELECT COALESCE(MAX(version), 0) + 1 AS version
+       FROM   tenant_belief_artifacts
+       WHERE  tenant_id = $1) AS n
 RETURNING version`
 	var version int64
 	if err := s.db.QueryRowContext(ctx, query, tenantID, string(beliefModel), string(edgePosteriors)).Scan(&version); err != nil {

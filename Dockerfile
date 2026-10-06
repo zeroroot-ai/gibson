@@ -100,6 +100,10 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 #   tuple for a closed-registration self-hosted install's first tenant. Invoked
 #   ad hoc by the operator (no Helm hook, no session) after
 #   AdminProvisionTenant has been drained, never wired into the rollout.
+# - belief-trainer (gibson#614, ADR-0106) fits the belief artifacts of one
+#   tenant. The CronJob that the tenant operator creates for each tenant
+#   (gibson#616) runs `belief-trainer -tenant <id>`. It talks only to the
+#   daemon over SPIFFE mTLS and opens no data store.
 #
 # Every one of them is invoked by an explicit command override on its Job,
 # DaemonSet or `kubectl exec`, so they ship in the daemon image unchanged.
@@ -108,7 +112,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -ldflags="-s -w" -o /out/ \
         ./cmd/gibson-migrate \
         ./cmd/sandbox-eviction-handler \
-        ./cmd/bootstrap-tenant-owner
+        ./cmd/bootstrap-tenant-owner \
+        ./cmd/belief-trainer
 
 # ============================================================================
 # Stage 2: Runtime - Minimal Alpine
@@ -141,6 +146,7 @@ COPY --from=builder /out/gibson /usr/local/bin/gibson
 COPY --from=builder /out/gibson-migrate /usr/local/bin/gibson-migrate
 COPY --from=builder /out/sandbox-eviction-handler /usr/local/bin/sandbox-eviction-handler
 COPY --from=builder /out/bootstrap-tenant-owner /usr/local/bin/bootstrap-tenant-owner
+COPY --from=builder /out/belief-trainer /usr/local/bin/belief-trainer
 
 # Create gibson home directory.
 # The bundled ONNX embedder (and its HuggingFace model cache) was removed in

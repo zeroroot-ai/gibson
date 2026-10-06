@@ -30,7 +30,7 @@ func TestRowsFromWorld_LabelledFindingBecomesARow(t *testing.T) {
 
 	// The contradiction splits identity into two hosts at one address; both
 	// carry the Finding, so both are positive rows.
-	rows := RowsFromWorld(e.World, nil)
+	rows := RowsFromWorld(e.World)
 	if len(rows) != 2 {
 		t.Fatalf("want 2 rows, got %d: %+v", len(rows), rows)
 	}
@@ -50,21 +50,20 @@ func TestRowsFromWorld_LabelledFindingBecomesARow(t *testing.T) {
 	}
 }
 
-// TestRowsFromWorld_KnownRestrictsColumnsAndUnscannedHostsTeachNothing
-// proves known filters the emitted variables and a host with no ports and no
-// label yields no row.
-func TestRowsFromWorld_KnownRestrictsColumnsAndUnscannedHostsTeachNothing(t *testing.T) {
+// TestRowsFromWorld_UnscannedHostsTeachNothing proves a host with no ports
+// and no label yields no row, and a row holds the belief evidence of the host.
+func TestRowsFromWorld_UnscannedHostsTeachNothing(t *testing.T) {
 	w := brain.NewWorld("acme")
 	brain.Reduce(w, brain.HostObserved{ScopeID: "s1", Address: "10.0.0.1", OpenPorts: []int{80, 443}})
 	brain.Reduce(w, brain.HostObserved{ScopeID: "s1", Address: "10.0.0.2"})
 
-	rows := RowsFromWorld(w, map[string]bool{"reachable": true, "exploitable": true})
+	rows := RowsFromWorld(w)
 	if len(rows) != 1 {
 		t.Fatalf("want 1 row (the scanned host only), got %d: %+v", len(rows), rows)
 	}
 	r := rows[0]
-	if len(r) != 2 || !r["reachable"] || r["exploitable"] {
-		t.Fatalf("known must restrict the row to reachable=true, exploitable=false: %+v", r)
+	if !r["reachable"] || !r["port_80"] || !r["port_443"] || r["exploitable"] || r["finding_high"] {
+		t.Fatalf("row does not hold the evidence of the host: %+v", r)
 	}
 }
 
@@ -80,14 +79,14 @@ func TestRowsFromWorld_HITLVerdictOverridesTheAutoOutcome(t *testing.T) {
 	}
 	brain.Reduce(w, brain.LabelApplied{TargetID: fmt.Sprintf("surprise-host-%d", hosts[0].ID), Verdict: brain.VerdictFalsePositive, UserID: "bob"})
 
-	rows := RowsFromWorld(w, nil)
+	rows := RowsFromWorld(w)
 	if len(rows) != 1 {
 		t.Fatalf("want 1 row, got %d", len(rows))
 	}
 	if rows[0]["exploitable"] || rows[0]["juicy"] {
 		t.Fatalf("a false_positive label must force exploitable and juicy false: %+v", rows[0])
 	}
-	again := RowsFromWorld(w, nil)
+	again := RowsFromWorld(w)
 	if rowKey(again[0]) != rowKey(rows[0]) {
 		t.Fatal("the same World must yield the same rows")
 	}
