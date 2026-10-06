@@ -29,7 +29,8 @@ type auditSink interface {
 // Postgres audit_log is the durable copy, and the Redis stream is the live
 // tail for the console.
 //
-// It also starts audit retention on the platform database. The period comes
+// It also starts the export of each record to the durable bucket, and audit
+// retention on the platform database. The period comes
 // from GIBSON_AUDIT_RETENTION_MONTHS. A period under 13 months is an error,
 // and the daemon does not start.
 //
@@ -57,6 +58,10 @@ func wireDaemonAudit(
 	go retention.Run(ctx, audit.DefaultRetentionInterval)
 	logger.InfoContext(ctx, "audit retention started", slog.Int("months", months))
 
+	if err := startAuditExport(ctx, db, logger); err != nil {
+		return nil, fmt.Errorf("audit wiring: %w", err)
+	}
+
 	if sc == nil {
 		logger.WarnContext(ctx, "no state client: the audit log is not wired, and the RPCs that require a record refuse")
 		return nil, nil
@@ -73,4 +78,34 @@ func newStartedAuditWriter(ctx context.Context, db *sql.DB, logger *slog.Logger)
 	w := audit.NewWriter(db, logger)
 	w.Start(ctx)
 	return w
+}
+
+// startAuditExport starts the export of the audit log to the durable bucket
+// (ADR-0113, gibson#764). A bad export config is an error, and the daemon
+// does not start. With no bucket configured, the daemon starts, logs an
+// error, and measures the export lag: no record is exported, retention
+// removes no record, and the lag alert fires.
+func startAuditExport(ctx context.Context, db *sql.DB, logger *slog.Logger) error {
+	cfg, err := audit.ExportConfigFromEnv()
+	if errors.Is(err, audit.ErrExportNotConfigured) {
+		logger.ErrorContext(ctx, "audit export: no durable bucket is configured; records stay in Postgres and retention removes none",
+			slog.String("variable", audit.ExportBucketEnv))
+		go audit.MeasureExportLag(ctx, db, audit.DefaultExportInterval, logger)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("audit export config: %w", err)
+	}
+	store, err := audit.NewS3Store(cfg)
+	if err != nil {
+		return fmt.Errorf("audit export store: %w", err)
+	}
+	exporter, err := audit.NewExporter(db, store, cfg.Policy, logger)
+	if err != nil {
+		return fmt.Errorf("audit exporter: %w", err)
+	}
+	go exporter.Run(ctx, audit.DefaultExportInterval)
+	logger.InfoContext(ctx, "audit export started",
+		slog.String("bucket", cfg.Bucket), slog.String("lock_mode", cfg.Policy.LockMode), slog.Int("lock_days", cfg.Policy.LockDays))
+	return nil
 }

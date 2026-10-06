@@ -101,3 +101,35 @@ func TestWireDaemonAudit_RefusesAShortRetentionPeriod(t *testing.T) {
 		t.Fatalf("err = %v, want ErrRetentionTooShort", err)
 	}
 }
+
+// setExportEnv sets a valid export config.
+func setExportEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv(audit.ExportEndpointEnv, "https://s3.us-east-1.amazonaws.com")
+	t.Setenv(audit.ExportBucketEnv, "durable")
+	t.Setenv(audit.ExportAccessKeyEnv, "AKIAEXAMPLE")
+	t.Setenv(audit.ExportSecretKeyEnv, "example")
+	t.Setenv(audit.ExportLockModeEnv, "GOVERNANCE")
+	t.Setenv(audit.ExportLockDaysEnv, "400")
+}
+
+// TestWireDaemonAudit_StartsTheExport: a valid export config starts the
+// exporter, and the wiring returns no error.
+func TestWireDaemonAudit_StartsTheExport(t *testing.T) {
+	setExportEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if _, err := wireDaemonAudit(ctx, nil, auditWiringDB(t), slog.Default(), &recordingAuditSink{}); err != nil {
+		t.Fatalf("wireDaemonAudit: %v", err)
+	}
+}
+
+// TestWireDaemonAudit_RefusesABadExportConfig: a bucket with a bad lock
+// mode stops the start of the daemon.
+func TestWireDaemonAudit_RefusesABadExportConfig(t *testing.T) {
+	setExportEnv(t)
+	t.Setenv(audit.ExportLockModeEnv, "NONE")
+	if _, err := wireDaemonAudit(context.Background(), nil, auditWiringDB(t), slog.Default(), &recordingAuditSink{}); err == nil {
+		t.Fatal("expected an error for a bad lock mode")
+	}
+}

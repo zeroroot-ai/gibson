@@ -77,6 +77,8 @@ func TestRetention_RemovesOnlyRowsOlderThanThePeriod(t *testing.T) {
 
 	r, err := NewRetention(db, MinRetentionMonths, auditSilentLogger())
 	require.NoError(t, err)
+	markExported(t, db, "acme", 5)
+	markExported(t, db, "beta", 1)
 	removed, err := r.Prune(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, int64(3), removed, "retention must remove the three rows that are older than 13 months")
@@ -134,6 +136,7 @@ func TestRetention_EachRowOld_WriterContinuesTheChain(t *testing.T) {
 	w := NewWriter(db, auditSilentLogger())
 
 	writeAged(t, db, w, "acme", 3, time.Now().UTC().AddDate(0, -20, 0))
+	markExported(t, db, "acme", 3)
 
 	r, err := NewRetention(db, MinRetentionMonths, auditSilentLogger())
 	require.NoError(t, err)
@@ -148,6 +151,38 @@ func TestRetention_EachRowOld_WriterContinuesTheChain(t *testing.T) {
 	assert.True(t, report.Intact(), "%+v", report)
 	assert.Equal(t, int64(4), report.FirstSeq, "the new row continues at position 4, not at position 1")
 	assert.Equal(t, 1, report.Chained)
+}
+
+// TestRetention_KeepsARowThatIsNotExported: retention removes an old row
+// only after the export wrote it to the durable bucket (gibson#764).
+func TestRetention_KeepsARowThatIsNotExported(t *testing.T) {
+	db := setupAuditPostgres(t)
+	ctx := context.Background()
+	w := NewWriter(db, auditSilentLogger())
+	writeAged(t, db, w, "acme", 3, time.Now().UTC().AddDate(0, -20, 0))
+
+	r, err := NewRetention(db, MinRetentionMonths, auditSilentLogger())
+	require.NoError(t, err)
+	removed, err := r.Prune(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, removed, "no row is exported, so no row is removed")
+
+	markExported(t, db, "acme", 2)
+	removed, err = r.Prune(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), removed, "only the two exported rows are removed")
+	assert.Equal(t, 1, countRows(t, db, "acme"))
+	assert.True(t, mustVerify(t, db, "acme").Intact())
+}
+
+// markExported sets the export position of a tenant, as the exporter does
+// after a write.
+func markExported(t *testing.T, db *sql.DB, tenant string, seq int64) {
+	t.Helper()
+	_, err := db.ExecContext(context.Background(), `
+INSERT INTO audit_export_cursor (tenant_id, exported_seq) VALUES ($1, $2)
+ON CONFLICT (tenant_id) DO UPDATE SET exported_seq = EXCLUDED.exported_seq`, tenant, seq)
+	require.NoError(t, err)
 }
 
 // rechainAll writes the chain of a tenant again from its first row, after a
