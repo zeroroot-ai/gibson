@@ -150,13 +150,10 @@ func (n nilDaemonStub) ResumeMission(_ context.Context, _ string) error        {
 func (n nilDaemonStub) GetMissionHistory(_ context.Context, _ string, _, _ int) ([]MissionRunData, int, error) {
 	return nil, 0, nil
 }
-func (n nilDaemonStub) GetMissionCheckpoints(_ context.Context, _ string) ([]CheckpointData, error) {
+func (n nilDaemonStub) GetMissionCheckpoints(_ context.Context, _ string) ([]MissionCheckpoint, error) {
 	return nil, nil
 }
-func (n nilDaemonStub) GetMissionCheckpointPayload(_ context.Context, _, _ string) (*CheckpointData, error) {
-	return nil, nil
-}
-func (n nilDaemonStub) RewindMission(_ context.Context, _, _ string) (string, error) {
+func (n nilDaemonStub) RewindMission(_ context.Context, _ RewindRequest) (string, error) {
 	return "", nil
 }
 func (n nilDaemonStub) BuildComponent(_ context.Context, _, _ string) (BuildComponentResult, error) {

@@ -1060,6 +1060,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints": {
+    method: "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.v1.DaemonService/GetMissionDefinition": {
     method: "/gibson.daemon.v1.DaemonService/GetMissionDefinition",
     service: "gibson.daemon.v1.DaemonService",
@@ -1262,6 +1272,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   },
   "/gibson.daemon.v1.DaemonService/ResumeMission": {
     method: "/gibson.daemon.v1.DaemonService/ResumeMission",
+    service: "gibson.daemon.v1.DaemonService",
+    relation: "writer",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
+  "/gibson.daemon.v1.DaemonService/RewindMission": {
+    method: "/gibson.daemon.v1.DaemonService/RewindMission",
     service: "gibson.daemon.v1.DaemonService",
     relation: "writer",
     objectType: "tenant",

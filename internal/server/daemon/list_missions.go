@@ -69,7 +69,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		if namePattern != "" && !containsCI(ms.Name, namePattern) {
 			continue
 		}
-		result = append(result, missionSnapshotToData(ms))
+		result = append(result, missionSnapshotToData(eng, ms))
 	}
 
 	total := len(result)

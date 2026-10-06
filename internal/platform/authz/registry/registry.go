@@ -974,6 +974,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.v1.DaemonService/GetMissionCheckpoints": {
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.v1.DaemonService/GetMissionDefinition": {
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "member",
@@ -1155,6 +1164,15 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.v1.DaemonService/ResumeMission": {
+		Service:           "gibson.daemon.v1.DaemonService",
+		Relation:          "writer",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.v1.DaemonService/RewindMission": {
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
 		ObjectType:        "tenant",

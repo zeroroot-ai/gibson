@@ -684,6 +684,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.v1.DaemonService/GetMissionDefinition":
     relation: "member"
     object_type: "tenant"
@@ -812,6 +819,13 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.daemon.v1.DaemonService/ResumeMission":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/RewindMission":
     relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

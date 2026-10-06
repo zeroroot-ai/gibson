@@ -2685,38 +2685,37 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 			Error:         r.Error,
 			TraceID:       traceID,
 		}
+		if d.brainRegistry != nil {
+			if rw, ok := d.brainRegistry.For(tenant.String()).MissionRewind(r.MissionID.String()); ok {
+				runs[i].ParentMissionID = rw.ParentMissionID
+				runs[i].ParentCheckpointID = rw.ParentCheckpointID
+			}
+		}
 	}
 
 	d.logger.Debug(ctx, "mission history retrieved", "name", name, "count", len(runs), "total", total)
 	return runs, total, nil
 }
 
-// GetMissionCheckpoints returns all checkpoints for a mission.
-// Legacy checkpoint store removed (gibson#1117); returns empty list.
-func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpoints called (legacy checkpoint store removed)", "mission_id", missionID)
-	return []api.CheckpointData{}, nil
+// GetMissionCheckpoints returns the node ends of a mission run (ADR-0170).
+func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.MissionCheckpoint, error) {
+	if d.missionManager == nil {
+		return nil, status.Error(codes.Unavailable, "mission manager not initialized")
+	}
+	return d.missionManager.Checkpoints(ctx, missionID)
 }
 
-// GetMissionCheckpointPayload returns the checkpoint payload for the given (mission, checkpoint) pair.
-// Legacy checkpoint store removed (gibson#1117); returns not-found.
-func (d *daemonImpl) GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpointPayload called (legacy checkpoint store removed)",
-		"mission_id", missionID,
-		"checkpoint_id", checkpointID,
+// RewindMission starts a new mission run at a checkpoint of an earlier run
+// (ADR-0170). It returns the id of the new run.
+func (d *daemonImpl) RewindMission(ctx context.Context, req api.RewindRequest) (string, error) {
+	if d.missionManager == nil {
+		return "", status.Error(codes.Unavailable, "mission manager not initialized")
+	}
+	d.logger.Info(ctx, "RewindMission called",
+		"mission_id", req.MissionID,
+		"checkpoint_id", req.CheckpointID,
 	)
-	return nil, fmt.Errorf("checkpoint %s not found for mission %s: not found", checkpointID, missionID)
-}
-
-// RewindMission rewinds the mission's state to the target checkpoint.
-// Legacy checkpoint store removed (gibson#1117); returns not-found.
-func (d *daemonImpl) RewindMission(ctx context.Context, missionID, targetCheckpointID string) (string, error) {
-	d.logger.Info(ctx, "RewindMission called (legacy checkpoint store removed)",
-		"mission_id", missionID,
-		"target_checkpoint_id", targetCheckpointID,
-	)
-	return "", fmt.Errorf("target checkpoint %s not found for mission %s: not found",
-		targetCheckpointID, missionID)
+	return d.missionManager.Rewind(ctx, req)
 }
 
 // BuildComponent is not supported; component store has been removed.
