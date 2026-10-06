@@ -97,7 +97,7 @@ func NewRetention(db *sql.DB, months int, logger *slog.Logger) (*Retention, erro
 		return nil, errors.New("audit.NewRetention: logger must not be nil")
 	}
 	if err := ValidateRetentionMonths(months); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("audit.NewRetention: %w", err)
 	}
 	return &Retention{
 		db:     db,
