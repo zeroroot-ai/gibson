@@ -139,14 +139,3 @@ func emitAccessTupleChange(
 	}
 	em.Log(ctx, "access_tuple_change", "component", tuple.Object, details)
 }
-
-// ReconcileSummaryFields carries the trigger + deltas a tenant-operator
-// reconcile pass emits at the end of each loop.
-type ReconcileSummaryFields struct {
-	Plan                 string
-	AddedFeatureTuples   int
-	RemovedFeatureTuples int
-	QuotaDelta           int
-	DurationMs           int64
-	Trigger              string // "cr_change" | "background" | "stripe_webhook"
-}

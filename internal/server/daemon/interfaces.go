@@ -8,16 +8,6 @@ import (
 	"time"
 )
 
-// Shutdownable represents a component that can be gracefully shut down.
-// Components implementing this interface can participate in the coordinated
-// shutdown sequence managed by the ShutdownCoordinator.
-type Shutdownable interface {
-	// Shutdown performs cleanup and graceful termination of the component.
-	// The context may have a deadline to enforce shutdown timeouts.
-	// Returns an error if shutdown fails.
-	Shutdown(ctx context.Context) error
-}
-
 // ShutdownPhase represents a single phase in the shutdown sequence.
 // Each phase is executed in order by the ShutdownCoordinator.
 type ShutdownPhase interface {

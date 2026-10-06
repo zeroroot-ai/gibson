@@ -117,9 +117,6 @@ func recordCacheMissOTel(ctx context.Context) {
 	cacheMissOTel.Add(ctx, 1)
 }
 
-// PlatformFGAOptions configures a NewPlatformFGAClient adapter.
-type PlatformFGAOptions = authz.FGAClientOptions
-
 // NewPlatformFGAClient constructs an FGAClient backed by the
 // internal/infra/authz package. The returned value implements this
 // package's FGAClient interface, so the existing cache + checker code
