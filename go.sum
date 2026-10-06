@@ -776,6 +776,8 @@ github.com/zeroroot-ai/sdk v0.198.1-0.20261006184755-6b8404f86eda h1:xksQVQEzDpV
 github.com/zeroroot-ai/sdk v0.198.1-0.20261006184755-6b8404f86eda/go.mod h1:RGKgTNatLIAhrtDzi1OeRIKdi3YwfmsGv1dcicrkJHQ=
 github.com/zeroroot-ai/sdk v0.198.1-0.20261006224325-820cf19d3d22 h1:7Kw4vy49S4VIb0pCFIYef6XKjwLl6KJHiRaaNV1QOJs=
 github.com/zeroroot-ai/sdk v0.198.1-0.20261006224325-820cf19d3d22/go.mod h1:RGKgTNatLIAhrtDzi1OeRIKdi3YwfmsGv1dcicrkJHQ=
+github.com/zeroroot-ai/sdk v0.198.1-0.20261006224941-389abf1c4089 h1:noLzftOAoorN1ZYk6S2i36hUUQ8AwMoCJZ0Y7/ccxYE=
+github.com/zeroroot-ai/sdk v0.198.1-0.20261006224941-389abf1c4089/go.mod h1:RGKgTNatLIAhrtDzi1OeRIKdi3YwfmsGv1dcicrkJHQ=
 github.com/zeroroot-ai/setec v0.121.0 h1:jHS5eFcRM3vLDhS3hkYAWLmmTK3wekyX+XgjFBY9KU8=
 github.com/zeroroot-ai/setec v0.121.0/go.mod h1:ynfxKiuNc8VN75a4yX/sAF/j3thHuRRdP5mKR86bJ50=
 github.com/zeroroot-ai/testfixtures v0.3.0 h1:c0pjwhGxFHhahZZjf9uDleeTYh2q0sIcTRLJFjbXXXk=
