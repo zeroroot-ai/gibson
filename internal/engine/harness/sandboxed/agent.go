@@ -426,7 +426,6 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 // and parses the terminal result line. A launched sandbox and a fork take
 // the same path.
 func (l *AgentLauncher) followRun(ctx context.Context, tenant, sandboxID, class string, runTimeout time.Duration, dispatch AgentDispatch) (AgentRunResult, error) {
-
 	// Register this run as a live instance so a read-only subscriber can follow
 	// its structured events (ADR-0116 S11). The instance is keyed by the CUSTOMER
 	// tenant on the dispatch. finish deregisters and

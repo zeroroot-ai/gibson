@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -39,7 +40,6 @@ type recordingLauncher struct {
 	forkRun   sandboxed.ForkRun
 	forkErr   error
 	forkIDs   []string
-	onForkErr error
 }
 
 func (r *recordingLauncher) ForkAgent(_ context.Context, source string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error) {
@@ -51,7 +51,7 @@ func (r *recordingLauncher) ForkAgent(_ context.Context, source string, spec san
 	}
 	if spec.OnForked != nil {
 		if err := spec.OnForked(sandboxed.ForkResponse{Snapshot: r.forkRun.Snapshot, SandboxIDs: r.forkIDs}); err != nil {
-			return sandboxed.ForkRun{}, err
+			return sandboxed.ForkRun{}, fmt.Errorf("on forked: %w", err)
 		}
 	}
 	return r.forkRun, nil

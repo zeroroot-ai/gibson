@@ -116,7 +116,7 @@ func (l *RedisForkLedger) RecordForks(ctx context.Context, sourceJTI, sourceSand
 }
 
 // ForkedSource implements ForkLedger.
-func (l *RedisForkLedger) ForkedSource(ctx context.Context, sourceJTI string) (string, bool, error) {
+func (l *RedisForkLedger) ForkedSource(ctx context.Context, sourceJTI string) (sourceSandboxID string, forked bool, err error) {
 	src, err := l.client.HGet(ctx, forkLedgerKey(sourceJTI), "source").Result()
 	if errors.Is(err, redis.Nil) {
 		return "", false, nil

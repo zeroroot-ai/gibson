@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -39,7 +40,10 @@ func (z *lazyForkLedger) BeginFork(ctx context.Context, jti, source string, ttl 
 	if l == nil {
 		return errNoForkStore
 	}
-	return l.BeginFork(ctx, jti, source, ttl)
+	if err := l.BeginFork(ctx, jti, source, ttl); err != nil {
+		return fmt.Errorf("fork ledger: %w", err)
+	}
+	return nil
 }
 
 func (z *lazyForkLedger) RecordForks(ctx context.Context, jti, source string, forks []harness.ForkDispatch, ttl time.Duration) error {
@@ -47,15 +51,22 @@ func (z *lazyForkLedger) RecordForks(ctx context.Context, jti, source string, fo
 	if l == nil {
 		return errNoForkStore
 	}
-	return l.RecordForks(ctx, jti, source, forks, ttl)
+	if err := l.RecordForks(ctx, jti, source, forks, ttl); err != nil {
+		return fmt.Errorf("fork ledger: %w", err)
+	}
+	return nil
 }
 
-func (z *lazyForkLedger) ForkedSource(ctx context.Context, jti string) (string, bool, error) {
+func (z *lazyForkLedger) ForkedSource(ctx context.Context, jti string) (source string, forked bool, err error) {
 	l := z.ledger()
 	if l == nil {
 		return "", false, nil
 	}
-	return l.ForkedSource(ctx, jti)
+	source, forked, err = l.ForkedSource(ctx, jti)
+	if err != nil {
+		return "", false, fmt.Errorf("fork ledger: %w", err)
+	}
+	return source, forked, nil
 }
 
 func (z *lazyForkLedger) Claim(ctx context.Context, jti, fork string) (harness.ForkDispatch, error) {
@@ -63,5 +74,9 @@ func (z *lazyForkLedger) Claim(ctx context.Context, jti, fork string) (harness.F
 	if l == nil {
 		return harness.ForkDispatch{}, errNoForkStore
 	}
-	return l.Claim(ctx, jti, fork)
+	d, err := l.Claim(ctx, jti, fork)
+	if err != nil {
+		return harness.ForkDispatch{}, fmt.Errorf("fork ledger: %w", err)
+	}
+	return d, nil
 }
