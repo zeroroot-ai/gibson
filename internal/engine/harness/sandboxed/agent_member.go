@@ -103,6 +103,10 @@ func (l *AgentLauncher) LaunchMember(ctx context.Context, spec AgentLaunchSpec, 
 		return MemberRun{}, types.NewError(types.SANDBOX_POLICY_DENIED,
 			"LaunchMember needs an image and a member command")
 	}
+	if dispatch.Tenant == "" {
+		return MemberRun{}, types.NewError(types.SANDBOX_POLICY_DENIED,
+			"LaunchMember needs the tenant of the dispatch")
+	}
 	class := spec.SandboxClass
 	if class == "" {
 		class = l.sandboxClass
@@ -122,7 +126,7 @@ func (l *AgentLauncher) LaunchMember(ctx context.Context, spec AgentLaunchSpec, 
 		Env:          l.buildEnv(ctx, spec, dispatch),
 		VCPU:         spec.VCPU,
 		Memory:       spec.Memory,
-		Tenant:       l.tenant,
+		Tenant:       dispatch.Tenant,
 		SandboxClass: class,
 		Timeout:      memberLifetime + killGrace,
 		Egress:       spec.Egress,
@@ -135,7 +139,7 @@ func (l *AgentLauncher) LaunchMember(ctx context.Context, spec AgentLaunchSpec, 
 	span.SetAttributes(attribute.String("setec.sandbox_id", launchResp.SandboxID))
 
 	if isoErr := VerifyIsolation(class, launchResp); isoErr != nil {
-		l.kill(ctx, launchResp.SandboxID)
+		l.kill(ctx, dispatch.Tenant, launchResp.SandboxID)
 		return MemberRun{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("member sandbox %s refused", launchResp.SandboxID), isoErr)
 	}
@@ -176,15 +180,15 @@ func (l *AgentLauncher) followMember(ctx context.Context, cancel context.CancelF
 
 	ringBuf := newRing(logBufferLimit)
 	terminal := make(chan struct{})
-	logsDone := l.streamAgentLogsAsync(ctx, sandboxID, ringBuf, publish, terminal)
+	logsDone := l.streamAgentLogsAsync(ctx, dispatch.Tenant, sandboxID, ringBuf, publish, terminal)
 
-	waitResp, waitErr := l.client.Wait(ctx, sandboxID)
+	waitResp, waitErr := l.client.Wait(ctx, dispatch.Tenant, sandboxID)
 	close(terminal)
 	<-logsDone
 
 	switch {
 	case waitErr != nil && errors.Is(waitErr, context.DeadlineExceeded):
-		l.kill(ctx, sandboxID)
+		l.kill(ctx, dispatch.Tenant, sandboxID)
 		l.logger.WarnContext(ctx, "bank member reached its sandbox lifetime; the reconciler replaces it",
 			"agent", dispatch.AgentName, "sandbox_id", sandboxID)
 	case waitErr != nil:
@@ -197,21 +201,25 @@ func (l *AgentLauncher) followMember(ctx context.Context, cancel context.CancelF
 	}
 }
 
-// StopSandbox ends a sandbox. The reconciler calls it for a drained member,
-// which has no jobs left, and for a dead one, whose process already stopped.
-func (l *AgentLauncher) StopSandbox(ctx context.Context, sandboxID string) error {
+// StopSandbox ends a sandbox of a tenant. The reconciler calls it for a
+// drained member, which has no jobs left, and for a dead one, whose process
+// already stopped.
+func (l *AgentLauncher) StopSandbox(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errors.New("sandboxed: StopSandbox: tenant is required")
+	}
 	if sandboxID == "" {
 		return errors.New("sandboxed: StopSandbox: sandbox id is required")
 	}
-	if err := l.client.Kill(ctx, sandboxID); err != nil {
+	if err := l.client.Kill(ctx, tenant, sandboxID); err != nil {
 		return fmt.Errorf("kill sandbox %s: %w", sandboxID, err)
 	}
 	return nil
 }
 
 // kill is the best-effort teardown of a sandbox that must not be used.
-func (l *AgentLauncher) kill(ctx context.Context, sandboxID string) {
+func (l *AgentLauncher) kill(ctx context.Context, tenant, sandboxID string) {
 	killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer killCancel()
-	_ = l.client.Kill(killCtx, sandboxID)
+	_ = l.client.Kill(killCtx, tenant, sandboxID)
 }

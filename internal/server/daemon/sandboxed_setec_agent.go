@@ -44,7 +44,6 @@ func NewSetecAgentLauncher(cfg config.SandboxConfig, tracer trace.Tracer, logger
 		Client:       client,
 		Tracer:       tracer,
 		Logger:       logger,
-		Tenant:       cfg.Setec.Tenant,
 		SandboxClass: cfg.Setec.AgentSandboxClass,
 		RunTimeout:   cfg.Setec.AgentRunTimeout,
 		Events:       events,

@@ -156,7 +156,7 @@ func memberEnv(b *bank.Bank, memberID, model string) map[string]string {
 }
 
 // StopMember ends a member's sandbox.
-func (l *memberLauncher) StopMember(ctx context.Context, _ string, m *bank.Member) error {
+func (l *memberLauncher) StopMember(ctx context.Context, tenantID string, m *bank.Member) error {
 	launcher, _, _, err := l.seams()
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func (l *memberLauncher) StopMember(ctx context.Context, _ string, m *bank.Membe
 	if m.SandboxID == "" {
 		return fmt.Errorf("member %s names no sandbox, so there is nothing to stop", m.ID)
 	}
-	if err := launcher.StopSandbox(ctx, m.SandboxID); err != nil {
+	if err := launcher.StopSandbox(ctx, tenantID, m.SandboxID); err != nil {
 		return fmt.Errorf("stop member %s: %w", m.ID, err)
 	}
 	return nil

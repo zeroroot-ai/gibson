@@ -114,7 +114,7 @@ type SessionClient interface {
 	// directly — no shell is interposed, so no quoting, globbing or
 	// redirection happens on the way. A caller that wants a shell asks for
 	// one: argv = ["sh", "-c", "..."].
-	Exec(ctx context.Context, sandboxID string, argv []string) (ExecStream, error)
+	Exec(ctx context.Context, tenant, sandboxID string, argv []string) (ExecStream, error)
 }
 
 // ErrSessionUnavailable is returned when session execution is not wired on
@@ -257,7 +257,7 @@ func (r *SessionRegistry) Exec(ctx context.Context, tenant, sessionID string, ar
 	if err != nil {
 		return nil, err
 	}
-	stream, err := r.client.Exec(ctx, sandboxID, argv)
+	stream, err := r.client.Exec(ctx, tenant, sandboxID, argv)
 	if err != nil {
 		return nil, fmt.Errorf("exec in session sandbox %s: %w", sandboxID, err)
 	}
@@ -298,7 +298,7 @@ func (r *SessionRegistry) Release(ctx context.Context, tenant, sessionID string)
 	if e.err != nil || e.sandboxID == "" {
 		return nil //nolint:nilerr // a failed launch left no sandbox; absent is success
 	}
-	if err := r.client.Kill(ctx, e.sandboxID); err != nil {
+	if err := r.client.Kill(ctx, tenant, e.sandboxID); err != nil {
 		return fmt.Errorf("kill session sandbox %s: %w", e.sandboxID, err)
 	}
 	return nil

@@ -38,13 +38,13 @@ type mockClient struct {
 func (m *mockClient) Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error) {
 	return m.launch(ctx, req)
 }
-func (m *mockClient) StreamLogs(ctx context.Context, id string) (LogStream, error) {
+func (m *mockClient) StreamLogs(ctx context.Context, _, id string) (LogStream, error) {
 	return m.streamLog(ctx, id)
 }
-func (m *mockClient) Wait(ctx context.Context, id string) (WaitResponse, error) {
+func (m *mockClient) Wait(ctx context.Context, _, id string) (WaitResponse, error) {
 	return m.wait(ctx, id)
 }
-func (m *mockClient) Kill(ctx context.Context, id string) error { return m.kill(ctx, id) }
+func (m *mockClient) Kill(ctx context.Context, _, id string) error { return m.kill(ctx, id) }
 
 // fixedLogs is a LogStream that emits a pre-built byte sequence once then EOF.
 type fixedLogs struct {
@@ -70,6 +70,7 @@ func (f *fixedLogs) Close() error { return nil }
 // carries a per-tool registry — the daemon's catalog refresher owns that
 // mapping live in ComponentRegistry.
 var helloSpec = ToolSpec{
+	Live:    LiveScope{Tenant: "acme"},
 	Image:   "ghcr.io/zeroroot-ai/gibson-tool-runner:hello-dev",
 	Command: []string{"/tool-runner"},
 	VCPU:    1,
@@ -80,7 +81,6 @@ func newExecutor(t *testing.T, c SandboxClient) *Executor {
 	t.Helper()
 	e, err := New(Config{
 		Client:       c,
-		Tenant:       "gibson-dev",
 		SandboxClass: "tool",
 		CallTimeout:  5 * time.Second,
 	})
@@ -322,7 +322,7 @@ func TestExecute_DiscoveryProcessor_FieldHundredFires(t *testing.T) {
 		kill: func(context.Context, string) error { return nil },
 	}
 	e, err := New(Config{
-		Client: client, Tenant: "t", SandboxClass: "tool",
+		Client: client, SandboxClass: "tool",
 		CallTimeout: 2 * time.Second, DiscoveryProcessor: fake,
 	})
 	if err != nil {
@@ -393,7 +393,7 @@ func TestExecute_DiscoveryProcessor_ErrorLoggedNotReturned(t *testing.T) {
 		kill: func(context.Context, string) error { return nil },
 	}
 	e, err := New(Config{
-		Client: client, Tenant: "t", SandboxClass: "tool",
+		Client: client, SandboxClass: "tool",
 		CallTimeout: 2 * time.Second, DiscoveryProcessor: fake,
 	})
 	if err != nil {
@@ -451,7 +451,7 @@ func TestExecute_DiscoveryProcessor_NoFieldHundredSkips(t *testing.T) {
 		kill: func(context.Context, string) error { return nil },
 	}
 	e, err := New(Config{
-		Client: client, Tenant: "t", SandboxClass: "tool",
+		Client: client, SandboxClass: "tool",
 		CallTimeout: 2 * time.Second, DiscoveryProcessor: fake,
 	})
 	if err != nil {
@@ -533,7 +533,7 @@ func liveExecutor(t *testing.T, pub EventPublisher) (*Executor, *mockClient) {
 		},
 		kill: func(context.Context, string) error { return nil },
 	}
-	e, err := New(Config{Client: c, Tenant: "setec-infra", SandboxClass: "tool", Events: pub})
+	e, err := New(Config{Client: c, SandboxClass: "tool", Events: pub})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -151,8 +151,8 @@ type AgentDispatch struct {
 	// TaskB64 is the base64 protojson of the agent.Task to run.
 	TaskB64 string
 	// Tenant is the CUSTOMER tenant that owns this mission run, derived from the
-	// caller's authenticated context. It is NOT the setec infra tenant on the
-	// launcher; the live-console registry keys instances by this value so a
+	// caller's authenticated context. setec gets it on each request
+	// (ADR-0142), and the live-console registry keys instances by it, so a
 	// subscriber only ever sees its own tenant's runs (ADR-0116 S11).
 	Tenant string
 	// AgentName is the dispatched agent's name, shown in the running-instance
@@ -274,15 +274,14 @@ type AgentLauncher struct {
 	client       SandboxClient
 	tracer       trace.Tracer
 	logger       *slog.Logger
-	tenant       string
 	sandboxClass string
 	runTimeout   time.Duration
 	events       EventPublisher
 	platformCA   string
 }
 
-// AgentLauncherConfig is the constructor input for AgentLauncher. Client and
-// Tenant are required. SandboxClass is the deployment-default class an
+// AgentLauncherConfig is the constructor input for AgentLauncher. Client is
+// required. Each launch names the customer tenant of its dispatch. SandboxClass is the deployment-default class an
 // AgentLaunchSpec may override; it is required so a launch can never inherit
 // the cluster-default isolation posture (ADR-0052). Tracer, Logger and
 // RunTimeout default when unset.
@@ -290,7 +289,6 @@ type AgentLauncherConfig struct {
 	Client       SandboxClient
 	Tracer       trace.Tracer
 	Logger       *slog.Logger
-	Tenant       string
 	SandboxClass string
 	RunTimeout   time.Duration
 	// Events is the live-console sink for running-agent structured events
@@ -311,9 +309,6 @@ func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("sandboxed.NewAgentLauncher: Client is required")
 	}
-	if cfg.Tenant == "" {
-		return nil, errors.New("sandboxed.NewAgentLauncher: Tenant is required")
-	}
 	if cfg.SandboxClass == "" {
 		return nil, errors.New("sandboxed.NewAgentLauncher: SandboxClass is required (ADR-0052: gibson must name the isolation posture, not inherit the cluster default)")
 	}
@@ -330,7 +325,6 @@ func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 		client:       cfg.Client,
 		tracer:       cfg.Tracer,
 		logger:       cfg.Logger,
-		tenant:       cfg.Tenant,
 		sandboxClass: cfg.SandboxClass,
 		runTimeout:   cfg.RunTimeout,
 		events:       cfg.Events,
@@ -350,11 +344,18 @@ func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, dispatch AgentDispatch) (AgentRunResult, error) {
 	ctx, span := l.tracer.Start(ctx, "harness.sandboxed.launch_agent")
 	defer span.End()
-	span.SetAttributes(attribute.String("setec.tenant", l.tenant))
+	span.SetAttributes(attribute.String("setec.tenant", dispatch.Tenant))
 
 	if spec.Image == "" {
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 			"agent launch: empty image in AgentLaunchSpec", nil)
+	}
+	// The customer tenant of the dispatch names the setec namespace
+	// (ADR-0142). A dispatch with no tenant does not launch.
+	tenant := dispatch.Tenant
+	if tenant == "" {
+		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
+			"agent launch: the dispatch names no tenant", nil)
 	}
 
 	// SandboxClass precedence: the manifest spec wins; the launcher's
@@ -382,7 +383,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 		Env:          env,
 		VCPU:         spec.VCPU,
 		Memory:       spec.Memory,
-		Tenant:       l.tenant,
+		Tenant:       tenant,
 		SandboxClass: class,
 		Timeout:      runTimeout + killGrace,
 		Egress:       spec.Egress,
@@ -401,7 +402,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	// isolation we could not confirm is killed, not used.
 	if isoErr := VerifyIsolation(class, launchResp); isoErr != nil {
 		killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		_ = l.client.Kill(killCtx, launchResp.SandboxID)
+		_ = l.client.Kill(killCtx, tenant, launchResp.SandboxID)
 		killCancel()
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent sandbox %s refused", launchResp.SandboxID), isoErr)
@@ -410,7 +411,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 
 	// Register this run as a live instance so a read-only subscriber can follow
 	// its structured events (ADR-0116 S11). The instance is keyed by the CUSTOMER
-	// tenant on the dispatch, not the setec infra tenant. finish deregisters and
+	// tenant on the dispatch. finish deregisters and
 	// closes every subscriber stream at the terminal state below. A nil publisher
 	// (live console disabled) yields no-op publish/finish.
 	var publish func([]byte)
@@ -437,11 +438,11 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	// terminal closes once Wait returns, so the log tee stops re-attaching to a
 	// run that has already ended.
 	terminal := make(chan struct{})
-	logsDone := l.streamAgentLogsAsync(waitCtx, launchResp.SandboxID, ringBuf, publish, terminal)
+	logsDone := l.streamAgentLogsAsync(waitCtx, tenant, launchResp.SandboxID, ringBuf, publish, terminal)
 
 	// Wait for the terminal phase.
 	waitCtx2, waitSpan := l.tracer.Start(waitCtx, "setec.wait")
-	waitResp, waitErr := l.client.Wait(waitCtx2, launchResp.SandboxID)
+	waitResp, waitErr := l.client.Wait(waitCtx2, tenant, launchResp.SandboxID)
 	waitSpan.End()
 	close(terminal)
 
@@ -452,7 +453,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 		if errors.Is(waitErr, context.DeadlineExceeded) {
 			// Kill so setec reaps the run rather than letting it keep going.
 			killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			_ = l.client.Kill(killCtx, launchResp.SandboxID)
+			_ = l.client.Kill(killCtx, tenant, launchResp.SandboxID)
 			killCancel()
 			return AgentRunResult{SandboxID: launchResp.SandboxID}, types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
 				"agent sandbox "+launchResp.SandboxID+" exceeded "+runTimeout.String()+" run timeout", waitErr)
@@ -527,13 +528,13 @@ const (
 // with backoff until the first chunk arrives, the context ends, or the run
 // reaches its terminal phase (terminal closes). After the first chunk a
 // recv error ends the tee, as a re-attach would replay what was seen.
-func (l *AgentLauncher) streamAgentLogsAsync(ctx context.Context, sandboxID string, rb *ring, publish func([]byte), terminal <-chan struct{}) <-chan struct{} {
+func (l *AgentLauncher) streamAgentLogsAsync(ctx context.Context, tenant, sandboxID string, rb *ring, publish func([]byte), terminal <-chan struct{}) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		backoff := logAttachBackoffStart
 		for attempt := 1; ; attempt++ {
-			attached, err := l.teeAgentLogs(ctx, sandboxID, rb, publish)
+			attached, err := l.teeAgentLogs(ctx, tenant, sandboxID, rb, publish)
 			if err == nil || attached {
 				return
 			}
@@ -568,8 +569,8 @@ func (l *AgentLauncher) streamAgentLogsAsync(ctx context.Context, sandboxID stri
 // teeAgentLogs runs one attach-and-drain of the sandbox log stream. It
 // reports whether at least one chunk arrived and the error that ended the
 // stream, nil for a clean end (EOF or context cancel).
-func (l *AgentLauncher) teeAgentLogs(ctx context.Context, sandboxID string, rb *ring, publish func([]byte)) (attached bool, err error) {
-	stream, err := l.client.StreamLogs(ctx, sandboxID)
+func (l *AgentLauncher) teeAgentLogs(ctx context.Context, tenant, sandboxID string, rb *ring, publish func([]byte)) (attached bool, err error) {
+	stream, err := l.client.StreamLogs(ctx, tenant, sandboxID)
 	if err != nil {
 		return false, fmt.Errorf("open agent sandbox log stream: %w", err)
 	}

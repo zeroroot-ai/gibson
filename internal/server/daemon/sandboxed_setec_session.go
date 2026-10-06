@@ -113,7 +113,7 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 // setec's Exec is bidirectional; the start message must be first and exactly
 // once. This sends it eagerly so a caller that never writes stdin still gets
 // the command running.
-func (c *setecClient) Exec(ctx context.Context, sandboxID string, argv []string) (sandboxed.ExecStream, error) {
+func (c *setecClient) Exec(ctx context.Context, _, sandboxID string, argv []string) (sandboxed.ExecStream, error) {
 	if sandboxID == "" {
 		return nil, errors.New("setec: exec needs a sandbox id")
 	}

@@ -37,11 +37,11 @@ func (c *memberClient) Launch(_ context.Context, req LaunchRequest) (LaunchRespo
 	return LaunchResponse{SandboxID: "sbx-member-1", Runtime: c.runtime}, nil
 }
 
-func (c *memberClient) StreamLogs(context.Context, string) (LogStream, error) {
+func (c *memberClient) StreamLogs(context.Context, string, string) (LogStream, error) {
 	return &fixedLogs{}, nil
 }
 
-func (c *memberClient) Wait(ctx context.Context, _ string) (WaitResponse, error) {
+func (c *memberClient) Wait(ctx context.Context, _, _ string) (WaitResponse, error) {
 	select {
 	case <-c.ended:
 		return WaitResponse{ExitCode: 0, Reason: "ended"}, nil
@@ -50,7 +50,7 @@ func (c *memberClient) Wait(ctx context.Context, _ string) (WaitResponse, error)
 	}
 }
 
-func (c *memberClient) Kill(_ context.Context, id string) error {
+func (c *memberClient) Kill(_ context.Context, _, id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.killed = append(c.killed, id)
@@ -89,7 +89,7 @@ func memberSpec() AgentLaunchSpec {
 func TestLaunchMember_ReturnsWhileTheSandboxRuns(t *testing.T) {
 	client := newMemberClient()
 	events := &finishCapture{registered: make(chan LiveInstance, 1), finished: make(chan struct{})}
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent", Events: events})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent", Events: events})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,18 +146,18 @@ func TestLaunchMember_ReturnsWhileTheSandboxRuns(t *testing.T) {
 // as a member, and a spec with no command has nothing to run.
 func TestLaunchMember_RefusesWhatIsNotAMember(t *testing.T) {
 	client := newMemberClient()
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	spec := memberSpec()
 	spec.Mode = "oneshot"
-	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Error("a one-shot spec must be refused")
 	}
 	spec = memberSpec()
 	spec.Command = nil
-	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchMember(context.Background(), spec, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Error("a spec with no command must be refused")
 	}
 	if len(client.launched) != 0 {
@@ -170,7 +170,7 @@ func TestLaunchMember_RefusesWhatIsNotAMember(t *testing.T) {
 func TestLaunchMember_KillsASandboxItCannotTrust(t *testing.T) {
 	client := newMemberClient()
 	client.runtime = "runc"
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestLaunchMember_KillsASandboxItCannotTrust(t *testing.T) {
 
 	client = newMemberClient()
 	client.launchErr = errors.New("setec is down")
-	l, _ = NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	l, _ = NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if _, err := l.LaunchMember(context.Background(), memberSpec(), AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("a launch failure must be reported")
 	}
@@ -193,18 +193,21 @@ func TestLaunchMember_KillsASandboxItCannotTrust(t *testing.T) {
 // empty id is refused rather than sent.
 func TestStopSandbox_KillsByID(t *testing.T) {
 	client := newMemberClient()
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := l.StopSandbox(context.Background(), "sbx-9"); err != nil {
+	if err := l.StopSandbox(context.Background(), "acme", "sbx-9"); err != nil {
 		t.Fatalf("StopSandbox: %v", err)
 	}
 	if killed := client.killedIDs(); len(killed) != 1 || killed[0] != "sbx-9" {
 		t.Fatalf("killed = %v", killed)
 	}
-	if err := l.StopSandbox(context.Background(), ""); err == nil {
+	if err := l.StopSandbox(context.Background(), "acme", ""); err == nil {
 		t.Error("an empty id must be refused")
+	}
+	if err := l.StopSandbox(context.Background(), "", "sbx-9"); err == nil {
+		t.Error("an empty tenant must be refused")
 	}
 }
 
@@ -212,7 +215,7 @@ func TestStopSandbox_KillsByID(t *testing.T) {
 // bound is killed by the follower so setec reaps it.
 func TestLaunchMember_FollowerEndsAtTheLifetime(t *testing.T) {
 	client := newMemberClient()
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, Tenant: "infra", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: client, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}

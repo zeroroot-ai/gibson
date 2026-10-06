@@ -38,6 +38,7 @@ func TestLaunchAgent_TheDispatchRunTimeoutBoundsTheSandbox(t *testing.T) {
 	l := newAgentLauncher(t, launchTimeoutProbe(&got)) // launcher default: 5s
 
 	dispatch := AgentDispatch{
+		Tenant:     "acme",
 		Grant:      "cg",
 		MissionID:  "m1",
 		RunTimeout: 8 * time.Hour,
@@ -57,7 +58,7 @@ func TestLaunchAgent_WithoutADispatchBoundTheLauncherDefaultStands(t *testing.T)
 	var got time.Duration
 	l := newAgentLauncher(t, launchTimeoutProbe(&got)) // launcher default: 5s
 
-	if _, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{Grant: "cg", MissionID: "m1"}); err != nil {
+	if _, err := l.LaunchAgent(context.Background(), agentSpec, AgentDispatch{Tenant: "acme", Grant: "cg", MissionID: "m1"}); err != nil {
 		t.Fatalf("LaunchAgent: %v", err)
 	}
 	if got > time.Minute {

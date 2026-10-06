@@ -60,7 +60,6 @@ func newAgentLauncherWithEvents(t *testing.T, c SandboxClient, pub EventPublishe
 	t.Helper()
 	l, err := NewAgentLauncher(AgentLauncherConfig{
 		Client:       c,
-		Tenant:       "gibson-infra-tenant",
 		SandboxClass: "agent",
 		RunTimeout:   5 * time.Second,
 		Events:       pub,
@@ -285,7 +284,7 @@ func TestLaunchAgent_LogTeeStopsRetryingWhenRunEnds(t *testing.T) {
 	})
 	l := newAgentLauncher(t, c)
 	start := time.Now()
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{}); err != nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{Tenant: "acme"}); err != nil {
 		t.Fatalf("LaunchAgent: %v", err)
 	}
 	if time.Since(start) > 3*time.Second {
@@ -314,12 +313,12 @@ func TestLaunchAgent_LogTeeStopsOnContextEnd(t *testing.T) {
 		},
 		kill: func(context.Context, string) error { return nil },
 	}
-	l, err := NewAgentLauncher(AgentLauncherConfig{Client: c, RunTimeout: 1200 * time.Millisecond, Tenant: "t", SandboxClass: "agent"})
+	l, err := NewAgentLauncher(AgentLauncherConfig{Client: c, RunTimeout: 1200 * time.Millisecond, SandboxClass: "agent"})
 	if err != nil {
 		t.Fatalf("NewAgentLauncher: %v", err)
 	}
 	start := time.Now()
-	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{}); err == nil {
+	if _, err := l.LaunchAgent(context.Background(), AgentLaunchSpec{Image: "img@sha256:abc"}, AgentDispatch{Tenant: "acme"}); err == nil {
 		t.Fatal("want the run timeout error")
 	}
 	if time.Since(start) > 4*time.Second {
