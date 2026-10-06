@@ -12,8 +12,6 @@ import (
 // downstream: who minted it, who it covers, what mission task it
 // applies to, and when it stops being valid.
 type Grant struct {
-	// Issuer is the iss claim — the daemon's CG authority URL.
-	Issuer string
 
 	// Subject is the sub claim — the agent / tool / plugin
 	// principal that presents the grant.
@@ -22,13 +20,6 @@ type Grant struct {
 	// Audience is the aud claim — the daemon identifier the grant
 	// is targeted at.
 	Audience []string
-
-	// IssuedAt is the iat claim, in UTC.
-	IssuedAt time.Time
-
-	// NotBefore is the nbf claim, in UTC. The grant is not valid
-	// before this instant.
-	NotBefore time.Time
 
 	// ExpiresAt is the exp claim, in UTC. The grant is not valid
 	// at or after this instant.

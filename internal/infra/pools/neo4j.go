@@ -27,10 +27,6 @@ type Neo4jOptions struct {
 	// MaxConnectionPoolSize caps the total number of connections in the
 	// driver pool. Defaults to the neo4j-go-driver default (100) when 0.
 	MaxConnectionPoolSize int
-
-	// IdlePingInterval is how often idle connections are pinged to keep
-	// them alive. Defaults to defaultNeo4jIdlePingInterval (30 s) when 0.
-	IdlePingInterval time.Duration
 }
 
 // validate returns a non-nil error if any required field is zero.

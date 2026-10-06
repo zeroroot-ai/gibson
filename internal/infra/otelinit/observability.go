@@ -109,9 +109,8 @@ type Option func(*config)
 
 // config holds options accumulated by Init before initialising providers.
 type config struct {
-	otlpEndpoint       string
-	logLevel           slog.Level
-	resourceAttributes []attribute
+	otlpEndpoint string
+	logLevel     slog.Level
 }
 
 type attribute struct{ key, value string }

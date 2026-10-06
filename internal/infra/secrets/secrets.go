@@ -207,8 +207,7 @@ type Closer interface {
 
 // circuitKey is the map key for per-(tenant, provider) circuit breakers.
 type circuitKey struct {
-	tenant   string
-	provider string
+	tenant string
 }
 
 // BrokerOptions configures NewBroker.
@@ -268,7 +267,7 @@ func NewBroker(opts BrokerOptions) (Broker, error) {
 
 // breaker returns the per-(tenant, provider) gobreaker, creating it lazily.
 func (b *circuitBroker) breaker(tenant string) *gobreaker.CircuitBreaker {
-	key := circuitKey{tenant: tenant, provider: b.providerName}
+	key := circuitKey{tenant: tenant}
 	if v, ok := b.breakers.Load(key); ok {
 		return v.(*gobreaker.CircuitBreaker)
 	}

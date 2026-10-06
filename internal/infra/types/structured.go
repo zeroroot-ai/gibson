@@ -170,9 +170,6 @@ type StructuredOutputUnmarshalError struct {
 
 	// UnderlyingError is the original unmarshal error
 	UnderlyingError error
-
-	// Schema is the JSON schema that was expected (if available)
-	Schema *JSONSchema
 }
 
 // Error implements the error interface

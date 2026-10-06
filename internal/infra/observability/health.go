@@ -5,7 +5,6 @@ package observability
 
 import (
 	"context"
-	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
@@ -21,7 +20,4 @@ type HealthChecker interface {
 // componentState tracks the current and previous health status of a component
 // to detect state transitions (healthy -> degraded, degraded -> healthy, etc.)
 type componentState struct {
-	checker       HealthChecker
-	lastStatus    types.HealthStatus
-	lastCheckedAt time.Time
 }

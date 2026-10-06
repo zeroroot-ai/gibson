@@ -91,27 +91,9 @@ func (c *Conn) Release() {
 // Callers that need ForEachTenant must use admin.AdminPool.Acquire directly
 // rather than going through Pool.Admin.
 type AdminConn struct {
-	// AdminPostgres is the admin pgxpool.Pool with CONNECT on all tenant_* DBs.
-	// May be nil if Postgres was not configured.
-	AdminPostgres *pgxpool.Pool
-
-	// AdminRedis is the admin *redis.Client pointing at db 0 (master index).
-	// May be nil if Redis was not configured.
-	AdminRedis *redis.Client
-
-	// AdminNeo4jDriver is the admin Neo4j driver with cross-DB privileges.
-	// May be nil if Neo4j was not configured.
-	AdminNeo4jDriver neo4j.DriverWithContext
-
-	// AdminVector is the admin vector-store driver.
-	// May be nil if the vector store was not configured.
-	AdminVector vectordb.Driver
 
 	// Subject is the FGA subject that acquired this AdminConn (e.g., "platform-svc").
 	Subject string
-
-	// RPCMethod is the gRPC method that triggered the acquisition (best-effort).
-	RPCMethod string
 
 	// release is the cleanup hook (may be nil for no-op release).
 	release func()
