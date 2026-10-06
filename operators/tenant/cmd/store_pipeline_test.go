@@ -4,10 +4,18 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	vaultadmin "github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/vault"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
+	dataplaneclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 func envOf(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
@@ -34,5 +42,33 @@ func TestBuildStorePipeline_AddsTheRedisSteps(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Postgres") {
 		t.Errorf("err = %v, want the missing Postgres named", err)
+	}
+}
+
+// nopVault is a Vault admin client that the constructors accept. The test
+// never provisions, so no method is called.
+type nopVault struct{ vaultadmin.AdminClient }
+
+// nopKEK is a KEK deriver that the constructors accept.
+type nopKEK struct{}
+
+func (nopKEK) DeriveTenantKEK(context.Context, auth.TenantID) ([]byte, error) { return nil, nil }
+
+// With every store, the builder returns the pipeline.
+func TestBuildStorePipeline_BuildsThePipeline(t *testing.T) {
+	scheme := runtime.NewScheme()
+	k8s := fake.NewClientBuilder().WithScheme(scheme).Build()
+	pg, err := dataplane.NewPostgresProvisioner(dataplane.PostgresConfig{AdminDSN: "postgres://nobody@127.0.0.1:1/postgres", KEKDeriver: nopKEK{}, VaultClient: nopVault{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n4j, err := dataplane.NewNeo4jProvisioner(dataplane.Neo4jConfig{K8sClient: dataplaneclient.New(k8s, "gibson"), VaultClient: nopVault{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := dataplane.PipelineConfig{Postgres: pg, Neo4j: n4j, K8sClient: k8s, Recorder: events.NewFakeRecorder(10)}
+	p, err := buildStorePipeline(cfg, envOf(map[string]string{"DATAPLANE_REDIS_ADDR": "127.0.0.1:1"}), nopVault{}, nopKEK{})
+	if err != nil || p == nil {
+		t.Fatalf("buildStorePipeline = %v, %v", p, err)
 	}
 }
