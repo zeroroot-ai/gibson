@@ -107,7 +107,7 @@ func TestWireOntologyDiscovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
-	callback := harness.NewCallbackManager(harness.CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	callback := harness.NewCallbackManager(harness.CallbackConfig{ServiceOptions: []harness.CallbackServiceOption{harness.WithEventBus(NewEventBusAdapter(NewEventBus(slog.Default())))}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	wireOntologyDiscovery(callback, registry)
 

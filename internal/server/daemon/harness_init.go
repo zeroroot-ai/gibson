@@ -371,11 +371,10 @@ func (d *daemonImpl) taskGrantVerifier() harness.TaskGrantVerifier {
 // targetFactsLookup is what a dispatched tool's target facts are read through,
 // read at harness creation rather than captured at factory construction.
 //
-// A nil store returns a nil INTERFACE and not a typed nil: the harness checks
-// `h.targetFacts == nil` to decide whether to look a target up at all, and a
-// typed nil wrapped in a non-nil interface passes that check and then panics on
-// the call. Returning d.targetStore unconditionally would do exactly that
-// whenever the daemon runs without Redis.
+// A nil store returns a nil INTERFACE and not a typed nil: the harness factory
+// refuses a nil lookup (gibson#681), and a typed nil wrapped in a non-nil
+// interface passes that check and then panics on the call. Start sets the
+// store before any dispatch, so the refusal shows a wiring defect.
 func (d *daemonImpl) targetFactsLookup() harness.TargetFactsLookup {
 	if d.targetStore == nil {
 		return nil

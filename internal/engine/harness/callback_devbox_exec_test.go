@@ -102,7 +102,7 @@ func devboxService(t *testing.T, client sandboxed.SessionClient) *HarnessCallbac
 				SandboxClass: "devbox", Idle: 3600_000_000_000,
 			})))
 	}
-	return NewHarnessCallbackService(logger, opts...)
+	return NewHarnessCallbackService(logger, append(opts, testEventBus())...)
 }
 
 func tenantCtx(t *testing.T) context.Context {

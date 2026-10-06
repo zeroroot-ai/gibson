@@ -63,7 +63,7 @@ func boundsService(sink ObservationSink) *HarnessCallbackService {
 		tenantID:  "tenant-a",
 		targetID:  types.NewID(),
 	})
-	return NewHarnessCallbackServiceWithRegistry(slog.Default(), registry, WithObservationSink(sink))
+	return NewHarnessCallbackServiceWithRegistry(slog.Default(), registry, WithObservationSink(sink), testEventBus())
 }
 
 // TestObserveRejectsOverSizePayload is the no-partial-state test for the
@@ -118,7 +118,7 @@ func TestObserveRejectsOverSizePayload(t *testing.T) {
 	})
 
 	t.Run("rejection does not depend on the sink being wired", func(t *testing.T) {
-		svc := NewHarnessCallbackService(slog.Default())
+		svc := NewHarnessCallbackService(slog.Default(), testEventBus())
 		resp, err := svc.Observe(auth.ContextWithTenantString(context.Background(), "tenant-a"), observeRequestOfSize(t, emitbounds.MaxPayloadBytes+1))
 		if err != nil {
 			t.Fatalf("Observe returned a transport error: %v", err)

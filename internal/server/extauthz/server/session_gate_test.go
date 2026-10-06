@@ -138,6 +138,7 @@ func buildServerForSessionGateTests(t *testing.T, rpcAllowed, sessionAllowed boo
 	checker := fga.NewChecker(mock, reg)
 	cc := fga.NewCachedChecker(checker, 0, 0)
 	return NewEnvoyAuthzServer(Config{
+		Component:  testComponentVerifier(t),
 		Cache:      cc,
 		Logger:     newTestLogger(),
 		OrgTenants: &fakeOrgTenantResolver{},
@@ -244,7 +245,7 @@ func TestSessionGate_MachinePrincipal_GateSkipped(t *testing.T) {
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
+	srv := NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
 	// Build a client-credentials (SA) request: client_id == sub marks it as
 	// SERVICE class, so the org->tenant resolver is never consulted for it.
@@ -345,7 +346,7 @@ func TestSessionGate_FGAError_Unavailable(t *testing.T) {
 	fgaErr := errors.New("fga: dial tcp: connection refused")
 	mock := &errorSessionFGA{rpcAllowed: true, sessionErr: fgaErr}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
+	srv := NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
 	req := makeSessionGateRequest(t, "/test.v1.S/UserOp", "u-1", "acme", time.Now().Unix())
 
@@ -377,7 +378,7 @@ func TestSessionGate_SelfMode_TenantFromOrg_GateFires(t *testing.T) {
 	}
 	mock := &sessionObjectRecorder{sessionAllowed: false}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
+	srv := NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 
 	// No x-gibson-tenant header — a person's tenant comes only from the org
 	// claim below, resolved to "acme" by fakeOrgTenantResolver's default
@@ -514,7 +515,7 @@ func buildServerForUserScopedGate(t *testing.T, mock fga.FGAClient) *EnvoyAuthzS
 		t.Fatalf("LoadRegistry: %v", err)
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	return NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
+	return NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 }
 
 // userScopedSessionFGA faithfully models the USER-SCOPED active_session tuple

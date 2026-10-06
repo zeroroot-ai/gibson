@@ -53,7 +53,7 @@ func (f *fakeJobDriver) CloseJob(_ context.Context, req *jobpb.CloseJobRequest) 
 func driverService(t *testing.T, driver JobDriver, jobs JobSurface, members MemberLookup) *HarnessCallbackService {
 	t.Helper()
 	return NewHarnessCallbackService(nil,
-		WithJobDriver(driver), WithJobSurface(jobs), WithMemberLookup(members))
+		WithJobDriver(driver), WithJobSurface(jobs), WithMemberLookup(members), testEventBus())
 }
 
 // notAMember is the lookup answer for a dispatched agent: its run backs no
@@ -223,7 +223,7 @@ func TestJobDriver_TheRefusalOfJobServicePassesThrough(t *testing.T) {
 
 // A daemon with no job service wired fails closed on each of the three.
 func TestJobDriver_NoJobServiceFailsClosed(t *testing.T) {
-	s := NewHarnessCallbackService(nil, WithMemberLookup(notAMember()))
+	s := NewHarnessCallbackService(nil, WithMemberLookup(notAMember()), testEventBus())
 
 	if _, err := s.OpenJob(memberCtx("acme"), &harnesspb.OpenJobRequest{Context: scorerInfo(), BankId: "bank-1"}); status.Code(err) != codes.FailedPrecondition {
 		t.Errorf("OpenJob err = %v; want FailedPrecondition", err)
@@ -281,7 +281,7 @@ func TestCloseJob_RefusalsBeforeTheMemberLookup(t *testing.T) {
 	})
 
 	t.Run("a daemon with no banks", func(t *testing.T) {
-		s := NewHarnessCallbackService(nil, WithJobDriver(&fakeJobDriver{}))
+		s := NewHarnessCallbackService(nil, WithJobDriver(&fakeJobDriver{}), testEventBus())
 		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{Context: scorerInfo(), JobId: "job-1"})
 		if status.Code(err) != codes.FailedPrecondition {
 			t.Fatalf("err = %v; want FailedPrecondition", err)

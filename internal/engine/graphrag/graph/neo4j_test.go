@@ -133,15 +133,22 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestNewNeo4jClient(t *testing.T) {
-	t.Run("valid config", func(t *testing.T) {
+	// A database that does not answer gives no client: no client exists
+	// without a connected driver (gibson#681).
+	t.Run("database does not answer", func(t *testing.T) {
 		config := DefaultConfig()
+		config.URI = "bolt://127.0.0.1:1"
 		config.Password = "from-configuration"
-		client, err := NewNeo4jClient(config)
+		ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+		defer cancel()
 
-		require.NoError(t, err)
-		require.NotNil(t, client)
-		assert.Equal(t, config, client.config)
-		assert.Nil(t, client.driver)
+		client, err := NewNeo4jClient(ctx, config)
+
+		require.Error(t, err)
+		assert.Nil(t, client)
+		var gibsonErr *types.GibsonError
+		require.ErrorAs(t, err, &gibsonErr)
+		assert.Equal(t, ErrCodeGraphConnectionFailed, gibsonErr.Code)
 	})
 
 	t.Run("invalid config", func(t *testing.T) {
@@ -151,7 +158,7 @@ func TestNewNeo4jClient(t *testing.T) {
 			Password: "password",
 		}
 
-		client, err := NewNeo4jClient(config)
+		client, err := NewNeo4jClient(t.Context(), config)
 
 		require.Error(t, err)
 		assert.Nil(t, client)

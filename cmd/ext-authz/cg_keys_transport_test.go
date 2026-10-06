@@ -160,20 +160,20 @@ func verifierAgainst(t *testing.T, keysURL string, clientSource *staticSource) *
 	return component
 }
 
-// TestCGVerifiers_DisabledTogether — with no keys URL there is no key endpoint,
-// so neither verifier is built. They are enabled and disabled as one because
-// they share the one fetch-by-kid path (ADR-0045).
-func TestCGVerifiers_DisabledTogether(t *testing.T) {
+// TestCGVerifiers_RequireTheKeysURL — with no keys URL there is no key
+// endpoint, and the server requires the component verifier (gibson#681). So
+// startup stops at the verifier wiring and names the missing variable.
+func TestCGVerifiers_RequireTheKeysURL(t *testing.T) {
 	ca := newTestCA(t, "zeroroot-platform-ca")
 	extAuthz := newStaticSource(t, ca, mustSPIFFEID(t, testExtAuthzSVID), ca)
 
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "")
 	dispatch, component, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz, testReplayStore(t))
-	if err != nil {
-		t.Fatalf("buildCGVerifiers with the keys URL unset: %v", err)
+	if err == nil {
+		t.Fatalf("buildCGVerifiers with the keys URL unset = %v, %v, nil; want an error", dispatch, component)
 	}
-	if dispatch != nil || component != nil {
-		t.Fatalf("verifiers built despite the keys URL being unset: dispatch=%v component=%v", dispatch, component)
+	if !strings.Contains(err.Error(), "EXT_AUTHZ_CGJWT_KEYS_URL") {
+		t.Fatalf("err = %v, want it to name the missing variable", err)
 	}
 }
 
@@ -352,23 +352,6 @@ func TestCGKeysClient_RequiresDaemonSVID(t *testing.T) {
 	}
 }
 
-// TestCGKeysClient_DisabledWhenKeysURLUnset — with no keys URL there is
-// nothing to fetch and both verifiers are off, so the transport is absent
-// rather than an error.
-func TestCGKeysClient_DisabledWhenKeysURLUnset(t *testing.T) {
-	ca := newTestCA(t, "zeroroot-platform-ca")
-	extAuthz := newStaticSource(t, ca, mustSPIFFEID(t, testExtAuthzSVID), ca)
-
-	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "")
-	client, err := buildCGKeysClient(discardLogger(), extAuthz, extAuthz)
-	if err != nil {
-		t.Fatalf("buildCGKeysClient with the keys URL unset: %v", err)
-	}
-	if client != nil {
-		t.Fatal("buildCGKeysClient returned a transport despite the keys URL being unset")
-	}
-}
-
 // TestVerifiersRefuseUnpinnedTransport — the wiring cannot silently fall back
 // to a default client if a future edit drops the plumbing: with the keys URL
 // set, both verifier constructors refuse a nil transport.
@@ -379,7 +362,7 @@ func TestVerifiersRefuseUnpinnedTransport(t *testing.T) {
 	if v, err := buildComponentVerifier(discardLogger(), nil, testReplayStore(t)); err == nil {
 		t.Fatalf("buildComponentVerifier = %v, nil — a nil transport must not be defaulted", v)
 	}
-	if v, err := buildCGVerifier(discardLogger(), nil); err == nil {
+	if v, err := buildCGVerifier(nil); err == nil {
 		t.Fatalf("buildCGVerifier = %v, nil — a nil transport must not be defaulted", v)
 	}
 }

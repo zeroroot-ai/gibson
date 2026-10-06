@@ -89,7 +89,7 @@ func callerCtx(t *testing.T, subject, tenant string) context.Context {
 func newCredentialTestService(t *testing.T, a authz.Authorizer, store CredentialStore) *HarnessCallbackService {
 	t.Helper()
 	logger, _ := newBufferLogger()
-	s := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry())
+	s := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry(), testEventBus())
 	s.componentAuthorizer = a
 	s.credentialStore = store
 	return s

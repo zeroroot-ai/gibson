@@ -314,6 +314,7 @@ func buildServerForTenantTests(t *testing.T, fgaAllowed bool) *EnvoyAuthzServer 
 	cachedChecker := fga.NewCachedChecker(checker, 0, 0)
 
 	return NewEnvoyAuthzServer(Config{
+		Component:  testComponentVerifier(t),
 		Cache:      cachedChecker,
 		Logger:     newTestLogger(),
 		OrgTenants: &fakeOrgTenantResolver{},
@@ -333,6 +334,7 @@ func buildServerForOrgTenantTests(t *testing.T, fgaAllowed bool, resolver OrgTen
 	checker := fga.NewChecker(mock, reg)
 	cachedChecker := fga.NewCachedChecker(checker, 0, 0)
 	return NewEnvoyAuthzServer(Config{
+		Component:  testComponentVerifier(t),
 		Cache:      cachedChecker,
 		Logger:     newTestLogger(),
 		OrgTenants: resolver,
@@ -635,7 +637,25 @@ func TestNewEnvoyAuthzServer_PanicsWithoutOrgTenants(t *testing.T) {
 			t.Fatal("expected NewEnvoyAuthzServer to panic with a nil OrgTenants")
 		}
 	}()
-	NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger()})
+	NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, Logger: newTestLogger()})
+}
+
+// TestNewEnvoyAuthzServer_PanicsWithoutComponent — the component verifier is
+// required (gibson#681). Every install sets EXT_AUTHZ_CGJWT_KEYS_URL, so a
+// server without the verifier is a wiring defect that must fail at start.
+func TestNewEnvoyAuthzServer_PanicsWithoutComponent(t *testing.T) {
+	t.Parallel()
+	reg, err := fga.LoadRegistry([]byte(tenantTestYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cc := fga.NewCachedChecker(fga.NewChecker(&tenantMockFGA{allowed: true}, reg), 0, 0)
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected NewEnvoyAuthzServer to panic with a nil Component")
+		}
+	}()
+	NewEnvoyAuthzServer(Config{Cache: cc, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 }
 
 // ---------------------------------------------------------------------------
@@ -670,6 +690,7 @@ func buildServerWithIssuerAllowlist(t *testing.T, fgaAllowed bool, allowlist []s
 	cachedChecker := fga.NewCachedChecker(checker, 0, 0)
 
 	return NewEnvoyAuthzServer(Config{
+		Component:       testComponentVerifier(t),
 		Cache:           cachedChecker,
 		Logger:          newTestLogger(),
 		IssuerAllowlist: allowlist,
@@ -950,7 +971,7 @@ func buildGrantServer(t *testing.T, fgaAllowed bool) (*EnvoyAuthzServer, ed25519
 	}
 	mock := &grantTestFGA{allowed: fgaAllowed}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
-	srv := NewEnvoyAuthzServer(Config{Cache: cc, CGJWT: verifier, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
+	srv := NewEnvoyAuthzServer(Config{Component: testComponentVerifier(t), Cache: cc, CGJWT: verifier, Logger: newTestLogger(), OrgTenants: &fakeOrgTenantResolver{}})
 	return srv, priv, mock
 }
 
@@ -1160,6 +1181,7 @@ func TestNewEnvoyAuthzServer_HumanClientIDs(t *testing.T) {
 	}
 	cc := fga.NewCachedChecker(fga.NewChecker(&sessionAwareFGA{rpcAllowed: true, sessionAllowed: false}, reg), 0, 0)
 	srv := NewEnvoyAuthzServer(Config{
+		Component:      testComponentVerifier(t),
 		Cache:          cc,
 		Logger:         newTestLogger(),
 		HumanClientIDs: []string{" 334268812578094081@gibson ", "", "  "},

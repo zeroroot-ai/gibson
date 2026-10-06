@@ -20,107 +20,105 @@ type Neo4jClient struct {
 	driver neo4j.DriverWithContext
 }
 
-// NewNeo4jClient creates a new Neo4j client with the given configuration.
-// The client must be connected via Connect() before use.
-func NewNeo4jClient(config GraphClientConfig) (*Neo4jClient, error) {
+// NewNeo4jClient connects to the Neo4j database of config and returns the
+// client. It retries with exponential backoff. A client never exists without
+// its driver, so each method can use the driver without a check (gibson#681).
+func NewNeo4jClient(ctx context.Context, config GraphClientConfig) (*Neo4jClient, error) {
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
-
-	return &Neo4jClient{
-		config: config,
-	}, nil
+	driver, err := connectNeo4j(ctx, config)
+	if err != nil {
+		return nil, err
+	}
+	return &Neo4jClient{config: config, driver: driver}, nil
 }
 
-// Driver returns the underlying neo4j.DriverWithContext after Connect has
-// succeeded, or nil before connection is established. Exposed so callers that
-// need direct driver access (e.g., orchestrator graph intelligence) can build
-// query helpers without re-establishing a connection.
+// Driver returns the underlying neo4j.DriverWithContext. Exposed so callers
+// that need direct driver access (e.g., orchestrator graph intelligence) can
+// build query helpers without re-establishing a connection.
 func (c *Neo4jClient) Driver() neo4j.DriverWithContext {
 	return c.driver
 }
 
-// Connect establishes a connection to the Neo4j database.
-// Uses exponential backoff for connection retries.
+// Connect checks that the database answers. NewNeo4jClient already
+// connected the driver.
 func (c *Neo4jClient) Connect(ctx context.Context) error {
+	if err := c.driver.VerifyConnectivity(ctx); err != nil {
+		return types.WrapError(ErrCodeGraphConnectionFailed, "database does not answer", err)
+	}
+	return nil
+}
+
+// connectNeo4j makes a driver and verifies its connectivity. It uses
+// exponential backoff for connection retries.
+func connectNeo4j(ctx context.Context, cfg GraphClientConfig) (neo4j.DriverWithContext, error) {
 	// Configure authentication
-	auth := neo4j.BasicAuth(c.config.Username, c.config.Password, "")
+	auth := neo4j.BasicAuth(cfg.Username, cfg.Password, "")
 
 	// Configure driver options
 	driverConfig := func(config *neo4j.Config) {
-		config.MaxConnectionPoolSize = c.config.MaxConnectionPoolSize
-		config.ConnectionAcquisitionTimeout = c.config.ConnectionTimeout
-		config.MaxTransactionRetryTime = c.config.MaxTransactionRetryTime
+		config.MaxConnectionPoolSize = cfg.MaxConnectionPoolSize
+		config.ConnectionAcquisitionTimeout = cfg.ConnectionTimeout
+		config.MaxTransactionRetryTime = cfg.MaxTransactionRetryTime
 		// Note: Encryption is controlled by URI scheme (bolt:// vs bolt+s://)
 		// TLS configuration can be set via config.TlsConfig if needed
 	}
 
-	// Create driver with exponential backoff
-	var driver neo4j.DriverWithContext
 	var lastErr error
 	maxRetries := 5
 	baseDelay := 100 * time.Millisecond
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		var err error
-		driver, err = neo4j.NewDriverWithContext(c.config.URI, auth, driverConfig)
+		driver, err := neo4j.NewDriverWithContext(cfg.URI, auth, driverConfig)
 		if err == nil {
 			// Verify connectivity
 			err = driver.VerifyConnectivity(ctx)
 			if err == nil {
-				c.driver = driver
-				return nil
+				return driver, nil
 			}
+			_ = driver.Close(ctx)
 		}
 
 		lastErr = err
 
 		// Check if context is cancelled
 		if ctx.Err() != nil {
-			return types.WrapError(ErrCodeGraphConnectionFailed,
+			return nil, types.WrapError(ErrCodeGraphConnectionFailed,
 				"connection attempt cancelled", ctx.Err())
 		}
 
 		// Calculate backoff delay: baseDelay * 2^attempt
 		delay := baseDelay * time.Duration(math.Pow(2, float64(attempt)))
-		if delay > c.config.ConnectionTimeout {
-			delay = c.config.ConnectionTimeout
+		if delay > cfg.ConnectionTimeout {
+			delay = cfg.ConnectionTimeout
 		}
 
 		select {
 		case <-time.After(delay):
 			continue
 		case <-ctx.Done():
-			return types.WrapError(ErrCodeGraphConnectionFailed,
+			return nil, types.WrapError(ErrCodeGraphConnectionFailed,
 				"connection attempt cancelled", ctx.Err())
 		}
 	}
 
-	return types.WrapError(ErrCodeGraphConnectionFailed,
+	return nil, types.WrapError(ErrCodeGraphConnectionFailed,
 		fmt.Sprintf("failed to connect after %d attempts", maxRetries), lastErr)
 }
 
-// Close releases all resources and closes the database connection.
+// Close releases all resources and closes the database connection. A
+// method called after Close returns the error of the closed driver.
 func (c *Neo4jClient) Close(ctx context.Context) error {
-	if c.driver == nil {
-		return nil
-	}
-
 	if err := c.driver.Close(ctx); err != nil {
 		return types.WrapError(ErrCodeGraphConnectionClosed,
 			"failed to close driver", err)
 	}
-
-	c.driver = nil
 	return nil
 }
 
 // Health returns the current health status of the Neo4j connection.
 func (c *Neo4jClient) Health(ctx context.Context) types.HealthStatus {
-	if c.driver == nil {
-		return types.Unhealthy("driver not initialized")
-	}
-
 	// Verify connectivity with a timeout
 	healthCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -135,11 +133,6 @@ func (c *Neo4jClient) Health(ctx context.Context) types.HealthStatus {
 // Query runs a Cypher query in a read transaction on a read-mode session. A
 // write statement fails: Query never opens a write transaction (ADR-0112).
 func (c *Neo4jClient) Query(ctx context.Context, cypher string, params map[string]any) (QueryResult, error) {
-	if c.driver == nil {
-		return QueryResult{}, types.NewError(ErrCodeGraphConnectionClosed,
-			"driver not connected")
-	}
-
 	startTime := time.Now()
 
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
@@ -188,9 +181,6 @@ func (c *Neo4jClient) Query(ctx context.Context, cypher string, params map[strin
 // returns. Use this for platform-level reads that are not tied to a specific
 // tenant database (see GraphClient.ExecuteRead for the full contract).
 func (c *Neo4jClient) ExecuteRead(ctx context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-	if c.driver == nil {
-		return nil, types.NewError(ErrCodeGraphConnectionClosed, "driver not connected")
-	}
 	session := c.driver.NewSession(ctx, neo4j.SessionConfig{
 		DatabaseName: c.config.Database,
 		AccessMode:   neo4j.AccessModeRead,

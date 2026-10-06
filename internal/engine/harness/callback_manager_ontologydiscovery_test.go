@@ -22,7 +22,7 @@ import (
 // ProposeOntologyExtension has no engine on any daemon that only calls
 // CallbackManager (every real daemon) and always answers Unavailable.
 func TestCallbackManager_SetOntologyDiscovery(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -60,7 +60,7 @@ func TestCallbackManager_SetOntologyDiscovery_NilServerIsNoOp(_ *testing.T) {
 // a request-path method that assumes a manager built through
 // NewCallbackManager (ADR-0003).
 func TestCallbackManager_OntologyDiscovery(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 	if got := m.OntologyDiscovery(); got != nil {
 		t.Fatalf("OntologyDiscovery() before SetOntologyDiscovery = %v, want nil", got)
 	}

@@ -20,7 +20,7 @@ import (
 func delegateService(t *testing.T, jobs *fakeJobs, allow bool) (*HarnessCallbackService, *recordingAuthorizer) {
 	t.Helper()
 	az := &recordingAuthorizer{allow: allow}
-	s := NewHarnessCallbackService(nil, WithJobSurface(jobs))
+	s := NewHarnessCallbackService(nil, WithJobSurface(jobs), testEventBus())
 	s.componentAuthorizer = az
 	return s, az
 }
@@ -121,7 +121,7 @@ func TestDelegateToAgent_TargetsAreRefusedByName(t *testing.T) {
 		t.Errorf("unknown job: %v", err)
 	}
 
-	noAuthz := NewHarnessCallbackService(nil, WithJobSurface(jobs))
+	noAuthz := NewHarnessCallbackService(nil, WithJobSurface(jobs), testEventBus())
 	if _, err := noAuthz.DelegateToAgent(ok, bankTarget("fix", "bank-1")); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("no authorizer: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestDelegateToAgent_StoreFailuresAreReported(t *testing.T) {
 	}
 
 	az := &recordingAuthorizer{allow: true, err: boom}
-	s = NewHarnessCallbackService(nil, WithJobSurface(newFakeJobs()))
+	s = NewHarnessCallbackService(nil, WithJobSurface(newFakeJobs()), testEventBus())
 	s.componentAuthorizer = az
 	if _, err := s.DelegateToAgent(ok, bankTarget("fix", "bank-1")); status.Code(err) != codes.Unavailable {
 		t.Errorf("an authorization outage: %v", err)

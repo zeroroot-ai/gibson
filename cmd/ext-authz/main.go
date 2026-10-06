@@ -480,7 +480,7 @@ func buildCGVerifiers(
 	if err != nil {
 		return nil, nil, err
 	}
-	dispatch, err := buildCGVerifier(log, keysClient)
+	dispatch, err := buildCGVerifier(keysClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dispatch capability-grant verifier: %w", err)
 	}
@@ -492,9 +492,9 @@ func buildCGVerifiers(
 }
 
 // buildCGKeysClient builds the HTTP client both CG-JWT verifiers use to fetch
-// per-kid key documents from the daemon (EXT_AUTHZ_CGJWT_KEYS_URL). It returns
-// (nil, nil) when the keys URL is unset — both verifiers are then disabled and
-// there is nothing to fetch.
+// per-kid key documents from the daemon (EXT_AUTHZ_CGJWT_KEYS_URL). The keys
+// URL is required: the component verifier is a required dependency of the
+// server (gibson#681), and the chart sets the URL on every install.
 //
 // The transport is SPIFFE mTLS pinned to EXT_AUTHZ_DAEMON_SVID, identical to
 // the authz-registry fetch in loadRegistryBytes, and for the identical reason:
@@ -513,7 +513,8 @@ func buildCGVerifiers(
 func buildCGKeysClient(log *slog.Logger, svid x509svid.Source, bundle x509bundle.Source) (*http.Client, error) {
 	keysURL := strings.TrimSpace(os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL"))
 	if keysURL == "" {
-		return nil, nil
+		return nil, errors.New("EXT_AUTHZ_CGJWT_KEYS_URL required (the daemon's per-kid key endpoint, " +
+			"https://<daemon>:8086/capabilitygrant/v1/keys)")
 	}
 	parsed, err := url.Parse(keysURL)
 	if err != nil {
@@ -604,20 +605,13 @@ func daemonMTLSClient(svid x509svid.Source, bundle x509bundle.Source, timeout ti
 // same endpoint the component verifier uses, because ADR-0045 collapses key
 // resolution to one fetch-by-kid path. There is no JWKS-wide document.
 //
-// keysClient is the SVID-pinned transport from buildCGKeysClient; it is nil
-// exactly when the keys URL is unset, which is the same condition that
-// disables this verifier.
-func buildCGVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.Verifier, error) {
+// keysClient is the SVID-pinned transport from buildCGKeysClient, which
+// refuses an unset keys URL.
+func buildCGVerifier(keysClient *http.Client) (*cgjwt.Verifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
-	if keysURL == "" {
-		log.Warn("EXT_AUTHZ_CGJWT_KEYS_URL not set — capability-grant short-circuit disabled")
-		// Return a no-op verifier; the server treats nil as "no
-		// short-circuit possible" and falls through to FGA.
-		return nil, nil
-	}
 	issuer := os.Getenv("EXT_AUTHZ_CGJWT_ISSUER")
 	if issuer == "" {
-		return nil, errors.New("EXT_AUTHZ_CGJWT_ISSUER required when the CG keys URL is set")
+		return nil, errors.New("EXT_AUTHZ_CGJWT_ISSUER required")
 	}
 	audience := envOr("EXT_AUTHZ_CGJWT_AUDIENCE", "gibson-daemon")
 	ttl := durationOr("EXT_AUTHZ_CGJWT_TTL", time.Hour)
@@ -633,8 +627,8 @@ func buildCGVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.Verifier
 // buildComponentVerifier wires the verifier for components' self-signed per-RPC
 // CG-JWTs (ADR-0045). EXT_AUTHZ_CGJWT_KEYS_URL is the daemon per-kid key
 // endpoint base on the daemon's SPIFFE-mTLS listener, e.g.
-// "https://gibson:8086/capabilitygrant/v1/keys". When unset, the component
-// path is disabled (a component token alone is unauthenticated).
+// "https://gibson:8086/capabilitygrant/v1/keys". buildCGKeysClient refuses an
+// unset URL, so the component path is always on.
 //
 // keysClient is the SVID-pinned transport from buildCGKeysClient. The
 // descriptor it fetches is what binds a component kid to an FGA principal, so
@@ -659,10 +653,6 @@ func buildComponentVerifier(
 	replay cgjwt.ReplayStore,
 ) (*cgjwt.ComponentVerifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
-	if keysURL == "" {
-		log.Warn("EXT_AUTHZ_CGJWT_KEYS_URL not set — component CG-JWT auth disabled")
-		return nil, nil
-	}
 	audiences := []string{capabilitygrant.AudienceGibsonDaemon}
 	ttl := durationOr("EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL", 5*time.Minute)
 	log.Info("component CG-JWT auth enabled",

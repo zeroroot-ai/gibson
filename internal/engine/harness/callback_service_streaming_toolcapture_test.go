@@ -118,6 +118,7 @@ func newStreamCaptureSvc(t *testing.T, captured *[]capturedTool, toolErr error) 
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			*captured = append(*captured, capturedTool{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 	contextInfo := &harnesspb.ContextInfo{
 		TaskId: "task-123", AgentName: "test-agent", MissionId: "test-mission-123",

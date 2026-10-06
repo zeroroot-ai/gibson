@@ -61,6 +61,7 @@ func newObserveService(t *testing.T, h *observeMockHarness, got *[]observeCaptur
 			*got = append(*got, observeCapture{attr: attr, req: req})
 			return nil
 		}),
+		testEventBus(),
 	)
 }
 
