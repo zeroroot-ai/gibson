@@ -65,3 +65,37 @@ func TestDaemonSPIFFETrustDomainComesFromConfig(t *testing.T) {
 		}
 	}
 }
+
+// The daemon reads the Envoy SVID from the config, else from the env, and
+// refuses to start without a valid Envoy SVID in the configured trust domain.
+func TestSPIFFEStartIdentity(t *testing.T) {
+	const envoy = "spiffe://example.org/ns/gibson/sa/envoy"
+	noEnv := func(string) string { return "" }
+	envoyEnv := func(k string) string {
+		if k == "GIBSON_SPIFFE_ENVOY_ID" {
+			return envoy
+		}
+		return ""
+	}
+
+	id, td, err := spiffeStartIdentity(&config.SPIFFEConfig{EnvoyID: envoy, TrustDomain: " example.org "}, noEnv)
+	if err != nil || id != envoy || td != "example.org" {
+		t.Fatalf("config: id=%q td=%q err=%v", id, td, err)
+	}
+	if id, _, err = spiffeStartIdentity(&config.SPIFFEConfig{TrustDomain: "example.org"}, envoyEnv); err != nil || id != envoy {
+		t.Fatalf("env: id=%q err=%v", id, err)
+	}
+	for name, c := range map[string]struct {
+		cfg    *config.SPIFFEConfig
+		getenv func(string) string
+	}{
+		"no envoy id":        {&config.SPIFFEConfig{TrustDomain: "example.org"}, noEnv},
+		"invalid envoy id":   {&config.SPIFFEConfig{EnvoyID: "not a spiffe id", TrustDomain: "example.org"}, noEnv},
+		"no trust domain":    {&config.SPIFFEConfig{EnvoyID: envoy}, noEnv},
+		"other trust domain": {&config.SPIFFEConfig{EnvoyID: envoy, TrustDomain: "other.example"}, noEnv},
+	} {
+		if _, _, err := spiffeStartIdentity(c.cfg, c.getenv); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
