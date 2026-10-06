@@ -209,7 +209,7 @@ The platform protos moved in-tree when `platform-sdk` was dissolved. They are no
 
 The daemon's FGA Check uses the canonical Zitadel **numeric `sub`** forwarded from ext-authz as `X-Gibson-Identity-Subject`. The fga-init Helm Job seeds platform_operator tuples keyed by that numeric form, sourced from the chart-managed `gibson-sa-identity-map` ConfigMap. No translation in the daemon hot path.
 
-The package `internal/platform/auth/identityresolver` provides a numeric→readable lookup. It is for **log enrichment only** — never call it from a code path that reaches an allow/deny decision. The mounted source path is `/etc/gibson/sa-identity-map` (one file per SA, kubelet's native ConfigMap projection); the resolver also accepts a single JSON file for compatibility with the dashboard's init-container output.
+The daemon has no numeric-to-readable lookup for this `sub`. Logs carry the numeric form.
 
 Spec: `canonical-service-identity`.
 
