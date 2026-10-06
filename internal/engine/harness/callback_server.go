@@ -146,6 +146,13 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		}
 	}
 
+	// The fork ledger is required (ADR-0169, D74): the grant of a forked
+	// source must be refused outside its sandbox on every callback, so a
+	// server with no ledger does not start.
+	if s.service.forkLedger == nil {
+		return errors.New("callback server has no fork ledger; wire harness.WithForkLedger")
+	}
+
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {

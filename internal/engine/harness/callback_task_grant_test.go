@@ -124,7 +124,7 @@ func TestTaskGrantFromMetadata(t *testing.T) {
 // grant that names this tenant and this mission reaches the handler untouched.
 func TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
-	unary, _ := taskGrantScopeInterceptors(getter(v), nil, slog.Default())
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), slog.Default())
 	called := false
 	resp, err := unary(grantCtx("acme", compactJWT("JWT")), observeReq("m-1"),
 		&grpc.UnaryServerInfo{FullMethod: scopeMethod},
@@ -138,7 +138,7 @@ func TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches(t *te
 // is returned as-is, not turned into an authorization refusal.
 func TestTaskGrantScopeInterceptors_StreamPropagatesARecvError(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
-	_, stream := taskGrantScopeInterceptors(getter(v), nil, nil)
+	_, stream := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	want := errors.New("connection reset")
 	err := stream(nil, &failingRecvStream{ctx: grantCtx("acme", compactJWT("JWT")), err: want},
 		&grpc.StreamServerInfo{FullMethod: scopeMethod},
@@ -262,7 +262,7 @@ func TestCheckTaskGrantScope_RequestWithoutContextSkipsMissionCheck(t *testing.T
 
 func TestTaskGrantScopeInterceptors_UnaryDeniesBeforeTheHandler(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-A")}
-	unary, _ := taskGrantScopeInterceptors(getter(v), nil, nil)
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	called := false
 	_, err := unary(grantCtx("acme", compactJWT("JWT")), observeReq("m-B"),
 		&grpc.UnaryServerInfo{FullMethod: scopeMethod},
@@ -295,7 +295,7 @@ func (s *recvStream) RecvMsg(m any) error {
 
 func TestTaskGrantScopeInterceptors_StreamChecksEachMessage(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-A")}
-	_, stream := taskGrantScopeInterceptors(getter(v), nil, nil)
+	_, stream := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	var got error
 	err := stream(nil, &recvStream{ctx: grantCtx("acme", compactJWT("JWT")), msg: observeReq("m-B")},
 		&grpc.StreamServerInfo{FullMethod: scopeMethod},

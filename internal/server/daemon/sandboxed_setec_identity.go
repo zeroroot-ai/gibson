@@ -24,13 +24,8 @@ import (
 var _ harness.SandboxIdentityVerifier = (*setecClient)(nil)
 
 // NewSetecIdentityVerifier dials setec and returns the check of the sandbox
-// identity, or (nil, nil) when the sandbox subsystem is disabled. With no
-// verifier the callback service refuses each call that needs the verified
-// sandbox of the caller.
+// identity. The setec address is required (#979), so each daemon has one.
 func NewSetecIdentityVerifier(cfg config.SandboxConfig) (harness.SandboxIdentityVerifier, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
 	c, err := NewSetecSandboxClient(cfg)
 	if err != nil {
 		return nil, err

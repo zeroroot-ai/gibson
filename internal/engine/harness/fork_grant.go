@@ -60,7 +60,8 @@ func WithSandboxIdentityVerifier(v SandboxIdentityVerifier) CallbackServiceOptio
 }
 
 // forkGuard holds what the callback interceptors need to refuse the grant
-// of a forked source outside the source sandbox.
+// of a forked source outside the source sandbox. Its ledger is required:
+// CallbackServer.Start refuses to run without one.
 type forkGuard struct {
 	ledger   ForkLedger
 	identity SandboxIdentityVerifier
@@ -75,7 +76,7 @@ type forkGuard struct {
 // accepts the source grant from a fork, and it checks the identity itself.
 // A grant with no fork, or a request with no task grant, passes unchanged.
 func checkForkGrant(ctx context.Context, guard *forkGuard, method string, logger *slog.Logger) error {
-	if guard == nil || guard.ledger == nil || method == claimForkMethod {
+	if method == claimForkMethod {
 		return nil
 	}
 	claims, ok := TaskGrantClaimsFromContext(ctx)

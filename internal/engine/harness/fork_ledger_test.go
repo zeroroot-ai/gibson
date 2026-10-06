@@ -196,9 +196,6 @@ func TestCheckForkGrant(t *testing.T) {
 	if err := checkForkGrant(context.Background(), guard, method, nil); err != nil {
 		t.Errorf("no task grant: %v", err)
 	}
-	if err := checkForkGrant(forkCtx("jti-src", "", "fork-1"), nil, method, nil); err != nil {
-		t.Errorf("no ledger: %v", err)
-	}
 
 	// A fork with its own token is not the source.
 	requireForkUnclaimed(t, "fork token", checkForkGrant(forkCtx("jti-src", "tok-fork-1", "fork-1"), guard, method, nil))
@@ -264,4 +261,11 @@ func TestRedisForkLedger_PendingFork(t *testing.T) {
 	if err := l.BeginFork(ctx, "", "s", time.Hour); err == nil {
 		t.Fatal("BeginFork with no grant id must fail")
 	}
+}
+
+// testForkGuard is a fork guard over an empty ledger: no grant is forked.
+func testForkGuard(t *testing.T) *forkGuard {
+	t.Helper()
+	l, _ := newForkLedger(t)
+	return &forkGuard{ledger: l}
 }
