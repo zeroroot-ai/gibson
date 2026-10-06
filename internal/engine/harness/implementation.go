@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"log/slog"
 	"sync"
 	"time"
+
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
@@ -19,7 +20,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/targetbind"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	sdkqueue "github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -37,11 +37,9 @@ import (
 	"github.com/zeroroot-ai/sdk/secretenv"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 	"go.opentelemetry.io/otel/attribute"
-	otelcodes "go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // defaultMaxDelegationDepth is the default cap on the number of nested DelegateToAgent
@@ -142,7 +140,7 @@ type DefaultAgentHarness struct {
 
 	// workQueue provides pull-based work dispatch over Redis Streams.
 	// When non-nil, remote components discovered via componentRegistry (those without
-	// a direct grpc_endpoint in their metadata) receive work items via this queue
+	// an address of their own) receive work items via this queue
 	// rather than a direct gRPC call. Nil means use the existing path.
 	workQueue component.WorkQueue
 	// callbackManager registers the child harness for a queue-dispatched agent
@@ -727,60 +725,17 @@ func (h *DefaultAgentHarness) Stream(ctx context.Context, slot string, messages 
 // Tool Execution Methods
 // ────────────────────────────────────────────────────────────────────────────
 
-// getToolMetadata extracts metadata (including FileDescriptorSet) from a tool.
-// Currently only the remote gRPC tool client carries metadata; in-process
-// tools return nil.
-func getToolMetadata(t tool.Tool) map[string]string {
-	if grpcClient, ok := t.(*component.GRPCToolClient); ok {
-		if md := grpcClient.Metadata(); md != nil {
-			return md
-		}
-	}
-	return nil
-}
-
 // CallToolProto executes a tool using proto message input/output.
 //
-// Dispatch order:
-//  1. Sandboxed manifest tool (ADR-0117) — when the tool has a kind:tool
-//     catalog manifest, gate on the calling tenant's can_execute and dispatch
-//     it into a Setec microVM via gRPC. This is the one sandboxed-tool path.
-//  2. ComponentRegistry (Redis-backed, tenant-scoped) — if configured:
-//     a. Component has grpc_endpoint metadata → call directly via registryAdapter
-//     b. No grpc_endpoint → enqueue work via WorkQueue and wait for result
-//  3. RegistryAdapter fallback — used when ComponentRegistry is not configured
-//     or returned no instances (e.g. tools registered directly without
-//     ComponentService).
+// A tool has two dispatch paths (ADR-0110):
+//  1. The sandbox: a tool with a kind:tool catalog manifest runs in a setec
+//     sandbox (ADR-0117).
+//  2. The work queue: a tool that registered through ComponentService pulls
+//     its work.
 //
-// All dispatch paths route to out-of-process tool implementations. Tools are
-// never compiled into the Gibson daemon.
-
-// mergeToolResponse copies the tool's output message into the caller-supplied
-// response message. proto.Merge requires dst and src to share the same message
-// descriptor *instance*. A tool adapter cannot guarantee that: a
-// dynamicpb.Message rebuilt from a re-parsed FileDescriptorSet is name-equal to
-// the response type (so the type-name check upstream passes) but is a distinct
-// descriptor instance, and proto.Merge then panics with "descriptor mismatch".
-// When the descriptors differ, the two messages are still wire-compatible by
-// construction (identical field numbers/types), so bridge them through the wire
-// format instead of panicking. Spec: gibson#963.
-func mergeToolResponse(response, outputMsg proto.Message) error {
-	if response.ProtoReflect().Descriptor() == outputMsg.ProtoReflect().Descriptor() {
-		proto.Merge(response, outputMsg)
-		return nil
-	}
-	wire, err := proto.Marshal(outputMsg)
-	if err != nil {
-		return fmt.Errorf("marshal tool output: %w", err)
-	}
-	if err := proto.Unmarshal(wire, response); err != nil {
-		return fmt.Errorf("unmarshal into response: %w", err)
-	}
-	return nil
-}
-
+// A tool with neither gets ErrHarnessToolNotFound. Tools are never compiled
+// into the Gibson daemon, and the daemon dials no address that a tool reports.
 func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
-	callStart := time.Now()
 	ctx, span := h.tracer.Start(ctx, "harness.CallToolProto")
 	defer span.End()
 
@@ -822,396 +777,48 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 		return h.sandboxedExecutor.ExecuteWithSpec(ctx, name, spec, request, response)
 	}
 
-	var t tool.Tool
+	// ── Path 2: the work queue ───────────────────────────────────────────────
+	// A tool that a developer or a customer runs registered through
+	// ComponentService. It pulls its work from the work queue. The daemon
+	// dials no address that a tool reports, and no third path exists
+	// (ADR-0110).
+	notFound := types.NewError(ErrHarnessToolNotFound,
+		fmt.Sprintf("tool %q has no sandbox manifest and no work queue instance", name))
+	if h.componentRegistry == nil {
+		return notFound
+	}
+	// authorizeToolDispatch refused a call with no tenant before this point.
+	tenant := auth.TenantStringFromContext(ctx)
+	instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
+	if discErr != nil {
+		return types.WrapError(ErrHarnessToolExecutionFailed,
+			fmt.Sprintf("tool %q: component registry discovery failed", name), discErr)
+	}
+	if len(instances) == 0 {
+		return notFound
+	}
+	info := instances[0] // Use first live instance; load-balancing is a future concern.
 
-	// ── Path 2: ComponentRegistry (Redis-backed, tenant-scoped) ──────────────
-	if h.componentRegistry != nil {
-		tenant := auth.TenantStringFromContext(ctx)
-		if tenant == "" {
-			h.logger.Warn("component registry configured but no tenant in context, skipping registry lookup",
-				"tool", name)
-		} else {
-			instances, discErr := h.componentRegistry.Discover(ctx, tenant, "tool", name)
-			if discErr != nil {
-				h.logger.Warn("component registry discovery failed, falling back to registry adapter",
-					"tool", name,
-					"tenant", tenant,
-					"error", discErr)
-			} else if len(instances) > 0 {
-				info := instances[0] // Use first live instance; load-balancing is a future concern.
-
-				// Dispatch-policy gate (ADR-0110 / gibson#994). We reach here
-				// only when the tool has no SANDBOXED entry (the top block
-				// returned !found), so there is no sandboxed dispatch available.
-				// The gate reads where the instance runs and, for code in the
-				// platform's cluster, the trust the catalog states. What the
-				// instance reported about itself is not an input.
-				placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
-				if dispatchpolicy.Decide(placement, trust, false) == dispatchpolicy.Deny {
-					return types.WrapError(types.SANDBOX_POLICY_DENIED,
-						fmt.Sprintf("tool %q runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", name), nil)
-				}
-
-				// Determine routing: does this instance expose a direct gRPC endpoint?
-				grpcEndpoint := info.Metadata["grpc_endpoint"]
-				if grpcEndpoint != "" && h.registryAdapter != nil {
-					// In-cluster tool with a direct gRPC endpoint — use the existing gRPC pool path.
-					h.logger.Debug("component registry: routing tool call via direct gRPC endpoint",
-						"tool", name,
-						"tenant", tenant,
-						"endpoint", grpcEndpoint,
-						"instance_id", info.InstanceID,
-						"discovery", "component_registry")
-
-					remoteTool, adapterErr := h.registryAdapter.DiscoverTool(ctx, name)
-					if adapterErr != nil {
-						h.logger.Warn("component registry directed to gRPC but adapter discovery failed, falling through",
-							"tool", name,
-							"endpoint", grpcEndpoint,
-							"error", adapterErr)
-						// Fall through to the legacy adapter path below.
-					} else {
-						t = remoteTool
-						goto executeProto
-					}
-				} else if h.workQueue != nil {
-					// Remote component registered via ComponentService — dispatch via WorkQueue.
-					h.logger.Debug("component registry: routing tool call via work queue",
-						"tool", name,
-						"tenant", tenant,
-						"instance_id", info.InstanceID,
-						"discovery", "component_registry")
-
-					return h.callToolViaWorkQueue(ctx, tenant, name, request, response, info)
-				} else {
-					h.logger.Warn("component registry found tool but no work queue configured, falling back",
-						"tool", name,
-						"tenant", tenant,
-						"instance_id", info.InstanceID)
-					// Fall through to legacy adapter path.
-				}
-			}
-		}
+	// Dispatch gate (ADR-0110). We reach here only when the tool has no
+	// sandbox manifest, so there is no sandboxed dispatch available. The gate
+	// reads where the instance runs and, for code in the platform's cluster,
+	// the trust the catalog states. What the instance reported about itself
+	// is not an input.
+	placement, trust := component.DispatchStanding(info.Attested, authz.KindTool, name)
+	if dispatchpolicy.Decide(placement, trust, false) == dispatchpolicy.Deny {
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("tool %q runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", name), nil)
 	}
 
-	// ── Path 3: RegistryAdapter fallback ─────────────────────────────────────
-	// Reached when ComponentRegistry is not configured, returned no instances,
-	// or had no work queue available. RegistryAdapter is Redis-backed and covers
-	// tools that registered directly (e.g. in-cluster gRPC tools with grpc_endpoint
-	// but no ComponentService registration).
-	{
-		if h.registryAdapter != nil {
-			h.logger.Debug("tool not found locally or via component registry, attempting registry adapter discovery",
-				"tool", name,
-				"discovery", "registry_adapter")
-
-			remoteTool, discErr := h.registryAdapter.DiscoverTool(ctx, name)
-			if discErr != nil {
-				h.logger.Error("tool not found (component registry or registry adapter)",
-					"tool", name,
-					"discovery_error", discErr)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("tool not found: %s (%v)", name, discErr),
-					discErr,
-				)
-			}
-
-			t = remoteTool
-			h.logger.Debug("discovered tool via registry adapter",
-				"tool", name,
-				"version", remoteTool.Version(),
-				"discovery", "registry_adapter")
-		} else {
-			h.logger.Error("tool not found and no discovery path available", "tool", name)
-			return types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("tool not found: %s (no discovery path)", name),
-				nil,
-			)
-		}
+	if h.workQueue == nil {
+		return notFound
 	}
 
-executeProto:
-
-	// Check if tool supports proto execution by type assertion
-	// The SDK tool.Tool interface has proto methods, but internal tool.Tool does not
-	type protoTool interface {
-		InputMessageType() string
-		OutputMessageType() string
-		ExecuteProto(ctx context.Context, input proto.Message) (proto.Message, error)
-	}
-
-	protoT, ok := t.(protoTool)
-	if !ok {
-		// Tool doesn't support proto - this is an error
-		h.logger.Error("tool does not support proto execution",
-			"tool", name)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool %s does not support proto execution (use CallTool instead)", name),
-			nil,
-		)
-	}
-
-	inputType := protoT.InputMessageType()
-	outputType := protoT.OutputMessageType()
-
-	if inputType == "" || outputType == "" {
-		// Tool doesn't support proto - this is an error
-		h.logger.Error("tool does not support proto execution",
-			"tool", name,
-			"input_type", inputType,
-			"output_type", outputType)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool %s does not support proto execution (use CallTool instead)", name),
-			nil,
-		)
-	}
-
-	// Verify message types match
-	expectedInputType := string(request.ProtoReflect().Descriptor().FullName())
-	expectedOutputType := string(response.ProtoReflect().Descriptor().FullName())
-
-	// Note: inputType and outputType from tool might be in format "package.Message"
-	// while proto reflection gives "package.Message" - they should match
-	//
-	// However, agents using the SDK structpb fallback will send google.protobuf.Struct
-	// when the tool expects a specific proto type. In this case, we need to convert
-	// the Struct to the tool's expected type using the ProtoResolver.
-	actualRequest := request
-	if inputType != expectedInputType {
-		// Check if the request is a structpb.Struct that needs conversion
-		if structInput, ok := request.(*structpb.Struct); ok && expectedInputType == "google.protobuf.Struct" {
-			h.logger.Debug("converting structpb.Struct input to typed message",
-				"tool", name,
-				"target_type", inputType)
-
-			// Get tool metadata for resolver
-			toolMetadata := getToolMetadata(t)
-			if toolMetadata == nil {
-				h.logger.Error("tool has no metadata for input conversion",
-					"tool", name,
-					"expected", inputType)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("cannot convert input: tool %s has no metadata", name),
-					nil,
-				)
-			}
-
-			// Convert Struct to JSON
-			marshaler := protojson.MarshalOptions{
-				UseProtoNames:   true,
-				EmitUnpopulated: false,
-			}
-			jsonBytes, err := marshaler.Marshal(structInput)
-			if err != nil {
-				h.logger.Error("failed to marshal struct input",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert input: %v", err),
-					err,
-				)
-			}
-
-			// Log the JSON being converted (INFO level for debugging)
-			h.logger.Info("converting structpb.Struct to typed message via resolver",
-				"tool", name,
-				"target_type", inputType,
-				"json", string(jsonBytes))
-
-			// Use resolver to unmarshal JSON into typed proto message
-			dynamicMsg, err := h.resolver.UnmarshalProtoJSON(ctx, inputType, jsonBytes, toolMetadata)
-			if err != nil {
-				h.logger.Error("failed to unmarshal input to typed message via resolver",
-					"tool", name,
-					"target_type", inputType,
-					"json", string(jsonBytes),
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert input to %s: %v", inputType, err),
-					err,
-				)
-			}
-
-			h.logger.Debug("successfully converted structpb.Struct to typed message via resolver",
-				"tool", name,
-				"target_type", inputType)
-
-			// Use the converted message
-			actualRequest = dynamicMsg
-		} else {
-			h.logger.Error("input message type mismatch",
-				"tool", name,
-				"expected", inputType,
-				"provided", expectedInputType)
-			return types.WrapError(
-				ErrHarnessToolExecutionFailed,
-				fmt.Sprintf("input message type mismatch: tool expects %s, got %s", inputType, expectedInputType),
-				nil,
-			)
-		}
-	}
-
-	// Determine if tool is local or remote for logging
-	isRemote := false
-	if h.registryAdapter != nil {
-		// Check if tool implements registry gRPC client (remote)
-		if _, ok := t.(*component.GRPCToolClient); ok {
-			isRemote = true
-		}
-	}
-
-	// Emit tool call event
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventToolCall, "tool call", ToolCallEventData{
-			ToolName: name,
-		})
-	}
-
-	// Execute tool with proto messages (using actualRequest which may be converted)
-	outputMsg, err := protoT.ExecuteProto(ctx, actualRequest)
-
-	if err != nil {
-		h.logger.Error("tool execution failed",
-			"tool", name,
-			"remote", isRemote,
-			"error", err)
-
-		// Record failure metrics
-		h.metrics.RecordCounter("tools.executions", 1, map[string]string{
-			"tool":   name,
-			"remote": fmt.Sprintf("%t", isRemote),
-			"status": "failed",
-			"mode":   "proto",
-		})
-
-		durationMs := time.Since(callStart).Milliseconds()
-		span.SetAttributes(
-			attribute.Int64("tool.duration_ms", durationMs),
-			attribute.String("tool.status", "error"),
-		)
-		span.RecordError(err)
-		span.SetStatus(otelcodes.Error, "tool execution failed")
-
-		// Emit tool result event (failure)
-		if h.eventLogger != nil {
-			h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
-				ToolName: name,
-				Success:  false,
-				Error:    err.Error(),
-			})
-		}
-
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("tool execution failed: %s", name),
-			err,
-		)
-	}
-
-	// Verify output type matches - or convert if necessary
-	actualOutputType := string(outputMsg.ProtoReflect().Descriptor().FullName())
-	if actualOutputType != expectedOutputType {
-		// Check if the output is a structpb.Struct that needs conversion to typed message
-		// This happens when tools return generic JSON via subprocess execution
-		if structOutput, ok := outputMsg.(*structpb.Struct); ok && actualOutputType == "google.protobuf.Struct" {
-			h.logger.Debug("converting structpb.Struct output to typed message",
-				"tool", name,
-				"target_type", expectedOutputType)
-
-			// Convert Struct to JSON, then unmarshal into the response message
-			marshaler := protojson.MarshalOptions{
-				UseProtoNames:   true,
-				EmitUnpopulated: false,
-			}
-			jsonBytes, err := marshaler.Marshal(structOutput)
-			if err != nil {
-				h.logger.Error("failed to marshal struct output",
-					"tool", name,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert tool output: %v", err),
-					err,
-				)
-			}
-
-			// Unmarshal JSON into the typed response message
-			unmarshaler := protojson.UnmarshalOptions{
-				DiscardUnknown: true,
-			}
-			if err := unmarshaler.Unmarshal(jsonBytes, response); err != nil {
-				h.logger.Error("failed to unmarshal output to typed message",
-					"tool", name,
-					"target_type", expectedOutputType,
-					"error", err)
-				return types.WrapError(
-					ErrHarnessToolExecutionFailed,
-					fmt.Sprintf("failed to convert tool output to %s: %v", expectedOutputType, err),
-					err,
-				)
-			}
-
-			// Skip the normal merge since we've directly populated the response
-			goto metricsSuccess
-		}
-
-		h.logger.Error("output message type mismatch",
-			"tool", name,
-			"expected", expectedOutputType,
-			"actual", actualOutputType)
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("output message type mismatch: expected %s, got %s", expectedOutputType, actualOutputType),
-			nil,
-		)
-	}
-
-	// Merge the tool output into the caller-supplied response message.
-	if err := mergeToolResponse(response, outputMsg); err != nil {
-		return types.WrapError(
-			ErrHarnessToolExecutionFailed,
-			fmt.Sprintf("failed to merge tool output %s into response: %v", expectedOutputType, err),
-			nil,
-		)
-	}
-
-metricsSuccess:
-
-	// Record success metrics
-	h.metrics.RecordCounter("tools.executions", 1, map[string]string{
-		"tool":   name,
-		"remote": fmt.Sprintf("%t", isRemote),
-		"status": "success",
-		"mode":   "proto",
-	})
-
-	h.logger.Debug("tool execution successful with proto",
+	h.logger.Debug("routing tool call via work queue",
 		"tool", name,
-		"remote", isRemote)
-
-	durationMs := time.Since(callStart).Milliseconds()
-	span.SetAttributes(
-		attribute.Int64("tool.duration_ms", durationMs),
-		attribute.String("tool.status", "success"),
-	)
-	span.SetStatus(otelcodes.Ok, "tool execution successful")
-
-	// Emit tool result event (success)
-	if h.eventLogger != nil {
-		h.eventLogger.Event(ctx, EventToolResult, "tool result", ToolResultEventData{
-			ToolName: name,
-			Success:  true,
-		})
-	}
-
-	return nil
+		"tenant", tenant,
+		"instance_id", info.InstanceID)
+	return h.callToolViaWorkQueue(ctx, tenant, name, request, response, info)
 }
 
 // workQueueWaitTimeout returns the configured wait timeout or the 5-minute default.
@@ -1228,7 +835,6 @@ func (h *DefaultAgentHarness) workQueueWaitTimeout() time.Duration {
 //
 // This path is taken when:
 //   - A component is found in the ComponentRegistry (Redis), AND
-//   - The component has no grpc_endpoint metadata (pull-based remote component), AND
 //   - A WorkQueue is configured on the harness.
 //
 // remoteAgentInstance resolves a live kind=agent component for this tenant.

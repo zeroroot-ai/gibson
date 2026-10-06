@@ -25,10 +25,11 @@ import (
 // on the in-process / direct-gRPC path.
 type gateFakeRegistry struct {
 	tenantInstances []component.ComponentInfo
+	discoverErr     error
 }
 
 func (r *gateFakeRegistry) Discover(_ context.Context, _, _, _ string) ([]component.ComponentInfo, error) {
-	return r.tenantInstances, nil
+	return r.tenantInstances, r.discoverErr
 }
 func (r *gateFakeRegistry) DiscoverSystemOnly(_ context.Context, _, _ string) ([]component.ComponentInfo, error) {
 	return nil, nil

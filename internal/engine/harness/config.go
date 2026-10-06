@@ -207,7 +207,7 @@ type HarnessConfig struct {
 
 	// WorkQueue provides pull-based work dispatch over Redis Streams.
 	// When non-nil, remote components found in ComponentRegistry (those without a
-	// direct grpc_endpoint in their metadata) receive work items via this queue.
+	// address of their own) receive work items via this queue.
 	// Nil means use the existing direct-gRPC path only.
 	// Optional.
 	WorkQueue component.WorkQueue

@@ -139,6 +139,30 @@ func scanToolCallSinkCompleteness(filename string, src []byte) ([]toolCallSinkVi
 	return violations, nil
 }
 
+// toolCallSinkRecordedHandler is the unary callback handler. It records each
+// call that it dispatches. A second handler that hands its whole call to it,
+// on the service receiver, needs no capture call of its own.
+const toolCallSinkRecordedHandler = "CallToolProto"
+
+// toolCallSinkIsRecordedDelegation reports whether call is
+// `<receiver>.CallToolProto(...)` on the receiver of fd. A call of the same
+// method name on a different value, for example on the harness, is the
+// dispatch itself and records nothing.
+func toolCallSinkIsRecordedDelegation(fd *ast.FuncDecl, call *ast.CallExpr) bool {
+	if fd.Recv == nil || len(fd.Recv.List) == 0 || len(fd.Recv.List[0].Names) == 0 {
+		return false
+	}
+	if fd.Name.Name == toolCallSinkRecordedHandler {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != toolCallSinkRecordedHandler {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	return ok && x.Name == fd.Recv.List[0].Names[0].Name
+}
+
 // scanToolCallSinkFunc applies the completeness rule to one function.
 func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, fd *ast.FuncDecl) []toolCallSinkViolation {
 	var (
@@ -158,7 +182,7 @@ func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, 
 
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc {
+			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc || toolCallSinkIsRecordedDelegation(fd, node) {
 				capturePositions = append(capturePositions, node.Pos())
 			}
 		case *ast.CompositeLit:
@@ -478,5 +502,53 @@ func TestToolCallSinkCompleteness_AllowsExplicitlyExemptedReturn(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("an explicitly exempted return must not violate the guard: %v", violations)
+	}
+}
+
+// toolCallSinkDelegationFixture is a second handler that hands its call to
+// the recorded unary handler on the service receiver. It needs no capture
+// call of its own.
+const toolCallSinkDelegationFixture = `package harness
+
+func (s *HarnessCallbackService) delegatingStream() error {
+	resp, err := s.CallToolProto(ctx, req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(&harnesspb.CallToolProtoStreamResponse{
+		Payload: &harnesspb.CallToolProtoStreamResponse_Complete{Complete: &harnesspb.ToolCompleteEvent{OutputJson: resp.GetOutputJson()}},
+	})
+}
+`
+
+// toolCallSinkHarnessDispatchFixture calls CallToolProto on the harness, which
+// is the dispatch itself and records nothing. The guard must still fail.
+const toolCallSinkHarnessDispatchFixture = `package harness
+
+func (s *HarnessCallbackService) dispatchingStream() error {
+	err := harness.CallToolProto(ctx, name, in, out)
+	return stream.Send(&harnesspb.CallToolProtoStreamResponse{
+		Payload: &harnesspb.CallToolProtoStreamResponse_Complete{Complete: &harnesspb.ToolCompleteEvent{}},
+	})
+}
+`
+
+func TestToolCallSinkCompleteness_AllowsDelegationToTheRecordedHandler(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("delegation_fixture.go", []byte(toolCallSinkDelegationFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("a hand-off to the recorded handler needs no capture, got: %v", violations)
+	}
+}
+
+func TestToolCallSinkCompleteness_CatchesADispatchOnTheHarness(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("harness_dispatch_fixture.go", []byte(toolCallSinkHarnessDispatchFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("a dispatch on the harness records nothing; want 1 violation, got %d: %v", len(violations), violations)
 	}
 }
