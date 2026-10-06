@@ -18,7 +18,7 @@ ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 COPY go.mod go.sum ./
 # Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
-# setec, testfixtures) is public and served by proxy.golang.org, which also
+# setec) is public and served by proxy.golang.org, which also
 # holds every version go.sum pins. No GOPRIVATE, no git credential: the build
 # runs the same for a stranger as for CI (scripts/check-airgap-build.sh).
 # Go cache mounts. The builder image keeps its build cache at

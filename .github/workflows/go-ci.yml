@@ -113,7 +113,7 @@ concurrency:
 permissions:
   contents: read
 
-# Module fetch. Every first-party module (sdk, ast-checks, setec, testfixtures)
+# Module fetch. Every first-party module (sdk, ast-checks, setec)
 # is public, so `go` resolves them through the public proxy and checksum
 # database like any other dependency. No GOPRIVATE, no git credential.
 env:
