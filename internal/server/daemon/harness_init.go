@@ -228,7 +228,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			d.agentLauncher = launcher
 			// The bank reconciler suspends an idle member and resumes it
 			// when jobs wait (ADR-0119, gibson#809).
-			suspender, susErr := NewSetecSuspender(d.config.Sandbox)
+			suspender, susErr := newSetecSuspender(d.config.Sandbox)
 			if susErr != nil {
 				return nil, fmt.Errorf("setec suspender: %w", susErr)
 			}

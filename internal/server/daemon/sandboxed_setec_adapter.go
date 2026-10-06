@@ -406,9 +406,9 @@ func (c *setecClient) Resume(ctx context.Context, tenant, sandboxID string) erro
 	return nil
 }
 
-// NewSetecSuspender builds the setec client that suspends and resumes bank
+// newSetecSuspender builds the setec client that suspends and resumes bank
 // members (gibson#809).
-func NewSetecSuspender(cfg config.SandboxConfig) (sandboxSuspender, error) {
+func newSetecSuspender(cfg config.SandboxConfig) (sandboxSuspender, error) {
 	c, err := NewSetecSandboxClient(cfg)
 	if err != nil {
 		return nil, err
