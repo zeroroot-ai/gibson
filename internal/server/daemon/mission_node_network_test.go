@@ -154,3 +154,15 @@ func TestDispatchJob_AgentVerifierTaskCarriesTheNetworkScopeOfTheNode(t *testing
 		t.Fatalf("verifier tasks = %+v, want one task with no scope", tasks)
 	}
 }
+
+// A run whose target did not resolve has no address to scope a node to, so
+// the projection refuses it.
+func TestMissionDefinitionToProjected_RefusesATargetThatDidNotResolve(t *testing.T) {
+	_, _, err := missionDefinitionToProjected(&missionpb.MissionDefinition{
+		Id:    "m1",
+		Nodes: map[string]*missionpb.MissionNode{"a": agentNode("recon")},
+	}, "", []forEachTarget{{ID: "11111111-1111-1111-1111-111111111111"}})
+	if err == nil {
+		t.Fatal("a target that did not resolve must fail the projection")
+	}
+}
