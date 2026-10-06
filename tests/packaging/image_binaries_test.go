@@ -31,6 +31,10 @@ import (
 // the Dockerfile fails this test; shipping it in the Dockerfile without listing
 // it here also fails, so the list cannot silently drift out of date.
 var shippedTools = []string{
+	// belief-trainer (gibson#614): fits the belief artifacts of one tenant.
+	// The CronJob that the tenant operator creates for each tenant (gibson#616)
+	// runs it.
+	"belief-trainer",
 	// bootstrap-tenant-owner (gibson#1103): a one-time, operator-credentialed
 	// one-shot that creates the owner human identity for a tenant on a
 	// closed-registration self-hosted install. No Helm hook — invoked ad hoc
