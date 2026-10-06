@@ -25,7 +25,7 @@ func TestWireExecutor_DrivesGoalMissionEndToEnd(t *testing.T) {
 		{Complete: &DeciderComplete{Outcome: "success", Reason: "done"}},
 	}}
 
-	reg := NewRegistry(context.Background(), ExecutorSystems()...)
+	reg := NewRegistry(context.Background(), memStoreFactory(), ExecutorSystems()...)
 	disp := &goroutineDispatcher{}
 	beliefRegistry := liveBeliefRegistry(t)
 	reg.OnEngine(func(e *Engine) {
@@ -66,7 +66,7 @@ func TestWireExecutor_DrivesGoalMissionEndToEnd(t *testing.T) {
 }
 
 func TestWireExecutor_NoGoalMissionCompletesMechanically(t *testing.T) {
-	reg := NewRegistry(context.Background(), ExecutorSystems()...)
+	reg := NewRegistry(context.Background(), memStoreFactory(), ExecutorSystems()...)
 	disp := &goroutineDispatcher{}
 	reg.OnEngine(func(e *Engine) {
 		disp.eng = e
@@ -109,7 +109,7 @@ func TestWireExecutor_NilCatalogPanics(t *testing.T) {
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	WireExecutor(ctx, NewEngine("t1"), ExecutorDeps{
+	WireExecutor(ctx, NewEngine("t1", &memTimelineStore{}), ExecutorDeps{
 		Dispatcher: &goroutineDispatcher{},
 		Decider:    &scriptedLLM{},
 	})
@@ -131,7 +131,7 @@ func TestWireExecutor_GivesThePlannerItsCatalog(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
-		e := NewEngine("t1")
+		e := NewEngine("t1", &memTimelineStore{})
 		e.AddSystem(VoIGateSystem)
 		var w *VoIWorker
 		if plannerFirst {

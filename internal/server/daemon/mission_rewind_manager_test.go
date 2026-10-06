@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -25,7 +26,7 @@ func rewindManager(t *testing.T) (*missionManager, *brain.Registry) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	return &missionManager{logger: slog.New(slog.DiscardHandler), brainRegistry: reg}, reg
 }
 
@@ -125,7 +126,7 @@ func (s failingStore) Save(ctx context.Context, m *mission.Mission) error {
 
 // Each request that the rewind cannot serve fails, and no run starts.
 func TestRewind_RefusesWhatItCannotServe(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	parent := storedChain(t)
 	runChain(eng, parent.ID.String())
 	noDef := storedChain(t)

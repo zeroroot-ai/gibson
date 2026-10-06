@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
@@ -21,7 +22,7 @@ import (
 func TestWorldService_SubmitAndListLabels_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	acme := auth.ContextWithActingUser(
@@ -57,7 +58,7 @@ func TestWorldService_SubmitAndListLabels_TenantScoped(t *testing.T) {
 func TestWorldService_SubmitLabel_Validation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv := NewWorldServer(brain.NewRegistry(ctx), nil)
+	srv := NewWorldServer(brain.NewRegistry(ctx, braintest.StoreFactory()), nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
 	if _, err := srv.SubmitLabel(tctx, &worldpb.SubmitLabelRequest{TargetId: "f", Verdict: "bogus"}); status.Code(err) != codes.InvalidArgument {
@@ -76,7 +77,7 @@ func TestWorldService_SubmitLabel_Validation(t *testing.T) {
 func TestWorldService_ListReviewQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx, brain.SurpriseFindingSystem)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.SurpriseFindingSystem)
 	srv := NewWorldServer(reg, nil)
 
 	eng := reg.For("acme")

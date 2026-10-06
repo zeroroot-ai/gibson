@@ -14,7 +14,7 @@ func TestDispatchHandler_LiveWorkDispatchedActuates(t *testing.T) {
 	rec := &recordingDispatcher{}
 	h := NewDispatchHandler(rec)
 
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.Subscribe(h.Tap)
 
@@ -35,7 +35,7 @@ func TestDispatchHandler_LiveWorkDispatchedActuates(t *testing.T) {
 
 func TestDispatchHandler_ReplayDoesNotActuate(t *testing.T) {
 	// Build a Timeline by running live, capturing events.
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.Submit(MissionProjected{ID: "m1", Nodes: []WorkNode{{ID: "a", Kind: "tool", Target: "recon"}}})
 	e.Tick()
@@ -44,7 +44,7 @@ func TestDispatchHandler_ReplayDoesNotActuate(t *testing.T) {
 	// NOT fire the tap (no effects re-fire on resume — ADR-0109).
 	rec := &recordingDispatcher{}
 	h := NewDispatchHandler(rec)
-	re := NewEngine("t1")
+	re := NewEngine("t1", &memTimelineStore{})
 	re.Subscribe(h.Tap)
 	for _, ev := range e.Timeline.Events() {
 		Reduce(re.World, ev) // Replay path: Reduce directly, never e.apply
@@ -76,7 +76,7 @@ func TestResumeFailInFlight_FailsRunningWork(t *testing.T) {
 
 func TestRetrySystem_ReDispatchesUpToMaxThenFailsMission(t *testing.T) {
 	// node "a" fails every time; MaxRetries=2 → 3 total attempts, then mission fails.
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(fakeDispatcher(map[string]bool{"a": true})) // always fails a
 	e.AddSystem(RetrySystem)
@@ -119,7 +119,7 @@ func TestRetrySystem_RecoversWhenRetrySucceeds(t *testing.T) {
 		return out
 	}
 
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(dispatcher)
 	e.AddSystem(RetrySystem)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // TestDefaultBeliefSet_IsTheEmbeddedBaseModel proves that a tenant with no
@@ -104,7 +105,7 @@ func TestWireBrainRegistry_InstallsBothBeliefPipelines(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	registry := brain.NewRegistry(ctx, brain.BeliefSystem)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.BeliefSystem)
 	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 	if err != nil {
 		t.Fatalf("newBeliefSchemaRegistry: %v", err)
@@ -143,7 +144,7 @@ func TestWireBrainRegistry_InstallsVoIPlanner(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	registry := brain.NewRegistry(ctx, append(
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()...,
 	)...)
@@ -177,7 +178,7 @@ func TestWireBrainRegistry_InstallsReputationLoop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	registry := brain.NewRegistry(ctx, append(
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()...,
 	)...)

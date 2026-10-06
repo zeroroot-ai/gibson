@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
@@ -227,7 +228,7 @@ func TestMissionDefinitionToProjected_RunsThroughEngine(t *testing.T) {
 		t.Fatalf("translate: %v", err)
 	}
 
-	e := brain.NewEngine("t1")
+	e := brain.NewEngine("t1", braintest.NewMemTimelineStore())
 	e.AddSystem(brain.SchedulerSystem)
 	e.AddSystem(func(w *brain.World) []brain.Event { // fake dispatcher
 		var out []brain.Event

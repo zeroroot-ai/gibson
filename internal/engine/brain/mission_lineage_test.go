@@ -27,7 +27,7 @@ func lineageEvents() []Event {
 // The reducer folds the lineage event, and the World answers which mission
 // started which.
 func TestMissionOriginated_FoldsTheLineage(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	for _, ev := range lineageEvents() {
 		e.Submit(ev)
 	}
@@ -52,7 +52,7 @@ func TestMissionOriginated_FoldsTheLineage(t *testing.T) {
 // The acceptance test of gibson#734: a replay of the Timeline rebuilds the
 // lineage, with no second store.
 func TestMissionOriginated_AReplayRebuildsTheLineage(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	for _, ev := range lineageEvents() {
 		e.Submit(ev)
 	}

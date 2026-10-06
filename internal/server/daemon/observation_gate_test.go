@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -137,7 +138,7 @@ func TestObservationShape(t *testing.T) {
 var t1Attr = harness.ObservationAttribution{Tenant: "t1", ScopeID: "scope-1", MissionID: "mission-1"}
 
 func TestIngestNovelShapeProducesAnObservation(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	if err := sink(context.Background(), t1Attr, observeUnknownVariant(t, "mission-1")); err != nil {
@@ -160,7 +161,7 @@ func TestIngestNovelShapeProducesAnObservation(t *testing.T) {
 }
 
 func TestIngestPromotedShapeProducesATypedNode(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := &harnesspb.ObserveRequest{
@@ -189,7 +190,7 @@ func TestIngestPromotedShapeProducesATypedNode(t *testing.T) {
 // same shape and payload seen twice are two nodes with one content hash,
 // because "seen again three weeks later" is signal.
 func TestTwoSightingsOfTheSameFactStayDistinct(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	for range 2 {
@@ -287,7 +288,7 @@ func assertSameObservations(t *testing.T, want, got []brain.ObservationSnapshot)
 // — actually materialises Observations, so an out-of-taxonomy shape is
 // immediately queryable rather than merely stored in the World.
 func TestProjectorWritesObservations(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	eng := reg.For("t1")
 	eng.Submit(brain.ObservationRecorded{
 		EventID: "ev-1", ScopeID: "s", MissionID: "m", Shape: "ServiceAccount",
@@ -430,7 +431,7 @@ func TestProjectedVocabularyMatchesTheTaxonomy(t *testing.T) {
 // Observation. Nothing was lost, but it was not the node the agent named — so
 // an agent reading its own write back found it missing.
 func TestIngestLifecycleEntityProducesTheTypedEntity(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := &harnesspb.ObserveRequest{
@@ -471,7 +472,7 @@ func TestIngestLifecycleEntityProducesTheTypedEntity(t *testing.T) {
 // an error and not a silent loss — it becomes an Observation, exactly as a
 // novel shape from any other reporter does (ADR-0112).
 func TestIngestLifecycleEntityOutsideTheTaxonomyStillLands(t *testing.T) {
-	reg := brain.NewRegistry(context.Background())
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := &harnesspb.ObserveRequest{

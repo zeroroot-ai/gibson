@@ -16,7 +16,7 @@ import (
 // readable back through a fresh WorldBeliefSubstrate on the same engine.
 func newReputationTestEngine(t *testing.T) (*Engine, *ReputationWorker) {
 	t.Helper()
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	w := NewReputationWorker(e, NewWorldBeliefSubstrate(e))
 	e.Subscribe(w.Tap)
 	return e, w
@@ -167,7 +167,7 @@ func TestReputationWorker_DrainIsQuiescentWithoutSettlements(t *testing.T) {
 func TestWireReputation_UpdatesReputationOffTheTick(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	WireReputation(ctx, e, 5*time.Millisecond)
 
 	e.Submit(HypothesisObserved{HypothesisID: "hyp-1", ScopeID: "scope-a", Claim: "c", Technique: "t1190"})

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
@@ -73,7 +74,7 @@ func TestWireBrainRegistry_ADeciderDispatchForACoveringCapabilityPassesTheGate(t
 		}
 	}
 
-	registry := brain.NewRegistry(ctx, append(
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()...,
 	)...)
@@ -119,7 +120,7 @@ func TestWireBrainRegistry_PlannerReadsTheEngineCatalog(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	registry := brain.NewRegistry(ctx, append(
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()...,
 	)...)

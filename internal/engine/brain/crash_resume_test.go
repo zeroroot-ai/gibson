@@ -93,7 +93,7 @@ func TestCrashResume_NoRetryPolicyStaysFailed(t *testing.T) {
 // MaxRetries ceiling end-to-end: a node that always fails exhausts its retries
 // and stays failed (not re-armed indefinitely).
 func TestCrashResume_RetryBoundedByMaxRetries(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(fakeDispatcher(map[string]bool{"scan": true})) // always fails
 	e.AddSystem(RetrySystem)
@@ -143,7 +143,7 @@ func TestCrashResume_GoalMissionDeciderReEngages(t *testing.T) {
 		return DeciderOutput{Complete: &DeciderComplete{Outcome: "failed", Reason: "tool crashed; giving up"}}, nil
 	})
 
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, llm, func(string) []Capability {
 		return []Capability{
 			{Kind: "tool", Name: "nmap", InputSchema: `{"type":"object"}`},

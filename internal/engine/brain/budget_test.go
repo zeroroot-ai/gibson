@@ -12,7 +12,7 @@ import (
 // budgetEngine wires BudgetSystem FIRST (so an over-budget mission dispatches no
 // further work), then the full goal loop.
 func budgetEngine(llm DeciderLLM, catalog func(string) []Capability) (*Engine, *DeciderWorker) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, llm, catalog)
 	e.AddSystem(BudgetSystem)
 	e.AddSystem(SchedulerSystem)
@@ -54,7 +54,7 @@ func TestBudget_ExecutionRunawayGuardAborts(t *testing.T) {
 }
 
 func TestBudget_TokenBudgetAborts(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(BudgetSystem)
 	e.Submit(MissionProjected{ID: "m1", Goal: "g", Budget: Budget{MaxTokens: 100}})
 	e.Submit(TokenUsed{MissionID: "m1", Tokens: 150})
@@ -79,7 +79,7 @@ func TestBudget_WithinBudgetCompletesNormally(t *testing.T) {
 }
 
 func TestBudget_ZeroMeansUnlimited(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(BudgetSystem)
 	e.Submit(MissionProjected{ID: "m1", Goal: "g"}) // Budget zero-value
 	e.Submit(TokenUsed{MissionID: "m1", Tokens: 1_000_000})

@@ -51,7 +51,7 @@ func fakeDispatcher(fails map[string]bool) System {
 // engineWithScheduler wires the scheduler, a fake dispatcher, and the completion
 // System (in that order) onto a fresh engine.
 func engineWithScheduler(fails map[string]bool) *Engine {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(fakeDispatcher(fails))
 	e.AddSystem(MissionCompletionSystem)

@@ -1680,7 +1680,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				return nil, err
 			}
 		}
-		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
+		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))

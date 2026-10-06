@@ -9,7 +9,7 @@ import "testing"
 // version it ran under (ADR-0134) and that replay reproduces the pin — the
 // deterministic-replay guarantee for the belief field.
 func TestMission_PinsBeliefModelVersion(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(MissionProjected{ID: "m1", Goal: "find a path", BeliefModel: "base-v1"})
 	e.Tick()
 
@@ -31,7 +31,7 @@ func TestMission_PinsBeliefModelVersion(t *testing.T) {
 // TestMissionStarted_PinsBeliefModelVersion proves the minimal launch path also
 // carries the pin.
 func TestMissionStarted_PinsBeliefModelVersion(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "m1", Goal: "g", BeliefModel: "base-v2"})
 	e.Tick()
 	ms := e.World.MissionSnapshot()

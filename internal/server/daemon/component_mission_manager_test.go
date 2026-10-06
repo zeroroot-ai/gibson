@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -102,7 +103,7 @@ func newCMMTest(t *testing.T, store mission.MissionStore, ledger mission.Reserva
 	d := &daemonImpl{
 		logger:        testObsLogger(),
 		pool:          &mockPool{conn: minimalConn()},
-		brainRegistry: brain.NewRegistry(ctx),
+		brainRegistry: brain.NewRegistry(ctx, braintest.StoreFactory()),
 	}
 	return &componentMissionManager{
 		daemon: d,
@@ -427,7 +428,7 @@ func TestMissionRecordAndLineage(t *testing.T) {
 	require.Nil(t, lineageRecord(brain.MissionLineage{}))
 
 	// A mission that no component originated has no lineage in the World.
-	eng := brain.NewEngine("acme")
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
 	require.Nil(t, lineageOf(eng, m))
 	require.Nil(t, lineageOf(eng, nil))
 	eng.Submit(brain.MissionOriginated{MissionID: m.ID.String(), OriginatingComponent: "agent:recon"})

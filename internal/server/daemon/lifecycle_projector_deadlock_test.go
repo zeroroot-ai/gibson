@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // TestLifecycleProjector_DoesNotDeadlockTheTick is the regression for
@@ -26,7 +27,7 @@ import (
 // hang: asserted directly, a broken projector would wedge the test binary
 // instead of failing it.
 func TestLifecycleProjector_DoesNotDeadlockTheTick(t *testing.T) {
-	eng := brain.NewEngine("acme")
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
 	InstallLifecycleProjector("acme", eng, nil, nil, slog.Default())
 
 	eng.Submit(brain.MissionProjected{ID: "m1", Nodes: []brain.WorkNode{
@@ -78,7 +79,7 @@ func onlyWorkID(t *testing.T, eng *brain.Engine) string {
 // still live afterwards — the symptom that made the deadlock so hard to read was
 // not the first mission failing, but every LATER mission silently doing nothing.
 func TestLifecycleProjector_KeepsTickingAfterWorkCompletes(t *testing.T) {
-	eng := brain.NewEngine("acme")
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
 	InstallLifecycleProjector("acme", eng, nil, nil, slog.Default())
 
 	eng.Submit(brain.MissionProjected{ID: "m1", Nodes: []brain.WorkNode{{ID: "probe", Kind: "tool", Target: "http"}}})

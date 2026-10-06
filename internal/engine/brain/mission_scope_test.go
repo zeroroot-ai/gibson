@@ -13,7 +13,7 @@ import (
 // to the owning mission, keep two missions isolated, and treat tenant-ambient
 // observations as belonging to no mission.
 func TestMissionSlice_AttributesAndIsolates(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})
 	e.Submit(MissionStarted{ID: "B", Goal: "gb"})
 	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "t"})
@@ -73,7 +73,7 @@ func TestMissionSlice_AttributesAndIsolates(t *testing.T) {
 // tick (status "done"/"failed"). The fold is mission-scoped, so no other mission's
 // work bleeds in. This asserts the in-flight set at seq 0 / mid / total.
 func TestMissionFrameAt_InFlightWork(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                           // A slice idx 0
 	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"})   // idx 1: wa1 running
 	e.Submit(WorkDispatched{ID: "wa2", MissionID: "A", ItemKind: "agent", Target: "recon"}) // idx 2: wa2 running
@@ -149,7 +149,7 @@ func TestMissionFrameAt_InFlightWork(t *testing.T) {
 // another mission's decisions never bleed in. This asserts the decision set at seq
 // 0 / mid / total.
 func TestMissionFrameAt_Decisions(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                         // A idx 0
 	e.Submit(DecisionRequested{MissionID: "A", Cursor: 0})                                // A idx 1: open A#d1
 	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "tool", Target: "nmap"}) // A idx 2: A#d1 chose wa1
@@ -242,7 +242,7 @@ func TestMissionFrameAt_Decisions(t *testing.T) {
 // call made under another mission, or one with no mission context at all, never
 // bleeds in. This asserts the folded call set at seq 0 / mid / total.
 func TestMissionFrameAt_LlmCalls(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})                                                               // A idx 0
 	e.Submit(WorkDispatched{ID: "wa1", MissionID: "A", ItemKind: "agent", Target: "recon"})                     // A idx 1
 	e.Submit(LlmCallObserved{CallID: "ca1", MissionID: "A", Model: "m", PromptTokens: 10, CompletionTokens: 5}) // A idx 2
@@ -320,7 +320,7 @@ func TestMissionFrameAt_LlmCalls(t *testing.T) {
 // calls never bleed into another's frame, and a tenant-ambient tool call (no
 // mission context) attaches to no mission frame.
 func TestMissionFrameAt_AgentToolCalls(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})
 	e.Submit(AgentToolCallObserved{ToolCallID: "ta1", MissionID: "A", ToolName: "nmap"})
 	// mission B — its tool call must never bleed into A.
@@ -343,7 +343,7 @@ func TestMissionFrameAt_AgentToolCalls(t *testing.T) {
 // Evidence with no mission context stays tenant-ambient, and one mission's evidence
 // never bleeds into another's frame, while the tenant-wide fold still sees it all.
 func TestMissionFrameAt_HostsAndFindings(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SurpriseFindingSystem)
 
 	e.Submit(MissionStarted{ID: "A", Goal: "ga"})

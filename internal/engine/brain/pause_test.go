@@ -40,7 +40,7 @@ func TestPause_HaltsDispatchUntilResumed(t *testing.T) {
 
 // Pausing mid-flight (after some work done) halts further dispatch; resume finishes.
 func TestPause_MidFlightThenResume(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	// dispatcher that completes work, so the chain would progress each tick.
 	e.AddSystem(fakeDispatcher(nil))

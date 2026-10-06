@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
@@ -56,7 +57,7 @@ func awaitHosts(t *testing.T, reg *brain.Registry, tenant string, want int) []br
 func TestIngestObservation_SameAddressInDifferentScopesStaysDistinct(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	attrFor := func(scope string) harness.ObservationAttribution {
@@ -114,7 +115,7 @@ func TestIngestObservation_SameAddressInDifferentScopesStaysDistinct(t *testing.
 func TestIngestObservation_RoutesToTheAttributedTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	err := sink(ctx, harness.ObservationAttribution{
@@ -144,7 +145,7 @@ func TestIngestObservation_RoutesToTheAttributedTenant(t *testing.T) {
 func TestIngestObservation_CarriesMissionAttribution(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	err := sink(ctx, harness.ObservationAttribution{
@@ -204,7 +205,7 @@ func awaitHypotheses(t *testing.T, reg *brain.Registry, tenant string, want int)
 func TestIngestObservation_Hypothesis(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := observeHypothesis("recon-agent", "port 6443 is unauthenticated", 0.75,
@@ -256,7 +257,7 @@ func TestIngestObservation_Hypothesis(t *testing.T) {
 func TestIngestObservation_Hypothesis_HypothesisIDAndTechnique(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := &harnesspb.ObserveRequest{
@@ -294,7 +295,7 @@ func TestIngestObservation_Hypothesis_HypothesisIDAndTechnique(t *testing.T) {
 func TestIngestObservation_Hypothesis_SameClaimInDifferentTenantsStaysDistinct(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestObservation(reg)
 
 	req := observeHypothesis("recon-agent", "shared claim text", 0.5)

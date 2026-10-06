@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -69,7 +70,7 @@ func destructiveMarkerRegistry(t *testing.T) *settlement.Registry {
 func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_NoTenant_PermissionDenied(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 
 	_, err := s.RequestDestructiveAuthorization(context.Background(), brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"})
@@ -86,7 +87,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_NoTenant_Pe
 func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnTenantEngine(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -118,7 +119,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnT
 func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructive(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 	reg := destructiveMarkerRegistry(t)
@@ -178,7 +179,7 @@ func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructi
 func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 
@@ -217,7 +218,7 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 func TestTenantRoutedProofSettlement_ReviewAndRecordsStayInTheTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acme := auth.ContextWithTenantString(context.Background(), "acme")
 	globex := auth.ContextWithTenantString(context.Background(), "globex")

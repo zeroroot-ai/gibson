@@ -157,7 +157,7 @@ func newSettlementTestEngine(t *testing.T) *Engine {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	reg := NewRegistry(ctx)
+	reg := NewRegistry(ctx, memStoreFactory())
 	return reg.For("acme")
 }
 

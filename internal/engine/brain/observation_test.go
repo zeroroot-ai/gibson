@@ -119,7 +119,7 @@ func TestObservationRecorded_CodecRoundTrip(t *testing.T) {
 
 // TestEngineObservations exposes the engine-level read the projector consumes.
 func TestEngineObservations(t *testing.T) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	if got := e.Observations(); len(got) != 0 {
 		t.Fatalf("fresh engine: got %d observations, want 0", len(got))
 	}

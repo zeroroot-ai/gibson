@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/compliance"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz/registry"
@@ -43,7 +44,7 @@ func newComplianceService(t *testing.T) (*ComplianceService, sqlmock.Sqlmock) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = db.Close() })
-	reg := brain.NewRegistry(context.Background(), brain.BeliefSystem)
+	reg := brain.NewRegistry(context.Background(), braintest.StoreFactory(), brain.BeliefSystem)
 	reg.For("acme").Submit(brain.DomainPackEnabled{Name: "fw", Version: 2})
 	require.Eventually(t, func() bool { return len(reg.For("acme").DomainPacks()) == 1 }, 5*time.Second, 10*time.Millisecond)
 	reader, err := compliance.NewReader(db, ontology.NewDomainPackCatalog(complianceTestPack()), BrainEnabledPacks{Registry: reg})

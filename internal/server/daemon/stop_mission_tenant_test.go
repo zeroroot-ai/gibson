@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -37,7 +38,7 @@ func newStopMissionTestDaemon(t *testing.T) *daemonImpl {
 
 	mm := &missionManager{
 		logger:         slog.New(slog.DiscardHandler),
-		brainRegistry:  brain.NewRegistry(ctx),
+		brainRegistry:  brain.NewRegistry(ctx, braintest.StoreFactory()),
 		activeMissions: make(map[auth.TenantID]map[string]*activeMission),
 	}
 	d := newMinimalDaemon(minimalCfg())
