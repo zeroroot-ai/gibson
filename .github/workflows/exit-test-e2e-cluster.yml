@@ -341,21 +341,6 @@ jobs:
           kill $pf_pids 2>/dev/null || true
           .github/scripts/e2e-suite-verdict.sh audit_v4 "$E2E_OUT/audit_v4.log" "$rc" "$RESULTS"
 
-      # signup_full_chain and login_full_chain are the Go half of a two-part
-      # test. The other half is a Playwright spec in the
-      # dashboard repository that signs up, logs in and writes the files the
-      # Go half reads (/tmp/login-redirect-chain-<slug>.json and the like).
-      # No browser runs here, so the Go half alone can never pass (run
-      # 35660778012). gibson#215 wires the browser half; hosted's
-      # exit-test-signup.yml already proves the signup chain (blocker 2).
-      - name: "Suite: signup_full_chain, login_full_chain (browser half missing)"
-        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        run: |
-          gibson/.github/scripts/e2e-suite-verdict.sh --skip signup_full_chain \
-            "superseded by hosted exit-test-signup.yml; the Go half reads browser artifacts no step here writes (gibson#215)" "$RESULTS"
-          gibson/.github/scripts/e2e-suite-verdict.sh --skip login_full_chain \
-            "reads the dashboard Playwright spec's files; no browser runs on this venue yet (gibson#215)" "$RESULTS"
-
       # operators/tenant/test/e2e (Ginkgo), through its own entrypoint,
       # `make test-e2e`: it creates a kind cluster of its own
       # (tenant-operator-test-e2e), builds the operator image from
@@ -393,7 +378,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$E2E_OUT"
           touch "$RESULTS"
-          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 signup_full_chain login_full_chain tenant_operator"
+          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 tenant_operator"
           {
             echo "## Cluster-bound e2e suites (run ${{ github.run_id }})"
             echo

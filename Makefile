@@ -667,35 +667,6 @@ check-queue-gate:
 vet-e2e:
 	$(GOCMD) vet -tags e2e ./...
 
-# ---------------------------------------------------------------------------
-# Cluster-bound e2e suites (gibson#1394). Each target runs one tests/e2e suite
-# against a LIVE kind cluster (`make recreate ENV=kind` in zeroroot-ai/hosted) and
-# requires the env its suite documents; the suites fail loud on missing env,
-# so these targets validate up front only what the suite cannot self-check.
-# The three targets restore what the suite doc-comments have referenced since
-# they were written ("run via `make test-login-e2e`", …) — the targets never
-# existed, so the documented invocation path was a 404 (gibson#1394). Where
-# they RUN in CI is gibson#1396 (venue decision pending); locally they run
-# against your kind cluster today.
-# ---------------------------------------------------------------------------
-E2E_TIMEOUT ?= 10m
-
-define require_env
-	@if [ -z "$${$(1)}" ]; then echo "ERROR: $(1) is required for this target (see tests/e2e/$(2))"; exit 1; fi
-endef
-
-.PHONY: test-signup-e2e
-test-signup-e2e: ## Run the signup full-chain e2e suite against a live kind cluster
-	$(call require_env,SIGNUP_SLUG,signup_full_chain_test.go)
-	$(call require_env,SIGNUP_EMAIL,signup_full_chain_test.go)
-	$(GOCMD) test -tags=e2e -run 'TestSignup' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
-
-.PHONY: test-login-e2e
-test-login-e2e: ## Run the login full-chain e2e suite against a live kind cluster
-	$(call require_env,SIGNUP_SLUG,login_full_chain_test.go)
-	$(call require_env,SIGNUP_EMAIL,login_full_chain_test.go)
-	$(GOCMD) test -tags=e2e -run 'TestLogin' -v -timeout $(E2E_TIMEOUT) ./tests/e2e/...
-
 # vet-tags: the local equivalent of the CI `vet-tags` matrix — type-checks the
 # module once per declared build-tag variant. Roughly a minute per leg.
 # `default` is the sentinel for the untagged leg; every other word is passed
