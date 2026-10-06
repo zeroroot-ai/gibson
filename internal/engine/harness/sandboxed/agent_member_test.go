@@ -246,3 +246,7 @@ func (c *memberClient) Recovery(context.Context, string, string) (SessionRecover
 	}
 	return c.recovery, true, nil
 }
+
+func (c *memberClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("memberClient: snapshot is not used here")
+}

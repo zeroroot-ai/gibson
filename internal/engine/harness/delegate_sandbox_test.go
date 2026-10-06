@@ -45,6 +45,37 @@ type recordingLauncher struct {
 	followCalls int
 	gotFollow   string
 	followClass string
+
+	snapshot    string
+	snapshotErr error
+	snapshotted []string
+	stopped     []string
+	restoreSnap string
+	restoreSpec sandboxed.AgentForkSpec
+	restoreID   string
+	restoreErr  error
+	restored    sandboxed.AgentRunResult
+}
+
+func (r *recordingLauncher) SnapshotSandbox(_ context.Context, _, sandboxID string, _ time.Duration) (string, error) {
+	r.snapshotted = append(r.snapshotted, sandboxID)
+	return r.snapshot, r.snapshotErr
+}
+
+func (r *recordingLauncher) StopSandbox(_ context.Context, _, sandboxID string) error {
+	r.stopped = append(r.stopped, sandboxID)
+	return nil
+}
+
+func (r *recordingLauncher) LaunchFromSnapshot(_ context.Context, snap string, spec sandboxed.AgentForkSpec, d sandboxed.AgentDispatch, onStarted func(string) error) (sandboxed.AgentRunResult, error) {
+	r.restoreSnap, r.restoreSpec, r.gotDispatch = snap, spec, d
+	if r.restoreErr != nil {
+		return sandboxed.AgentRunResult{}, r.restoreErr
+	}
+	if err := onStarted(r.restoreID); err != nil {
+		return sandboxed.AgentRunResult{}, fmt.Errorf("on started: %w", err)
+	}
+	return r.restored, nil
 }
 
 // ForkSandbox forks once with the first of forkIDs, and runs OnForked.

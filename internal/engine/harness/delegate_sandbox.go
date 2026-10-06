@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"errors"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -27,6 +28,11 @@ import (
 // Nil means no sandboxed agent dispatch: DelegateToAgent denies an untrusted
 // agent fail-closed.
 type AgentSandboxLauncher interface {
+	// SnapshotSandbox, StopSandbox and LaunchFromSnapshot serve the sandbox
+	// checkpoint mode and the rewind from a snapshot (ADR-0170).
+	SnapshotSandbox(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error)
+	StopSandbox(ctx context.Context, tenant, sandboxID string) error
+	LaunchFromSnapshot(ctx context.Context, snapshot string, spec sandboxed.AgentForkSpec, dispatch sandboxed.AgentDispatch, onStarted func(sandboxID string) error) (sandboxed.AgentRunResult, error)
 	LaunchAgent(ctx context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
 	// ForkAgent starts the dispatches in forks of a running source sandbox
 	// (ADR-0169).
@@ -186,10 +192,24 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	} else if ok {
 		return h.delegateToAgentViaSeat(ctx, name, task, spec, dispatch, seat)
 	}
+	if task.FromSnapshot != "" {
+		res, err := h.delegateToAgentViaRestore(ctx, name, task, spec, dispatch)
+		if !errors.Is(err, sandboxed.ErrSnapshotGone) {
+			return res, err
+		}
+		// The snapshot of the checkpoint is gone: the node starts in a
+		// fresh sandbox, as for a checkpoint with no snapshot (ADR-0170).
+		h.logger.Warn("rewind snapshot is gone; the node starts in a fresh sandbox",
+			"agent", name, "node", task.NodeID, "snapshot", task.FromSnapshot)
+	}
 	if task.StartsFrom != "" {
 		return h.delegateToAgentViaFork(ctx, name, task, spec, dispatch)
 	}
-	if task.Forkable && h.forks != nil {
+	// A node that a later node forks, and a node of the sandbox checkpoint
+	// mode, park at the result line, so the sandbox still runs when the node
+	// ends (D74, ADR-0170).
+	forkable := task.Forkable && h.forks != nil
+	if forkable || task.Checkpoint {
 		dispatch.Forkable = true
 	}
 
@@ -208,14 +228,23 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 			"agent sandbox launch failed: "+name, launchErr)
 	}
+	var extra map[string]any
 	if outcome.Parked {
-		h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{
-			Tenant:    tenant,
-			SandboxID: outcome.SandboxID,
-			GrantJTI:  grantJTI(grant),
-		})
+		if task.Checkpoint {
+			extra = h.checkpointSnapshot(ctx, tenant, task, outcome.SandboxID)
+		}
+		if forkable {
+			h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{
+				Tenant:    tenant,
+				SandboxID: outcome.SandboxID,
+				GrantJTI:  grantJTI(grant),
+			})
+		} else if err := h.agentLauncher.StopSandbox(ctx, tenant, outcome.SandboxID); err != nil {
+			h.logger.Warn("parked sandbox of a checkpoint node not stopped; setec reaps it at its timeout",
+				"agent", name, "sandbox_id", outcome.SandboxID, "error", err)
+		}
 	}
-	return h.sandboxOutcome(name, tenant, task, outcome, nil)
+	return h.sandboxOutcome(name, tenant, task, outcome, extra)
 }
 
 // sandboxOutcome turns the outcome of a sandboxed agent run into the result

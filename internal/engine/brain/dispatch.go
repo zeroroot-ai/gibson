@@ -41,6 +41,11 @@ type DispatchRequest struct {
 	// gibson#802). They travel with Network to the dispatch.
 	StartsFrom string
 	Forkable   bool
+	// Checkpoint marks an agent node of a mission in the sandbox checkpoint
+	// mode: its sandbox leaves a snapshot when the node ends. FromSnapshot
+	// names the snapshot that the node of a rewind starts from (ADR-0170).
+	Checkpoint   bool
+	FromSnapshot string
 }
 
 // Dispatcher actuates a single unit of work against the real world. It is the
@@ -75,15 +80,17 @@ func (h *DispatchHandler) Tap(ev Event) {
 	}
 	h.mu.Lock()
 	h.pending = append(h.pending, DispatchRequest{
-		WorkID:     d.ID,
-		MissionID:  d.MissionID,
-		Kind:       d.ItemKind,
-		Target:     d.Target,
-		Input:      d.Input,
-		Timeout:    d.Timeout,
-		Network:    d.Network,
-		StartsFrom: d.StartsFrom,
-		Forkable:   d.Forkable,
+		WorkID:       d.ID,
+		MissionID:    d.MissionID,
+		Kind:         d.ItemKind,
+		Target:       d.Target,
+		Input:        d.Input,
+		Timeout:      d.Timeout,
+		Network:      d.Network,
+		StartsFrom:   d.StartsFrom,
+		Forkable:     d.Forkable,
+		Checkpoint:   d.Checkpoint,
+		FromSnapshot: d.FromSnapshot,
 	})
 	h.mu.Unlock()
 }

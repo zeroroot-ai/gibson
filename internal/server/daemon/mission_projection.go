@@ -167,6 +167,14 @@ func missionDefinitionToProjected(
 		nodes[i].Forkable = named[nodes[i].ID]
 	}
 
+	// 8. The sandbox checkpoint mode (ADR-0170): each agent node leaves a
+	// snapshot when it ends, so a rewind can start the node from it.
+	if def.GetCheckpoints() == missionpb.CheckpointMode_CHECKPOINT_MODE_SANDBOX {
+		for i := range nodes {
+			nodes[i].Checkpoint = nodes[i].Kind == "agent"
+		}
+	}
+
 	return brain.MissionProjected{
 		ID:          def.GetId(),
 		Goal:        goal,

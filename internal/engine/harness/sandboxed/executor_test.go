@@ -35,6 +35,14 @@ type mockClient struct {
 	kill      func(context.Context, string) error
 	fork      func(context.Context, ForkRequest) (ForkResponse, error)
 	recovery  func(context.Context, string) (SessionRecovery, bool, error)
+	snapshot  func(context.Context, string, time.Duration) (string, error)
+}
+
+func (m *mockClient) Snapshot(ctx context.Context, _, id string, ttl time.Duration) (string, error) {
+	if m.snapshot == nil {
+		return "", errors.New("mockClient: no snapshot configured")
+	}
+	return m.snapshot(ctx, id, ttl)
 }
 
 func (m *mockClient) Recovery(ctx context.Context, _, id string) (SessionRecovery, bool, error) {

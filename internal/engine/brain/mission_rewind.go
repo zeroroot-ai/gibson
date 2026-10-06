@@ -23,6 +23,10 @@ type MissionRewound struct {
 	// ParentCheckpointID is the checkpoint of the earlier run that the new
 	// mission starts at.
 	ParentCheckpointID string
+	// StartSnapshot is the sandbox snapshot of the checkpoint, when the
+	// earlier run kept one (ADR-0170). The node of the checkpoint then
+	// starts from it.
+	StartSnapshot string `json:",omitempty"`
 }
 
 // Kind identifies this event on the Timeline.
@@ -33,6 +37,7 @@ type MissionRewind struct {
 	MissionID          string
 	ParentMissionID    string
 	ParentCheckpointID string
+	StartSnapshot      string
 }
 
 // applyMissionRewound folds the parent of one mission. The parent is a fact

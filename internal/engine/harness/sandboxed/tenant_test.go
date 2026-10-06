@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -134,4 +135,8 @@ func (c *tenantClient) Fork(context.Context, ForkRequest) (ForkResponse, error) 
 
 func (c *tenantClient) Recovery(context.Context, string, string) (SessionRecovery, bool, error) {
 	return SessionRecovery{}, false, nil
+}
+
+func (c *tenantClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("tenantClient: snapshot is not used here")
 }

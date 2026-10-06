@@ -78,6 +78,7 @@ func missionCheckpoints(eng *brain.Engine, missionID string) []api.MissionCheckp
 			CheckpointID:     node,
 			NodeID:           node,
 			TimelinePosition: position[w.ID],
+			SnapshotID:       w.Snapshot,
 		})
 	}
 	return out
@@ -237,7 +238,8 @@ func (r missionRewinder) rewind(ctx context.Context, req api.RewindRequest) (str
 	if err != nil {
 		return "", status.Errorf(codes.InvalidArgument, "mission_id %q is not a mission id", req.MissionID)
 	}
-	if !hasCheckpoint(missionCheckpoints(r.eng, req.MissionID), req.CheckpointID) {
+	cp, ok := findCheckpoint(missionCheckpoints(r.eng, req.MissionID), req.CheckpointID)
+	if !ok {
 		return "", status.Errorf(codes.NotFound,
 			"checkpoint %q not found for mission %s", req.CheckpointID, req.MissionID)
 	}
@@ -285,17 +287,20 @@ func (r missionRewinder) rewind(ctx context.Context, req api.RewindRequest) (str
 		MissionID:          newID.String(),
 		ParentMissionID:    req.MissionID,
 		ParentCheckpointID: req.CheckpointID,
+		// The node starts from the snapshot of the checkpoint when the
+		// earlier run kept one, and in a fresh sandbox otherwise (ADR-0170).
+		StartSnapshot: cp.SnapshotID,
 	})
 	return r.start(ctx, newID.String())
 }
 
-func hasCheckpoint(cps []api.MissionCheckpoint, id string) bool {
+func findCheckpoint(cps []api.MissionCheckpoint, id string) (api.MissionCheckpoint, bool) {
 	for _, cp := range cps {
 		if cp.CheckpointID == id {
-			return true
+			return cp, true
 		}
 	}
-	return false
+	return api.MissionCheckpoint{}, false
 }
 
 // rewoundMission builds the record of the new mission from its parent. It
