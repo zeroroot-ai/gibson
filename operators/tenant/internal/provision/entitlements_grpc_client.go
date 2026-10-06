@@ -28,6 +28,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
@@ -353,9 +354,29 @@ func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) e
 	return translateGRPCError("ack-tenant-op", err)
 }
 
-// EmitReconcileSummary maps the controller's strongly-typed summary onto
-// the daemon's generic AuditEventMessage. The daemon's audit emitter
-// stores the event in the platform Postgres + Redis stream.
+// EmitAuditEvent sends one audit record of an operator change to the daemon
+// (DaemonOperatorService.EmitAuditEvent, gibson#583). The daemon writes it to
+// Postgres before it answers, with the SPIFFE identity of the operator as the
+// actor. It implements audit.Sink.
+func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.EmitAuditEvent(authedCtx, &operatorv1.EmitAuditEventRequest{
+		Event: &operatorv1.AuditEventMessage{
+			Type:       ev.Action,
+			TenantId:   ev.TenantID,
+			TargetType: ev.TargetType,
+			TargetId:   ev.TargetID,
+			Result:     ev.Result,
+			Reason:     ev.Reason,
+			Fields:     ev.Fields,
+		},
+	})
+	return translateGRPCError("emit-audit-event", err)
+}
+
 // parseAccessTuples splits "user#relation@object" into the gRPC
 // AccessTuple message. Mirrors EntitlementsHTTPClient's tuplesFromStrings
 // so the operator's caller surface is unchanged.

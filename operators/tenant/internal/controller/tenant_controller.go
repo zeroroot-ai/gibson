@@ -57,8 +57,9 @@ type TenantReconciler struct {
 	// Runner executes provisioning and teardown sagas.
 	Runner *saga.Runner
 
-	// Audit emitter for structured lifecycle events.
-	Audit audit.Emitter
+	// Audit writes the audit record of each saga step before the step
+	// changes state (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 
 	// Provisioning steps. Foundation contributes Namespace. Other specs
 	// append additional steps via ProvisionSteps.
@@ -501,8 +502,11 @@ func (s *deleteNamespaceStep) Provision(ctx context.Context, obj saga.Conditione
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Runner == nil {
-		r.Runner = saga.NewRunner(r.Client, mgr.GetEventRecorder("tenant-operator"), mgr.GetLogger())
+		r.Runner = saga.NewRunner(r.Client, mgr.GetEventRecorder("tenant-operator"), mgr.GetLogger(), r.Audit)
 	}
 	if r.Runner.Deps == nil {
 		r.Runner.Deps = r.Deps

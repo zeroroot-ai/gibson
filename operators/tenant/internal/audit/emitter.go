@@ -1,351 +1,117 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package audit emits structured audit events for every reconcile action.
-// Events go to two sinks simultaneously: stdout (for log aggregation via
-// Loki/Promtail) and Redis Streams (for the Gibson audit log store).
+// Package audit records each change that the tenant-operator makes to
+// Kubernetes, Redis, FGA or Velero state.
 //
-// Emission is asynchronous via a buffered channel. When the channel is
-// full, the emitter blocks briefly then drops the oldest event. Callers
-// should NOT block a reconcile loop on audit emission — use EmitAsync for
-// fire-and-forget, and only use EmitSync when fail-closed behavior is
-// needed (e.g., for security-sensitive operations).
+// The operator has no audit store of its own. It sends each record to the
+// daemon over DaemonOperatorService.EmitAuditEvent, and the daemon writes it
+// to the Postgres audit_log through the audit-first writer (ADR-0113, D15,
+// gibson#583). The actor of each record is the SPIFFE identity of the
+// operator: the daemon takes it from the mTLS peer, never from the request.
 //
-// Saga-specific events use the lighter-weight SagaEmitter, which writes
-// synchronously to stdout with the [audit.tenant-operator] prefix matching
-// the dashboard's [audit.auth] / [audit.crd] shape.
+// The order is fixed. The operator writes the record first and makes the
+// change only after the daemon accepts the record. When the record cannot be
+// written, the change does not happen. When the change fails after its
+// record, the operator writes a second record with the result "failure" and
+// the reason.
 package audit
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"sync/atomic"
-	"time"
-
-	"github.com/go-logr/logr"
-	"github.com/redis/go-redis/v9"
 )
 
-// AuditEvent is the canonical schema for all Gibson audit records.
-type AuditEvent struct {
-	Timestamp       time.Time       `json:"timestamp"`
-	Tenant          string          `json:"tenant"`
-	Subsystem       string          `json:"subsystem"`
-	Action          string          `json:"action"`
-	Before          json.RawMessage `json:"before,omitempty"`
-	After           json.RawMessage `json:"after,omitempty"`
-	OperatorVersion string          `json:"operator_version"`
-	ReconcileID     string          `json:"reconcile_id,omitempty"`
-	Severity        string          `json:"severity,omitempty"`
-}
-
-// Emitter writes audit events to stdout and Redis Streams.
-type Emitter interface {
-	// EmitAsync enqueues an event for background emission. Returns nil
-	// unless the queue is full AND drop-oldest fails, which is rare.
-	EmitAsync(ctx context.Context, evt AuditEvent) error
-
-	// EmitSync writes the event synchronously to both sinks. Returns error
-	// if either sink fails. Use for fail-closed security events.
-	EmitSync(ctx context.Context, evt AuditEvent) error
-
-	// Close flushes the buffer and stops background workers. Blocks up to
-	// the configured drain timeout.
-	Close(ctx context.Context) error
-}
-
-// Config configures the emitter.
-type Config struct {
-	// RedisClient is used for the Streams sink. If nil, only stdout is used.
-	RedisClient *redis.Client
-	// StreamKey is the Redis key for the audit stream. Default:
-	// "gibson:audit:events".
-	StreamKey string
-	// MaxLen caps the stream length (approximate). Default 1,000,000.
-	MaxLen int64
-	// BufferSize bounds the async channel. Default 1000.
-	BufferSize int
-	// DrainTimeout bounds Close's blocking wait. Default 10s.
-	DrainTimeout time.Duration
-	// OperatorVersion is stamped onto every event.
-	OperatorVersion string
-	// Log is the structured logger for the emitter's own diagnostics.
-	Log logr.Logger
-}
-
-// ErrBufferFull is returned when EmitAsync cannot enqueue an event.
-var ErrBufferFull = errors.New("audit buffer full")
-
-type emitter struct {
-	cfg    Config
-	buf    chan AuditEvent
-	done   chan struct{}
-	closed chan struct{}
-}
-
-// New constructs an Emitter, applying defaults and starting the background
-// writer goroutine.
-func New(cfg Config) Emitter {
-	if cfg.StreamKey == "" {
-		cfg.StreamKey = "gibson:audit:events"
-	}
-	if cfg.MaxLen == 0 {
-		cfg.MaxLen = 1_000_000
-	}
-	if cfg.BufferSize == 0 {
-		cfg.BufferSize = 1000
-	}
-	if cfg.DrainTimeout == 0 {
-		cfg.DrainTimeout = 10 * time.Second
-	}
-	e := &emitter{
-		cfg:    cfg,
-		buf:    make(chan AuditEvent, cfg.BufferSize),
-		done:   make(chan struct{}),
-		closed: make(chan struct{}),
-	}
-	go e.runBackground()
-	return e
-}
-
-func (e *emitter) EmitAsync(ctx context.Context, evt AuditEvent) error {
-	evt = e.finalize(evt)
-	select {
-	case e.buf <- evt:
-		return nil
-	default:
-		// Queue full. Drop oldest by draining one, then enqueue.
-		select {
-		case <-e.buf:
-			e.cfg.Log.Info("audit buffer full, dropped oldest event")
-		default:
-		}
-		select {
-		case e.buf <- evt:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return ErrBufferFull
-		}
-	}
-}
-
-func (e *emitter) EmitSync(ctx context.Context, evt AuditEvent) error {
-	evt = e.finalize(evt)
-	return e.write(ctx, evt)
-}
-
-func (e *emitter) Close(ctx context.Context) error {
-	close(e.done)
-	drainCtx, cancel := context.WithTimeout(ctx, e.cfg.DrainTimeout)
-	defer cancel()
-	select {
-	case <-e.closed:
-		return nil
-	case <-drainCtx.Done():
-		return drainCtx.Err()
-	}
-}
-
-func (e *emitter) finalize(evt AuditEvent) AuditEvent {
-	if evt.Timestamp.IsZero() {
-		evt.Timestamp = time.Now().UTC()
-	}
-	if evt.OperatorVersion == "" {
-		evt.OperatorVersion = e.cfg.OperatorVersion
-	}
-	if evt.Severity == "" {
-		evt.Severity = "INFO"
-	}
-	return evt
-}
-
-func (e *emitter) runBackground() {
-	defer close(e.closed)
-	for {
-		select {
-		case <-e.done:
-			// Drain remaining events.
-			for {
-				select {
-				case evt := <-e.buf:
-					ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-					_ = e.write(ctx, evt)
-					cancel()
-				default:
-					return
-				}
-			}
-		case evt := <-e.buf:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := e.write(ctx, evt); err != nil {
-				e.cfg.Log.Error(err, "audit write failed")
-			}
-			cancel()
-		}
-	}
-}
-
-func (e *emitter) write(ctx context.Context, evt AuditEvent) error {
-	// Stdout sink — always runs.
-	payload, err := json.Marshal(evt)
-	if err != nil {
-		return fmt.Errorf("marshal audit event: %w", err)
-	}
-	_, _ = fmt.Fprintln(os.Stdout, string(payload))
-
-	// Redis sink — optional.
-	if e.cfg.RedisClient == nil {
-		return nil
-	}
-	values := map[string]any{
-		"timestamp":        evt.Timestamp.Format(time.RFC3339Nano),
-		"tenant":           evt.Tenant,
-		"subsystem":        evt.Subsystem,
-		"action":           evt.Action,
-		"operator_version": evt.OperatorVersion,
-		"reconcile_id":     evt.ReconcileID,
-		"severity":         evt.Severity,
-	}
-	if len(evt.Before) > 0 {
-		values["before"] = string(evt.Before)
-	}
-	if len(evt.After) > 0 {
-		values["after"] = string(evt.After)
-	}
-	return e.cfg.RedisClient.XAdd(ctx, &redis.XAddArgs{
-		Stream: e.cfg.StreamKey,
-		MaxLen: e.cfg.MaxLen,
-		Approx: true,
-		Values: values,
-	}).Err()
-}
-
-// ---------------------------------------------------------------------------
-// SagaEmitter — lightweight, synchronous, prefix-aware audit writer.
-//
-// Emits lines of the form:
-//
-//	[audit.tenant-operator] {"ts":"...","action":"saga_step_started",...}
-//
-// Shape is intentionally aligned with the dashboard's [audit.auth] events
-// (same field names, same 512-char errorMessage truncation) so a unified
-// Loki pipeline can index both.
-//
-// SECURITY: Step arguments must never be passed to Emit. Callers supply
-// only inputKeys (a slice of field names — no values) and a free-form
-// reason string that must not contain secret material.
-// ---------------------------------------------------------------------------
-
-const maxErrorMessageChars = 512
-
-// SagaAction enumerates the audit action tokens emitted by the saga runner.
-type SagaAction string
-
+// Actions of the records that the operator writes.
 const (
-	ActionSagaStepStarted   SagaAction = "saga_step_started"
-	ActionSagaStepCompleted SagaAction = "saga_step_completed"
-	ActionSagaStepFailed    SagaAction = "saga_step_failed"
-	ActionSagaStepSkipped   SagaAction = "saga_step_skipped"
+	// ActionSagaStep is the record before a saga step changes state.
+	ActionSagaStep = "operator.saga_step"
+	// ActionLastBackup is the record before the last backup of a deleted
+	// tenant is created (ADR-0075).
+	ActionLastBackup = "operator.last_backup"
 )
 
-// SagaOutcome enumerates the outcome tokens, matching the dashboard shape.
-type SagaOutcome string
+// ResultFailure is the result of the second record of a change that failed.
+const ResultFailure = "failure"
 
-const (
-	OutcomeOk          SagaOutcome = "ok"
-	OutcomeFailed      SagaOutcome = "failed"
-	OutcomeRateLimited SagaOutcome = "rate_limited"
-	OutcomeLocked      SagaOutcome = "locked"
-)
+// maxReasonChars bounds the reason of a failure record.
+const maxReasonChars = 512
 
-// SagaAuditEvent is the JSON payload written inside the [audit.tenant-operator]
-// prefix. Field names match the dashboard's AuthAuditEvent shape exactly.
-type SagaAuditEvent struct {
-	// Ts is the ISO 8601 timestamp.
-	Ts string `json:"ts"`
-	// Action is one of the ActionSaga* constants.
-	Action SagaAction `json:"action"`
-	// Outcome is one of the Outcome* constants.
-	Outcome SagaOutcome `json:"outcome"`
-	// UserId is the actor. For operator-driven steps this is always "operator".
-	UserId string `json:"userId"`
-	// CorrelationId is propagated from the Tenant's annotation when present.
-	// Empty string is serialised as an empty string (not omitted) to keep
-	// field presence stable for Loki parsing.
-	CorrelationId string `json:"correlationId"`
-	// TenantId is the Tenant object name.
-	TenantId string `json:"tenantId"`
-	// Reason is an optional free-form human-readable string.
-	// Must not contain secret material.
-	Reason string `json:"reason,omitempty"`
-	// ErrorCode is a machine-readable error classifier.
-	ErrorCode string `json:"errorCode,omitempty"`
-	// ErrorMessage is the truncated error string (max 512 chars).
-	ErrorMessage string `json:"errorMessage,omitempty"`
-	// StepName is the saga step identifier, for debuggability.
-	StepName string `json:"stepName"`
+// Event is one audit record of a change that the operator makes.
+type Event struct {
+	// Action is one of the Action constants.
+	Action string
+	// TenantID is the tenant that owns the target.
+	TenantID string
+	// TargetType is the kind of the changed object, for example "tenant".
+	TargetType string
+	// TargetID is the id of the changed object.
+	TargetID string
+	// Result is empty for the record before the change, or ResultFailure.
+	Result string
+	// Reason is why the change failed. Set only with ResultFailure. It must
+	// not hold secret material.
+	Reason string
+	// Fields are more facts about the change, for example the step name.
+	Fields map[string]string
 }
 
-// SagaEmitter writes SagaAuditEvents to an io.Writer with a configurable prefix.
-// The zero value is not useful; construct via NewSagaEmitter.
+// Sink sends one record to the durable audit store. The daemon client
+// (provision.EntitlementsGRPCClient) implements it.
+type Sink interface {
+	EmitAuditEvent(ctx context.Context, ev Event) error
+}
+
+// ErrNoSink reports a SagaEmitter built with no sink.
+var ErrNoSink = errors.New("audit: the saga emitter needs a sink; the operator does not change state without an audit record")
+
+// SagaEmitter writes the audit records of the saga steps and of the last
+// backup. Build it with NewSagaEmitter.
 type SagaEmitter struct {
-	prefix     string
-	out        io.Writer
-	dropWarned atomic.Bool
+	sink Sink
 }
 
-// NewSagaEmitter constructs a SagaEmitter. prefix should be "tenant-operator"
-// (the part after "audit."); pass an empty string to use the default.
-// out is the destination writer; pass nil to use os.Stdout.
-func NewSagaEmitter(prefix string, out io.Writer) *SagaEmitter {
-	if prefix == "" {
-		prefix = "tenant-operator"
+// NewSagaEmitter returns a SagaEmitter over sink. The sink is required.
+func NewSagaEmitter(sink Sink) (*SagaEmitter, error) {
+	if sink == nil {
+		return nil, ErrNoSink
 	}
-	if out == nil {
-		out = os.Stdout
-	}
-	return &SagaEmitter{prefix: prefix, out: out}
+	return &SagaEmitter{sink: sink}, nil
 }
 
-// Emit writes a single SagaAuditEvent line. It is synchronous and never
-// returns an error to callers — failures are written to stderr so they
-// never mask a reconcile result.
-func (s *SagaEmitter) Emit(evt SagaAuditEvent) {
-	if evt.Ts == "" {
-		evt.Ts = time.Now().UTC().Format(time.RFC3339Nano)
+// Record writes the record of a change before the change. When it returns
+// an error, the caller must not make the change.
+func (e *SagaEmitter) Record(ctx context.Context, ev Event) error {
+	if e == nil || e.sink == nil {
+		return ErrNoSink
 	}
-	if evt.UserId == "" {
-		evt.UserId = "operator"
+	ev.Result = ""
+	ev.Reason = ""
+	if err := e.sink.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("audit: record %s of %s %q: %w", ev.Action, ev.TargetType, ev.TargetID, err)
 	}
-	if len(evt.ErrorMessage) > maxErrorMessageChars {
-		evt.ErrorMessage = evt.ErrorMessage[:maxErrorMessageChars] + "...[truncated]"
-	}
-
-	payload, err := json.Marshal(evt)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "[audit.%s] marshal error: %v\n", s.prefix, err)
-		return
-	}
-	line := fmt.Sprintf("[audit.%s] %s\n", s.prefix, payload)
-	if _, werr := fmt.Fprint(s.out, line); werr != nil {
-		// Warn to stderr only the first time so log spam is bounded.
-		if s.dropWarned.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "[audit.%s] write failed (further failures suppressed): %v\n", s.prefix, werr)
-		}
-	}
+	return nil
 }
 
-// truncateErrorMessage trims an error message to the shared 512-char limit.
-// Exported so runner.go can use it without re-implementing the constant.
-func TruncateErrorMessage(msg string) string {
-	if len(msg) <= maxErrorMessageChars {
+// RecordFailure writes the second record of a change that failed after its
+// first record. cause is the error of the change.
+func (e *SagaEmitter) RecordFailure(ctx context.Context, ev Event, cause error) error {
+	if e == nil || e.sink == nil {
+		return ErrNoSink
+	}
+	ev.Result = ResultFailure
+	ev.Reason = truncate(cause.Error())
+	if err := e.sink.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("audit: record the failure of %s of %s %q: %w", ev.Action, ev.TargetType, ev.TargetID, err)
+	}
+	return nil
+}
+
+// truncate bounds a reason to maxReasonChars.
+func truncate(msg string) string {
+	if len(msg) <= maxReasonChars {
 		return msg
 	}
-	return msg[:maxErrorMessageChars] + "...[truncated]"
+	return msg[:maxReasonChars] + "...[truncated]"
 }

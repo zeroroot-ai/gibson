@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
@@ -74,7 +75,7 @@ func newTestRunner(t *testing.T) *saga.Runner {
 	scheme := runtime.NewScheme()
 	_ = gibsonv1alpha1.AddToScheme(scheme)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := saga.NewRunner(c, events.NewFakeRecorder(100), testr.New(t))
+	r := saga.NewRunner(c, events.NewFakeRecorder(100), testr.New(t), (&audittest.Sink{}).Emitter(t))
 	r.InitialBackoff = 5 * time.Millisecond
 	r.MaxBackoff = 50 * time.Millisecond
 	r.RequeueInterval = time.Millisecond
@@ -177,7 +178,7 @@ func TestRunner_HonorRetryAnnotation_ClearsBlockedAndRemovesAnnotation(t *testin
 		WithObjects(tenant).
 		Build()
 	rec := events.NewFakeRecorder(10)
-	r := saga.NewRunner(c, rec, testr.New(t))
+	r := saga.NewRunner(c, rec, testr.New(t), (&audittest.Sink{}).Emitter(t))
 
 	honored, err := r.HonorRetryAnnotation(context.Background(), tenant)
 	if err != nil {
@@ -209,7 +210,7 @@ func TestRunner_HonorRetryAnnotation_NoAnnotationIsNoop(t *testing.T) {
 	_ = gibsonv1alpha1.AddToScheme(scheme)
 	tenant := newTestTenant()
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t))
+	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t), (&audittest.Sink{}).Emitter(t))
 
 	honored, err := r.HonorRetryAnnotation(context.Background(), tenant)
 	if err != nil {
@@ -245,7 +246,7 @@ func TestRunner_HonorRetryAnnotation_PreservesNonSagaBlocked(t *testing.T) {
 		WithStatusSubresource(&gibsonv1alpha1.Tenant{}).
 		WithObjects(tenant).
 		Build()
-	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t))
+	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t), (&audittest.Sink{}).Emitter(t))
 
 	honored, err := r.HonorRetryAnnotation(context.Background(), tenant)
 	if err != nil {
@@ -286,7 +287,7 @@ func TestRunner_Run_HonorsRetryAnnotationBeforeSagaRuns(t *testing.T) {
 		WithStatusSubresource(&gibsonv1alpha1.Tenant{}).
 		WithObjects(tenant).
 		Build()
-	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t))
+	r := saga.NewRunner(c, events.NewFakeRecorder(10), testr.New(t), (&audittest.Sink{}).Emitter(t))
 	r.InitialBackoff = time.Millisecond
 	r.MaxBackoff = 10 * time.Millisecond
 	r.RequeueInterval = time.Millisecond

@@ -43,6 +43,7 @@ import (
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/redisstate"
@@ -666,6 +667,9 @@ func main() {
 	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
 	var agentLimits flows.AgentLimitsReporter
+	// The audit record of each saga step and of the last backup goes to the
+	// daemon before the change (gibson#583). Required: no emitter, no start.
+	var sagaAudit *audit.SagaEmitter
 	// One block for the wiring of the daemon client and of each loop that
 	// needs it.
 	{
@@ -678,6 +682,10 @@ func main() {
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
 		agentLimits = grpcClient
+		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
+			setupLog.Error(gerr, "saga audit emitter init failed")
+			os.Exit(1)
+		}
 
 		// Operator-pull tenant provisioning (E9, gibson#948, enables
 		// dashboard#813): drain the daemon's pending-provisioning queue and
@@ -754,7 +762,7 @@ func main() {
 	// The last backup of a tenant delete (ADR-0075). VELERO_NAMESPACE is
 	// required: no switch turns the backup off, so an operator with no Velero
 	// namespace must not start.
-	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"))
+	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"), sagaAudit)
 	if err != nil {
 		setupLog.Error(err, "VELERO_NAMESPACE is required: the tenant delete flow takes a last Velero backup")
 		os.Exit(1)
@@ -765,6 +773,7 @@ func main() {
 		Scheme:            mgr.GetScheme(),
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
 		FinalBackup:       finalBackup,
+		Audit:             sagaAudit,
 		ProvisionSteps:    provisionSteps,
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,
@@ -808,6 +817,7 @@ func main() {
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
 		Deps:            enrollmentDeps,
+		Audit:           sagaAudit,
 		IssuanceSteps:   flows.EnrollmentIssuanceSteps(enrollmentDeps),
 		RevocationSteps: flows.EnrollmentRevocationSteps(enrollmentDeps),
 	}).SetupWithManager(mgr); err != nil {

@@ -23,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -62,7 +63,7 @@ func newChildOrchestrationReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant
 		WithObjects(tenant).
 		Build()
 
-	runner := saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t))
+	runner := saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t), (&audittest.Sink{}).Emitter(t))
 	r := &TenantReconciler{
 		Client:               fakeClient,
 		Scheme:               scheme,

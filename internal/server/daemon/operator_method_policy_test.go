@@ -135,17 +135,17 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 // reconciliation: the operator-allowed set must equal EXACTLY the set of RPCs
 // the tenant-operator actually dials. It fails on BOTH a missing grant (the
 // recurring provisioning-breaking bug) and a surplus grant (a standing
-// over-grant such as the UpsertTenantQuota / EmitAuditEvent ones removed here).
+// over-grant such as the UpsertTenantQuota one removed here).
 //
 // operatorActualCallSet is a curated, human-maintained list. When the operator
 // starts (or stops) calling an RPC, update this list AND the allowed/denied
 // classification in operatorMethodPolicy together — this test is the tripwire
 // that forces both edits.
 func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
-	// The 11 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
-	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota and
-	// EmitAuditEvent are deliberately ABSENT: no caller is wired, so granting
-	// them would be an over-grant (least privilege).
+	// The 12 DaemonOperatorService RPCs the tenant-operator (operators/tenant)
+	// actually calls over the SPIFFE direct-dial path. UpsertTenantQuota is
+	// deliberately ABSENT: no caller is wired, so granting it would be an
+	// over-grant (least privilege).
 	operatorActualCallSet := []string{
 		daemonoperatorv1.DaemonOperatorService_WriteAccessTuples_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ListFeatureTuples_FullMethodName,
@@ -158,6 +158,7 @@ func TestOperatorMethodPolicy_AllowedSetEqualsActualCallSet(t *testing.T) {
 		daemonoperatorv1.DaemonOperatorService_ListPendingTenantOps_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_AckTenantOp_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_SetAgentEnrollmentLimits_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName,
 	}
 
 	want := append([]string(nil), operatorActualCallSet...)

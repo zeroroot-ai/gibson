@@ -108,7 +108,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		k8sShape    = "k8s API may return nil map/slice; map-shape guard, not dep"
 		ctrlShim    = "controller-runtime cleanup-only reconcile tolerates nil"
 		applyShim   = "ApplyOpts helper accepts nil dst as no-op"
-		emitterOpt  = "emitter optional in early-boot; emitter-required follow-up"
 		healthShim  = "health probe accepts nil client to mean unprobeable"
 		recorderOpt = "event recorder always set by SetupWithManager; nil only in unit tests (best-effort obs)"
 	)
@@ -146,14 +145,12 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/controller/tenantgrants_controller.go :: if r.Recorder == nil { ... }":         recorderOpt,
 		"internal/controller/tenantrolesync_controller.go :: if r.Recorder == nil { ... }":       recorderOpt,
 
-		// Audit emitter + health probes
-		"internal/audit/emitter.go :: if e.cfg.RedisClient == nil { ... }": emitterOpt,
-		"internal/health/downstream.go :: if c == nil { ... }":             healthShim,
+		// Health probes
+		"internal/health/downstream.go :: if c == nil { ... }": healthShim,
 
 		// Saga runner — k8s API may return nil maps/conditions from a freshly created object.
-		"internal/saga/runner.go :: if conditions == nil { ... }":            k8sShape,
-		"internal/saga/runner.go :: if annotations == nil { ... }":           k8sShape,
-		"internal/saga/runner.go :: if a == nil || a.emitter == nil { ... }": emitterOpt,
+		"internal/saga/runner.go :: if conditions == nil { ... }":  k8sShape,
+		"internal/saga/runner.go :: if annotations == nil { ... }": k8sShape,
 	}
 
 	// Real-code subtest: walk internal/ and fail on any new finding.

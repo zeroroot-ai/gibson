@@ -11,6 +11,9 @@
 // not finish in time, and a Velero API that does not answer are all errors,
 // so the flow removes nothing.
 //
+// Ensure writes the audit record of the backup before it creates the Backup,
+// and creates nothing when the record cannot be written (gibson#583).
+//
 // No switch turns the backup off.
 package finalbackup
 
@@ -28,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 )
 
@@ -77,19 +81,24 @@ var ErrBackupFailed = errors.New("the last backup of the tenant did not complete
 type Taker struct {
 	client    client.Client
 	namespace string
+	audit     *audit.SagaEmitter
 	now       func() time.Time
 }
 
-// New returns a Taker that writes Backup objects into veleroNamespace. Both
-// arguments are required.
-func New(c client.Client, veleroNamespace string) (*Taker, error) {
+// New returns a Taker that writes Backup objects into veleroNamespace and
+// the audit record of each backup through auditEmitter. Each argument is
+// required.
+func New(c client.Client, veleroNamespace string, auditEmitter *audit.SagaEmitter) (*Taker, error) {
 	if c == nil {
 		return nil, errors.New("finalbackup: the Kubernetes client is required")
 	}
 	if veleroNamespace == "" {
 		return nil, errors.New("finalbackup: the Velero namespace is required")
 	}
-	return &Taker{client: c, namespace: veleroNamespace, now: time.Now}, nil
+	if auditEmitter == nil {
+		return nil, fmt.Errorf("finalbackup: %w", audit.ErrNoSink)
+	}
+	return &Taker{client: c, namespace: veleroNamespace, audit: auditEmitter, now: time.Now}, nil
 }
 
 // BackupName returns the name of the last backup of a tenant. The name comes
@@ -134,10 +143,7 @@ func (t *Taker) Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool
 	backup.SetGroupVersionKind(backupGVK)
 	err := t.client.Get(ctx, client.ObjectKey{Namespace: t.namespace, Name: name}, backup)
 	if apierrors.IsNotFound(err) {
-		if cErr := t.client.Create(ctx, Build(name, t.namespace, tenant)); cErr != nil {
-			return false, t.fail("create", fmt.Errorf("finalbackup: create Backup %s/%s: %w", t.namespace, name, cErr))
-		}
-		return false, nil
+		return false, t.create(ctx, name, tenant)
 	}
 	if err != nil {
 		return false, t.fail("read", fmt.Errorf("finalbackup: read Backup %s/%s: %w", t.namespace, name, err))
@@ -161,6 +167,33 @@ func (t *Taker) Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool
 				ErrBackupFailed, t.namespace, name, phase, age.Round(time.Second)))
 	}
 	return false, nil
+}
+
+// create writes the audit record of the backup, then creates the Backup.
+// With no record, it creates nothing. A failed create gets a second record.
+func (t *Taker) create(ctx context.Context, name string, tenant *gibsonv1alpha1.Tenant) error {
+	ev := audit.Event{
+		Action:     audit.ActionLastBackup,
+		TenantID:   tenant.Name,
+		TargetType: "tenant",
+		TargetID:   tenant.Name,
+		Fields: map[string]string{
+			"backup":           t.namespace + "/" + name,
+			"tenant_namespace": TenantNamespace(tenant.Name),
+			"tenant_uid":       string(tenant.UID),
+		},
+	}
+	if err := t.audit.Record(ctx, ev); err != nil {
+		return t.fail("audit", fmt.Errorf("finalbackup: Backup %s/%s not created: %w", t.namespace, name, err))
+	}
+	if cErr := t.client.Create(ctx, Build(name, t.namespace, tenant)); cErr != nil {
+		err := fmt.Errorf("finalbackup: create Backup %s/%s: %w", t.namespace, name, cErr)
+		if aErr := t.audit.RecordFailure(ctx, ev, err); aErr != nil {
+			err = errors.Join(err, aErr)
+		}
+		return t.fail("create", err)
+	}
+	return nil
 }
 
 // fail counts one failure and returns err unchanged.

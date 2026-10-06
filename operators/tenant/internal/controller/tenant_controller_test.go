@@ -4,12 +4,9 @@
 package controller
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/go-logr/logr/testr"
@@ -27,7 +24,7 @@ import (
 
 	platformv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
@@ -62,7 +59,7 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		WithObjects(tenant).
 		Build()
 
-	runner := saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t))
+	runner := saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t), (&audittest.Sink{}).Emitter(t))
 	r := &TenantReconciler{
 		Client:               fakeClient,
 		Scheme:               scheme,
@@ -303,33 +300,11 @@ func TestReconcile_NetworkPolicy_DaemonEgressIsPodScoped(t *testing.T) {
 // Correlation-ID propagation tests (Task 20.1)
 // ---------------------------------------------------------------------------
 
-// newAuditCapturingRunner creates a runner whose audit emitter writes to buf,
-// allowing tests to inspect emitted correlation IDs.
-func newAuditCapturingRunner(t *testing.T, fakeClient client.Client, buf *bytes.Buffer) *saga.Runner {
+// newAuditCapturingRunner creates a runner whose audit records go to sink,
+// allowing tests to inspect the correlation IDs of the records.
+func newAuditCapturingRunner(t *testing.T, fakeClient client.Client, sink *audittest.Sink) *saga.Runner {
 	t.Helper()
-	r := saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t))
-	r.Audit = audit.NewSagaEmitter("tenant-operator", buf)
-	return r
-}
-
-// decodedAuditLines parses lines from buf and returns them as JSON maps.
-func decodedAuditLines(t *testing.T, buf *bytes.Buffer) []map[string]any {
-	t.Helper()
-	var out []map[string]any
-	for l := range strings.SplitSeq(buf.String(), "\n") {
-		if l == "" {
-			continue
-		}
-		const prefix = "[audit.tenant-operator] "
-		if !strings.HasPrefix(l, prefix) {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(l, prefix)), &m); err == nil {
-			out = append(out, m)
-		}
-	}
-	return out
+	return saga.NewRunner(fakeClient, events.NewFakeRecorder(100), testr.New(t), sink.Emitter(t))
 }
 
 // TestReconcile_CorrelationID_FromAnnotation verifies that when the Tenant CR
@@ -359,8 +334,8 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		WithObjects(tenant).
 		Build()
 
-	var buf bytes.Buffer
-	runner := newAuditCapturingRunner(t, fakeClient, &buf)
+	sink := &audittest.Sink{}
+	runner := newAuditCapturingRunner(t, fakeClient, sink)
 
 	r := &TenantReconciler{
 		Client:               fakeClient,
@@ -377,13 +352,13 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	lines := decodedAuditLines(t, &buf)
-	if len(lines) == 0 {
-		t.Fatal("expected audit lines, got none")
+	records := sink.Events()
+	if len(records) == 0 {
+		t.Fatal("expected audit records, got none")
 	}
-	for _, m := range lines {
-		if got, _ := m["correlationId"].(string); got != wantCorrID {
-			t.Errorf("audit correlationId: got %q, want %q (line: %v)", got, wantCorrID, m)
+	for _, ev := range records {
+		if got := ev.Fields["correlation_id"]; got != wantCorrID {
+			t.Errorf("audit correlation_id: got %q, want %q (record: %+v)", got, wantCorrID, ev)
 		}
 	}
 }
@@ -412,8 +387,8 @@ func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
 		WithObjects(tenant).
 		Build()
 
-	var buf bytes.Buffer
-	runner := newAuditCapturingRunner(t, fakeClient, &buf)
+	sink := &audittest.Sink{}
+	runner := newAuditCapturingRunner(t, fakeClient, sink)
 
 	r := &TenantReconciler{
 		Client:               fakeClient,
@@ -430,14 +405,13 @@ func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
 		t.Fatalf("reconcile: %v", err)
 	}
 
-	lines := decodedAuditLines(t, &buf)
-	if len(lines) == 0 {
-		t.Fatal("expected audit lines, got none")
+	records := sink.Events()
+	if len(records) == 0 {
+		t.Fatal("expected audit records, got none")
 	}
-	for _, m := range lines {
-		corrID, _ := m["correlationId"].(string)
-		if corrID == "" {
-			t.Errorf("expected non-empty generated correlationId in audit line, got empty (line: %v)", m)
+	for _, ev := range records {
+		if ev.Fields["correlation_id"] == "" {
+			t.Errorf("expected non-empty generated correlation_id in audit record, got empty (record: %+v)", ev)
 		}
 	}
 }

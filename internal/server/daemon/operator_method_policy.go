@@ -134,13 +134,13 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		allowed: true,
 		reason:  "operator acks each drained tenant_admin_ops entry (migration 018)",
 	},
+	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName: {
+		allowed: true,
+		reason:  "operator records each saga step and the last backup before the change (gibson#583)",
+	},
 
 	// --- operator-denied: least privilege, no caller wired ---
 	daemonoperatorv1.DaemonOperatorService_UpsertTenantQuota_FullMethodName: {
-		allowed: false,
-		reason:  "no current caller; re-add when wired",
-	},
-	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName: {
 		allowed: false,
 		reason:  "no current caller; re-add when wired",
 	},
