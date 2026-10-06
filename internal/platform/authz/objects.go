@@ -67,10 +67,6 @@ func ComponentObject(kind, name string) string {
 	return "component:" + kind + "/" + name
 }
 
-// ConnectorKindPrefix is the "connector/" object-id prefix, kept for callers
-// that build the connector segment by hand.
-const ConnectorKindPrefix = KindConnector + "/"
-
 // ConnectorComponentObject returns the canonical FGA object reference for a
 // connector component: "component:connector/<catalog-id>". One object per
 // catalog entry, shared across tenants; per-tenant state lives in relations

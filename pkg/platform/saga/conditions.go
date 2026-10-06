@@ -21,7 +21,6 @@ const (
 	ReasonInvalidSpec      = "InvalidSpec"
 	ReasonAllStepsComplete = "AllStepsComplete"
 	ReasonStepFailed       = "StepFailed"
-	ReasonStartupGate      = "StartupGate"
 )
 
 // SetCondition updates or inserts a condition in the given slice. Preserves

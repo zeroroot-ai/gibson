@@ -42,17 +42,6 @@ func (p ProcessState) IsValid() bool {
 // remaining producer.
 type HealthCheckProtocol string
 
-const (
-	// HealthCheckProtocolHTTP uses HTTP GET requests for health checks
-	HealthCheckProtocolHTTP HealthCheckProtocol = "http"
-
-	// HealthCheckProtocolGRPC uses gRPC health checking protocol (grpc_health_v1)
-	HealthCheckProtocolGRPC HealthCheckProtocol = "grpc"
-
-	// HealthCheckProtocolAuto automatically detects the protocol (tries gRPC first, then HTTP)
-	HealthCheckProtocolAuto HealthCheckProtocol = "auto"
-)
-
 // HealthCheckResult represents the result of a health check operation.
 // It contains detailed information about the health check status,
 // protocol used, timing, and any errors encountered.
@@ -83,25 +72,4 @@ type LogError struct {
 
 	// Level is the log level (e.g., "ERROR", "WARN", "FATAL")
 	Level string
-}
-
-// StatusResult represents the comprehensive status of a component.
-// This includes process state, health check results, recent errors,
-// and uptime information.
-type StatusResult struct {
-	// Component is the component being checked
-	Component *Component
-
-	// ProcessState indicates the current state of the component's process
-	ProcessState ProcessState
-
-	// HealthCheck contains the health check result, or nil if health check was not performed
-	HealthCheck *HealthCheckResult
-
-	// RecentErrors contains recent errors from component logs
-	RecentErrors []LogError
-
-	// Uptime is the duration the component has been running.
-	// Zero if the component is not running.
-	Uptime time.Duration
 }

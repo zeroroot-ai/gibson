@@ -27,8 +27,6 @@ const (
 	ActionSecretDelete = "secret_delete"
 	// ActionSecretList is emitted when a tenant's secret names are listed.
 	ActionSecretList = "secret_list"
-	// ActionSecretProbe is emitted when a provider probe is executed.
-	ActionSecretProbe = "secret_probe"
 	// ActionSecretConfigSet is emitted when a tenant's broker configuration
 	// is created, updated, or deleted.
 	ActionSecretConfigSet = "secret_config_set"

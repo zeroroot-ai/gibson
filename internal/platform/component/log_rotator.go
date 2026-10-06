@@ -5,21 +5,6 @@ package component
 
 import (
 	"os"
-	"sync"
-)
-
-const (
-	// DefaultLogMaxSize is the default maximum log file size before rotation (10MB).
-	DefaultLogMaxSize = 10 * 1024 * 1024 // 10MB
-
-	// DefaultLogMaxBackups is the default maximum number of old log files to retain.
-	DefaultLogMaxBackups = 5
-
-	// DefaultLogDirPerms is the default permission for log directories.
-	DefaultLogDirPerms = 0755
-
-	// DefaultLogFilePerms is the default permission for log files.
-	DefaultLogFilePerms = 0644
 )
 
 // LogRotator defines the interface for log rotation strategies.
@@ -39,12 +24,4 @@ type LogRotator interface {
 	//
 	// Returns the new file handle on success, or an error if rotation fails.
 	Rotate(path string) (*os.File, error)
-}
-
-// DefaultLogRotator implements size-based log rotation with backup retention.
-// It is safe for concurrent use by multiple goroutines.
-type DefaultLogRotator struct {
-	mu         sync.Mutex // Protects rotation operations
-	maxSize    int64      // Maximum file size before rotation
-	maxBackups int        // Maximum number of backup files to keep
 }

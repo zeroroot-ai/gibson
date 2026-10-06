@@ -9,7 +9,6 @@ package component
 
 import (
 	"context"
-	"time"
 )
 
 // ComponentStore provides storage operations for installed components.
@@ -45,18 +44,4 @@ type ComponentStore interface {
 
 	// ListInstances returns all running instances for a component.
 	ListInstances(ctx context.Context, kind ComponentKind, name string) ([]ComponentInfo, error)
-}
-
-// ComponentMetadata is the JSON structure used for serializing installed components.
-// This contains only the persistent installation data, not runtime state.
-type ComponentMetadata struct {
-	Kind      string    `json:"kind"`
-	Name      string    `json:"name"`
-	Version   string    `json:"version"`
-	RepoPath  string    `json:"repo_path"`
-	BinPath   string    `json:"bin_path"`
-	Source    string    `json:"source"`
-	Manifest  string    `json:"manifest,omitempty"` // JSON-encoded Manifest
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
 }

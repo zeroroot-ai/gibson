@@ -90,12 +90,6 @@ type ResultDiscoveryProcessor interface {
 // These match the tier strings used by the generated MemoryRequest proto type.
 // ---------------------------------------------------------------------------
 
-const (
-	memTierWorking  = "working"
-	memTierMission  = "mission"
-	memTierLongTerm = "long_term"
-)
-
 // ---------------------------------------------------------------------------
 // Connection parameter defaults
 //

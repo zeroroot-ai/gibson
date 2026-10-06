@@ -5,7 +5,6 @@ package manifest
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -20,13 +19,6 @@ const invalidationChannelSuffix = ":manifest_invalidated"
 // requires. Implemented by redis.UniversalClient and mockable in tests.
 type RedisPublishClient interface {
 	Publish(ctx context.Context, channel string, message any) *redis.IntCmd
-}
-
-// redisInvalidator implements Invalidator over Redis pubsub. Failures
-// are logged and swallowed so the originating write is never blocked.
-type redisInvalidator struct {
-	rdb RedisPublishClient
-	log *slog.Logger
 }
 
 // InvalidationPattern is the psubscribe pattern matching every tenant's

@@ -30,24 +30,16 @@ package identityresolver
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 // DefaultPath is the on-disk location of the projected identity map.
 // Override via GIBSON_SA_IDENTITY_MAP_PATH env var. Either a directory of
 // per-key files (kubelet ConfigMap projection) or a JSON file is accepted.
 const DefaultPath = "/etc/gibson/sa-identity-map"
-
-// DefaultRefreshInterval is how often the background refresher polls the
-// file mtime. Reads on every Resolve also check mtime, so this interval
-// only matters for callers that hold a long-lived Resolver and never call
-// Resolve.
-const DefaultRefreshInterval = 60 * time.Second
 
 // Resolver holds the in-memory map and watches the source file for
 // updates. Safe for concurrent use.
@@ -171,6 +163,3 @@ func readJSONMap(path string) (map[string]string, error) {
 	}
 	return m, nil
 }
-
-// errMissing is exported only for test use.
-var errMissing = errors.New("identityresolver: source file missing")

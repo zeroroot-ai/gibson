@@ -21,7 +21,6 @@ import (
 var (
 	ErrComponentNotEnabled    = errors.New("component not enabled for tenant")
 	ErrComponentNotConfigured = errors.New("component enabled but not configured")
-	ErrComponentAlreadyExists = errors.New("component access record already exists")
 	ErrComponentAccessDenied  = errors.New("component access level not granted for tenant")
 )
 

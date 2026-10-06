@@ -40,13 +40,6 @@ type Invalidator interface {
 	Publish(ctx context.Context, tenantID string, reason string)
 }
 
-// ManifestNotifier is the small combined facade used by write-path call
-// sites (FGA, registry, tier limits). A single Notify covers both Bump
-// and Publish so cross-cutting wiring remains trivial.
-type ManifestNotifier interface {
-	Notify(ctx context.Context, tenantID string, reason string)
-}
-
 // FGAResolver is the narrow Builder-facing view of the capabilitygrant.FGABridge.
 // *capabilitygrant.FGABridge satisfies it natively. Declared here so unit
 // tests mock one small surface rather than the full bridge.

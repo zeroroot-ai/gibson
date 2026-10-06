@@ -71,38 +71,6 @@ type agentLookup interface {
 // Claim types returned by the verifier
 // ---------------------------------------------------------------------------
 
-// AgentClaims contains the verified claims extracted from an agent+jwt.
-//
-// All fields are guaranteed to be non-empty after successful verification.
-type AgentClaims struct {
-	// AgentID is the agent that presented this token (JWT sub).
-	AgentID string
-
-	// HostID is the host the agent is registered under (JWT iss).
-	HostID string
-
-	// TenantID is sourced from the agent's store record (not the JWT).
-	TenantID string
-
-	// OwnerUserID is sourced from the agent's store record (not the JWT).
-	OwnerUserID string
-
-	// ComponentScope is the FGA component identifier bound to this agent at
-	// registration time (spec R2). Extracted from the JWT's component_scope
-	// payload claim. VerifyAgentJWT rejects tokens whose component_scope is
-	// empty — there is no grace period.
-	ComponentScope string
-
-	// IssuedAt is when the token was created (JWT iat).
-	IssuedAt time.Time
-
-	// ExpiresAt is when the token expires (JWT exp).
-	ExpiresAt time.Time
-
-	// JTI is the token's unique identifier used for replay prevention.
-	JTI string
-}
-
 // HostClaims contains the verified claims extracted from a host+jwt.
 type HostClaims struct {
 	// HostID is the JWK thumbprint of the host's public key (JWT iss).

@@ -37,10 +37,3 @@ type notifier struct {
 type SystemTenantEnumerator interface {
 	AllTenantIDs(ctx context.Context) ([]string, error)
 }
-
-// StaticTenantEnumerator is a simple SystemTenantEnumerator backed by a
-// fixed list. Tests and dev-mode setups can use this; production wires a
-// live enumerator against the tenant-operator state.
-type StaticTenantEnumerator struct {
-	Tenants []string
-}
