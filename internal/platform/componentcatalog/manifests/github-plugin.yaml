@@ -14,6 +14,7 @@
 # The exit test .github/workflows/exit-test-tool-dispatch.yml deploys this
 # image. Until the first build from plugins/github, the pin is the last image
 # that the integrations CI published.
+# plugin-source-tree: 2501b3f89e25e4b206205c84b420add1490dae70
 id: github
 kind: plugin
 displayName: GitHub
@@ -24,7 +25,7 @@ egressAllow:
   - api.github.com:443
 spec:
   runtime: pod
-  image: ghcr.io/zeroroot-ai/integrations/github@sha256:12a5cb2ae9b7ed4380b07d063bcac83caed8989bd18fd3c6633394aefeda093c
+  image: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:8d64bd2ba8c3d915444ee124a507ef07f4f5bca494afc83454cce3c90c6e66fc
   svid: spiffe://zeroroot.ai/plugin/github
   # Trusted, and four facts make it so. We wrote the code. The image is signed
   # and pinned by digest. The plugin passes the content it handles through and
