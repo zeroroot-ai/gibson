@@ -141,7 +141,7 @@ func TestWriteSync_NilWriter_ReturnsError(t *testing.T) {
 func TestWriteSyncID_ReturnsTheRowID(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	expectChainPreamble(mock)
 	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").
@@ -159,7 +159,7 @@ func TestWriteSyncID_ReturnsTheRowID(t *testing.T) {
 func TestWriteSyncID_SurfacesTheInsertError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	expectChainPreamble(mock)
 	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").WillReturnError(errors.New("insert refused"))
@@ -174,7 +174,7 @@ func TestWriteSyncID_SurfacesTheInsertError(t *testing.T) {
 func TestWriteSyncID_CommitError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	expectChainPreamble(mock)
 	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").
@@ -195,7 +195,7 @@ func TestWriteSyncID_NilWriter_ReturnsError(t *testing.T) {
 func TestInsert_EmptyBatchWritesNothing(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	id, err := NewWriter(db, silentLogger()).insert(context.Background(), nil, true)
 	require.NoError(t, err)
@@ -207,7 +207,7 @@ func TestInsert_EmptyBatchWritesNothing(t *testing.T) {
 func TestInsert_LockError(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	mock.ExpectBegin()
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnError(errors.New("lock refused"))

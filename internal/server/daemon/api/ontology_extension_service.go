@@ -67,8 +67,8 @@ const SubmittedFragmentAction = "ontology.extension.submitted"
 
 // NewOntologyExtensionService constructs the service over the given tenant
 // brain registry and the audit writer of submitted fragments.
-func NewOntologyExtensionService(registry *brain.Registry, audit FragmentAuditWriter) *OntologyExtensionService {
-	return &OntologyExtensionService{registry: registry, audit: audit}
+func NewOntologyExtensionService(registry *brain.Registry, fragments FragmentAuditWriter) *OntologyExtensionService {
+	return &OntologyExtensionService{registry: registry, audit: fragments}
 }
 
 // engine resolves the caller's tenant from the ext-authz context and returns

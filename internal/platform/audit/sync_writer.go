@@ -15,6 +15,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -47,7 +48,7 @@ func (w *Writer) WriteSync(ctx context.Context, event Event) error {
 // so that a caller can name the record in its response.
 func (w *Writer) WriteSyncID(ctx context.Context, event Event) (int64, error) {
 	if w == nil {
-		return 0, fmt.Errorf("audit: WriteSyncID called on nil Writer")
+		return 0, errors.New("audit: WriteSyncID called on nil Writer")
 	}
 	id, err := w.insert(ctx, []Event{event}, true)
 	if err != nil {
