@@ -197,7 +197,7 @@ func TestMissionManager_TenantlessCallsAreRefused(t *testing.T) {
 				// request picked one, which is the escalation itself.
 				regCtx, cancelReg := context.WithCancel(t.Context())
 				defer cancelReg()
-				reg := brain.NewRegistry(regCtx, braintest.StoreFactory())
+				reg := brain.NewRegistry(regCtx, braintest.StoreFactory()) //nolint:contextcheck // the Registry lives for the test, not for the request context under test
 				engines := 0
 				reg.OnEngine(func(*brain.Engine) { engines++ })
 
