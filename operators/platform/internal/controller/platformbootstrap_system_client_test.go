@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
@@ -87,17 +86,12 @@ func TestSystemAPIClaimedHost(t *testing.T) {
 	}
 }
 
-// --- reconcileTrustedDomain ------------------------------------------------
+// --- systemClient --------------------------------------------------------
 
-// fakeSystemClient records the calls reconcileTrustedDomain makes.
+// fakeSystemClient stands in for the Zitadel System API (gibson#794):
+// validTokens are the tokens Zitadel accepts, minted counts each mint, and
+// mintErr and validErr fail the calls.
 type fakeSystemClient struct {
-	existing []string
-	added    []string
-	addErr   error
-	listErr  error
-
-	// The admin token half (gibson#794): validTokens are the tokens Zitadel
-	// accepts, minted counts each mint, and mintErr and validErr fail the calls.
 	validTokens map[string]bool
 	minted      int
 	mintErr     error
@@ -124,27 +118,21 @@ func (f *fakeSystemClient) AdminTokenValid(_ context.Context, pat string) (bool,
 	return f.validTokens[pat], nil
 }
 
-func (f *fakeSystemClient) ListInstanceDomains(context.Context) ([]string, error) {
-	if f.listErr != nil {
-		return nil, f.listErr
-	}
-	return f.existing, nil
-}
-
-func (f *fakeSystemClient) AddInstanceDomain(_ context.Context, d string) error {
-	if f.addErr != nil {
-		return f.addErr
-	}
-	f.added = append(f.added, d)
-	return nil
-}
-
 // capturedFactoryArgs records what the reconciler handed the client factory.
 type capturedFactoryArgs struct {
 	apiURL         string
 	systemUserName string
 	externalDomain string
 	keyPath        string
+}
+
+// capturingFactory returns a SystemClientFactory that records its arguments
+// in got and returns a fake client.
+func capturingFactory(got *capturedFactoryArgs) SystemClientFactory {
+	return func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
+		*got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
+		return &fakeSystemClient{}, nil
+	}
 }
 
 func newTestBootstrap(sc *gibsonv1alpha1.SystemClientSpec, externalDomain string) *gibsonv1alpha1.PlatformBootstrap {
@@ -159,161 +147,92 @@ func newTestBootstrap(sc *gibsonv1alpha1.SystemClientSpec, externalDomain string
 	}
 }
 
-// TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster is the
-// backwards-compatibility case: an existing PlatformBootstrap written before
-// the apiURL field existed must still reconcile, and must now dial the
-// in-cluster Service rather than the public issuer.
-func TestReconcileTrustedDomain_UnsetAPIURL_DialsInCluster(t *testing.T) {
+// TestSystemClient_UnsetAPIURL_DialsInCluster is the backwards-compatibility
+// case: a PlatformBootstrap written before the apiURL field existed dials the
+// in-cluster Service, never the public issuer, and claims the public host
+// from ZITADEL_EXTERNAL_DOMAIN.
+func TestSystemClient_UnsetAPIURL_DialsInCluster(t *testing.T) {
 	t.Setenv("ZITADEL_URL", "")
 	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "app.example.com")
 
 	var got capturedFactoryArgs
-	fake := &fakeSystemClient{}
+	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
 
-	r := &PlatformBootstrapReconciler{
-		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
-			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
-			return fake, nil
-		},
+	// No apiURL, no externalDomain: the shape an already-installed cluster has.
+	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, "")); err != nil {
+		t.Fatalf("systemClient: %v", err)
 	}
-
-	// No apiURL, no externalDomain — the shape an already-installed cluster has.
-	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, "")
-
-	res, err := r.reconcileTrustedDomain(context.Background(), pb, logr.Discard())
-	if err != nil {
-		t.Fatalf("reconcileTrustedDomain: %v", err)
-	}
-	if !res.IsZero() {
-		t.Fatalf("expected no requeue, got %+v", res)
-	}
-
 	if got.apiURL != testInClusterAddr {
 		t.Errorf("apiURL = %q, want in-cluster %q", got.apiURL, testInClusterAddr)
 	}
 	if got.apiURL == testIssuer {
 		t.Errorf("apiURL still points at the public issuer %q", testIssuer)
 	}
-	// The claimed host comes from ZITADEL_EXTERNAL_DOMAIN because the spec
-	// leaves externalDomain unset. It is never derived from the issuer.
 	if got.externalDomain != "app.example.com" {
 		t.Errorf("claimed host = %q, want %q", got.externalDomain, "app.example.com")
 	}
 	if got.systemUserName != "gibson-system-bot" {
 		t.Errorf("systemUserName = %q, want default gibson-system-bot", got.systemUserName)
 	}
-
-	// And it actually completed the registration.
-	if len(fake.added) != 1 || fake.added[0] != testClusterDomain {
-		t.Errorf("added domains = %v, want [%s]", fake.added, testClusterDomain)
-	}
-	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionTrustedDomainReady)
-	if cond == nil || cond.Status != metav1.ConditionTrue {
-		t.Fatalf("TrustedDomainReady = %+v, want True", cond)
-	}
 }
 
-// TestReconcileTrustedDomain_ExplicitAPIURL proves the CRD seam is honoured
-// and that an explicit externalDomain wins over the issuer-derived host.
-func TestReconcileTrustedDomain_ExplicitAPIURL(t *testing.T) {
+// TestSystemClient_ExplicitAPIURL proves the CRD seam is honoured and that an
+// explicit externalDomain wins.
+func TestSystemClient_ExplicitAPIURL(t *testing.T) {
 	t.Setenv("ZITADEL_URL", "http://env.svc:8080")
 
 	var got capturedFactoryArgs
-	r := &PlatformBootstrapReconciler{
-		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
-			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
-			return &fakeSystemClient{existing: []string{testClusterDomain}}, nil
-		},
-	}
+	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
 	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
 		APIURL:         "http://zitadel.gibson.svc:8080",
 		SystemUserName: "custom-bot",
 	}, testExternalDomain)
 
-	if _, err := r.reconcileTrustedDomain(context.Background(), pb, logr.Discard()); err != nil {
-		t.Fatalf("reconcileTrustedDomain: %v", err)
+	if _, err := r.systemClient(pb); err != nil {
+		t.Fatalf("systemClient: %v", err)
 	}
-
 	if got.apiURL != "http://zitadel.gibson.svc:8080" {
 		t.Errorf("apiURL = %q, want the spec value", got.apiURL)
 	}
 	if got.externalDomain != testExternalDomain {
-		t.Errorf("forged Host = %q, want %q", got.externalDomain, testExternalDomain)
+		t.Errorf("claimed host = %q, want %q", got.externalDomain, testExternalDomain)
 	}
 	if got.systemUserName != "custom-bot" {
 		t.Errorf("systemUserName = %q, want custom-bot", got.systemUserName)
 	}
 }
 
-// TestReconcileTrustedDomain_EnvFallback covers a chart that sets only the
-// operator-Pod env var and no CRD field.
-func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
+// TestSystemClient_EnvFallback covers a chart that sets only the operator-Pod
+// env var and no CRD field.
+func TestSystemClient_EnvFallback(t *testing.T) {
 	t.Setenv("ZITADEL_URL", "http://gibson-zitadel.gibson.svc:8080")
 
 	var got capturedFactoryArgs
-	r := &PlatformBootstrapReconciler{
-		SystemClientFactory: func(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
-			got = capturedFactoryArgs{apiURL, systemUserName, externalDomain, keyPath}
-			return &fakeSystemClient{}, nil
-		},
-	}
-	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, testExternalDomain)
-
-	if _, err := r.reconcileTrustedDomain(context.Background(), pb, logr.Discard()); err != nil {
-		t.Fatalf("reconcileTrustedDomain: %v", err)
+	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
+	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, testExternalDomain)); err != nil {
+		t.Fatalf("systemClient: %v", err)
 	}
 	if got.apiURL != "http://gibson-zitadel.gibson.svc:8080" {
 		t.Errorf("apiURL = %q, want the env value", got.apiURL)
 	}
 }
 
-// TestReconcileTrustedDomain_NilSystemClient: with no system client the step
-// cannot run, so its condition is False and never Ready (gibson#223).
-func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
-	r := &PlatformBootstrapReconciler{
-		SystemClientFactory: func(string, string, string, string) (zitadel.SystemClient, error) {
-			t.Fatal("factory must not be called when systemClient is nil")
-			return nil, nil
-		},
-	}
-	pb := newTestBootstrap(nil, "")
-
-	if _, err := r.reconcileTrustedDomain(context.Background(), pb, logr.Discard()); err != nil {
-		t.Fatalf("reconcileTrustedDomain: %v", err)
-	}
-	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionTrustedDomainReady)
-	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "SystemClientMissing" {
-		t.Fatalf("condition = %+v, want False with reason SystemClientMissing", cond)
-	}
-}
-
-// TestReconcileTrustedDomain_ClaimedHostReachesTheWire wires the REAL
-// zitadel.NewSystemClient through the reconciler against a local server
-// standing in for the in-cluster Zitadel Service. It proves end to end that
-// the connection is made to the in-cluster address while the instance header
-// carries the public domain — the property Zitadel's instance router
-// depends on, and the one that makes the public /system/v1/ route deletable.
-func TestReconcileTrustedDomain_ClaimedHostReachesTheWire(t *testing.T) {
+// TestSystemClient_ClaimedHostReachesTheWire wires the REAL
+// zitadel.NewSystemClient through the reconciler against a local server that
+// stands in for the in-cluster Zitadel Service. The connection goes to the
+// in-cluster address, and the instance header carries the public domain.
+func TestSystemClient_ClaimedHostReachesTheWire(t *testing.T) {
 	t.Setenv("ZITADEL_URL", "")
 
-	var searchHost, domainsHost string
-	mux := http.NewServeMux()
-	mux.HandleFunc("/system/v1/instances/_search", func(w http.ResponseWriter, r *http.Request) {
-		searchHost = r.Header.Get(zitadelconn.InstanceHostHeader)
+	var gotInstance string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"result":[{"id":"372802942115250284","domain":"app.example.com"}]}`))
-	})
-	mux.HandleFunc("/system/v1/instances/372802942115250284/domains/_search",
-		func(w http.ResponseWriter, r *http.Request) {
-			domainsHost = r.Header.Get(zitadelconn.InstanceHostHeader)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"result":[{"domain":"` + testClusterDomain + `"}]}`))
-		})
-	srv := httptest.NewServer(mux)
+		_, _ = w.Write([]byte(`{"org":{"id":"org-1"}}`))
+	}))
 	t.Cleanup(srv.Close)
 
 	r := &PlatformBootstrapReconciler{SystemClientFactory: DefaultSystemClientFactory}
-
 	// srv.URL stands in for the cluster Service address: a host that is NOT
 	// the public domain.
 	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
@@ -321,21 +240,18 @@ func TestReconcileTrustedDomain_ClaimedHostReachesTheWire(t *testing.T) {
 		KeyPath: writeTestRSAKey(t),
 	}, testExternalDomain)
 
-	if _, err := r.reconcileTrustedDomain(context.Background(), pb, logr.Discard()); err != nil {
-		t.Fatalf("reconcileTrustedDomain: %v", err)
+	sys, err := r.systemClient(pb)
+	if err != nil {
+		t.Fatalf("systemClient: %v", err)
 	}
-
-	if searchHost != testExternalDomain || domainsHost != testExternalDomain {
-		t.Errorf("instance header = (%q, %q), want %q on both requests",
-			searchHost, domainsHost, testExternalDomain)
+	if _, err := sys.AdminTokenValid(context.Background(), "a-token"); err != nil {
+		t.Fatalf("AdminTokenValid: %v", err)
+	}
+	if gotInstance != testExternalDomain {
+		t.Errorf("instance header = %q, want %q", gotInstance, testExternalDomain)
 	}
 	if strings.Contains(srv.URL, testExternalDomain) {
 		t.Fatalf("test setup broken: dial target %q is the public domain", srv.URL)
-	}
-
-	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionTrustedDomainReady)
-	if cond == nil || cond.Status != metav1.ConditionTrue {
-		t.Fatalf("TrustedDomainReady = %+v, want True", cond)
 	}
 }
 

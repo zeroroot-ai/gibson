@@ -81,9 +81,7 @@ type VaultTokenSource interface {
 //  4. Ensure Vault transit engine + key (or skip if !enabled) →
 //     VaultTransitReady
 //  5. Plan sync (hash-based) → PlanSyncComplete
-//  6. Register cluster-internal Zitadel Service hostname as trusted domain →
-//     TrustedDomainReady (ADR-0092)
-//  7. Top-level Ready = AND(above)
+//  6. Top-level Ready = AND(above)
 //
 // Children (OIDCClient CRs) are owned via ownerReferences so K8s GC
 // handles cascade on delete.
@@ -214,8 +212,8 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		//
 		// FIRST, deliberately. Escrow depends on nothing but the minted key, and
 		// every later step depends on services that can be down. Running it after
-		// them means a cluster that is partially broken — a failed Zitadel domain
-		// listing is enough — never escrows its key at all, which is precisely the
+		// them means a cluster that is partially broken — a failed Zitadel call
+		// is enough — never escrows its key at all, which is precisely the
 		// cluster whose key you will wish had been copied out. Ordering this last
 		// made escrow least likely to happen exactly when it mattered most.
 		//
@@ -235,17 +233,6 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// into the gibson-sa-identity-map ConfigMap. Replaces the gitops
 		// sa-identity-map-populator Sync Job (gitops#170).
 		r.reconcileSAIdentityMap,
-		// Step 3: Register cluster-internal Zitadel Service hostname as a trusted
-		// domain so in-cluster consumers can dial it directly (ADR-0092).
-		//
-		// Ordering rationale: trusted-domain registration depends only on
-		// reconcileZitadelProject (Step 1) + reconcileOIDCChildren (Step 2)
-		// being complete (it needs the Zitadel instance + the system-bot
-		// MACHINE_USER to exist). It is orthogonal to FGA, vault, plans,
-		// master-key, and postgres-bundle — promoting it ahead of those
-		// avoids gating slice 0 behind an unrelated reconciler short-circuit
-		// (gitops#122 tracks the postgres-side investigation).
-		r.reconcileTrustedDomain,
 		// Step 4: FGA model.
 		r.reconcileFGAModel,
 		// Step 5: Vault transit.
@@ -681,7 +668,6 @@ func (r *PlatformBootstrapReconciler) aggregateReady(pb *gibsonv1alpha1.Platform
 		gibsonv1alpha1.ConditionMasterKeyReady,
 		gibsonv1alpha1.ConditionUnsealKeyEscrowed,
 		gibsonv1alpha1.ConditionPostgresBundleReady,
-		gibsonv1alpha1.ConditionTrustedDomainReady,
 		gibsonv1alpha1.ConditionLoginBrandingReady,
 		gibsonv1alpha1.ConditionSMTPProviderReady,
 		gibsonv1alpha1.ConditionPlatformOwnerReady,

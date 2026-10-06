@@ -38,22 +38,13 @@ const (
 )
 
 // SystemClient is the Zitadel System API surface the platform-operator needs
-// to register additional trusted instance domains. Authentication is via a
+// to mint the Zitadel admin token (gibson#794). Authentication is via a
 // signed JWT assertion (RFC 7523) using the RSA private key provisioned at
 // chart install time for the SYSTEM_OWNER machine user.
 //
 // Unlike the Admin-API Client (PAT-based), SystemClient caches the access
 // token in memory and refreshes it automatically when it expires.
 type SystemClient interface {
-	// AddInstanceDomain registers domain as an additional valid Host for the
-	// Zitadel instance. Idempotent: if the domain is already registered the
-	// method returns nil.
-	AddInstanceDomain(ctx context.Context, domain string) error
-
-	// ListInstanceDomains returns the domain strings currently registered on
-	// the instance.
-	ListInstanceDomains(ctx context.Context) ([]string, error)
-
 	// MintAdminToken mints a personal access token for the IAM_OWNER machine
 	// user userName of the default organization, and creates that user and its
 	// IAM_OWNER membership when they do not exist (gibson#794). The system
@@ -149,10 +140,9 @@ type systemHTTPClient struct {
 	key      *rsa.PrivateKey
 	http     *http.Client
 
-	mu               sync.Mutex
-	cachedToken      string
-	tokenExpiry      time.Time
-	cachedInstanceID string
+	mu          sync.Mutex
+	cachedToken string
+	tokenExpiry time.Time
 }
 
 // token returns a valid bearer token, refreshing if the cached copy has
@@ -208,126 +198,6 @@ func (c *systemHTTPClient) mintAssertion() (string, time.Time, error) {
 	// Shave 10 s off expiry so we refresh before the JWT actually expires
 	// under load.
 	return assertion, exp.Add(-10 * time.Second), nil
-}
-
-// resolveInstanceID returns the numeric ID of the single Zitadel instance
-// reachable by this SystemAPIUser. Zitadel's System API addresses each
-// instance by its concrete ID — there is no `/me` alias. The mapping is
-// stable for the lifetime of the deployment, so we cache it on first
-// successful lookup.
-//
-// Zitadel System API v1: POST /system/v1/instances/_search with body `{}`.
-// Response shape:
-//
-//	{
-//	  "result": [
-//	    {"id": "372802942115250284", "name": "ZITADEL", "domain": "..."}
-//	  ]
-//	}
-//
-// For a single-instance deployment (the standard self-hosted shape — the
-// SystemAPIUser is bound to one Zitadel instance), we expect exactly one
-// entry in `result` and return its `id`. Multi-instance deployments would
-// need to disambiguate by `domain` matching the claimed host — wire that
-// in when the multi-instance use case actually exists.
-func (c *systemHTTPClient) resolveInstanceID(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	cached := c.cachedInstanceID
-	c.mu.Unlock()
-	if cached != "" {
-		return cached, nil
-	}
-
-	tok, err := c.token(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	var resp struct {
-		Result []struct {
-			ID     string `json:"id"`
-			Domain string `json:"domain"`
-		} `json:"result"`
-	}
-	if err := c.doJSON(ctx, tok, http.MethodPost, "/system/v1/instances/_search", struct{}{}, &resp); err != nil {
-		return "", fmt.Errorf("resolveInstanceID: %w", err)
-	}
-	if len(resp.Result) == 0 {
-		return "", fmt.Errorf("resolveInstanceID: no instances returned (SystemAPIUser lacks SYSTEM_OWNER membership?)")
-	}
-	id := resp.Result[0].ID
-	if id == "" {
-		return "", fmt.Errorf("resolveInstanceID: first instance has empty id")
-	}
-
-	c.mu.Lock()
-	c.cachedInstanceID = id
-	c.mu.Unlock()
-	return id, nil
-}
-
-// AddInstanceDomain implements SystemClient.
-//
-// Zitadel System API v1: POST /system/v1/instances/{instance_id}/domains
-// with body `{"domain": "<name>"}`. Returns 200/201 on success;
-// 409 / "domain already exists" / "AlreadyExists" code → treated as
-// idempotent success.
-func (c *systemHTTPClient) AddInstanceDomain(ctx context.Context, domain string) error {
-	tok, err := c.token(ctx)
-	if err != nil {
-		return fmt.Errorf("AddInstanceDomain: %w", err)
-	}
-	instID, err := c.resolveInstanceID(ctx)
-	if err != nil {
-		return fmt.Errorf("AddInstanceDomain: %w", err)
-	}
-
-	body := map[string]string{"domain": domain}
-	path := fmt.Sprintf("/system/v1/instances/%s/domains", instID)
-	err = c.doJSON(ctx, tok, http.MethodPost, path, body, nil)
-	if err != nil {
-		if IsAlreadyExists(err) || IsConflict(err) {
-			return nil
-		}
-		// Zitadel may also surface "already exists" as a 400 with a body
-		// containing "AlreadyExists" — check raw error message.
-		if isAlreadyExistsBody(err) {
-			return nil
-		}
-		return fmt.Errorf("AddInstanceDomain %q: %w", domain, err)
-	}
-	return nil
-}
-
-// ListInstanceDomains implements SystemClient.
-//
-// Zitadel System API v1: POST /system/v1/instances/{instance_id}/domains/_search
-// with empty body `{}`. Returns just the domain name strings.
-func (c *systemHTTPClient) ListInstanceDomains(ctx context.Context) ([]string, error) {
-	tok, err := c.token(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListInstanceDomains: %w", err)
-	}
-	instID, err := c.resolveInstanceID(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("ListInstanceDomains: %w", err)
-	}
-
-	var resp struct {
-		Result []struct {
-			Domain string `json:"domain"`
-		} `json:"result"`
-	}
-	path := fmt.Sprintf("/system/v1/instances/%s/domains/_search", instID)
-	if err := c.doJSON(ctx, tok, http.MethodPost, path, struct{}{}, &resp); err != nil {
-		return nil, fmt.Errorf("ListInstanceDomains: %w", err)
-	}
-
-	domains := make([]string, 0, len(resp.Result))
-	for _, r := range resp.Result {
-		domains = append(domains, r.Domain)
-	}
-	return domains, nil
 }
 
 // doJSON issues an authenticated JSON request using a Bearer token and
