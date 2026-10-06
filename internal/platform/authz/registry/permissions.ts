@@ -3890,6 +3890,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.world.v1.WorldService/ListProofReviews": {
+    method: "/gibson.world.v1.WorldService/ListProofReviews",
+    service: "gibson.world.v1.WorldService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.world.v1.WorldService/ListReviewQueue": {
     method: "/gibson.world.v1.WorldService/ListReviewQueue",
     service: "gibson.world.v1.WorldService",

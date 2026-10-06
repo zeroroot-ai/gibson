@@ -386,6 +386,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.world.v1.WorldService/ListLlmCalls,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListOpenBets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/ListProofReviews,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListReviewQueue,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/SettleBetByHITL,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/SubmitLabel,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule

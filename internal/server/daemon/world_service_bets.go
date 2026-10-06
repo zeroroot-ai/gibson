@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -131,4 +132,46 @@ func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBe
 		return nil, status.Errorf(codes.InvalidArgument, "settle bet: %v", err)
 	}
 	return &worldpb.SettleBetByHITLResponse{Settled: settled}, nil
+}
+
+// ListProofReviews returns the proofs that wait for a human review
+// (ADR-0131, gibson#798), one page at a time in hypothesis id order. The
+// brain drops a proof from the list when its bet settles by any path, so a
+// reviewer never sees a settled bet here.
+func (s *worldServer) ListProofReviews(ctx context.Context, req *worldpb.ListProofReviewsRequest) (*worldpb.ListProofReviewsResponse, error) {
+	e, err := s.engine(ctx)
+	if err != nil {
+		return nil, err
+	}
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+
+	all := e.ProofReviews()
+	start := min(offset, len(all))
+	end := min(start+limit, len(all))
+	page := all[start:end]
+
+	resp := &worldpb.ListProofReviewsResponse{
+		Reviews:       make([]*worldpb.ProofReview, 0, len(page)),
+		NextPageToken: pagetoken.Next(start, limit, len(page), len(all)),
+	}
+	for _, r := range page {
+		evidence := make([]*worldpb.ProofEvidenceView, 0, len(r.Evidence))
+		for _, item := range r.Evidence {
+			evidence = append(evidence, &worldpb.ProofEvidenceView{
+				Type: item.Type, Title: item.Title, Content: item.Content,
+			})
+		}
+		resp.Reviews = append(resp.Reviews, &worldpb.ProofReview{
+			HypothesisId:        r.HypothesisID,
+			MissionId:           r.MissionID,
+			ScopeId:             r.ScopeID,
+			Technique:           r.Technique,
+			Evidence:            evidence,
+			SubmittedAtUnixNano: r.SubmittedAtUnixNano,
+		})
+	}
+	return resp, nil
 }

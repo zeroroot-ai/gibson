@@ -3521,6 +3521,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.world.v1.WorldService/ListProofReviews": {
+		Service:           "gibson.world.v1.WorldService",
+		Relation:          "member",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.world.v1.WorldService/ListReviewQueue": {
 		Service:           "gibson.world.v1.WorldService",
 		Relation:          "member",
