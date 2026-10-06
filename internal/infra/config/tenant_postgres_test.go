@@ -105,21 +105,3 @@ func TestTenantPostgresInterpolation_AbsentSection(t *testing.T) {
 	cfg := loadConfigWithTenantPostgres(t, "") // no tenant_postgres block
 	assert.Empty(t, cfg.TenantPostgres.Host)
 }
-
-// TestTenantPostgresInterpolation_AdminUsername verifies admin_username resolves.
-func TestTenantPostgresInterpolation_AdminUsername(t *testing.T) {
-	os.Setenv("PG_ADMIN_USER", "super_admin")
-	defer os.Unsetenv("PG_ADMIN_USER")
-
-	cfg := loadConfigWithTenantPostgres(t, `
-tenant_postgres:
-  host: tenant-postgresql
-  port: 5432
-  admin_database: postgres
-  admin_username: ${PG_ADMIN_USER}
-  admin_password: pw
-  ssl_mode: disable
-`)
-
-	assert.Equal(t, "super_admin", cfg.TenantPostgres.AdminUsername)
-}

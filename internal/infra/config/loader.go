@@ -381,9 +381,6 @@ func applyInterpolation(cfg *Config, interpolated map[string]interface{}) error 
 		if host, ok := tp["host"].(string); ok {
 			cfg.TenantPostgres.Host = interpolateString(host)
 		}
-		if adminUsername, ok := tp["admin_username"].(string); ok {
-			cfg.TenantPostgres.AdminUsername = interpolateString(adminUsername)
-		}
 	}
 
 	// Apply Checkpoint config interpolation
