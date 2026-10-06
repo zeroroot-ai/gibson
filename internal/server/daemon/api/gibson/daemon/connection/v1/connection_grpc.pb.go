@@ -35,6 +35,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ConnectionPointService_CompleteSignupStep_FullMethodName  = "/gibson.daemon.connection.v1.ConnectionPointService/CompleteSignupStep"
+	ConnectionPointService_DescribeSignupStep_FullMethodName  = "/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep"
 	ConnectionPointService_SetTenantActivation_FullMethodName = "/gibson.daemon.connection.v1.ConnectionPointService/SetTenantActivation"
 	ConnectionPointService_ListTenantUsage_FullMethodName     = "/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage"
 )
@@ -53,6 +54,15 @@ type ConnectionPointServiceClient interface {
 	// Errors: NotFound (unknown or expired token), PermissionDenied (the caller
 	// is not the configured SPIFFE identity), InvalidArgument.
 	CompleteSignupStep(ctx context.Context, in *CompleteSignupStepRequest, opts ...grpc.CallOption) (*CompleteSignupStepResponse, error)
+	// DescribeSignupStep returns the tenant, the plan and the owner address of
+	// the signup that a step token names (gibson#943). The component that runs
+	// the step reads them here, never from the browser, because the browser
+	// carries the step link and could change a value in it. Only the configured
+	// step completer identity may call it, as for CompleteSignupStep.
+	//
+	// Errors: NotFound (unknown or expired token), PermissionDenied (the caller
+	// is not the configured SPIFFE identity), InvalidArgument.
+	DescribeSignupStep(ctx context.Context, in *DescribeSignupStepRequest, opts ...grpc.CallOption) (*DescribeSignupStepResponse, error)
 	// SetTenantActivation tells the platform that a tenant is active or
 	// suspended. A tenant that no call has named is active.
 	//
@@ -77,6 +87,16 @@ func (c *connectionPointServiceClient) CompleteSignupStep(ctx context.Context, i
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CompleteSignupStepResponse)
 	err := c.cc.Invoke(ctx, ConnectionPointService_CompleteSignupStep_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *connectionPointServiceClient) DescribeSignupStep(ctx context.Context, in *DescribeSignupStepRequest, opts ...grpc.CallOption) (*DescribeSignupStepResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DescribeSignupStepResponse)
+	err := c.cc.Invoke(ctx, ConnectionPointService_DescribeSignupStep_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +137,15 @@ type ConnectionPointServiceServer interface {
 	// Errors: NotFound (unknown or expired token), PermissionDenied (the caller
 	// is not the configured SPIFFE identity), InvalidArgument.
 	CompleteSignupStep(context.Context, *CompleteSignupStepRequest) (*CompleteSignupStepResponse, error)
+	// DescribeSignupStep returns the tenant, the plan and the owner address of
+	// the signup that a step token names (gibson#943). The component that runs
+	// the step reads them here, never from the browser, because the browser
+	// carries the step link and could change a value in it. Only the configured
+	// step completer identity may call it, as for CompleteSignupStep.
+	//
+	// Errors: NotFound (unknown or expired token), PermissionDenied (the caller
+	// is not the configured SPIFFE identity), InvalidArgument.
+	DescribeSignupStep(context.Context, *DescribeSignupStepRequest) (*DescribeSignupStepResponse, error)
 	// SetTenantActivation tells the platform that a tenant is active or
 	// suspended. A tenant that no call has named is active.
 	//
@@ -139,6 +168,9 @@ type UnimplementedConnectionPointServiceServer struct{}
 
 func (UnimplementedConnectionPointServiceServer) CompleteSignupStep(context.Context, *CompleteSignupStepRequest) (*CompleteSignupStepResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteSignupStep not implemented")
+}
+func (UnimplementedConnectionPointServiceServer) DescribeSignupStep(context.Context, *DescribeSignupStepRequest) (*DescribeSignupStepResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DescribeSignupStep not implemented")
 }
 func (UnimplementedConnectionPointServiceServer) SetTenantActivation(context.Context, *SetTenantActivationRequest) (*SetTenantActivationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetTenantActivation not implemented")
@@ -182,6 +214,24 @@ func _ConnectionPointService_CompleteSignupStep_Handler(srv interface{}, ctx con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConnectionPointServiceServer).CompleteSignupStep(ctx, req.(*CompleteSignupStepRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConnectionPointService_DescribeSignupStep_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DescribeSignupStepRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConnectionPointServiceServer).DescribeSignupStep(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConnectionPointService_DescribeSignupStep_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConnectionPointServiceServer).DescribeSignupStep(ctx, req.(*DescribeSignupStepRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -232,6 +282,10 @@ var ConnectionPointService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteSignupStep",
 			Handler:    _ConnectionPointService_CompleteSignupStep_Handler,
+		},
+		{
+			MethodName: "DescribeSignupStep",
+			Handler:    _ConnectionPointService_DescribeSignupStep_Handler,
 		},
 		{
 			MethodName: "SetTenantActivation",
