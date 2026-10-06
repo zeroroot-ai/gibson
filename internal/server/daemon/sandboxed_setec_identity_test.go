@@ -8,6 +8,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/sdk/fork"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -37,11 +38,11 @@ func (v *verifyingSetec) VerifySandboxIdentity(_ context.Context, in *setecv1.Ve
 func TestSetecClient_VerifySandboxIdentity(t *testing.T) {
 	rec := &verifyingSetec{resp: &setecv1.VerifySandboxIdentityResponse{SandboxId: "ns/fork-1/u1"}}
 	c := &setecClient{inner: rec}
-	id, err := c.VerifySandboxIdentity(context.Background(), "acme", "tok", harness.SandboxIdentityAudience)
+	id, err := c.VerifySandboxIdentity(context.Background(), "acme", "tok", fork.SandboxIdentityAudience)
 	if err != nil || id != "ns/fork-1/u1" {
 		t.Fatalf("VerifySandboxIdentity = %q, %v", id, err)
 	}
-	if rec.req.GetToken() != "tok" || rec.req.GetTenant() != "acme" || rec.req.GetAudience() != harness.SandboxIdentityAudience {
+	if rec.req.GetToken() != "tok" || rec.req.GetTenant() != "acme" || rec.req.GetAudience() != fork.SandboxIdentityAudience {
 		t.Fatalf("request = %v", rec.req)
 	}
 }

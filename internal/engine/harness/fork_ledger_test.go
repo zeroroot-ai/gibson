@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/sdk/fork"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func (f *fakeIdentity) VerifySandboxIdentity(_ context.Context, tenant, token, a
 	if f.err != nil {
 		return "", f.err
 	}
-	if audience != SandboxIdentityAudience {
+	if audience != fork.SandboxIdentityAudience {
 		return "", ErrSandboxIdentityRefused
 	}
 	id, ok := f.ids[token]
@@ -136,7 +137,7 @@ func forkCtx(jti, token, header string) context.Context {
 	ctx := withTaskGrantClaims(context.Background(), sdkcg.Claims{JTI: jti, Tenant: tenant})
 	var kv []string
 	if token != "" {
-		kv = append(kv, SandboxIdentityHeader, token)
+		kv = append(kv, fork.MetadataSandboxIdentity, token)
 	}
 	if header != "" {
 		kv = append(kv, sandboxIDHeader, header)

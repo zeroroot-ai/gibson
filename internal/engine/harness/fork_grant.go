@@ -27,16 +27,6 @@ const (
 	reasonForkUnclaimed = fork.ReasonForkUnclaimed
 	forkErrorDomain     = fork.ErrorDomain
 	claimForkMethod     = harnesspb.HarnessCallbackService_ClaimFork_FullMethodName
-
-	// SandboxIdentityHeader is the metadata key that carries the identity
-	// token of the sandbox of the caller. The process gets the token from
-	// the identity socket of its machine (setec#235) for the audience
-	// SandboxIdentityAudience, and sends a new token on each call.
-	SandboxIdentityHeader = "x-gibson-sandbox-identity"
-
-	// SandboxIdentityAudience is the audience that a sandbox identity token
-	// for the callback service must name.
-	SandboxIdentityAudience = "gibson-harness-callback"
 )
 
 // SandboxIdentityVerifier checks the identity token of a sandbox with setec
@@ -122,11 +112,11 @@ func verifiedSandbox(ctx context.Context, v SandboxIdentityVerifier, tenant stri
 	if v == nil {
 		return "", status.Error(codes.FailedPrecondition, "this daemon cannot verify a sandbox identity")
 	}
-	token := firstMetadata(ctx, SandboxIdentityHeader)
+	token := firstMetadata(ctx, fork.MetadataSandboxIdentity)
 	if token == "" {
 		return "", status.Error(codes.Unauthenticated, "this call needs the sandbox identity token of the caller")
 	}
-	id, err := v.VerifySandboxIdentity(ctx, tenant, token, SandboxIdentityAudience)
+	id, err := v.VerifySandboxIdentity(ctx, tenant, token, fork.SandboxIdentityAudience)
 	switch {
 	case errors.Is(err, ErrSandboxIdentityRefused):
 		return "", status.Error(codes.Unauthenticated, "the sandbox identity token does not verify")
