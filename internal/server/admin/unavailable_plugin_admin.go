@@ -42,10 +42,6 @@ func (s *unavailablePluginAdminServer) GetPluginInstall(_ context.Context, _ *te
 	return nil, status.Error(codes.Unavailable, "PluginAdminService: service unavailable — IdP client or secrets stack not initialised")
 }
 
-func (s *unavailablePluginAdminServer) RegisterPlugin(_ context.Context, _ *tenantv1.RegisterPluginRequest) (*tenantv1.RegisterPluginResponse, error) {
-	return nil, status.Error(codes.Unavailable, "PluginAdminService: service unavailable — IdP client or secrets stack not initialised")
-}
-
 func (s *unavailablePluginAdminServer) EditPluginSecretBinding(_ context.Context, _ *tenantv1.EditPluginSecretBindingRequest) (*tenantv1.EditPluginSecretBindingResponse, error) {
 	return nil, status.Error(codes.Unavailable, "PluginAdminService: service unavailable — IdP client or secrets stack not initialised")
 }

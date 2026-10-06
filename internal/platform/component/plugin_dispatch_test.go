@@ -17,7 +17,6 @@ import (
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	pluginmanifest "github.com/zeroroot-ai/sdk/plugin/manifest"
 )
 
 // ---------------------------------------------------------------------------
@@ -398,33 +397,17 @@ func TestFakePluginRegistry_DispatchOne_Default(t *testing.T) {
 // Ensure errors package is used (suppress import warning if tests are refactored).
 var _ = errors.New
 
-// ---------------------------------------------------------------------------
-// Task 19: manifest-derived dispatch tests
-// ---------------------------------------------------------------------------
-
-// TestDispatchEcho_ManifestDerived loads the debug-plugin manifest, registers
-// a test plugin install with DeclaredMethods derived from that manifest, and
-// asserts that PluginInvoke with method "Echo" succeeds (returns no error and
-// no PluginError). This test runs without a real daemon or Docker container.
-func TestDispatchEcho_ManifestDerived(t *testing.T) {
-	// Load the debug-plugin manifest from testdata.
-	m, err := pluginmanifest.Load("testdata/debug-plugin.yaml")
-	if err != nil {
-		t.Fatalf("manifest.Load: %v", err)
-	}
-
-	// Build DeclaredMethods from the manifest.
-	declaredMethods := make([]string, 0, len(m.Spec.Methods))
-	for _, meth := range m.Spec.Methods {
-		declaredMethods = append(declaredMethods, meth.Name)
-	}
-	if len(declaredMethods) == 0 {
-		t.Fatal("manifest has no declared methods")
-	}
+// TestDispatchEcho_DeclaredInCode registers a test plugin install with the
+// methods a plugin declares in code (ADR-0097) and asserts that PluginInvoke
+// with method "Echo" succeeds (returns no error and no PluginError). This
+// test runs without a real daemon or Docker container.
+func TestDispatchEcho_DeclaredInCode(t *testing.T) {
+	const pluginName = "debug-plugin"
+	declaredMethods := []string{"Echo"}
 
 	tenant := auth.MustNewTenantID("tenant-abc")
 	reg := newFakeComponentInstallRegistry()
-	reg.addInstall(tenant, m.Metadata.Name, declaredMethods)
+	reg.addInstall(tenant, pluginName, declaredMethods)
 
 	// The fake dispatch returns raw JSON, as a Go-first plugin would.
 	reg.dispatchFunc = func(_ context.Context, _ auth.TenantID, _, _ string, _ []byte, _ time.Duration) ([]byte, error) {
@@ -435,7 +418,7 @@ func TestDispatchEcho_ManifestDerived(t *testing.T) {
 	ctx := buildPluginInvokeCtx("tenant-abc")
 
 	resp, err := svc.PluginInvoke(ctx, &pluginpb.PluginInvokeRequest{
-		PluginName: m.Metadata.Name,
+		PluginName: pluginName,
 		Method:     "Echo",
 		DeadlineMs: 5000,
 	})

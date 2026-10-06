@@ -8,7 +8,8 @@
 //
 // E2E validation for the vault-refresh-and-plugin-runtime spec (Window 2).
 //
-// This test asserts that the manifest-driven plugin SDK works end-to-end:
+// This test asserts that the plugin SDK works end-to-end with a plugin that
+// declares itself in code (ADR-0097):
 //  1. The debug-plugin binary registers with the daemon via plugin.Serve.
 //  2. harness.ListPlugins returns debug-plugin with a non-empty Methods list
 //     containing "Echo".
@@ -92,16 +93,10 @@ func TestPlugin_E2E(t *testing.T) {
 		debugPluginBin = "debug-plugin"
 	}
 
-	manifestPath := os.Getenv("GIBSON_DEBUG_PLUGIN_MANIFEST")
-	if manifestPath == "" {
-		manifestPath = "plugin.yaml"
-	}
-
 	pluginCmd := exec.CommandContext(ctx, debugPluginBin)
 	pluginCmd.Env = append(os.Environ(),
 		fmt.Sprintf("GIBSON_URL=%s", gibsonURL),
 		fmt.Sprintf("GIBSON_BOOTSTRAP_TOKEN=%s", bootstrapToken),
-		fmt.Sprintf("GIBSON_PLUGIN_MANIFEST=%s", manifestPath),
 	)
 	pluginOut, err := pluginCmd.StdoutPipe()
 	require.NoError(t, err, "StdoutPipe for debug-plugin")

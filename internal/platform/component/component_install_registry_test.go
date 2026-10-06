@@ -50,11 +50,8 @@ type fakeInstallRow struct {
 	TenantID        string
 	PluginName      string
 	Version         string
-	ManifestHash    string
 	DeclaredMethods []string
 	HostID          string
-	RuntimeMode     string
-	SetecRequired   bool
 }
 
 func newFakeInstallStore() *fakeInstallStore {
@@ -66,10 +63,7 @@ func (s *fakeInstallStore) upsert(row *fakeInstallRow) string {
 	if existing, ok := s.rows[key]; ok {
 		// Upsert: update fields, preserve original ID.
 		existing.Version = row.Version
-		existing.ManifestHash = row.ManifestHash
 		existing.DeclaredMethods = row.DeclaredMethods
-		existing.RuntimeMode = row.RuntimeMode
-		existing.SetecRequired = row.SetecRequired
 		return existing.ID
 	}
 	s.rows[key] = row
@@ -131,11 +125,8 @@ func (tr *testPluginRegistry) register(ctx context.Context, install *ComponentIn
 		TenantID:        install.TenantID.String(),
 		PluginName:      install.Name,
 		Version:         install.Version,
-		ManifestHash:    install.ManifestHash,
 		DeclaredMethods: install.DeclaredMethods,
 		HostID:          install.HostID,
-		RuntimeMode:     install.RuntimeMode,
-		SetecRequired:   install.SetecRequired,
 	}
 	assignedID := tr.store.upsert(row)
 	install.ID = assignedID
@@ -207,10 +198,8 @@ func TestPluginRegistry_Register(t *testing.T) {
 		TenantID:        auth.MustNewTenantID("tenant-abc"),
 		Name:            "lookup",
 		Version:         "1.0.0",
-		ManifestHash:    "abc123",
 		DeclaredMethods: []string{"search", "host"},
 		HostID:          "host-key-thumbprint-1",
-		RuntimeMode:     "process",
 	}
 
 	id, err := tr.register(ctx, install)

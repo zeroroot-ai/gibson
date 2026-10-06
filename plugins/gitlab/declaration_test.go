@@ -4,33 +4,46 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/sdk/plugin/manifest"
+	"github.com/zeroroot-ai/sdk/plugin/secrets"
 )
 
-// The declaration passes the validation of the SDK, runs as a pod, declares
-// each method that main registers, and declares the one broker secret.
-func TestDeclaration(t *testing.T) {
-	m := declaration()
-	manifest.ApplyDefaults(m)
-	if err := manifest.Validate(m); err != nil {
-		t.Fatalf("the declaration does not validate: %v", err)
+// The declaration in code names the plugin and its version, and registers one
+// handler per method (ADR-0097).
+func TestServeOptions_DeclareThePlugin(t *testing.T) {
+	if pluginName != "gitlab" || pluginVersion == "" {
+		t.Fatalf("declaration = %q %q", pluginName, pluginVersion)
 	}
-	if m.Spec.Runtime != "pod" {
-		t.Errorf("runtime = %q, want pod (the chart refuses process)", m.Spec.Runtime)
+	if got := len(serveOptions()); got != 6 {
+		t.Fatalf("serveOptions returns %d options, want name, version, 3 handlers and the lifecycle", got)
 	}
-	want := map[string]bool{"GetProject": true, "ListIssues": true, "CreateIssue": true}
-	for _, d := range m.Spec.Methods {
-		if !want[d.Name] || d.Description == "" {
-			t.Errorf("method %q (description %q) is not one that main registers with a description", d.Name, d.Description)
-		}
-		delete(want, d.Name)
+}
+
+// deniedSecrets refuses every resolve, the state of a plugin whose tenant
+// admin granted no secret.
+type deniedSecrets struct{ secrets.Client }
+
+func (deniedSecrets) Resolve(context.Context, string, ...secrets.Option) ([]byte, error) {
+	return nil, secrets.ErrPermissionDenied
+}
+
+type grantedSecrets struct{ secrets.Client }
+
+func (grantedSecrets) Resolve(context.Context, string, ...secrets.Option) ([]byte, error) {
+	return []byte("token"), nil
+}
+
+// A plugin with no grant on its token fails at boot with the secret named.
+func TestRequireToken_NamesTheSecretWhenNotGranted(t *testing.T) {
+	err := requireToken(secrets.NewContext(context.Background(), deniedSecrets{}))
+	if err == nil || !strings.Contains(err.Error(), credName) || !errors.Is(err, secrets.ErrPermissionDenied) {
+		t.Fatalf("requireToken = %v, want an error that names %s", err, credName)
 	}
-	for name := range want {
-		t.Errorf("method %s is not declared", name)
-	}
-	if len(m.Spec.Secrets) != 1 || m.Spec.Secrets[0].Name != credName || !m.Spec.Secrets[0].Required {
-		t.Errorf("secrets = %+v, want the one required %s", m.Spec.Secrets, credName)
+	if err := requireToken(secrets.NewContext(context.Background(), grantedSecrets{})); err != nil {
+		t.Fatalf("requireToken with a grant = %v, want nil", err)
 	}
 }

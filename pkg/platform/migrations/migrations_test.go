@@ -43,15 +43,16 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
 	// unique so ext-authz's org->tenant lookup is unambiguous (ADR-0093
 	// decision 4, hosted#195), 028 drops connector_sandbox and
-	// webhook_idempotency, which no Go code read (gibson#506).
+	// webhook_idempotency, which no Go code read (gibson#506), and 041 drops
+	// the three component_install columns the plugin manifest fed (sdk#129).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 44 {
-		t.Errorf("platform: expected 44 up.sql files, got %d", upCount)
+	if upCount != 45 {
+		t.Errorf("platform: expected 45 up.sql files, got %d", upCount)
 	}
-	if downCount != 44 {
-		t.Errorf("platform: expected 44 down.sql files, got %d", downCount)
+	if downCount != 45 {
+		t.Errorf("platform: expected 45 down.sql files, got %d", downCount)
 	}
 }
 
@@ -156,8 +157,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 44 {
-		t.Errorf("PlatformMaxVersion: got %d, want 44", v)
+	if v != 45 {
+		t.Errorf("PlatformMaxVersion: got %d, want 45", v)
 	}
 }
 

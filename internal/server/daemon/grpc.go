@@ -1464,32 +1464,24 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 
 		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
+		// It lists plugin installs and edits or revokes a secret grant. A plugin
+		// declares itself in code and enrolls with a bootstrap token (ADR-0097).
 		//
 		// Dependencies:
-		//   Registry       — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
-		//   ManifestValidator — pluginManifestValidator parses the plugin YAML schema.
-		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient + cgMinter (CreateServiceAccount + CG bootstrap token; ADR-0045).
-		//   SecretWriter   — secretWriterAdapter wraps secretsService (tenant injected into ctx).
-		//   Authorizer     — d.authorizer (FGA; reused from the MembershipService block above).
+		//   Registry         — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
+		//   Authorizer       — d.authorizer (FGA; reused from the MembershipService block above).
 		//   BootstrapAuditor — d.brokerAuditWriter (*secrets.AuditWriter satisfies the interface).
 		//
-		// When the IdP client, secrets stack, or CG minter is absent we register an
-		// Unavailable stub consistent with the other tenant services above. The CG
-		// minter is required: the plugin SDK consumes a CG bootstrap token, so a
-		// missing minter means plugins cannot enroll.
-		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil && d.cgMinter != nil
+		// When the secrets stack or the audit writer is absent we register an
+		// Unavailable stub consistent with the other tenant services above.
+		pluginAdminStackOK := secretsStackOK && d.brokerAuditWriter != nil
 
 		if pluginAdminStackOK {
-			principalClient := &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter}
-
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
-				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB, redis: d.stateClient.Client()},
-				ManifestValidator: &pluginManifestValidator{},
-				ZitadelClient:     principalClient,
-				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
-				Authorizer:        d.authorizer,
-				BootstrapAuditor:  d.brokerAuditWriter,
-				Events:            componentEventPublisher,
+				Registry:         &componentInstallRegistryReaderAdapter{db: d.platformDB, redis: d.stateClient.Client()},
+				Authorizer:       d.authorizer,
+				BootstrapAuditor: d.brokerAuditWriter,
+				Events:           componentEventPublisher,
 			})
 
 			if paErr != nil {
@@ -1503,7 +1495,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		} else {
 			d.logger.Warn(ctx, "PluginAdminService: deps unavailable; registering Unavailable stub",
 				"secrets_stack_ok", secretsStackOK,
-				"idp_client_present", idpClient != nil,
 				"broker_audit_writer_present", d.brokerAuditWriter != nil,
 			)
 			pluginadminv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())

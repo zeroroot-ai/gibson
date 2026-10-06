@@ -2380,16 +2380,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
-  "/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin": {
-    method: "/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin",
-    service: "gibson.pluginadmin.v1.PluginAdminService",
-    relation: "admin",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.USER,
-    unauthenticated: false,
-    self: false,
-  },
   "/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": {
     method: "/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding",
     service: "gibson.pluginadmin.v1.PluginAdminService",

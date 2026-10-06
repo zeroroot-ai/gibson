@@ -19,10 +19,12 @@ vendor API — not the vendor's entire client.
 
 ## Credential
 
-One GitHub token (a PAT or GitHub App installation token) resolved from the
-secrets broker, declared in `declaration.go` as `cred:github_token`. The broker is
-the only credential channel — the plugin never reads a token from an env var,
-and never puts it in a log line or an error.
+One GitHub token (a PAT or GitHub App installation token), `cred:github_token`,
+resolved from the secrets broker. A tenant admin grants the plugin access to it
+in the deploy wizard. The plugin resolves it at start and fails at boot with
+the secret named when the grant is missing. The broker is the only credential
+channel — the plugin never reads a token from an env var, and never puts it in
+a log line or an error.
 
 ## Test
 

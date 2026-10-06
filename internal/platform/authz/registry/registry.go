@@ -2162,15 +2162,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin": {
-		Service:           "gibson.pluginadmin.v1.PluginAdminService",
-		Relation:          "admin",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": {
 		Service:           "gibson.pluginadmin.v1.PluginAdminService",
 		Relation:          "admin",
