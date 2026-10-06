@@ -374,12 +374,16 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 		toWrite = append(toWrite, tuples[i])
 	}
 
-	if err := s.recordGrantAudit(ctx, callerTenant, target.PrincipalID, "agent_grant_added", toWrite); err != nil {
+	actor, err := grantActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordGrantAudit(ctx, actor, callerTenant, target.PrincipalID, "agent_grant_added", toWrite); err != nil {
 		return nil, err
 	}
 	if len(toWrite) > 0 {
 		if err := s.authorizer.Write(ctx, toWrite); err != nil {
-			s.recordGrantFailure(ctx, callerTenant, target.PrincipalID, "agent_grant_added", toWrite)
+			s.recordGrantFailure(actor, callerTenant, target.PrincipalID, "agent_grant_added", toWrite)
 			s.logger.ErrorContext(ctx, "grants admin: write tuples failed",
 				slog.String("target", target.PrincipalID),
 				slog.Int("count", len(toWrite)),
@@ -436,12 +440,16 @@ func (s *GrantsAdminServer) DeleteAgentGrants(ctx context.Context, req *tenantv1
 		toDelete = append(toDelete, tuples[i])
 	}
 
-	if err := s.recordGrantAudit(ctx, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete); err != nil {
+	actor, err := grantActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.recordGrantAudit(ctx, actor, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete); err != nil {
 		return nil, err
 	}
 	if len(toDelete) > 0 {
 		if err := s.authorizer.Delete(ctx, toDelete); err != nil {
-			s.recordGrantFailure(ctx, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete)
+			s.recordGrantFailure(actor, callerTenant, target.PrincipalID, "agent_grant_removed", toDelete)
 			return nil, status.Errorf(codes.Internal, "delete tuples: %v", err)
 		}
 	}
@@ -533,9 +541,17 @@ func validateGrantTuples(grants []*tenantv1.GrantTuple, targetKind identitypb.Pr
 	return nil
 }
 
+// grantActor is the subject of the caller, the actor of a grant change.
+func grantActor(ctx context.Context) (string, error) {
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		return "", status.Error(codes.PermissionDenied, "no caller identity in context")
+	}
+	return id.Subject, nil
+}
+
 // grantAuditEvents builds one audit event per tuple written or deleted.
-func grantAuditEvents(ctx context.Context, tenant, target, action, decision string, tuples []authz.Tuple) []audit.Event {
-	callerID, _ := auth.IdentityFromContext(ctx)
+func grantAuditEvents(actor, tenant, target, action, decision string, tuples []authz.Tuple) []audit.Event {
 	out := make([]audit.Event, 0, len(tuples))
 	for _, t := range tuples {
 		md, _ := json.Marshal(map[string]any{
@@ -545,7 +561,7 @@ func grantAuditEvents(ctx context.Context, tenant, target, action, decision stri
 		})
 		out = append(out, audit.Event{
 			TenantID:   tenant,
-			ActorID:    callerID.Subject,
+			ActorID:    actor,
 			ActorType:  "user",
 			Action:     action,
 			TargetType: "agent_grant",
@@ -561,8 +577,8 @@ func grantAuditEvents(ctx context.Context, tenant, target, action, decision stri
 // grant change takes effect. The change fails when a record cannot be
 // written, so no grant change exists without its record (gibson#676).
 // When the writer is nil, the events are structured-logged instead.
-func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, tenant, target, action string, tuples []authz.Tuple) error {
-	for _, evt := range grantAuditEvents(ctx, tenant, target, action, "allow", tuples) {
+func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, actor, tenant, target, action string, tuples []authz.Tuple) error {
+	for _, evt := range grantAuditEvents(actor, tenant, target, action, "allow", tuples) {
 		if s.auditWriter == nil {
 			s.logger.InfoContext(ctx, "grants admin: audit event (no writer wired)",
 				slog.String("action", action),
@@ -580,9 +596,9 @@ func (s *GrantsAdminServer) recordGrantAudit(ctx context.Context, tenant, target
 
 // recordGrantFailure records that a grant change failed after its audit
 // record was written.
-func (s *GrantsAdminServer) recordGrantFailure(ctx context.Context, tenant, target, action string, tuples []authz.Tuple) {
+func (s *GrantsAdminServer) recordGrantFailure(actor, tenant, target, action string, tuples []authz.Tuple) {
 	if s.auditWriter != nil {
-		for _, evt := range grantAuditEvents(ctx, tenant, target, action, "deny", tuples) {
+		for _, evt := range grantAuditEvents(actor, tenant, target, action, "deny", tuples) {
 			s.auditWriter.Log(evt)
 		}
 	}
