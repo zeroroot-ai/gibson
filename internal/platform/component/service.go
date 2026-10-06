@@ -651,21 +651,21 @@ func (s *ComponentServiceServer) RegisterComponent(
 		info.Attested = attested
 	}
 
-	// A catalog plugin name belongs to the workload the platform attests
-	// (ADR-0066). A caller that did not enroll with an attested identity
-	// cannot check in under that name: the registry would list it as the
-	// platform's plugin, and work for the platform's plugin would reach it.
-	// The rule covers plugins only. An agent or a tool with a catalog name
-	// always takes the sandbox launch of the catalog, whatever is registered.
-	if req.Kind == authz.KindPlugin && !info.Attested {
+	// A catalog name belongs to the workload the platform attests (ADR-0066,
+	// ADR-0097). A caller that did not enroll with an attested identity
+	// cannot check in under the kind and name of a catalog agent, tool or
+	// plugin: the registry would list it as the platform's component, and
+	// work for the platform's component could reach it.
+	if !info.Attested {
 		if _, listed := componentcatalog.LookupContentTrust(req.Kind, req.Name); listed {
-			s.logger.WarnContext(ctx, "component registration refused: a catalog plugin name needs an attested identity",
+			s.logger.WarnContext(ctx, "component registration refused: a catalog name needs an attested identity",
 				slog.String("tenant", tenant),
+				slog.String("kind", req.Kind),
 				slog.String("name", req.Name),
 				slog.String("principal", principalRef),
 			)
 			return nil, status.Errorf(codes.PermissionDenied,
-				"the plugin name %q belongs to a platform plugin, use another name", req.Name)
+				"the %s name %q belongs to a platform %s, use another name", req.Kind, req.Name, req.Kind)
 		}
 	}
 
