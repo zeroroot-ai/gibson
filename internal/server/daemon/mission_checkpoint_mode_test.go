@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
@@ -39,7 +40,7 @@ func TestMissionDefinitionToProjected_TheCheckpointMode(t *testing.T) {
 // A checkpoint returns the snapshot that its node left, and a rewind to it
 // puts that snapshot on the start node of the new run (ADR-0170).
 func TestRewind_StartsFromTheSnapshotOfTheCheckpoint(t *testing.T) {
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	first := storedChain(t)
 	id := first.ID.String()
 	eng.Submit(brain.MissionProjected{ID: id, Nodes: []brain.WorkNode{

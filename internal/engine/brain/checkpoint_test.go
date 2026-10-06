@@ -34,7 +34,7 @@ func TestWorkCompleted_KeepsTheCheckpointSnapshot(t *testing.T) {
 func TestMissionRewound_TheStartNodeGetsTheSnapshot(t *testing.T) {
 	rec := &recordingDispatcher{}
 	h := NewDispatchHandler(rec)
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.Subscribe(h.Tap)
 	e.Submit(MissionRewound{MissionID: "m2", ParentMissionID: "m1", ParentCheckpointID: "exploit", StartSnapshot: "snap-1"})

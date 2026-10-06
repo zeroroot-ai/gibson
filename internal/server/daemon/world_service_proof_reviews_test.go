@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -59,7 +60,7 @@ func awaitProofReviews(ctx context.Context, t *testing.T, srv *worldServer, want
 func TestListProofReviews_ReturnsTheEvidenceOfTheCallersTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	submitProofReview(ctx, t, reg.For("acme"), "hyp-acme")
@@ -86,7 +87,7 @@ func TestListProofReviews_ReturnsTheEvidenceOfTheCallersTenant(t *testing.T) {
 func TestListProofReviews_PagesGiveEachProofOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 	for i := range 5 {
 		submitProofReview(ctx, t, reg.For("acme"), fmt.Sprintf("hyp-%d", i))
@@ -127,7 +128,7 @@ func TestListProofReviews_PagesGiveEachProofOnce(t *testing.T) {
 func TestListProofReviews_RefusesATokenItDidNotWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	reg.For("acme")

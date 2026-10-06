@@ -76,7 +76,7 @@ func (s *DaemonServer) SetAuditRetention(ctx context.Context, req *tenantv1.SetA
 	months := int(req.GetMonths())
 	details := map[string]any{"tenant_id": tenantID, "months": months}
 
-	if err := s.auditLogger.Record(ctx, auditActionRetentionSet, "tenant", tenantID, details); err != nil {
+	if _, err := s.auditLogger.Record(ctx, auditActionRetentionSet, "tenant", tenantID, details); err != nil {
 		s.logger.ErrorContext(ctx, "SetAuditRetention: durable audit write failed",
 			slog.String("tenant_id", tenantID), slog.String("error", err.Error()))
 		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the change could not be written; nothing changed")

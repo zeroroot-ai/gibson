@@ -27,7 +27,7 @@ func TestAuditEntriesToResponse_NamesTheActorAndTheTarget(t *testing.T) {
 			Action: "x", ResourceID: "only-id"},
 	}, "next")
 
-	require.Equal(t, "next", resp.GetNextCursor())
+	require.Equal(t, "next", resp.GetNextPageToken())
 	require.Len(t, resp.GetEvents(), 3)
 	ev := resp.GetEvents()[0]
 	require.Equal(t, "user-1", ev.GetActorId())
