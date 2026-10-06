@@ -19,13 +19,12 @@ import (
 
 // Structured output tracing attribute keys (aligned with observability.GenAI* constants)
 const (
-	genAIResponseFormat      = "gen_ai.response_format"
-	genAISchemaName          = "gen_ai.schema_name"
-	genAISchemaStrict        = "gen_ai.schema_strict"
-	genAIValidated           = "gen_ai.response_validated"
-	genAIValidationError     = "gen_ai.validation_error"
-	genAIValidationErrorPath = "gen_ai.validation_error_path"
-	genAIRawJSON             = "gen_ai.raw_json"
+	genAIResponseFormat  = "gen_ai.response_format"
+	genAISchemaName      = "gen_ai.schema_name"
+	genAISchemaStrict    = "gen_ai.schema_strict"
+	genAIValidated       = "gen_ai.response_validated"
+	genAIValidationError = "gen_ai.validation_error"
+	genAIRawJSON         = "gen_ai.raw_json"
 )
 
 // CompleteStructured performs a completion and unmarshals the response to type T.

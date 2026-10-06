@@ -21,9 +21,3 @@ type MitreTechnique struct {
 	TacticIDs   []string `json:"tactic_ids"` // Associated tactic IDs
 	URL         string   `json:"url"`        // Reference URL
 }
-
-// MitreDatabase holds the mapping of MITRE techniques
-type MitreDatabase struct {
-	attackTechniques map[string]MitreTechnique
-	atlasTechniques  map[string]MitreTechnique
-}

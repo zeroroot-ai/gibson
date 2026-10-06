@@ -18,6 +18,3 @@ type Deduplicator struct {
 	hashIndex map[string]types.ID           // hash -> finding ID
 	findings  map[types.ID]*EnhancedFinding // finding ID -> finding
 }
-
-// DeduplicatorOption is a functional option for configuring the Deduplicator
-type DeduplicatorOption func(*Deduplicator)

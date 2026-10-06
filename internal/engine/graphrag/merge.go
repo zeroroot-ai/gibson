@@ -238,23 +238,3 @@ func extractPath(node GraphNode) []types.ID {
 
 	return []types.ID{}
 }
-
-// MergeOptions contains configuration for the merge and rerank process.
-// Allows fine-tuning of the hybrid retrieval behavior.
-type MergeOptions struct {
-	// VectorWeight is the weight for vector similarity scores (0-1).
-	VectorWeight float64
-
-	// GraphWeight is the weight for graph proximity scores (0-1).
-	GraphWeight float64
-
-	// TopK limits the number of final results.
-	TopK int
-
-	// DeduplicateByID removes duplicate nodes by ID (default: true).
-	DeduplicateByID bool
-
-	// BoostBothSources increases scores for nodes in both vector and graph results.
-	// Multiplier applied to final score if node appears in both sources.
-	BoostBothSources float64
-}

@@ -42,31 +42,6 @@ type CompletionRequest struct {
 	Tools    []llm.ToolDef // Only populated for CompleteWithTools
 }
 
-// StreamRequest represents a streaming completion request.
-type StreamRequest struct {
-	Slot     string
-	Messages []llm.Message
-}
-
-// ToolRequest represents a tool execution request.
-type ToolRequest struct {
-	Name  string
-	Input map[string]any
-}
-
-// PluginRequest represents a plugin query request.
-type PluginRequest struct {
-	Name   string
-	Method string
-	Params map[string]any
-}
-
-// DelegateRequest represents a sub-agent delegation request.
-type DelegateRequest struct {
-	AgentName string
-	Task      TaskInfo // Simplified task info
-}
-
 // TaskInfo holds basic task information for logging.
 type TaskInfo struct {
 	Name string

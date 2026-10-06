@@ -13,18 +13,11 @@ type GraphRAGErrorCode string
 
 // GraphRAG error codes
 const (
-	ErrCodeConnectionFailed     GraphRAGErrorCode = "CONNECTION_FAILED"
-	ErrCodeQueryFailed          GraphRAGErrorCode = "QUERY_FAILED"
-	ErrCodeNodeNotFound         GraphRAGErrorCode = "NODE_NOT_FOUND"
-	ErrCodeRelationshipFailed   GraphRAGErrorCode = "RELATIONSHIP_FAILED"
-	ErrCodeEmbeddingFailed      GraphRAGErrorCode = "EMBEDDING_FAILED"
-	ErrCodeAuthenticationFailed GraphRAGErrorCode = "AUTHENTICATION_FAILED"
-	ErrCodeRateLimited          GraphRAGErrorCode = "RATE_LIMITED"
-	ErrCodeProviderUnavailable  GraphRAGErrorCode = "PROVIDER_UNAVAILABLE"
-	ErrCodeInvalidQuery         GraphRAGErrorCode = "INVALID_QUERY"
-	ErrCodeIndexFailed          GraphRAGErrorCode = "INDEX_FAILED"
-	ErrCodeTransactionFailed    GraphRAGErrorCode = "TRANSACTION_FAILED"
-	ErrCodeInvalidConfig        GraphRAGErrorCode = "INVALID_CONFIG"
+	ErrCodeQueryFailed     GraphRAGErrorCode = "QUERY_FAILED"
+	ErrCodeNodeNotFound    GraphRAGErrorCode = "NODE_NOT_FOUND"
+	ErrCodeEmbeddingFailed GraphRAGErrorCode = "EMBEDDING_FAILED"
+	ErrCodeInvalidQuery    GraphRAGErrorCode = "INVALID_QUERY"
+	ErrCodeInvalidConfig   GraphRAGErrorCode = "INVALID_CONFIG"
 )
 
 // GraphRAGError represents a structured error for GraphRAG operations.

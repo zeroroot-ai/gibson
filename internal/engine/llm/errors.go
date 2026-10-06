@@ -123,11 +123,6 @@ const (
 	ErrBudgetExceeded types.ErrorCode = "LLM_BUDGET_EXCEEDED"
 )
 
-// Embedding error codes
-const (
-	ErrEmbeddingsNotSupportedCode types.ErrorCode = "LLM_EMBEDDINGS_NOT_SUPPORTED"
-)
-
 // ErrEmbeddingsNotSupported is returned by GetEmbeddingProvider when no registered
 // LLM provider implements the EmbeddingProvider interface with SupportsEmbeddings
 // returning true.
@@ -135,18 +130,13 @@ var ErrEmbeddingsNotSupported = errors.New("no registered LLM provider supports 
 
 // Structured output error codes
 const (
-	ErrStructuredOutputNotSupported types.ErrorCode = "LLM_STRUCTURED_OUTPUT_NOT_SUPPORTED"
-	ErrSchemaRequired               types.ErrorCode = "LLM_SCHEMA_REQUIRED"
-	ErrValidationFailed             types.ErrorCode = "LLM_VALIDATION_FAILED"
-	ErrStructuredOutputParseFailed  types.ErrorCode = "LLM_STRUCTURED_OUTPUT_PARSE_FAILED"
-	ErrStructuredOutputUnmarshal    types.ErrorCode = "LLM_STRUCTURED_OUTPUT_UNMARSHAL_FAILED"
+	ErrValidationFailed types.ErrorCode = "LLM_VALIDATION_FAILED"
 )
 
 // Sentinel errors for structured output operations
 var (
 	ErrStructuredOutputNotSupportedSentinel = errors.New("provider does not support structured output")
 	ErrSchemaRequiredSentinel               = errors.New("schema required for json_schema format")
-	ErrValidationFailedSentinel             = errors.New("response failed schema validation")
 )
 
 // Provider-specific error creation helpers

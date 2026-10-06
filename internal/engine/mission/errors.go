@@ -21,29 +21,8 @@ const (
 	// ErrMissionValidation indicates mission validation failed.
 	ErrMissionValidation MissionErrorCode = "validation_failed"
 
-	// ErrMissionTargetNotFound indicates the target was not found.
-	ErrMissionTargetNotFound MissionErrorCode = "target_not_found"
-
-	// ErrMissionMissionNotFound indicates the mission was not found.
-	ErrMissionMissionNotFound MissionErrorCode = "mission_not_found"
-
 	// ErrMissionMissionFailed indicates mission execution failed.
 	ErrMissionMissionFailed MissionErrorCode = "mission_failed"
-
-	// ErrMissionConstraint indicates a constraint was violated.
-	ErrMissionConstraint MissionErrorCode = "constraint_violated"
-
-	// ErrMissionTimeout indicates the mission timed out.
-	ErrMissionTimeout MissionErrorCode = "mission_timeout"
-
-	// ErrMissionCheckpoint indicates checkpoint save/load failed.
-	ErrMissionCheckpoint MissionErrorCode = "checkpoint_error"
-
-	// ErrMissionCancelled indicates the mission was cancelled.
-	ErrMissionCancelled MissionErrorCode = "mission_cancelled"
-
-	// ErrMissionInternal indicates an internal mission error.
-	ErrMissionInternal MissionErrorCode = "internal_error"
 )
 
 // MissionError represents a mission-specific error with code and context.

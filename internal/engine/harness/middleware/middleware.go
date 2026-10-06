@@ -50,60 +50,11 @@ const (
 	OpCompleteWithTools OperationType = "complete_with_tools"
 	OpStream            OperationType = "stream"
 
-	// Component Operations
-	OpCallToolProto   OperationType = "call_tool_proto"
 	OpQueryPlugin     OperationType = "query_plugin"
 	OpDelegateToAgent OperationType = "delegate_to_agent"
 
-	// List Operations
-	OpListTools   OperationType = "list_tools"
-	OpListPlugins OperationType = "list_plugins"
-	OpListAgents  OperationType = "list_agents"
-
 	// Finding Operations
 	OpSubmitFinding OperationType = "submit_finding"
-	OpGetFindings   OperationType = "get_findings"
-
-	// Memory Operations
-	OpMemoryGet    OperationType = "memory_get"
-	OpMemorySet    OperationType = "memory_set"
-	OpMemoryDelete OperationType = "memory_delete"
-	OpMemoryList   OperationType = "memory_list"
-	OpMemorySearch OperationType = "memory_search"
-
-	// GraphRAG Query Operations
-	OpGraphRAGQuery           OperationType = "graphrag_query"
-	OpGraphRAGSimilarAttacks  OperationType = "graphrag_similar_attacks"
-	OpGraphRAGSimilarFindings OperationType = "graphrag_similar_findings"
-	OpGraphRAGAttackChains    OperationType = "graphrag_attack_chains"
-	OpGraphRAGRelatedFindings OperationType = "graphrag_related_findings"
-	OpGraphRAGQueryScoped     OperationType = "graphrag_query_scoped"
-
-	// GraphRAG Storage Operations
-	OpGraphRAGStoreNode  OperationType = "graphrag_store_node"
-	OpGraphRAGCreateRel  OperationType = "graphrag_create_rel"
-	OpGraphRAGStoreBatch OperationType = "graphrag_store_batch"
-	OpGraphRAGTraverse   OperationType = "graphrag_traverse"
-	OpGraphRAGHealth     OperationType = "graphrag_health"
-
-	// Planning Operations
-	OpPlanContext     OperationType = "plan_context"
-	OpReportStepHints OperationType = "report_step_hints"
-
-	// Mission Context Operations
-	OpMissionContext          OperationType = "mission_context"
-	OpMissionExecutionContext OperationType = "mission_execution_context"
-	OpMissionRunHistory       OperationType = "mission_run_history"
-	OpPreviousRunFindings     OperationType = "previous_run_findings"
-	OpAllRunFindings          OperationType = "all_run_findings"
-
-	// Streaming Operations
-	OpEmitOutput     OperationType = "emit_output"
-	OpEmitToolCall   OperationType = "emit_tool_call"
-	OpEmitToolResult OperationType = "emit_tool_result"
-	OpEmitFinding    OperationType = "emit_finding"
-	OpEmitStatus     OperationType = "emit_status"
-	OpEmitError      OperationType = "emit_error"
 )
 
 // Context keys for middleware communication
@@ -113,20 +64,11 @@ const (
 	// CtxOperationType stores the OperationType being executed
 	CtxOperationType ctxKey = "op_type"
 
-	// CtxStartTime stores the operation start time for duration calculation
-	CtxStartTime ctxKey = "start_time"
-
 	// CtxMissionID stores the current mission identifier
 	CtxMissionID ctxKey = "mission_id"
 
 	// CtxAgentName stores the current agent name
 	CtxAgentName ctxKey = "agent_name"
-
-	// CtxTraceID stores the OpenTelemetry trace ID
-	CtxTraceID ctxKey = "trace_id"
-
-	// CtxSpanID stores the OpenTelemetry span ID
-	CtxSpanID ctxKey = "span_id"
 
 	// CtxSlotName stores the LLM slot name for LLM operations
 	CtxSlotName ctxKey = "slot_name"
@@ -175,97 +117,6 @@ func GetMissionContext(ctx context.Context) (missionID, agentName string) {
 }
 
 // Request and response wrapper types for type-safe operation payloads.
-
-// ChatRequest wraps the parameters for LLM chat operations.
-type ChatRequest struct {
-	Slot     string
-	Messages any // []llm.Message
-	Options  any // []CompletionOption
-	Tools    any // []llm.ToolDef - for CompleteWithTools
-}
-
-// ChatResponse wraps the response from LLM chat operations.
-type ChatResponse struct {
-	Response any // *llm.CompletionResponse or <-chan llm.StreamChunk
-	Error    error
-}
-
-// AgentRequest wraps the parameters for agent delegation operations.
-type AgentRequest struct {
-	Name string
-	Task any // agent.Task
-}
-
-// AgentResponse wraps the response from agent delegation operations.
-type AgentResponse struct {
-	Result any // agent.Result
-	Error  error
-}
-
-// FindingRequest wraps the parameters for finding operations.
-type FindingRequest struct {
-	Finding any // agent.Finding or FindingFilter
-}
-
-// FindingResponse wraps the response from finding operations.
-type FindingResponse struct {
-	Findings any // []agent.Finding
-	Error    error
-}
-
-// MemoryRequest wraps the parameters for memory operations.
-type MemoryRequest struct {
-	Key   string
-	Value any
-	Query string
-	Limit int
-}
-
-// MemoryResponse wraps the response from memory operations.
-type MemoryResponse struct {
-	Value  any
-	Values []any
-	Error  error
-}
-
-// GraphRAGRequest wraps the parameters for GraphRAG operations.
-type GraphRAGRequest struct {
-	Query       any // graphrag.Query
-	Content     string
-	FindingID   string
-	TechniqueID string
-	TopK        int
-	MaxDepth    int
-	Scope       any // graphrag.MissionScope
-}
-
-// GraphRAGResponse wraps the response from GraphRAG operations.
-type GraphRAGResponse struct {
-	Results any      // Type varies by operation
-	NodeID  string   // For store operations
-	NodeIDs []string // For batch operations
-	Error   error
-}
-
-// StreamingRequest wraps the parameters for streaming operations.
-type StreamingRequest struct {
-	Content     string
-	IsReasoning bool
-	ToolName    string
-	Input       map[string]any
-	Output      map[string]any
-	CallID      string
-	Finding     any // *finding.Finding
-	Status      string
-	Message     string
-	Error       error
-	Context     string
-}
-
-// StreamingResponse wraps the response from streaming operations.
-type StreamingResponse struct {
-	Error error
-}
 
 // WithSlotName returns a new context with the LLM slot name set.
 func WithSlotName(ctx context.Context, slot string) context.Context {
@@ -318,20 +169,3 @@ type Message struct {
 	Role    string
 	Content string
 }
-
-// CompletionResult holds the essential response data for LLM completions.
-// This allows the middleware to capture response attributes without
-// depending on specific types that may be serialized during transport.
-type CompletionResult struct {
-	ID            string
-	Model         string
-	Content       string
-	FinishReason  string
-	InputTokens   int
-	OutputTokens  int
-	ToolCallCount int
-	ToolCallNames []string
-}
-
-// CtxCompletionResult is the context key for the completion result
-const CtxCompletionResult ctxKey = "completion_result"

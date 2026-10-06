@@ -26,7 +26,6 @@ type PluginStatus string
 
 const (
 	PluginStatusUninitialized PluginStatus = "uninitialized"
-	PluginStatusRunning       PluginStatus = "running"
 )
 
 // ToolDescriptor provides lightweight metadata about a tool without requiring

@@ -7,14 +7,6 @@ import (
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 )
 
-// TaxonomyIntrospector provides read-only access to the taxonomy registry.
-// This interface allows agents to query available node types, relationships,
-// and extensions without being able to modify the registry.
-//
-// The introspector is the agent-facing view of the TaxonomyRegistry, exposing
-// only query operations for discovering available taxonomy types at runtime.
-type TaxonomyIntrospector = sdkgraphrag.TaxonomyIntrospector
-
 // TaxonomyRegistry returns the taxonomy introspector for querying available
 // node types and relationships in the knowledge graph.
 //
