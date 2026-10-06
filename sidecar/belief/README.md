@@ -85,9 +85,13 @@ CPT per variable. The three query variables MUST be present: `juicy`,
 `exploitable`, `reachable`. See `models/base-v1.json` for the shipped minimal
 base model and `model.py` for the schema.
 
-OSS ships the minimal `base-v1`; the curated commercial base model (vendor
-red-team + public CVE/MITRE ATT&CK, never tenant data — ADR-0089/0129) is
-stored as a belief version of a tenant through the trainer RPCs (gibson#788).
+OSS ships the minimal `base-v1`. The curated commercial base model (public
+CVE, CISA KEV, EPSS and MITRE ATT&CK data, never tenant data — ADR-0089/0129)
+lives in the closed `billing` repo. Its trainer image sets
+`BELIEF_BASE_MODEL` to the model file (gibson#31). `cmd/belief-trainer` then
+fits on that base, and a tenant with no version gets the base as its first
+version through the trainer RPCs (gibson#788), so a new tenant starts on the
+curated model.
 
 ## Dependencies: numpy, and nothing else
 
