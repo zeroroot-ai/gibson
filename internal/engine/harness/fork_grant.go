@@ -20,13 +20,38 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-// The names of the fork contract (sdk#248).
+// The names of the fork contract (sdk#248) and of the sandbox identity
+// (setec#235).
 const (
 	sandboxIDHeader     = fork.MetadataSandboxID
 	reasonForkUnclaimed = fork.ReasonForkUnclaimed
 	forkErrorDomain     = fork.ErrorDomain
 	claimForkMethod     = harnesspb.HarnessCallbackService_ClaimFork_FullMethodName
+
+	// SandboxIdentityHeader is the metadata key that carries the identity
+	// token of the sandbox of the caller. The process gets the token from
+	// the identity socket of its machine (setec#235) for the audience
+	// SandboxIdentityAudience, and sends a new token on each call.
+	SandboxIdentityHeader = "x-gibson-sandbox-identity"
+
+	// SandboxIdentityAudience is the audience that a sandbox identity token
+	// for the callback service must name.
+	SandboxIdentityAudience = "gibson-harness-callback"
 )
+
+// SandboxIdentityVerifier checks the identity token of a sandbox with setec
+// (SandboxService.VerifySandboxIdentity, setec#235). A fork signs with its
+// own key, so its token never verifies as the sandbox of its source.
+type SandboxIdentityVerifier interface {
+	// VerifySandboxIdentity returns the id "<namespace>/<name>/<uid>" of
+	// the sandbox of the tenant that the token names. A token that does
+	// not verify returns an error that wraps ErrSandboxIdentityRefused.
+	VerifySandboxIdentity(ctx context.Context, tenant, token, audience string) (string, error)
+}
+
+// ErrSandboxIdentityRefused is the error of a sandbox identity token that
+// does not verify. Any other verifier error means setec cannot answer.
+var ErrSandboxIdentityRefused = errors.New("harness: the sandbox identity does not verify")
 
 // WithForkLedger wires the ledger of the forks (ADR-0169, D74).
 func WithForkLedger(l ForkLedger) CallbackServiceOption {
@@ -35,27 +60,51 @@ func WithForkLedger(l ForkLedger) CallbackServiceOption {
 	}
 }
 
+// WithSandboxIdentityVerifier wires the check of the sandbox identity
+// (setec#235). With no verifier, each call that needs the verified sandbox
+// is refused.
+func WithSandboxIdentityVerifier(v SandboxIdentityVerifier) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.sandboxIdentity = v
+	}
+}
+
+// forkGuard holds what the callback interceptors need to refuse the grant
+// of a forked source outside the source sandbox.
+type forkGuard struct {
+	ledger   ForkLedger
+	identity SandboxIdentityVerifier
+}
+
 // checkForkGrant refuses the grant of a forked source outside the source
 // sandbox (D74, sdk#248). After the first fork of a source, each callback
-// with its grant must carry the sandbox id of the source. A fork carries its
-// own id, so it gets FAILED_PRECONDITION with the reason
+// with its grant must carry a sandbox identity token that setec verifies as
+// the source sandbox. The header x-gibson-sandbox-id is never the proof. A
+// fork verifies as itself, so it gets FAILED_PRECONDITION with the reason
 // GIBSON_FORK_UNCLAIMED until it claims its own dispatch. Only ClaimFork
-// accepts the source grant from a fork. A grant with no fork, or a request
-// with no task grant, passes unchanged.
-func checkForkGrant(ctx context.Context, forks ForkLedger, method string, logger *slog.Logger) error {
-	if forks == nil || method == claimForkMethod {
+// accepts the source grant from a fork, and it checks the identity itself.
+// A grant with no fork, or a request with no task grant, passes unchanged.
+func checkForkGrant(ctx context.Context, guard *forkGuard, method string, logger *slog.Logger) error {
+	if guard == nil || guard.ledger == nil || method == claimForkMethod {
 		return nil
 	}
 	claims, ok := TaskGrantClaimsFromContext(ctx)
 	if !ok || claims.JTI == "" {
 		return nil
 	}
-	source, forked, err := forks.ForkedSource(ctx, claims.JTI)
+	source, forked, err := guard.ledger.ForkedSource(ctx, claims.JTI)
 	if err != nil {
 		return deny(ctx, logger, method, "fork record unreadable",
 			status.Error(codes.Unavailable, "the fork record of this grant cannot be read"))
 	}
-	if !forked || callerSandbox(ctx) == sandboxHostname(source) {
+	if !forked {
+		return nil
+	}
+	caller, err := verifiedSandbox(ctx, guard.identity, claims.Tenant.String())
+	if err != nil {
+		return deny(ctx, logger, method, "sandbox identity refused", err)
+	}
+	if caller == source {
 		return nil
 	}
 	st := status.New(codes.FailedPrecondition, "this grant belongs to the source sandbox: a fork must claim its own dispatch")
@@ -65,22 +114,58 @@ func checkForkGrant(ctx context.Context, forks ForkLedger, method string, logger
 	return deny(ctx, logger, method, "source grant used outside the source sandbox", st.Err())
 }
 
-// callerSandbox returns the sandbox id that the caller sent, or "".
-func callerSandbox(ctx context.Context) string {
+// verifiedSandbox returns the sandbox id that setec verifies from the
+// identity token of the caller. A call with no token, a token that does not
+// verify, and a header x-gibson-sandbox-id that names another sandbox than
+// the token are refused. The returned error is a gRPC status.
+func verifiedSandbox(ctx context.Context, v SandboxIdentityVerifier, tenant string) (string, error) {
+	if v == nil {
+		return "", status.Error(codes.FailedPrecondition, "this daemon cannot verify a sandbox identity")
+	}
+	token := firstMetadata(ctx, SandboxIdentityHeader)
+	if token == "" {
+		return "", status.Error(codes.Unauthenticated, "this call needs the sandbox identity token of the caller")
+	}
+	id, err := v.VerifySandboxIdentity(ctx, tenant, token, SandboxIdentityAudience)
+	switch {
+	case errors.Is(err, ErrSandboxIdentityRefused):
+		return "", status.Error(codes.Unauthenticated, "the sandbox identity token does not verify")
+	case err != nil:
+		return "", status.Error(codes.Unavailable, "the sandbox identity cannot be verified now")
+	case id == "":
+		return "", status.Error(codes.Unauthenticated, "the sandbox identity names no sandbox")
+	}
+	if claimed := firstMetadata(ctx, sandboxIDHeader); !namesSandbox(claimed, id) {
+		return "", status.Error(codes.PermissionDenied, "the sandbox id header names another sandbox than the identity token")
+	}
+	return id, nil
+}
+
+// namesSandbox reports whether a sandbox id that the caller sent agrees with
+// the verified id. The caller sends the hostname of its sandbox or the full
+// id. An empty value agrees, because the token is the proof.
+func namesSandbox(claimed, verified string) bool {
+	return claimed == "" || claimed == verified || claimed == sandboxHostname(verified)
+}
+
+// firstMetadata returns the first value of an incoming metadata key, or "".
+func firstMetadata(ctx context.Context, key string) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return ""
 	}
-	if v := md.Get(sandboxIDHeader); len(v) > 0 {
+	if v := md.Get(key); len(v) > 0 {
 		return v[0]
 	}
 	return ""
 }
 
 // ClaimFork serves a fork its own dispatch (D74, sdk#248). The fork calls it
-// with the grant of its source, and from then on uses the grant of the
-// dispatch. A sandbox that is not a fork of that grant gets
-// PERMISSION_DENIED, and a second claim of one fork gets ALREADY_EXISTS.
+// with the grant of its source and its own sandbox identity token. The fork
+// is the sandbox that setec verifies from the token, never the sandbox_id of
+// the request: a sandbox_id that names another sandbox is refused. A sandbox
+// that is not a fork of that grant gets PERMISSION_DENIED, and a second
+// claim of one fork gets ALREADY_EXISTS.
 func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.ClaimForkRequest) (*harnesspb.ClaimForkResponse, error) {
 	claims, ok := TaskGrantClaimsFromContext(ctx)
 	if !ok || claims.JTI == "" {
@@ -89,7 +174,14 @@ func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.C
 	if s.forkLedger == nil {
 		return nil, status.Error(codes.FailedPrecondition, "this daemon has no fork support")
 	}
-	d, err := s.forkLedger.Claim(ctx, claims.JTI, req.GetSandboxId())
+	caller, err := verifiedSandbox(ctx, s.sandboxIdentity, claims.Tenant.String())
+	if err != nil {
+		return nil, err
+	}
+	if !namesSandbox(req.GetSandboxId(), caller) {
+		return nil, status.Error(codes.PermissionDenied, "the sandbox_id of the request names another sandbox than the identity token")
+	}
+	d, err := s.forkLedger.Claim(ctx, claims.JTI, caller)
 	switch {
 	case errors.Is(err, ErrNotAFork):
 		return nil, status.Error(codes.PermissionDenied, "the sandbox is not a fork of this grant")

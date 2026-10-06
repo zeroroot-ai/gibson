@@ -177,6 +177,11 @@ type HarnessCallbackService struct {
 	// the source sandbox, and ClaimFork serves each fork its dispatch.
 	forkLedger ForkLedger
 
+	// sandboxIdentity verifies the sandbox identity token of a caller with
+	// setec (setec#235). The fork checks take the sandbox of the caller from
+	// it, never from a header that the process writes.
+	sandboxIdentity SandboxIdentityVerifier
+
 	// jobs is the job store the member-facing callbacks read and write
 	// (ADR-0119, gibson#1711). Nil means this daemon serves no banks, and
 	// every member callback says so rather than failing obscurely.

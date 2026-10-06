@@ -598,6 +598,13 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
 			"error", sessErr)
 	}
+	// The fork checks take the sandbox of a caller from its setec identity
+	// token, never from a header that the process writes (setec#235, D74).
+	identityVerifier, idErr := NewSetecIdentityVerifier(cfg.Sandbox)
+	if idErr != nil {
+		slogLogger.Warn("sandbox identity check unavailable; a forked grant is refused everywhere",
+			"error", idErr)
+	}
 	if cfg.Sandbox.Devbox.Image == "" {
 		// No image means no session surface at all. Say so once at startup
 		// rather than letting every DevboxExec fail with no explanation.
@@ -623,6 +630,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithMemberControl(d.memberControl),
 		harness.WithTaskGrantVerifier(d.taskGrantVerifier),
 		harness.WithForkLedger(d.forks.Ledger),
+		harness.WithSandboxIdentityVerifier(identityVerifier),
 		harness.WithSessionSandboxes(
 			sandboxed.NewSessionRegistry(sessionClient, sandboxed.SessionSpec{
 				Image:         cfg.Sandbox.Devbox.Image,

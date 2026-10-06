@@ -27,6 +27,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 )
@@ -52,5 +53,12 @@ func NewSetecSessionClient(_ config.SandboxConfig) (sandboxed.SessionClient, err
 // rather than the caller carrying a build-tag branch. The events publisher is
 // unused here — with no launcher there is nothing to tee.
 func NewSetecAgentLauncher(_ config.SandboxConfig, _ trace.Tracer, _ *slog.Logger, _ sandboxed.EventPublisher, _ string) (*sandboxed.AgentLauncher, error) {
+	return nil, nil
+}
+
+// NewSetecIdentityVerifier is the no-op counterpart of the setec_integration
+// build. Returns (nil, nil): with no setec no sandbox is forked, and the
+// callback service refuses each call that needs a verified sandbox.
+func NewSetecIdentityVerifier(_ config.SandboxConfig) (harness.SandboxIdentityVerifier, error) {
 	return nil, nil
 }

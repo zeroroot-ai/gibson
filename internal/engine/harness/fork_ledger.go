@@ -45,9 +45,10 @@ type ForkLedger interface {
 	// forked is false for a grant with no fork.
 	ForkedSource(ctx context.Context, sourceJTI string) (sourceSandboxID string, forked bool, err error)
 	// Claim returns the dispatch of one fork of the grant, one time. The
-	// fork names itself by its hostname, the form that setec gives the
-	// sandbox name (ClaimForkRequest.sandbox_id).
-	Claim(ctx context.Context, sourceJTI, forkHostname string) (ForkDispatch, error)
+	// fork is the sandbox id "<namespace>/<name>/<uid>" that setec verified
+	// from the identity token of the caller (setec#235), never a value that
+	// the process sent.
+	Claim(ctx context.Context, sourceJTI, forkSandboxID string) (ForkDispatch, error)
 }
 
 // ErrNotAFork refuses a claim for a sandbox that is not a fork of the grant.
@@ -102,7 +103,7 @@ func (l *RedisForkLedger) RecordForks(ctx context.Context, sourceJTI, sourceSand
 		if err != nil {
 			return fmt.Errorf("encode fork dispatch: %w", err)
 		}
-		fields["d:"+sandboxHostname(f.SandboxID)] = raw
+		fields["d:"+f.SandboxID] = raw
 	}
 	key := forkLedgerKey(sourceJTI)
 	pipe := l.client.TxPipeline()
@@ -128,10 +129,12 @@ func (l *RedisForkLedger) ForkedSource(ctx context.Context, sourceJTI string) (s
 }
 
 // Claim implements ForkLedger.
-func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkHostname string) (ForkDispatch, error) {
+func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkSandboxID string) (ForkDispatch, error) {
 	key := forkLedgerKey(sourceJTI)
-	host := sandboxHostname(forkHostname)
-	raw, err := l.client.HGet(ctx, key, "d:"+host).Bytes()
+	if forkSandboxID == "" {
+		return ForkDispatch{}, ErrNotAFork
+	}
+	raw, err := l.client.HGet(ctx, key, "d:"+forkSandboxID).Bytes()
 	if errors.Is(err, redis.Nil) {
 		pending, perr := l.client.HExists(ctx, key, "pending").Result()
 		if perr != nil {
@@ -145,7 +148,7 @@ func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkHostname str
 	if err != nil {
 		return ForkDispatch{}, fmt.Errorf("read fork dispatch: %w", err)
 	}
-	first, err := l.client.HSetNX(ctx, key, "c:"+host, 1).Result()
+	first, err := l.client.HSetNX(ctx, key, "c:"+forkSandboxID, 1).Result()
 	if err != nil {
 		return ForkDispatch{}, fmt.Errorf("mark fork claimed: %w", err)
 	}

@@ -172,8 +172,8 @@ func tokenType(token string) string {
 // interceptor placed on the context.
 //
 // forks, when set, also refuses the grant of a forked source outside the
-// source sandbox (checkForkGrant).
-func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks ForkLedger, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+// source sandbox, by the verified sandbox identity (checkForkGrant).
+func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks *forkGuard, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
 	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		scoped, err := checkTaskGrantScope(ctx, req, get, info.FullMethod, logger)
 		if err != nil {
@@ -196,7 +196,7 @@ func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks ForkLedger, 
 type taskGrantScopedStream struct {
 	grpc.ServerStream
 	get    func() TaskGrantVerifier
-	forks  ForkLedger
+	forks  *forkGuard
 	method string
 	logger *slog.Logger
 	// scoped is the request context with the verified claims, set on the
