@@ -560,8 +560,8 @@ func TestProject_StartsFrom_Refusals(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := graph.Project(tc.def, nil)
-			ve, ok := err.(*graph.ValidationError)
-			if !ok {
+			var ve *graph.ValidationError
+			if !errors.As(err, &ve) {
 				t.Fatalf("want *ValidationError, got %T %v", err, err)
 			}
 			if len(ve.StartsFrom) != 1 {
@@ -589,8 +589,8 @@ func TestProject_StartsFrom_CycleSkipsTheCheck(t *testing.T) {
 		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "a"}},
 	}
 	_, err := graph.Project(def, nil)
-	ve, ok := err.(*graph.ValidationError)
-	if !ok || len(ve.Cycles) == 0 {
+	var ve *graph.ValidationError
+	if !errors.As(err, &ve) || len(ve.Cycles) == 0 {
 		t.Fatalf("want a cycle refusal, got %T %v", err, err)
 	}
 	if len(ve.StartsFrom) != 0 {
