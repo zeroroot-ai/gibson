@@ -121,10 +121,10 @@ type daemonImpl struct {
 	// WorldService read path reads through it. Lazily created at gRPC registration.
 	brainRegistry *brain.Registry
 	brainExecutor *brainExecutor
-	// beliefProvider scores the belief field (ADR-0134), in-process via the
-	// native Go belief runtime (ADR-0134). Held here so the mission launch path
-	// can pin its model version (ADR-0134).
-	beliefProvider brain.BeliefProvider
+	// tenantBeliefs gives each tenant engine the belief version of its own
+	// tenant from the platform Postgres (ADR-0106, gibson#615). Held here so
+	// the mission launch path can pin the version of its tenant.
+	tenantBeliefs *tenantBeliefs
 
 	// liveAgents is the in-memory registry of running agent instances and their
 	// live structured-event feeds (ADR-0116 S11). The sandboxed agent launcher
@@ -1015,26 +1015,29 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
 	d.logger.Info(ctx, "redis event stream initialized")
 
+	// Dashboard PostgreSQL connection pool. It opens BEFORE the ECS brain
+	// registry, because the tenant belief source reads its artifacts from it
+	// (gibson#615), and BEFORE Component Registry. A connection failure is FATAL
+	// (gibson#246, one-code-path discipline): the daemon refuses to boot without
+	// a usable platform-postgres connection so downstream RPCs never mask a
+	// missing connection behind misleading "not found" / "not implemented" errors.
+	if err := d.initPlatformPostgres(ctx); err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to initialize platform-postgres: %w", err)
+	}
+
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0101 capture path).
-	beliefProvider, err := resolveBeliefProvider()
-	if err != nil {
-		d.stopServices(ctx)
-		return fmt.Errorf("failed to resolve belief provider: %w", err)
-	}
-	d.beliefProvider = beliefProvider
 	beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 	if err != nil {
 		d.stopServices(ctx)
 		return fmt.Errorf("failed to build belief schema registry: %w", err)
 	}
-	edgePosteriorProvider, err := resolveEdgePosteriorProvider()
-	if err != nil {
+	if err := d.initTenantBeliefs(ctx, beliefSchemaRegistry); err != nil {
 		d.stopServices(ctx)
-		return fmt.Errorf("failed to resolve edge posterior provider: %w", err)
+		return err
 	}
-	sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
 	d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
@@ -1050,9 +1053,8 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// through the SAME BeliefScored write path — so the two pipelines share one
 	// Host.Belief and never race. Registered here because engines fault in
 	// lazily on the first event.
-	wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry, edgePosteriorProvider)
-	d.logger.Info(ctx, "ECS brain registry initialized", "belief_model", d.beliefProvider.Version(),
-		"slice_belief_model", sliceBeliefProvider.Version())
+	wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
+	d.logger.Info(ctx, "ECS brain registry initialized", "default_belief_model", d.tenantBeliefs.defaultLabel())
 
 	// Project each tenant's World into its Neo4j knowledge graph (ADR-0107): the
 	// graph is a read-model of the World, written only by this projector. Runs
@@ -1087,16 +1089,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Note: envelope HMAC signing removed (admin-services-completion Req 6.4).
 	// Work items now carry unsigned queue.AuthzContext (run_id + issued_at + ttl_seconds).
 	// Authorization is fully covered by FGA tuples binding agent_principal to mission.
-
-	// Dashboard PostgreSQL connection pool — runs AFTER Authorization Service and
-	// BEFORE Component Registry. A connection failure is FATAL (gibson#246,
-	// one-code-path discipline): the daemon refuses to boot without a usable
-	// platform-postgres connection so downstream RPCs never mask a missing
-	// connection behind misleading "not found" / "not implemented" errors.
-	if err := d.initPlatformPostgres(ctx); err != nil {
-		d.stopServices(ctx)
-		return fmt.Errorf("failed to initialize platform-postgres: %w", err)
-	}
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).

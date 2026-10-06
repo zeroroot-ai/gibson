@@ -1678,24 +1678,17 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// registry is created lazily here with the resolved belief provider (native
 	// Go, in-process — ADR-0134).
 	if d.brainRegistry == nil {
-		if d.beliefProvider == nil {
-			beliefProvider, err := resolveBeliefProvider()
-			if err != nil {
-				return nil, fmt.Errorf("failed to resolve belief provider: %w", err)
-			}
-			d.beliefProvider = beliefProvider
-		}
 		beliefSchemaRegistry, err := newBeliefSchemaRegistry()
 		if err != nil {
 			return nil, fmt.Errorf("failed to build belief schema registry: %w", err)
 		}
-		edgePosteriorProvider, err := resolveEdgePosteriorProvider()
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve edge posterior provider: %w", err)
+		if d.tenantBeliefs == nil {
+			if err := d.initTenantBeliefs(ctx, beliefSchemaRegistry); err != nil {
+				return nil, err
+			}
 		}
-		sliceBeliefProvider := resolveSliceBeliefProvider(beliefSchemaRegistry, edgePosteriorProvider)
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
-		wireBrainRegistry(ctx, d.brainRegistry, d.beliefProvider, sliceBeliefProvider, beliefSchemaRegistry, edgePosteriorProvider)
+		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
