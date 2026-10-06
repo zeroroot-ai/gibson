@@ -78,14 +78,14 @@ const (
 	// rather than inferring it from what it was given.
 	envInstanceMode = "GIBSON_INSTANCE_MODE"
 	// envSandbox tells the process which isolation it runs under. The
-	// zerocool-claude member refuses to start without the gvisor marker
+	// zerocool-claude member refuses to start without the launcher marker
 	// (zerocool-plugins#66): it keeps --dangerously-skip-permissions only
 	// inside a sandbox, and the marker is how it knows it is in one. Both
-	// launch paths land in the gVisor class and VerifyIsolation kills a
+	// launch paths land in the launcher backend, and VerifyIsolation kills a
 	// sandbox that is not (ADR-0052), so the marker states a fact the
 	// launcher enforces, never a wish.
 	envSandbox      = "GIBSON_SANDBOX"
-	envSandboxValue = "gvisor"
+	envSandboxValue = IsolatedRuntime
 )
 
 // defaultAgentRunTimeout bounds one agent mission run when the launcher config
@@ -112,7 +112,7 @@ type AgentLaunchSpec struct {
 	VCPU   int32
 	Memory string
 	// SandboxClass names the setec SandboxClass this agent runs under
-	// (ADR-0116 — gVisor by default in production). Empty defers to
+	// (ADR-0116, a Firecracker machine in a launcher pod). Empty defers to
 	// the launcher's deployment-default class.
 	SandboxClass string
 	// Egress is the tenant egress envelope (ADR-0116). Empty keeps

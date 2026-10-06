@@ -80,8 +80,8 @@ type SandboxSetecConfig struct {
 	// AgentSandboxClass is the deployment-default setec SandboxClass an
 	// ephemeral agent launch names when the catalog manifest omits one
 	// (ADR-0116). It is distinct from the tool class: an agent runs a whole
-	// mission and gets its own isolation and egress posture (gVisor by
-	// default in production). Defaults to DefaultAgentSandboxClass. The
+	// mission and gets its own isolation and egress posture (the launcher
+	// backend of setec). Defaults to DefaultAgentSandboxClass. The
 	// per-agent manifest (gibson#1597) overrides it per launch.
 	AgentSandboxClass string `mapstructure:"agent_sandbox_class" yaml:"agent_sandbox_class"`
 
@@ -128,7 +128,7 @@ const (
 	// DefaultAgentSandboxClass is the class an ephemeral agent launch names
 	// when the catalog manifest omits one (ADR-0116). It is deliberately
 	// distinct from `tool` and `devbox`: a code-executing agent gets its own
-	// isolation backend (gVisor by default) and egress posture.
+	// sandbox class (the launcher backend of setec) and egress posture.
 	DefaultAgentSandboxClass = "agent"
 
 	// DefaultDevboxIdle bounds a session. Long enough for a working session,

@@ -1,0 +1,29 @@
+name: Node offers KVM to the launcher
+description: >
+  The setec device plugin offers /dev/kvm of the node as the extended resource
+  setec.zeroroot.ai/kvm. With none, every sandbox stays Pending. This action
+  fails with a clear message instead of a timeout later.
+inputs:
+  node:
+    description: The kind node to check.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Wait for setec.zeroroot.ai/kvm on the node
+      shell: bash
+      env:
+        NODE: ${{ inputs.node }}
+      run: |
+        set -euo pipefail
+        v=""
+        for _ in $(seq 1 30); do
+          v=$(kubectl get node "$NODE" -o jsonpath='{.status.allocatable.setec\.zeroroot\.ai/kvm}' 2>/dev/null || true)
+          [ -n "$v" ] && [ "$v" != "0" ] && { echo "node offers setec.zeroroot.ai/kvm=$v"; break; }
+          sleep 5
+        done
+        if [ -z "$v" ] || [ "$v" = "0" ]; then
+          echo "::error::node $NODE offers no setec.zeroroot.ai/kvm; the setec device plugin found no /dev/kvm in the kind node"
+          kubectl -n setec-system logs -l app.kubernetes.io/component=device-plugin --tail=40 || true
+          exit 1
+        fi

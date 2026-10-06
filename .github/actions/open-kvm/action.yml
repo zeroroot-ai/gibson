@@ -1,0 +1,21 @@
+name: Open /dev/kvm for the launcher
+description: >
+  The one setec backend is a Firecracker machine in a launcher pod (ADR-0116,
+  ADR-0141, setec#198). It needs /dev/kvm on the node. The hosted runner has
+  KVM, but only root can open the device. This action opens it to the kind
+  node container, and fails when the runner has no KVM.
+runs:
+  using: composite
+  steps:
+    - name: Open /dev/kvm
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ ! -c /dev/kvm ]; then
+          echo "::error::the runner has no /dev/kvm; the launcher backend of setec cannot start a sandbox here"
+          exit 1
+        fi
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+        ls -l /dev/kvm

@@ -321,7 +321,7 @@ func TestLaunchAgent_MemberModeReachesTheSandbox(t *testing.T) {
 	client := &mockClient{
 		launch: func(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
 			gotReq = req
-			return LaunchResponse{SandboxID: "sbx-member", Runtime: "gvisor"}, nil
+			return LaunchResponse{SandboxID: "sbx-member", Runtime: "launcher"}, nil
 		},
 		streamLog: func(context.Context, string) (LogStream, error) { return &fixedLogs{}, nil },
 		wait:      func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 0}, nil },
@@ -349,7 +349,7 @@ func TestLaunchAgent_MemberModeReachesTheSandbox(t *testing.T) {
 }
 
 // TestLaunchAgent_CarriesTheSandboxMarker: the one-shot path hands the process
-// GIBSON_SANDBOX=gvisor (gibson#152, zerocool-plugins#66), and neither the
+// GIBSON_SANDBOX=launcher (gibson#152, zerocool-plugins#66), and neither the
 // manifest's static env nor the dispatch env can claim another sandbox.
 func TestLaunchAgent_CarriesTheSandboxMarker(t *testing.T) {
 	var gotReq LaunchRequest
