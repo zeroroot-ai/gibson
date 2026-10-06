@@ -247,7 +247,11 @@ type daemonImpl struct {
 	agentLauncher *sandboxed.AgentLauncher
 
 	// forks holds the parked sources and the fork ledger (ADR-0169, D74).
-	forks                   *harness.ForkSupport
+	forks *harness.ForkSupport
+
+	// sandboxSuspender suspends and resumes an idle bank member through setec
+	// (gibson#809). Nil in a build without setec.
+	sandboxSuspender        sandboxSuspender
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 

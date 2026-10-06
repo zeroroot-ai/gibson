@@ -244,7 +244,7 @@ func (s *postgresStore) Delete(ctx context.Context, tenantID, id string) error {
 
 const memberColumns = `id, bank_id, mission_id, mission_run_id, agent_run_id, sandbox_id,
 	state, jobs_in_flight, job_cap, active_job_ids, claude_version,
-	last_heartbeat, created_at, updated_at`
+	last_heartbeat, idle_since, created_at, updated_at`
 
 func (s *postgresStore) ListMembers(ctx context.Context, tenantID, bankID string, page Page) ([]*Member, string, error) {
 	c, err := s.conn(ctx, tenantID)
@@ -319,17 +319,21 @@ func scanMember(row scanner) (*Member, error) {
 		m       Member
 		state   string
 		beat    *time.Time
+		idle    *time.Time
 		created time.Time
 		updated time.Time
 	)
 	if err := row.Scan(&m.ID, &m.BankID, &m.MissionID, &m.MissionRunID, &m.AgentRunID,
 		&m.SandboxID, &state, &m.JobsInFlight, &m.JobCap, &m.ActiveJobIDs,
-		&m.ClaudeVersion, &beat, &created, &updated); err != nil {
+		&m.ClaudeVersion, &beat, &idle, &created, &updated); err != nil {
 		return nil, fmt.Errorf("scan member row: %w", err)
 	}
 	m.State = MemberState(state)
 	if beat != nil {
 		m.LastHeartbeat = beat.UTC()
+	}
+	if idle != nil {
+		m.IdleSince = idle.UTC()
 	}
 	m.CreatedAt = created.UTC()
 	m.UpdatedAt = updated.UTC()
@@ -530,6 +534,7 @@ func (s *postgresStore) UpdateMemberStatus(ctx context.Context, tenantID, member
 		`UPDATE bank_members SET
 		   state = CASE WHEN state = $7 THEN state ELSE $2 END,
 		   jobs_in_flight = $3, job_cap = $4, active_job_ids = $5, claude_version = $6,
+		   idle_since = CASE WHEN $3 = 0 THEN COALESCE(idle_since, now()) ELSE NULL END,
 		   last_heartbeat = now(), updated_at = now()
 		 WHERE id = $1
 		 RETURNING `+memberColumns,

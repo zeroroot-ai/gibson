@@ -400,3 +400,36 @@ func (c *setecClient) Fork(ctx context.Context, req sandboxed.ForkRequest) (sand
 	}
 	return sandboxed.ForkResponse{Snapshot: resp.GetSnapshot(), SandboxIDs: resp.GetSandboxIds()}, nil
 }
+
+// Suspend asks setec to checkpoint a session sandbox and release its microVM
+// (setec#193). The daemon suspends an idle bank member (ADR-0119, gibson#809).
+func (c *setecClient) Suspend(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errNoTenant
+	}
+	if _, err := c.inner.Suspend(ctx, &setecv1.SuspendRequest{Tenant: tenant, SandboxId: sandboxID}); err != nil {
+		return fmt.Errorf("setec suspend %s: %w", sandboxID, err)
+	}
+	return nil
+}
+
+// Resume asks setec to bring a suspended session sandbox back.
+func (c *setecClient) Resume(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errNoTenant
+	}
+	if _, err := c.inner.Resume(ctx, &setecv1.ResumeRequest{Tenant: tenant, SandboxId: sandboxID}); err != nil {
+		return fmt.Errorf("setec resume %s: %w", sandboxID, err)
+	}
+	return nil
+}
+
+// newSetecSuspender builds the setec client that suspends and resumes bank
+// members (gibson#809).
+func newSetecSuspender(cfg config.SandboxConfig, src setecSVIDSource) (sandboxSuspender, error) {
+	c, err := NewSetecSandboxClient(cfg, src)
+	if err != nil {
+		return nil, err
+	}
+	return c.(*setecClient), nil
+}

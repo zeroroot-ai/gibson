@@ -227,6 +227,13 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			// The bank reconciler launches members outside any mission harness,
 			// so it needs the same three seams the harness gets (gibson#1709).
 			d.agentLauncher = launcher
+			// The bank reconciler suspends an idle member and resumes it
+			// when jobs wait (ADR-0119, gibson#809).
+			suspender, susErr := newSetecSuspender(d.config.Sandbox, daemonSVIDSource{d: d})
+			if susErr != nil {
+				return nil, fmt.Errorf("setec suspender: %w", susErr)
+			}
+			d.sandboxSuspender = suspender
 			d.agentLaunchSpecResolver = config.AgentLaunchSpecResolver
 			d.agentCallbackEndpoint = config.AgentCallbackEndpoint
 			d.logger.Info(ctx, "sandboxed agent launcher wired",

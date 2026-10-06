@@ -213,7 +213,7 @@ func memberRow(id, bankID string, state MemberState) []any {
 	return []any{
 		id, bankID, "m", "run", "agent", "sbx",
 		string(state), int32(0), int32(1), []string{}, "2.0.1",
-		&beat, unitNow, unitNow,
+		&beat, (*time.Time)(nil), unitNow, unitNow,
 	}
 }
 
