@@ -129,7 +129,7 @@ jobs:
             image: ghcr.io/zeroroot-ai/gibson-bootstrap
             tag_pattern: gibson-bootstrap-v(.*)
             build_args: ""
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
     permissions:
       contents: read
       packages: write
@@ -158,7 +158,7 @@ jobs:
   bootstrap-runner:
     name: gibson-bootstrap-runner
     needs: images
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
     permissions:
       contents: read
       packages: write
@@ -209,7 +209,7 @@ jobs:
     name: gibson-plugin-github
     needs: plugin-sources
     if: needs.plugin-sources.outputs.github != ''
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
     permissions:
       contents: read
       packages: write
@@ -230,7 +230,7 @@ jobs:
     name: gibson-plugin-gitlab
     needs: plugin-sources
     if: needs.plugin-sources.outputs.gitlab != ''
-    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@1366fb5a29590e522bf5a74308f55bb39a4edb56 # v0.5.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-image-build.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
     permissions:
       contents: read
       packages: write
