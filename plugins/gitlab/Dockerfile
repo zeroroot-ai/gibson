@@ -34,7 +34,6 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
 
 COPY --from=builder /out/gitlab /gitlab
-COPY plugins/gitlab/plugin.yaml /etc/gibson/plugin.yaml
 # The Elastic License 2.0 requires the notice to travel with a
 # distribution, and a published image is one. /licenses is the OCI
 # convention. LICENSE sits at the repository root, which is why the

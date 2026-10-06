@@ -1,5 +1,4 @@
 BINARY   := github
-MANIFEST := ./plugin.yaml
 TOKEN    ?=
 
 .PHONY: build test register run image

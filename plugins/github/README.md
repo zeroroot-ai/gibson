@@ -20,7 +20,7 @@ vendor API — not the vendor's entire client.
 ## Credential
 
 One GitHub token (a PAT or GitHub App installation token) resolved from the
-secrets broker, declared in `plugin.yaml` as `cred:github_token`. The broker is
+secrets broker, declared in `declaration.go` as `cred:github_token`. The broker is
 the only credential channel — the plugin never reads a token from an env var,
 and never puts it in a log line or an error.
 
