@@ -204,7 +204,7 @@ func TestCatalog_AgentCoverage_ValidCategoryIsDeclared(t *testing.T) {
 	assert.False(t, caps[0].Coverage.IsEmpty())
 }
 
-func TestCatalog_AgentCoverage_UnknownCategoryFallsBackToEmpty(t *testing.T) {
+func TestCatalog_AgentCoverage_UnknownCategoryIsDropped(t *testing.T) {
 	b := newBrainExecutor(&fakeDiscovery{
 		agents: []component.AgentInfo{{Name: "recon", TechniqueTypes: []string{"not_a_real_category"}}},
 	}, slog.Default())
@@ -226,18 +226,34 @@ func TestCatalog_AgentCoverage_NoDeclarationIsEmpty(t *testing.T) {
 	assert.True(t, caps[0].Coverage.IsEmpty())
 }
 
-func TestCatalog_ToolAndPluginCoverage_AreEmpty(t *testing.T) {
+// A tool of the catalog states its coverage in its manifest (gibson#716):
+// nmap covers reconnaissance. A tool or a plugin that is not in the catalog
+// has no coverage, rather than a fabricated one.
+func TestCatalog_ToolAndPluginCoverage_FromTheCatalog(t *testing.T) {
 	b := newBrainExecutor(&fakeDiscovery{
-		tools:   []component.ToolInfo{{Name: "nmap"}},
+		tools:   []component.ToolInfo{{Name: "nmap"}, {Name: "not-in-catalog"}},
 		plugins: []component.PluginInfo{{Name: "gitleaks"}},
 	}, slog.Default())
 	b.register("m1", &missionBinding{ctx: context.Background(), tenant: "acme-corp"})
 
 	caps := b.catalog("m1")
-	require.Len(t, caps, 2)
+	require.Len(t, caps, 3)
+	byName := map[string]brain.Capability{}
 	for _, c := range caps {
-		assert.True(t, c.Coverage.IsEmpty(), "kind %s should have no coverage source yet", c.Kind)
+		byName[c.Name] = c
 	}
+	assert.True(t, byName["nmap"].Coverage.HasCategory("reconnaissance"), "nmap must cover reconnaissance")
+	assert.True(t, byName["not-in-catalog"].Coverage.IsEmpty())
+	assert.True(t, byName["gitleaks"].Coverage.IsEmpty())
+}
+
+// One id outside the taxonomy is dropped, and the valid ones stay.
+func TestCatalog_CoverageKeepsTheValidIDs(t *testing.T) {
+	coreCategory := string(taxonomy.GlobalTechniques.Categories()[0])
+	b := newBrainExecutor(&fakeDiscovery{}, slog.Default())
+	cov := b.coverage("agent", "not-in-catalog", []string{coreCategory, "not_a_real_category"})
+	assert.True(t, cov.HasCategory(taxonomy.CategoryID(coreCategory)))
+	assert.Len(t, cov.Categories(), 1)
 }
 
 // The catalog runs in the mission's tenant, not in whatever namespace a
