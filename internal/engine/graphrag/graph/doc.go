@@ -24,13 +24,9 @@
 //	config.Username = "neo4j"
 //	config.Password = os.Getenv("NEO4J_PASSWORD")
 //
-//	client, err := graph.NewNeo4jClient(config)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//
 //	ctx := context.Background()
-//	if err := client.Connect(ctx); err != nil {
+//	client, err := graph.NewNeo4jClient(ctx, config)
+//	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	defer client.Close(ctx)
