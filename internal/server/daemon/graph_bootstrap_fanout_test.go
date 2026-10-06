@@ -22,16 +22,16 @@ func bootstrapFixture(t *testing.T) (*mission.Mission, *mission.MissionRun) {
 	t.Helper()
 	missionID := types.NewID()
 	return &mission.Mission{
-			ID:       missionID,
-			Name:     "fanout",
-			TenantID: "tenant-a",
-			TargetID: types.NewID(),
-			Status:   mission.MissionStatusRunning,
-		}, &mission.MissionRun{
-			ID:        types.NewID(),
-			MissionID: missionID,
-			RunNumber: 1,
-		}
+		ID:       missionID,
+		Name:     "fanout",
+		TenantID: "tenant-a",
+		TargetID: types.NewID(),
+		Status:   mission.MissionStatusRunning,
+	}, &mission.MissionRun{
+		ID:        types.NewID(),
+		MissionID: missionID,
+		RunNumber: 1,
+	}
 }
 
 // The whole of gibson#528: a two-target fan-out writes one graph node per
