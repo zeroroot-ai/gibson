@@ -733,15 +733,15 @@ message ListDesiredConnectorsResponse {
 
 message ReportConnectorStatusRequest {
   // tenant_id is the tenant slug. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // connector_id is the catalog id of the connector. Required.
-  string connector_id = 2;
+  string connector_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // phase is the phase of the ConnectorInstance. Required.
-  string phase = 3;
+  string phase = 3 [(buf.validate.field).string = { max_len: 1024 }];
   // discovered_tools is the number of tools the connector serves.
-  int32 discovered_tools = 4;
+  int32 discovered_tools = 4 [(buf.validate.field).int32 = { gte: 0 }];
   // last_error is the last error of the connector, or empty.
-  string last_error = 5;
+  string last_error = 5 [(buf.validate.field).string = { max_len: 65536 }];
 }
 
 message ReportConnectorStatusResponse {
@@ -751,9 +751,9 @@ message ReportConnectorStatusResponse {
 
 message AdoptConnectorRequest {
   // tenant_id is the tenant slug. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // connector_id is the catalog id of the connector. Required.
-  string connector_id = 2;
+  string connector_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 message AdoptConnectorResponse {}
