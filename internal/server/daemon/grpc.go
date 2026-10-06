@@ -558,8 +558,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 		return sdkAuthStream(srv, ss, info, handler)
 	}
-	unaryInterceptors = append(unaryInterceptors, registryAwareUnary)
-	streamInterceptors = append(streamInterceptors, registryAwareStream)
+	unaryInterceptors = append(unaryInterceptors, registryAwareUnary, actingUserUnary)
+	streamInterceptors = append(streamInterceptors, registryAwareStream, actingUserStream)
 	d.logger.Info(ctx, "identity interceptor installed (header-trusting; channel security via SPIFFE mTLS)")
 
 	// 4. Idempotency-key dedup (mutating-RPC convention from
