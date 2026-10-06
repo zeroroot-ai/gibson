@@ -268,7 +268,8 @@ func TestReconcileTrustedDomain_EnvFallback(t *testing.T) {
 	}
 }
 
-// TestReconcileTrustedDomain_NilSystemClient keeps the opt-out path intact.
+// TestReconcileTrustedDomain_NilSystemClient: with no system client the step
+// cannot run, so its condition is False and never Ready (gibson#223).
 func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 	r := &PlatformBootstrapReconciler{
 		SystemClientFactory: func(string, string, string, string) (zitadel.SystemClient, error) {
@@ -282,8 +283,8 @@ func TestReconcileTrustedDomain_NilSystemClient(t *testing.T) {
 		t.Fatalf("reconcileTrustedDomain: %v", err)
 	}
 	cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionTrustedDomainReady)
-	if cond == nil || cond.Reason != "SystemClientDisabled" {
-		t.Fatalf("condition = %+v, want reason SystemClientDisabled", cond)
+	if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != "SystemClientMissing" {
+		t.Fatalf("condition = %+v, want False with reason SystemClientMissing", cond)
 	}
 }
 

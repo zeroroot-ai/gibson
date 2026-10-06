@@ -45,17 +45,23 @@ func DefaultSystemClientFactory(apiURL, systemUserName, externalDomain, keyPath 
 //
 // Condition managed: ConditionTrustedDomainReady.
 //
-// If spec.zitadel.systemClient is nil the condition flips True with reason
-// "SystemClientDisabled" and no System API calls are made. This allows
-// existing clusters to opt-in incrementally without breaking the reconciler.
+// If spec.zitadel.systemClient is nil the step cannot run, so the condition is
+// False with reason "SystemClientMissing", and PlatformBootstrap is not Ready.
+// A step that did not run never reports Ready (gibson#223). The chart sets
+// the system client on every profile.
+//
+// Why the step stays (ADR-0092): each client sends the public host in the
+// x-zitadel-instance-host header, so the registration of the Service name may
+// be residue. No test records that the header alone selects the instance on
+// the pinned Zitadel release, so the step stays until one does.
 func (r *PlatformBootstrapReconciler) reconcileTrustedDomain(
 	ctx context.Context,
 	pb *gibsonv1alpha1.PlatformBootstrap,
 	logger logr.Logger,
 ) (ctrl.Result, error) {
 	if pb.Spec.Zitadel.SystemClient == nil {
-		setBootstrapCond(pb, gibsonv1alpha1.ConditionTrustedDomainReady, metav1.ConditionTrue,
-			"SystemClientDisabled", "spec.zitadel.systemClient not configured; skipping trusted-domain registration")
+		setBootstrapCond(pb, gibsonv1alpha1.ConditionTrustedDomainReady, metav1.ConditionFalse,
+			"SystemClientMissing", "spec.zitadel.systemClient is not set, so the trusted domain is not registered")
 		return ctrl.Result{}, nil
 	}
 
