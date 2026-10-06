@@ -94,12 +94,12 @@ func TestPeerSPIFFEID_CertWithoutSPIFFEURI(t *testing.T) {
 func TestPeerSPIFFEID_FindsSPIFFEURI(t *testing.T) {
 	ctx := peer.NewContext(context.Background(), &peer.Peer{
 		AuthInfo: credentials.TLSInfo{State: tls.ConnectionState{
-			PeerCertificates: []*x509.Certificate{certWithURIs(callbackEnvoySVID)},
+			PeerCertificates: []*x509.Certificate{certWithURIs(callbackEnvoySVID(callbackTestTD))},
 		}},
 	})
 	svid, ok := peerSPIFFEID(ctx)
 	require.True(t, ok)
-	assert.Equal(t, callbackEnvoySVID, svid)
+	assert.Equal(t, callbackEnvoySVID(callbackTestTD), svid)
 }
 
 // --- Interceptor tests ---
@@ -132,7 +132,7 @@ func ctxWithNoTLSPeer() context.Context {
 
 func TestCallbackPeerAuthzInterceptors_UnaryDeniesUnknownPeer(t *testing.T) {
 	logger, _ := newBufferLogger()
-	unary, _ := callbackPeerAuthzInterceptors(logger, true)
+	unary, _ := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
 	handlerCalled := false
 	handler := func(_ context.Context, _ any) (any, error) {
@@ -141,7 +141,7 @@ func TestCallbackPeerAuthzInterceptors_UnaryDeniesUnknownPeer(t *testing.T) {
 	}
 	info := &grpc.UnaryServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/GetCredential"}
 
-	_, err := unary(ctxWithSVID("spiffe://zeroroot.ai/platform/some-new-thing"), nil, info, handler)
+	_, err := unary(ctxWithSVID("spiffe://example.org/platform/some-new-thing"), nil, info, handler)
 	require.Error(t, err, "REGRESSION (GHSA-cwgm-qw3c-4ph7): an unclassified peer SVID must be denied, "+
 		"not defaulted to allowed")
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
@@ -150,7 +150,7 @@ func TestCallbackPeerAuthzInterceptors_UnaryDeniesUnknownPeer(t *testing.T) {
 
 func TestCallbackPeerAuthzInterceptors_UnaryDeniesUnresolvableSVID(t *testing.T) {
 	logger, _ := newBufferLogger()
-	unary, _ := callbackPeerAuthzInterceptors(logger, true)
+	unary, _ := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
 	handlerCalled := false
 	handler := func(_ context.Context, _ any) (any, error) {
@@ -169,7 +169,7 @@ func TestCallbackPeerAuthzInterceptors_UnaryDeniesUnresolvableSVID(t *testing.T)
 
 func TestCallbackPeerAuthzInterceptors_UnaryAllowsAgentPeerInPolicy(t *testing.T) {
 	logger, _ := newBufferLogger()
-	unary, _ := callbackPeerAuthzInterceptors(logger, true)
+	unary, _ := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
 	handlerCalled := false
 	handler := func(_ context.Context, _ any) (any, error) {
@@ -178,16 +178,16 @@ func TestCallbackPeerAuthzInterceptors_UnaryAllowsAgentPeerInPolicy(t *testing.T
 	}
 	info := &grpc.UnaryServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/LLMComplete"}
 
-	_, err := unary(ctxWithSVID(callbackEnvoySVID), nil, info, handler)
+	_, err := unary(ctxWithSVID(callbackEnvoySVID(callbackTestTD)), nil, info, handler)
 	require.NoError(t, err)
 	assert.True(t, handlerCalled, "the legitimate in-mission callback path must not regress")
 }
 
 func TestCallbackPeerAuthzInterceptors_StreamDeniesDashboard(t *testing.T) {
 	logger, _ := newBufferLogger()
-	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, true)
+	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
-	ss := &fakeServerStream{ctx: ctxWithSVID(callbackDashboardSVID)}
+	ss := &fakeServerStream{ctx: ctxWithSVID(callbackDashboardSVID(callbackTestTD))}
 	handlerCalled := false
 	handler := func(_ any, _ grpc.ServerStream) error {
 		handlerCalled = true
@@ -203,9 +203,9 @@ func TestCallbackPeerAuthzInterceptors_StreamDeniesDashboard(t *testing.T) {
 
 func TestCallbackPeerAuthzInterceptors_StreamDeniesUnknownPeer(t *testing.T) {
 	logger, _ := newBufferLogger()
-	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, true)
+	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
-	ss := &fakeServerStream{ctx: ctxWithSVID("spiffe://zeroroot.ai/platform/some-new-thing")}
+	ss := &fakeServerStream{ctx: ctxWithSVID("spiffe://example.org/platform/some-new-thing")}
 	handlerCalled := false
 	handler := func(_ any, _ grpc.ServerStream) error {
 		handlerCalled = true
@@ -222,9 +222,9 @@ func TestCallbackPeerAuthzInterceptors_StreamDeniesUnknownPeer(t *testing.T) {
 
 func TestCallbackPeerAuthzInterceptors_StreamAllowsAgentPeer(t *testing.T) {
 	logger, _ := newBufferLogger()
-	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, true)
+	_, streamInterceptor := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
-	ss := &fakeServerStream{ctx: ctxWithSVID(callbackEnvoySVID)}
+	ss := &fakeServerStream{ctx: ctxWithSVID(callbackEnvoySVID(callbackTestTD))}
 	handlerCalled := false
 	handler := func(_ any, _ grpc.ServerStream) error {
 		handlerCalled = true
@@ -246,7 +246,7 @@ func TestCallbackPeerAuthzInterceptors_StreamAllowsAgentPeer(t *testing.T) {
 // s.spiffeSource != nil).
 func TestCallbackPeerAuthzInterceptors_NoEnforcementWithoutSPIFFE(t *testing.T) {
 	logger, _ := newBufferLogger()
-	unary, _ := callbackPeerAuthzInterceptors(logger, false)
+	unary, _ := callbackPeerAuthzInterceptors(logger, callbackTestTD, false)
 
 	handlerCalled := false
 	handler := func(_ context.Context, _ any) (any, error) {
@@ -277,7 +277,7 @@ func startCallbackTestServerWithInterceptor(t *testing.T, serverPKI *callbackTes
 	t.Helper()
 
 	logger, _ := newBufferLogger()
-	unary, _ := callbackPeerAuthzInterceptors(logger, true)
+	unary, _ := callbackPeerAuthzInterceptors(logger, callbackTestTD, true)
 
 	serverBundle := serverPKI.bundleSource.bundle.Clone()
 	for _, pki := range clientPKIs {
@@ -336,8 +336,8 @@ func dialCallbackAsClient(t *testing.T, clientPKI, _ *callbackTestPKI, addr stri
 // transport-level rejection like the tests in callback_server_tls_test.go), but
 // the request must still be rejected before the handler runs.
 func TestCallback_DashboardSVID_DeniedAtApplicationLayer(t *testing.T) {
-	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
-	dashboardPKI := newCallbackTestPKI(t, "zeroroot.ai", "/platform/dashboard")
+	serverPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/callback/server")
+	dashboardPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/platform/dashboard")
 	allowlist := []spiffeid.ID{dashboardPKI.spiffeID}
 
 	addr, health := startCallbackTestServerWithInterceptor(t, serverPKI, []*callbackTestPKI{dashboardPKI}, allowlist)
@@ -361,8 +361,8 @@ func TestCallback_DashboardSVID_DeniedAtApplicationLayer(t *testing.T) {
 // reached the handler with full power over all 41 RPCs; under the allowlist it
 // gets nothing.
 func TestCallback_UnclassifiedSVID_DeniedAtApplicationLayer(t *testing.T) {
-	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
-	newPeerPKI := newCallbackTestPKI(t, "zeroroot.ai", "/platform/some-new-thing")
+	serverPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/callback/server")
+	newPeerPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/platform/some-new-thing")
 	allowlist := []spiffeid.ID{newPeerPKI.spiffeID}
 
 	addr, health := startCallbackTestServerWithInterceptor(t, serverPKI, []*callbackTestPKI{newPeerPKI}, allowlist)
@@ -384,8 +384,8 @@ func TestCallback_UnclassifiedSVID_DeniedAtApplicationLayer(t *testing.T) {
 // passes both the TLS handshake AND the method policy for a method inside its
 // policy, proving the fix does not regress the live mission callback path.
 func TestCallback_EnvoySVID_ReachesHandler(t *testing.T) {
-	serverPKI := newCallbackTestPKI(t, "zeroroot.ai", "/callback/server")
-	envoyPKI := newCallbackTestPKI(t, "zeroroot.ai", "/platform/envoy")
+	serverPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/callback/server")
+	envoyPKI := newCallbackTestPKI(t, callbackTestTD.Name(), "/platform/envoy")
 	allowlist := []spiffeid.ID{envoyPKI.spiffeID}
 
 	addr, health := startCallbackTestServerWithInterceptor(t, serverPKI, []*callbackTestPKI{envoyPKI}, allowlist)

@@ -14,47 +14,57 @@ import (
 
 // The three SPIFFE peers the chart configures in
 // gibson.config.callback.spiffe.peerSvids (rendered as
-// GIBSON_CALLBACK_PEER_SVIDS). Verified identical in every environment:
-// zeroroot-ai/charts helm/gibson/values.yaml and
-// helm/gibson-workloads/values.yaml, and the dev overlay in zeroroot-ai/hosted
-// gitops/envs (staging and prod inherit the umbrella default).
+// GIBSON_CALLBACK_PEER_SVIDS). Each one is spiffe://<td>/platform/<name>, where
+// <td> is the trust domain of the install (auth.spiffe.trust_domain). No code
+// holds the trust domain as a literal (ADR-0164).
 //
-// These are constants for the same reason tenantOperatorSVID is a constant in
+// The paths are code for the same reason the tenant operator path is code in
 // internal/server/daemon/operator_method_policy.go: what a peer may call is a
 // code-level security decision, not a deployment knob. A configured peer with no
 // policy here is refused at callback-server start by
 // validateCallbackPeerPolicies, so a chart that renames or adds an SVID fails
 // loud at boot rather than silently denying every callback at request time.
-const (
-	// callbackDashboardSVID is the browser-path caller. Its policy grants ZERO
-	// methods: HarnessCallbackService is an agent-only in-mission callback
-	// surface (docs/how-to-add-a-rpc.md) and no dashboard caller exists for any
-	// of its RPCs anywhere in this codebase. The main daemon listener excludes
-	// the dashboard from its direct-dial allowlist for the identical reason.
-	callbackDashboardSVID = "spiffe://zeroroot.ai/platform/dashboard"
 
-	// callbackEnvoySVID is the INGRESS peer. It fronts two populations, and
-	// this policy is the only thing that bounds either of them:
-	//
-	//   - the in-guest agent's callback traffic, and
-	//   - off-cluster components authenticating with a CG-JWT, whose edge
-	//     route (/gibson.harness.v1.HarnessCallbackService/) Envoy sends to
-	//     this listener via the `gibson_daemon_callback` cluster (gibson#1450;
-	//     before that fix the route landed on :50051 and every such call
-	//     returned Unimplemented).
-	//
-	// Because Envoy is a shared front for external callers, "what Envoy may
-	// call" is the external attack surface of this service, not an in-cluster
-	// convenience. Widening this peer's grant widens the public API. The
-	// per-caller half of the decision is made upstream by ext-authz (FGA, plus
-	// a CG-JWT bound to a single method); this half decides which RPCs the
-	// listener will serve to an Envoy-forwarded caller at all.
-	callbackEnvoySVID = "spiffe://zeroroot.ai/platform/envoy"
+// callbackPlatformSVID is the SPIFFE ID of a platform component in the trust
+// domain of the install.
+func callbackPlatformSVID(td spiffeid.TrustDomain, name string) string {
+	return "spiffe://" + td.Name() + "/platform/" + name
+}
 
-	// callbackDaemonSVID is the daemon's own identity on a self/loopback dial of
-	// the callback listener.
-	callbackDaemonSVID = "spiffe://zeroroot.ai/platform/daemon"
-)
+// callbackDashboardSVID is the browser-path caller. Its policy grants ZERO
+// methods: HarnessCallbackService is an agent-only in-mission callback
+// surface (docs/how-to-add-a-rpc.md) and no dashboard caller exists for any
+// of its RPCs anywhere in this codebase. The main daemon listener excludes
+// the dashboard from its direct-dial allowlist for the identical reason.
+func callbackDashboardSVID(td spiffeid.TrustDomain) string {
+	return callbackPlatformSVID(td, "dashboard")
+}
+
+// callbackEnvoySVID is the INGRESS peer. It fronts two populations, and
+// this policy is the only thing that bounds either of them:
+//
+//   - the in-guest agent's callback traffic, and
+//   - off-cluster components authenticating with a CG-JWT, whose edge
+//     route (/gibson.harness.v1.HarnessCallbackService/) Envoy sends to
+//     this listener via the `gibson_daemon_callback` cluster (gibson#1450;
+//     before that fix the route landed on :50051 and every such call
+//     returned Unimplemented).
+//
+// Because Envoy is a shared front for external callers, "what Envoy may
+// call" is the external attack surface of this service, not an in-cluster
+// convenience. Widening this peer's grant widens the public API. The
+// per-caller half of the decision is made upstream by ext-authz (FGA, plus
+// a CG-JWT bound to a single method); this half decides which RPCs the
+// listener will serve to an Envoy-forwarded caller at all.
+func callbackEnvoySVID(td spiffeid.TrustDomain) string {
+	return callbackPlatformSVID(td, "envoy")
+}
+
+// callbackDaemonSVID is the daemon's own identity on a self/loopback dial of
+// the callback listener.
+func callbackDaemonSVID(td spiffeid.TrustDomain) string {
+	return callbackPlatformSVID(td, "daemon")
+}
 
 // healthCheckMethod and healthWatchMethod are the gRPC health-probe methods the
 // callback server registers alongside HarnessCallbackService (see
@@ -347,7 +357,7 @@ func callbackAgentSurfaceMethods() map[string]bool {
 }
 
 // callbackPeerMethodPolicies returns the per-SVID method allowlist for the
-// harness callback listener. A peer that is NOT a key here has NO policy and is
+// harness callback listener in the trust domain td. A peer that is NOT a key here has NO policy and is
 // therefore DENIED at request time AND rejected at server start
 // (validateCallbackPeerPolicies). There is no implicit allow-all fall-through.
 //
@@ -360,12 +370,12 @@ func callbackAgentSurfaceMethods() map[string]bool {
 // standing grant on a SPIFFE-pinned listener. Reflection against the plaintext
 // loopback dev bind is unaffected — the interceptors do not enforce when SPIFFE
 // is unwired (see callbackPeerAuthzInterceptors).
-func callbackPeerMethodPolicies() map[string]map[string]bool {
+func callbackPeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 	agentSurface := callbackAgentSurfaceMethods()
 	return map[string]map[string]bool{
-		callbackDashboardSVID: {},
-		callbackEnvoySVID:     agentSurface,
-		callbackDaemonSVID:    agentSurface,
+		callbackDashboardSVID(td): {},
+		callbackEnvoySVID(td):     agentSurface,
+		callbackDaemonSVID(td):    agentSurface,
 	}
 }
 

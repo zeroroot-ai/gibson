@@ -51,6 +51,10 @@ type CallbackServer struct {
 	// Spec: critical-tls-no-fallbacks Component 1.
 	spiffeSource *workloadapi.X509Source
 	peerSVIDs    []spiffeid.ID
+	// trustDomain is the SPIFFE trust domain of the install
+	// (auth.spiffe.trust_domain). The peer method policies are keyed on SVIDs
+	// in this domain (ADR-0164). It is required when spiffeSource is set.
+	trustDomain spiffeid.TrustDomain
 }
 
 // NewCallbackServerWithRegistry creates a new callback server with the given
@@ -91,11 +95,13 @@ func (s *CallbackServer) Service() *HarnessCallbackService {
 // tlsconfig.AuthorizeOneOf(peerSVIDs...)) and the gRPC server is constructed
 // with grpc.Creds(credentials.NewTLS(tlsCfg)). Pass nil source to disable
 // (loopback dev only — callback_manager rejects non-loopback binds without
-// SPIFFE). peerSVIDs MUST be non-empty when source is non-nil.
+// SPIFFE). peerSVIDs MUST be non-empty and td MUST be set when source is
+// non-nil.
 //
 // Spec: critical-tls-no-fallbacks Component 1.
-func (s *CallbackServer) SetSPIFFE(source *workloadapi.X509Source, peerSVIDs []spiffeid.ID) {
+func (s *CallbackServer) SetSPIFFE(source *workloadapi.X509Source, td spiffeid.TrustDomain, peerSVIDs []spiffeid.ID) {
 	s.spiffeSource = source
+	s.trustDomain = td
 	s.peerSVIDs = peerSVIDs
 }
 
@@ -130,7 +136,12 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 					"populate gibson.config.callback.spiffe.peerSvids in chart values " +
 					"(daemon initSPIFFEX509Source should have caught this — bug if it did not)")
 		}
-		if err := validateCallbackPeerPolicies(s.peerSVIDs, callbackPeerMethodPolicies()); err != nil {
+		if s.trustDomain.IsZero() {
+			return errors.New(
+				"callback server has SPIFFE source but no trust domain; " +
+					"set auth.spiffe.trust_domain (ADR-0164)")
+		}
+		if err := validateCallbackPeerPolicies(s.peerSVIDs, callbackPeerMethodPolicies(s.trustDomain)); err != nil {
 			return err
 		}
 	}
@@ -161,7 +172,7 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	// context and must NOT be threaded into them — each closure derives its
 	// own per-REQUEST context later (the unary ctx param / ss.Context()),
 	// which is the one that belongs in a per-request structured-log call.
-	peerAuthzUnary, peerAuthzStream := callbackPeerAuthzInterceptors(s.logger, s.spiffeSource != nil)
+	peerAuthzUnary, peerAuthzStream := callbackPeerAuthzInterceptors(s.logger, s.trustDomain, s.spiffeSource != nil)
 	// The task-grant scope check runs AFTER the auth interceptor: it compares
 	// the grant's tenant and mission against the identity that interceptor
 	// placed on the context and the ContextInfo in the body (gibson#1605).

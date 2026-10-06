@@ -277,6 +277,14 @@ jobs:
           bash scripts/check-no-payment-vendor.sh --selftest
           bash scripts/check-no-payment-vendor.sh
 
+      # gibson#757: each install has its own SPIFFE trust domain (ADR-0164).
+      # No tracked file outside tests, testdata and Markdown holds the SaaS
+      # trust domain as a literal.
+      - name: Check no trust domain literal
+        run: |
+          bash scripts/check-no-trust-domain-literal.sh --selftest
+          bash scripts/check-no-trust-domain-literal.sh
+
       # gibson#1294: this guard spent the whole post-monorepo period scanning
       # two directories that do not exist, and it only ever ran inside `make
       # check` locally. Run it in CI, self-test first.

@@ -65,6 +65,11 @@ type CallbackConfig struct {
 	// (parsed by initSPIFFEX509Source). MUST be non-empty when X509Source is set.
 	// Spec: critical-tls-no-fallbacks Requirement 1.3.
 	PeerSVIDs []spiffeid.ID
+
+	// TrustDomain is the SPIFFE trust domain of the install
+	// (auth.spiffe.trust_domain). The callback peer policies are keyed on
+	// SVIDs in this domain. MUST be set when X509Source is set.
+	TrustDomain spiffeid.TrustDomain
 }
 
 // CallbackManager coordinates the lifecycle of the CallbackServer and provides
@@ -150,7 +155,7 @@ func NewCallbackManager(cfg CallbackConfig, logger *slog.Logger) *CallbackManage
 	// rejects non-loopback binds without SPIFFE — this wiring is what makes
 	// SPIFFEEnabled=true in production.
 	if cfg.X509Source != nil {
-		server.SetSPIFFE(cfg.X509Source, cfg.PeerSVIDs)
+		server.SetSPIFFE(cfg.X509Source, cfg.TrustDomain, cfg.PeerSVIDs)
 	}
 
 	return &CallbackManager{
@@ -752,14 +757,15 @@ func (m *CallbackManager) SetAgentOwnerLookup(fn AgentOwnerLookup) {
 // d.spiffeX509Source and d.callbackPeerSVIDs.
 //
 // Spec: critical-tls-no-fallbacks Component 4.
-func (m *CallbackManager) SetSPIFFE(source *workloadapi.X509Source, peerSVIDs []spiffeid.ID) {
+func (m *CallbackManager) SetSPIFFE(source *workloadapi.X509Source, td spiffeid.TrustDomain, peerSVIDs []spiffeid.ID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.config.X509Source = source
+	m.config.TrustDomain = td
 	m.config.PeerSVIDs = peerSVIDs
 	m.config.SPIFFEEnabled = source != nil
 	if m.server != nil {
-		m.server.SetSPIFFE(source, peerSVIDs)
+		m.server.SetSPIFFE(source, td, peerSVIDs)
 		m.logger.Debug("wired SPIFFE source onto callback server",
 			"peer_svid_count", len(peerSVIDs))
 	}

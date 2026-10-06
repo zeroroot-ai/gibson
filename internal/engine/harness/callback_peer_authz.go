@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -101,8 +102,12 @@ func checkCallbackPeerAuthz(ctx context.Context, svid string, resolved bool, met
 // posture is confined to the plaintext loopback dev/test bind, which
 // rejectNonLoopbackWithoutSPIFFE (listener_guard.go) already refuses to expose
 // on any non-loopback address. Every production bind runs with enforce=true.
-func callbackPeerAuthzInterceptors(logger *slog.Logger, enforce bool) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
-	policies := callbackPeerMethodPolicies()
+// td is the trust domain of the install: the peer policies are keyed on SVIDs
+// in that domain.
+func callbackPeerAuthzInterceptors(
+	logger *slog.Logger, td spiffeid.TrustDomain, enforce bool,
+) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+	policies := callbackPeerMethodPolicies(td)
 
 	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 		if enforce {

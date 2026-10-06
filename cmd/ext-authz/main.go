@@ -59,7 +59,7 @@
 //	EXT_AUTHZ_DAEMON_SVID           REQUIRED whenever EXT_AUTHZ_CGJWT_KEYS_URL or
 //	                                EXT_AUTHZ_REGISTRY_URL is set — the daemon
 //	                                SPIFFE ID both fetches pin their peer to
-//	                                (e.g. spiffe://zeroroot.ai/platform/daemon)
+//	                                (e.g. spiffe://example.org/platform/daemon)
 //	EXT_AUTHZ_CGJWT_ISSUER          required (daemon CG authority URL)
 //	EXT_AUTHZ_CGJWT_AUDIENCE        default gibson-daemon
 //	EXT_AUTHZ_CGJWT_TTL             default 1h
@@ -92,7 +92,7 @@
 //	SPIFFE_ENDPOINT_SOCKET          REQUIRED — SPIRE Workload API socket path
 //	                                (e.g. unix:///run/spire/agent-sockets/spire-agent.sock)
 //	EXT_AUTHZ_ENVOY_SVID            REQUIRED — Envoy peer SVID to authorize
-//	                                (e.g. spiffe://zeroroot.ai/ns/gibson/sa/gibson-envoy);
+//	                                (e.g. spiffe://example.org/ns/gibson/sa/gibson-envoy);
 //	                                comma-separated list also accepted.
 //	EXT_AUTHZ_HEALTH_CERT_DIR       default /etc/extauthz/tls/health — directory
 //	                                holding tls.crt, tls.key, ca.crt for the HTTPS
@@ -583,7 +583,7 @@ func daemonMTLSClient(svid x509svid.Source, bundle x509bundle.Source, timeout ti
 	raw := strings.TrimSpace(os.Getenv("EXT_AUTHZ_DAEMON_SVID"))
 	if raw == "" {
 		return nil, errors.New(
-			"EXT_AUTHZ_DAEMON_SVID required (e.g. spiffe://zeroroot.ai/platform/daemon) — " +
+			"EXT_AUTHZ_DAEMON_SVID required (e.g. spiffe://example.org/platform/daemon) — " +
 				"a daemon-ward fetch MUST be SVID-pinned")
 	}
 	daemonID, err := spiffeid.FromString(raw)
@@ -849,7 +849,7 @@ func loadSPIFFESource(ctx context.Context, log *slog.Logger) (*workloadapi.X509S
 func buildEnvoyAuthorizer() (tlsconfig.Authorizer, error) {
 	raw := os.Getenv("EXT_AUTHZ_ENVOY_SVID")
 	if raw == "" {
-		return nil, errors.New("EXT_AUTHZ_ENVOY_SVID required (e.g. spiffe://zeroroot.ai/ns/gibson/sa/gibson-envoy)")
+		return nil, errors.New("EXT_AUTHZ_ENVOY_SVID required (e.g. spiffe://example.org/ns/gibson/sa/gibson-envoy)")
 	}
 	parts := strings.Split(raw, ",")
 	ids := make([]spiffeid.ID, 0, len(parts))
