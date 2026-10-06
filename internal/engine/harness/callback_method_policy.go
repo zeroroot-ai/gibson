@@ -228,7 +228,9 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	},
 
 	// --- Sub-mission lifecycle ---
-	harnesspb.HarnessCallbackService_CreateMission_FullMethodName:     {agentSurface: true, reason: reasonAgentCallbackSurface},
+	harnesspb.HarnessCallbackService_CreateMission_FullMethodName: {agentSurface: true, reason: reasonAgentCallbackSurface},
+	// A fork claims its own dispatch with the grant of its source (D74).
+	harnesspb.HarnessCallbackService_ClaimFork_FullMethodName:         {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_RunMission_FullMethodName:        {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_GetMissionStatus_FullMethodName:  {agentSurface: true, reason: reasonAgentCallbackSurface},
 	harnesspb.HarnessCallbackService_WaitForMission_FullMethodName:    {agentSurface: true, reason: reasonAgentCallbackSurface},
