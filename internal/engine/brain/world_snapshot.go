@@ -219,6 +219,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Timeout:   wi.Timeout,
 			Group:     wi.Group,
 			Limit:     wi.Limit,
+			Network:   wi.Network,
 		}
 		Reduce(w, dsp)
 		switch wi.State {

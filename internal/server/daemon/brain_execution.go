@@ -131,9 +131,12 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// DelegateToAgent reads that as "run until the agent returns a result
 			// or its worker stops heartbeating", which is what a live session
 			// node needs (gibson#1602).
+			// The network scope of the node decides the egress of the agent
+			// sandbox (owner decision S6, gibson#865).
 			res, err := bind.harness.DelegateToAgent(bind.ctx, req.Target, agent.Task{
 				Goal:    req.Input,
 				Timeout: req.Timeout,
+				Network: req.Network,
 			})
 			if err != nil {
 				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})

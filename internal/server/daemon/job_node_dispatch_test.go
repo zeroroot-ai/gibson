@@ -31,6 +31,7 @@ type verifierHarness struct {
 	agentOut map[string]any
 	agentErr error
 	called   []string
+	tasks    []agent.Task
 }
 
 func (h *verifierHarness) CallToolProto(_ context.Context, name string, _, response proto.Message) error {
@@ -43,8 +44,9 @@ func (h *verifierHarness) CallToolProto(_ context.Context, name string, _, respo
 	return nil
 }
 
-func (h *verifierHarness) DelegateToAgent(_ context.Context, name string, _ agent.Task) (agent.Result, error) {
+func (h *verifierHarness) DelegateToAgent(_ context.Context, name string, task agent.Task) (agent.Result, error) {
 	h.called = append(h.called, "agent/"+name)
+	h.tasks = append(h.tasks, task)
 	if h.agentErr != nil {
 		return agent.Result{}, h.agentErr
 	}
