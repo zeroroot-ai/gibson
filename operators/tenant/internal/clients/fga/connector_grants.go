@@ -74,10 +74,26 @@ func LegacyConnectorInvokeTuple(catalogID, tenantID string) Tuple {
 	}
 }
 
-// DeleteLegacyConnectorInvokeTuple removes the retired borrow tuple.
-// Idempotent: Client.Delete treats a missing tuple as success.
+// DeleteLegacyConnectorInvokeTuple removes the retired borrow tuple when it
+// exists. It reads the exact tuple first and sends no delete when it is gone,
+// which is the case on every reconcile after the first one. A delete of a
+// missing tuple is a server error in OpenFGA, so an unconditional delete
+// failed each pass (gibson#879).
 func DeleteLegacyConnectorInvokeTuple(ctx context.Context, fgaClient Client, catalogID, tenantID string) error {
-	if err := fgaClient.Delete(ctx, []Tuple{LegacyConnectorInvokeTuple(catalogID, tenantID)}); err != nil {
+	legacy := LegacyConnectorInvokeTuple(catalogID, tenantID)
+	found, err := fgaClient.Read(ctx, legacy)
+	if err != nil {
+		return fmt.Errorf("fga: DeleteLegacyConnectorInvokeTuple connector=%s tenant=%s: read: %w",
+			catalogID, tenantID, err)
+	}
+	present := false
+	for _, t := range found {
+		present = present || t == legacy
+	}
+	if !present {
+		return nil
+	}
+	if err := fgaClient.Delete(ctx, []Tuple{legacy}); err != nil {
 		return fmt.Errorf("fga: DeleteLegacyConnectorInvokeTuple connector=%s tenant=%s: %w",
 			catalogID, tenantID, err)
 	}

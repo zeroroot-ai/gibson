@@ -332,13 +332,14 @@ func (c *HTTPClient) doJSON(ctx context.Context, path string, body any, out any)
 	// duplicate an existing tuple. That's a conflict, not a true validation
 	// error — surface it as ErrAlreadyExists so idempotent steps treat it as
 	// success.
+	//
+	// The message text changed between OpenFGA releases, so each text that a
+	// supported release sends is in the two lists below (gibson#879).
 	bodyStr := string(raw)
-	if resp.StatusCode == http.StatusBadRequest &&
-		strings.Contains(bodyStr, "tuple to be written already existed") {
+	if resp.StatusCode == http.StatusBadRequest && containsAny(bodyStr, fgaTupleExistsMessages) {
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrAlreadyExists)
 	}
-	if resp.StatusCode == http.StatusBadRequest &&
-		strings.Contains(bodyStr, "tuple to be deleted did not exist") {
+	if resp.StatusCode == http.StatusBadRequest && containsAny(bodyStr, fgaTupleMissingMessages) {
 		return fmt.Errorf("fga %d: %w", resp.StatusCode, clients.ErrNotFound)
 	}
 	switch {
@@ -361,4 +362,27 @@ func (c *HTTPClient) doJSON(ctx context.Context, path string, body any, out any)
 	default:
 		return fmt.Errorf("fga %d: %w: %s", resp.StatusCode, clients.ErrUnreachable, bodyStr)
 	}
+}
+
+// fgaTupleExistsMessages are the texts with which OpenFGA refuses a write of a
+// tuple that exists, from the older and the current releases.
+var fgaTupleExistsMessages = []string{
+	"tuple to be written already existed",
+	"cannot write a tuple which already exists",
+}
+
+// fgaTupleMissingMessages are the texts with which OpenFGA refuses a delete of
+// a tuple that does not exist, from the older and the current releases.
+var fgaTupleMissingMessages = []string{
+	"tuple to be deleted did not exist",
+	"cannot delete a tuple which does not exist",
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }

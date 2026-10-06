@@ -6,10 +6,12 @@ package fga_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 )
 
@@ -129,5 +131,39 @@ func TestWriteAndDelete_EmptyIsANoOp(t *testing.T) {
 	}
 	if calls != 0 {
 		t.Fatalf("WriteAndDelete made %d requests for empty input, want 0", calls)
+	}
+}
+
+// TestHTTPClient_MapsEachOpenFGAMessageText pins the 400 mapping for the old
+// and the current OpenFGA texts (gibson#879). A write of a tuple that exists is
+// an idempotent success, and so is a delete of a tuple that does not exist.
+func TestHTTPClient_MapsEachOpenFGAMessageText(t *testing.T) {
+	tuple := fga.Tuple{User: "tenant:acme#member", Relation: "can_invoke", Object: "plugin:acme/gitlab"}
+	answer := func(body string) http.HandlerFunc {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":"write_failed_due_to_invalid_input","message":"` + body + `"}`))
+		}
+	}
+	for _, msg := range []string{
+		"cannot delete a tuple which does not exist: user: 'tenant:acme#member'",
+		"tuple to be deleted did not exist",
+	} {
+		if err := newHTTPClient(t, answer(msg)).Delete(context.Background(), []fga.Tuple{tuple}); err != nil {
+			t.Errorf("delete answered %q: err = %v, want nil", msg, err)
+		}
+	}
+	for _, msg := range []string{
+		"cannot write a tuple which already exists: user: 'tenant:acme#member'",
+		"tuple to be written already existed",
+	} {
+		err := newHTTPClient(t, answer(msg)).Write(context.Background(), []fga.Tuple{tuple})
+		if !errors.Is(err, clients.ErrAlreadyExists) {
+			t.Errorf("write answered %q: err = %v, want ErrAlreadyExists", msg, err)
+		}
+	}
+	// The control: another 400 is still an error.
+	if err := newHTTPClient(t, answer("type 'nope' not found")).Delete(context.Background(), []fga.Tuple{tuple}); err == nil {
+		t.Error("an unrelated 400 must stay an error")
 	}
 }
