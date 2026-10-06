@@ -333,7 +333,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	// isolation we could not confirm is killed, not used: the tool inside it
 	// is untrusted by construction and must not execute without a boundary.
 	if isoErr := VerifyIsolation(e.sandboxClass, launchResp); isoErr != nil {
-		killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
 		killCancel()
 		return types.WrapError(types.SANDBOX_POLICY_DENIED,
@@ -361,7 +361,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	if waitErr != nil {
 		if errors.Is(waitErr, context.DeadlineExceeded) {
 			// Best-effort kill so Setec reaps the sandbox rather than letting it run.
-			killCtx, killCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
 			killCancel()
 			return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
