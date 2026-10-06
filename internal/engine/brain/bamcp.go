@@ -144,12 +144,11 @@ const (
 	DefaultBAMCPExploration = 10.0
 )
 
-// EdgeStrengthPosterior is the Beta(Alpha, Beta) posterior BAMCP Thompson-
-// samples for one enablement-edge TYPE's noisy-OR strength (ADR-0137).
-// Its mean (Alpha/(Alpha+Beta)) is what exact inference
-// consumes today via UninformativePriorStrength; BAMCP consumes the whole
-// distribution, which is exactly ADR-0137's "one output, two
-// uses."
+// EdgeStrengthPosterior is the Beta(Alpha, Beta) posterior of one learned
+// noisy-OR strength (ADR-0137): an enablement edge type, an intra-node
+// dependency or a leak. Its mean (Alpha/(Alpha+Beta)) is what exact
+// inference consumes; BAMCP Thompson-samples the whole distribution, which is
+// exactly ADR-0137's "one output, two uses."
 type EdgeStrengthPosterior struct {
 	Alpha float64
 	Beta  float64
@@ -184,6 +183,22 @@ type EdgeStrengthPosteriorProvider interface {
 	Posterior(edgeType string) EdgeStrengthPosterior
 }
 
+// StrengthPosteriorProvider supplies each learned noisy-OR strength as a Beta
+// posterior (ADR-0137): each enablement edge type (Posterior), each
+// dependency inside one node (InNodeStrength) and each leak (Leak,
+// gibson#720). Each method falls back to the uninformative Beta(1,1) when no
+// value was fitted. The BAMCP planner Thompson-samples all three, and exact
+// inference reads their means. UninformativeEdgePosteriors is the cold-start
+// implementation.
+type StrengthPosteriorProvider interface {
+	EdgeStrengthPosteriorProvider
+	// InNodeStrength is the posterior of the strength of parent on child
+	// inside one node of kind.
+	InNodeStrength(kind, child, parent string) EdgeStrengthPosterior
+	// Leak is the posterior of the leak of variable in a node of kind.
+	Leak(kind, variable string) EdgeStrengthPosterior
+}
+
 // PinnedEdgeStrengthPosteriorProvider is an EdgeStrengthPosteriorProvider
 // fitted from a versioned artifact (ADR-0137, gibson#395):
 // braintrain's per-tenant edge-posterior artifact, stored as one version of
@@ -197,26 +212,30 @@ type EdgeStrengthPosteriorProvider interface {
 // this: the cold-start prior has no fitted artifact version to report, which
 // is exactly why a nil/absent provider means "no posterior pinned."
 type PinnedEdgeStrengthPosteriorProvider interface {
-	EdgeStrengthPosteriorProvider
+	StrengthPosteriorProvider
 	// Version identifies the fitted artifact this provider's posteriors came
 	// from (e.g. "tenant-acme-v3").
 	Version() string
-	// InNodeStrength is the fitted posterior of the strength of parent on
-	// child inside one node of kind, and Leak is the fitted posterior of the
-	// leak of variable in a node of kind (gibson#720). Each falls back to the
-	// uninformative Beta(1,1) when the artifact has no fitted value.
-	InNodeStrength(kind, child, parent string) EdgeStrengthPosterior
-	Leak(kind, variable string) EdgeStrengthPosterior
 }
 
-// UninformativeEdgePosteriors is the cold-start EdgeStrengthPosteriorProvider:
-// every edge type, known or not, gets the same uninformative Beta(1,1) prior
+// UninformativeEdgePosteriors is the cold-start StrengthPosteriorProvider:
+// every strength, known or not, gets the same uninformative Beta(1,1) prior
 // (ADR-0137).
 type UninformativeEdgePosteriors struct{}
 
 // Posterior implements EdgeStrengthPosteriorProvider.
 func (UninformativeEdgePosteriors) Posterior(string) EdgeStrengthPosterior {
 	return EdgeStrengthPosterior{Alpha: beliefvi.UninformativeBetaAlpha, Beta: beliefvi.UninformativeBetaBeta}
+}
+
+// InNodeStrength implements StrengthPosteriorProvider.
+func (u UninformativeEdgePosteriors) InNodeStrength(string, string, string) EdgeStrengthPosterior {
+	return u.Posterior("")
+}
+
+// Leak implements StrengthPosteriorProvider.
+func (u UninformativeEdgePosteriors) Leak(string, string) EdgeStrengthPosterior {
+	return u.Posterior("")
 }
 
 // BAMCPConfig names every tunable of a BAMCP rollout (ADR-0126
@@ -290,7 +309,7 @@ func (cfg BAMCPConfig) sanitized() BAMCPConfig {
 // not built here.
 type BAMCPPlanner struct {
 	Registry   *ontology.BeliefSchemaRegistry
-	Posteriors EdgeStrengthPosteriorProvider
+	Posteriors StrengthPosteriorProvider
 	Config     BAMCPConfig
 }
 
@@ -299,7 +318,7 @@ type BAMCPPlanner struct {
 // needs it to know which enablement edges feed which target variable.
 // posteriors nil defaults to UninformativeEdgePosteriors (the cold start
 // every edge type gets until braintrain, gibson#395, fits real ones).
-func NewBAMCPPlanner(registry *ontology.BeliefSchemaRegistry, posteriors EdgeStrengthPosteriorProvider, cfg BAMCPConfig) *BAMCPPlanner {
+func NewBAMCPPlanner(registry *ontology.BeliefSchemaRegistry, posteriors StrengthPosteriorProvider, cfg BAMCPConfig) *BAMCPPlanner {
 	if posteriors == nil {
 		posteriors = UninformativeEdgePosteriors{}
 	}
@@ -344,7 +363,7 @@ func (p *BAMCPPlanner) Plan(ctx context.Context, in VoIPlanInput, substrate Beli
 		return nil, err
 	}
 
-	vars := bamcpGround(in.Graph, p.Registry)
+	vars := bamcpGround(in.Graph, p.Registry, p.Posteriors)
 	order := bamcpTopoOrder(vars)
 
 	cfg := p.Config.sanitized()
@@ -659,24 +678,22 @@ func (t *bamcpTree) rollout(step int) float64 {
 }
 
 // bamcpVar is one grounded belief variable, ready for ancestral (generative)
-// sampling: its ground name, its fixed-strength intra-node causes (an
-// intra-node DependsOn parent and the leak keep UninformativePriorStrength
-// here; exact inference reads their fitted posteriors since gibson#720, and
-// the planner does not yet), and its cross-node
-// enablement causes, each still carrying its edge TYPE so bamcpSampleWorld
-// can Thompson-sample the right posterior for it.
+// sampling: its ground name, the Beta posterior of its leak, its intra-node
+// causes with the Beta posterior of each strength (gibson#931), and its
+// cross-node enablement causes, each still carrying its edge TYPE so
+// bamcpSampleWorld can Thompson-sample the right posterior for it.
 type bamcpVar struct {
 	Name        string
-	Leak        float64
+	Leak        EdgeStrengthPosterior
 	IntraCauses []bamcpIntraCause
 	EdgeCauses  []bamcpEdgeCause
 }
 
 // bamcpIntraCause is one intra-node noisy-OR cause: ground parent name plus
-// its fixed structural strength.
+// the Beta posterior of its strength.
 type bamcpIntraCause struct {
 	Parent   string
-	Strength float64
+	Strength EdgeStrengthPosterior
 }
 
 // bamcpEdgeCause is one cross-node enablement cause: ground parent name plus
@@ -699,7 +716,11 @@ type bamcpEdgeCause struct {
 // documents, deliberately duplicated rather than shared: sharing would mean
 // changing EnablementCause's own shape (beliefvi) to carry a type it has no
 // other use for.
-func bamcpGround(graph AttackGraph, registry *ontology.BeliefSchemaRegistry) []bamcpVar {
+//
+// The leak and each intra-node strength carry their posterior from
+// posteriors (InNodeStrength, Leak), the same values whose means exact
+// inference reads (gibson#931).
+func bamcpGround(graph AttackGraph, registry *ontology.BeliefSchemaRegistry, posteriors StrengthPosteriorProvider) []bamcpVar {
 	nodeVariables := make(map[string]map[string]struct{}, len(graph.Nodes))
 	nodeKind := make(map[string]string, len(graph.Nodes))
 	byName := make(map[string]*bamcpVar)
@@ -717,13 +738,13 @@ func bamcpGround(graph AttackGraph, registry *ontology.BeliefSchemaRegistry) []b
 			if err != nil {
 				continue
 			}
-			bv := &bamcpVar{Name: gname, Leak: UninformativePriorStrength}
+			bv := &bamcpVar{Name: gname, Leak: posteriors.Leak(n.Kind, v.Name)}
 			for _, parent := range v.DependsOn {
 				pname, err := beliefvi.GroundName(n.ID, parent)
 				if err != nil {
 					continue
 				}
-				bv.IntraCauses = append(bv.IntraCauses, bamcpIntraCause{Parent: pname, Strength: UninformativePriorStrength})
+				bv.IntraCauses = append(bv.IntraCauses, bamcpIntraCause{Parent: pname, Strength: posteriors.InNodeStrength(n.Kind, v.Name, parent)})
 			}
 			byName[gname] = bv
 		}
@@ -827,9 +848,10 @@ func bamcpTopoOrder(vars []bamcpVar) []string {
 }
 
 // bamcpSampleWorld draws one Thompson-sampled possible world (ADR-0126,
-// ADR-0137): every edge cause's strength is drawn
-// fresh from posteriors (model uncertainty); every intra-node cause keeps its
-// fixed structural strength (see bamcpVar's doc comment). Each variable is
+// ADR-0137): every strength is drawn fresh from its Beta posterior (model
+// uncertainty): the leak and each intra-node cause from the posterior that
+// bamcpGround recorded (gibson#931), and each edge cause from posteriors.
+// Each variable is
 // then sampled by the exact generative process noisy-OR factorizes into
 // (beliefvi/noisyor.go's own doc comment): the leak fires independently with
 // probability Leak, and each ACTIVE cause independently fires with
@@ -856,11 +878,11 @@ func bamcpSampleWorld(vars []bamcpVar, order []string, posteriors EdgeStrengthPo
 // already-realized parents (realized) -- see bamcpSampleWorld's doc comment
 // for the generative process.
 func bamcpSampleVar(v bamcpVar, posteriors EdgeStrengthPosteriorProvider, realized map[string]bool, rng *rand.Rand) bool {
-	if rng.Float64() < v.Leak {
+	if rng.Float64() < v.Leak.sample(rng) {
 		return true
 	}
 	for _, c := range v.IntraCauses {
-		if realized[c.Parent] && rng.Float64() < c.Strength {
+		if realized[c.Parent] && rng.Float64() < c.Strength.sample(rng) {
 			return true
 		}
 	}
