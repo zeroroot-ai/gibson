@@ -1,0 +1,17 @@
+{
+  "method": "GET",
+  "path": "/repos/zeroroot-ai/gibson",
+  "status": 200,
+  "response": {
+    "id": 42,
+    "name": "gibson",
+    "full_name": "zeroroot-ai/gibson",
+    "description": "The Gibson platform.",
+    "private": false,
+    "fork": false,
+    "default_branch": "main",
+    "language": "Go",
+    "stargazers_count": 128,
+    "html_url": "https://github.com/zeroroot-ai/gibson"
+  }
+}

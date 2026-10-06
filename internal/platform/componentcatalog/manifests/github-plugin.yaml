@@ -1,5 +1,5 @@
-# GitHub plugin — the first-party Go plugin from zeroroot-ai/integrations
-# (plugins/github), hosted as a SVID pod beside Envoy (ADR-0066).
+# GitHub plugin — the first-party Go plugin in plugins/github of this repo,
+# hosted as a SVID pod beside Envoy (ADR-0066).
 #
 # Listing it here is what lets its check-in bind can_resolve on the secret it
 # declares (cred:github_token): the daemon writes that binding only for a
@@ -8,8 +8,12 @@
 # ADR-0097). A plugin outside this table gets no binding from its own
 # declaration; a tenant admin grants it.
 #
-# The digest is the one .github/workflows/exit-test-tool-dispatch.yml deploys
-# (PLUGIN_IMAGE_DIGEST). Move both together.
+# The image workflow (.github/workflows/gibson-images.yml) builds and signs the
+# plugin image and writes the image line below through a pull request, with
+# the source tree it built from (gibson#790). No person edits the image line.
+# The exit test .github/workflows/exit-test-tool-dispatch.yml deploys this
+# image. Until the first build from plugins/github, the pin is the last image
+# that the integrations CI published.
 id: github
 kind: plugin
 displayName: GitHub

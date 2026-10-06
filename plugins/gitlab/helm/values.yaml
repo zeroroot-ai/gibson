@@ -1,0 +1,39 @@
+# Helm wiring fragment for the gitlab plugin (ADR-0065 R5).
+#
+# The deploy path is Helm + GitOps: the gibson umbrella chart ships the
+# `plugins` mechanism (in the gibson-workloads subchart) and this fragment is
+# the values entry that turns this plugin on. Merge it into the umbrella's
+# values under the `gibson-workloads:` subtree (that is where the plugin
+# templates live), e.g. a GitOps env overlay or a customer fork's values:
+#
+#   gibson-workloads:
+#     plugins:
+#       gitlab:
+#         enabled: true
+#         ...
+#
+# The gibson image workflow builds, signs and pushes the image to
+# ghcr.io/zeroroot-ai/gibson-plugin-gitlab, and writes its digest into the
+# catalog manifest (gibson#790). On the reproducible surface
+# (values-vanilla.yaml / staging / prod) pin that digest rather than a moving
+# `tag`. A moving tag is for dev bring-up only.
+#
+# No credential is passed here: the plugin enrols with the daemon over
+# capability-grant (its ServiceAccount token is the one-time bootstrap
+# credential) and resolves every declared cred:/provider_config: at call time
+# through the secrets broker over the daemon gRPC channel.
+gibson-workloads:
+  plugins:
+    gitlab:
+      enabled: true
+      # pod (default) runs a Deployment; setec runs a hardened Firecracker
+      # microVM Sandbox and additionally requires `sandboxClassName`.
+      runtime: pod
+      image:
+        repository: ghcr.io/zeroroot-ai/gibson-plugin-gitlab
+        tag: "0.1.0"
+        # digest: "sha256:..."   # pin on the reproducible surface
+        pullPolicy: IfNotPresent
+      # Rendered under the namespace default-deny; keep it on for pod runtime.
+      networkPolicy:
+        enabled: true
