@@ -17,6 +17,7 @@ package daemon
 
 import (
 	"context"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -382,4 +383,17 @@ func missionToHarnessResult(m *mission.Mission) *harness.MissionClientResult {
 		Error:       errStr,
 		CompletedAt: completedAt,
 	}
+}
+
+// ChildFirstNode returns the first node of the child mission missionID, as
+// its run will project it (gibson#803, ADR-0169). The harness forks the
+// caller sandbox with the network scope of this node and parks the fork as
+// the source of the node, so the first dispatch of the child continues the
+// caller's state.
+func (a *missionHarnessAdapter) ChildFirstNode(ctx context.Context, missionID types.ID) (brain.WorkNode, error) {
+	mgr, err := a.mgr(ctx)
+	if err != nil {
+		return brain.WorkNode{}, err
+	}
+	return mgr.childFirstNode(ctx, missionID)
 }
