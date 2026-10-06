@@ -68,3 +68,20 @@ func TestInitializeNotificationAndUnknownMethod(t *testing.T) {
 		t.Errorf("bad JSON code = %d", rec.Code)
 	}
 }
+
+func TestPingGetAndPort(t *testing.T) {
+	if rec := call(t, `{"jsonrpc":"2.0","id":4,"method":"ping"}`); !strings.Contains(rec.Body.String(), `"result"`) {
+		t.Errorf("ping = %s", rec.Body)
+	}
+	rec := httptest.NewRecorder()
+	handle(rec, httptest.NewRequest(http.MethodGet, "/mcp", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("GET code = %d", rec.Code)
+	}
+	if got := newServer(func(string) string { return "" }).Addr; got != ":8080" {
+		t.Errorf("default addr = %q", got)
+	}
+	if got := newServer(func(string) string { return "9090" }).Addr; got != ":9090" {
+		t.Errorf("MCP_PORT addr = %q", got)
+	}
+}

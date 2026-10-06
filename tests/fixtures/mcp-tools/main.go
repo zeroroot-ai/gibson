@@ -79,15 +79,19 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func main() {
+// newServer returns the fixture server on the port in MCP_PORT, or on 8080.
+func newServer(getenv func(string) string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/mcp", handle)
 	// ToolHive passes the port in MCP_PORT. The connector operator sets it
 	// to 8080.
-	port := os.Getenv("MCP_PORT")
+	port := getenv("MCP_PORT")
 	if port == "" {
 		port = "8080"
 	}
-	srv := &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
-	log.Fatal(srv.ListenAndServe())
+	return &http.Server{Addr: ":" + port, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+}
+
+func main() {
+	log.Fatal(newServer(os.Getenv).ListenAndServe())
 }
