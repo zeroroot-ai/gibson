@@ -231,13 +231,7 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	// Egress allow-list: connector launches (gibson#684) confine the sandbox
 	// to the targets declared in the connector manifest plus the platform
 	// endpoints. Empty Egress keeps setec's default network mode.
-	if len(req.Egress) > 0 {
-		allow := make([]*setecv1.NetworkAllow, 0, len(req.Egress))
-		for _, e := range req.Egress {
-			allow = append(allow, &setecv1.NetworkAllow{Host: e.Host, Port: e.Port})
-		}
-		pbReq.Network = &setecv1.Network{Mode: "egress-allow-list", Allow: allow}
-	}
+	pbReq.Network = setecNetwork(req.NetworkMode, req.Egress)
 	resp, err := c.inner.Launch(ctx, pbReq)
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
@@ -362,4 +356,34 @@ func (s *setecLogStream) Close() error {
 	// on the stream handle; the executor cancels the parent context when
 	// the call completes, which closes the underlying HTTP/2 stream.
 	return nil
+}
+
+// setecNetwork maps the network of a launch onto the wire. A set mode wins,
+// with the egress rules for the allow-list mode. With no mode, egress rules
+// select the allow-list mode, and no rules keep the default of the class
+// (nil). Each rule keeps its CIDR and its port ranges (zeroroot-ai/setec#200),
+// so the network scope of a mission node reaches setec as the node states it
+// (gibson#865).
+func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
+	if mode == "" {
+		if len(egress) == 0 {
+			return nil
+		}
+		mode = sandboxed.NetworkModeAllowList
+	}
+	n := &setecv1.Network{Mode: mode}
+	if mode != sandboxed.NetworkModeAllowList {
+		return n
+	}
+	n.Allow = make([]*setecv1.NetworkAllow, 0, len(egress))
+	for _, e := range egress {
+		allow := &setecv1.NetworkAllow{Host: e.Host, Port: e.Port, Cidr: e.CIDR}
+		for _, p := range e.Ports {
+			allow.Ports = append(allow.Ports, &setecv1.NetworkAllowPort{
+				Protocol: p.Protocol, Port: p.Port, EndPort: p.EndPort,
+			})
+		}
+		n.Allow = append(n.Allow, allow)
+	}
+	return n
 }
