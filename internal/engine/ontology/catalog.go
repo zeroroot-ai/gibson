@@ -16,8 +16,8 @@ import (
 // by a tenant. DomainPackCatalog is the in-process registry
 // DomainPackService.ListCatalog reads and EnableDomainPack resolves a
 // catalog name against. gibson#381 built the enablement mechanism; gibson#382
-// seeds the catalog's content — see MainDomainPack in catalog_main_pack.go,
-// the "main" pack ADR-0133 names, default-off.
+// seeds the catalog's content. Each pack is a data file in packs/, loaded
+// by catalog_files.go (gibson#710). The "main" pack is default-off.
 
 // DomainPackCatalog is the curated set of catalog Domain Packs available to
 // enable, keyed by Name. Immutable after construction — a catalog never

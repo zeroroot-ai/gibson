@@ -16,14 +16,14 @@ import (
 
 // TestEnableDomainPack_MainCatalogPack_BindingsGoLive is the acceptance test
 // for gibson#382 (epic #376, ADR-0133): the real, seeded "main" catalog pack
-// (ontology.MainDomainPack — the same value the daemon wires into its
+// (ontology.EmbeddedCatalog().Get — the same value the daemon wires into its
 // DomainPackCatalog at startup, see internal/server/daemon/infrastructure.go)
 // is default-off for a fresh tenant, and EnableDomainPack makes its CEL
 // predicate bindings live — present in that tenant's World, and still
 // compiling against the gibson-owned CEL environment once they get there —
 // in that tenant alone.
 func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
-	catalog := ontology.NewDomainPackCatalog(ontology.MainDomainPack())
+	catalog := ontology.NewDomainPackCatalog(mustMainPack(t))
 	s, registry := newDomainPackService(t, catalog)
 
 	// Default-off (ADR-0133): a fresh tenant starts with no
@@ -42,7 +42,7 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 	snap := registry.For("acme").DomainPacks()
 	require.Len(t, snap, 1)
 	assert.Equal(t, ontology.MainDomainPackName, snap[0].Name)
-	assert.Equal(t, ontology.MainDomainPack().Predicates, snap[0].Predicates,
+	assert.Equal(t, mustMainPack(t).Predicates, snap[0].Predicates,
 		"the bindings folded into the tenant World must be exactly what the catalog shipped")
 
 	// Still loadable — compiles and type-checks against the gibson-owned CEL
@@ -61,4 +61,14 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 	other, err := s.ListDomainPacks(tenantCtx("other"), &tenantv1.ListDomainPacksRequest{})
 	require.NoError(t, err)
 	assert.Empty(t, other.GetPacks(), "enabling a pack in one tenant must never leak into another")
+}
+
+// mustMainPack returns the main pack from the embedded catalog.
+func mustMainPack(t *testing.T) ontology.DomainPack {
+	t.Helper()
+	p, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
+	if !ok {
+		t.Fatal("the embedded catalog must hold the main pack")
+	}
+	return p
 }
