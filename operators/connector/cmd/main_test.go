@@ -13,6 +13,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/connector/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
 )
 
@@ -44,6 +45,39 @@ func TestDaemonSettings(t *testing.T) {
 	}
 }
 
+// TestProxyAuthSettings: the issuer, the JWKS URL and the daemon SPIFFE ID
+// are each required, so no connector proxy runs without caller
+// authentication (ADR-0114).
+func TestProxyAuthSettings(t *testing.T) {
+	full := map[string]string{
+		"CONNECTOR_PROXY_OIDC_ISSUER": "https://oidc.example.org",
+		"CONNECTOR_PROXY_JWKS_URL":    "https://oidc.example.org/keys",
+		"GIBSON_DAEMON_SPIFFE_ID":     "spiffe://example.org/platform/daemon",
+	}
+	for missing := range full {
+		env := map[string]string{}
+		for k, v := range full {
+			if k != missing {
+				env[k] = v
+			}
+		}
+		if _, err := proxyAuthSettings(func(k string) string { return env[k] }); err == nil {
+			t.Errorf("a missing %s must be refused", missing)
+		}
+	}
+	got, err := proxyAuthSettings(func(k string) string { return full[k] })
+	if err != nil {
+		t.Fatalf("proxyAuthSettings: %v", err)
+	}
+	want := controller.ProxyAuth{
+		Issuer: full["CONNECTOR_PROXY_OIDC_ISSUER"], JWKSURL: full["CONNECTOR_PROXY_JWKS_URL"],
+		DaemonSPIFFEID: full["GIBSON_DAEMON_SPIFFE_ID"],
+	}
+	if got != want {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
 // TestWireReconciler registers the controller on a manager built over a dummy
 // rest.Config (constructed lazily, no API-server round trip) with a revoker.
 func TestWireReconciler(t *testing.T) {
@@ -54,7 +88,7 @@ func TestWireReconciler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.New: %v", err)
 	}
-	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil)); err != nil {
+	if err := wireReconciler(mgr, daemonclient.NewWithConn(nil), controller.ProxyAuth{}); err != nil {
 		t.Fatalf("wireReconciler: %v", err)
 	}
 }

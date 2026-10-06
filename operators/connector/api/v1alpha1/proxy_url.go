@@ -9,6 +9,12 @@ import "fmt"
 // exposes.
 const ProxyPort = 8080
 
+// ProxyAudience is the audience of the JWT-SVID that the daemon presents to
+// the ToolHive proxy of a connector (ADR-0065, D22). The operator binds the
+// proxy to this audience, and the daemon mints its token for it. It is one
+// constant so that the two can never disagree.
+const ProxyAudience = "gibson-connector-proxy"
+
 // ProxyURL returns the in-cluster MCP address of the connector instance name
 // in namespace. The operator writes it to Status.ProxyURL, and the daemon,
 // the one MCP client (ADR-0065), dials it. It is one function so that the two
