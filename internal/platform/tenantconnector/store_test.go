@@ -119,3 +119,56 @@ func TestStore_ReportStatus(t *testing.T) {
 	require.Error(t, err, "a report with no phase must be refused")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+var errDB = errors.New("db down")
+
+// Each database failure returns an error and no result.
+func TestStore_DatabaseFailures(t *testing.T) {
+	ctx := context.Background()
+
+	s, mock := newMockStore(t)
+	mock.ExpectExec("INSERT INTO tenant_connectors").WillReturnError(errDB)
+	if err := s.Adopt(ctx, "acme", "gitlab"); err == nil {
+		t.Error("Adopt: insert failure returned no error")
+	}
+	mock.ExpectExec("INSERT INTO tenant_connectors").WillReturnResult(sqlmock.NewErrorResult(errDB))
+	if err := s.Adopt(ctx, "acme", "gitlab"); err == nil {
+		t.Error("Adopt: rows affected failure returned no error")
+	}
+	mock.ExpectExec("DELETE FROM tenant_connectors").WillReturnError(errDB)
+	if err := s.Disable(ctx, "acme", "gitlab"); err == nil {
+		t.Error("Disable: delete failure returned no error")
+	}
+	mock.ExpectExec("DELETE FROM tenant_connectors").WillReturnResult(sqlmock.NewErrorResult(errDB))
+	if err := s.Disable(ctx, "acme", "gitlab"); err == nil {
+		t.Error("Disable: rows affected failure returned no error")
+	}
+	mock.ExpectQuery("SELECT tenant_id").WillReturnError(errDB)
+	if _, err := s.List(ctx, "acme"); err == nil {
+		t.Error("List: query failure returned no error")
+	}
+	mock.ExpectQuery("SELECT tenant_id").WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow("acme"))
+	if _, err := s.ListAll(ctx); err == nil {
+		t.Error("ListAll: scan failure returned no error")
+	}
+	mock.ExpectQuery("SELECT tenant_id").WillReturnRows(
+		sqlmock.NewRows([]string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}).
+			AddRow("acme", "gitlab", "Ready", 1, "").RowError(0, errDB))
+	if _, err := s.ListAll(ctx); err == nil {
+		t.Error("ListAll: row failure returned no error")
+	}
+	if _, err := s.List(ctx, ""); err == nil {
+		t.Error("List: no tenant returned no error")
+	}
+	if _, err := s.ReportStatus(ctx, "acme", "gitlab", Status{}); err == nil {
+		t.Error("ReportStatus: no phase returned no error")
+	}
+	mock.ExpectExec("UPDATE tenant_connectors").WillReturnError(errDB)
+	if _, err := s.ReportStatus(ctx, "acme", "gitlab", Status{Phase: "Ready"}); err == nil {
+		t.Error("ReportStatus: update failure returned no error")
+	}
+	mock.ExpectExec("UPDATE tenant_connectors").WillReturnResult(sqlmock.NewErrorResult(errDB))
+	if _, err := s.ReportStatus(ctx, "acme", "gitlab", Status{Phase: "Ready"}); err == nil {
+		t.Error("ReportStatus: rows affected failure returned no error")
+	}
+}

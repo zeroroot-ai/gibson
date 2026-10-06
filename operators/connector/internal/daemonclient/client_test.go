@@ -45,6 +45,27 @@ func (f *fakeOperatorService) RevokeConnectorGrant(_ context.Context, req *daemo
 	return &tenantv1.RevokeConnectorGrantResponse{}, nil
 }
 
+func (f *fakeOperatorService) ListDesiredConnectors(context.Context, *daemonoperatorv1.ListDesiredConnectorsRequest) (*daemonoperatorv1.ListDesiredConnectorsResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &daemonoperatorv1.ListDesiredConnectorsResponse{Connectors: []*daemonoperatorv1.DesiredConnector{{TenantId: "acme", ConnectorId: "gitlab"}}}, nil
+}
+
+func (f *fakeOperatorService) ReportConnectorStatus(_ context.Context, req *daemonoperatorv1.ReportConnectorStatusRequest) (*daemonoperatorv1.ReportConnectorStatusResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &daemonoperatorv1.ReportConnectorStatusResponse{Updated: req.GetTenantId() == "acme"}, nil
+}
+
+func (f *fakeOperatorService) AdoptConnector(context.Context, *daemonoperatorv1.AdoptConnectorRequest) (*daemonoperatorv1.AdoptConnectorResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &daemonoperatorv1.AdoptConnectorResponse{}, nil
+}
+
 // dialFake serves the fake over bufconn and returns a Client on it.
 func dialFake(t *testing.T, svc *fakeOperatorService) *Client {
 	t.Helper()
@@ -143,5 +164,32 @@ func TestAuthStatus_WrapsTheDaemonError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "acme/github") {
 		t.Errorf("error = %q, want the tenant and connector named", err.Error())
+	}
+}
+
+// The three connector RPCs pass the request and surface the daemon error.
+func TestConnectorRPCs(t *testing.T) {
+	ctx := context.Background()
+	c := dialFake(t, &fakeOperatorService{})
+	got, err := c.ListDesiredConnectors(ctx)
+	if err != nil || len(got) != 1 || got[0].GetConnectorId() != "gitlab" {
+		t.Fatalf("ListDesiredConnectors = %v, %v", got, err)
+	}
+	if err := c.ReportConnectorStatus(ctx, &daemonoperatorv1.ReportConnectorStatusRequest{TenantId: "acme", ConnectorId: "gitlab", Phase: "Ready"}); err != nil {
+		t.Fatalf("ReportConnectorStatus: %v", err)
+	}
+	if err := c.AdoptConnector(ctx, "acme", "gitlab"); err != nil {
+		t.Fatalf("AdoptConnector: %v", err)
+	}
+
+	down := dialFake(t, &fakeOperatorService{err: status.Error(codes.Unavailable, "down")})
+	if _, err := down.ListDesiredConnectors(ctx); status.Code(err) != codes.Unavailable {
+		t.Errorf("ListDesiredConnectors: code %v", status.Code(err))
+	}
+	if err := down.ReportConnectorStatus(ctx, &daemonoperatorv1.ReportConnectorStatusRequest{TenantId: "acme"}); status.Code(err) != codes.Unavailable {
+		t.Errorf("ReportConnectorStatus: code %v", status.Code(err))
+	}
+	if err := down.AdoptConnector(ctx, "acme", "gitlab"); status.Code(err) != codes.Unavailable {
+		t.Errorf("AdoptConnector: code %v", status.Code(err))
 	}
 }
