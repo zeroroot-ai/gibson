@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
@@ -307,7 +310,7 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 	}
 	steps := []func(context.Context, provision.DesiredCatalogPlugin) error{
 		r.ensureNamespace, r.ensureNamespaceRBAC, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
-		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensureDeployment,
+		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensurePluginEgressPolicy, r.ensureDeployment,
 	}
 	for _, step := range steps {
 		if err := step(ctx, p); err != nil {
@@ -487,9 +490,10 @@ func (r *CatalogPluginRunnable) ensureClusterSPIFFEID(ctx context.Context, p pro
 	return nil
 }
 
-// ensurePluginNetworkPolicy admits the health probes of the kubelet and lets
-// the plugin reach its vendor. The SDK of the plugin enforces the egress list
-// of the catalog in process, because a NetworkPolicy cannot match a DNS name.
+// ensurePluginNetworkPolicy admits the health probes of the kubelet. It has
+// no egress rule: the egress of the plugin is its CiliumNetworkPolicy
+// (ensurePluginEgressPolicy). Allow rules union, so an egress rule here would
+// widen that list.
 func (r *CatalogPluginRunnable) ensurePluginNetworkPolicy(ctx context.Context, p provision.DesiredCatalogPlugin) error {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: pluginObjectName(p.PluginID), Namespace: pluginNamespace(p.TenantID)}}
 	tcp := corev1.ProtocolTCP
@@ -504,12 +508,65 @@ func (r *CatalogPluginRunnable) ensurePluginNetworkPolicy(ctx context.Context, p
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{
 				Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &health}},
 			}},
-			Egress: []networkingv1.NetworkPolicyEgressRule{{}},
 		}
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("ensure NetworkPolicy %s/%s: %w", np.Namespace, np.Name, err)
+	}
+	return nil
+}
+
+// egressPolicyName is the name of the CiliumNetworkPolicy of the plugin
+// instance whose other objects have the name objectName.
+func egressPolicyName(objectName string) string { return objectName + "-egress" }
+
+// pluginEgressHosts is the host list of one plugin instance: the egress list
+// of its catalog entry and the edge of the platform, which the plugin dials
+// for the daemon (GIBSON_URL).
+func (r *CatalogPluginRunnable) pluginEgressHosts(p provision.DesiredCatalogPlugin) ([]string, error) {
+	edge, err := url.Parse(r.Config.GibsonURL)
+	if err != nil || edge.Hostname() == "" {
+		return nil, fmt.Errorf("PLUGIN_GIBSON_URL %q has no host", r.Config.GibsonURL)
+	}
+	port := edge.Port()
+	if port == "" {
+		port = "443"
+	}
+	return append(append([]string(nil), p.EgressAllow...), net.JoinHostPort(edge.Hostname(), port)), nil
+}
+
+// ensurePluginEgressPolicy confines the egress of a plugin instance to its
+// host list (ADR-0136, D76): DNS to kube-dns, each host of the catalog entry,
+// and the edge of the platform. A Kubernetes NetworkPolicy cannot name a
+// host, so this is a CiliumNetworkPolicy. A host that the list does not name
+// is refused at the network, whatever the code in the plugin does.
+func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p provision.DesiredCatalogPlugin) error {
+	hosts, err := r.pluginEgressHosts(p)
+	if err != nil {
+		return err
+	}
+	rules, err := ciliumegress.Rules(hosts)
+	if err != nil {
+		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
+	}
+	cnp := ciliumegress.NewPolicy()
+	cnp.SetName(egressPolicyName(pluginObjectName(p.PluginID)))
+	cnp.SetNamespace(pluginNamespace(p.TenantID))
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cnp, func() error {
+		cnp.SetLabels(instanceLabels(p))
+		cnp.Object["spec"] = map[string]interface{}{
+			"endpointSelector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{
+					labelAppName: pluginObjectName(p.PluginID), labelAppComponent: pluginComponent,
+				},
+			},
+			"egress": rules,
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("ensure CiliumNetworkPolicy %s/%s: %w", cnp.GetNamespace(), cnp.GetName(), err)
 	}
 	return nil
 }
@@ -699,13 +756,17 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 	return nil
 }
 
-// deleteInstanceObjects removes the Deployment, the NetworkPolicy and the
-// ServiceAccount of one plugin instance.
+// deleteInstanceObjects removes the Deployment, the NetworkPolicy, the
+// CiliumNetworkPolicy and the ServiceAccount of one plugin instance.
 func (r *CatalogPluginRunnable) deleteInstanceObjects(ctx context.Context, namespace, name string) error {
 	meta := metav1.ObjectMeta{Namespace: namespace, Name: name}
+	cnp := ciliumegress.NewPolicy()
+	cnp.SetNamespace(namespace)
+	cnp.SetName(egressPolicyName(name))
 	for _, obj := range []client.Object{
 		&appsv1.Deployment{ObjectMeta: meta},
 		&networkingv1.NetworkPolicy{ObjectMeta: meta},
+		cnp,
 		&corev1.ServiceAccount{ObjectMeta: meta},
 	} {
 		if err := r.Client.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {

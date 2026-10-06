@@ -29,6 +29,7 @@ import (
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
 
 // testScheme knows the connector types, the core/networking types, and the two
@@ -48,8 +49,8 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPServer+"List"),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy+"List"),
-		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy),
-		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy+"List"),
+		schema.FromAPIVersionAndKind(ciliumegress.APIVersion, ciliumegress.Kind),
+		schema.FromAPIVersionAndKind(ciliumegress.APIVersion, ciliumegress.Kind+"List"),
 	} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 	}
