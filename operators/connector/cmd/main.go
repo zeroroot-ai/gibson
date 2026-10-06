@@ -33,12 +33,13 @@ import (
 // (ADR-0061) and the controller reads the credential state so the CR
 // reports Degraded rather than a silent Active (ADR-0061). One
 // client serves both, because both are the same SPIFFE-mTLS dial.
-func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
+func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth) error {
 	if err := (&controller.ConnectorInstanceReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Revoker:    daemon,
 		AuthReader: daemon,
+		ProxyAuth:  proxyAuth,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("connectorinstance controller: %w", err)
 	}
@@ -69,6 +70,27 @@ func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 // (ADR-0002, ADR-0061). Both failure modes — missing address, unreachable
 // SPIRE Workload API — fail the boot, so a misconfigured operator never runs
 // with grants it cannot revoke.
+// proxyAuthSettings reads the caller authentication of each connector proxy
+// (ADR-0114, D22). The daemon is the only caller: the proxy validates its
+// JWT-SVID against the SPIRE OIDC issuer and permits its SPIFFE ID only.
+// Each value is required, so no connector runs without it.
+func proxyAuthSettings(getenv func(string) string) (controller.ProxyAuth, error) {
+	auth := controller.ProxyAuth{
+		Issuer:         getenv("CONNECTOR_PROXY_OIDC_ISSUER"),
+		JWKSURL:        getenv("CONNECTOR_PROXY_JWKS_URL"),
+		DaemonSPIFFEID: getenv("GIBSON_DAEMON_SPIFFE_ID"),
+	}
+	switch {
+	case auth.Issuer == "":
+		return auth, errors.New("CONNECTOR_PROXY_OIDC_ISSUER is required: the connector proxy validates the JWT-SVID of the daemon against this issuer")
+	case auth.JWKSURL == "":
+		return auth, errors.New("CONNECTOR_PROXY_JWKS_URL is required: the connector proxy reads the keys of the issuer from it")
+	case auth.DaemonSPIFFEID == "":
+		return auth, errors.New("GIBSON_DAEMON_SPIFFE_ID is required: the connector proxy permits only this caller")
+	}
+	return auth, nil
+}
+
 func buildDaemonClient(ctx context.Context, getenv func(string) string) (*daemonclient.Client, error) {
 	addr, svid, err := daemonSettings(getenv)
 	if err != nil {
@@ -132,7 +154,13 @@ func main() {
 	}
 	defer func() { _ = daemon.Close() }()
 
-	if err := wireReconciler(mgr, daemon); err != nil {
+	proxyAuth, err := proxyAuthSettings(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "connector proxy authentication")
+		os.Exit(1)
+	}
+
+	if err := wireReconciler(mgr, daemon, proxyAuth); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConnectorInstance")
 		os.Exit(1)
 	}

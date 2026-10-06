@@ -116,6 +116,9 @@ type ConnectorInstanceReconciler struct {
 	AuthReader ConnectorAuthReader
 	// Now is the clock the revoke deadline is measured on. Nil means time.Now.
 	Now func() time.Time
+	// ProxyAuth is the caller authentication of each connector proxy.
+	// Required: with an empty value the operator makes no proxy.
+	ProxyAuth ProxyAuth
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;create;update;patch;delete
@@ -424,6 +427,9 @@ func toolHiveServingPhase(kind string) string {
 func (r *ConnectorInstanceReconciler) desiredToolHive(
 	ci *connectorv1alpha1.ConnectorInstance,
 ) (*unstructured.Unstructured, error) {
+	if err := r.ProxyAuth.validate(); err != nil {
+		return nil, err
+	}
 	transport := string(ci.Spec.Transport)
 	if transport == "" {
 		transport = string(connectorv1alpha1.ConnectorTransportStreamableHTTP)
@@ -454,6 +460,8 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
 			"podTemplateSpec":   mcpServerPodTemplate(),
+			"oidcConfig":        r.ProxyAuth.oidcConfig(),
+			"authzConfig":       r.ProxyAuth.authzConfig(),
 		}
 		// The declared vendor credentials (spec.credentials, gibson#597): the
 		// daemon publishes each one as a key of the same connector-cred
@@ -486,13 +494,10 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"remoteURL": ci.Spec.Endpoint,
 			"transport": transport,
 			"proxyPort": int64(proxyPort),
-			// oidcConfig is REQUIRED by the MCPRemoteProxy CRD. type kubernetes
-			// makes only the daemon's Kubernetes ServiceAccount token able to
-			// call the proxy — this IS the ADR-0114 decision "ToolHive OIDC
-			// gates daemon access".
-			"oidcConfig": map[string]interface{}{
-				"type": "kubernetes",
-			},
+			// The daemon is the only caller of the proxy (ADR-0114): its
+			// JWT-SVID, for the proxy audience, and its SPIFFE ID only.
+			"oidcConfig":  r.ProxyAuth.oidcConfig(),
+			"authzConfig": r.ProxyAuth.authzConfig(),
 		}
 		// A vendor connector presents a bearer token as the Authorization
 		// header. ToolHive forwards it from a Kubernetes Secret the daemon
