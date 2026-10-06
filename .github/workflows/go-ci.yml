@@ -160,16 +160,10 @@ jobs:
           CHANGED="$(git diff --name-only "${BASE}" "${HEAD}")"
           echo "Changed files:"
           echo "${CHANGED}"
-          # Dockerfiles are Go-relevant: tests/packaging asserts that the
-          # daemon image's builder stage builds every shipped tool and copies it
-          # into the runtime stage. Leaving them out let a Dockerfile-only PR
-          # skip every Go gate and then fail that test in the merge queue, which
-          # evicted it after it reported CLEAN (gibson#16).
-          if echo "${CHANGED}" | grep -Eq '\.go$|(^|/)go\.mod$|(^|/)go\.sum$|^\.github/workflows/|(^|/)Dockerfile$|\.Dockerfile$'; then
-            echo "go=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "go=false" >> "$GITHUB_OUTPUT"
-          fi
+          # The Go gates run unless every changed path is Markdown. The rule
+          # and the reason live in the script, and its fixture runs first.
+          bash scripts/__tests__/go-relevant-changes.test.sh
+          echo "go=$(echo "${CHANGED}" | bash scripts/go-relevant-changes.sh)" >> "$GITHUB_OUTPUT"
 
   # ---- fast tier (pull_request): reusable vet/build/test + mod-tidy drift ----
   fast:
