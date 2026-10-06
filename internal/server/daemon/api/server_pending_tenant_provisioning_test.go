@@ -34,7 +34,7 @@ func expectEnsureTable(mock sqlmock.Sqlmock) {
 func TestEnqueuePendingTenantProvisioning_NilDB_NoError(t *testing.T) {
 	srv := newPendingServer()
 	srv.platformDB = nil
-	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{TenantId: "acme"}, nil)
+	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{TenantId: "acme"}, nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestEnqueuePendingTenantProvisioning_InsertsRow(t *testing.T) {
 
 	expectEnsureTable(mock)
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}).
+		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}, true).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{
@@ -64,7 +64,7 @@ func TestEnqueuePendingTenantProvisioning_InsertsRow(t *testing.T) {
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme Inc",
 		Tier:          "team",
-	}, nil)
+	}, nil, true)
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestEnqueuePendingTenantProvisioning_IdempotentConflict(t *testing.T) {
 	expectEnsureTable(mock)
 	// ON CONFLICT DO NOTHING → 0 rows affected on a retry of the same tenant.
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}).
+		WithArgs("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "pending", "", "", sql.NullTime{}, true).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
 	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{
@@ -98,7 +98,7 @@ func TestEnqueuePendingTenantProvisioning_IdempotentConflict(t *testing.T) {
 		OwnerEmail:    "owner@acme.test",
 		WorkspaceName: "Acme Inc",
 		Tier:          "team",
-	}, nil)
+	}, nil, true)
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}

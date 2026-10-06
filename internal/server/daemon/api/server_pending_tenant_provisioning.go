@@ -44,7 +44,14 @@ import (
 //
 // hold, when not nil, puts the row in status 'waiting_step': the operator does
 // not see it until the external signup step is done (signup_step.go).
-func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold) (bool, error) {
+//
+// welcomeOwner marks a workspace that its owner created through signup. When
+// the tenant is ready, the owner gets the onboarding email once
+// (owner_welcome.go, gibson#987). An owner that an admin invites gets the
+// invitation email instead, so that path passes false.
+func (s *DaemonServer) enqueuePendingTenantProvisioning(
+	ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold, welcomeOwner bool,
+) (bool, error) {
 	db := s.entitlementsDB()
 	if db == nil {
 		return false, nil
@@ -55,8 +62,8 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 	const q = `
 		INSERT INTO pending_tenant_provisioning
 			(tenant_id, owner_user_id, owner_email, workspace_name, tier, status,
-			 attempt_id, step_token_hash, step_expires_at, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+			 attempt_id, step_token_hash, step_expires_at, welcome_owner, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
 		ON CONFLICT (tenant_id) DO NOTHING
 	`
 	queueStatus, attemptID, tokenHash := "pending", "", ""
@@ -68,7 +75,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(ctx context.Context, p *
 	res, err := db.ExecContext(ctx, q,
 		p.GetTenantId(), p.GetOwnerUserId(), p.GetOwnerEmail(),
 		p.GetWorkspaceName(), p.GetTier(), queueStatus,
-		attemptID, tokenHash, expiresAt,
+		attemptID, tokenHash, expiresAt, welcomeOwner,
 	)
 	if err != nil {
 		return false, fmt.Errorf("insert pending_tenant_provisioning: %w", err)
@@ -202,9 +209,13 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 			attempt_id         TEXT NOT NULL DEFAULT '',
 			step_token_hash    TEXT NOT NULL DEFAULT '',
 			step_expires_at    TIMESTAMPTZ,
+			welcome_owner      BOOLEAN NOT NULL DEFAULT FALSE,
+			welcome_sent_at    TIMESTAMPTZ,
 			created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
-		)
+		);
+		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS welcome_owner BOOLEAN NOT NULL DEFAULT FALSE;
+		ALTER TABLE pending_tenant_provisioning ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMPTZ
 	`
 	if _, err := db.ExecContext(ctx, create); err != nil {
 		return fmt.Errorf("create pending_tenant_provisioning: %w", err)
@@ -246,7 +257,7 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 		OwnerEmail:    req.GetOwnerEmail(),
 		WorkspaceName: req.GetDisplayName(),
 		Tier:          tier,
-	}, nil)
+	}, nil, false)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}

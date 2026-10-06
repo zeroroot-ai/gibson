@@ -329,6 +329,11 @@ type DaemonServer struct {
 	// connection points (connection_points.go).
 	connectionCallers ConnectionPointCallers
 
+	// ownerWelcome sends the onboarding email to the owner of a workspace
+	// from signup, once, when the tenant is ready (owner_welcome.go,
+	// gibson#987). Nil when the install has no delivering mail transport.
+	ownerWelcome ownerWelcomeConfig
+
 	// tenantActivation caches reads of the tenant activation signal
 	// (tenant_activation.go).
 	tenantActivation activationCache

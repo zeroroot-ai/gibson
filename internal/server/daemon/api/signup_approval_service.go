@@ -332,7 +332,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		OwnerEmail:    row.Email,
 		WorkspaceName: row.WorkspaceName,
 		Tier:          plan.ID,
-	}, nil); err != nil {
+	}, nil, true); err != nil {
 		s.logger.ErrorContext(ctx, "AdminApproveRegistration: enqueue pending tenant provisioning failed",
 			"registration_id", row.ID, "tenant_id", slug, "error", err.Error())
 		// The owner can sign in now and has no workspace. Deactivate again so
