@@ -88,6 +88,7 @@ func (s *DaemonServer) ReportTenantStatus(ctx context.Context, req *daemonoperat
 		return nil, status.Errorf(codes.Internal, "upsert tenant_status: %v", err)
 	}
 	n, _ := res.RowsAffected()
+	s.welcomeOwnerIfReady(ctx, db, req.GetTenantId(), req.GetPhase(), req.GetDataPlaneReady())
 	return &daemonoperatorv1.ReportTenantStatusResponse{Updated: n > 0}, nil
 }
 
