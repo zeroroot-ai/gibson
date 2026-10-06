@@ -15,9 +15,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
-// auditSink is the one method of api.DaemonServer the audit wiring needs.
+// auditSink is the part of api.DaemonServer the audit wiring needs.
 type auditSink interface {
 	WithAuditLogger(*audit.AuditLogger) *api.DaemonServer
+	WithAuditRetention(*audit.RetentionSettings) *api.DaemonServer
 }
 
 // wireDaemonAudit builds the daemon's one audit logger and hands it to the
@@ -32,7 +33,8 @@ type auditSink interface {
 // It also starts the export of each record to the durable bucket, and audit
 // retention on the platform database. The period comes
 // from GIBSON_AUDIT_RETENTION_MONTHS. A period under 13 months is an error,
-// and the daemon does not start.
+// and the daemon does not start. A tenant admin can set a longer period for
+// the tenant through the retention settings that the service receives.
 //
 // The state client is required: it carries the live tail, and the daemon
 // does not start without it.
@@ -54,6 +56,11 @@ func wireDaemonAudit(
 	if err != nil {
 		return nil, fmt.Errorf("audit wiring: %w", err)
 	}
+	settings, err := audit.NewRetentionSettings(db, months)
+	if err != nil {
+		return nil, fmt.Errorf("audit wiring: %w", err)
+	}
+	svc.WithAuditRetention(settings)
 	go retention.Run(ctx, audit.DefaultRetentionInterval)
 	logger.InfoContext(ctx, "audit retention started", slog.Int("months", months))
 

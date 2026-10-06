@@ -91,6 +91,28 @@ service TenantService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+  // GetAuditRetention returns the audit retention period of the caller's
+  // tenant: the period of the install, the period that a tenant admin set,
+  // and the period that retention uses.
+  rpc GetAuditRetention(GetAuditRetentionRequest) returns (GetAuditRetentionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+  // SetAuditRetention sets the audit retention period of the caller's tenant.
+  // The period must not be shorter than the period of the install. Zero
+  // removes the setting, and the tenant uses the period of the install.
+  rpc SetAuditRetention(SetAuditRetentionRequest) returns (SetAuditRetentionResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
   // ExportFindings exports findings to the requested format (json, csv, sarif).
   rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
     option (gibson.auth.v1.authz) = {
@@ -245,6 +267,41 @@ message ListAuditEventsRequest {
 message ListAuditEventsResponse {
   repeated AuditEvent events = 1;
   string next_cursor = 2;
+}
+
+// GetAuditRetentionRequest reads the audit retention period of the caller's
+// tenant. The tenant comes from the identity of the caller.
+message GetAuditRetentionRequest {}
+
+// AuditRetention is the audit retention period of one tenant, in months.
+message AuditRetention {
+  // install_months is the period of the install (13 months or more).
+  int32 install_months = 1;
+  // tenant_months is the period that a tenant admin set. Zero means that the
+  // tenant uses the period of the install.
+  int32 tenant_months = 2;
+  // effective_months is the period that retention uses: the longer of the
+  // two.
+  int32 effective_months = 3;
+}
+
+// GetAuditRetentionResponse carries the audit retention period.
+message GetAuditRetentionResponse {
+  AuditRetention retention = 1;
+}
+
+// SetAuditRetentionRequest sets the audit retention period of the caller's
+// tenant.
+message SetAuditRetentionRequest {
+  // months is the new period. It must not be shorter than the period of the
+  // install. Zero removes the setting. 1200 months is the upper limit.
+  int32 months = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1200 }];
+}
+
+// SetAuditRetentionResponse carries the audit retention period after the
+// change.
+message SetAuditRetentionResponse {
+  AuditRetention retention = 1;
 }
 
 // ---------------------------------------------------------------------------

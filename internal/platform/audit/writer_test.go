@@ -89,7 +89,8 @@ func setupAuditPostgres(t *testing.T) *sql.DB {
 // hash chain that flush() writes on every INSERT (chain.go). Query.List
 // reads id, ..., decision (COALESCE'd), metadata, created_at and orders by
 // created_at DESC. audit_chain_anchor mirrors 035_audit_retention.up.sql, and
-// audit_export_cursor mirrors 037_audit_export_cursor.up.sql.
+// audit_export_cursor mirrors 037_audit_export_cursor.up.sql, and
+// audit_retention_tenant mirrors 041_audit_retention_tenant.up.sql.
 func createAuditSchema(ctx context.Context, db *sql.DB) error {
 	const ddl = `
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -121,6 +122,12 @@ CREATE TABLE IF NOT EXISTS audit_export_cursor (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     CHECK ((pending_first IS NULL) = (pending_last IS NULL)),
     CHECK (pending_first IS NULL OR pending_first <= pending_last)
+);
+CREATE TABLE IF NOT EXISTS audit_retention_tenant (
+    tenant_id  TEXT        PRIMARY KEY,
+    months     INTEGER     NOT NULL CHECK (months >= 13),
+    updated_by TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS audit_log_tenant_chain_seq_key
     ON audit_log (tenant_id, chain_seq)

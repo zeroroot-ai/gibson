@@ -2081,6 +2081,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.TenantService/GetAuditRetention":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.TenantService/GetMissionDraft":
     relation: "writer"
     object_type: "tenant"
@@ -2125,6 +2132,13 @@ entries:
       - SERVICE
   "/gibson.tenant.v1.TenantService/SaveMissionDraft":
     relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantService/SetAuditRetention":
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:

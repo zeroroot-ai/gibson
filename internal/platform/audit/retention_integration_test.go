@@ -127,6 +127,39 @@ func TestRetention_ALongerPeriodKeepsTheRows(t *testing.T) {
 	assert.True(t, mustVerify(t, db, "acme").Intact())
 }
 
+// TestRetention_ATenantPeriodKeepsTheRowsOfThatTenant: the install has 13
+// months, and tenant acme set 24 months. The rows of acme that are 14 months
+// old stay. The same rows of beta go. Both chains verify.
+func TestRetention_ATenantPeriodKeepsTheRowsOfThatTenant(t *testing.T) {
+	db := setupAuditPostgres(t)
+	ctx := context.Background()
+	w := NewWriter(db, auditSilentLogger())
+	old := time.Now().UTC().AddDate(0, -14, 0)
+
+	writeAged(t, db, w, "acme", 3, old)
+	writeAged(t, db, w, "beta", 3, old)
+	markExported(t, db, "acme", 3)
+	markExported(t, db, "beta", 3)
+
+	settings, err := NewRetentionSettings(db, MinRetentionMonths)
+	require.NoError(t, err)
+	require.ErrorIs(t, settings.SetTenantMonths(ctx, "acme", 12, "admin"), ErrRetentionUnderInstall)
+	require.NoError(t, settings.SetTenantMonths(ctx, "acme", 24, "admin"))
+	period, err := settings.Period(ctx, "acme")
+	require.NoError(t, err)
+	assert.Equal(t, 24, period.EffectiveMonths)
+
+	r, err := NewRetention(db, MinRetentionMonths, auditSilentLogger())
+	require.NoError(t, err)
+	removed, err := r.Prune(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), removed, "only the rows of beta are older than the period of their tenant")
+	assert.Equal(t, 3, countRows(t, db, "acme"))
+	assert.Zero(t, countRows(t, db, "beta"))
+	assert.True(t, mustVerify(t, db, "acme").Intact())
+	assert.True(t, mustVerify(t, db, "beta").Intact())
+}
+
 // TestRetention_EachRowOld_WriterContinuesTheChain: retention removes each
 // row of a tenant. The next record continues the chain from the anchor, and
 // the chain verifies.

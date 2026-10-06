@@ -90,6 +90,7 @@ func TestRetention_PruneTenant_MovesTheAnchorAndRemovesOnlyOlderRows(t *testing.
 	mock.ExpectExec("pg_advisory_xact_lock").
 		WithArgs(tenantAdvisoryKey("acme")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
+	expectNoTenantPeriod(mock)
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WithArgs("acme", cutoff).
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}).AddRow(int64(40), lastHash))
@@ -114,6 +115,7 @@ func TestRetention_PruneTenant_NothingOld(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectNoTenantPeriod(mock)
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
 	mock.ExpectCommit()
@@ -133,6 +135,7 @@ func TestRetention_PruneTenant_UsesTheLongerPeriodOfTheInstall(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectNoTenantPeriod(mock)
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WithArgs("acme", cutoff).
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
@@ -150,6 +153,7 @@ func TestRetention_PruneTenant_RollsBackOnEachFailure(t *testing.T) {
 	goodHash := make([]byte, chainHashLen)
 	lock := func(m sqlmock.Sqlmock) {
 		m.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+		expectNoTenantPeriod(m)
 	}
 	lastOld := func(m sqlmock.Sqlmock) {
 		m.ExpectQuery("ORDER  BY chain_seq DESC").
@@ -162,6 +166,10 @@ func TestRetention_PruneTenant_RollsBackOnEachFailure(t *testing.T) {
 	cases := map[string]func(m sqlmock.Sqlmock){
 		"lock": func(m sqlmock.Sqlmock) {
 			m.ExpectExec("pg_advisory_xact_lock").WillReturnError(assert.AnError)
+		},
+		"tenant period": func(m sqlmock.Sqlmock) {
+			m.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+			m.ExpectQuery("FROM audit_retention_tenant").WillReturnError(assert.AnError)
 		},
 		"find rows": func(m sqlmock.Sqlmock) {
 			lock(m)
@@ -210,10 +218,17 @@ func TestRetention_PruneTenant_RollsBackOnEachFailure(t *testing.T) {
 	})
 }
 
+// expectNoTenantPeriod expects the read of the tenant period, with no
+// period set.
+func expectNoTenantPeriod(m sqlmock.Sqlmock) {
+	m.ExpectQuery("FROM audit_retention_tenant").WillReturnRows(sqlmock.NewRows([]string{"months"}))
+}
+
 // expectPruneNothing sets the statements of a run that finds no old row.
 func expectPruneNothing(mock sqlmock.Sqlmock) {
 	mock.ExpectBegin()
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectNoTenantPeriod(mock)
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
 	mock.ExpectCommit()
@@ -230,6 +245,7 @@ func TestRetention_Prune_GoesOnAfterOneTenantFails(t *testing.T) {
 	// beta runs and removes two rows.
 	mock.ExpectBegin()
 	mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+	expectNoTenantPeriod(mock)
 	mock.ExpectQuery("ORDER  BY chain_seq DESC").
 		WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}).AddRow(int64(2), make([]byte, chainHashLen)))
 	mock.ExpectExec("INSERT INTO audit_chain_anchor").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -420,4 +436,119 @@ func TestChain_CorruptAnchorIsAnError(t *testing.T) {
 	mock.ExpectQuery("audit_chain_anchor").WillReturnError(assert.AnError)
 	_, err = NewQuery(db).VerifyChain(context.Background(), "acme")
 	require.Error(t, err)
+}
+
+// TestRetention_PruneTenant_UsesTheLongerPeriodOfTheTenant: a tenant that set
+// 36 months keeps rows that the install period of 13 months would remove. A
+// tenant period under the install period changes nothing.
+func TestRetention_PruneTenant_UsesTheLongerPeriodOfTheTenant(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	cases := map[string]struct {
+		install, tenant int
+		cutoff          time.Time
+	}{
+		"tenant longer":  {13, 36, time.Date(2023, 10, 5, 12, 0, 0, 0, time.UTC)},
+		"install longer": {24, 13, time.Date(2024, 10, 5, 12, 0, 0, 0, time.UTC)},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r, mock := newTestRetention(t, tc.install, now)
+			mock.ExpectBegin()
+			mock.ExpectExec("pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectQuery("FROM audit_retention_tenant").
+				WithArgs("acme").
+				WillReturnRows(sqlmock.NewRows([]string{"months"}).AddRow(tc.tenant))
+			mock.ExpectQuery("ORDER  BY chain_seq DESC").
+				WithArgs("acme", tc.cutoff).
+				WillReturnRows(sqlmock.NewRows([]string{"chain_seq", "entry_hash"}))
+			mock.ExpectCommit()
+
+			_, err := r.PruneTenant(context.Background(), "acme")
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func newTestSettings(t *testing.T, installMonths int) (*RetentionSettings, sqlmock.Sqlmock) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	s, err := NewRetentionSettings(db, installMonths)
+	require.NoError(t, err)
+	return s, mock
+}
+
+func TestNewRetentionSettings_RefusesBadInput(t *testing.T) {
+	db, _, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+	_, err = NewRetentionSettings(nil, 13)
+	require.Error(t, err)
+	_, err = NewRetentionSettings(db, 12)
+	require.ErrorIs(t, err, ErrRetentionTooShort)
+}
+
+func TestRetentionSettings_Period(t *testing.T) {
+	t.Run("no tenant period", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		mock.ExpectQuery("FROM audit_retention_tenant").WithArgs("acme").
+			WillReturnRows(sqlmock.NewRows([]string{"months"}))
+		p, err := s.Period(context.Background(), "acme")
+		require.NoError(t, err)
+		assert.Equal(t, RetentionPeriod{InstallMonths: 13, EffectiveMonths: 13}, p)
+	})
+	t.Run("a longer tenant period", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		mock.ExpectQuery("FROM audit_retention_tenant").WithArgs("acme").
+			WillReturnRows(sqlmock.NewRows([]string{"months"}).AddRow(60))
+		p, err := s.Period(context.Background(), "acme")
+		require.NoError(t, err)
+		assert.Equal(t, RetentionPeriod{InstallMonths: 13, TenantMonths: 60, EffectiveMonths: 60}, p)
+	})
+	t.Run("a read failure", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		mock.ExpectQuery("FROM audit_retention_tenant").WillReturnError(assert.AnError)
+		_, err := s.Period(context.Background(), "acme")
+		require.ErrorIs(t, err, assert.AnError)
+	})
+	t.Run("no tenant", func(t *testing.T) {
+		s, _ := newTestSettings(t, 13)
+		_, err := s.Period(context.Background(), "")
+		require.Error(t, err)
+	})
+}
+
+func TestRetentionSettings_SetTenantMonths(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a longer period is written", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		mock.ExpectExec("INSERT INTO audit_retention_tenant").WithArgs("acme", 36, "user-1").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		require.NoError(t, s.SetTenantMonths(ctx, "acme", 36, "user-1"))
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+	t.Run("zero clears the tenant period", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		mock.ExpectExec("DELETE FROM audit_retention_tenant").WithArgs("acme").
+			WillReturnResult(sqlmock.NewResult(0, 1))
+		require.NoError(t, s.SetTenantMonths(ctx, "acme", 0, "user-1"))
+		require.NoError(t, mock.ExpectationsWereMet())
+	})
+	t.Run("a period under the install is refused", func(t *testing.T) {
+		s, mock := newTestSettings(t, 24)
+		require.ErrorIs(t, s.SetTenantMonths(ctx, "acme", 13, "user-1"), ErrRetentionUnderInstall)
+		require.ErrorIs(t, s.SetTenantMonths(ctx, "acme", 6, "user-1"), ErrRetentionUnderInstall)
+		require.NoError(t, mock.ExpectationsWereMet(), "a refused period writes nothing")
+	})
+	t.Run("bad input and write failures", func(t *testing.T) {
+		s, mock := newTestSettings(t, 13)
+		require.Error(t, s.SetTenantMonths(ctx, "", 36, "user-1"))
+		require.Error(t, s.SetTenantMonths(ctx, "acme", 36, ""))
+		mock.ExpectExec("INSERT INTO audit_retention_tenant").WillReturnError(assert.AnError)
+		require.ErrorIs(t, s.SetTenantMonths(ctx, "acme", 36, "user-1"), assert.AnError)
+		mock.ExpectExec("DELETE FROM audit_retention_tenant").WillReturnError(assert.AnError)
+		require.ErrorIs(t, s.SetTenantMonths(ctx, "acme", 0, "user-1"), assert.AnError)
+	})
 }
