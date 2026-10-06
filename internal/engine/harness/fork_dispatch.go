@@ -110,7 +110,8 @@ func (h *DefaultAgentHarness) delegateToAgentViaFork(
 			for i, id := range resp.SandboxIDs {
 				forks[i] = ForkDispatch{
 					SandboxID:    id,
-					Grant:        dispatch.Grant,
+					Tenant:       dispatch.Tenant,
+					AgentName:    name,
 					MissionID:    dispatch.MissionID,
 					MissionRunID: dispatch.MissionRunID,
 					AgentRunID:   dispatch.AgentRunID,

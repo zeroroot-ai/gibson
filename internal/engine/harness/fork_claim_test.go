@@ -5,115 +5,136 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/fork"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
-func claimService(t *testing.T) (*HarnessCallbackService, *RedisForkLedger) {
-	t.Helper()
-	l, _ := newForkLedger(t)
-	return &HarnessCallbackService{forkLedger: l, sandboxIdentity: testIdentity(), logger: discardLogger()}, l
+// stubForkGrants mints a grant that names the claimed sandbox.
+type stubForkGrants struct{ err error }
+
+func (s stubForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return "new-grant-for-" + d.SandboxID, nil
 }
 
-// TestClaimFork_ServesTheDispatchOnce serves a recorded fork its dispatch
-// one time. The fork is the sandbox that its identity token names.
-func TestClaimFork_ServesTheDispatchOnce(t *testing.T) {
-	s, l := claimService(t)
-	err := l.RecordForks(context.Background(), "jti-1", "ns/src-1/u0", []ForkDispatch{
-		{SandboxID: "ns/fork-1/u1", Grant: "g-fork-1", NodeID: "n2", MissionID: "m1"},
-		{SandboxID: "ns/fork-2/u2", Grant: "g-fork-2", NodeID: "n3", MissionID: "m1"},
-	}, time.Hour)
-	if err != nil {
+func claimService(t *testing.T) (*HarnessCallbackService, *RedisForkLedger) {
+	t.Helper()
+	shortTargetWait(t)
+	l, _ := newForkLedger(t)
+	return &HarnessCallbackService{
+		forkLedger: l, forkGrants: stubForkGrants{}, sandboxIdentity: testIdentity(), logger: discardLogger(),
+	}, l
+}
+
+// identityCtx is a claim call that carries only the identity token of the
+// sandbox, as D80 states: no grant.
+func identityCtx(token string) context.Context {
+	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(fork.MetadataSandboxIdentity, token))
+}
+
+func recordFork(t *testing.T, l *RedisForkLedger, sandboxID, node string) {
+	t.Helper()
+	d := ForkDispatch{SandboxID: sandboxID, Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1", NodeID: node}
+	if err := l.RecordStart(context.Background(), d, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := s.ClaimFork(forkCtx("jti-1", "tok-fork-1", "fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
+}
+
+// A fork claims its dispatch with its identity token only, one time, and
+// gets a new grant for its task (D80).
+func TestClaimFork_ServesTheDispatchOnce(t *testing.T) {
+	s, l := claimService(t)
+	recordFork(t, l, "ns/fork-1/u1", "n2")
+
+	resp, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
 	if err != nil {
 		t.Fatalf("ClaimFork: %v", err)
 	}
-	if resp.GetGrant() != "g-fork-1" || resp.GetNodeId() != "n2" || resp.GetMissionId() != "m1" {
+	if resp.GetGrant() != "new-grant-for-ns/fork-1/u1" || resp.GetNodeId() != "n2" || resp.GetMissionId() != "m1" {
 		t.Fatalf("response = %v", resp)
 	}
-	_, err = s.ClaimFork(forkCtx("jti-1", "tok-fork-1", ""), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
+	_, err = s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
 	if status.Code(err) != codes.AlreadyExists {
 		t.Fatalf("second claim: code = %v, want AlreadyExists", status.Code(err))
 	}
-	// The other fork claims its own dispatch with an empty sandbox_id: the
-	// token is the proof.
-	resp, err = s.ClaimFork(forkCtx("jti-1", "tok-fork-2", ""), &harnesspb.ClaimForkRequest{})
-	if err != nil || resp.GetGrant() != "g-fork-2" {
-		t.Fatalf("second fork: %v, %v", resp, err)
+}
+
+// A token that names another sandbox than the one the daemon started is
+// refused, and the refusal does not use up the claim.
+func TestClaimFork_TokenForAnotherSandboxIsRefused(t *testing.T) {
+	s, l := claimService(t)
+	recordFork(t, l, "ns/fork-1/u1", "n2")
+
+	_, err := s.ClaimFork(identityCtx("tok-fork-2"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+	if _, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"}); err != nil {
+		t.Fatalf("the real fork must still claim: %v", err)
 	}
 }
 
-// TestClaimFork_TheTokenNamesTheFork refuses a claim for another sandbox
-// than the one that the identity token names (setec#235). A fork cannot
-// claim the dispatch of another fork, and the source cannot claim a fork.
-func TestClaimFork_TheTokenNamesTheFork(t *testing.T) {
+// A claim that presents a grant, the expired grant of the source or any
+// other, is refused (D80).
+func TestClaimFork_AGrantIsRefused(t *testing.T) {
 	s, l := claimService(t)
-	err := l.RecordForks(context.Background(), "jti-1", "ns/src-1/u0", []ForkDispatch{
-		{SandboxID: "ns/fork-1/u1", Grant: "g-fork-1"},
-		{SandboxID: "ns/fork-2/u2", Grant: "g-fork-2"},
-	}, time.Hour)
-	if err != nil {
+	recordFork(t, l, "ns/fork-1/u1", "n2")
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
+		fork.MetadataSandboxIdentity, "tok-fork-1", taskGrantHeader, "Bearer h.e.s"))
+
+	_, err := s.ClaimFork(ctx, &harnesspb.ClaimForkRequest{SandboxId: "fork-1"})
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
+	}
+}
+
+// A claim days after the start works: the claim needs no grant, and the
+// record lives as long as the snapshot (7 days).
+func TestClaimFork_AClaimAfterSevenDaysWorks(t *testing.T) {
+	l, mr := newForkLedger(t)
+	s := &HarnessCallbackService{forkLedger: l, forkGrants: stubForkGrants{}, sandboxIdentity: testIdentity(), logger: discardLogger()}
+	d := ForkDispatch{SandboxID: "ns/fork-1/u1", Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1", NodeID: "n2"}
+	if err := l.RecordStart(context.Background(), d, SnapshotLife); err != nil {
 		t.Fatal(err)
 	}
-	cases := []struct {
-		name  string
-		ctx   context.Context
-		claim string
-		code  codes.Code
-	}{
-		{"fork 2 names fork 1", forkCtx("jti-1", "tok-fork-2", ""), "fork-1", codes.PermissionDenied},
-		{"fork 2 sends the header of fork 1", forkCtx("jti-1", "tok-fork-2", "fork-1"), "fork-2", codes.PermissionDenied},
-		{"header only, no token", forkCtx("jti-1", "", "fork-1"), "fork-1", codes.Unauthenticated},
-		{"token that does not verify", forkCtx("jti-1", "tok-forged", ""), "fork-1", codes.Unauthenticated},
-		{"the source claims", forkCtx("jti-1", "tok-src", ""), "", codes.PermissionDenied},
-	}
-	for _, c := range cases {
-		if _, err := s.ClaimFork(c.ctx, &harnesspb.ClaimForkRequest{SandboxId: c.claim}); status.Code(err) != c.code {
-			t.Errorf("%s: code = %v, want %v", c.name, status.Code(err), c.code)
-		}
-	}
-	// No refused claim used up a fork.
-	for _, tok := range []string{"tok-fork-1", "tok-fork-2"} {
-		if _, err := s.ClaimFork(forkCtx("jti-1", tok, ""), &harnesspb.ClaimForkRequest{}); err != nil {
-			t.Errorf("claim with %s after the refusals: %v", tok, err)
-		}
+	mr.FastForward(SnapshotLife - time.Minute)
+	if _, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"}); err != nil {
+		t.Fatalf("ClaimFork after 7 days: %v", err)
 	}
 }
 
-// TestClaimFork_Refusals checks the code of each refused claim.
+// Each other refusal of the claim.
 func TestClaimFork_Refusals(t *testing.T) {
 	s, l := claimService(t)
-	ctx := context.Background()
-	if err := l.BeginFork(ctx, "jti-p", "ns/src-1/u0", time.Hour); err != nil {
-		t.Fatal(err)
-	}
+	recordFork(t, l, "ns/fork-1/u1", "n2")
 	req := &harnesspb.ClaimForkRequest{SandboxId: "fork-1"}
 
-	if _, err := s.ClaimFork(ctx, req); status.Code(err) != codes.Unauthenticated {
-		t.Errorf("no grant: code = %v", status.Code(err))
+	if _, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-9"}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("not started: code = %v", status.Code(err))
 	}
-	wait := forkClaimWait
-	forkClaimWait = 50 * time.Millisecond
-	t.Cleanup(func() { forkClaimWait = wait })
-	if _, err := s.ClaimFork(forkCtx("jti-p", "tok-fork-1", ""), req); status.Code(err) != codes.DeadlineExceeded {
-		t.Errorf("pending: code = %v", status.Code(err))
+	if _, err := s.ClaimFork(context.Background(), req); status.Code(err) != codes.Unauthenticated {
+		t.Errorf("no token: code = %v", status.Code(err))
 	}
-	if _, err := s.ClaimFork(forkCtx("jti-none", "tok-fork-1", ""), req); status.Code(err) != codes.PermissionDenied {
-		t.Errorf("not a fork: code = %v", status.Code(err))
+	if _, err := s.ClaimFork(identityCtx("bad"), req); status.Code(err) != codes.Unauthenticated {
+		t.Errorf("bad token: code = %v", status.Code(err))
 	}
-	none := &HarnessCallbackService{sandboxIdentity: testIdentity(), logger: discardLogger()}
-	if _, err := none.ClaimFork(forkCtx("jti-p", "tok-fork-1", ""), req); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("no ledger: code = %v", status.Code(err))
+	none := &HarnessCallbackService{logger: discardLogger()}
+	if _, err := none.ClaimFork(identityCtx("tok-fork-1"), req); status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("no fork support: code = %v", status.Code(err))
 	}
-	noVerifier := &HarnessCallbackService{forkLedger: l, logger: discardLogger()}
-	if _, err := noVerifier.ClaimFork(forkCtx("jti-p", "tok-fork-1", ""), req); status.Code(err) != codes.FailedPrecondition {
-		t.Errorf("no verifier: code = %v", status.Code(err))
+	s.forkGrants = stubForkGrants{err: errors.New("no key")}
+	if _, err := s.ClaimFork(identityCtx("tok-fork-1"), req); status.Code(err) != codes.Unavailable {
+		t.Errorf("mint failure: code = %v", status.Code(err))
 	}
 }
 
@@ -132,5 +153,30 @@ func TestForkTask(t *testing.T) {
 	task, err := forkTask("eyJnb2FsIjoic2NhbiJ9")
 	if err != nil || task.GetGoal() != "scan" {
 		t.Errorf("task = %v, %v", task, err)
+	}
+}
+
+// shortTargetWait bounds the wait for a start record in a test.
+func shortTargetWait(t *testing.T) {
+	t.Helper()
+	old := forkTargetWait
+	forkTargetWait = 300 * time.Millisecond
+	t.Cleanup(func() { forkTargetWait = old })
+}
+
+// The minter of a claimed fork mints a grant for the task of the dispatch,
+// and refuses before the daemon has a key or for a dispatch without scope.
+func TestNewForkGrantMinter(t *testing.T) {
+	d := ForkDispatch{SandboxID: "s", Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1"}
+	m := testMinter(t)
+	tok, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return m }).MintForkGrant(context.Background(), d)
+	if err != nil || tok == "" {
+		t.Fatalf("MintForkGrant = %q, %v", tok, err)
+	}
+	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return nil }).MintForkGrant(context.Background(), d); err == nil {
+		t.Error("no minter: want an error")
+	}
+	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return m }).MintForkGrant(context.Background(), ForkDispatch{}); err == nil {
+		t.Error("no scope: want an error")
 	}
 }

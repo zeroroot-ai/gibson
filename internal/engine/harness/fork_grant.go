@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/fork"
@@ -152,32 +153,39 @@ func firstMetadata(ctx context.Context, key string) string {
 	return ""
 }
 
-// ClaimFork serves a fork its own dispatch (D74, sdk#248). The fork calls it
-// with the grant of its source and its own sandbox identity token. The fork
-// is the sandbox that setec verifies from the token, never the sandbox_id of
-// the request: a sandbox_id that names another sandbox is refused. A sandbox
-// that is not a fork of that grant gets PERMISSION_DENIED, and a second
-// claim of one fork gets ALREADY_EXISTS. A fork whose dispatch is not
-// recorded yet waits in the call (awaitForkClaim).
+// ClaimFork serves a fork, or a sandbox restored from a snapshot, its own
+// dispatch (D74, D80). The only proof is the identity token of the sandbox,
+// which setec verifies (setec#235). The daemon serves the dispatch only to
+// the sandbox that it asked setec to start, one time, and mints a new grant
+// for the claimed task. A request that presents a grant is refused: a fork
+// never uses the grant of its source, which lives 30 minutes and is often
+// expired when a rewind starts.
 func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.ClaimForkRequest) (*harnesspb.ClaimForkResponse, error) {
-	claims, ok := TaskGrantClaimsFromContext(ctx)
-	if !ok || claims.JTI == "" {
-		return nil, status.Error(codes.Unauthenticated, "ClaimFork needs the task grant of the source")
+	if _, presented := taskGrantFromMetadata(ctx); presented {
+		return nil, status.Error(codes.PermissionDenied, "ClaimFork takes the sandbox identity token, never a grant")
 	}
-	if s.forkLedger == nil {
+	if s.forkLedger == nil || s.forkGrants == nil {
 		return nil, status.Error(codes.FailedPrecondition, "this daemon has no fork support")
 	}
-	caller, err := verifiedSandbox(ctx, s.sandboxIdentity, claims.Tenant.String())
+	target, err := s.awaitClaimTarget(ctx, req.GetSandboxId())
+	switch {
+	case errors.Is(err, ErrNotAFork):
+		return nil, status.Error(codes.PermissionDenied, "the daemon started no such sandbox")
+	case err != nil:
+		s.logger.Error("ClaimFork: fork ledger failed", "error", err)
+		return nil, status.Error(codes.Unavailable, "the fork record cannot be read")
+	}
+	caller, err := verifiedSandbox(ctx, s.sandboxIdentity, target.Tenant)
 	if err != nil {
 		return nil, err
 	}
-	if !namesSandbox(req.GetSandboxId(), caller) {
-		return nil, status.Error(codes.PermissionDenied, "the sandbox_id of the request names another sandbox than the identity token")
+	if caller != target.SandboxID {
+		return nil, status.Error(codes.PermissionDenied, "the identity token names another sandbox than the one the daemon started")
 	}
-	d, err := s.awaitForkClaim(ctx, claims.JTI, caller)
+	d, err := s.awaitForkClaim(ctx, caller)
 	switch {
 	case errors.Is(err, ErrNotAFork):
-		return nil, status.Error(codes.PermissionDenied, "the sandbox is not a fork of this grant")
+		return nil, status.Error(codes.PermissionDenied, "the daemon started no such sandbox")
 	case errors.Is(err, ErrForkClaimed):
 		return nil, status.Error(codes.AlreadyExists, "the fork was already claimed")
 	case errors.Is(err, ErrForkPending):
@@ -190,8 +198,13 @@ func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.C
 	if err != nil {
 		return nil, status.Error(codes.Internal, "the task of the fork cannot be decoded")
 	}
+	grant, err := s.forkGrants.MintForkGrant(ctx, d)
+	if err != nil {
+		s.logger.Error("ClaimFork: grant not minted", "sandbox_id", caller, "error", err)
+		return nil, status.Error(codes.Unavailable, "the grant of the claimed task cannot be minted")
+	}
 	return &harnesspb.ClaimForkResponse{
-		Grant:        d.Grant,
+		Grant:        grant,
 		MissionId:    d.MissionID,
 		MissionRunId: d.MissionRunID,
 		AgentRunId:   d.AgentRunID,
@@ -199,6 +212,20 @@ func (s *HarnessCallbackService) ClaimFork(ctx context.Context, req *harnesspb.C
 		Model:        d.Model,
 		Task:         task,
 	}, nil
+}
+
+// ForkGrantMinter mints the grant of a claimed fork or restored sandbox
+// (D80). The grant is scoped as any dispatch grant: the tenant, the mission,
+// the task and the agent of the dispatch.
+type ForkGrantMinter interface {
+	MintForkGrant(ctx context.Context, d ForkDispatch) (string, error)
+}
+
+// WithForkGrantMinter wires the minter of the grant of a claimed fork.
+func WithForkGrantMinter(m ForkGrantMinter) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.forkGrants = m
+	}
 }
 
 // forkClaimWait bounds how long ClaimFork waits for the dispatch of a
@@ -213,11 +240,11 @@ var (
 // awaitForkClaim claims the dispatch of a fork. While the dispatch is not
 // recorded it waits, until forkClaimWait or the end of ctx, so the fork
 // parks in the call and not in a retry loop of its own.
-func (s *HarnessCallbackService) awaitForkClaim(ctx context.Context, jti, sandboxID string) (ForkDispatch, error) {
+func (s *HarnessCallbackService) awaitForkClaim(ctx context.Context, sandboxID string) (ForkDispatch, error) {
 	deadline := time.NewTimer(forkClaimWait)
 	defer deadline.Stop()
 	for {
-		d, err := s.forkLedger.Claim(ctx, jti, sandboxID)
+		d, err := s.forkLedger.Claim(ctx, sandboxID)
 		if err == nil {
 			return d, nil
 		}
@@ -229,6 +256,31 @@ func (s *HarnessCallbackService) awaitForkClaim(ctx context.Context, jti, sandbo
 			return ForkDispatch{}, ErrForkPending
 		case <-deadline.C:
 			return ForkDispatch{}, ErrForkPending
+		case <-time.After(forkClaimPoll):
+		}
+	}
+}
+
+// forkTargetWait bounds how long ClaimFork waits for the start record of a
+// sandbox. setec returns the id of a fork before the daemon records it, and
+// the fork can call at once.
+var forkTargetWait = 30 * time.Second
+
+// awaitClaimTarget reads the start record that a hostname names. While no
+// record exists it waits, until forkTargetWait or the end of ctx.
+func (s *HarnessCallbackService) awaitClaimTarget(ctx context.Context, hostname string) (ClaimTarget, error) {
+	deadline := time.NewTimer(forkTargetWait)
+	defer deadline.Stop()
+	for {
+		t, err := s.forkLedger.ClaimTarget(ctx, hostname)
+		if !errors.Is(err, ErrNotAFork) {
+			return t, err
+		}
+		select {
+		case <-ctx.Done():
+			return ClaimTarget{}, ErrNotAFork
+		case <-deadline.C:
+			return ClaimTarget{}, ErrNotAFork
 		case <-time.After(forkClaimPoll):
 		}
 	}
@@ -248,4 +300,41 @@ func forkTask(b64 string) (*typespb.Task, error) {
 		return nil, fmt.Errorf("decode fork task: %w", err)
 	}
 	return t, nil
+}
+
+// minterForkGrants mints the grant of a claimed fork with the capability
+// grant minter of the daemon. The minter exists only after the daemon
+// starts, so it is read on each claim.
+type minterForkGrants struct {
+	minter func() *capabilitygrant.Minter
+}
+
+// NewForkGrantMinter returns the ForkGrantMinter over the minter that get
+// returns. A claim before the daemon has a minter is an error.
+func NewForkGrantMinter(get func() *capabilitygrant.Minter) ForkGrantMinter {
+	return &minterForkGrants{minter: get}
+}
+
+// MintForkGrant implements ForkGrantMinter. The grant has the scope of a
+// dispatch grant of the agent (mintCGForWork).
+func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (string, error) {
+	minter := m.minter()
+	if minter == nil {
+		return "", errors.New("harness: the daemon has no grant minter yet")
+	}
+	if d.Tenant == "" || d.MissionID == "" || d.MissionRunID == "" || d.AgentName == "" {
+		return "", errors.New("harness: the fork dispatch lacks the tenant, the mission, the run or the agent")
+	}
+	tok, err := minter.Mint(capabilitygrant.MintRequest{
+		Subject:        "component:agent:" + d.AgentName,
+		Tenant:         d.Tenant,
+		MissionID:      d.MissionID,
+		TaskID:         d.MissionRunID,
+		RecipientClass: "agent",
+		AllowedRPCs:    taskGrantAllowedRPCs(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("mint the grant of the fork: %w", err)
+	}
+	return tok, nil
 }

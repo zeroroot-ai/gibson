@@ -366,3 +366,17 @@ func TestTaskGrantScopedStream_ContextCarriesTheClaimsOnceSeen(t *testing.T) {
 		t.Fatalf("claims = %+v, %v", claims, ok)
 	}
 }
+
+// TestClaimFork_AnExpiredSourceGrantIsRefused: a fork that sends the
+// expired grant of its source to ClaimFork never reaches the handler (D80).
+func TestClaimFork_AnExpiredSourceGrantIsRefused(t *testing.T) {
+	v := &fakeGrantVerifier{err: sdkcg.ErrExpired}
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), slog.Default())
+	called := false
+	_, err := unary(grantCtx("acme", compactJWT("JWT")), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"},
+		&grpc.UnaryServerInfo{FullMethod: claimForkMethod},
+		func(context.Context, any) (any, error) { called = true; return nil, nil })
+	if status.Code(err) != codes.Unauthenticated || called {
+		t.Fatalf("code = %v, called = %v; want Unauthenticated and no handler", status.Code(err), called)
+	}
+}

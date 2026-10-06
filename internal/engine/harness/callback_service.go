@@ -177,6 +177,9 @@ type HarnessCallbackService struct {
 	// the source sandbox, and ClaimFork serves each fork its dispatch.
 	forkLedger ForkLedger
 
+	// forkGrants mints the grant of a claimed fork (D80).
+	forkGrants ForkGrantMinter
+
 	// sandboxIdentity verifies the sandbox identity token of a caller with
 	// setec (setec#235). The fork checks take the sandbox of the caller from
 	// it, never from a header that the process writes.

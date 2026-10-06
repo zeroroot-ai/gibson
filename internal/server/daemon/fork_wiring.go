@@ -69,12 +69,35 @@ func (z *lazyForkLedger) ForkedSource(ctx context.Context, jti string) (source s
 	return source, forked, nil
 }
 
-func (z *lazyForkLedger) Claim(ctx context.Context, jti, fork string) (harness.ForkDispatch, error) {
+func (z *lazyForkLedger) RecordStart(ctx context.Context, d harness.ForkDispatch, ttl time.Duration) error {
+	l := z.ledger()
+	if l == nil {
+		return errNoForkStore
+	}
+	if err := l.RecordStart(ctx, d, ttl); err != nil {
+		return fmt.Errorf("fork ledger: %w", err)
+	}
+	return nil
+}
+
+func (z *lazyForkLedger) ClaimTarget(ctx context.Context, hostname string) (harness.ClaimTarget, error) {
+	l := z.ledger()
+	if l == nil {
+		return harness.ClaimTarget{}, errNoForkStore
+	}
+	t, err := l.ClaimTarget(ctx, hostname)
+	if err != nil {
+		return harness.ClaimTarget{}, fmt.Errorf("fork ledger: %w", err)
+	}
+	return t, nil
+}
+
+func (z *lazyForkLedger) Claim(ctx context.Context, hostname string) (harness.ForkDispatch, error) {
 	l := z.ledger()
 	if l == nil {
 		return harness.ForkDispatch{}, errNoForkStore
 	}
-	d, err := l.Claim(ctx, jti, fork)
+	d, err := l.Claim(ctx, hostname)
 	if err != nil {
 		return harness.ForkDispatch{}, fmt.Errorf("fork ledger: %w", err)
 	}
