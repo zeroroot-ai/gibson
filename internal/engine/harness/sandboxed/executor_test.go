@@ -33,6 +33,7 @@ type mockClient struct {
 	streamLog func(context.Context, string) (LogStream, error)
 	wait      func(context.Context, string) (WaitResponse, error)
 	kill      func(context.Context, string) error
+	fork      func(context.Context, ForkRequest) (ForkResponse, error)
 }
 
 func (m *mockClient) Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error) {
@@ -45,6 +46,12 @@ func (m *mockClient) Wait(ctx context.Context, _, id string) (WaitResponse, erro
 	return m.wait(ctx, id)
 }
 func (m *mockClient) Kill(ctx context.Context, _, id string) error { return m.kill(ctx, id) }
+func (m *mockClient) Fork(ctx context.Context, req ForkRequest) (ForkResponse, error) {
+	if m.fork == nil {
+		return ForkResponse{}, errors.New("mockClient: no fork configured")
+	}
+	return m.fork(ctx, req)
+}
 
 // fixedLogs is a LogStream that emits a pre-built byte sequence once then EOF.
 type fixedLogs struct {

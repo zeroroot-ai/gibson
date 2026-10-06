@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"log/slog"
 	"os"
 	"strconv"
@@ -341,3 +342,7 @@ func (s *setecRoundtripLogStream) Recv() ([]byte, error) {
 }
 
 func (s *setecRoundtripLogStream) Close() error { return nil }
+
+func (c *setecRoundtripClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	return sandboxed.ForkResponse{}, errors.New("setecRoundtripClient: fork is not used here")
+}

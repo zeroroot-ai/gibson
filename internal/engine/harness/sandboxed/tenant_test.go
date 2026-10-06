@@ -127,3 +127,7 @@ func TestLaunchMember_NoTenantDoesNotLaunch(t *testing.T) {
 		t.Fatalf("setec calls = %v; want none", c.seen())
 	}
 }
+
+func (c *tenantClient) Fork(context.Context, ForkRequest) (ForkResponse, error) {
+	return ForkResponse{}, errors.New("tenantClient: fork is not used here")
+}

@@ -409,6 +409,15 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	}
 	span.SetAttributes(attribute.String("setec.sandbox_class", class))
 
+	return l.followRun(ctx, tenant, launchResp.SandboxID, class, runTimeout, dispatch)
+}
+
+// followRun follows one running agent sandbox to its terminal outcome: it
+// registers the run on the live console, tees its logs, waits for the end
+// and parses the terminal result line. A launched sandbox and a fork take
+// the same path.
+func (l *AgentLauncher) followRun(ctx context.Context, tenant, sandboxID, class string, runTimeout time.Duration, dispatch AgentDispatch) (AgentRunResult, error) {
+
 	// Register this run as a live instance so a read-only subscriber can follow
 	// its structured events (ADR-0116 S11). The instance is keyed by the CUSTOMER
 	// tenant on the dispatch. finish deregisters and
@@ -418,9 +427,9 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	var finish func()
 	if l.events != nil {
 		publish, finish = l.events.RegisterInstance(dispatch.Tenant, LiveInstance{
-			RunID:         dispatchRunID(dispatch, launchResp.SandboxID),
+			RunID:         dispatchRunID(dispatch, sandboxID),
 			AgentName:     dispatch.AgentName,
-			SandboxID:     launchResp.SandboxID,
+			SandboxID:     sandboxID,
 			SandboxClass:  class,
 			ComponentKind: ComponentKindAgent,
 			StartedAt:     time.Now(),
@@ -438,11 +447,11 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 	// terminal closes once Wait returns, so the log tee stops re-attaching to a
 	// run that has already ended.
 	terminal := make(chan struct{})
-	logsDone := l.streamAgentLogsAsync(waitCtx, tenant, launchResp.SandboxID, ringBuf, publish, terminal)
+	logsDone := l.streamAgentLogsAsync(waitCtx, tenant, sandboxID, ringBuf, publish, terminal)
 
 	// Wait for the terminal phase.
 	waitCtx2, waitSpan := l.tracer.Start(waitCtx, "setec.wait")
-	waitResp, waitErr := l.client.Wait(waitCtx2, tenant, launchResp.SandboxID)
+	waitResp, waitErr := l.client.Wait(waitCtx2, tenant, sandboxID)
 	waitSpan.End()
 	close(terminal)
 
@@ -453,17 +462,17 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 		if errors.Is(waitErr, context.DeadlineExceeded) {
 			// Kill so setec reaps the run rather than letting it keep going.
 			killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			_ = l.client.Kill(killCtx, tenant, launchResp.SandboxID)
+			_ = l.client.Kill(killCtx, tenant, sandboxID)
 			killCancel()
-			return AgentRunResult{SandboxID: launchResp.SandboxID}, types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
-				"agent sandbox "+launchResp.SandboxID+" exceeded "+runTimeout.String()+" run timeout", waitErr)
+			return AgentRunResult{SandboxID: sandboxID}, types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
+				"agent sandbox "+sandboxID+" exceeded "+runTimeout.String()+" run timeout", waitErr)
 		}
-		return AgentRunResult{SandboxID: launchResp.SandboxID}, types.WrapError(types.SANDBOX_LAUNCH_FAILED,
-			"wait for agent sandbox "+launchResp.SandboxID, waitErr)
+		return AgentRunResult{SandboxID: sandboxID}, types.WrapError(types.SANDBOX_LAUNCH_FAILED,
+			"wait for agent sandbox "+sandboxID, waitErr)
 	}
 
 	return AgentRunResult{
-		SandboxID: launchResp.SandboxID,
+		SandboxID: sandboxID,
 		ExitCode:  waitResp.ExitCode,
 		Reason:    waitResp.Reason,
 		LogTail:   ringBuf.tail(32),
