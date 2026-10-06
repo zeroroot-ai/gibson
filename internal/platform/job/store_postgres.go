@@ -587,6 +587,26 @@ func (s *postgresStore) Stale(ctx context.Context, tenantID, bankID string, stal
 	return out, nil
 }
 
+func (s *postgresStore) Unassigned(ctx context.Context, tenantID, bankID string) (int64, error) {
+	if bankID == "" {
+		return 0, fmt.Errorf("%w: unassigned needs a bank", ErrInvalid)
+	}
+	c, err := s.conn(ctx, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Release()
+
+	// The same predicate as the queue that Claim reads.
+	var n int64
+	if err := c.SQL().QueryRow(ctx,
+		`SELECT count(*) FROM jobs WHERE bank_id = $1 AND member_id = '' AND state <> $2`,
+		bankID, string(StateClosed)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("job: count unassigned jobs of %s: %w", bankID, err)
+	}
+	return n, nil
+}
+
 // ---- shared statements -----------------------------------------------------
 
 // memberHasFreeSlot reports whether a member holds fewer jobs than its cap.

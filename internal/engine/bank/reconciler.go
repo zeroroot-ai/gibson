@@ -77,10 +77,17 @@ type StaleJobCloser interface {
 	Close(ctx context.Context, tenantID string, in job.CloseInput) (*job.Job, error)
 }
 
+// JobQueue counts the jobs that wait in the queue of a bank. The reconciler
+// reads it to apply the spill policy of the bank.
+type JobQueue interface {
+	Unassigned(ctx context.Context, tenantID, bankID string) (int64, error)
+}
+
 // Jobs is everything the reconciler needs from the job store.
 type Jobs interface {
 	JobReleaser
 	StaleJobCloser
+	JobQueue
 }
 
 // staleJobBatch is the largest number of stale jobs that one pass closes for
@@ -193,7 +200,9 @@ func (r *Reconciler) ReconcileTenant(ctx context.Context, tenantID string) error
 }
 
 // ReconcileBank brings one bank to its desired state, in three passes that must
-// happen in this order, and then closes the stale jobs of the bank:
+// happen in this order, and then closes the stale jobs of the bank. The count
+// to reach is the desired count, plus the spill members of a bank with the
+// ephemeral spill policy (targetCount):
 //
 //  1. Mark the dead. A member whose heartbeat stopped is not running, so it
 //     must not count toward the desired total — otherwise a bank of five with
@@ -232,13 +241,21 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 	// A bank holds tens of members, never more than int32 can count, so the
 	// narrowing cannot overflow; it is spelled once so the comparisons read.
 	running := int32(len(live)) //nolint:gosec // bounded by the bank's desired count, an int32
+	target, terr := r.targetCount(ctx, tenantID, b)
+	if terr != nil {
+		// Without the queue length the reconciler keeps the desired count,
+		// so a failed read never drains a member that serves a spilled job
+		// and never launches one that nobody asked for.
+		failures = append(failures, terr)
+		target = max(running, b.DesiredCount)
+	}
 	switch {
-	case running > b.DesiredCount:
-		if derr := r.drain(ctx, tenantID, live, running-b.DesiredCount); derr != nil {
+	case running > target:
+		if derr := r.drain(ctx, tenantID, live, running-target); derr != nil {
 			failures = append(failures, derr)
 		}
-	case running < b.DesiredCount:
-		if lerr := r.launch(ctx, tenantID, b, b.DesiredCount-running); lerr != nil {
+	case running < target:
+		if lerr := r.launch(ctx, tenantID, b, target-running); lerr != nil {
 			failures = append(failures, lerr)
 		}
 	}
@@ -246,6 +263,49 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 		failures = append(failures, cerr)
 	}
 	return errors.Join(failures...)
+}
+
+// targetCount is the number of members the bank must run in this pass.
+//
+// The spill policy of the bank says what happens to a job when each member is
+// at its job cap (ADR-0119):
+//
+//   - queue: the job waits. The target is the desired count.
+//   - ephemeral: the daemon starts one extra member for each job cap of
+//     waiting jobs. The target is the desired count plus that number, at most
+//     twice the desired count. When the queue is empty again, the extra
+//     members are the excess, and drain removes the idle ones first.
+//
+// A bank that signs in on a person's subscription never spills: a new member
+// waits for that person to sign in, so it cannot take a job that waits now.
+func (r *Reconciler) targetCount(ctx context.Context, tenantID string, b *bankstore.Bank) (int32, error) {
+	if b.SpillPolicy != bankstore.SpillEphemeral || b.LoginShape == bankstore.LoginShapeSubscription {
+		return b.DesiredCount, nil
+	}
+	waiting, err := r.jobs.Unassigned(ctx, tenantID, b.ID)
+	if err != nil {
+		return 0, fmt.Errorf("count the waiting jobs of bank %s: %w", b.ID, err)
+	}
+	return b.DesiredCount + spillMembers(waiting, b.MaxJobsInFlight, b.DesiredCount), nil
+}
+
+// spillMembers is the number of extra members for waiting jobs: one for each
+// job cap of waiting jobs, rounded up, at most limit. A bank with a desired
+// count of zero gets one extra member at most, so a bank that its owner
+// stopped does not grow without a bound.
+func spillMembers(waiting int64, jobCap, limit int32) int32 {
+	if waiting <= 0 {
+		return 0
+	}
+	if jobCap < 1 {
+		jobCap = 1
+	}
+	limit = max(limit, 1)
+	n := (waiting + int64(jobCap) - 1) / int64(jobCap)
+	if n > int64(limit) {
+		return limit
+	}
+	return int32(n) //nolint:gosec // n is at most limit, an int32
 }
 
 // closeStaleJobs closes each job of the bank that got no input for longer

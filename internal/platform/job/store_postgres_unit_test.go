@@ -769,3 +769,19 @@ func TestPostgresStore_ReleaseMemberHandsOpenJobsBack(t *testing.T) {
 		t.Error("an empty member must not reach the database")
 	}
 }
+
+func TestPostgresStore_Unassigned(t *testing.T) {
+	script := newScript()
+	script.rows["SELECT count(*) FROM jobs"] = [][]any{{int64(3)}}
+	store, _ := scriptedStore(t, script)
+	n, err := store.Unassigned(context.Background(), "acme", "bank-1")
+	if err != nil || n != 3 {
+		t.Fatalf("Unassigned = %d, %v, want 3", n, err)
+	}
+	if !script.ran("member_id = ''") {
+		t.Error("the count does not read the queue predicate of Claim")
+	}
+	if _, err := store.Unassigned(context.Background(), "acme", ""); !errors.Is(err, ErrInvalid) {
+		t.Errorf("an empty bank: err = %v, want ErrInvalid", err)
+	}
+}
