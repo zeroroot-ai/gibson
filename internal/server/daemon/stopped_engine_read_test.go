@@ -76,3 +76,30 @@ func TestWorldRead_ALiveEngineServes(t *testing.T) {
 		t.Fatalf("ListMissions: %v", err)
 	}
 }
+
+// Each adapter of a tenant engine answers Unavailable while the engine of the
+// tenant is stopped (gibson#826).
+func TestAdapters_AStoppedEngineIsUnavailable(t *testing.T) {
+	reg := downRegistry(t)
+	ctx := tenantCtx(t, "tenant-a")
+	m := &missionManager{logger: slog.New(slog.DiscardHandler), brainRegistry: reg}
+	if _, _, err := m.List(ctx, false, 10, 0); status.Code(err) != codes.Unavailable {
+		t.Errorf("missionManager.List: code %v", status.Code(err))
+	}
+	if _, err := m.Get(ctx, "m-1"); status.Code(err) != codes.Unavailable {
+		t.Errorf("missionManager.Get: code %v", status.Code(err))
+	}
+	if _, err := (&tenantRoutedBeliefSubstrate{registry: reg}).forTenant(ctx); status.Code(err) != codes.Unavailable {
+		t.Errorf("belief substrate: code %v", status.Code(err))
+	}
+	if _, err := (&destructiveAuthzServer{registry: reg, logger: slog.New(slog.DiscardHandler)}).queue(ctx); status.Code(err) != codes.Unavailable {
+		t.Errorf("destructive authz queue: code %v", status.Code(err))
+	}
+	ps := &tenantRoutedProofSettlement{registry: reg}
+	if _, err := ps.forTenant(ctx); status.Code(err) != codes.Unavailable {
+		t.Errorf("proof settlement: code %v", status.Code(err))
+	}
+	if _, err := ps.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{}); status.Code(err) != codes.Unavailable {
+		t.Errorf("destructive authorization request: code %v", status.Code(err))
+	}
+}
