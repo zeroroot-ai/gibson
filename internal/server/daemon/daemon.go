@@ -996,6 +996,17 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	d.redisEventStream = NewRedisEventStream(stateClient, d.logger.Slog())
 	d.logger.Info(ctx, "redis event stream initialized")
 
+	// Dashboard PostgreSQL connection pool. It opens BEFORE the ECS brain
+	// registry, because the tenant belief source reads its artifacts from it
+	// (gibson#615), and BEFORE Component Registry. A connection failure is FATAL
+	// (gibson#246, one-code-path discipline): the daemon refuses to boot without
+	// a usable platform-postgres connection so downstream RPCs never mask a
+	// missing connection behind misleading "not found" / "not implemented" errors.
+	if err := d.initPlatformPostgres(ctx); err != nil {
+		d.stopServices(ctx)
+		return fmt.Errorf("failed to initialize platform-postgres: %w", err)
+	}
+
 	// Initialize the per-tenant ECS brain registry (epic ecs-brain). Engines run
 	// for the daemon's lifetime; the orchestrator event-bus adapter feeds each
 	// tenant's World from its live mission event stream (ADR-0101 capture path).
@@ -1060,16 +1071,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// Note: envelope HMAC signing removed (admin-services-completion Req 6.4).
 	// Work items now carry unsigned queue.AuthzContext (run_id + issued_at + ttl_seconds).
 	// Authorization is fully covered by FGA tuples binding agent_principal to mission.
-
-	// Dashboard PostgreSQL connection pool — runs AFTER Authorization Service and
-	// BEFORE Component Registry. A connection failure is FATAL (gibson#246,
-	// one-code-path discipline): the daemon refuses to boot without a usable
-	// platform-postgres connection so downstream RPCs never mask a missing
-	// connection behind misleading "not found" / "not implemented" errors.
-	if err := d.initPlatformPostgres(ctx); err != nil {
-		d.stopServices(ctx)
-		return fmt.Errorf("failed to initialize platform-postgres: %w", err)
-	}
 
 	// Initialize Redis-backed component registry and registry adapter.
 	// The component registry uses Redis for runtime service discovery (registrations with TTL).

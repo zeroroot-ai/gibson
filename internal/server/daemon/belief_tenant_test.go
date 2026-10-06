@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
@@ -106,7 +108,7 @@ func testTenantBeliefs(t *testing.T, schema *ontology.BeliefSchemaRegistry, stor
 	if store == nil {
 		store = newFakeBeliefArtifacts()
 	}
-	b, err := newTenantBeliefs(func() beliefArtifacts { return store }, schema, nil)
+	b, err := newTenantBeliefs(store, schema, nil)
 	if err != nil {
 		t.Fatalf("newTenantBeliefs: %v", err)
 	}
@@ -230,12 +232,12 @@ func TestTenantBeliefs_AReadErrorFailsThePin(t *testing.T) {
 		t.Fatal("Pin succeeded while the store was down")
 	}
 
-	closed, err := newTenantBeliefs(func() beliefArtifacts { return nil }, testSchema(t), nil)
-	if err != nil {
-		t.Fatalf("newTenantBeliefs: %v", err)
-	}
-	if _, _, err := closed.Pin(context.Background(), "acme"); !errors.Is(err, errNoBeliefArtifacts) {
-		t.Fatalf("Pin with no database = %v, want errNoBeliefArtifacts", err)
+}
+
+// The store is a required dependency: a nil store fails at construction.
+func TestNewTenantBeliefs_RefusesANilStore(t *testing.T) {
+	if _, err := newTenantBeliefs(nil, testSchema(t), nil); !errors.Is(err, errNoBeliefArtifacts) {
+		t.Fatalf("newTenantBeliefs(nil) = %v, want errNoBeliefArtifacts", err)
 	}
 }
 
@@ -297,23 +299,43 @@ func TestTenantBeliefs_AReplayReadsThePinnedVersion(t *testing.T) {
 	}
 }
 
-// initTenantBeliefs builds the source and starts its loop. Before the
-// platform database opens, a pin fails instead of using a default.
-func TestInitTenantBeliefs_RefusesAPinBeforeTheDatabaseOpens(t *testing.T) {
+// initTenantBeliefs refuses to start without the platform database. Start
+// opens the database first, so this is a wiring defect, not a degraded mode.
+func TestInitTenantBeliefs_RefusesToStartWithoutTheDatabase(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	d := &daemonImpl{
 		config: &config.Config{Belief: config.BeliefConfig{ReloadInterval: time.Hour}},
 		logger: observability.NewLogger(observability.ConfigFromEnv()),
 	}
+	if err := d.initTenantBeliefs(ctx, testSchema(t)); !errors.Is(err, errNoBeliefArtifacts) {
+		t.Fatalf("initTenantBeliefs without the database = %v, want errNoBeliefArtifacts", err)
+	}
+	if d.tenantBeliefs != nil {
+		t.Fatal("initTenantBeliefs set a tenant belief source without the database")
+	}
+}
+
+// initTenantBeliefs builds the source over the open database and starts its
+// reload loop.
+func TestInitTenantBeliefs_BuildsTheSourceOverTheDatabase(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	d := &daemonImpl{
+		config:     &config.Config{Belief: config.BeliefConfig{ReloadInterval: time.Hour}},
+		logger:     observability.NewLogger(observability.ConfigFromEnv()),
+		platformDB: db,
+	}
 	if err := d.initTenantBeliefs(ctx, testSchema(t)); err != nil {
 		t.Fatalf("initTenantBeliefs: %v", err)
 	}
 	if d.tenantBeliefs == nil {
 		t.Fatal("initTenantBeliefs set no tenant belief source")
-	}
-	if _, _, err := d.tenantBeliefs.Pin(ctx, "acme"); !errors.Is(err, errNoBeliefArtifacts) {
-		t.Fatalf("Pin before the database opens = %v, want errNoBeliefArtifacts", err)
 	}
 }
 

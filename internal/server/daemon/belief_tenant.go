@@ -29,15 +29,13 @@ type beliefPinner interface {
 }
 
 // initTenantBeliefs builds d.tenantBeliefs over the platform Postgres and
-// starts its reload loop on belief.reload_interval. The brain registry starts
-// before the platform database opens, so the store is resolved on each read.
+// starts its reload loop on belief.reload_interval. Start opens the platform
+// database before it calls this, so the store is a required dependency.
 func (d *daemonImpl) initTenantBeliefs(ctx context.Context, schema *ontology.BeliefSchemaRegistry) error {
-	beliefs, err := newTenantBeliefs(func() beliefArtifacts {
-		if d.platformDB == nil {
-			return nil
-		}
-		return beliefartifact.NewStore(d.platformDB)
-	}, schema, d.logger.Slog())
+	if d.platformDB == nil {
+		return errNoBeliefArtifacts
+	}
+	beliefs, err := newTenantBeliefs(beliefartifact.NewStore(d.platformDB), schema, d.logger.Slog())
 	if err != nil {
 		return fmt.Errorf("failed to build the tenant belief source: %w", err)
 	}
@@ -61,7 +59,7 @@ type beliefArtifacts interface {
 	Version(ctx context.Context, tenantID string, version int64) (beliefModel, edgePosteriors []byte, found bool, err error)
 }
 
-// errNoBeliefArtifacts reports that the platform database is not open yet.
+// errNoBeliefArtifacts reports that the tenant belief source has no store.
 var errNoBeliefArtifacts = errors.New("belief artifacts: the platform database is not open")
 
 // beliefVersionSwapsTotal counts the belief version swaps of each tenant.
@@ -89,9 +87,8 @@ var beliefVersionLoadErrorsTotal = promauto.NewCounter(prometheus.CounterOpts{
 // of a running mission comes from the version it pinned. A replay reads the
 // recorded version and the recorded scores. It never reads the current one.
 type tenantBeliefs struct {
-	// artifacts returns the store, or nil while the platform database is not
-	// open. The brain registry starts before the database.
-	artifacts func() beliefArtifacts
+	// artifacts is the belief artifact store. It is required.
+	artifacts beliefArtifacts
 	schema    *ontology.BeliefSchemaRegistry
 	defaults  *beliefSet
 	logger    *slog.Logger
@@ -119,11 +116,14 @@ type tenantBelief struct {
 	loggedDefault bool
 }
 
-// newTenantBeliefs builds the per-tenant belief source. artifacts may return
-// nil until the platform database is open.
+// newTenantBeliefs builds the per-tenant belief source. The store is
+// required: a nil store is an error.
 func newTenantBeliefs(
-	artifacts func() beliefArtifacts, schema *ontology.BeliefSchemaRegistry, logger *slog.Logger,
+	artifacts beliefArtifacts, schema *ontology.BeliefSchemaRegistry, logger *slog.Logger,
 ) (*tenantBeliefs, error) {
+	if artifacts == nil {
+		return nil, errNoBeliefArtifacts
+	}
 	defaults, err := defaultBeliefSet(schema)
 	if err != nil {
 		return nil, err
@@ -220,10 +220,7 @@ func (b *tenantBeliefs) refreshTenants(ctx context.Context, tenants []*tenantBel
 	if len(tenants) == 0 {
 		return nil
 	}
-	store := b.artifacts()
-	if store == nil {
-		return errNoBeliefArtifacts
-	}
+	store := b.artifacts
 	current, err := store.CurrentVersions(ctx)
 	if err != nil {
 		beliefVersionLoadErrorsTotal.Inc()
@@ -290,16 +287,17 @@ func (b *tenantBeliefs) refreshOne(ctx context.Context, store beliefArtifacts, t
 	return nil
 }
 
-// promoteLocked makes the pending set active. The caller holds tb.mu.
+// promoteLocked makes the pending set active when the tenant has one. A
+// tenant with no pending set keeps its active set. The caller holds tb.mu.
 func (b *tenantBeliefs) promoteLocked(tb *tenantBelief) {
-	if tb.pending == nil {
-		return
+	next := tb.pending
+	if next != nil {
+		prev := tb.active.Swap(next)
+		b.logger.Info("belief version swapped", "tenant", tb.tenant,
+			"from", prev.label(), "to", next.label())
+		tb.pending = nil
+		beliefVersionSwapsTotal.WithLabelValues(tb.tenant).Inc()
 	}
-	prev := tb.active.Swap(tb.pending)
-	b.logger.Info("belief version swapped", "tenant", tb.tenant,
-		"from", prev.label(), "to", tb.pending.label())
-	tb.pending = nil
-	beliefVersionSwapsTotal.WithLabelValues(tb.tenant).Inc()
 }
 
 // Run calls Refresh every interval until ctx ends. A failed refresh is logged,
