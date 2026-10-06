@@ -21,6 +21,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"google.golang.org/grpc/codes"
@@ -225,6 +226,8 @@ func ensurePendingTenantProvisioningTable(ctx context.Context, db *sql.DB) error
 // owner_user_id is deliberately empty: no Zitadel user exists yet. The Tenant
 // CR's owner is the email, and bootstrap-tenant-owner creates the owner user +
 // FGA tuple afterwards. Idempotent on tenant_id via the helper's ON CONFLICT.
+// A row that still waits in pending takes the values of this call
+// (rewritePendingSeed), so the queue holds the current intent.
 // gibsoncheck:allow tenant-from-request — DaemonOperatorService:
 // platform_operator on system_tenant, enforced at ext-authz (same rule as the
 // ListPendingTenantProvisioning sibling). The tenant is caller-supplied by
@@ -250,5 +253,52 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}
+	if !inserted {
+		if err := s.rewritePendingSeed(ctx, req.GetTenantId(), req.GetOwnerEmail(), req.GetDisplayName(), tier); err != nil {
+			return nil, status.Errorf(codes.Internal, "rewrite pending tenant provisioning: %v", err)
+		}
+	}
 	return &daemonoperatorv1.EnqueueTenantProvisioningResponse{AlreadyExisted: !inserted}, nil
+}
+
+// rewritePendingSeed makes a queued seed row match the current intent of the
+// operator (gibson#219). The seed is the one writer of this row. A row that
+// still waits in 'pending' with an older owner, name or tier gets the new
+// values, so a chart fix reaches a cluster whose first row cannot provision.
+// A row that the operator claimed or finished stays as it is: the tenant
+// exists, and the queue no longer decides anything for it.
+func (s *DaemonServer) rewritePendingSeed(ctx context.Context, tenantID, ownerEmail, workspaceName, tier string) error {
+	db := s.entitlementsDB()
+	if db == nil {
+		return nil
+	}
+	const q = `
+		WITH prev AS (
+			SELECT tenant_id, owner_email, workspace_name, tier
+			FROM pending_tenant_provisioning
+			WHERE tenant_id = $1 AND status = 'pending'
+			FOR UPDATE
+		)
+		UPDATE pending_tenant_provisioning p
+		SET owner_email = $2, workspace_name = $3, tier = $4, updated_at = NOW()
+		FROM prev
+		WHERE p.tenant_id = prev.tenant_id
+		  AND (prev.owner_email, prev.workspace_name, prev.tier) IS DISTINCT FROM ($2, $3, $4)
+		RETURNING prev.tier, prev.owner_email, prev.workspace_name
+	`
+	var oldTier, oldEmail, oldName string
+	err := db.QueryRowContext(ctx, q, tenantID, ownerEmail, workspaceName, tier).Scan(&oldTier, &oldEmail, &oldName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("update pending_tenant_provisioning: %w", err)
+	}
+	s.logger.Warn("queued first tenant did not match the operator configuration; rewrote the pending row",
+		"tenant_id", tenantID,
+		"queued_tier", oldTier, "configured_tier", tier,
+		"queued_owner_email", oldEmail, "configured_owner_email", ownerEmail,
+		"queued_workspace_name", oldName, "configured_workspace_name", workspaceName,
+	)
+	return nil
 }
