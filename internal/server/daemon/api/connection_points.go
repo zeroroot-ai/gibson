@@ -122,6 +122,35 @@ func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1
 	return &connectionv1.CompleteSignupStepResponse{}, nil
 }
 
+// DescribeSignupStep implements ConnectionPointServiceServer. It returns the
+// tenant, the plan and the owner address of the signup that the step token
+// names (gibson#943). The step completer reads them here and never from the
+// browser, which carries the step link and could change a value in it.
+func (s *DaemonServer) DescribeSignupStep(ctx context.Context, req *connectionv1.DescribeSignupStepRequest) (*connectionv1.DescribeSignupStepResponse, error) {
+	if reason, ok := callerRefusal(ctx, s.connectionCallers.SignupStepCompleter); !ok {
+		return nil, status.Error(codes.PermissionDenied, reason)
+	}
+	if req.GetStepToken() == "" {
+		return nil, status.Error(codes.InvalidArgument, "step_token is required")
+	}
+	db := s.entitlementsDB()
+	if db == nil {
+		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
+	}
+	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
+		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
+	}
+	d, err := describeSignupStep(ctx, db, req.GetStepToken(), s.signupNow())
+	switch {
+	case errors.Is(err, errSignupStepNotFound):
+		return nil, status.Error(codes.NotFound, "unknown or expired step token")
+	case err != nil:
+		s.logger.ErrorContext(ctx, "DescribeSignupStep failed", "error", err.Error())
+		return nil, status.Error(codes.Unavailable, "the signup step could not be read; try again")
+	}
+	return d, nil
+}
+
 // SetTenantActivation implements ConnectionPointServiceServer.
 //
 // gibsoncheck:allow tenant-from-request — the caller is the configured

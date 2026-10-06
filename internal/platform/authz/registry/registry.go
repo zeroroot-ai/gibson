@@ -596,6 +596,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep": {
+		Service:           "gibson.daemon.connection.v1.ConnectionPointService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage": {
 		Service:           "gibson.daemon.connection.v1.ConnectionPointService",
 		Relation:          "platform_operator",

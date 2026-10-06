@@ -39,6 +39,23 @@ service ConnectionPointService {
     };
   }
 
+  // DescribeSignupStep returns the tenant, the plan and the owner address of
+  // the signup that a step token names (gibson#943). The component that runs
+  // the step reads them here, never from the browser, because the browser
+  // carries the step link and could change a value in it. Only the configured
+  // step completer identity may call it, as for CompleteSignupStep.
+  //
+  // Errors: NotFound (unknown or expired token), PermissionDenied (the caller
+  // is not the configured SPIFFE identity), InvalidArgument.
+  rpc DescribeSignupStep(DescribeSignupStepRequest) returns (DescribeSignupStepResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
+    };
+  }
+
   // SetTenantActivation tells the platform that a tenant is active or
   // suspended. A tenant that no call has named is active.
   //
@@ -86,6 +103,23 @@ message CompleteSignupStepRequest {
 
 // CompleteSignupStepResponse is empty.
 message CompleteSignupStepResponse {}
+
+// DescribeSignupStepRequest names a signup by its step token.
+message DescribeSignupStepRequest {
+  // step_token is the token that SignupResponse.step_token returned.
+  string step_token = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+}
+
+// DescribeSignupStepResponse holds the facts of the signup that the step
+// needs.
+message DescribeSignupStepResponse {
+  // tenant_id is the slug of the new tenant.
+  string tenant_id = 1;
+  // plan_id is the plan that the owner chose at signup.
+  string plan_id = 2;
+  // owner_email is the address of the owner of the new tenant.
+  string owner_email = 3;
+}
 
 // TenantActivationState is the activation state of a tenant.
 enum TenantActivationState {

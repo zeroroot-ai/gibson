@@ -640,6 +640,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep": {
+    method: "/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep",
+    service: "gibson.daemon.connection.v1.ConnectionPointService",
+    relation: "platform_operator",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage": {
     method: "/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage",
     service: "gibson.daemon.connection.v1.ConnectionPointService",

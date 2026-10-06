@@ -387,6 +387,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - SERVICE
+  "/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - SERVICE
   "/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage":
     relation: "platform_operator"
     object_type: "system_tenant"
