@@ -172,6 +172,16 @@ type HarnessCallbackService struct {
 	// WithTaskGrantVerifier.
 	taskGrantVerifier func() TaskGrantVerifier
 
+	// forkLedger records the forks of each source grant (ADR-0169, D74).
+	// The callback interceptors refuse the grant of a forked source outside
+	// the source sandbox, and ClaimFork serves each fork its dispatch.
+	forkLedger ForkLedger
+
+	// sandboxIdentity verifies the sandbox identity token of a caller with
+	// setec (setec#235). The fork checks take the sandbox of the caller from
+	// it, never from a header that the process writes.
+	sandboxIdentity SandboxIdentityVerifier
+
 	// jobs is the job store the member-facing callbacks read and write
 	// (ADR-0119, gibson#1711). Nil means this daemon serves no banks, and
 	// every member callback says so rather than failing obscurely.
@@ -1767,7 +1777,7 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harne
 	}
 
 	// Convert proto Task to internal Task
-	task := protoTaskToTask(req.Task)
+	task := inheritNodeScope(protoTaskToTask(req.Task), harness.Mission())
 
 	// Capture start time for agent execution
 	agentStartTime := time.Now()
@@ -3623,4 +3633,17 @@ func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *har
 			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
+}
+
+// inheritNodeScope gives a delegated agent the node of its caller. A
+// delegation runs inside the node of the caller, so the sub-agent gets the
+// node id and the network scope of that node (gibson#865, ADR-0169). It is
+// not a mission node of its own: no later node names it, and it starts from
+// no other node, so StartsFrom and Forkable stay empty.
+func inheritNodeScope(task agent.Task, caller MissionContext) agent.Task {
+	task.NodeID = caller.NodeID
+	task.Network = caller.NodeNetwork
+	task.StartsFrom = ""
+	task.Forkable = false
+	return task
 }

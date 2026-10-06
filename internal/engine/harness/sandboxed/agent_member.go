@@ -69,6 +69,9 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 		mode = "oneshot"
 	}
 	env[envInstanceMode] = mode
+	if dispatch.Forkable {
+		env[EnvForkable] = "1"
+	}
 	// Injected after the manifest and the dispatch so neither can claim a
 	// different sandbox than the one the launcher verifies.
 	env[envSandbox] = envSandboxValue

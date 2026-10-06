@@ -260,6 +260,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		sandboxedExecutor:       f.config.SandboxedExecutor,
 		agentLauncher:           f.config.AgentLauncher,
 		agentLaunchSpecResolver: f.config.AgentLaunchSpecResolver,
+		forks:                   f.config.Forks,
 		agentCallbackEndpoint:   f.config.AgentCallbackEndpoint,
 		agentDispatchMode:       agentDispatchModeOrDefault(f.config.AgentDispatchMode),
 		quotaCounter:            f.config.QuotaCounter,

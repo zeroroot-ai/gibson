@@ -85,6 +85,11 @@ type SandboxClient interface {
 	StreamLogs(ctx context.Context, tenant, sandboxID string) (LogStream, error)
 	Wait(ctx context.Context, tenant, sandboxID string) (WaitResponse, error)
 	Kill(ctx context.Context, tenant, sandboxID string) error
+
+	// Fork takes a snapshot of a running sandbox of the tenant and starts
+	// the forks from it (ADR-0169, setec#195). Each fork gets the network
+	// of the request, never the network of the source.
+	Fork(ctx context.Context, req ForkRequest) (ForkResponse, error)
 }
 
 // LaunchRequest is the data the executor passes to Setec's Launch RPC.

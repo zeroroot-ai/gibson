@@ -231,3 +231,7 @@ func TestLaunchMember_FollowerEndsAtTheLifetime(t *testing.T) {
 		t.Fatal("the follower must end when its context does")
 	}
 }
+
+func (c *memberClient) Fork(context.Context, ForkRequest) (ForkResponse, error) {
+	return ForkResponse{}, errors.New("memberClient: fork is not used here")
+}

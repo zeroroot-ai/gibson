@@ -137,6 +137,10 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				Goal:    req.Input,
 				Timeout: req.Timeout,
 				Network: req.Network,
+				// The fork fields of the node (ADR-0169, gibson#802).
+				NodeID:     nodeIDOf(req.WorkID, req.MissionID),
+				StartsFrom: req.StartsFrom,
+				Forkable:   req.Forkable,
 			})
 			if err != nil {
 				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})

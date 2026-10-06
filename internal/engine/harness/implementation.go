@@ -206,6 +206,11 @@ type DefaultAgentHarness struct {
 	// fail-closed rather than launching with an empty image.
 	agentLaunchSpecResolver AgentLaunchSpecResolver
 
+	// forks holds the parked sources and the fork ledger of ADR-0169. Nil
+	// means no fork support: a node with starts_from fails, and a forkable
+	// node runs as a normal node.
+	forks *ForkSupport
+
 	// agentCallbackEndpoint is the HarnessCallbackService address the daemon
 	// advertises. It is injected into an ephemeral agent sandbox so the agent
 	// dials the daemon back for LLM/tools/findings and to return its result.
@@ -901,6 +906,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
+		childMissionCtx.NodeID = task.NodeID
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,

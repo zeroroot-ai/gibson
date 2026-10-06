@@ -272,3 +272,7 @@ func TestBuildBankRunner_NeedsThePoolAndTheSeams(t *testing.T) {
 		t.Fatal("no signing key must refuse")
 	}
 }
+
+func (c *memberSandboxClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	return sandboxed.ForkResponse{}, errors.New("memberSandboxClient: fork is not used here")
+}

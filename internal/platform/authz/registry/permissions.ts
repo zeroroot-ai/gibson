@@ -1610,6 +1610,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.harness.v1.HarnessCallbackService/ClaimFork": {
+    method: "/gibson.harness.v1.HarnessCallbackService/ClaimFork",
+    service: "gibson.harness.v1.HarnessCallbackService",
+    relation: "can_use",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.harness.v1.HarnessCallbackService/CloseJob": {
     method: "/gibson.harness.v1.HarnessCallbackService/CloseJob",
     service: "gibson.harness.v1.HarnessCallbackService",

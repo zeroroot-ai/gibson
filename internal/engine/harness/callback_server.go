@@ -146,6 +146,13 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		}
 	}
 
+	// The fork ledger is required (ADR-0169, D74): the grant of a forked
+	// source must be refused outside its sandbox on every callback, so a
+	// server with no ledger does not start.
+	if s.service.forkLedger == nil {
+		return errors.New("callback server has no fork ledger; wire harness.WithForkLedger")
+	}
+
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
@@ -176,7 +183,8 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 	// The task-grant scope check runs AFTER the auth interceptor: it compares
 	// the grant's tenant and mission against the identity that interceptor
 	// placed on the context and the ContextInfo in the body (gibson#1605).
-	grantUnary, grantStream := taskGrantScopeInterceptors(s.service.taskGrantVerifier, s.logger)
+	grantUnary, grantStream := taskGrantScopeInterceptors(s.service.taskGrantVerifier,
+		&forkGuard{ledger: s.service.forkLedger, identity: s.service.sandboxIdentity}, s.logger)
 	serverOpts := []grpc.ServerOption{
 		// Mirror the main daemon listener's 16 MiB message ceilings
 		// (internal/server/daemon/grpc.go maxDaemonRecvMsgBytes): the
