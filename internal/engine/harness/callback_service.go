@@ -176,6 +176,11 @@ type HarnessCallbackService struct {
 	// every member callback says so rather than failing obscurely.
 	jobs JobSurface
 
+	// jobDriver is the JobService implementation behind OpenJob, SendInput
+	// and CloseJob, the callbacks that a dispatched agent uses to drive a
+	// bank (callback_job_driver.go).
+	jobDriver JobDriver
+
 	// turnGrants mints the per-turn grant each delivered input carries.
 	turnGrants TurnGrantMinter
 
@@ -597,6 +602,7 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		// The member seams are never nil. A daemon that serves no banks
 		// answers ErrNoBankSurface on each, and the callbacks fail closed.
 		jobs:          noBankSurface{},
+		jobDriver:     noBankSurface{},
 		members:       noBankSurface{},
 		turnGrants:    noBankSurface{},
 		memberEvents:  noBankSurface{},
@@ -638,6 +644,7 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		logger:           logger.With("component", "harness_callback_service"),
 		metadataInjector: NewMetadataInjector(),
 		jobs:             noBankSurface{},
+		jobDriver:        noBankSurface{},
 		members:          noBankSurface{},
 		turnGrants:       noBankSurface{},
 		memberEvents:     noBankSurface{},

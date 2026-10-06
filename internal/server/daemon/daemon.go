@@ -248,6 +248,12 @@ type daemonImpl struct {
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 
+	// jobService is the server of JobService. The callback service hands the
+	// job calls of a dispatched agent to it (lazyJobDriver), so one
+	// implementation makes each check. Nil until the gRPC services are
+	// registered, and on a daemon that serves no jobs.
+	jobService harness.JobDriver
+
 	// memberControl is the in-memory sign-in control queue the bank service
 	// enqueues on and the callback service delivers from (gibson#1715).
 	memberControl *harness.MemberControl
@@ -606,6 +612,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// than failing obscurely.
 	callbackOpts = append(callbackOpts,
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
+		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),

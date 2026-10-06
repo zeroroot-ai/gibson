@@ -99,12 +99,12 @@ const reasonAgentCallbackSurface = "in-mission agent callback: dialed by the SDK
 const reasonUnimplemented = "no handler on this daemon (falls through to UnimplementedHarnessCallbackServiceServer); " +
 	"classify explicitly when a handler is added"
 
-// reasonUnimplementedJobSurface is reasonUnimplemented for the member-facing
-// job callbacks the sdk bump declared. It names the slice that serves each, so
-// the deny reads as "not yet, and here is who" rather than "never".
-const reasonUnimplementedJobSurface = "job callback declared by the sdk bump; no handler yet " +
-	"(gibson#1713 mirrors JobService for a dispatched agent). " +
-	"Flip to agentSurface in the change that adds the handler"
+// reasonDriverJobSurface is the allow reason for the three RPCs that a
+// dispatched agent calls to drive a bank. The handler hands each call to the
+// server that serves JobService, so the caller needs the same relation on
+// the bank or the job, and CloseJob refuses the worker of the job.
+const reasonDriverJobSurface = "bank driver callback: the handler applies the checks of JobService, " +
+	"and the worker of a job cannot close it (ADR-0119)"
 
 // reasonMemberJobSurface is the allow reason for the four RPCs a bank member
 // calls as itself, under its base grant. They are on the surface for the same
@@ -256,11 +256,11 @@ var callbackMethodPolicy = map[string]callbackMethodDecision{
 	harnesspb.HarnessCallbackService_ReportJobState_FullMethodName:    {agentSurface: true, reason: reasonMemberJobSurface},
 	harnesspb.HarnessCallbackService_ReportDeliverable_FullMethodName: {agentSurface: true, reason: reasonMemberJobSurface},
 
-	// The three a DISPATCHED AGENT calls to drive a bank. They mirror
-	// JobService and land with the job node executor, gibson#1713 (slice C7).
-	harnesspb.HarnessCallbackService_OpenJob_FullMethodName:   {agentSurface: false, reason: reasonUnimplementedJobSurface},
-	harnesspb.HarnessCallbackService_SendInput_FullMethodName: {agentSurface: false, reason: reasonUnimplementedJobSurface},
-	harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  {agentSurface: false, reason: reasonUnimplementedJobSurface},
+	// The three a DISPATCHED AGENT calls to drive a bank, served by
+	// callback_job_driver.go. They mirror JobService.
+	harnesspb.HarnessCallbackService_OpenJob_FullMethodName:   {agentSurface: true, reason: reasonDriverJobSurface},
+	harnesspb.HarnessCallbackService_SendInput_FullMethodName: {agentSurface: true, reason: reasonDriverJobSurface},
+	harnesspb.HarnessCallbackService_CloseJob_FullMethodName:  {agentSurface: true, reason: reasonDriverJobSurface},
 
 	// WorldView is the agent's only World read (ADR-0112 read half); the daemon
 	// handler landed in gibson#1377 (worldview.go), projecting a mission-Scope-

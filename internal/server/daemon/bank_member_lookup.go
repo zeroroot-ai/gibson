@@ -179,6 +179,44 @@ func (l *lazyJobSurface) AddDeliverable(ctx context.Context, tenantID, jobID str
 	return j, nil
 }
 
+// lazyJobDriver resolves the server of JobService per call. The callback
+// service hands OpenJob, SendInput and CloseJob of a dispatched agent to it,
+// so the callback entry point applies the checks of JobService.
+type lazyJobDriver struct{ daemon *daemonImpl }
+
+var _ harness.JobDriver = (*lazyJobDriver)(nil)
+
+func (l *lazyJobDriver) server() (harness.JobDriver, error) {
+	if l.daemon.jobService == nil {
+		return nil, errUnavailable("the job service is not up, so this daemon serves no jobs")
+	}
+	return l.daemon.jobService, nil
+}
+
+func (l *lazyJobDriver) OpenJob(ctx context.Context, req *jobpb.OpenJobRequest) (*jobpb.OpenJobResponse, error) {
+	s, err := l.server()
+	if err != nil {
+		return nil, err
+	}
+	return s.OpenJob(ctx, req) //nolint:wrapcheck // the gRPC status of JobService passes through unchanged
+}
+
+func (l *lazyJobDriver) SendInput(ctx context.Context, req *jobpb.SendInputRequest) (*jobpb.SendInputResponse, error) {
+	s, err := l.server()
+	if err != nil {
+		return nil, err
+	}
+	return s.SendInput(ctx, req) //nolint:wrapcheck // the gRPC status of JobService passes through unchanged
+}
+
+func (l *lazyJobDriver) CloseJob(ctx context.Context, req *jobpb.CloseJobRequest) (*jobpb.CloseJobResponse, error) {
+	s, err := l.server()
+	if err != nil {
+		return nil, err
+	}
+	return s.CloseJob(ctx, req) //nolint:wrapcheck // the gRPC status of JobService passes through unchanged
+}
+
 // lazyMemberLookup resolves the bank store per call.
 type lazyMemberLookup struct {
 	daemon *daemonImpl
