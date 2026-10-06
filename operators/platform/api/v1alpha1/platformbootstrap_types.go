@@ -224,9 +224,9 @@ type SystemClientSpec struct {
 	// System API is an instance-superuser surface and must never leave the
 	// cluster, so no ingress route needs to publish it.
 	//
-	// The public issuer (spec.zitadel.issuer) is deliberately NOT a valid
-	// value here — dialling it sends instance-superuser traffic out to the
-	// internet-facing edge and back.
+	// The public origin is deliberately NOT a valid value here — dialling it
+	// sends instance-superuser traffic out to the internet-facing edge and
+	// back.
 	//
 	// Resolution order when empty:
 	//  1. the ZITADEL_URL env var on the operator Pod, then
@@ -303,14 +303,10 @@ type ZitadelSMTPSpec struct {
 	PasswordSecretRef *SecretKeyRef `json:"passwordSecretRef,omitempty"`
 }
 
-// ZitadelSpec collects every Zitadel-facing field in one block.
+// ZitadelSpec collects every Zitadel-facing field in one block. The
+// address the operator connects to is not a field: it is the ZITADEL_URL of
+// the operator (ADR-0092, gibson#665).
 type ZitadelSpec struct {
-	// Issuer is the OIDC issuer URL the platform uses for both browser
-	// and in-cluster traffic (forge Host header as needed).
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Pattern="^https?://"
-	Issuer string `json:"issuer"`
-
 	// ExternalDomain is the public hostname (e.g. "app.example.com") the
 	// operator claims on every Zitadel System API request with the
 	// x-zitadel-instance-host header (ADR-0092). It is a bare host: a value

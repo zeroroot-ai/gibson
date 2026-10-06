@@ -152,7 +152,6 @@ func newTestBootstrap(sc *gibsonv1alpha1.SystemClientSpec, externalDomain string
 		ObjectMeta: metav1.ObjectMeta{Name: "gibson"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
 			Zitadel: gibsonv1alpha1.ZitadelSpec{
-				Issuer:         testIssuer,
 				ExternalDomain: externalDomain,
 				SystemClient:   sc,
 			},
