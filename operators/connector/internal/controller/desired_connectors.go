@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
@@ -59,6 +61,9 @@ type DesiredConnectorsDaemon interface {
 	ListDesiredConnectors(ctx context.Context) ([]*daemonoperatorv1.DesiredConnector, error)
 	ReportConnectorStatus(ctx context.Context, req *daemonoperatorv1.ReportConnectorStatusRequest) error
 	AdoptConnector(ctx context.Context, tenantID, connector string) error
+	ConnectorCredential(
+		ctx context.Context, req *daemonoperatorv1.GetConnectorCredentialRequest,
+	) (*daemonoperatorv1.GetConnectorCredentialResponse, error)
 }
 
 // DesiredConnectorsRunnable converges the ConnectorInstances to the
@@ -150,6 +155,10 @@ func (r *DesiredConnectorsRunnable) converge(ctx context.Context) error {
 			report.Phase = string(connectorv1alpha1.ConnectorInstancePhaseFailed)
 			report.LastError = ensureErr.Error()
 		} else {
+			if cerr := r.syncCredential(ctx, d.GetTenantId(), ci); cerr != nil {
+				// The error names the Secret, never a value.
+				logger.Error(cerr, "connector credential failed", "tenant", d.GetTenantId(), "connector", d.GetConnectorId())
+			}
 			report.Phase = string(ci.Status.Phase)
 			if report.Phase == "" {
 				report.Phase = string(connectorv1alpha1.ConnectorInstancePhasePending)
@@ -270,4 +279,62 @@ func (r *DesiredConnectorsRunnable) prune(
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// needsCredential reports whether a connector has a connector-cred Secret: an
+// OAuth or a static token, or a declared credential.
+func needsCredential(ci *connectorv1alpha1.ConnectorInstance) bool {
+	return ci.Spec.Auth == connectorv1alpha1.ConnectorAuthOAuth ||
+		ci.Spec.Auth == connectorv1alpha1.ConnectorAuthSecret ||
+		len(ci.Spec.Credentials) > 0
+}
+
+// syncCredential writes the connector-cred Secret of one ConnectorInstance
+// from the daemon (gibson#663), or deletes it when the daemon says that the
+// token is past its expiry. The Secret has an ownerReference to the
+// ConnectorInstance, so Kubernetes deletes it with the connector. The whole
+// data set is replaced, so a withdrawn token or a removed ref leaves.
+func (r *DesiredConnectorsRunnable) syncCredential(
+	ctx context.Context, tenant string, ci *connectorv1alpha1.ConnectorInstance,
+) error {
+	if !needsCredential(ci) {
+		return nil
+	}
+	req := &daemonoperatorv1.GetConnectorCredentialRequest{TenantId: tenant, ConnectorId: ci.Spec.Connector}
+	for _, ref := range ci.Spec.Credentials {
+		req.Credentials = append(req.Credentials, &daemonoperatorv1.ConnectorCredentialRef{
+			Key: ref.Key, Property: ref.Property, TargetEnv: ref.EnvName(),
+		})
+	}
+	resp, err := r.Daemon.ConnectorCredential(ctx, req)
+	if err != nil {
+		return fmt.Errorf("read the credential of %s/%s: %w", ci.Namespace, ci.Name, err)
+	}
+	name := credentialSecretName(ci.Name)
+	if resp.GetWithdraw() {
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
+		if derr := r.Client.Delete(ctx, sec); derr != nil && !apierrors.IsNotFound(derr) {
+			return fmt.Errorf("withdraw Secret %s/%s: %w", ci.Namespace, name, derr)
+		}
+		return nil
+	}
+	if len(resp.GetData()) == 0 {
+		return nil // nothing minted and nothing declared
+	}
+	sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
+	owner := metav1.OwnerReference{
+		APIVersion: connectorv1alpha1.GroupVersion.String(),
+		Kind:       "ConnectorInstance",
+		Name:       ci.Name,
+		UID:        ci.UID,
+	}
+	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
+		sec.Type = corev1.SecretTypeOpaque
+		sec.Data = resp.GetData()
+		sec.OwnerReferences = []metav1.OwnerReference{owner}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
 }

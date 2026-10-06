@@ -40,6 +40,7 @@ const (
 	DaemonOperatorService_ListDesiredConnectors_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors"
 	DaemonOperatorService_ReportConnectorStatus_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus"
 	DaemonOperatorService_AdoptConnector_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/AdoptConnector"
+	DaemonOperatorService_GetConnectorCredential_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -191,6 +192,14 @@ type DaemonOperatorServiceClient interface {
 	// it once for each ConnectorInstance that the daemon wrote in the past. A
 	// pair that is already recorded stays as it is.
 	AdoptConnector(ctx context.Context, in *AdoptConnectorRequest, opts ...grpc.CallOption) (*AdoptConnectorResponse, error)
+	// GetConnectorCredential returns the content of the connector-cred Secret of
+	// one tenant connector: the "authorization" header with the short-lived
+	// access token, and each declared static credential (gibson#663). It never
+	// returns a refresh token or a Grant. The connector operator writes the
+	// Secret. The handler serves only the direct-dial SPIFFE peer of the
+	// connector operator, and refuses each other caller, also a caller with a
+	// platform_operator token through the edge.
+	GetConnectorCredential(ctx context.Context, in *GetConnectorCredentialRequest, opts ...grpc.CallOption) (*GetConnectorCredentialResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -401,6 +410,16 @@ func (c *daemonOperatorServiceClient) AdoptConnector(ctx context.Context, in *Ad
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) GetConnectorCredential(ctx context.Context, in *GetConnectorCredentialRequest, opts ...grpc.CallOption) (*GetConnectorCredentialResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetConnectorCredentialResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_GetConnectorCredential_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -550,6 +569,14 @@ type DaemonOperatorServiceServer interface {
 	// it once for each ConnectorInstance that the daemon wrote in the past. A
 	// pair that is already recorded stays as it is.
 	AdoptConnector(context.Context, *AdoptConnectorRequest) (*AdoptConnectorResponse, error)
+	// GetConnectorCredential returns the content of the connector-cred Secret of
+	// one tenant connector: the "authorization" header with the short-lived
+	// access token, and each declared static credential (gibson#663). It never
+	// returns a refresh token or a Grant. The connector operator writes the
+	// Secret. The handler serves only the direct-dial SPIFFE peer of the
+	// connector operator, and refuses each other caller, also a caller with a
+	// platform_operator token through the edge.
+	GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -619,6 +646,9 @@ func (UnimplementedDaemonOperatorServiceServer) ReportConnectorStatus(context.Co
 }
 func (UnimplementedDaemonOperatorServiceServer) AdoptConnector(context.Context, *AdoptConnectorRequest) (*AdoptConnectorResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdoptConnector not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetConnectorCredential not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -1001,6 +1031,24 @@ func _DaemonOperatorService_AdoptConnector_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_GetConnectorCredential_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConnectorCredentialRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).GetConnectorCredential(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_GetConnectorCredential_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).GetConnectorCredential(ctx, req.(*GetConnectorCredentialRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1087,6 +1135,10 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdoptConnector",
 			Handler:    _DaemonOperatorService_AdoptConnector_Handler,
+		},
+		{
+			MethodName: "GetConnectorCredential",
+			Handler:    _DaemonOperatorService_GetConnectorCredential_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

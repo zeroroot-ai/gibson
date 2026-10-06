@@ -115,11 +115,13 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 		daemonoperatorv1.DaemonOperatorService_ListDesiredConnectors_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_GetConnectorCredential_FullMethodName,
 	}, got, "connector-operator may call exactly its revoke, its status read and its connector loop RPCs")
 	for _, m := range []string{
 		daemonoperatorv1.DaemonOperatorService_ListDesiredConnectors_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_GetConnectorCredential_FullMethodName,
 	} {
 		assert.False(t, operatorAllowedMethods()[m], "the tenant-operator must not call %s", m)
 	}

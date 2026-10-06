@@ -36,11 +36,12 @@ const (
 	envOperatorSAName      = "OPERATOR_SERVICE_ACCOUNT_NAME"
 	envOperatorSANamespace = "OPERATOR_SERVICE_ACCOUNT_NAMESPACE"
 
-	// The daemon's ServiceAccount, for the per-tenant connector-credential
-	// binding below. The chart sets it from the workloads release; the
-	// default is the umbrella's rendered name.
-	envDaemonSAName     = "DAEMON_SERVICE_ACCOUNT_NAME"
-	defaultDaemonSAName = "gibson-gibson-workloads"
+	// The connector operator's ServiceAccount, for the per-tenant
+	// connector-credential binding below. The connector operator writes the
+	// connector-cred Secrets (gibson#663). The chart sets the name; the
+	// default is the name the chart renders.
+	envConnectorOperatorSAName     = "CONNECTOR_OPERATOR_SERVICE_ACCOUNT_NAME"
+	defaultConnectorOperatorSAName = "gibson-connector-operator"
 
 	// tenantOperatorRoleName is the per-tenant-namespace Role granting
 	// the operator the verbs it needs on every per-tenant resource it
@@ -71,14 +72,14 @@ const (
 	// the chart.
 	tenantOperatorNamespaceClusterRole = "gibson-tenant-operator-tenant-namespace"
 
-	// daemonConnectorCredsRoleBindingName binds the daemon's ServiceAccount
-	// to the chart-rendered ClusterRole daemonConnectorCredsClusterRole
-	// inside each tenant namespace. The daemon materializes
-	// <connector>-connector-cred Secrets there (its connector-token loop)
-	// and nowhere else. This RoleBinding replaces a ClusterRoleBinding that
-	// gave the daemon read and write on every Secret in every namespace.
-	daemonConnectorCredsRoleBindingName = "gibson-connector-creds"
-	daemonConnectorCredsClusterRole     = "gibson-connector-creds"
+	// connectorCredsRoleBindingName binds the connector operator's
+	// ServiceAccount to the chart-rendered ClusterRole
+	// connectorCredsClusterRole inside each tenant namespace. The connector
+	// operator writes <connector>-connector-cred Secrets there and nowhere
+	// else (gibson#663). Before, the daemon held this binding and wrote the
+	// Secrets itself.
+	connectorCredsRoleBindingName = "gibson-connector-creds"
+	connectorCredsClusterRole     = "gibson-connector-creds"
 )
 
 // Annotation keys the operator writes on tenant namespaces so downstream
@@ -408,16 +409,18 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 	if err := p.upsertRoleBinding(ctx, rb); err != nil {
 		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, tenantOperatorRoleBindingName, err)
 	}
-	// The daemon's Secret write, bounded to this namespace by the same
-	// shape: a RoleBinding to a chart-owned ClusterRole. The operator can
-	// bind only that one name (clusterroles/bind, resourceNames).
-	daemonSA := os.Getenv(envDaemonSAName)
-	if daemonSA == "" {
-		daemonSA = defaultDaemonSAName
+	// The connector operator's Secret write, bounded to this namespace by
+	// the same shape: a RoleBinding to a chart-owned ClusterRole. The
+	// operator can bind only that one name (clusterroles/bind,
+	// resourceNames). The subject changes in place, so a tenant namespace
+	// from before gibson#663 loses the daemon binding on its next pass.
+	connectorOperatorSA := os.Getenv(envConnectorOperatorSAName)
+	if connectorOperatorSA == "" {
+		connectorOperatorSA = defaultConnectorOperatorSAName
 	}
-	drb := &rbacv1.RoleBinding{
+	crb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      daemonConnectorCredsRoleBindingName,
+			Name:      connectorCredsRoleBindingName,
 			Namespace: nsName,
 			Labels: map[string]string{
 				"gibson.zeroroot.ai/managed-by": "tenant-operator",
@@ -425,17 +428,17 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 		},
 		Subjects: []rbacv1.Subject{{
 			Kind:      rbacv1.ServiceAccountKind,
-			Name:      daemonSA,
+			Name:      connectorOperatorSA,
 			Namespace: saNamespace,
 		}},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
 			Kind:     "ClusterRole",
-			Name:     daemonConnectorCredsClusterRole,
+			Name:     connectorCredsClusterRole,
 		},
 	}
-	if err := p.upsertRoleBinding(ctx, drb); err != nil {
-		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, daemonConnectorCredsRoleBindingName, err)
+	if err := p.upsertRoleBinding(ctx, crb); err != nil {
+		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, connectorCredsRoleBindingName, err)
 	}
 
 	return nil

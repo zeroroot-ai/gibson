@@ -20,23 +20,6 @@ type TokenFreshener interface {
 	EnsureFresh(ctx context.Context, tenant auth.TenantID, connector string) (refreshed bool, err error)
 }
 
-// Materializer publishes one connector's fresh access token into the place the
-// ToolHive proxy reads it — the tenant-namespace Secret <connector>-connector-cred
-// whose "authorization" key is the full "Bearer <token>" header (ADR-0061). The
-// daemon wiring adapts a kube client plus the tenant secret store to this shape;
-// the reconciler stays ignorant of Kubernetes, exactly as it does for the store
-// behind TokenFreshener.
-//
-// Materialize is idempotent and safe to call every pass: it creates the Secret
-// or updates it in place, self-healing a Secret that was deleted or never
-// written. It reports "no token stored yet" as a quiet success (nil), so an
-// authorized-but-not-yet-minted connector produces no log noise. It also owns
-// the fail-closed half: a token past its expiry is withdrawn rather than left
-// mounted as a cache (ADR-0061).
-type Materializer interface {
-	Materialize(ctx context.Context, desired ConnectorSandbox) error
-}
-
 // ConnectorTokenConfig wires the token refresher loop to its dependencies.
 type ConnectorTokenConfig struct {
 	// Catalog enumerates the connectors each tenant has enabled — the same
@@ -44,11 +27,7 @@ type ConnectorTokenConfig struct {
 	// no running bridge, so a warm token would only generate vendor traffic.
 	Catalog   CatalogSource
 	Freshener TokenFreshener
-	// Materializer writes each connector's access token into its
-	// <connector>-connector-cred Secret (ADR-0061). Optional: a detached
-	// daemon with no kube client leaves it nil and the loop only refreshes.
-	Materializer Materializer
-	Logger       *slog.Logger
+	Logger    *slog.Logger
 	// Interval between passes. Zero defaults to 5m. The freshener's expiry
 	// skew must exceed this interval, or a token can die between passes.
 	Interval time.Duration
@@ -117,29 +96,8 @@ func (r *ConnectorTokenReconciler) reconcile(ctx context.Context) {
 			r.cfg.Logger.Info("connector-token: refreshed access token",
 				"tenant", d.Tenant.String(), "connector", d.Connector)
 		}
-		// Publish the token into the connector-cred Secret every pass, not only
-		// on a refresh: the token may be fresh in the store while the Secret is
-		// missing (a fresh restart, a deleted Secret, a proxy pod that never
-		// started). Materialize is idempotent, so a healthy connector is a
-		// cheap no-op.
-		//
-		// A FAILED refresh runs it too, and that is the point of ADR-0061.
-		// Materialize publishes only a live token and withdraws an
-		// expired one, so the pass that cannot renew a credential is exactly
-		// the pass that must take the dead one out of the Secret. Skipping it
-		// here would leave the expired token mounted, which is the fallback
-		// cache the ADR refuses. A failure is logged and isolated, exactly
-		// like a refresh failure, so one connector never stalls the others.
-		if r.cfg.Materializer == nil {
-			continue
-		}
-		if err := r.cfg.Materializer.Materialize(ctx, d); err != nil {
-			// The error names the tenant and connector but never the token
-			// bytes (the materializer's contract), so logging it is what makes
-			// a stuck credential visible.
-			r.cfg.Logger.Warn("connector-token: materialize secret failed",
-				"tenant", d.Tenant.String(), "connector", d.Connector, "err", err)
-			continue
-		}
+		// The connector operator publishes the token into the connector-cred
+		// Secret. It reads the token through GetConnectorCredential, which
+		// withholds a token past its expiry (ADR-0061, gibson#663).
 	}
 }

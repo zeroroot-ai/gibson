@@ -9,10 +9,8 @@ import (
 	"testing"
 
 	"google.golang.org/grpc"
-	"k8s.io/client-go/rest"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
-	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 const connectorServiceName = "gibson.tenant.v1.ConnectorService"
@@ -43,37 +41,6 @@ func TestRegisterConnector_SkipsWithoutAuthorizer(t *testing.T) {
 
 	if _, ok := srv.GetServiceInfo()[connectorServiceName]; ok {
 		t.Fatal("ConnectorService must not be registered without an authorizer")
-	}
-}
-
-// connectorKubeClient caches the client on the daemon: a pre-set one is returned
-// as-is, with no error and no cluster lookup.
-func TestConnectorKubeClient_ReturnsCachedClient(t *testing.T) {
-	want := fakeConnectorKube(t)
-	d := &daemonImpl{logger: testObservabilityLogger(), connectorKube: want}
-
-	got, err := d.connectorKubeClient()
-	if err != nil {
-		t.Fatalf("connectorKubeClient: %v", err)
-	}
-	if got != want {
-		t.Fatal("connectorKubeClient must return the cached client")
-	}
-}
-
-// TestNewConnectorKubeClient builds the narrow ConnectorService client over a
-// dummy rest.Config. The client is lazy, so no API server is contacted; the
-// scheme must recognize the ConnectorInstance API.
-func TestNewConnectorKubeClient(t *testing.T) {
-	kube, err := newConnectorKubeClient(&rest.Config{Host: "https://127.0.0.1:6443"})
-	if err != nil {
-		t.Fatalf("newConnectorKubeClient: %v", err)
-	}
-	if kube == nil {
-		t.Fatal("client must not be nil")
-	}
-	if !kube.Scheme().Recognizes(connectorv1alpha1.SchemeGroupVersion.WithKind("ConnectorInstance")) {
-		t.Error("client scheme must recognize ConnectorInstance")
 	}
 }
 

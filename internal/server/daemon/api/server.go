@@ -117,6 +117,14 @@ type DaemonServer struct {
 	beliefWorlds       BeliefWorlds
 	trainerTrustDomain spiffeid.TrustDomain
 
+	// connectorCredStore and connectorCredPeer back GetConnectorCredential
+	// (gibson#663): the tenant secret store, and the one SPIFFE ID that may
+	// call the RPC. connectorCredNow is the clock of the token expiry check;
+	// nil means time.Now.
+	connectorCredStore ConnectorSecretResolver
+	connectorCredPeer  string
+	connectorCredNow   func() time.Time
+
 	// cgMinter / cgVerifier back the RenewCapabilityGrant RPC.
 	// liveMissions gates CG renewal on the mission run still executing
 	// (gibson#1602). Wired via WithLiveMissionLookup; nil refuses renewal

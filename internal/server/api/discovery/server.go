@@ -39,8 +39,8 @@ type Server struct {
 	authorizer authz.Authorizer
 	registry   component.ComponentRegistry
 	// connectors lists the tenant's enabled connectors (ADR-0067, the fourth
-	// component kind). Nil when the daemon has no kube client; ListConnectors
-	// then fails closed with FailedPrecondition.
+	// component kind). Nil only in a test; ListConnectors then fails closed
+	// with FailedPrecondition.
 	connectors ConnectorLister
 	logger     *slog.Logger
 }

@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -23,9 +24,12 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/reconciler"
+	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 	"github.com/zeroroot-ai/gibson/internal/server/admin"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 // registerConnectorAuth registers gibson.tenant.v1.ConnectorAuthService on
@@ -82,37 +86,56 @@ func (d *daemonImpl) registerConnectorAuth(ctx context.Context, srv *grpc.Server
 	tenantv1.RegisterConnectorAuthServiceServer(srv, connAuthSrv)
 	d.logger.Info(ctx, "registered gibson.tenant.v1.ConnectorAuthService gRPC endpoint (ADR-0061)")
 
-	// The loop walks the tenant's ConnectorInstance CRs (ADR-0065): the OAuth
-	// freshener's connector set comes from the ToolHive path, not from
-	// connector_manifest rows, so the legacy connector runtime could be removed
-	// (gibson#1524) without connector OAuth going dark. Started by Start()
-	// alongside the other reconcilers. Needs a kube client; without one (a
-	// detached daemon) the loop stays off.
-	if kube, kubeErr := d.connectorKubeClient(); kubeErr != nil {
-		d.logger.Warn(ctx, "connector-token reconciler: no kube client; OAuth refresh loop disabled",
-			"error", kubeErr)
-	} else {
-		d.connectorTokenReconciler = reconciler.NewConnectorTokenReconciler(reconciler.ConnectorTokenConfig{
-			Catalog: &reconciler.ConnectorInstanceCatalogSource{
-				Lister: kube,
-				Logger: d.logger.Slog(),
-			},
-			Freshener: &connectorTokenFreshener{
-				refresher: connectorRefresher,
-				book:      d.connectorTokenStatus,
-				now:       time.Now,
-			},
-			// The daemon writes the connector-cred Secret directly from the loop
-			// (ADR-0061): no RPC returns the token, no ESO. The proxy mounts
-			// this Secret, so without it the connector never leaves Provisioning.
-			Materializer: &connectorTokenMaterializer{
-				kube:    kube,
-				secrets: d.secretsService,
-			},
-			Logger:   d.logger.Slog(),
-			Interval: connectorTokenInterval,
-		})
+	// The loop walks the connectors each tenant enabled, from the table that
+	// ConnectorService writes (gibson#662). It only refreshes: the connector
+	// operator reads the token through GetConnectorCredential and writes the
+	// connector-cred Secret (gibson#663). The daemon makes no Kubernetes call.
+	d.connectorTokenReconciler = reconciler.NewConnectorTokenReconciler(reconciler.ConnectorTokenConfig{
+		Catalog: &tenantConnectorCatalogSource{
+			store:  tenantconnector.NewStore(d.platformDB),
+			logger: d.logger.Slog(),
+		},
+		Freshener: &connectorTokenFreshener{
+			refresher: connectorRefresher,
+			book:      d.connectorTokenStatus,
+			now:       time.Now,
+		},
+		Logger:   d.logger.Slog(),
+		Interval: connectorTokenInterval,
+	})
+}
+
+// tenantConnectorCatalogSource is the desired set of the token freshener: each
+// connector a tenant enabled whose catalog entry uses OAuth. A static
+// credential needs no refresh, and a connector that left the catalog is not
+// refreshed.
+type tenantConnectorCatalogSource struct {
+	store interface {
+		ListAll(ctx context.Context) ([]tenantconnector.Connector, error)
 	}
+	logger *slog.Logger
+}
+
+func (s *tenantConnectorCatalogSource) DesiredConnectors(ctx context.Context) ([]reconciler.ConnectorSandbox, error) {
+	rows, err := s.store.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("connector token source: list tenant connectors: %w", err)
+	}
+	out := make([]reconciler.ConnectorSandbox, 0, len(rows))
+	for _, r := range rows {
+		entry, lerr := componentcatalog.LookupConnector(r.ConnectorID)
+		if lerr != nil || entry.Auth != connectorv1alpha1.ConnectorAuthOAuth {
+			continue
+		}
+		tid, terr := auth.NewTenantID(r.TenantID)
+		if terr != nil {
+			s.logger.Warn("connector token source: skipping a row with a malformed tenant id",
+				"tenant", r.TenantID, "err", terr)
+			continue
+		}
+		out = append(out, reconciler.ConnectorSandbox{Tenant: tid, Connector: r.ConnectorID})
+	}
+	return out, nil
 }
 
 // connectorTokenFreshenerActor is the audit actor of a background token

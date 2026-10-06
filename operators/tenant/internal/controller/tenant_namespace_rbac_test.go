@@ -5,6 +5,8 @@ package controller
 
 import (
 	"context"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"reflect"
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -92,31 +94,34 @@ func TestEnsureTenantNamespaceRBAC_Idempotent(t *testing.T) {
 
 // THE FIXTURE THIS EXISTS FOR: the daemon's connector-credential write is a
 // RoleBinding in the tenant namespace, never a cluster-wide grant.
-func TestEnsureTenantNamespaceRBAC_BindsTheDaemonInTheTenantNamespace(t *testing.T) {
+func TestEnsureTenantNamespaceRBAC_BindsTheConnectorOperatorInTheTenantNamespace(t *testing.T) {
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)
 	}
-	cl := fake.NewClientBuilder().WithScheme(scheme).Build()
+	// A namespace from before gibson#663: the binding names the daemon.
+	old := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "tenant-test", Name: connectorCredsRoleBindingName},
+		Subjects:   []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "gibson-gibson-workloads", Namespace: "gibson"}},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: connectorCredsClusterRole},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(old).Build()
 	p := &NamespaceProvisioner{Client: cl, PlatformNamespace: "gibson"}
-	t.Setenv(envDaemonSAName, "daemon-sa-from-chart")
+	t.Setenv(envConnectorOperatorSAName, "connector-operator-sa-from-chart")
 	if err := p.ensureTenantNamespaceRBAC(context.Background(), "tenant-test"); err != nil {
 		t.Fatalf("ensureTenantNamespaceRBAC: %v", err)
 	}
 	rb := &rbacv1.RoleBinding{}
 	if err := cl.Get(context.Background(), types.NamespacedName{
-		Namespace: "tenant-test", Name: daemonConnectorCredsRoleBindingName,
+		Namespace: "tenant-test", Name: connectorCredsRoleBindingName,
 	}, rb); err != nil {
-		t.Fatalf("daemon RoleBinding not created: %v", err)
+		t.Fatalf("connector-creds RoleBinding not found: %v", err)
 	}
-	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != daemonConnectorCredsClusterRole {
-		t.Errorf("RoleRef = %+v, want ClusterRole/%s", rb.RoleRef, daemonConnectorCredsClusterRole)
+	if rb.RoleRef.Kind != "ClusterRole" || rb.RoleRef.Name != connectorCredsClusterRole {
+		t.Errorf("RoleRef = %+v, want ClusterRole/%s", rb.RoleRef, connectorCredsClusterRole)
 	}
-	if len(rb.Subjects) != 1 || rb.Subjects[0].Name != "daemon-sa-from-chart" || rb.Subjects[0].Namespace != "gibson" {
-		t.Errorf("Subjects = %+v, want the daemon SA in the platform namespace", rb.Subjects)
-	}
-	// Idempotent: a second pass updates in place.
-	if err := p.ensureTenantNamespaceRBAC(context.Background(), "tenant-test"); err != nil {
-		t.Fatalf("second ensureTenantNamespaceRBAC: %v", err)
+	want := []rbacv1.Subject{{Kind: rbacv1.ServiceAccountKind, Name: "connector-operator-sa-from-chart", Namespace: "gibson"}}
+	if !reflect.DeepEqual(rb.Subjects, want) {
+		t.Errorf("Subjects = %+v, want only the connector operator; the daemon must lose the grant", rb.Subjects)
 	}
 }
