@@ -55,9 +55,9 @@ import (
 )
 
 const (
-	// revocationPluginName is the plugin's manifest metadata.name
-	// (integrations/plugins/github/plugin.yaml) and the vendor key the
-	// chart renders it under (plugins.github).
+	// revocationPluginName is the plugin's declared metadata name
+	// (plugins/github/declaration.go) and the vendor key the chart renders
+	// it under (plugins.github).
 	revocationPluginName = "github"
 
 	// revocationSecretName is the caller-facing name; SetSecret stores it

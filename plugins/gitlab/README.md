@@ -22,7 +22,7 @@ vendor API — not the vendor's entire client.
 ## Credential
 
 One GitLab personal or project access token resolved from the secrets broker,
-declared in `plugin.yaml` as `cred:gitlab_token`. The broker is the only
+declared in `declaration.go` as `cred:gitlab_token`. The broker is the only
 credential channel — the plugin never reads a token from an env var, and never
 puts it in a log line or an error.
 

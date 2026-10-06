@@ -4,7 +4,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -16,7 +15,7 @@ import (
 )
 
 // credName is the broker-qualified secret this plugin resolves. It is declared
-// in plugin.yaml under spec.secrets; the SDK rejects any undeclared name before
+// in declaration() under Spec.Secrets; the SDK rejects any undeclared name before
 // it reaches the broker.
 const credName = "cred:gitlab_token"
 
@@ -200,7 +199,7 @@ func handleCreateIssue(ctx context.Context, req CreateIssueRequest) (CreateIssue
 func main() {
 	err := plugin.Serve(
 		context.Background(),
-		plugin.WithManifest(cmp.Or(os.Getenv("GIBSON_PLUGIN_MANIFEST"), "./plugin.yaml")),
+		plugin.WithParsedManifest(declaration()),
 		plugin.WithHandler("GetProject", handleGetProject),
 		plugin.WithHandler("ListIssues", handleListIssues),
 		plugin.WithHandler("CreateIssue", handleCreateIssue),
