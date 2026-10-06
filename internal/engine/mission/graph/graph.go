@@ -103,12 +103,16 @@ func analyse(def *missionv1.MissionDefinition) (*analysis, *ValidationError) {
 	// The fan-out refusals come from the same finder the run path calls, so the
 	// mission view and a submitted run cannot disagree about what is supported.
 	nested := findNestedForEach(nodes)
-	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 || len(nested) > 0 {
+	// starts_from must name an earlier node, so the check needs the edge set
+	// and runs after the cycle check: ancestry is only meaningful on a DAG.
+	startsFrom := findStartsFromRefusals(nodes, edges, cycles)
+	if len(dangling) > 0 || len(orphans) > 0 || len(cycles) > 0 || len(nested) > 0 || len(startsFrom) > 0 {
 		return nil, &ValidationError{
 			DanglingEdges: dangling,
 			OrphanNodes:   orphans,
 			Cycles:        cycles,
 			NestedForEach: nested,
+			StartsFrom:    startsFrom,
 		}
 	}
 	return &analysis{nodes: nodes, edges: edges, entry: entry, exit: exit}, nil

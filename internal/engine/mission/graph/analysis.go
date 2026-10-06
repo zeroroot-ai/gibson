@@ -36,6 +36,19 @@ type ValidationError struct {
 	// same set is nine dispatches from a definition that reads like three, and
 	// `{{target.*}}` inside it would have two instance targets to mean.
 	NestedForEach []string
+	// StartsFrom names every node whose starts_from is invalid: it names a
+	// node that does not exist, names the node itself, or names a node that
+	// does not run before it. A node starts from the sandbox snapshot of an
+	// earlier node (ADR-0169), so the named node must end before this node
+	// starts.
+	StartsFrom []StartsFromRefusal
+}
+
+// StartsFromRefusal describes one node whose starts_from field is invalid.
+type StartsFromRefusal struct {
+	Node       string // the node that declares the starts_from
+	StartsFrom string // the node id it named
+	Reason     string // "does not exist" | "is the node itself" | "does not run before it"
 }
 
 func (e *ValidationError) Error() string {
@@ -55,6 +68,9 @@ func (e *ValidationError) Error() string {
 	if len(e.NestedForEach) > 0 {
 		parts = append(parts, "for_each nodes whose template is itself a for_each: "+
 			strings.Join(e.NestedForEach, ", "))
+	}
+	for _, r := range e.StartsFrom {
+		parts = append(parts, fmt.Sprintf("node %q starts_from %q, which %s", r.Node, r.StartsFrom, r.Reason))
 	}
 	return "mission graph: " + strings.Join(parts, "; ")
 }
@@ -255,4 +271,54 @@ func dedupe(ss []string) []string {
 		}
 	}
 	return out
+}
+
+// findStartsFromRefusals returns one StartsFromRefusal for each node whose
+// starts_from field is invalid (ADR-0169, gibson#802): it names a node that
+// does not exist, names the node itself, or names a node that does not run
+// before it. "Runs before it" means the named node is an ancestor: there is a
+// directed path from the named node to this node, so the named node ends
+// before this node starts.
+//
+// A cyclic definition skips the ancestry check: a cycle is already a refusal,
+// and ancestry on a cyclic graph has no meaning.
+func findStartsFromRefusals(nodes map[string]*missionv1.MissionNode, edges []edge, cycles [][]string) []StartsFromRefusal {
+	var out []StartsFromRefusal
+	adj := adjacency(edges)
+	hasCycle := len(cycles) > 0
+	for _, id := range sortedNodeKeys(nodes) {
+		from := nodes[id].GetStartsFrom()
+		if from == "" {
+			continue
+		}
+		switch {
+		case from == id:
+			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "is the node itself"})
+		case nodes[from] == nil:
+			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not exist"})
+		case !hasCycle && !reaches(adj, from, id):
+			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not run before it"})
+		}
+	}
+	return out
+}
+
+// reaches reports whether there is a directed path from src to dst over adj.
+func reaches(adj map[string][]string, src, dst string) bool {
+	seen := map[string]bool{src: true}
+	stack := []string{src}
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		for _, next := range adj[n] {
+			if next == dst {
+				return true
+			}
+			if !seen[next] {
+				seen[next] = true
+				stack = append(stack, next)
+			}
+		}
+	}
+	return false
 }
