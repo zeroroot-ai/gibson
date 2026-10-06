@@ -41,10 +41,10 @@ func (m *scopeSpyConversationStore) Save(
 	return nil
 }
 
-func (m *scopeSpyConversationStore) List(_ context.Context, tenantID, userID string, _ int) ([]storedConversation, error) {
+func (m *scopeSpyConversationStore) List(_ context.Context, tenantID, userID string, _, _ int) ([]storedConversation, int, error) {
 	m.tenantIDs = append(m.tenantIDs, tenantID)
 	m.userIDs = append(m.userIDs, userID)
-	return m.conversations, nil
+	return m.conversations, len(m.conversations), nil
 }
 
 func (m *scopeSpyConversationStore) Get(_ context.Context, tenantID, callerUserID, _ string) (*storedConversation, []storedMessage, error) {
@@ -357,10 +357,10 @@ type scopeSpyAlertStore struct {
 	userIDs   []string
 }
 
-func (m *scopeSpyAlertStore) ListAlerts(_ context.Context, tenantID, userID string, _ bool, _ int) ([]*storedAlert, error) {
+func (m *scopeSpyAlertStore) ListAlerts(_ context.Context, tenantID, userID string, _ bool, _, _ int) ([]*storedAlert, int, error) {
 	m.tenantIDs = append(m.tenantIDs, tenantID)
 	m.userIDs = append(m.userIDs, userID)
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (m *scopeSpyAlertStore) MarkAlertRead(_ context.Context, tenantID, callerUserID, _ string) error {

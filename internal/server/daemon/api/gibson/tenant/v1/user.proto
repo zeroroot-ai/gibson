@@ -413,11 +413,20 @@ message ListAlertsRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
   bool unread_only = 3;
-  int32 limit = 4;
+  reserved 4;
+  reserved "limit";
+  // page_size is the largest number of items on one page. Zero means the
+  // server default.
+  int32 page_size = 5;
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 6 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListAlertsResponse {
   repeated Alert alerts = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 message MarkAlertReadRequest {
@@ -502,11 +511,20 @@ message ConversationMessage {
 message ListConversationsRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
   string user_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
-  int32 limit = 3;
+  reserved 3;
+  reserved "limit";
+  // page_size is the largest number of items on one page. Zero means the
+  // server default.
+  int32 page_size = 4;
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 5 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListConversationsResponse {
   repeated ConversationSummary conversations = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 message GetConversationRequest {

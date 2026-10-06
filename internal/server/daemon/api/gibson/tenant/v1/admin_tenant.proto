@@ -166,14 +166,22 @@ message PendingRegistration {
 
 // AdminListPendingRegistrationsRequest asks for the queue.
 message AdminListPendingRegistrationsRequest {
-  // limit caps the page. Zero means the server default; the server also caps
-  // it, so a large value cannot turn this into a full-table read.
-  int32 limit = 1;
+  reserved 1;
+  reserved "limit";
+  // page_size is the largest number of registrations on one page. Zero means
+  // the server default. The server also caps it, so a large value cannot turn
+  // this into a full-table read.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // AdminListPendingRegistrationsResponse carries the queue, oldest first.
 message AdminListPendingRegistrationsResponse {
   repeated PendingRegistration registrations = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // AdminApproveRegistrationRequest names the registration to approve.

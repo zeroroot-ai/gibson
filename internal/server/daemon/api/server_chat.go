@@ -47,6 +47,7 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -76,9 +77,11 @@ type conversationStoreIface interface {
 	// returns errConversationOwnedByAnotherUser rather than overwriting it.
 	Save(ctx context.Context, tenantID, userID, conversationID, title, agentID string, messages []storedMessage) error
 
-	// List returns conversation summaries for a user, ordered by
-	// updated_at descending.  At most limit entries are returned.
-	List(ctx context.Context, tenantID, userID string, limit int) ([]storedConversation, error)
+	// List returns one page of the conversation summaries of a user, ordered
+	// by updated_at descending: at most limit entries after the first offset
+	// index entries. scanned is the number of index entries the page read,
+	// so the caller can tell a full page from the last one.
+	List(ctx context.Context, tenantID, userID string, offset, limit int) (convs []storedConversation, scanned int, err error)
 
 	// Get returns the full conversation and its messages, but only when it
 	// belongs to callerUserID.  Returns a non-nil error (the sentinel
@@ -304,8 +307,9 @@ func (s *redisConversationStore) Save(
 	return nil
 }
 
-// List returns conversation summaries for a user, ordered by updated_at descending.
-func (s *redisConversationStore) List(ctx context.Context, tenantID, userID string, limit int) ([]storedConversation, error) {
+// List returns one page of the conversation summaries of a user, ordered by
+// updated_at descending.
+func (s *redisConversationStore) List(ctx context.Context, tenantID, userID string, offset, limit int) ([]storedConversation, int, error) {
 	if limit <= 0 {
 		limit = conversationDefaultLimit
 	}
@@ -313,15 +317,16 @@ func (s *redisConversationStore) List(ctx context.Context, tenantID, userID stri
 		limit = conversationMaxLimit
 	}
 
+	offset = max(offset, 0)
 	idxKey := convIndexKey(tenantID, userID)
 
 	// ZREVRANGE returns conversation IDs sorted descending by updated_at score.
-	convIDs, err := s.client.ZRevRange(ctx, idxKey, 0, int64(limit-1)).Result()
+	convIDs, err := s.client.ZRevRange(ctx, idxKey, int64(offset), int64(offset+limit-1)).Result()
 	if err == goredis.Nil || len(convIDs) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("conversations ZREVRANGE failed: %w", err)
+		return nil, 0, fmt.Errorf("conversations ZREVRANGE failed: %w", err)
 	}
 
 	out := make([]storedConversation, 0, len(convIDs))
@@ -342,7 +347,7 @@ func (s *redisConversationStore) List(ctx context.Context, tenantID, userID stri
 		}
 		out = append(out, *conv)
 	}
-	return out, nil
+	return out, len(convIDs), nil
 }
 
 // Get returns the full conversation and its messages, but only when it
@@ -519,7 +524,15 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *tenantv1.List
 		return nil, status_grpc.Error(codes.Internal, "conversation store not available")
 	}
 
-	stored, err := s.conversationStore.List(ctx, tenantID, userID, int(req.GetLimit()))
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
+	if req.GetPageSize() <= 0 {
+		limit = conversationDefaultLimit
+	}
+	limit = min(limit, conversationMaxLimit)
+	stored, scanned, err := s.conversationStore.List(ctx, tenantID, userID, offset, limit)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "ListConversations: store read failed",
 			slog.String("tenant_id", tenantID),
@@ -542,7 +555,10 @@ func (s *DaemonServer) ListConversations(ctx context.Context, req *tenantv1.List
 			MessageCount:  c.MessageCount,
 		})
 	}
-	return &tenantv1.ListConversationsResponse{Conversations: convs}, nil
+	return &tenantv1.ListConversationsResponse{
+		Conversations: convs,
+		NextPageToken: pagetoken.Next(offset, limit, scanned, -1),
+	}, nil
 }
 
 // ---------------------------------------------------------------------------
