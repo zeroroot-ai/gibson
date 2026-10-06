@@ -231,14 +231,14 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
 	}
-	// SandboxClass / Runtime are left unset: the setec.v1 LaunchResponse
-	// carries only sandbox_id/name/namespace, so this transport cannot report
-	// the class setec bound or the runtime backend it resolved to. The Sandbox
-	// CR records both (spec.sandboxClassName, status.runtime.chosen) and
-	// gibson holds no Kubernetes client (ADR-0023) to read them. Fill these in
-	// here as soon as setec puts them on the wire — sandboxed.VerifyIsolation
-	// already denies on a mismatch or a non-isolating runtime.
-	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+	// setec reports the class it bound and the runtime backend of that class.
+	// sandboxed.VerifyIsolation refuses the sandbox when either one is empty,
+	// differs from the request, or is not the launcher backend (ADR-0052).
+	return sandboxed.LaunchResponse{
+		SandboxID:    resp.GetSandboxId(),
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
 }
 
 // wrapSecretEnvVars envelope-wraps values whose key starts with secretEnvPrefix.

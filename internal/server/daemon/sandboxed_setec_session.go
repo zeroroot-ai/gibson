@@ -104,7 +104,11 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
 	}
-	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+	return sandboxed.LaunchResponse{
+		SandboxID:    resp.GetSandboxId(),
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
 }
 
 // Exec opens a command stream inside an existing session sandbox.
