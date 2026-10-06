@@ -101,6 +101,9 @@ func PerTenantKinds() []ctrlclient.Object {
 		&networkingv1.NetworkPolicy{},
 		&rbacv1.Role{},
 		&rbacv1.RoleBinding{},
+		// The catalog plugin loop (gibson#815): plugin namespaces only.
+		&appsv1.Deployment{},
+		&corev1.ServiceAccount{},
 	}
 }
 
@@ -136,6 +139,10 @@ func perTenantKind(o ctrlclient.Object) (string, bool) {
 		return "Role", true
 	case *rbacv1.RoleBinding:
 		return "RoleBinding", true
+	case *appsv1.Deployment:
+		return "Deployment", true
+	case *corev1.ServiceAccount:
+		return "ServiceAccount", true
 	}
 	return "", false
 }

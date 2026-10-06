@@ -87,3 +87,13 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - spire.spiffe.io
+  resources:
+  - clusterspiffeids
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update

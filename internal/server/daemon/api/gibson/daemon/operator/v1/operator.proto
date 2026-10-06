@@ -350,6 +350,31 @@ service DaemonOperatorService {
     };
   }
 
+
+  // ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
+  // tenant enabled (gibson#815). The tenant-operator pulls it and runs one
+  // instance of the plugin for each pair. The daemon holds the desired state
+  // in Postgres and cannot write cluster resources itself (ADR-0023).
+  rpc ListDesiredCatalogPlugins(ListDesiredCatalogPluginsRequest) returns (ListDesiredCatalogPluginsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ReportCatalogPluginStatus records the state of one tenant's instance of
+  // a catalog plugin, as the tenant-operator sees it in the cluster. A report
+  // for a pair no tenant enabled changes nothing.
+  rpc ReportCatalogPluginStatus(ReportCatalogPluginStatusRequest) returns (ReportCatalogPluginStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -800,4 +825,45 @@ message GetConnectorCredentialResponse {
   // credential is declared. The operator then deletes the Secret, so a dead
   // token is never left mounted (ADR-0061).
   bool withdraw = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Catalog plugins for each tenant (gibson#815)
+// ---------------------------------------------------------------------------
+
+message ListDesiredCatalogPluginsRequest {}
+
+// DesiredCatalogPlugin is one instance the platform must run: the catalog
+// plugin plugin_id, for the tenant tenant_id.
+message DesiredCatalogPlugin {
+  // tenant_id is the tenant slug (Tenant CR name).
+  string tenant_id = 1;
+  // plugin_id is the catalog id of the plugin, for example "github".
+  string plugin_id = 2;
+  // image is the image of the plugin, pinned by digest, from the catalog
+  // entry of the daemon. The operator runs this image and no other, so the
+  // catalog of the daemon is the one source of what runs.
+  string image = 3;
+  // egress_allow is the egress list of the catalog entry, as "host:port".
+  repeated string egress_allow = 4;
+}
+
+message ListDesiredCatalogPluginsResponse {
+  repeated DesiredCatalogPlugin plugins = 1;
+}
+
+message ReportCatalogPluginStatusRequest {
+  // tenant_id is the tenant slug (Tenant CR name). Required.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // plugin_id is the catalog id of the plugin. Required.
+  string plugin_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // phase is the state of the instance, for example "Ready". Required.
+  string phase = 3 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // last_error is the last error of the instance, or empty.
+  string last_error = 4 [(buf.validate.field).string = { max_len: 16777216 }];
+}
+
+message ReportCatalogPluginStatusResponse {
+  // updated is true when a row for the pair exists and took the report.
+  bool updated = 1;
 }

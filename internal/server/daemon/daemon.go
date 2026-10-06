@@ -41,6 +41,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/platform/catalogplugin"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
@@ -834,26 +835,21 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 // the host+jwt and bootstrap-token paths (a nil interface, never a typed-nil,
 // so the handler's `svidEnroller != nil` guard is correct).
 //
-// SVID enrollment is enabled only when ALL of these hold: the install tenant is
-// set (GIBSON_PLATFORM_TENANT — the model has no tenant-less principal, so a
-// first-party plugin binds to a real tenant; the tenant's OWNER is resolved
-// dynamically at enrol time, not pre-configured), the CapabilityGrantService is
-// wired, and the SPIRE Workload API is reachable. Any missing piece disables the
-// path with a log line rather than failing the daemon, so a bootstrap-only
-// install is unaffected.
+// SVID enrollment is enabled when both of these hold: the
+// CapabilityGrantService is wired, and the SPIRE Workload API is reachable. A
+// missing piece disables the path with a log line rather than failing the
+// daemon. No setting binds a plugin to a tenant: the tenant comes from the
+// verified identity of each instance (gibson#815).
 func (d *daemonImpl) buildPluginSVIDEnroller(ctx context.Context) pluginEnroller {
 	var socket, trustDomain string
 	if d.config.Auth.SPIFFE != nil {
 		socket = d.config.Auth.SPIFFE.WorkloadAPISocket
 		trustDomain = d.config.Auth.SPIFFE.TrustDomain
 	}
-	binding, reason, ok := resolvePluginSVIDBinding(
-		os.Getenv("GIBSON_PLATFORM_TENANT"),
-		trustDomain, socket, d.capabilityGrantSvc != nil,
-	)
+	binding, reason, ok := resolvePluginSVIDBinding(trustDomain, socket, d.capabilityGrantSvc != nil)
 	if !ok {
-		// reason is empty for the common "nothing configured" case (bootstrap
-		// only); non-empty for a partial configuration that disables the path.
+		// reason is empty for the "no SPIFFE Workload API" case; non-empty for
+		// a partial configuration that disables the path.
 		if reason != "" {
 			d.logger.Warn(ctx, reason)
 		}
@@ -871,43 +867,36 @@ func (d *daemonImpl) buildPluginSVIDEnroller(ctx context.Context) pluginEnroller
 
 	d.logger.Info(ctx, "SPIFFE-SVID plugin enrollment enabled",
 		"trust_domain", binding.trustDomain.Name(),
-		"install_tenant", binding.tenantID,
 	)
 	return &spiffePluginEnroller{
 		bundles:     d.spiffeJWTSource,
 		trustDomain: binding.trustDomain,
 		cg:          d.capabilityGrantSvc,
-		tenantID:    binding.tenantID,
+		enabled:     catalogplugin.NewStore(d.platformDB),
 		logger:      d.logger.Slog(),
 	}
 }
 
 // pluginSVIDBinding is the resolved configuration for SPIFFE-SVID plugin
-// enrollment: the install-tenant binding and the SPIRE trust domain + socket.
+// enrollment: the SPIRE trust domain and the socket.
 type pluginSVIDBinding struct {
-	tenantID    string
 	trustDomain spiffeid.TrustDomain
 	socketAddr  string
 }
 
-// resolvePluginSVIDBinding decides, from the raw env + config inputs, whether
+// resolvePluginSVIDBinding decides, from the config inputs, whether
 // SPIFFE-SVID plugin enrollment is configured (ADR-0066). It is pure so every
 // branch is testable; the caller opens the JWT source (the only side effect).
 //
 // Returns (binding, "", true) when enabled; (_, reason, false) when a PARTIAL
 // configuration disables it (reason names the missing piece, to be logged); and
-// (_, "", false) when nothing is configured at all — the common bootstrap-only
-// case, which stays silent.
-func resolvePluginSVIDBinding(tenantID, trustDomain, workloadSocket string, cgWired bool) (pluginSVIDBinding, string, bool) {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
+// (_, "", false) when the daemon has no SPIFFE Workload API at all.
+func resolvePluginSVIDBinding(trustDomain, workloadSocket string, cgWired bool) (pluginSVIDBinding, string, bool) {
+	if strings.TrimSpace(workloadSocket) == "" {
 		return pluginSVIDBinding{}, "", false
 	}
 	if !cgWired {
-		return pluginSVIDBinding{}, "SPIFFE-SVID plugin enrollment configured but the CapabilityGrantService is not wired; SVID enrollment disabled", false
-	}
-	if strings.TrimSpace(workloadSocket) == "" {
-		return pluginSVIDBinding{}, "SPIFFE-SVID plugin enrollment configured (GIBSON_PLATFORM_TENANT set) but the SPIFFE workload API is not; SVID enrollment disabled", false
+		return pluginSVIDBinding{}, "the SPIFFE workload API is configured but the CapabilityGrantService is not wired; SVID plugin enrollment disabled", false
 	}
 	tdStr := strings.TrimSpace(trustDomain)
 	td, err := spiffeid.TrustDomainFromString(tdStr)
@@ -915,7 +904,6 @@ func resolvePluginSVIDBinding(tenantID, trustDomain, workloadSocket string, cgWi
 		return pluginSVIDBinding{}, fmt.Sprintf("invalid SPIFFE trust domain %q; SVID plugin enrollment disabled: %v", tdStr, err), false
 	}
 	return pluginSVIDBinding{
-		tenantID:    tenantID,
 		trustDomain: td,
 		socketAddr:  "unix://" + strings.TrimSpace(workloadSocket),
 	}, "", true

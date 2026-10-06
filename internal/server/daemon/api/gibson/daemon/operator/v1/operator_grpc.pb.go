@@ -41,6 +41,8 @@ const (
 	DaemonOperatorService_ReportConnectorStatus_FullMethodName         = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus"
 	DaemonOperatorService_AdoptConnector_FullMethodName                = "/gibson.daemon.operator.v1.DaemonOperatorService/AdoptConnector"
 	DaemonOperatorService_GetConnectorCredential_FullMethodName        = "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential"
+	DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins"
+	DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName     = "/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus"
 )
 
 // DaemonOperatorServiceClient is the client API for DaemonOperatorService service.
@@ -200,6 +202,15 @@ type DaemonOperatorServiceClient interface {
 	// connector operator, and refuses each other caller, also a caller with a
 	// platform_operator token through the edge.
 	GetConnectorCredential(ctx context.Context, in *GetConnectorCredentialRequest, opts ...grpc.CallOption) (*GetConnectorCredentialResponse, error)
+	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
+	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
+	// instance of the plugin for each pair. The daemon holds the desired state
+	// in Postgres and cannot write cluster resources itself (ADR-0023).
+	ListDesiredCatalogPlugins(ctx context.Context, in *ListDesiredCatalogPluginsRequest, opts ...grpc.CallOption) (*ListDesiredCatalogPluginsResponse, error)
+	// ReportCatalogPluginStatus records the state of one tenant's instance of
+	// a catalog plugin, as the tenant-operator sees it in the cluster. A report
+	// for a pair no tenant enabled changes nothing.
+	ReportCatalogPluginStatus(ctx context.Context, in *ReportCatalogPluginStatusRequest, opts ...grpc.CallOption) (*ReportCatalogPluginStatusResponse, error)
 }
 
 type daemonOperatorServiceClient struct {
@@ -420,6 +431,26 @@ func (c *daemonOperatorServiceClient) GetConnectorCredential(ctx context.Context
 	return out, nil
 }
 
+func (c *daemonOperatorServiceClient) ListDesiredCatalogPlugins(ctx context.Context, in *ListDesiredCatalogPluginsRequest, opts ...grpc.CallOption) (*ListDesiredCatalogPluginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDesiredCatalogPluginsResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonOperatorServiceClient) ReportCatalogPluginStatus(ctx context.Context, in *ReportCatalogPluginStatusRequest, opts ...grpc.CallOption) (*ReportCatalogPluginStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportCatalogPluginStatusResponse)
+	err := c.cc.Invoke(ctx, DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DaemonOperatorServiceServer is the server API for DaemonOperatorService service.
 // All implementations must embed UnimplementedDaemonOperatorServiceServer
 // for forward compatibility.
@@ -577,6 +608,15 @@ type DaemonOperatorServiceServer interface {
 	// connector operator, and refuses each other caller, also a caller with a
 	// platform_operator token through the edge.
 	GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error)
+	// ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
+	// tenant enabled (gibson#815). The tenant-operator pulls it and runs one
+	// instance of the plugin for each pair. The daemon holds the desired state
+	// in Postgres and cannot write cluster resources itself (ADR-0023).
+	ListDesiredCatalogPlugins(context.Context, *ListDesiredCatalogPluginsRequest) (*ListDesiredCatalogPluginsResponse, error)
+	// ReportCatalogPluginStatus records the state of one tenant's instance of
+	// a catalog plugin, as the tenant-operator sees it in the cluster. A report
+	// for a pair no tenant enabled changes nothing.
+	ReportCatalogPluginStatus(context.Context, *ReportCatalogPluginStatusRequest) (*ReportCatalogPluginStatusResponse, error)
 	mustEmbedUnimplementedDaemonOperatorServiceServer()
 }
 
@@ -649,6 +689,12 @@ func (UnimplementedDaemonOperatorServiceServer) AdoptConnector(context.Context, 
 }
 func (UnimplementedDaemonOperatorServiceServer) GetConnectorCredential(context.Context, *GetConnectorCredentialRequest) (*GetConnectorCredentialResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetConnectorCredential not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ListDesiredCatalogPlugins(context.Context, *ListDesiredCatalogPluginsRequest) (*ListDesiredCatalogPluginsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDesiredCatalogPlugins not implemented")
+}
+func (UnimplementedDaemonOperatorServiceServer) ReportCatalogPluginStatus(context.Context, *ReportCatalogPluginStatusRequest) (*ReportCatalogPluginStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReportCatalogPluginStatus not implemented")
 }
 func (UnimplementedDaemonOperatorServiceServer) mustEmbedUnimplementedDaemonOperatorServiceServer() {}
 func (UnimplementedDaemonOperatorServiceServer) testEmbeddedByValue()                               {}
@@ -1049,6 +1095,42 @@ func _DaemonOperatorService_GetConnectorCredential_Handler(srv interface{}, ctx 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonOperatorService_ListDesiredCatalogPlugins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDesiredCatalogPluginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ListDesiredCatalogPlugins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ListDesiredCatalogPlugins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ListDesiredCatalogPlugins(ctx, req.(*ListDesiredCatalogPluginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonOperatorService_ReportCatalogPluginStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportCatalogPluginStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonOperatorServiceServer).ReportCatalogPluginStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonOperatorService_ReportCatalogPluginStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonOperatorServiceServer).ReportCatalogPluginStatus(ctx, req.(*ReportCatalogPluginStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DaemonOperatorService_ServiceDesc is the grpc.ServiceDesc for DaemonOperatorService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1139,6 +1221,14 @@ var DaemonOperatorService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetConnectorCredential",
 			Handler:    _DaemonOperatorService_GetConnectorCredential_Handler,
+		},
+		{
+			MethodName: "ListDesiredCatalogPlugins",
+			Handler:    _DaemonOperatorService_ListDesiredCatalogPlugins_Handler,
+		},
+		{
+			MethodName: "ReportCatalogPluginStatus",
+			Handler:    _DaemonOperatorService_ReportCatalogPluginStatus_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -86,3 +86,72 @@ func TestStore_List(t *testing.T) {
 	require.Error(t, err, "a list with no tenant must be refused")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
+
+func TestStore_ListAll(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+
+	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "plugin_id", "phase", "last_error"}).
+			AddRow("acme", "github", "Ready", "").
+			AddRow("globex", "github", PhasePending, ""))
+	got, err := store.ListAll(ctx)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	assert.Equal(t, "globex", got[1].TenantID)
+
+	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").WillReturnError(errors.New("db down"))
+	_, err = store.ListAll(ctx)
+	require.Error(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// A report updates a row a tenant made and never creates one.
+func TestStore_ReportStatus(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+
+	mock.ExpectExec("UPDATE tenant_catalog_plugins").WithArgs("acme", "github", "Degraded", "image pull failed").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	updated, err := store.ReportStatus(ctx, "acme", "github", "Degraded", "image pull failed")
+	require.NoError(t, err)
+	assert.True(t, updated)
+
+	mock.ExpectExec("UPDATE tenant_catalog_plugins").WillReturnResult(sqlmock.NewResult(0, 0))
+	updated, err = store.ReportStatus(ctx, "acme", "gitlab", "Ready", "")
+	require.NoError(t, err)
+	assert.False(t, updated, "a report for a pair no tenant enabled changes nothing")
+
+	mock.ExpectExec("UPDATE tenant_catalog_plugins").WillReturnError(errors.New("db down"))
+	_, err = store.ReportStatus(ctx, "acme", "github", "Ready", "")
+	require.Error(t, err)
+
+	_, err = store.ReportStatus(ctx, "acme", "github", "", "")
+	require.Error(t, err, "an empty phase must be refused")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestStore_IsEnabled(t *testing.T) {
+	store, mock := newMockStore(t)
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("acme", "github").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	if got, err := store.IsEnabled(context.Background(), "acme", "github"); err != nil || !got {
+		t.Fatalf("IsEnabled(acme, github) = %v, %v, want true", got, err)
+	}
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("globex", "github").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	if got, err := store.IsEnabled(context.Background(), "globex", "github"); err != nil || got {
+		t.Fatalf("IsEnabled(globex, github) = %v, %v, want false", got, err)
+	}
+
+	mock.ExpectQuery(`SELECT EXISTS`).WithArgs("acme", "github").WillReturnError(errors.New("down"))
+	if got, err := store.IsEnabled(context.Background(), "acme", "github"); err == nil || got {
+		t.Fatalf("IsEnabled with a read error = %v, %v, want false and an error", got, err)
+	}
+
+	if _, err := store.IsEnabled(context.Background(), "", "github"); err == nil {
+		t.Error("IsEnabled accepted an empty tenant")
+	}
+}

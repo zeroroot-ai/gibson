@@ -839,6 +839,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins": {
+		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors": {
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
@@ -867,6 +876,15 @@ var Registry = map[string]Entry{
 		Self:              false,
 	},
 	"/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning": {
+		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
+		Relation:          "platform_operator",
+		ObjectType:        "system_tenant",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
+	"/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus": {
 		Service:           "gibson.daemon.operator.v1.DaemonOperatorService",
 		Relation:          "platform_operator",
 		ObjectType:        "system_tenant",
