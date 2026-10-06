@@ -272,6 +272,33 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 	})
 }
 
+// recordProviderAudit writes the audit record of a provider change durably,
+// BEFORE the change takes effect. The change fails when the record cannot be
+// written, so no provider change exists without its record (gibson#676).
+// With no audit logger wired (dev/test mode) nothing is recorded.
+func (s *DaemonServer) recordProviderAudit(ctx context.Context, tenantID, action, providerName string) error {
+	if s.auditLogger == nil {
+		return nil
+	}
+	if err := s.auditLogger.Record(ctx, action, "provider", providerName, map[string]any{
+		"tenant_id": tenantID,
+	}); err != nil {
+		s.logger.Error("provider audit: durable write failed", "action", action, "error", err.Error())
+		return status_grpc.Errorf(codes.Unavailable, "the audit record of %s could not be written; nothing changed", action)
+	}
+	return nil
+}
+
+// recordProviderFailure records that a provider change failed after its
+// audit record was written.
+func (s *DaemonServer) recordProviderFailure(ctx context.Context, tenantID, action, providerName string) {
+	if s.auditLogger != nil {
+		s.auditLogger.LogWithResult(ctx, action, "provider", providerName, "failure", map[string]any{
+			"tenant_id": tenantID,
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // ListProviders
 // ---------------------------------------------------------------------------
@@ -333,8 +360,12 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err := validateProviderInput(req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.recordProviderAudit(ctx, tenantID, auditProviderCreated, req.GetInput().GetName()); err != nil {
+		return nil, err
+	}
 	cfg, err := s.providerConfig.Create(ctx, tenantID, fromProtoInput(req.GetInput()))
 	if err != nil {
+		s.recordProviderFailure(ctx, tenantID, auditProviderCreated, req.GetInput().GetName())
 		return nil, toGRPCProviderError("create provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
@@ -342,7 +373,6 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	// this provider serves embeddings (gibson#940). Async + idempotent: a no-op
 	// when the index marker already matches.
 	s.maybeTriggerReembed(tenantID, req.GetInput())
-	s.emitProviderAudit(ctx, tenantID, auditProviderCreated, cfg.Name)
 	return &tenantv1.CreateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
@@ -375,15 +405,18 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 	if err := validateProviderInput(req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.recordProviderAudit(ctx, tenantID, auditProviderUpdated, req.GetName()); err != nil {
+		return nil, err
+	}
 	cfg, err := s.providerConfig.Update(ctx, tenantID, req.GetName(), fromProtoInput(req.GetInput()))
 	if err != nil {
+		s.recordProviderFailure(ctx, tenantID, auditProviderUpdated, req.GetName())
 		return nil, toGRPCProviderError("update provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
 	// Reconcile the tenant's vector index against its (possibly changed) embedding
 	// config when this provider serves embeddings (gibson#940). Async + idempotent.
 	s.maybeTriggerReembed(tenantID, req.GetInput())
-	s.emitProviderAudit(ctx, tenantID, auditProviderUpdated, cfg.Name)
 	return &tenantv1.UpdateProviderResponse{Provider: toProtoProviderRecord(cfg)}, nil
 }
 
@@ -402,11 +435,14 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	}
 	name := req.GetName()
+	if err := s.recordProviderAudit(ctx, tenantID, auditProviderDeleted, name); err != nil {
+		return nil, err
+	}
 	if err := s.providerConfig.Delete(ctx, tenantID, name); err != nil {
+		s.recordProviderFailure(ctx, tenantID, auditProviderDeleted, name)
 		return nil, toGRPCProviderError("delete provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
-	s.emitProviderAudit(ctx, tenantID, auditProviderDeleted, name)
 	return &tenantv1.DeleteProviderResponse{}, nil
 }
 
@@ -743,7 +779,11 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	}
 	name := req.GetName()
+	if err := s.recordProviderAudit(ctx, tenantID, auditProviderDefaultChanged, name); err != nil {
+		return nil, err
+	}
 	if err := s.providerConfig.SetDefault(ctx, tenantID, name); err != nil {
+		s.recordProviderFailure(ctx, tenantID, auditProviderDefaultChanged, name)
 		return nil, toGRPCProviderError("set default provider", err)
 	}
 	s.invalidateEmbedderCache(tenantID)
@@ -751,7 +791,6 @@ func (s *DaemonServer) SetDefaultProvider(ctx context.Context, req *tenantv1.Set
 	// (and thus the index dimension), so reconcile unconditionally (gibson#940).
 	// Async + idempotent: a no-op when the resolved embedder still matches the marker.
 	s.triggerReembed(tenantID)
-	s.emitProviderAudit(ctx, tenantID, auditProviderDefaultChanged, name)
 	// Return the updated provider record.
 	cfg, err := s.providerConfig.Get(ctx, tenantID, name)
 	if err != nil {

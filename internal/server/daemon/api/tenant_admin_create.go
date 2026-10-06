@@ -120,6 +120,29 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		return nil, status_grpc.Error(codes.Internal, "failed to create identity in identity provider")
 	}
 
+	// Step 5a: The audit record is durable before the identity gets any
+	// authorization. When it cannot be written, the account rolls back and
+	// nothing is granted (gibson#676). It never holds the bootstrap token.
+	created := audit.Event{
+		TenantID:   tenantID,
+		ActorID:    callerID.Subject,
+		ActorType:  "user",
+		Action:     "agent_identity.created",
+		TargetType: fgaType,
+		TargetID:   sa.AccountID,
+		Decision:   "allow",
+	}
+	if s.tenantAdminAuditWriter != nil {
+		if err := s.tenantAdminAuditWriter.WriteSync(ctx, created); err != nil {
+			s.rollbackServiceAccount(ctx, sa.AccountID, "audit write failed")
+			s.logger.ErrorContext(ctx, "CreateAgentIdentity: durable audit write failed",
+				slog.String("tenant_id", tenantID),
+				slog.String("error", err.Error()),
+			)
+			return nil, status_grpc.Error(codes.Unavailable, "the audit record could not be written; nothing was created")
+		}
+	}
+
 	// Step 5: Write FGA tuples (rollback on failure).
 	//
 	// FGA is the sole authority for a non-human principal's tenancy and
@@ -192,6 +215,11 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 
 		if err := s.authorizer.Write(ctx, tuples); err != nil {
 			s.rollbackServiceAccount(ctx, sa.AccountID, "FGA Write failed")
+			if s.tenantAdminAuditWriter != nil {
+				failed := created
+				failed.Decision = "deny"
+				s.tenantAdminAuditWriter.Log(failed)
+			}
 			s.logger.ErrorContext(ctx, "CreateAgentIdentity: FGA write failed",
 				slog.String("tenant_id", tenantID),
 				slog.String("principal_id", principalID),
@@ -199,19 +227,6 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 			)
 			return nil, status_grpc.Error(codes.Internal, "failed to configure identity authorization")
 		}
-	}
-
-	// Step 6: Emit audit event (non-fatal — never include the bootstrap token).
-	if s.tenantAdminAuditWriter != nil {
-		s.tenantAdminAuditWriter.Log(audit.Event{
-			TenantID:   tenantID,
-			ActorID:    callerID.Subject,
-			ActorType:  "user",
-			Action:     "agent_identity.created",
-			TargetType: fgaType,
-			TargetID:   sa.AccountID,
-			Decision:   "allow",
-		})
 	}
 
 	// Step 7: Mint the first-registration capability-grant bootstrap token

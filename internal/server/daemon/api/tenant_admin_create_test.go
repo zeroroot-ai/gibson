@@ -218,10 +218,20 @@ func (f *fakeIDPClient) Close() error { return nil }
 
 type fakeAuditWriter struct {
 	events []audit.Event
+	// syncErr fails each durable write when set.
+	syncErr error
 }
 
 func (f *fakeAuditWriter) Log(event audit.Event) {
 	f.events = append(f.events, event)
+}
+
+func (f *fakeAuditWriter) WriteSync(_ context.Context, event audit.Event) error {
+	if f.syncErr != nil {
+		return f.syncErr
+	}
+	f.events = append(f.events, event)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

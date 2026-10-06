@@ -364,6 +364,10 @@ type DaemonServer struct {
 // audit.Writer. Using an interface allows tests to inject a no-op.
 type auditWriterIface interface {
 	Log(event audit.Event)
+	// WriteSync writes the event durably and returns the error of the
+	// write. A state change calls it before the change takes effect
+	// (gibson#676).
+	WriteSync(ctx context.Context, event audit.Event) error
 }
 
 // budgetEnforcerIface is the narrow surface ExecuteLLM / StreamLLM use

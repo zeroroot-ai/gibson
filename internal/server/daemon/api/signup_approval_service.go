@@ -262,8 +262,23 @@ func (s *DaemonServer) AdminApproveRegistration(ctx context.Context, req *tenant
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}
 
+	// The approval record is durable before the tenant is created. When it
+	// cannot be written, the registration returns to the queue (gibson#676).
+	if err := s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.approved", ""); err != nil {
+		if rerr := s.signupVerifications.ReleaseApproval(ctx, row.ID); rerr != nil {
+			s.logger.ErrorContext(ctx, "AdminApproveRegistration: releasing the claimed registration failed; it will not return to the queue",
+				"registration_id", row.ID, "error", rerr.Error())
+		}
+		return nil, err
+	}
+
 	resp, aerr := s.applyRegistrationApproval(ctx, row)
 	if aerr != nil {
+		if s.tenantAdminAuditWriter != nil {
+			failed := s.registrationDecisionEvent(ctx, decidedBy, row, "signup_registration.approved", "")
+			failed.Decision = "deny"
+			s.tenantAdminAuditWriter.Log(failed)
+		}
 		// Put the registration back in the queue so the decision can be made
 		// again. A release that itself fails leaves a decided row with no
 		// tenant, which is why it is logged at error level.
@@ -274,7 +289,6 @@ func (s *DaemonServer) AdminApproveRegistration(ctx context.Context, req *tenant
 		return nil, aerr
 	}
 
-	s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.approved", "")
 	s.logger.InfoContext(ctx, "AdminApproveRegistration: tenant enqueued for operator-pull provisioning",
 		"registration_id", row.ID, "tenant_id", resp.GetTenantId())
 	return resp, nil
@@ -366,7 +380,12 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 		return nil, status.Error(codes.Internal, "failed to reject the registration")
 	}
 
-	s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.rejected", req.GetReason())
+	// The rejection is on the row already, and the store has no read of a
+	// pending row to record first. A failed record fails the call so the
+	// operator sees it (gibson#676).
+	if err := s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.rejected", req.GetReason()); err != nil {
+		return nil, err
+	}
 	s.logger.InfoContext(ctx, "AdminRejectRegistration: registration refused",
 		"registration_id", row.ID)
 	return &tenantv1.AdminRejectRegistrationResponse{}, nil
@@ -383,15 +402,10 @@ func signupDeciderID(ctx context.Context) (string, error) {
 	return identity.Subject, nil
 }
 
-// recordRegistrationDecision emits the audit event for one decision.
-//
-// Non-fatal, like every other audit write on this surface: the decision is
-// already recorded on the registration row, and failing the call after the
-// decision landed would tell the administrator to make it again.
-//
-// The event carries no credential material and no token. It names the
-// administrator, the address they decided on and the workspace it asked for.
-func (s *DaemonServer) recordRegistrationDecision(ctx context.Context, decidedBy string, row SignupVerification, action, reason string) {
+// registrationDecisionEvent is the audit event for one decision. It carries
+// no credential material and no token. It names the administrator, the
+// address they decided on and the workspace it asked for.
+func (s *DaemonServer) registrationDecisionEvent(ctx context.Context, decidedBy string, row SignupVerification, action, reason string) audit.Event {
 	details := map[string]string{
 		"owner_email":    row.Email,
 		"workspace_name": row.WorkspaceName,
@@ -402,22 +416,31 @@ func (s *DaemonServer) recordRegistrationDecision(ctx context.Context, decidedBy
 	}
 	metadata, err := json.Marshal(details)
 	if err != nil {
-		// The decision is already recorded on the row; a metadata failure is
-		// not a reason to fail the call.
 		s.logger.WarnContext(ctx, "registration decision: audit metadata could not be encoded",
 			"registration_id", row.ID, "error", err.Error())
 		metadata = nil
 	}
-	if s.tenantAdminAuditWriter != nil {
-		s.tenantAdminAuditWriter.Log(audit.Event{
-			TenantID:   signupSlugify(row.WorkspaceName),
-			ActorID:    decidedBy,
-			ActorType:  "user",
-			Action:     action,
-			TargetType: "signup_registration",
-			TargetID:   row.ID,
-			Decision:   "allow",
-			Metadata:   metadata,
-		})
+	return audit.Event{
+		TenantID:   signupSlugify(row.WorkspaceName),
+		ActorID:    decidedBy,
+		ActorType:  "user",
+		Action:     action,
+		TargetType: "signup_registration",
+		TargetID:   row.ID,
+		Decision:   "allow",
+		Metadata:   metadata,
 	}
+}
+
+// recordRegistrationDecision writes the audit record of one decision
+// durably (gibson#676). The caller fails the call when it returns an error.
+func (s *DaemonServer) recordRegistrationDecision(ctx context.Context, decidedBy string, row SignupVerification, action, reason string) error {
+	if s.tenantAdminAuditWriter != nil {
+		if err := s.tenantAdminAuditWriter.WriteSync(ctx, s.registrationDecisionEvent(ctx, decidedBy, row, action, reason)); err != nil {
+			s.logger.ErrorContext(ctx, "registration decision: durable audit write failed",
+				"registration_id", row.ID, "error", err.Error())
+			return status.Error(codes.Unavailable, "the audit record of the decision could not be written")
+		}
+	}
+	return nil
 }
