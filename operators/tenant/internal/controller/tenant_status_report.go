@@ -27,29 +27,17 @@ import (
 
 // TenantStatusReporter reports observed Tenant status to the daemon.
 // provision.EntitlementsGRPCClient satisfies it; tests pass a stub. It is
-// ALWAYS non-nil on the reconcile path: main.go injects
-// NoopTenantStatusReporter when the operator boots without a daemon address
-// (GIBSON_DAEMON_GRPC_ADDRESS unset), so report-back is disabled by
-// substituting a no-op rather than a nil-guard (no graceful-nil in the
-// reconcile path — production-readiness [[0003]]).
+// always set on the reconcile path: the operator does not start without a
+// daemon address (GIBSON_DAEMON_GRPC_ADDRESS), so no implementation exists
+// that reports nothing ([[0003]]).
 type TenantStatusReporter interface {
 	ReportTenantStatus(ctx context.Context, r provision.TenantStatusReport) error
-}
-
-// NoopTenantStatusReporter is the report-back-disabled implementation injected
-// when the operator has no daemon address. It reports nothing, so
-// reportStatusToDaemon becomes a cheap local no-op without a nil dependency.
-type NoopTenantStatusReporter struct{}
-
-// ReportTenantStatus does nothing.
-func (NoopTenantStatusReporter) ReportTenantStatus(context.Context, provision.TenantStatusReport) error {
-	return nil
 }
 
 // reportStatusToDaemon pushes the Tenant's observed status into the daemon so
 // the dashboard can read it without Kubernetes access. Best-effort: a daemon
 // blip logs and returns; it never fails the reconcile. StatusReporter is
-// always non-nil (NoopTenantStatusReporter when report-back is disabled).
+// always set: the operator does not start without the daemon client.
 func (r *TenantReconciler) reportStatusToDaemon(ctx context.Context, tenant *gibsonv1alpha1.Tenant) {
 	logger := log.FromContext(ctx).WithName("tenant-status-report")
 	err := r.StatusReporter.ReportTenantStatus(ctx, provision.TenantStatusReport{

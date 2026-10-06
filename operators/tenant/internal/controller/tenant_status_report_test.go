@@ -52,17 +52,6 @@ func assertNoAnnotations(t *testing.T, c client.Client) {
 	}
 }
 
-func TestReportStatusToDaemon_NoopReporter(t *testing.T) {
-	scheme := setupScheme(t)
-	tenant := tenantWithStatus()
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
-	// NoopTenantStatusReporter is what main.go injects when report-back is
-	// disabled (no daemon address). It must no-op and never panic.
-	r := &TenantReconciler{Client: c, StatusReporter: NoopTenantStatusReporter{}}
-	r.reportStatusToDaemon(context.Background(), tenant)
-	assertNoAnnotations(t, c)
-}
-
 func TestReportStatusToDaemon_MapsStatusFields(t *testing.T) {
 	scheme := setupScheme(t)
 	tenant := tenantWithStatus()

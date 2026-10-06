@@ -68,9 +68,9 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
-		// Production always injects a reporter (cmd/main.go). The no-op one
-		// is what it injects when report-back is off.
-		StatusReporter: NoopTenantStatusReporter{},
+		// Production always injects the daemon client as the reporter
+		// (cmd/main.go).
+		StatusReporter: &stubReporter{},
 		// Production always injects the backup gate (cmd/main.go). This stub
 		// reports a complete backup.
 		FinalBackup: &stubFinalBackup{done: true},
@@ -367,6 +367,7 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		StatusReporter:       &stubReporter{},
 	}
 
 	_, err := r.Reconcile(context.Background(), reconcile.Request{
@@ -419,6 +420,7 @@ func TestReconcile_CorrelationID_GeneratedWhenMissing(t *testing.T) {
 		Scheme:               scheme,
 		Runner:               runner,
 		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		StatusReporter:       &stubReporter{},
 	}
 
 	_, err := r.Reconcile(context.Background(), reconcile.Request{

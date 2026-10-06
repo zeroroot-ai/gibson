@@ -105,9 +105,9 @@ type TenantReconciler struct {
 
 	// StatusReporter pushes observed Tenant status to the daemon so the
 	// dashboard can read provisioning status without Kubernetes access
-	// (gibson#948, dashboard#813). Always non-nil on the
-	// reconcile path: main.go injects NoopTenantStatusReporter when the operator
-	// boots without GIBSON_DAEMON_GRPC_ADDRESS (report-back disabled).
+	// (gibson#948, dashboard#813). Required: main.go sets it to the daemon
+	// client, and the operator does not start without
+	// GIBSON_DAEMON_GRPC_ADDRESS.
 	StatusReporter TenantStatusReporter
 }
 
@@ -277,7 +277,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// Production always injects the mailer (SMTP_HOST is boot-required, see
 	// cmd/require_smtp.go); the positive guard keeps unit tests that omit it
 	// from dereferencing nil, matching this reconciler's other
-	// optional-collaborator gates (r.StatusReporter, r.MigrationEmitter).
+	// optional-collaborator gate (r.MigrationEmitter).
 	welcomeRetry := false
 	if err == nil && r.Mail != nil && tenant.Status.Phase == gibsonv1alpha1.TenantPhaseReady {
 		welcomeRetry = r.sendWelcomeEmail(ctx, &tenant)
@@ -293,13 +293,9 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 
 	// Report the observed status to the daemon so the dashboard can read it
 	// without Kubernetes access (gibson#948, dashboard#813). Best-effort: a
-	// daemon blip logs and never fails the reconcile. Production always injects a
-	// reporter (NoopTenantStatusReporter when report-back is disabled); the
-	// positive guard keeps unit tests that omit it from dereferencing nil,
-	// matching the operator's other optional-collaborator gates (r.Provisioner).
-	if r.StatusReporter != nil {
-		r.reportStatusToDaemon(ctx, &tenant)
-	}
+	// daemon blip logs and never fails the reconcile. The reporter is always
+	// set: the operator does not start without the daemon client.
+	r.reportStatusToDaemon(ctx, &tenant)
 
 	// Requeue until the children converge so the Tenant flips to Ready without
 	// waiting for an unrelated watch event.
