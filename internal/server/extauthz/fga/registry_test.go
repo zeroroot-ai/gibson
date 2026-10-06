@@ -257,3 +257,19 @@ func TestEntry_NeedsTenant(t *testing.T) {
 		}
 	}
 }
+
+// Only the system_tenant deriver names the one system object. Every other
+// deriver, and no deriver, does not (gibson#761).
+func TestEntry_DerivesSystemObject(t *testing.T) {
+	for deriver, want := range map[string]bool{
+		"system_tenant":                true,
+		"tenant_from_identity":         false,
+		"tenant_and_field(mission_id)": false,
+		"field(target_id)":             false,
+		"":                             false,
+	} {
+		if got := (Entry{ObjectDeriver: deriver}).DerivesSystemObject(); got != want {
+			t.Errorf("%q: DerivesSystemObject = %v, want %v", deriver, got, want)
+		}
+	}
+}

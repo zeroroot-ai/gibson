@@ -60,14 +60,13 @@ const (
 
 // Bounds on the signup-progress store.
 //
-// SetSignupProgress is a pre-authentication surface: it is annotated
-// unauthenticated in the authz registry because it runs before any identity
-// exists, and it keys on an attempt_id the caller invents. There is therefore
-// no subject to scope a key to and no owner to check a write against — the
-// UUID shape is the only thing distinguishing one caller's key from another's,
-// and it is not a secret in any meaningful sense.
+// SetSignupProgress runs during signup, before the person has a tenant, and it
+// keys on an attempt_id that the dashboard invents. Only the dashboard server
+// calls it, with its own service identity (signup_service on
+// system_tenant:_system, gibson#761). There is no person to scope a key to,
+// so the UUID shape is the only thing that separates one attempt from another.
 //
-// What is left is to bound what an unattributable caller can occupy: how long
+// The bounds below limit what one caller can occupy: how long
 // a document lives, how large it is, and how many can exist at once. Each of
 // the three was previously unbounded — in particular ttl_seconds was taken
 // verbatim, so a caller chose how long its key stayed resident in a Redis the
@@ -528,7 +527,8 @@ func activityKindStr(k tenantv1.ActivityKind) string {
 // ============================================================================
 
 // GetSignupProgress implements UserServiceServer.
-// This RPC is unauthenticated — no tenant/user context is needed.
+// Only the dashboard service identity reaches it (signup_service on
+// system_tenant:_system, gibson#761). The call carries no tenant.
 func (s *DaemonServer) GetSignupProgress(
 	ctx context.Context,
 	req *tenantv1.GetSignupProgressRequest,

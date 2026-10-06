@@ -3433,11 +3433,11 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.UserService/GetSignupProgress": {
     method: "/gibson.tenant.v1.UserService/GetSignupProgress",
     service: "gibson.tenant.v1.UserService",
-    relation: "",
-    objectType: "",
-    objectDeriver: "",
-    allowedIdentities: 0,
-    unauthenticated: true,
+    relation: "signup_service",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.SERVICE,
+    unauthenticated: false,
     self: false,
   },
   "/gibson.tenant.v1.UserService/GetUserActivity": {
@@ -3623,11 +3623,11 @@ export const AuthRegistry: Record<string, AuthEntry> = {
   "/gibson.tenant.v1.UserService/SetSignupProgress": {
     method: "/gibson.tenant.v1.UserService/SetSignupProgress",
     service: "gibson.tenant.v1.UserService",
-    relation: "",
-    objectType: "",
-    objectDeriver: "",
-    allowedIdentities: 0,
-    unauthenticated: true,
+    relation: "signup_service",
+    objectType: "system_tenant",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.SERVICE,
+    unauthenticated: false,
     self: false,
   },
   "/gibson.tenant.v1.UserService/StageAttachment": {

@@ -1098,8 +1098,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// RPC (E9, gibson#812). Same DaemonServer instance: the handler uses the IdP
 	// admin client wired below to provision the founding-owner Zitadel user. The
 	// daemon performs NO Kubernetes write (ADR-0023); the dashboard keeps the
-	// Tenant CR. Signup is annotated unauthenticated in the registry (like
-	// SetSignupProgress), so ext-authz lets it through pre-tenant.
+	// Tenant CR. Signup is annotated unauthenticated in the registry, so
+	// ext-authz lets it through pre-tenant.
 	tenantv1.RegisterSignupServiceServer(srv, daemonSvc)
 
 	// Resolve and wire the signup seam policy (ADR-0074, gibson#1094).

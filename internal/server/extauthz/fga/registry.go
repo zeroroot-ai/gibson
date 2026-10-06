@@ -286,3 +286,11 @@ func (e Entry) NeedsTenant() bool {
 	}
 	return false
 }
+
+// DerivesSystemObject reports whether the rule's object is the one system
+// object "<object_type>:_system". Such a rule asks FGA one question about one
+// fixed object, so it needs no tenant. ext-authz lets a service account with
+// no tenant header reach FGA on such a rule only (gibson#761).
+func (e Entry) DerivesSystemObject() bool {
+	return e.ObjectDeriver == "system_tenant"
+}

@@ -107,7 +107,7 @@ type MembershipServiceClient interface {
 	// (if new) and projects full membership (FGA tuple + per-tenant org
 	// membership), transitioning the member to "active". The token is the
 	// capability, so this RPC is unauthenticated (the invitee is not yet a
-	// member of any tenant) — exactly like GetSignupProgress.
+	// member of any tenant).
 	AcceptInvitation(ctx context.Context, in *AcceptInvitationRequest, opts ...grpc.CallOption) (*AcceptInvitationResponse, error)
 	// ResendInvitation re-sends the invitation email for a pending invitation
 	// without creating a duplicate.
@@ -430,7 +430,7 @@ type MembershipServiceServer interface {
 	// (if new) and projects full membership (FGA tuple + per-tenant org
 	// membership), transitioning the member to "active". The token is the
 	// capability, so this RPC is unauthenticated (the invitee is not yet a
-	// member of any tenant) — exactly like GetSignupProgress.
+	// member of any tenant).
 	AcceptInvitation(context.Context, *AcceptInvitationRequest) (*AcceptInvitationResponse, error)
 	// ResendInvitation re-sends the invitation email for a pending invitation
 	// without creating a duplicate.

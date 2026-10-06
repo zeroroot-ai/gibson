@@ -44,9 +44,9 @@ syntax = "proto3";
 //   passed.
 //
 // Authorization: all three RPCs are UNAUTHENTICATED. They run before any tenant
-// or membership exists, so there is no principal to FGA-check (like
-// UserService.SetSignupProgress). The capability is the emailed token, then the
-// session token derived from it, both held only by whoever received the mail.
+// or membership exists, so there is no principal to FGA-check. The capability
+// is the emailed token, then the session token derived from it, both held only
+// by whoever received the mail.
 // The handlers enforce rate limits, expiry and single-use themselves.
 package gibson.tenant.v1;
 
@@ -126,8 +126,7 @@ service SignupService {
   }
 
   // GetSignupStep reports the state of the external signup step of one
-  // signup attempt. The attempt id is the capability, as for
-  // GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+  // signup attempt. The attempt id is the capability. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
   // the answer does not tell a caller which attempts exist.
   rpc GetSignupStep(GetSignupStepRequest) returns (GetSignupStepResponse) {
     option (gibson.auth.v1.authz) = {

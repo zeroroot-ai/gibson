@@ -40,37 +40,17 @@ var allowedUnauthenticated = map[string]bool{
 	// gibson.admin.v1.TenantAdminService to gibson.tenant.v1.MembershipService.
 	"/gibson.tenant.v1.MembershipService/GetReservedNames": true,
 
-	// GetSignupProgress is intentionally unauthenticated.
-	// Polled by the browser during the signup flow (before the user has an account).
-	// The attempt_id is an opaque UUID-v4 capability functioning as a single-use token;
-	// the response carries only step names + error codes, never PII.
-	// Spec: dashboard-no-backing-store-clients (Module 2 — Signup Progress RPC).
-	// ADR-0058: promoted from daemon-local gibson.user.v1.UserService to
-	// gibson.tenant.v1.UserService. The daemon-local user/v1 proto package was
-	// deleted in gibson#502, so tenant.v1 is the only entry.
-	"/gibson.tenant.v1.UserService/GetSignupProgress": true,
-
-	// SetSignupProgress is intentionally unauthenticated, matching its Get
-	// sibling above. Signup writes progress before any tenant/membership
-	// exists (founding-user flow); the daemon must parse identity loosely
-	// (subject-only, no x-gibson-identity-tenant) for this RPC. The attempt_id
-	// is an opaque single-use capability; the payload is non-sensitive step
-	// labels. Was member/tenant-scoped — flipped in sdk#275 (dashboard#646).
-	"/gibson.tenant.v1.UserService/SetSignupProgress": true,
-
 	// AcceptInvitation is intentionally unauthenticated: a user follows an
 	// invitation link (carrying the invite token) BEFORE they have a session
 	// or membership in the inviting tenant — there is no JWT to present. The
 	// invitation TOKEN is the capability, enforced by the handler itself
 	// (internal/server/admin/invitation_handlers.go: GetByTokenHash + pending +
-	// expiry checks; PermissionDenied on an unknown/invalid token). Same
-	// token-capability pattern as SetSignupProgress above. The annotation
+	// expiry checks; PermissionDenied on an unknown/invalid token). The annotation
 	// shipped in the proto (gibson/tenant/v1/membership.proto, ADR-0058
 	// decomposed MembershipService); this guard list lagged it.
 	"/gibson.tenant.v1.MembershipService/AcceptInvitation": true,
 
-	// Signup is intentionally unauthenticated, matching SetSignupProgress
-	// above: it provisions a tenant during self-serve signup, BEFORE any
+	// Signup is intentionally unauthenticated: it provisions a tenant during self-serve signup, BEFORE any
 	// tenant or membership exists, so there is no principal to FGA-check. The
 	// attempt_id UUID is the single-use capability; the daemon holds the
 	// provisioning privilege so the caller no longer needs the Zitadel
@@ -105,8 +85,7 @@ var allowedUnauthenticated = map[string]bool{
 	//   - RedeemEmailVerification's capability is the raw token, which the
 	//     daemon mailed to the address itself. The handler enforces
 	//     single-use (an atomic compare-and-set) and expiry.
-	//   - GetSignupStep's capability is the attempt id, as for
-	//     GetSignupProgress. It returns only the state of the external step
+	//   - GetSignupStep's capability is the attempt id. It returns only the state of the external step
 	//     (D54): none, waiting, done or failed.
 	//
 	// Provisioning is unreachable without passing this chain, which is the

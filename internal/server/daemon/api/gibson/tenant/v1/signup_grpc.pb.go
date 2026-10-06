@@ -48,9 +48,9 @@
 //   passed.
 //
 // Authorization: all three RPCs are UNAUTHENTICATED. They run before any tenant
-// or membership exists, so there is no principal to FGA-check (like
-// UserService.SetSignupProgress). The capability is the emailed token, then the
-// session token derived from it, both held only by whoever received the mail.
+// or membership exists, so there is no principal to FGA-check. The capability
+// is the emailed token, then the session token derived from it, both held only
+// by whoever received the mail.
 // The handlers enforce rate limits, expiry and single-use themselves.
 
 package tenantv1
@@ -132,8 +132,7 @@ type SignupServiceClient interface {
 	// response carries step_url and step_token.
 	Signup(ctx context.Context, in *SignupRequest, opts ...grpc.CallOption) (*SignupResponse, error)
 	// GetSignupStep reports the state of the external signup step of one
-	// signup attempt. The attempt id is the capability, as for
-	// GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+	// signup attempt. The attempt id is the capability. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
 	// the answer does not tell a caller which attempts exist.
 	GetSignupStep(ctx context.Context, in *GetSignupStepRequest, opts ...grpc.CallOption) (*GetSignupStepResponse, error)
 	// Register is the APPROVAL rung's single registration call (ADR-0074,
@@ -279,8 +278,7 @@ type SignupServiceServer interface {
 	// response carries step_url and step_token.
 	Signup(context.Context, *SignupRequest) (*SignupResponse, error)
 	// GetSignupStep reports the state of the external signup step of one
-	// signup attempt. The attempt id is the capability, as for
-	// GetSignupProgress. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
+	// signup attempt. The attempt id is the capability. An unknown attempt reads as SIGNUP_STEP_STATE_NONE, so
 	// the answer does not tell a caller which attempts exist.
 	GetSignupStep(context.Context, *GetSignupStepRequest) (*GetSignupStepResponse, error)
 	// Register is the APPROVAL rung's single registration call (ADR-0074,

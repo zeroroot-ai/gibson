@@ -217,20 +217,27 @@ service UserService {
   // Signup Progress
   // ---------------------------------------------------------------------------
 
+  // GetSignupProgress and SetSignupProgress run during signup, before any
+  // tenant or membership exists, and the attempt id keys the document. Only
+  // the dashboard server calls them, with the service identity of its own
+  // machine user (D11, gibson#761). That identity holds signup_service on
+  // system_tenant:_system, so ext-authz refuses a call with no token, the
+  // token of a person and the token of a different service. The call carries
+  // no tenant: the rule derives its object from the system tenant.
   rpc GetSignupProgress(GetSignupProgressRequest) returns (GetSignupProgressResponse) {
     option (gibson.auth.v1.authz) = {
-      unauthenticated: true
+      relation: "signup_service",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
     };
   }
-  // Signup progress is written DURING signup, before any tenant or membership
-  // exists (the founding-user flow keys it by a random attemptId, not a tenant).
-  // It must therefore be unauthenticated — matching GetSignupProgress above.
-  // Previously member/tenant-scoped, which deadlocked every signup once the
-  // tenant-selector became fail-closed (dashboard#646). The attemptId UUID is
-  // the capability; the payload is non-sensitive step labels.
   rpc SetSignupProgress(SetSignupProgressRequest) returns (SetSignupProgressResponse) {
     option (gibson.auth.v1.authz) = {
-      unauthenticated: true
+      relation: "signup_service",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 2  // SERVICE
     };
   }
 

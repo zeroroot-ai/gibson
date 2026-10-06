@@ -84,13 +84,14 @@ type UserServiceClient interface {
 	ResetUserLayout(ctx context.Context, in *ResetUserLayoutRequest, opts ...grpc.CallOption) (*ResetUserLayoutResponse, error)
 	GetUserActivity(ctx context.Context, in *GetUserActivityRequest, opts ...grpc.CallOption) (*GetUserActivityResponse, error)
 	RecordUserActivity(ctx context.Context, in *RecordUserActivityRequest, opts ...grpc.CallOption) (*RecordUserActivityResponse, error)
+	// GetSignupProgress and SetSignupProgress run during signup, before any
+	// tenant or membership exists, and the attempt id keys the document. Only
+	// the dashboard server calls them, with the service identity of its own
+	// machine user (D11, gibson#761). That identity holds signup_service on
+	// system_tenant:_system, so ext-authz refuses a call with no token, the
+	// token of a person and the token of a different service. The call carries
+	// no tenant: the rule derives its object from the system tenant.
 	GetSignupProgress(ctx context.Context, in *GetSignupProgressRequest, opts ...grpc.CallOption) (*GetSignupProgressResponse, error)
-	// Signup progress is written DURING signup, before any tenant or membership
-	// exists (the founding-user flow keys it by a random attemptId, not a tenant).
-	// It must therefore be unauthenticated — matching GetSignupProgress above.
-	// Previously member/tenant-scoped, which deadlocked every signup once the
-	// tenant-selector became fail-closed (dashboard#646). The attemptId UUID is
-	// the capability; the payload is non-sensitive step labels.
 	SetSignupProgress(ctx context.Context, in *SetSignupProgressRequest, opts ...grpc.CallOption) (*SetSignupProgressResponse, error)
 	InvalidateMembershipCache(ctx context.Context, in *InvalidateMembershipCacheRequest, opts ...grpc.CallOption) (*InvalidateMembershipCacheResponse, error)
 	StageAttachment(ctx context.Context, in *StageAttachmentRequest, opts ...grpc.CallOption) (*StageAttachmentResponse, error)
@@ -449,13 +450,14 @@ type UserServiceServer interface {
 	ResetUserLayout(context.Context, *ResetUserLayoutRequest) (*ResetUserLayoutResponse, error)
 	GetUserActivity(context.Context, *GetUserActivityRequest) (*GetUserActivityResponse, error)
 	RecordUserActivity(context.Context, *RecordUserActivityRequest) (*RecordUserActivityResponse, error)
+	// GetSignupProgress and SetSignupProgress run during signup, before any
+	// tenant or membership exists, and the attempt id keys the document. Only
+	// the dashboard server calls them, with the service identity of its own
+	// machine user (D11, gibson#761). That identity holds signup_service on
+	// system_tenant:_system, so ext-authz refuses a call with no token, the
+	// token of a person and the token of a different service. The call carries
+	// no tenant: the rule derives its object from the system tenant.
 	GetSignupProgress(context.Context, *GetSignupProgressRequest) (*GetSignupProgressResponse, error)
-	// Signup progress is written DURING signup, before any tenant or membership
-	// exists (the founding-user flow keys it by a random attemptId, not a tenant).
-	// It must therefore be unauthenticated — matching GetSignupProgress above.
-	// Previously member/tenant-scoped, which deadlocked every signup once the
-	// tenant-selector became fail-closed (dashboard#646). The attemptId UUID is
-	// the capability; the payload is non-sensitive step labels.
 	SetSignupProgress(context.Context, *SetSignupProgressRequest) (*SetSignupProgressResponse, error)
 	InvalidateMembershipCache(context.Context, *InvalidateMembershipCacheRequest) (*InvalidateMembershipCacheResponse, error)
 	StageAttachment(context.Context, *StageAttachmentRequest) (*StageAttachmentResponse, error)
