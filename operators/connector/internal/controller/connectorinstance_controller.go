@@ -52,10 +52,17 @@ const (
 
 	condRevoked = "GrantRevoked"
 
-	// toolhiveAPIVersion is the ToolHive CRD version this operator pins. The
-	// chart serves v1alpha1 as of ToolHive 0.12.1 (ADR-0114, Spike 1). The
+	// toolhiveAPIVersion is the ToolHive CRD version this operator pins
+	// (ADR-0114, owner decision of 2026-10-05, gibson#680). The
 	// ConnectorInstance wrapper absorbs a future bump.
 	toolhiveAPIVersion = "toolhive.stacklok.dev/v1alpha1"
+
+	// toolhiveChartVersion is the release of the ToolHive CRD chart that an
+	// install puts on the cluster (hosted: scripts/recreate-*.sh,
+	// TOOLHIVE_VERSION). TestToolHiveAPIVersion_IsServedByThePinnedChart
+	// fails when that chart does not serve toolhiveAPIVersion. To move
+	// ToolHive, run scripts/toolhive-served-versions.sh with the new version.
+	toolhiveChartVersion = "0.12.1"
 
 	kindMCPServer      = "MCPServer"
 	kindMCPRemoteProxy = "MCPRemoteProxy"
