@@ -20,6 +20,12 @@ package brain
 // parallel codepath (ADR-0027) duplicating that loop. Scoring here answers "how
 // well-calibrated was the stake", a separate question from "what to learn".
 //
+// The quality gate of the belief artifact versions (belief_quality.go,
+// gibson#789) also uses the Brier score: it scores a new version and the
+// current version on the settled bets, and accepts the new version only when
+// its score is not worse. That use accepts or rejects a version. It is not a
+// training input: no training read returns the score, and no fit reads it.
+//
 // The score is computed HERE, at settlement time, from the confidence the
 // caller declares was staked (BetSettlement.PredictedProbability) and the
 // verdict the settlement itself just decided — never read back from
