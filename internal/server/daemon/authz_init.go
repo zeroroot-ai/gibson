@@ -82,12 +82,11 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 
 	// Construct the real FGA authorizer.
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
-		Endpoint:   cfg.Fga.Endpoint,
-		StoreID:    storeID,
-		ModelID:    modelID,
-		TimeoutMs:  cfg.Fga.TimeoutMs,
-		TLSEnabled: cfg.Fga.TLS.Enabled,
-		Logger:     d.logger.Slog(),
+		Endpoint:  cfg.Fga.Endpoint,
+		StoreID:   storeID,
+		ModelID:   modelID,
+		TimeoutMs: cfg.Fga.TimeoutMs,
+		Logger:    d.logger.Slog(),
 	})
 	if err != nil {
 		return fmt.Errorf("authorization service: failed to construct FGA client (FGA is required — no fallback): %w", err)

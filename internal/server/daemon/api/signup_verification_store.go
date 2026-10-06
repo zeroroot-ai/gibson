@@ -207,8 +207,6 @@ type SignupVerification struct {
 	Status          string
 	ExpiresAt       time.Time
 	CompletionCount int
-	SendCount       int
-	LastSentAt      time.Time
 	CreatedAt       time.Time
 
 	// OwnerUserID is the identity-provider user created at registration time

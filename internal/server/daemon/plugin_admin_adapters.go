@@ -416,7 +416,6 @@ func (v *pluginManifestValidator) Validate(manifestYAML []byte) (admin.Validated
 		DeclaredMethods: methods,
 		DeclaredSecrets: declaredSecrets,
 		RuntimeMode:     raw.Spec.Runtime,
-		SetecRequired:   raw.Spec.Policy.SetecRequired,
 		ManifestHash:    hex.EncodeToString(hash[:]),
 	}, nil
 }

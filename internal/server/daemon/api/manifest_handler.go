@@ -97,10 +97,9 @@ func (s *DaemonServer) resolveManifestSubject(id auth.Identity, req *manifestpb.
 			return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "impersonation requires tenant admin")
 		}
 		return manifest.ManifestSubject{
-			Type:        manifest.SubjectTypeAgentPrincipal,
-			ID:          req.GetAgentPrincipalId(),
-			TenantID:    tenantID,
-			OwnerUserID: id.Subject, // admin owns the preview query
+			Type:     manifest.SubjectTypeAgentPrincipal,
+			ID:       req.GetAgentPrincipalId(),
+			TenantID: tenantID,
 			// Both fields are what makes this issuance attributable: the
 			// admin who asked, and the principal they asked as. Without them
 			// an impersonated manifest is indistinguishable from the agent
@@ -121,10 +120,9 @@ func (s *DaemonServer) resolveManifestSubject(id auth.Identity, req *manifestpb.
 		// or use a manifest-specific lookup. The Builder will return
 		// InvalidArgument when OwnerUserID is empty.
 		return manifest.ManifestSubject{
-			Type:        manifest.SubjectTypeAgentPrincipal,
-			ID:          apID,
-			TenantID:    tenantID,
-			OwnerUserID: "", // resolved by Builder from agent-auth store
+			Type:     manifest.SubjectTypeAgentPrincipal,
+			ID:       apID,
+			TenantID: tenantID,
 			Actor: manifest.Actor{
 				Type: manifest.SubjectTypeAgentPrincipal,
 				ID:   apID,

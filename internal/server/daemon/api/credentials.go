@@ -37,39 +37,32 @@ func NewCredentialHandler(service *secrets.Service) (*CredentialHandler, error) 
 
 // CredentialCreateRequest contains the data needed to create a credential.
 type CredentialCreateRequest struct {
-	Name        string
-	Type        types.CredentialType
-	Provider    string
-	APIKey      string // The plaintext API key to store (encrypted by the broker)
-	Description string
-	Tags        []string
+	Name     string
+	Type     types.CredentialType
+	Provider string
+	APIKey   string // The plaintext API key to store (encrypted by the broker)
+	Tags     []string
 }
 
 // CredentialResponse is the response for credential operations.
 // It never includes the decrypted API key.
 type CredentialResponse struct {
-	ID            types.ID
-	Name          string
-	Type          types.CredentialType
-	Provider      string
-	Status        types.CredentialStatus
-	Description   string
-	MaskedKey     string
-	Tags          []string
-	NeedsRotation bool
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	LastUsed      *time.Time
+	ID        types.ID
+	Name      string
+	Type      types.CredentialType
+	Status    types.CredentialStatus
+	MaskedKey string
+	Tags      []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // CredentialUpdateRequest contains the data for updating a credential.
 type CredentialUpdateRequest struct {
-	ID          types.ID
-	Name        *string // Optional, nil means no change
-	Description *string
-	APIKey      *string // Optional, nil means no change to the stored value
-	Tags        []string
-	Status      *types.CredentialStatus
+	ID     types.ID
+	Name   *string // Optional, nil means no change
+	APIKey *string // Optional, nil means no change to the stored value
+	Status *types.CredentialStatus
 }
 
 // Create creates a new credential. The APIKey is stored encrypted by the broker.
@@ -93,7 +86,6 @@ func (h *CredentialHandler) Create(ctx context.Context, req CredentialCreateRequ
 		ID:        types.NewID(),
 		Name:      req.Name,
 		Type:      req.Type,
-		Provider:  req.Provider,
 		Status:    types.CredentialStatusActive,
 		MaskedKey: maskAPIKey(req.APIKey),
 		Tags:      req.Tags,

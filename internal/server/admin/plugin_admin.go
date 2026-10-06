@@ -106,9 +106,6 @@ type ValidatedManifest struct {
 	// RuntimeMode is one of: process, pod, setec.
 	RuntimeMode string
 
-	// SetecRequired mirrors spec.policy.setec_required.
-	SetecRequired bool
-
 	// ManifestHash is the SHA-256 hex digest of manifestYAML. Used by the
 	// daemon to dedupe upserts.
 	ManifestHash string

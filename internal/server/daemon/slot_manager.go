@@ -104,7 +104,6 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 	picked := modelgate.Candidate{
 		Provider: provider.Name(),
 		Model:    model.Name,
-		Rank:     0,
 	}
 	allowed := true
 	if m.modelFilter != nil {
