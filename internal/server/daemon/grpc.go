@@ -1511,7 +1511,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// through GetConnectorCredential and writes the Secret (gibson#663). The
 	// handler serves the direct-dial connector operator SVID only.
 	if d.secretsService != nil {
-		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID)
+		daemonSvc.WithConnectorCredentialSource(d.secretsService, connectorOperatorSVID(d.spiffeTrustDomain()))
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
