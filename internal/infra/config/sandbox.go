@@ -6,10 +6,9 @@ package config
 import (
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
 
 // SandboxConfig configures the Gibson daemon's sandboxed-tool execution
@@ -66,9 +65,14 @@ type SandboxDevboxConfig struct {
 // SandboxSetecConfig describes how to reach and authenticate to the Setec
 // frontend that this daemon dispatches sandboxed tool calls into.
 type SandboxSetecConfig struct {
-	Address     string              `mapstructure:"address" yaml:"address"`
-	CallTimeout time.Duration       `mapstructure:"call_timeout" yaml:"call_timeout"`
-	MTLS        component.TLSConfig `mapstructure:"mtls" yaml:"mtls"`
+	Address     string        `mapstructure:"address" yaml:"address"`
+	CallTimeout time.Duration `mapstructure:"call_timeout" yaml:"call_timeout"`
+
+	// SpiffeID is the SPIFFE ID of the setec fleet (ADR-0142). The daemon
+	// dials the fleet with its own SVID from the Workload API and accepts no
+	// other server. It holds the trust domain of the install, so the chart
+	// builds it; no code holds a domain as a literal (ADR-0164).
+	SpiffeID string `mapstructure:"spiffe_id" yaml:"spiffe_id"`
 
 	// SandboxClass is the setec SandboxClass every tool and catalog launch
 	// names. Defaults to DefaultSandboxClass. It is never sent empty: an
@@ -158,9 +162,8 @@ func (c *SandboxConfig) RequireSetec() error {
 }
 
 // Validate checks the shape of a configured sandbox section: with an
-// address set, every required field is populated and the cert/key/ca files
-// exist. An empty address passes here; RequireSetec refuses it at the
-// daemon start.
+// address set, the defaults are filled and the fleet SPIFFE ID is valid. An
+// empty address passes here; RequireSetec refuses it at the daemon start.
 func (c *SandboxConfig) Validate() error {
 	if c.Setec.Address == "" {
 		return nil
@@ -194,20 +197,8 @@ func (c *SandboxConfig) Validate() error {
 			c.Devbox.Idle = DefaultDevboxIdle
 		}
 	}
-	if !c.Setec.MTLS.Enabled {
-		return fmt.Errorf("sandbox.setec.mtls.enabled must be true (Setec requires mTLS)")
-	}
-	for _, f := range []struct{ name, path string }{
-		{"cert_file", c.Setec.MTLS.CertFile},
-		{"key_file", c.Setec.MTLS.KeyFile},
-		{"ca_file", c.Setec.MTLS.CAFile},
-	} {
-		if f.path == "" {
-			return fmt.Errorf("sandbox.setec.mtls.%s is required", f.name)
-		}
-		if _, err := os.Stat(f.path); err != nil {
-			return fmt.Errorf("sandbox.setec.mtls.%s (%s): %w", f.name, f.path, err)
-		}
+	if _, err := spiffeid.FromString(c.Setec.SpiffeID); err != nil {
+		return fmt.Errorf("sandbox.setec.spiffe_id %q is not a SPIFFE ID: %w", c.Setec.SpiffeID, err)
 	}
 	return nil
 }

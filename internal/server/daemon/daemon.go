@@ -588,7 +588,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// matching the per-call executor: the failure belongs at invocation, not at
 	// boot (design Requirement 5.4).
 	var callbackOpts []harness.CallbackServiceOption
-	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox)
+	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox, daemonSVIDSource{d: d})
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
 			"error", sessErr)
