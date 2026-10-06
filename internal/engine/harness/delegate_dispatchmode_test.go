@@ -18,7 +18,7 @@ import (
 // componentcatalog.LookupAgent so the routing is exercised without depending on
 // the embedded manifest.
 func TestDelegateToAgent_ManifestSandboxed_ForcesSandbox(t *testing.T) {
-	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-1", ExitCode: 0}}
+	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-1", ExitCode: 0, Result: &sandboxed.AgentTerminalResult{Success: true, Output: "done"}}}
 	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{
 		Image:        "ghcr.io/zeroroot-ai/zerocool-agent@sha256:abc",
 		SandboxClass: "agent",

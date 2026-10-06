@@ -85,11 +85,11 @@ func IsInstanceMode(m string) bool {
 // (ADR-0116). The tenant-enablement gate has already run in DelegateToAgent, so
 // this is authorized before the sandbox starts.
 //
-// It returns a terminal Result on a clean exit. The agent's STRUCTURED mission
-// result returns over the agent's own callback seam to the daemon, not through
-// setec, which reports only exit status and streamed stdout. Correlating that
-// payload back into Result.Output is the next slice; this slice reports the
-// terminal run outcome and leaves teardown to setec's finished-TTL reaper.
+// It returns the structured result of the agent in Result.Output. The agent
+// writes that result as the last result line on its stdout, and the launcher
+// reads it (sandboxed.AgentTerminalResult). A sandbox that exits with no
+// result line is an error, and so is a result that reports a failure.
+// Teardown is left to setec's finished-TTL reaper.
 func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	ctx context.Context,
 	name string,
@@ -195,6 +195,21 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 				name, outcome.SandboxID, outcome.ExitCode, outcome.Reason, outcome.LogTail))
 	}
 
+	if outcome.Result == nil {
+		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
+			"agent": name, "status": "failed", "transport": "sandbox",
+		})
+		return agent.Result{}, types.NewError(ErrHarnessDelegationFailed,
+			fmt.Sprintf("agent %q sandbox %s exited 0 and wrote no result line", name, outcome.SandboxID))
+	}
+	if !outcome.Result.Success {
+		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
+			"agent": name, "status": "failed", "transport": "sandbox",
+		})
+		return agent.Result{}, types.NewError(ErrHarnessDelegationFailed,
+			fmt.Sprintf("agent %q sandbox %s reported a failure: %s", name, outcome.SandboxID, outcome.Result.Output))
+	}
+
 	h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 		"agent": name, "status": "success", "transport": "sandbox",
 	})
@@ -202,9 +217,25 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		"agent", name, "tenant", tenant, "sandbox_id", outcome.SandboxID)
 
 	result := agent.NewResult(task.ID)
-	result.Status = agent.ResultStatusCompleted
-	result.CompletedAt = time.Now()
+	result.Complete(sandboxResultOutput(outcome.Result))
 	return result, nil
+}
+
+// sandboxResultOutput maps the terminal result of a sandboxed agent to the
+// output of the mission node.
+func sandboxResultOutput(r *sandboxed.AgentTerminalResult) map[string]any {
+	out := map[string]any{"output": r.Output}
+	if len(r.FindingIDs) > 0 {
+		ids := make([]any, len(r.FindingIDs))
+		for i, id := range r.FindingIDs {
+			ids[i] = id
+		}
+		out["finding_ids"] = ids
+	}
+	if len(r.Metadata) > 0 {
+		out["metadata"] = r.Metadata
+	}
+	return out
 }
 
 // capRunTimeout bounds a dispatch's run timeout by the enrollment cap
