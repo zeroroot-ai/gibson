@@ -182,7 +182,7 @@ Two ways a suite reaches the cluster:
 | `plugin_secret_revocation_test.go` | `exit-test-tool-dispatch.yml` | in-cluster Job, `TestPluginSecretRevocation` |
 | `sandboxed_agent_dispatch_test.go` | `exit-test-sandboxed-dispatch.yml` | in-cluster Job |
 | `bank_test.go` | `exit-test-bank.yml` | in-cluster Job, gated on a repository variable and a real key |
-| `tests/e2e/secrets/*` (5 files, 4 tests) | `exit-test-e2e-cluster.yml` | in-cluster Job, `secrets.test` binary. Reads SKIP until gibson#213 moves the suites to the SVID path |
+| `tests/e2e/secrets/*` (3 files, 2 tests) | `exit-test-e2e-cluster.yml` | in-cluster Job, `secrets.test` binary. Admin calls with the runner SVID, component calls through the Envoy edge (gibson#213) |
 | `plugin_e2e_test.go` | `exit-test-e2e-cluster.yml` | SKIP by design: needs a debug-plugin subprocess and a human-minted bootstrap token. The plugin path is proven by `plugin_secret_revocation_test.go` |
 | `mission_finding_per_tenant_e2e_test.go` | `exit-test-e2e-cluster.yml` | on the runner, `kubectl`-driven |
 | `audit_v4_foundation_test.go` `live_*` | `exit-test-e2e-cluster.yml` | on the runner, port-forwards at the suite's NodePort constants. Reads FAIL until gibson#214 makes the suite drive its own mission |
