@@ -102,3 +102,37 @@ func TestPluginChange_NoAuditLoggerRefuses(t *testing.T) {
 	_, err = store.GetAccess(ctx, "tenant-a", "gitlab")
 	assert.ErrorIs(t, err, ErrComponentNotEnabled)
 }
+
+// Each plugin change is refused when its audit record is not durable.
+func TestPluginChange_EachChangeRefusesWithNoRecord(t *testing.T) {
+	store, _ := newTestComponentAccessStore(t)
+	srv := accessServer(store)
+	srv.auditLog = newPluginAuditLogger(t, &refusingWriter{})
+	ctx := adminCtx(t)
+
+	_, err := srv.DisablePlugin(ctx, &componentpb.DisablePluginRequest{PluginName: "gitlab"})
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+	_, err = srv.UpdatePluginConfig(ctx, &componentpb.UpdatePluginConfigRequest{PluginName: "gitlab", ConfigJson: `{"a":1}`})
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+}
+
+// A store failure after the record writes a failure record for enable and
+// for disable.
+func TestPluginChange_StoreFailureIsRecorded(t *testing.T) {
+	store, mr := newTestComponentAccessStore(t)
+	srv := accessServer(store)
+	rec := &audittest.Recorder{}
+	srv.auditLog = newPluginAuditLogger(t, rec)
+	ctx := adminCtx(t)
+	mr.Close()
+
+	_, err := srv.EnablePlugin(ctx, &componentpb.EnablePluginRequest{PluginName: "gitlab"})
+	require.Error(t, err)
+	_, err = srv.DisablePlugin(ctx, &componentpb.DisablePluginRequest{PluginName: "gitlab"})
+	require.Error(t, err)
+
+	events := rec.Events()
+	require.Len(t, events, 4, "a record and a failure record for each change")
+	assert.Contains(t, string(events[1].Metadata), "failure")
+	assert.Contains(t, string(events[3].Metadata), "failure")
+}

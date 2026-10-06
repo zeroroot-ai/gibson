@@ -1322,3 +1322,20 @@ func TestFailedAction_NamesTheCause(t *testing.T) {
 	assert.Equal(t, "agent_revoked", ev.Action)
 	assert.JSONEq(t, `{"result":"failure","error":"not in tenant"}`, string(ev.Metadata))
 }
+
+// A failure record that cannot be written does not hide the error of the
+// action.
+func TestRevokeCapabilityGrant_FailureRecordErrorKeepsTheActionError(t *testing.T) {
+	m := newMockedService(t)
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_agents SET status = 'revoked' WHERE id = $1 AND tenant_id = $2").
+		WithArgs("agt_deadbeef", "acme").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	m.mock.ExpectRollback()
+	m.mock.ExpectBegin().WillReturnError(errors.New("audit database down"))
+
+	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
+	require.ErrorIs(t, err, ErrAgentNotInTenant)
+	require.NoError(t, m.mock.ExpectationsWereMet())
+}
