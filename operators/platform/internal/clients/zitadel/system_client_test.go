@@ -7,11 +7,9 @@ import (
 	"context"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -85,44 +83,36 @@ func bearerFromAuth(r *http.Request) string {
 	return strings.TrimPrefix(v, prefix)
 }
 
-// testInstanceID is the canned Zitadel instance ID returned by the
-// /system/v1/instances/_search fake handler that every test installs.
-const testInstanceID = "372802942115250284"
+// systemAPIRoute is the System API route the transport tests call.
+const systemAPIRoute = "GET /admin/v1/orgs/default"
 
-// instanceSearchHandler is the shared handler for the instance-discovery
-// call that runs first in every System API operation. Returns a single
-// instance whose ID is testInstanceID.
-func instanceSearchHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{
-			"result": [
-				{"id": %q, "name": "ZITADEL", "domain": "auth.zeroroot.local"}
-			],
-			"details": {"totalResult": "1"}
-		}`, testInstanceID)
+// callSystemAPI makes one authenticated System API call with the self-signed
+// JWT of the client: the call that MintAdminToken makes first.
+func callSystemAPI(ctx context.Context, sc SystemClient) error {
+	c := sc.(*systemHTTPClient)
+	tok, err := c.token(ctx)
+	if err != nil {
+		return err
 	}
+	return c.doJSON(ctx, tok, http.MethodGet, "/admin/v1/orgs/default", nil, nil)
 }
 
-// TestSystemClient_HappyPath_AddInstanceDomain verifies the JWT-mint →
+// TestSystemClient_HappyPath_SelfSignedBearer verifies the JWT-mint →
 // direct-bearer-on-System-API flow. Zitadel's System API authenticates
 // via a self-signed JWT presented directly in `Authorization: Bearer …`
 // — there is NO OIDC token-exchange round-trip.
 //
 // Reference: https://zitadel.com/docs/guides/integrate/zitadel-apis/access-zitadel-system-api
-func TestSystemClient_HappyPath_AddInstanceDomain(t *testing.T) {
+func TestSystemClient_HappyPath_SelfSignedBearer(t *testing.T) {
 	key := generateTestRSAKey(t)
 	keyPath := writeKeyFile(t, key)
 
 	const systemUser = "gibson-system-bot"
 	var capturedBearer string
-	var capturedDomainBody []byte
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
 			capturedBearer = bearerFromAuth(r)
-			capturedDomainBody, _ = io.ReadAll(r.Body)
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{}`))
 		},
@@ -133,20 +123,8 @@ func TestSystemClient_HappyPath_AddInstanceDomain(t *testing.T) {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
 
-	const targetDomain = "gibson-zitadel.gibson.svc.cluster.local"
-	if err := sc.AddInstanceDomain(context.Background(), targetDomain); err != nil {
-		t.Fatalf("AddInstanceDomain: %v", err)
-	}
-
-	// --- Verify request body contained the domain ---
-	var domainPayload struct {
-		Domain string `json:"domain"`
-	}
-	if err := json.Unmarshal(capturedDomainBody, &domainPayload); err != nil {
-		t.Fatalf("parse domain request body: %v", err)
-	}
-	if domainPayload.Domain != targetDomain {
-		t.Errorf("domain in request = %q, want %q", domainPayload.Domain, targetDomain)
+	if err := callSystemAPI(context.Background(), sc); err != nil {
+		t.Fatalf("System API call: %v", err)
 	}
 
 	// --- Verify Bearer is a self-signed JWT (NOT exchanged via OIDC) ---
@@ -193,54 +171,6 @@ func TestSystemClient_HappyPath_AddInstanceDomain(t *testing.T) {
 	}
 }
 
-// TestSystemClient_Idempotent_409 verifies that a 409 Conflict response
-// from AddInstanceDomain (domain already registered) returns nil.
-func TestSystemClient_Idempotent_409(t *testing.T) {
-	key := generateTestRSAKey(t)
-	keyPath := writeKeyFile(t, key)
-
-	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"code":6,"message":"domain already registered"}`))
-		},
-	})
-
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
-	if err != nil {
-		t.Fatalf("NewSystemClient: %v", err)
-	}
-	if err := sc.AddInstanceDomain(context.Background(), "already.example"); err != nil {
-		t.Fatalf("AddInstanceDomain 409 returned error: %v", err)
-	}
-}
-
-// TestSystemClient_Idempotent_AlreadyExistsBody verifies that a 400-level
-// response whose body contains "already exists" is treated as idempotent.
-// Zitadel sometimes returns a 400 with an "already exists" error code instead
-// of a true 409.
-func TestSystemClient_Idempotent_AlreadyExistsBody(t *testing.T) {
-	key := generateTestRSAKey(t)
-	keyPath := writeKeyFile(t, key)
-
-	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(`{"code":6,"message":"domain already exists","details":[]}`))
-		},
-	})
-
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
-	if err != nil {
-		t.Fatalf("NewSystemClient: %v", err)
-	}
-	if err := sc.AddInstanceDomain(context.Background(), "already.example"); err != nil {
-		t.Fatalf("AddInstanceDomain on already-exists 400 returned error: %v", err)
-	}
-}
-
 // TestSystemClient_Unauthorized verifies that a 401 from the System API
 // wraps both ErrUnauthorized and ErrPermanent so the controller requeue
 // loop doesn't retry indefinitely on a misconfigured key.
@@ -249,8 +179,7 @@ func TestSystemClient_Unauthorized(t *testing.T) {
 	keyPath := writeKeyFile(t, key)
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"invalid key or user"}`))
 		},
@@ -260,7 +189,7 @@ func TestSystemClient_Unauthorized(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
-	err = sc.AddInstanceDomain(context.Background(), "any.domain")
+	err = callSystemAPI(context.Background(), sc)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -272,15 +201,13 @@ func TestSystemClient_Unauthorized(t *testing.T) {
 	}
 }
 
-// TestSystemClient_ServerError_5xx verifies that a 5xx from the domains
-// endpoint surfaces as ErrUnreachable (transient — controller should requeue).
+// TestSystemClient_ServerError_5xx verifies that a 5xx from the System API surfaces as ErrUnreachable (transient — controller should requeue).
 func TestSystemClient_ServerError_5xx(t *testing.T) {
 	key := generateTestRSAKey(t)
 	keyPath := writeKeyFile(t, key)
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 		},
@@ -290,7 +217,7 @@ func TestSystemClient_ServerError_5xx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
-	err = sc.AddInstanceDomain(context.Background(), "any.domain")
+	err = callSystemAPI(context.Background(), sc)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -299,53 +226,6 @@ func TestSystemClient_ServerError_5xx(t *testing.T) {
 	}
 	if IsPermanent(err) {
 		t.Errorf("5xx should NOT be permanent (controller should retry); got permanent err: %v", err)
-	}
-}
-
-// TestSystemClient_ListInstanceDomains verifies that ListInstanceDomains
-// parses the result array and returns just the domain strings.
-func TestSystemClient_ListInstanceDomains(t *testing.T) {
-	key := generateTestRSAKey(t)
-	keyPath := writeKeyFile(t, key)
-
-	const (
-		domain1 = "auth.zeroroot.local"
-		domain2 = "gibson-zitadel.gibson.svc.cluster.local"
-	)
-
-	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains/_search": func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{
-				"result": [
-					{"domain": %q, "isPrimary": true,  "isVerified": true},
-					{"domain": %q, "isPrimary": false, "isVerified": true}
-				],
-				"details": {"totalResult": "2"}
-			}`, domain1, domain2)
-		},
-	})
-
-	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, keyPath)
-	if err != nil {
-		t.Fatalf("NewSystemClient: %v", err)
-	}
-	domains, err := sc.ListInstanceDomains(context.Background())
-	if err != nil {
-		t.Fatalf("ListInstanceDomains: %v", err)
-	}
-	if len(domains) != 2 {
-		t.Fatalf("want 2 domains, got %d: %v", len(domains), domains)
-	}
-	domainSet := make(map[string]bool, len(domains))
-	for _, d := range domains {
-		domainSet[d] = true
-	}
-	for _, want := range []string{domain1, domain2} {
-		if !domainSet[want] {
-			t.Errorf("domain %q missing from result %v", want, domains)
-		}
 	}
 }
 
@@ -358,8 +238,7 @@ func TestSystemClient_AssertionCaching(t *testing.T) {
 	var firstBearer, secondBearer string
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
 			if firstBearer == "" {
 				firstBearer = bearerFromAuth(r)
 			} else {
@@ -376,11 +255,11 @@ func TestSystemClient_AssertionCaching(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := sc.AddInstanceDomain(ctx, "a.example"); err != nil {
-		t.Fatalf("first AddInstanceDomain: %v", err)
+	if err := callSystemAPI(ctx, sc); err != nil {
+		t.Fatalf("first System API call: %v", err)
 	}
-	if err := sc.AddInstanceDomain(ctx, "b.example"); err != nil {
-		t.Fatalf("second AddInstanceDomain: %v", err)
+	if err := callSystemAPI(ctx, sc); err != nil {
+		t.Fatalf("second System API call: %v", err)
 	}
 
 	if firstBearer == "" || secondBearer == "" {
@@ -428,8 +307,7 @@ func TestSystemClient_ClaimsTheHostByHeader(t *testing.T) {
 	var gotInstance, gotHost string
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		"POST /system/v1/instances/_search": instanceSearchHandler(),
-		"POST /system/v1/instances/372802942115250284/domains": func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
 			gotInstance = r.Header.Get(zitadelconn.InstanceHostHeader)
 			gotHost = r.Host
 			w.WriteHeader(http.StatusOK)
@@ -441,8 +319,8 @@ func TestSystemClient_ClaimsTheHostByHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSystemClient: %v", err)
 	}
-	if err := sc.AddInstanceDomain(context.Background(), "any.domain"); err != nil {
-		t.Fatalf("AddInstanceDomain: %v", err)
+	if err := callSystemAPI(context.Background(), sc); err != nil {
+		t.Fatalf("System API call: %v", err)
 	}
 
 	if gotInstance != testDomain {

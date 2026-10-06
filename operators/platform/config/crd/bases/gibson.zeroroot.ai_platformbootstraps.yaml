@@ -677,10 +677,9 @@ spec:
                     type: object
                   systemClient:
                     description: |-
-                      SystemClient configures the System API client used to register the
-                      cluster-internal Zitadel Service hostname as an additional trusted
-                      domain. When nil, the TrustedDomainReady step is skipped (for existing
-                      clusters without a system-bot user provisioned).
+                      SystemClient configures the System API client that mints the Zitadel
+                      admin token (gibson#794). When nil, the AdminTokenReady step cannot run
+                      and PlatformBootstrap is not Ready.
                     properties:
                       apiURL:
                         description: |-
@@ -719,10 +718,12 @@ spec:
                         type: string
                       trustedClusterDomain:
                         description: |-
-                          TrustedClusterDomain is the cluster-internal Service hostname to
-                          register as an additional trusted domain on the Zitadel instance.
-                          When empty the controller derives it from the CR name and the
-                          operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
+                          TrustedClusterDomain is the cluster-internal Zitadel Service hostname.
+                          The operator dials the System API at "http://<it>:8080" when apiURL
+                          and ZITADEL_URL are empty. No trusted domain is registered: the
+                          x-zitadel-instance-host header alone selects the instance (ADR-0092,
+                          gibson#990). When empty the controller derives it from the CR name and
+                          the operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
                         type: string
                     type: object
                 required:

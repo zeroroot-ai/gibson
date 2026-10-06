@@ -43,12 +43,6 @@ const (
 	// for each declared per-role database. Idempotent.
 	ConditionPostgresBundleReady = "PostgresBundleReady"
 
-	// ConditionTrustedDomainReady reports whether the cluster-internal
-	// Zitadel Service hostname has been registered as an additional trusted
-	// domain on the Zitadel instance. Once true, in-cluster consumers can
-	// dial Zitadel by Service name without hostAliases. See ADR-0092.
-	ConditionTrustedDomainReady = "TrustedDomainReady"
-
 	// ConditionAdminTokenReady reports whether OpenBao holds a valid Zitadel
 	// admin token that this operator minted (gibson#794). The operator mints
 	// the first one with its System API key, and a new one when the stored
@@ -191,8 +185,8 @@ type LoginBrandingSpec struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// SystemClientSpec configures the Zitadel System API client used to
-// register additional trusted domains on the instance. The System API
+// SystemClientSpec configures the Zitadel System API client that mints the
+// Zitadel admin token (gibson#794). The System API
 // requires a SYSTEM_OWNER machine user authenticated via a signed JWT
 // assertion (RFC 7523) — distinct from the IAM_OWNER PAT used by the
 // admin-API client.
@@ -212,10 +206,12 @@ type SystemClientSpec struct {
 	// +optional
 	KeyPath string `json:"keyPath,omitempty"`
 
-	// TrustedClusterDomain is the cluster-internal Service hostname to
-	// register as an additional trusted domain on the Zitadel instance.
-	// When empty the controller derives it from the CR name and the
-	// operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
+	// TrustedClusterDomain is the cluster-internal Zitadel Service hostname.
+	// The operator dials the System API at "http://<it>:8080" when apiURL
+	// and ZITADEL_URL are empty. No trusted domain is registered: the
+	// x-zitadel-instance-host header alone selects the instance (ADR-0092,
+	// gibson#990). When empty the controller derives it from the CR name and
+	// the operator's namespace: "<cr-name>-zitadel.<namespace>.svc.cluster.local".
 	// +optional
 	TrustedClusterDomain string `json:"trustedClusterDomain,omitempty"`
 
@@ -331,10 +327,9 @@ type ZitadelSpec struct {
 	// +optional
 	LoginBranding *LoginBrandingSpec `json:"loginBranding,omitempty"`
 
-	// SystemClient configures the System API client used to register the
-	// cluster-internal Zitadel Service hostname as an additional trusted
-	// domain. When nil, the TrustedDomainReady step is skipped (for existing
-	// clusters without a system-bot user provisioned).
+	// SystemClient configures the System API client that mints the Zitadel
+	// admin token (gibson#794). When nil, the AdminTokenReady step cannot run
+	// and PlatformBootstrap is not Ready.
 	// +optional
 	SystemClient *SystemClientSpec `json:"systemClient,omitempty"`
 
