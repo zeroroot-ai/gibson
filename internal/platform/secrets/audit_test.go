@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // newTestAuditLogger creates an AuditLogger backed by an in-process miniredis
@@ -158,4 +159,68 @@ func TestContainsSubstring(t *testing.T) {
 		got := containsSubstring(tc.s, tc.sub)
 		assert.Equal(t, tc.want, got, "containsSubstring(%q, %q)", tc.s, tc.sub)
 	}
+}
+
+// newRecordingAuditLogger is newTestAuditLogger with the durable Recorder
+// returned, so a test can read what reached the durable writer.
+func newRecordingAuditLogger(t *testing.T) (*audit.AuditLogger, *audittest.Recorder) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sc.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	rec := &audittest.Recorder{}
+	return audit.NewAuditLogger(ctx, sc, rec, slog.Default()), rec
+}
+
+func operatorContext() context.Context {
+	ctx := auth.ContextWithTenantString(context.Background(), "acme-corp")
+	tid, _ := auth.NewTenantID("acme-corp")
+	return auth.WithIdentity(ctx, auth.Identity{Subject: "operator-1", Issuer: "zitadel", CredentialType: "oidc", Tenant: tid})
+}
+
+// TestAuditWriter_Record_WritesDurablyBeforeItReturns: Record returns
+// after the durable writer has the event.
+func TestAuditWriter_Record_WritesDurablyBeforeItReturns(t *testing.T) {
+	logger, rec := newRecordingAuditLogger(t)
+	w := NewAuditWriter(logger, slog.Default())
+
+	require.NoError(t, w.Record(operatorContext(), AuditEvent{
+		ActorID: "operator-1", ActorTenantID: "acme-corp",
+		Action: ActionSecretConfigSet, Effect: EffectAllow,
+		ResourceType: "secret_broker_config", ResourceURI: "secret_broker_config:tenant-acme-corp",
+		Decision: "allow", Success: true,
+	}))
+	events := rec.Events()
+	require.Len(t, events, 1)
+	assert.Equal(t, ActionSecretConfigSet, events[0].Action)
+}
+
+// TestAuditWriter_Record_RefusesAPlaintextEvent: the guard refuses the
+// event, and the caller gets an error, so it makes no change.
+func TestAuditWriter_Record_RefusesAPlaintextEvent(t *testing.T) {
+	logger, rec := newRecordingAuditLogger(t)
+	w := NewAuditWriter(logger, slog.Default())
+
+	err := w.Record(operatorContext(), AuditEvent{
+		ActorTenantID: "acme-corp", Action: ActionSecretConfigSet,
+		ResourceURI: string(make([]byte, 300)) + "secret_value",
+	})
+	require.ErrorIs(t, err, ErrAuditRejected)
+	assert.Empty(t, rec.Events())
+}
+
+// TestAuditWriter_Record_FailsWithNoActor: a context with no identity gets
+// an error, not a record with no actor.
+func TestAuditWriter_Record_FailsWithNoActor(t *testing.T) {
+	logger, rec := newRecordingAuditLogger(t)
+	w := NewAuditWriter(logger, slog.Default())
+
+	err := w.Record(context.Background(), AuditEvent{ActorTenantID: "acme-corp", Action: ActionSecretConfigSet})
+	require.ErrorIs(t, err, audit.ErrNoActor)
+	assert.Empty(t, rec.Events())
 }

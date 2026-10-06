@@ -6,6 +6,7 @@ package audit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"sync"
@@ -74,8 +75,17 @@ func ctxWithTenantAndIdentity(tenant, subject, _ string) context.Context {
 // recordingEmitter stands in for the durable Postgres writer. It keeps each
 // event that the logger hands to it.
 type recordingEmitter struct {
-	mu     sync.Mutex
-	events []Event
+	mu      sync.Mutex
+	events  []Event
+	syncErr error
+}
+
+func (r *recordingEmitter) WriteSync(_ context.Context, event Event) error {
+	if r.syncErr != nil {
+		return r.syncErr
+	}
+	r.Log(event)
+	return nil
 }
 
 func (r *recordingEmitter) Log(event Event) {
@@ -643,4 +653,41 @@ func TestActorTypeFor(t *testing.T) {
 	assert.Equal(t, "system", actorTypeFor(auth.CredentialClientCredentials))
 	assert.Equal(t, "agent", actorTypeFor(auth.CredentialCapabilityGrant))
 	assert.Equal(t, "user", actorTypeFor(""))
+}
+
+// TestRecord_WritesDurablyThenTails: Record returns after the durable writer
+// has the record, and the live tail gets a copy.
+func TestRecord_WritesDurablyThenTails(t *testing.T) {
+	al, _ := newTestLogger(t)
+	ctx := ctxWithTenantAndIdentity("acme", "user-1", "")
+
+	require.NoError(t, al.Record(ctx, "agent_grant_added", "agent_grant", "agent_principal:a", map[string]any{"k": "v"}))
+	got := durableOf(t, al).recorded()
+	require.Len(t, got, 1)
+	assert.Equal(t, "agent_grant_added", got[0].Action)
+	require.Eventually(t, func() bool {
+		entries, err := al.Query(context.Background(), "acme", AuditQueryOptions{})
+		return err == nil && len(entries) == 1
+	}, time.Second, 5*time.Millisecond)
+}
+
+// TestRecord_ReturnsTheDurableError: when Postgres refuses the record, the
+// caller gets the error and the live tail gets no copy, so the caller can
+// fail its action before the state changes.
+func TestRecord_ReturnsTheDurableError(t *testing.T) {
+	al, _ := newTestLogger(t)
+	durableOf(t, al).syncErr = errors.New("postgres down")
+
+	err := al.Record(ctxWithTenantAndIdentity("acme", "user-1", ""), "agent_grant_added", "agent_grant", "a", nil)
+	require.ErrorContains(t, err, "postgres down")
+	time.Sleep(50 * time.Millisecond)
+	entries, qerr := al.Query(context.Background(), "acme", AuditQueryOptions{})
+	require.NoError(t, qerr)
+	assert.Empty(t, entries, "a record that Postgres refused must not reach the tail")
+}
+
+func TestRecord_RefusesAContextWithNoActor(t *testing.T) {
+	al, _ := newTestLogger(t)
+	require.ErrorIs(t, al.Record(ctxWithTenant("acme"), "x", "r", "id", nil), ErrNoActor)
+	assert.Empty(t, durableOf(t, al).recorded())
 }

@@ -6,6 +6,7 @@
 package audittest
 
 import (
+	"context"
 	"sync"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
@@ -18,7 +19,13 @@ type Recorder struct {
 	events []audit.Event
 }
 
-var _ audit.Emitter = (*Recorder)(nil)
+var _ audit.DurableWriter = (*Recorder)(nil)
+
+// WriteSync keeps the event, as Log does.
+func (r *Recorder) WriteSync(_ context.Context, event audit.Event) error {
+	r.Log(event)
+	return nil
+}
 
 // Log keeps the event.
 func (r *Recorder) Log(event audit.Event) {

@@ -47,9 +47,18 @@ type ProviderFactory func(configBlob []byte) (sdksecrets.Broker, error)
 
 // ConfigStoreAuditWriter is the narrow interface ConfigStore uses to emit
 // audit events. The concrete implementation is AuditWriter (audit.go);
-// tests inject a fake.
+// tests inject a fake. Record writes the event durably before a change;
+// Audit writes a refusal or a failure.
 type ConfigStoreAuditWriter interface {
 	Audit(ctx context.Context, event AuditEvent)
+	Record(ctx context.Context, event AuditEvent) error
+}
+
+// configRows is the part of *configstore.Store that ConfigStore uses.
+type configRows interface {
+	GetRaw(ctx context.Context, tenant auth.TenantID) (provider string, configJSON []byte, err error)
+	SetRaw(ctx context.Context, tenant auth.TenantID, provider string, configJSON []byte, actor string) error
+	DeleteRaw(ctx context.Context, tenant auth.TenantID) error
 }
 
 // ConfigStore provides Get/Set/Delete operations for per-tenant broker
@@ -58,7 +67,7 @@ type ConfigStoreAuditWriter interface {
 //
 // ConfigStore is safe for concurrent use.
 type ConfigStore struct {
-	store     *configstore.Store
+	store     configRows
 	factories map[string]ProviderFactory
 	auditor   ConfigStoreAuditWriter
 }
@@ -75,6 +84,16 @@ func NewConfigStore(
 	if store == nil {
 		return nil, errors.New("config store: underlying store must not be nil")
 	}
+	return newConfigStore(store, factories, auditor)
+}
+
+// newConfigStore is NewConfigStore over the row interface. Tests call it
+// with an in-memory row store.
+func newConfigStore(
+	store configRows,
+	factories map[string]ProviderFactory,
+	auditor ConfigStoreAuditWriter,
+) (*ConfigStore, error) {
 	if auditor == nil {
 		return nil, errors.New("config store: auditor must not be nil")
 	}
@@ -172,7 +191,23 @@ func (cs *ConfigStore) Set(ctx context.Context, tenant auth.TenantID, cfg Broker
 		return fmt.Errorf("config store: set tenant %s: probe provider %q: %w", tenant, cfg.Provider, err)
 	}
 
-	// Probe succeeded — persist.
+	// Probe succeeded. The audit record goes to Postgres first, so no
+	// config change exists without its record (D15, gibson#676).
+	if err := cs.auditor.Record(ctx, AuditEvent{
+		ActorID:       actor,
+		ActorTenantID: tenant.String(),
+		Action:        ActionSecretConfigSet,
+		Effect:        EffectAllow,
+		ResourceType:  "secret_broker_config",
+		ResourceURI:   "secret_broker_config:tenant-" + tenant.String(),
+		Decision:      "allow",
+		Success:       true,
+		LatencyMS:     time.Since(start).Milliseconds(),
+		OccurredAt:    time.Now().UTC(),
+	}); err != nil {
+		return fmt.Errorf("config store: set tenant %s: audit record: %w", tenant, err)
+	}
+
 	if err := cs.store.SetRaw(ctx, tenant, cfg.Provider, cfg.ConfigBlob, actor); err != nil {
 		cs.auditor.Audit(ctx, AuditEvent{
 			ActorID:        actor,
@@ -190,8 +225,19 @@ func (cs *ConfigStore) Set(ctx context.Context, tenant auth.TenantID, cfg Broker
 		})
 		return fmt.Errorf("config store: set tenant %s: persist: %w", tenant, err)
 	}
+	return nil
+}
 
-	cs.auditor.Audit(ctx, AuditEvent{
+// Delete removes the broker config for the given tenant. It is a no-op when
+// no config row exists. It writes the audit record to Postgres before it
+// removes the row, and a second record when the removal fails.
+//
+// actor is the operator principal ID stored in updated_by.
+func (cs *ConfigStore) Delete(ctx context.Context, tenant auth.TenantID, actor string) error {
+	start := time.Now()
+
+	// The audit record goes to Postgres before the row is removed.
+	if err := cs.auditor.Record(ctx, AuditEvent{
 		ActorID:       actor,
 		ActorTenantID: tenant.String(),
 		Action:        ActionSecretConfigSet,
@@ -202,16 +248,9 @@ func (cs *ConfigStore) Set(ctx context.Context, tenant auth.TenantID, cfg Broker
 		Success:       true,
 		LatencyMS:     time.Since(start).Milliseconds(),
 		OccurredAt:    time.Now().UTC(),
-	})
-	return nil
-}
-
-// Delete removes the broker config for the given tenant. It is a no-op when
-// no config row exists. An audit event is emitted on both success and failure.
-//
-// actor is the operator principal ID stored in updated_by.
-func (cs *ConfigStore) Delete(ctx context.Context, tenant auth.TenantID, actor string) error {
-	start := time.Now()
+	}); err != nil {
+		return fmt.Errorf("config store: delete tenant %s: audit record: %w", tenant, err)
+	}
 
 	if err := cs.store.DeleteRaw(ctx, tenant); err != nil {
 		cs.auditor.Audit(ctx, AuditEvent{
@@ -230,19 +269,6 @@ func (cs *ConfigStore) Delete(ctx context.Context, tenant auth.TenantID, actor s
 		})
 		return fmt.Errorf("config store: delete tenant %s: %w", tenant, err)
 	}
-
-	cs.auditor.Audit(ctx, AuditEvent{
-		ActorID:       actor,
-		ActorTenantID: tenant.String(),
-		Action:        ActionSecretConfigSet,
-		Effect:        EffectAllow,
-		ResourceType:  "secret_broker_config",
-		ResourceURI:   "secret_broker_config:tenant-" + tenant.String(),
-		Decision:      "allow",
-		Success:       true,
-		LatencyMS:     time.Since(start).Milliseconds(),
-		OccurredAt:    time.Now().UTC(),
-	})
 	return nil
 }
 
