@@ -60,9 +60,6 @@ func EdgePosteriors(counts map[string]OutcomeCount, version string) (*EdgePoster
 			outcomes, len(counts), beliefvi.UninformativeBetaAlpha, beliefvi.UninformativeBetaBeta),
 		Posteriors: posteriors,
 	}
-	if err := a.Validate(); err != nil {
-		return nil, err
-	}
 	return a, nil
 }
 

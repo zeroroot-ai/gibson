@@ -15,6 +15,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
@@ -24,14 +25,15 @@ import (
 
 // fakeDaemon answers the two trainer RPCs and records the stored artifacts.
 type fakeDaemon struct {
-	data    *daemonoperatorv1.GetBeliefTrainingDataResponse
-	readErr error
-	stored  []*daemonoperatorv1.StoreBeliefArtifactRequest
-	closed  bool
+	data     *daemonoperatorv1.GetBeliefTrainingDataResponse
+	readErr  error
+	storeErr error
+	stored   []*daemonoperatorv1.StoreBeliefArtifactRequest
+	closed   bool
 }
 
 func (f *fakeDaemon) GetBeliefTrainingData(
-	_ context.Context, in *daemonoperatorv1.GetBeliefTrainingDataRequest,
+	_ context.Context, in *daemonoperatorv1.GetBeliefTrainingDataRequest, _ ...grpc.CallOption,
 ) (*daemonoperatorv1.GetBeliefTrainingDataResponse, error) {
 	if in.GetTenantId() != "acme" {
 		return nil, errors.New("wrong tenant")
@@ -40,8 +42,11 @@ func (f *fakeDaemon) GetBeliefTrainingData(
 }
 
 func (f *fakeDaemon) StoreBeliefArtifact(
-	_ context.Context, in *daemonoperatorv1.StoreBeliefArtifactRequest,
+	_ context.Context, in *daemonoperatorv1.StoreBeliefArtifactRequest, _ ...grpc.CallOption,
 ) (*daemonoperatorv1.StoreBeliefArtifactResponse, error) {
+	if f.storeErr != nil {
+		return nil, f.storeErr
+	}
 	f.stored = append(f.stored, in)
 	return &daemonoperatorv1.StoreBeliefArtifactResponse{Version: int64(len(f.stored))}, nil
 }
@@ -127,6 +132,36 @@ func TestRun_ReadErrorFails(t *testing.T) {
 	err := run(context.Background(), []string{"-tenant", "acme"}, env, d.dial, quietLogger(&bytes.Buffer{}))
 	require.ErrorContains(t, err, "read the training data")
 	assert.Empty(t, d.stored)
+}
+
+// A failed dial, a refused store and an outcome count that cannot fit each
+// stop the run with an error.
+func TestRun_FailuresStopTheRun(t *testing.T) {
+	ctx := context.Background()
+	args := []string{"-tenant", "acme"}
+	logger := quietLogger(&bytes.Buffer{})
+
+	noDial := func(context.Context, string, string) (trainerClient, io.Closer, error) {
+		return nil, nil, errors.New("no SPIRE agent")
+	}
+	require.ErrorContains(t, run(ctx, args, env, noDial, logger), "no SPIRE agent")
+
+	d := &fakeDaemon{data: threeSettledBets(), storeErr: errors.New("refused")}
+	require.ErrorContains(t, run(ctx, args, env, d.dial, logger), "store the artifacts")
+
+	bad := threeSettledBets()
+	bad.EdgeOutcomes[0].Alpha = -1
+	d = &fakeDaemon{data: bad}
+	require.ErrorContains(t, run(ctx, args, env, d.dial, logger), "fit the artifacts")
+	assert.Empty(t, d.stored)
+}
+
+// dialDaemon needs the SPIRE agent of the pod. Without its socket the dial
+// fails with an error and leaks nothing.
+func TestDialDaemon_NeedsTheSPIREAgent(t *testing.T) {
+	t.Setenv("SPIFFE_ENDPOINT_SOCKET", "")
+	_, _, err := dialDaemon(context.Background(), "daemon:50051", "spiffe://example.org/platform/daemon")
+	require.ErrorContains(t, err, "connect to the daemon")
 }
 
 // The run refuses before it dials when a required input is missing.

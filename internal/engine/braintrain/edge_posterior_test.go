@@ -82,3 +82,18 @@ func TestLoadEdgePosteriorArtifact_InvalidJSONErrors(t *testing.T) {
 		t.Fatal("expected an error for invalid JSON")
 	}
 }
+
+func TestLoadEdgePosteriorArtifact_LoadsAValidFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "edges.json")
+	const raw = `{"version":"tenant-acme-v1","posteriors":{"RESOLVES_TO":{"alpha":8,"beta":4}}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := LoadEdgePosteriorArtifact(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := EdgePosteriorProvider(a).Posterior("RESOLVES_TO"); got.Alpha != 8 || got.Beta != 4 {
+		t.Errorf("posterior = %+v, want Beta(8,4)", got)
+	}
+}

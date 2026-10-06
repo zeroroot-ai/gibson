@@ -116,3 +116,29 @@ func TestExploitable_SteersAmbientOrder(t *testing.T) {
 		t.Fatalf("with equal exploitable the address tiebreak must decide, got %q first", ctrl[0].Address)
 	}
 }
+
+// BeliefEvidenceByHost gives each host the evidence that BeliefSystem
+// scores, keyed by the host id (gibson#614).
+func TestBeliefEvidenceByHost_MatchesTheScoredEvidence(t *testing.T) {
+	w := NewWorld("acme")
+	Reduce(w, HostObserved{ScopeID: "s1", Address: "10.0.0.1", OpenPorts: []int{22},
+		Services: map[int]ServiceInfo{22: {Name: "ssh"}}})
+	hosts := w.Snapshot()
+	if len(hosts) != 1 {
+		t.Fatalf("want 1 host, got %d", len(hosts))
+	}
+	ev, ok := w.BeliefEvidenceByHost()[hosts[0].ID]
+	if !ok {
+		t.Fatal("the host has no evidence")
+	}
+	var requested []BeliefEvidence
+	for _, e := range BeliefSystem(w) {
+		requested = append(requested, e.(BeliefScoreRequested).Evidence)
+	}
+	if len(requested) != 1 || evidenceDigest(requested[0]) != evidenceDigest(ev) {
+		t.Fatalf("evidence %+v differs from the scored evidence %+v", ev, requested)
+	}
+	if !ev.Reachable || len(ev.Services) != 1 || ev.Services[0] != "22/ssh" {
+		t.Errorf("evidence = %+v, want reachable with 22/ssh", ev)
+	}
+}

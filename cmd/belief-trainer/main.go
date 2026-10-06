@@ -45,6 +45,8 @@ import (
 	"os"
 	"strings"
 
+	"google.golang.org/grpc"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
@@ -60,10 +62,14 @@ func main() {
 }
 
 // trainerClient is the part of the daemon operator API that the trainer
-// calls.
+// calls. The generated DaemonOperatorServiceClient satisfies it.
 type trainerClient interface {
-	GetBeliefTrainingData(ctx context.Context, in *daemonoperatorv1.GetBeliefTrainingDataRequest) (*daemonoperatorv1.GetBeliefTrainingDataResponse, error)
-	StoreBeliefArtifact(ctx context.Context, in *daemonoperatorv1.StoreBeliefArtifactRequest) (*daemonoperatorv1.StoreBeliefArtifactResponse, error)
+	GetBeliefTrainingData(
+		ctx context.Context, in *daemonoperatorv1.GetBeliefTrainingDataRequest, opts ...grpc.CallOption,
+	) (*daemonoperatorv1.GetBeliefTrainingDataResponse, error)
+	StoreBeliefArtifact(
+		ctx context.Context, in *daemonoperatorv1.StoreBeliefArtifactRequest, opts ...grpc.CallOption,
+	) (*daemonoperatorv1.StoreBeliefArtifactResponse, error)
 }
 
 // dialFunc opens the trainer client. The returned closer releases it.
@@ -76,33 +82,7 @@ func dialDaemon(ctx context.Context, addr, daemonSPIFFEID string) (trainerClient
 	if err != nil {
 		return nil, nil, fmt.Errorf("connect to the daemon: %w", err)
 	}
-	return grpcTrainerClient{c: daemonoperatorv1.NewDaemonOperatorServiceClient(c.Conn())}, c, nil
-}
-
-// grpcTrainerClient drops the per-call options of the generated client, so it
-// satisfies trainerClient.
-type grpcTrainerClient struct {
-	c daemonoperatorv1.DaemonOperatorServiceClient
-}
-
-func (g grpcTrainerClient) GetBeliefTrainingData(
-	ctx context.Context, in *daemonoperatorv1.GetBeliefTrainingDataRequest,
-) (*daemonoperatorv1.GetBeliefTrainingDataResponse, error) {
-	resp, err := g.c.GetBeliefTrainingData(ctx, in)
-	if err != nil {
-		return nil, fmt.Errorf("GetBeliefTrainingData: %w", err)
-	}
-	return resp, nil
-}
-
-func (g grpcTrainerClient) StoreBeliefArtifact(
-	ctx context.Context, in *daemonoperatorv1.StoreBeliefArtifactRequest,
-) (*daemonoperatorv1.StoreBeliefArtifactResponse, error) {
-	resp, err := g.c.StoreBeliefArtifact(ctx, in)
-	if err != nil {
-		return nil, fmt.Errorf("StoreBeliefArtifact: %w", err)
-	}
-	return resp, nil
+	return daemonoperatorv1.NewDaemonOperatorServiceClient(c.Conn()), c, nil
 }
 
 // candidateVersion is the version that the trainer writes into both
