@@ -548,7 +548,7 @@ func TestPluginInvoke_TrustedAllowedUnderSetecOnly(t *testing.T) {
 
 // githubGetRepoRequest / githubGetRepoResponse model the typed Go structs a
 // Go-first plugin authors with sdk plugin.WithHandler (see
-// zeroroot-ai/integrations/plugins/github): JSON in, JSON out, no protobuf.
+// plugins/github in this repo): JSON in, JSON out, no protobuf.
 type githubGetRepoRequest struct {
 	Owner string `json:"owner"`
 	Repo  string `json:"repo"`
