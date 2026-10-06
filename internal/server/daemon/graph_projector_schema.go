@@ -99,6 +99,48 @@ var lookupIndexes = []struct {
 	{"Finding", []string{"status"}, "applicationFindingsCypher filters Findings by status"},
 }
 
+// schemaStatement is one statement of the tenant schema. Neo4j DDL takes no
+// parameter for a label or a property, so a statement holds their text, the
+// one place in the projector where Cypher holds a name (ADR-0112). A
+// statement that is not a constant comes only from ddlUniqueConstraint or
+// ddlIndex, which refuse a label or a property that is not a plain
+// identifier. The gibsoncheck analyzer projectorcypher keeps it so.
+type schemaStatement string
+
+// validSchemaNames refuses a label or a property that is not a plain
+// identifier, so no other text reaches a statement.
+func validSchemaNames(label string, props []string) error {
+	if err := taxonomy.ValidIdentifier(label); err != nil {
+		return fmt.Errorf("schema label %q: %w", label, err)
+	}
+	for _, p := range props {
+		if err := taxonomy.ValidIdentifier(p); err != nil {
+			return fmt.Errorf("schema property %q of %s: %w", p, label, err)
+		}
+	}
+	return nil
+}
+
+// ddlUniqueConstraint is the uniqueness constraint on prop of label.
+func ddlUniqueConstraint(label, prop string) (schemaStatement, error) {
+	if err := validSchemaNames(label, []string{prop}); err != nil {
+		return "", err
+	}
+	return schemaStatement(fmt.Sprintf(
+		"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE n.%s IS UNIQUE",
+		schemaIdent(label, []string{prop})+"_unique", label, prop)), nil
+}
+
+// ddlIndex is the index on props of label.
+func ddlIndex(label string, props []string) (schemaStatement, error) {
+	if err := validSchemaNames(label, props); err != nil {
+		return "", err
+	}
+	return schemaStatement(fmt.Sprintf(
+		"CREATE INDEX %s IF NOT EXISTS FOR (n:%s) ON (%s)",
+		schemaIdent(label, props), label, propList(props))), nil
+}
+
 func schemaIdent(label string, props []string) string {
 	return "gibson_" + strings.ToLower(label) + "_" + strings.Join(props, "_")
 }
@@ -115,64 +157,77 @@ func propList(props []string) string {
 // constraint on the label's identity, or a composite index when the identity is
 // composite. Labels are PascalCase exactly as the projector writes them. Neo4j
 // labels are case sensitive, so a lower-case label constrains no node.
-func constraintStatements(reg *taxonomy.Registry) []string {
+func constraintStatements(reg *taxonomy.Registry) ([]schemaStatement, error) {
 	labels := reg.NodeLabels()
 	sort.Strings(labels)
-	out := make([]string, 0, len(labels))
+	out := make([]schemaStatement, 0, len(labels))
 	for _, label := range labels {
 		id := identityForLabel(label)
+		var stmt schemaStatement
+		var err error
 		if id.unique {
-			out = append(out, fmt.Sprintf(
-				"CREATE CONSTRAINT %s IF NOT EXISTS FOR (n:%s) REQUIRE n.%s IS UNIQUE",
-				schemaIdent(label, id.props)+"_unique", label, id.props[0]))
-			continue
+			stmt, err = ddlUniqueConstraint(label, id.props[0])
+		} else {
+			stmt, err = ddlIndex(label, id.props)
 		}
-		out = append(out, fmt.Sprintf(
-			"CREATE INDEX %s IF NOT EXISTS FOR (n:%s) ON (%s)",
-			schemaIdent(label, id.props), label, propList(id.props)))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stmt)
 	}
-	return out
+	return out, nil
 }
 
 // indexStatements returns the lookup index DDL.
-func indexStatements() []string {
-	out := make([]string, 0, len(lookupIndexes))
+func indexStatements() ([]schemaStatement, error) {
+	out := make([]schemaStatement, 0, len(lookupIndexes))
 	for _, ix := range lookupIndexes {
-		out = append(out, fmt.Sprintf(
-			"CREATE INDEX %s IF NOT EXISTS FOR (n:%s) ON (%s)",
-			schemaIdent(ix.label, ix.props), ix.label, propList(ix.props)))
+		stmt, err := ddlIndex(ix.label, ix.props)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, stmt)
 	}
-	return out
+	return out, nil
 }
 
 // versionConstraint keeps the :_SchemaVersion node a singleton under
 // concurrent first touches from more than one daemon replica.
-var versionConstraint = fmt.Sprintf(
-	"CREATE CONSTRAINT gibson_schemaversion_name_unique IF NOT EXISTS FOR (n:%s) REQUIRE n.name IS UNIQUE",
-	schemaVersionLabel)
+const versionConstraint schemaStatement = "CREATE CONSTRAINT gibson_schemaversion_name_unique IF NOT EXISTS FOR (n:" +
+	schemaVersionLabel + ") REQUIRE n.name IS UNIQUE"
 
 // versionCypher records the taxonomy version. The property shape matches what
 // cmd/gibson-migrate wrote and the tenant operator reads.
-var versionCypher = fmt.Sprintf(
-	"MERGE (v:%s {name: $name}) SET v.version = $version, v.applied_at = datetime()",
-	schemaVersionLabel)
+const versionCypher schemaStatement = "MERGE (v:" + schemaVersionLabel +
+	" {name: $name}) SET v.version = $version, v.applied_at = datetime()"
 
 // schemaDDL is every statement ensureSchema runs, in order, for reg.
-func schemaDDL(reg *taxonomy.Registry) []string {
-	ddl := constraintStatements(reg)
-	ddl = append(ddl, indexStatements()...)
-	return append(ddl, versionConstraint)
+func schemaDDL(reg *taxonomy.Registry) ([]schemaStatement, error) {
+	ddl, err := constraintStatements(reg)
+	if err != nil {
+		return nil, err
+	}
+	indexes, err := indexStatements()
+	if err != nil {
+		return nil, err
+	}
+	ddl = append(ddl, indexes...)
+	return append(ddl, versionConstraint), nil
 }
 
 // cypherExec runs one statement in its own transaction. DDL cannot share a
 // transaction with a data write, and Neo4j allows one schema change per
 // transaction.
-type cypherExec func(ctx context.Context, cypher string, params map[string]any) error
+type cypherExec func(ctx context.Context, stmt schemaStatement, params map[string]any) error
 
 // applySchema runs the schema DDL for reg and then records the version. Every
 // statement is IF NOT EXISTS or a MERGE, so running it again is safe.
 func applySchema(ctx context.Context, reg *taxonomy.Registry, run cypherExec) error {
-	for _, stmt := range schemaDDL(reg) {
+	ddl, err := schemaDDL(reg)
+	if err != nil {
+		return fmt.Errorf("build schema: %w", err)
+	}
+	for _, stmt := range ddl {
 		if err := run(ctx, stmt, nil); err != nil {
 			return fmt.Errorf("%s: %w", stmt, err)
 		}
@@ -188,9 +243,9 @@ func applySchema(ctx context.Context, reg *taxonomy.Registry, run cypherExec) er
 
 // sessionExec adapts a tenant session to cypherExec.
 func sessionExec(sess neo4j.SessionWithContext) cypherExec {
-	return func(ctx context.Context, cypher string, params map[string]any) error {
+	return func(ctx context.Context, stmt schemaStatement, params map[string]any) error {
 		_, err := sess.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
-			res, txErr := tx.Run(ctx, cypher, params)
+			res, txErr := tx.Run(ctx, string(stmt), params)
 			if txErr != nil {
 				return nil, fmt.Errorf("run schema statement: %w", txErr)
 			}

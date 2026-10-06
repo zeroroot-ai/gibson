@@ -39,7 +39,7 @@ func extendedRegistry(t *testing.T, extra string) *taxonomy.Registry {
 // TestConstraintStatements_CoverEveryTaxonomyLabel is the drift guard: every
 // label the taxonomy admits has a constraint or index in the generated set.
 func TestConstraintStatements_CoverEveryTaxonomyLabel(t *testing.T) {
-	if gaps := constraintGaps(taxonomy.Global, schemaDDL(taxonomy.Global)); len(gaps) > 0 {
+	if gaps := constraintGaps(taxonomy.Global, mustSchemaDDL(t, taxonomy.Global)); len(gaps) > 0 {
 		t.Fatalf("taxonomy labels with no constraint or index: %v", gaps)
 	}
 }
@@ -53,12 +53,12 @@ func TestConstraintGaps_FixtureCatchesNewLabel(t *testing.T) {
 	const added = "Zz9Probe"
 	reg := extendedRegistry(t, added)
 
-	stale := schemaDDL(taxonomy.Global)
+	stale := mustSchemaDDL(t, taxonomy.Global)
 	gaps := constraintGaps(reg, stale)
 	if len(gaps) != 1 || gaps[0] != added {
 		t.Fatalf("constraintGaps over a stale set = %v, want [%s]", gaps, added)
 	}
-	if gaps := constraintGaps(reg, schemaDDL(reg)); len(gaps) != 0 {
+	if gaps := constraintGaps(reg, mustSchemaDDL(t, reg)); len(gaps) != 0 {
 		t.Fatalf("generated set for the extended registry still has gaps: %v", gaps)
 	}
 }
@@ -77,7 +77,7 @@ func TestConstraintStatements_KeyedOnProjectorIdentity(t *testing.T) {
 		"Port":          "(n:Port) ON (n.brain_host_id, n.number)",
 		"Service":       "(n:Service) ON (n.brain_host_id, n.port)",
 	}
-	ddl := strings.Join(constraintStatements(taxonomy.Global), "\n")
+	ddl := strings.Join(mustConstraintStatements(t, taxonomy.Global), "\n")
 	for label, frag := range want {
 		if !strings.Contains(ddl, frag) {
 			t.Errorf("%s: generated DDL lacks %q", label, frag)
@@ -89,7 +89,7 @@ func TestConstraintStatements_KeyedOnProjectorIdentity(t *testing.T) {
 // the deleted migration constrained :mission, :finding and :host, which match
 // no node because Neo4j labels are case sensitive.
 func TestSchemaDDL_PascalCaseNotLegacyLowercase(t *testing.T) {
-	ddl := strings.Join(schemaDDL(taxonomy.Global), "\n")
+	ddl := strings.Join(mustSchemaDDL(t, taxonomy.Global), "\n")
 	for _, legacy := range []string{":mission", ":finding", ":host", ":port", ":service", ":domain"} {
 		if strings.Contains(ddl, legacy) {
 			t.Errorf("DDL contains lower-case label %q", legacy)
@@ -142,7 +142,8 @@ func newFakeStore() *fakeStore { return &fakeStore{created: map[string]bool{}} }
 
 var ddlName = regexp.MustCompile(`^CREATE (?:CONSTRAINT|INDEX) (\S+)`)
 
-func (f *fakeStore) run(_ context.Context, cypher string, params map[string]any) error {
+func (f *fakeStore) run(_ context.Context, stmt schemaStatement, params map[string]any) error {
+	cypher := string(stmt)
 	if f.delay > 0 {
 		time.Sleep(f.delay)
 	}
@@ -178,7 +179,7 @@ func TestApplySchema_Idempotent(t *testing.T) {
 			t.Fatalf("run %d: %v", i+1, err)
 		}
 	}
-	if want := 2 * (len(schemaDDL(taxonomy.Global)) + 1); store.count() != want {
+	if want := 2 * (len(mustSchemaDDL(t, taxonomy.Global)) + 1); store.count() != want {
 		t.Fatalf("issued %d statements over two runs, want %d", store.count(), want)
 	}
 }
@@ -202,7 +203,8 @@ func TestApplySchema_RecordsVersionInOperatorShape(t *testing.T) {
 		!strings.Contains(operatorVersionQuery, "v.version") {
 		t.Fatalf("operator query drifted: %s", operatorVersionQuery)
 	}
-	if !strings.Contains(versionCypher, "(v:"+schemaVersionLabel+" ") || !strings.Contains(versionCypher, "SET v.version = $version") {
+	if !strings.Contains(string(versionCypher), "(v:"+schemaVersionLabel+" ") ||
+		!strings.Contains(string(versionCypher), "SET v.version = $version") {
 		t.Fatalf("version write does not set v.version on :%s: %s", schemaVersionLabel, versionCypher)
 	}
 }
@@ -250,7 +252,7 @@ func TestSchemaTracker_ConcurrentFirstTouchRunsOnce(t *testing.T) {
 	if applied.Load() != 1 {
 		t.Fatalf("schema applied %d times for one tenant, want 1", applied.Load())
 	}
-	if want := len(schemaDDL(taxonomy.Global)) + 1; store.count() != want {
+	if want := len(mustSchemaDDL(t, taxonomy.Global)) + 1; store.count() != want {
 		t.Fatalf("issued %d statements, want %d", store.count(), want)
 	}
 }
@@ -324,7 +326,7 @@ func TestNeo4jGraphWriter_EnsuresSchemaOnceBeforeFirstWrite(t *testing.T) {
 		}
 	}
 
-	ddl := len(schemaDDL(taxonomy.Global)) + 1 // plus the version write
+	ddl := len(mustSchemaDDL(t, taxonomy.Global)) + 1 // plus the version write
 	if want := ddl + 2; len(sess.log) != want {
 		t.Fatalf("issued %d statements, want %d (schema once, two data writes)", len(sess.log), want)
 	}
@@ -354,4 +356,54 @@ func constraintGaps(reg *taxonomy.Registry, stmts []string) []string {
 		}
 	}
 	return gaps
+}
+
+// mustSchemaDDL is schemaDDL as text, for the checks of these tests.
+func mustSchemaDDL(t *testing.T, reg *taxonomy.Registry) []string {
+	t.Helper()
+	ddl, err := schemaDDL(reg)
+	if err != nil {
+		t.Fatalf("schemaDDL: %v", err)
+	}
+	return statementsText(ddl)
+}
+
+// mustConstraintStatements is constraintStatements as text.
+func mustConstraintStatements(t *testing.T, reg *taxonomy.Registry) []string {
+	t.Helper()
+	stmts, err := constraintStatements(reg)
+	if err != nil {
+		t.Fatalf("constraintStatements: %v", err)
+	}
+	return statementsText(stmts)
+}
+
+func statementsText(stmts []schemaStatement) []string {
+	out := make([]string, len(stmts))
+	for i, s := range stmts {
+		out[i] = string(s)
+	}
+	return out
+}
+
+// TestSchemaStatement_RefusesANameThatIsNotAnIdentifier is the failing
+// fixture of the schema half of ADR-0112: a label or a property that is not
+// a plain identifier never reaches a statement.
+func TestSchemaStatement_RefusesANameThatIsNotAnIdentifier(t *testing.T) {
+	bad := "Host) DETACH DELETE (n"
+	if _, err := ddlUniqueConstraint(bad, "brain_id"); err == nil {
+		t.Error("ddlUniqueConstraint accepted a label that is not an identifier")
+	}
+	if _, err := ddlUniqueConstraint("Host", "id} RETURN 1 //"); err == nil {
+		t.Error("ddlUniqueConstraint accepted a property that is not an identifier")
+	}
+	if _, err := ddlIndex(bad, []string{"scope"}); err == nil {
+		t.Error("ddlIndex accepted a label that is not an identifier")
+	}
+	if _, err := ddlIndex("Host", []string{"scope", "a, n.b"}); err == nil {
+		t.Error("ddlIndex accepted a property that is not an identifier")
+	}
+	if _, err := ddlIndex("Host", []string{"scope", "address"}); err != nil {
+		t.Errorf("ddlIndex refused plain identifiers: %v", err)
+	}
 }
