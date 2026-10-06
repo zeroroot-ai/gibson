@@ -2423,6 +2423,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.world.v1.WorldService/ListProofReviews":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.world.v1.WorldService/ListReviewQueue":
     relation: "member"
     object_type: "tenant"
