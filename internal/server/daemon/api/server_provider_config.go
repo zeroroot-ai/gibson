@@ -261,12 +261,9 @@ const (
 )
 
 // emitProviderAudit logs a provider-related audit event via the daemon's
-// AuditLogger. The function is a no-op when auditLogger is nil (dev/test mode).
+// AuditLogger. The audit logger is required: the daemon wires it at start.
 // Credential material MUST NOT appear in the action or metadata.
 func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, providerName string) {
-	if s.auditLogger == nil {
-		return
-	}
 	s.auditLogger.Log(ctx, action, "provider", providerName, map[string]any{
 		"tenant_id": tenantID,
 	})
@@ -275,11 +272,7 @@ func (s *DaemonServer) emitProviderAudit(ctx context.Context, tenantID, action, 
 // recordProviderAudit writes the audit record of a provider change durably,
 // BEFORE the change takes effect. The change fails when the record cannot be
 // written, so no provider change exists without its record (gibson#676).
-// With no audit logger wired (dev/test mode) nothing is recorded.
 func (s *DaemonServer) recordProviderAudit(ctx context.Context, tenantID, action, providerName string) error {
-	if s.auditLogger == nil {
-		return nil
-	}
 	if err := s.auditLogger.Record(ctx, action, "provider", providerName, map[string]any{
 		"tenant_id": tenantID,
 	}); err != nil {

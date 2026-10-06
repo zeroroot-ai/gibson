@@ -75,14 +75,6 @@ func TestFGASecretsPluginAssociations_PluginsBoundTo(t *testing.T) {
 	}
 }
 
-func TestFGASecretsPluginAssociations_NilAuthorizer(t *testing.T) {
-	a := NewFGASecretsPluginAssociations(nil)
-	got, err := a.PluginsBoundTo(context.Background(), auth.MustNewTenantID("acme"), "cred:x")
-	if err != nil || got != nil {
-		t.Fatalf("nil authorizer must return (nil,nil), got (%v,%v)", got, err)
-	}
-}
-
 func (r *recordingAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, userType string) ([]string, error) {
 	r.gotObjectType, r.gotObject, r.gotRelation, r.gotUserType = objectType, object, relation, userType
 	return r.users, nil

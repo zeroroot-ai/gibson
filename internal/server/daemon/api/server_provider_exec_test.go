@@ -118,8 +118,11 @@ func (l *stubExecLimiter) Check(_ context.Context, _, _ string) error {
 // ---------------------------------------------------------------------------
 
 // tenantCtx builds a context with the given tenant wired in.
+// tenantCtx is a request context of a signed-in user of tenantID. The user is
+// the actor of each audit record the handlers write.
 func tenantCtx(tenantID string) context.Context {
-	return auth.ContextWithTenantString(context.Background(), tenantID)
+	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
+	return auth.WithIdentity(ctx, auth.Identity{Tenant: auth.MustNewTenantID(tenantID), Subject: "user-test"})
 }
 
 // newExecServer builds a minimal DaemonServer with a stubbed provider store and
@@ -129,6 +132,8 @@ func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConf
 		logger:          slog.Default(),
 		providerConfig:  store,
 		providerFactory: factory,
+		// The budget enforcer is required: the daemon wires it at start.
+		budgetEnforcer: &stubBudgetEnforcer{},
 	}
 	return s
 }
@@ -330,6 +335,7 @@ func TestExecuteLLM_NoProviderStore(t *testing.T) {
 	s := &DaemonServer{
 		logger:          slog.Default(),
 		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
+		budgetEnforcer:  &stubBudgetEnforcer{},
 	}
 	ctx := tenantCtx("tenant-a")
 	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
@@ -705,6 +711,7 @@ func TestWithProviderFactory_ReplacesDefault(t *testing.T) {
 	s := &DaemonServer{
 		logger:          slog.Default(),
 		providerFactory: providerFactoryFunc, // default
+		budgetEnforcer:  &stubBudgetEnforcer{},
 	}
 	called := false
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {

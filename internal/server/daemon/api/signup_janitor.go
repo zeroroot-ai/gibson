@@ -29,12 +29,9 @@ const signupJanitorInterval = time.Hour
 // janitor that stops on the first transient database error is a janitor that
 // silently stops running.
 //
-// Safe to call when no store is wired — it returns immediately rather than
-// spinning.
+// The verification store is required. The daemon starts the janitor only
+// after it wires the store.
 func (s *DaemonServer) RunSignupJanitor(ctx context.Context) {
-	if s.signupVerifications == nil {
-		return
-	}
 	ticker := time.NewTicker(signupJanitorInterval)
 	defer ticker.Stop()
 

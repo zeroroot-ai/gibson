@@ -109,7 +109,7 @@ func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
 
 	rec := &audittest.Recorder{}
 	store := &mockProviderStore{createOut: fakeProviderRecord("p1"), getOut: fakeProviderRecord("p1")}
-	srv := serverWithStore(store)
+	srv := serverWithStore(t, store)
 	srv.auditLogger = auditLoggerOver(t, rec)
 	if _, err := srv.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: input}); err != nil {
 		t.Fatalf("CreateProvider: %v", err)
@@ -125,7 +125,7 @@ func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
 	}
 
 	downStore := &mockProviderStore{}
-	down := serverWithStore(downStore)
+	down := serverWithStore(t, downStore)
 	down.auditLogger = auditLoggerOver(t, failingDurable{})
 	for name, call := range map[string]func() error{
 		"create": func() error {
@@ -153,7 +153,7 @@ func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
 		t.Error("the store was called with no audit record")
 	}
 
-	failing := serverWithStore(&mockProviderStore{
+	failing := serverWithStore(t, &mockProviderStore{
 		createErr: errAuditDown, deleteErr: errAuditDown, updateErr: errAuditDown, setDefErr: errAuditDown,
 	})
 	failing.auditLogger = auditLoggerOver(t, &audittest.Recorder{})

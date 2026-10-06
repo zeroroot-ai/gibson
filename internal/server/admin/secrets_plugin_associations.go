@@ -42,7 +42,9 @@ type FGASecretsPluginAssociations struct {
 	authorizer authz.Authorizer
 }
 
-// NewFGASecretsPluginAssociations constructs the production associations reader.
+// NewFGASecretsPluginAssociations constructs the production associations
+// reader. The authorizer is required: FGA is required at the start of the
+// daemon, and this reader has no answer without it ([[0003]]).
 func NewFGASecretsPluginAssociations(authorizer authz.Authorizer) *FGASecretsPluginAssociations {
 	return &FGASecretsPluginAssociations{authorizer: authorizer}
 }
@@ -52,9 +54,6 @@ func NewFGASecretsPluginAssociations(authorizer authz.Authorizer) *FGASecretsPlu
 // "cred:openai"); with that layout the stored key equals the caller-facing
 // ref, so callerName is an identity normaliser here.
 func (f *FGASecretsPluginAssociations) PluginsBoundTo(ctx context.Context, tenant auth.TenantID, secretName string) ([]string, error) {
-	if f.authorizer == nil {
-		return nil, nil
-	}
 	ref := callerName(secretName)
 	object := fmt.Sprintf("secret:tenant-%s/%s", tenant, ref)
 	users, err := f.authorizer.ListUsersOfType(ctx, "secret", object, "can_resolve", "plugin_principal")

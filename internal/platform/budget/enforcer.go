@@ -82,8 +82,9 @@ type redisEnforcer struct {
 	recLs    *redis.Script
 }
 
-// NewEnforcer constructs an Enforcer backed by the given Redis client.
-// Pass teamResolver=nil to disable team-scope enforcement.
+// NewEnforcer constructs an Enforcer backed by the given Redis client. The
+// Redis client and the team resolver are required: each LLM call reads its
+// team budgets through the resolver ([[0003]]).
 //
 // Limits flow through the ADR-0089 entitlements seam: explicit admin-set
 // budgets (the Redis budget:* config) always win, and when no explicit
@@ -92,7 +93,15 @@ type redisEnforcer struct {
 // OSS default's zero Limits) means "no provider-supplied ceiling" — i.e.
 // unlimited unless an admin set one. The enforcer therefore never reads
 // plans or Stripe directly.
-func NewEnforcer(rdb redis.UniversalClient, logger *slog.Logger, teamResolver TeamMembershipResolver, clock Clock, provider entitlements.Provider) Enforcer {
+func NewEnforcer(
+	rdb redis.UniversalClient, logger *slog.Logger, teamResolver TeamMembershipResolver, clock Clock, provider entitlements.Provider,
+) (Enforcer, error) {
+	if rdb == nil {
+		return nil, errors.New("budget: NewEnforcer: the Redis client is required")
+	}
+	if teamResolver == nil {
+		return nil, errors.New("budget: NewEnforcer: the team resolver is required")
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -107,7 +116,7 @@ func NewEnforcer(rdb redis.UniversalClient, logger *slog.Logger, teamResolver Te
 		provider: entitlements.Resolve(provider),
 		checkLs:  redis.NewScript(luaCheck),
 		recLs:    redis.NewScript(luaRecord),
-	}
+	}, nil
 }
 
 // Redis key layout (all keys are tenant-scoped already via the prefix):
@@ -202,13 +211,10 @@ func scopeSubject(ctx context.Context, scope Scope) (string, bool) {
 	return "", false
 }
 
-// resolveTeams returns the team IDs applicable to the current user, or
-// nil if no team resolver is wired. Errors are logged and treated as
-// "no teams" to fail open rather than blocking the call.
+// resolveTeams returns the team IDs applicable to the current user. Errors
+// are logged and treated as "no teams" to fail open rather than blocking the
+// call.
 func (e *redisEnforcer) resolveTeams(ctx context.Context, tenantID, userID string) []string {
-	if e.teams == nil {
-		return nil
-	}
 	teams, err := e.teams(ctx, tenantID, userID)
 	if err != nil {
 		e.logger.WarnContext(ctx, "budget: team membership resolution failed; skipping team-scope enforcement",

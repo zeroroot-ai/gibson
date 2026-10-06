@@ -27,6 +27,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 )
 
@@ -136,30 +137,27 @@ func fakeProviderRecord(name string) *providerconfig.ProviderConfig {
 
 // serverWithStore returns a DaemonServer with the given store and optional
 // audit logger wired in.
-func serverWithStore(store providerConfigStoreIface) *DaemonServer {
+// auditedServer is a blankServer with an audit logger. The audit logger is
+// required: the daemon wires it at start.
+func auditedServer(t *testing.T) *DaemonServer {
+	t.Helper()
 	s := blankServer()
+	s.auditLogger = auditLoggerOver(t, &audittest.Recorder{})
+	return s
+}
+
+func serverWithStore(t *testing.T, store providerConfigStoreIface) *DaemonServer {
+	t.Helper()
+	s := auditedServer(t)
 	s.providerConfig = store
 	return s
 }
 
-// serverWithStoreAndAudit returns a DaemonServer with store + a real
-// mockAuditLogger; the returned logger can be used to assert emitted events.
-func serverWithStoreAndAudit(store providerConfigStoreIface) (*DaemonServer, *mockAuditLogger) {
-	// DaemonServer.auditLogger is *audit.AuditLogger (concrete) so we cannot
-	// inject a mock directly. Instead, emitProviderAudit delegates to
-	// s.auditLogger.Log — we verify via the audit field being nil in most tests
-	// and rely on TestProvider audit verification via the event capturing the
-	// audit call pattern. For mutation handlers, we test that errors from the
-	// audit path are silently swallowed by keeping auditLogger nil (no-op path).
-	//
-	// Since audit.AuditLogger is a concrete struct the narrow interface trick
-	// does not apply here. Our coverage focuses on:
-	//   (a) the store is called with correct inputs, and
-	//   (b) the RPC returns the correct proto response.
-	// Audit emission is covered by TestProvider_AuditEmit_NilLogger_NoError.
-	s := blankServer()
-	s.providerConfig = store
-	return s, nil
+// serverWithStoreAndAudit returns a DaemonServer with store and an audit
+// logger. The second value is unused by the callers.
+func serverWithStoreAndAudit(t *testing.T, store providerConfigStoreIface) (*DaemonServer, *mockAuditLogger) {
+	t.Helper()
+	return serverWithStore(t, store), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -172,21 +170,21 @@ func serverWithStoreAndAudit(store providerConfigStoreIface) (*DaemonServer, *mo
 // the nil-store and store-error paths are sufficient here.
 
 func TestListProviders_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestListProviders_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{listErr: assert.AnError}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
 
 func TestListProviders_Empty_OK(t *testing.T) {
 	store := &mockProviderStore{listOut: nil}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -200,7 +198,7 @@ func TestListProviders_Multiple_ReturnedInOrder(t *testing.T) {
 			fakeProviderRecord("anthropic-secondary"),
 		},
 	}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.ListProviders(tenantCtx("acme"), &tenantv1.ListProvidersRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.Providers, 2)
@@ -215,21 +213,21 @@ func TestListProviders_Multiple_ReturnedInOrder(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "x"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{getErr: providerconfig.ErrNotFound}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "missing"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
 func TestGetProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{getErr: assert.AnError}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "x"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
@@ -237,7 +235,7 @@ func TestGetProvider_StoreError_Internal(t *testing.T) {
 func TestGetProvider_Success_ReturnsRecord(t *testing.T) {
 	cfg := fakeProviderRecord("openai-primary")
 	store := &mockProviderStore{getOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.GetProvider(tenantCtx("acme"), &tenantv1.GetProviderRequest{Name: "openai-primary"})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Provider)
@@ -251,7 +249,7 @@ func TestGetProvider_Success_ReturnsRecord(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCreateProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "openai"},
 	})
@@ -259,7 +257,7 @@ func TestCreateProvider_NilStore_FailedPrecondition(t *testing.T) {
 }
 
 func TestCreateProvider_InvalidType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "made-up-provider"},
 	})
@@ -267,7 +265,7 @@ func TestCreateProvider_InvalidType_InvalidArgument(t *testing.T) {
 }
 
 func TestCreateProvider_CustomType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "custom"},
 	})
@@ -276,7 +274,7 @@ func TestCreateProvider_CustomType_InvalidArgument(t *testing.T) {
 
 func TestCreateProvider_AlreadyExists_AlreadyExists(t *testing.T) {
 	store := &mockProviderStore{createErr: providerconfig.ErrAlreadyExists}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "dup", Type: "openai"},
 	})
@@ -285,7 +283,7 @@ func TestCreateProvider_AlreadyExists_AlreadyExists(t *testing.T) {
 
 func TestCreateProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{createErr: assert.AnError}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Name: "p", Type: "openai"},
 	})
@@ -295,7 +293,7 @@ func TestCreateProvider_StoreError_Internal(t *testing.T) {
 func TestCreateProvider_Success_ReturnsRecordAndEmitsAudit(t *testing.T) {
 	cfg := fakeProviderRecord("openai-new")
 	store := &mockProviderStore{createOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	// auditLogger is nil → emitProviderAudit is a no-op; no panic.
 	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
@@ -316,7 +314,7 @@ func TestCreateProvider_Success_ReturnsRecordAndEmitsAudit(t *testing.T) {
 func TestCreateProvider_CredentialsNotInResponse(t *testing.T) {
 	cfg := fakeProviderRecord("p")
 	store := &mockProviderStore{createOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
 			Name:        "p",
@@ -338,7 +336,7 @@ func TestCreateProvider_CredentialsNotInResponse(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestUpdateProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "p",
 		Input: &tenantv1.ProviderConfigInput{Type: "openai"},
@@ -348,7 +346,7 @@ func TestUpdateProvider_NilStore_FailedPrecondition(t *testing.T) {
 
 func TestUpdateProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{updateErr: providerconfig.ErrNotFound}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "missing",
 		Input: &tenantv1.ProviderConfigInput{Type: "openai"},
@@ -359,7 +357,7 @@ func TestUpdateProvider_NotFound_NotFound(t *testing.T) {
 func TestUpdateProvider_Success_PassesNameToStore(t *testing.T) {
 	cfg := fakeProviderRecord("openai-updated")
 	store := &mockProviderStore{updateOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "openai-updated",
 		Input: &tenantv1.ProviderConfigInput{Type: "openai", DefaultModel: "gpt-4o"},
@@ -374,21 +372,21 @@ func TestUpdateProvider_Success_PassesNameToStore(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeleteProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestDeleteProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{deleteErr: providerconfig.ErrNotFound}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "gone"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
 
 func TestDeleteProvider_Success_PassesNameToStore(t *testing.T) {
 	store := &mockProviderStore{}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.DeleteProvider(tenantCtx("acme"), &tenantv1.DeleteProviderRequest{Name: "old-provider"})
 	require.NoError(t, err)
 	assert.Equal(t, "old-provider", store.capturedDeleteName)
@@ -399,14 +397,14 @@ func TestDeleteProvider_Success_PassesNameToStore(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetDefaultProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetDefaultProvider_NotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{defaultErr: providerconfig.ErrNotFound}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
@@ -415,7 +413,7 @@ func TestGetDefaultProvider_Success(t *testing.T) {
 	cfg := fakeProviderRecord("default-prov")
 	cfg.IsDefault = true
 	store := &mockProviderStore{defaultOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.GetDefaultProvider(tenantCtx("acme"), &tenantv1.GetDefaultProviderRequest{})
 	require.NoError(t, err)
 	require.NotNil(t, resp.Provider)
@@ -428,14 +426,14 @@ func TestGetDefaultProvider_Success(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSetDefaultProvider_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestSetDefaultProvider_StoreError_Internal(t *testing.T) {
 	store := &mockProviderStore{setDefErr: assert.AnError}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	assert.Equal(t, codes.Internal, grpcCode(err))
 }
@@ -444,7 +442,7 @@ func TestSetDefaultProvider_Success_PassesNameAndEmitsAudit(t *testing.T) {
 	cfg := fakeProviderRecord("primary")
 	cfg.IsDefault = true
 	store := &mockProviderStore{getOut: cfg}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "primary"})
 	require.NoError(t, err)
 	assert.Equal(t, "primary", store.capturedDefaultName)
@@ -457,7 +455,7 @@ func TestSetDefaultProvider_GetFailureAfterSet_ReturnsEmpty(t *testing.T) {
 	// setDefault succeeds but the follow-up Get fails → return empty response
 	// rather than propagating the read error.
 	store := &mockProviderStore{getErr: assert.AnError}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "p"})
 	require.NoError(t, err) // no gRPC-level error
 	assert.Nil(t, resp.Provider)
@@ -468,14 +466,14 @@ func TestSetDefaultProvider_GetFailureAfterSet_ReturnsEmpty(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetProviderHealth_NilStore_FailedPrecondition(t *testing.T) {
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "p"})
 	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
 }
 
 func TestGetProviderHealth_ResolveNotFound_NotFound(t *testing.T) {
 	store := &mockProviderStore{resolveErr: providerconfig.ErrNotFound}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	_, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "missing"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
@@ -493,7 +491,7 @@ func TestGetProviderHealth_UnknownProviderType_ReturnsUnhealthy(t *testing.T) {
 			Credentials: map[string]string{"api_key": "sk-x"},
 		},
 	}
-	s := serverWithStore(store)
+	s := serverWithStore(t, store)
 	resp, err := s.GetProviderHealth(tenantCtx("acme"), &tenantv1.GetProviderHealthRequest{Name: "bad"})
 	require.NoError(t, err) // handler-level: no gRPC error
 	assert.False(t, resp.Healthy)
@@ -505,13 +503,13 @@ func TestGetProviderHealth_UnknownProviderType_ReturnsUnhealthy(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestTestProvider_NilInput_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: nil})
 	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
 }
 
 func TestTestProvider_InvalidType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Type: "not-a-real-provider"},
 	})
@@ -519,7 +517,7 @@ func TestTestProvider_InvalidType_InvalidArgument(t *testing.T) {
 }
 
 func TestTestProvider_CustomType_InvalidArgument(t *testing.T) {
-	s := serverWithStore(&mockProviderStore{})
+	s := serverWithStore(t, &mockProviderStore{})
 	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Type: "custom"},
 	})
@@ -535,7 +533,7 @@ func TestTestProvider_ProviderConstructionFails_ReturnsFalseOkNoGRPCError(t *tes
 	// whose construction always succeeds, test the ok:false path via the
 	// GetProviderHealth handler or mock the factory directly.
 	// This test verifies the input-validation → codes.InvalidArgument path.
-	s := blankServer()
+	s := auditedServer(t)
 	_, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{Type: "unknown-x"},
 	})
@@ -547,7 +545,7 @@ func TestTestProvider_ProviderConstructionFails_ReturnsFalseOkNoGRPCError(t *tes
 func TestTestProvider_CredentialsNotEchoedBack(t *testing.T) {
 	// Use ollama (no API key validation at construction time) with a sentinel value.
 	// The test catches any accidental echo of credentials in ok/error/model fields.
-	s := blankServer()
+	s := auditedServer(t)
 	// providerConfig is nil for TestProvider — it doesn't read from the store.
 	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
@@ -729,10 +727,11 @@ func TestDecryptedToLLMConfig_NoAPIKeyOrBaseURL_EmptyTypedFields(t *testing.T) {
 // Audit emission — nil logger is a no-op
 // ---------------------------------------------------------------------------
 
-func TestEmitProviderAudit_NilLogger_DoesNotPanic(t *testing.T) {
-	s := blankServer()
-	// auditLogger is nil → must not panic.
-	assert.NotPanics(t, func() {
-		s.emitProviderAudit(context.Background(), "acme", auditProviderCreated, "my-provider")
-	})
+func TestEmitProviderAudit_WritesTheRecord(t *testing.T) {
+	rec := &audittest.Recorder{}
+	s := auditedServer(t)
+	s.auditLogger = auditLoggerOver(t, rec)
+	s.emitProviderAudit(tenantCtx("acme"), "acme", auditProviderTested, "my-provider")
+	require.Eventually(t, func() bool { return len(rec.Events()) == 1 }, 2*time.Second, 10*time.Millisecond)
+	assert.Equal(t, "my-provider", rec.Events()[0].TargetID)
 }

@@ -61,7 +61,7 @@ func embeddingInput(name string) *tenantv1.ProviderConfigInput {
 func TestCreateProvider_EmbeddingProvider_FiresReembedForTenant(t *testing.T) {
 	store := &mockProviderStore{createOut: fakeProviderRecord("openai")}
 	trigger := &stubReembedTrigger{}
-	s := serverWithStore(store).WithReembedTrigger(trigger)
+	s := serverWithStore(t, store).WithReembedTrigger(trigger)
 
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: embeddingInput("openai"),
@@ -74,7 +74,7 @@ func TestCreateProvider_EmbeddingProvider_FiresReembedForTenant(t *testing.T) {
 func TestCreateProvider_NonEmbeddingProvider_DoesNotFireReembed(t *testing.T) {
 	store := &mockProviderStore{createOut: fakeProviderRecord("openai")}
 	trigger := &stubReembedTrigger{}
-	s := serverWithStore(store).WithReembedTrigger(trigger)
+	s := serverWithStore(t, store).WithReembedTrigger(trigger)
 
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
@@ -93,7 +93,7 @@ func TestCreateProvider_NonEmbeddingProvider_DoesNotFireReembed(t *testing.T) {
 func TestUpdateProvider_EmbeddingProvider_FiresReembedForTenant(t *testing.T) {
 	store := &mockProviderStore{updateOut: fakeProviderRecord("openai")}
 	trigger := &stubReembedTrigger{}
-	s := serverWithStore(store).WithReembedTrigger(trigger)
+	s := serverWithStore(t, store).WithReembedTrigger(trigger)
 
 	_, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "openai",
@@ -108,7 +108,7 @@ func TestSetDefaultProvider_FiresReembedUnconditionally(t *testing.T) {
 	// carries no embedding input, so the trigger fires regardless.
 	store := &mockProviderStore{getOut: fakeProviderRecord("openai")}
 	trigger := &stubReembedTrigger{}
-	s := serverWithStore(store).WithReembedTrigger(trigger)
+	s := serverWithStore(t, store).WithReembedTrigger(trigger)
 
 	_, err := s.SetDefaultProvider(tenantCtx("acme"), &tenantv1.SetDefaultProviderRequest{Name: "openai"})
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestSetDefaultProvider_FiresReembedUnconditionally(t *testing.T) {
 
 func TestCreateProvider_DefaultNoopTrigger_NoPanic(t *testing.T) {
 	store := &mockProviderStore{createOut: fakeProviderRecord("openai")}
-	s := serverWithStore(store) // no trigger wired — defaults to the no-op
+	s := serverWithStore(t, store) // no trigger wired — defaults to the no-op
 	_, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: embeddingInput("openai"),
 	})

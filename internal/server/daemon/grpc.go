@@ -838,20 +838,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// budgets via the dashboard.
 		//
 		// TeamMembershipResolver is wired against FGA: `team#member@user`
-		// tuples are the source of truth for team membership. Calls fall
-		// back to tenant+user scopes (no teams) on authorizer absence or
-		// transient error — the enforcer itself downgrades to no team
-		// check when the resolver returns nil.
+		// tuples are the source of truth for team membership. FGA is
+		// required at start, so the resolver is always set. A transient
+		// error falls back to tenant+user scopes (no teams).
 		// Spec: llm-user-attribution-governance (Requirement 3).
-		var teamResolver budget.TeamMembershipResolver
-		if d.authorizer != nil {
-			teamResolver = newBudgetTeamResolver(d.authorizer, d.logger.Slog())
-		}
+		teamResolver := newBudgetTeamResolver(d.authorizer, d.logger.Slog())
 		// The budget enforcer consumes tenant-default ceilings through the
 		// entitlements seam (ADR-0089): explicit admin budgets win, else the
 		// provider supplies the tenant default. OSS = config/unlimited. A nil
 		// provider is resolved to UnlimitedProvider inside NewEnforcer.
-		budgetEnforcer := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
+		budgetEnforcer, err := budget.NewEnforcer(d.stateClient.Client(), d.logger.Slog(), teamResolver, nil, d.entitlementsProvider)
+		if err != nil {
+			return nil, fmt.Errorf("budget enforcer: %w", err)
+		}
 		daemonSvc.WithBudgetEnforcer(budgetEnforcer)
 		d.budgetEnforcer = budgetEnforcer
 		d.logger.Info(ctx, "budget enforcer wired into DaemonServer (spec: llm-user-attribution-governance)")
@@ -1220,8 +1219,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			return nil, err
 		}
 
-		// Age out abandoned verification rows. Cancellation via ctx; a nil
-		// store makes the loop a no-op.
+		// Age out abandoned verification rows. Cancellation via ctx. The
+		// store is wired above exactly when the platform database is set.
 		if d.platformDB != nil {
 			go daemonSvc.RunSignupJanitor(ctx)
 		}
@@ -3112,9 +3111,6 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer bgCancel()
 
-		if d.graphWriter == nil {
-			return
-		}
 		if mergeErr := d.graphWriter.UpsertMission(bgCtx, tenantForMission.String(), MissionProjection{
 			ID:        missionIDStr,
 			Name:      missionName,
