@@ -1395,7 +1395,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// surface and serves no gRPC.
 				InviteAPIURL:  os.Getenv("GIBSON_PUBLIC_URL"),
 				ReservedNames: rnpForAdmin,
-				Logger:        d.logger.Slog(),
+				// A removal moves the enrollment owner of each identity the
+				// removed user owned (gibson#568).
+				ComponentOwners: capabilitygrant.NewCapabilityGrantStore(d.platformDB),
+				Logger:          d.logger.Slog(),
 			})
 			if taErr != nil {
 				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",

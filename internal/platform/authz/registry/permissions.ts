@@ -2930,6 +2930,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.MembershipService/ReassignAgentIdentity": {
+    method: "/gibson.tenant.v1.MembershipService/ReassignAgentIdentity",
+    service: "gibson.tenant.v1.MembershipService",
+    relation: "admin",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.MembershipService/RemoveMember": {
     method: "/gibson.tenant.v1.MembershipService/RemoveMember",
     service: "gibson.tenant.v1.MembershipService",

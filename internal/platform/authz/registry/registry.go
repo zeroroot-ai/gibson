@@ -2657,6 +2657,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.MembershipService/ReassignAgentIdentity": {
+		Service:           "gibson.tenant.v1.MembershipService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.MembershipService/RemoveMember": {
 		Service:           "gibson.tenant.v1.MembershipService",
 		Relation:          "admin",
