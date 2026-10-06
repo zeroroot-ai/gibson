@@ -135,3 +135,84 @@ func TestWriteSync_NilWriter_ReturnsError(t *testing.T) {
 	err := w.WriteSync(context.Background(), testEvent("acme", "x"))
 	require.Error(t, err)
 }
+
+// TestWriteSyncID_ReturnsTheRowID: WriteSyncID returns the id from
+// INSERT ... RETURNING id.
+func TestWriteSyncID_ReturnsTheRowID(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectChainPreamble(mock)
+	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
+	mock.ExpectCommit()
+
+	id, err := NewWriter(db, silentLogger()).WriteSyncID(context.Background(), testEvent("acme", "x"))
+	require.NoError(t, err)
+	assert.Equal(t, int64(42), id)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestWriteSyncID_SurfacesTheInsertError: the caller gets the error of the
+// insert and no id.
+func TestWriteSyncID_SurfacesTheInsertError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectChainPreamble(mock)
+	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").WillReturnError(errors.New("insert refused"))
+	mock.ExpectRollback()
+
+	id, err := NewWriter(db, silentLogger()).WriteSyncID(context.Background(), testEvent("acme", "x"))
+	require.ErrorContains(t, err, "insert refused")
+	assert.Zero(t, id)
+}
+
+// TestWriteSyncID_CommitError: a failed commit is an error, not an id.
+func TestWriteSyncID_CommitError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectChainPreamble(mock)
+	mock.ExpectQuery("INSERT INTO audit_log .* RETURNING id").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(7)))
+	mock.ExpectCommit().WillReturnError(errors.New("commit refused"))
+
+	_, err = NewWriter(db, silentLogger()).WriteSyncID(context.Background(), testEvent("acme", "x"))
+	require.ErrorContains(t, err, "commit refused")
+}
+
+func TestWriteSyncID_NilWriter_ReturnsError(t *testing.T) {
+	var w *Writer
+	_, err := w.WriteSyncID(context.Background(), testEvent("acme", "x"))
+	require.Error(t, err)
+}
+
+// TestInsert_EmptyBatchWritesNothing: an empty batch opens no transaction.
+func TestInsert_EmptyBatchWritesNothing(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	id, err := NewWriter(db, silentLogger()).insert(context.Background(), nil, true)
+	require.NoError(t, err)
+	assert.Zero(t, id)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestInsert_LockError: a failed chain lock is an error.
+func TestInsert_LockError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("pg_advisory_xact_lock").WillReturnError(errors.New("lock refused"))
+	mock.ExpectRollback()
+
+	_, err = NewWriter(db, silentLogger()).insert(context.Background(), []Event{testEvent("acme", "x")}, false)
+	require.ErrorContains(t, err, "lock chain")
+}

@@ -268,6 +268,8 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.ConnectorService/ListConnectors,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/connector.proto,rule
 /gibson.tenant.v1.DomainPackService/DisableDomainPack,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/domain_pack.proto,rule
 /gibson.tenant.v1.DomainPackService/EnableDomainPack,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/domain_pack.proto,rule
+/gibson.tenant.v1.DomainPackService/ExportDomainPack,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/domain_pack.proto,rule
+/gibson.tenant.v1.DomainPackService/ImportDomainPack,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/domain_pack.proto,rule
 /gibson.tenant.v1.DomainPackService/ListDomainPackCatalog,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/domain_pack.proto,rule
 /gibson.tenant.v1.DomainPackService/ListDomainPacks,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/domain_pack.proto,rule
 /gibson.tenant.v1.GrantsService/DeleteAgentGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule

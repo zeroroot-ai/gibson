@@ -44,12 +44,17 @@ type DomainPackService struct {
 	// ListDomainPackCatalog and refused by EnableDomainPack. Required — the
 	// service is not registered without it.
 	gate CatalogGate
+
+	// imports stores a pack that the Platform owner imports (gibson#712).
+	imports PackImportStore
 }
 
 // NewDomainPackService constructs the service over the given tenant brain
-// registry, catalog, and catalog gate.
-func NewDomainPackService(registry *brain.Registry, catalog *ontology.DomainPackCatalog, gate CatalogGate) *DomainPackService {
-	return &DomainPackService{registry: registry, catalog: catalog, gate: gate}
+// registry, catalog, catalog gate, and the store of imported packs.
+func NewDomainPackService(
+	registry *brain.Registry, catalog *ontology.DomainPackCatalog, gate CatalogGate, imports PackImportStore,
+) *DomainPackService {
+	return &DomainPackService{registry: registry, catalog: catalog, gate: gate, imports: imports}
 }
 
 // engine resolves the caller's tenant from the ext-authz context and returns

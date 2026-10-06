@@ -79,6 +79,33 @@ service DomainPackService {
       allowed_identities: 3  // USER | SERVICE
     };
   }
+
+  // ExportDomainPack returns the live extensions of the tenant of the caller
+  // as the JSON of one Domain Pack (gibson#712): the node labels and
+  // relationship types that the tenant promoted. A second install imports
+  // the JSON with ImportDomainPack. Requires tenant admin.
+  rpc ExportDomainPack(ExportDomainPackRequest) returns (ExportDomainPackResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ImportDomainPack checks the JSON of one Domain Pack and stores it in this
+  // install (gibson#712). The pack joins the catalog at the next daemon start,
+  // because a catalog never changes under a running daemon (ADR-0133). It
+  // never replaces an embedded catalog pack. Only the Platform owner may call
+  // it.
+  rpc ImportDomainPack(ImportDomainPackRequest) returns (ImportDomainPackResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_owner"
+      object_type: "system_tenant"
+      object_deriver: "system_tenant"
+      allowed_identities: 1  // USER
+    };
+  }
 }
 
 // DomainPackCatalogEntry is one curated Domain Pack the tenant may enable.
@@ -138,3 +165,25 @@ message DisableDomainPackRequest {
 }
 
 message DisableDomainPackResponse {}
+
+message ExportDomainPackRequest {
+  // name is the name of the exported pack, a plain identifier.
+  string name = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // version is the version of the exported pack, 1 or more.
+  int32 version = 2;
+}
+
+message ExportDomainPackResponse {
+  // pack_json is the pack, in the JSON shape of the catalog pack files.
+  bytes pack_json = 1;
+}
+
+message ImportDomainPackRequest {
+  // pack_json is the pack, in the JSON shape of the catalog pack files.
+  bytes pack_json = 1;
+}
+
+message ImportDomainPackResponse {
+  string name = 1;
+  int32 version = 2;
+}

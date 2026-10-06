@@ -43,6 +43,8 @@ const (
 	DomainPackService_ListDomainPacks_FullMethodName       = "/gibson.tenant.v1.DomainPackService/ListDomainPacks"
 	DomainPackService_EnableDomainPack_FullMethodName      = "/gibson.tenant.v1.DomainPackService/EnableDomainPack"
 	DomainPackService_DisableDomainPack_FullMethodName     = "/gibson.tenant.v1.DomainPackService/DisableDomainPack"
+	DomainPackService_ExportDomainPack_FullMethodName      = "/gibson.tenant.v1.DomainPackService/ExportDomainPack"
+	DomainPackService_ImportDomainPack_FullMethodName      = "/gibson.tenant.v1.DomainPackService/ImportDomainPack"
 )
 
 // DomainPackServiceClient is the client API for DomainPackService service.
@@ -70,6 +72,17 @@ type DomainPackServiceClient interface {
 	// pack's content from the caller's tenant World.
 	// Requires tenant admin (ADR-0067), matching EnableDomainPack.
 	DisableDomainPack(ctx context.Context, in *DisableDomainPackRequest, opts ...grpc.CallOption) (*DisableDomainPackResponse, error)
+	// ExportDomainPack returns the live extensions of the tenant of the caller
+	// as the JSON of one Domain Pack (gibson#712): the node labels and
+	// relationship types that the tenant promoted. A second install imports
+	// the JSON with ImportDomainPack. Requires tenant admin.
+	ExportDomainPack(ctx context.Context, in *ExportDomainPackRequest, opts ...grpc.CallOption) (*ExportDomainPackResponse, error)
+	// ImportDomainPack checks the JSON of one Domain Pack and stores it in this
+	// install (gibson#712). The pack joins the catalog at the next daemon start,
+	// because a catalog never changes under a running daemon (ADR-0133). It
+	// never replaces an embedded catalog pack. Only the Platform owner may call
+	// it.
+	ImportDomainPack(ctx context.Context, in *ImportDomainPackRequest, opts ...grpc.CallOption) (*ImportDomainPackResponse, error)
 }
 
 type domainPackServiceClient struct {
@@ -120,6 +133,26 @@ func (c *domainPackServiceClient) DisableDomainPack(ctx context.Context, in *Dis
 	return out, nil
 }
 
+func (c *domainPackServiceClient) ExportDomainPack(ctx context.Context, in *ExportDomainPackRequest, opts ...grpc.CallOption) (*ExportDomainPackResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExportDomainPackResponse)
+	err := c.cc.Invoke(ctx, DomainPackService_ExportDomainPack_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *domainPackServiceClient) ImportDomainPack(ctx context.Context, in *ImportDomainPackRequest, opts ...grpc.CallOption) (*ImportDomainPackResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportDomainPackResponse)
+	err := c.cc.Invoke(ctx, DomainPackService_ImportDomainPack_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DomainPackServiceServer is the server API for DomainPackService service.
 // All implementations must embed UnimplementedDomainPackServiceServer
 // for forward compatibility.
@@ -145,6 +178,17 @@ type DomainPackServiceServer interface {
 	// pack's content from the caller's tenant World.
 	// Requires tenant admin (ADR-0067), matching EnableDomainPack.
 	DisableDomainPack(context.Context, *DisableDomainPackRequest) (*DisableDomainPackResponse, error)
+	// ExportDomainPack returns the live extensions of the tenant of the caller
+	// as the JSON of one Domain Pack (gibson#712): the node labels and
+	// relationship types that the tenant promoted. A second install imports
+	// the JSON with ImportDomainPack. Requires tenant admin.
+	ExportDomainPack(context.Context, *ExportDomainPackRequest) (*ExportDomainPackResponse, error)
+	// ImportDomainPack checks the JSON of one Domain Pack and stores it in this
+	// install (gibson#712). The pack joins the catalog at the next daemon start,
+	// because a catalog never changes under a running daemon (ADR-0133). It
+	// never replaces an embedded catalog pack. Only the Platform owner may call
+	// it.
+	ImportDomainPack(context.Context, *ImportDomainPackRequest) (*ImportDomainPackResponse, error)
 	mustEmbedUnimplementedDomainPackServiceServer()
 }
 
@@ -166,6 +210,12 @@ func (UnimplementedDomainPackServiceServer) EnableDomainPack(context.Context, *E
 }
 func (UnimplementedDomainPackServiceServer) DisableDomainPack(context.Context, *DisableDomainPackRequest) (*DisableDomainPackResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DisableDomainPack not implemented")
+}
+func (UnimplementedDomainPackServiceServer) ExportDomainPack(context.Context, *ExportDomainPackRequest) (*ExportDomainPackResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExportDomainPack not implemented")
+}
+func (UnimplementedDomainPackServiceServer) ImportDomainPack(context.Context, *ImportDomainPackRequest) (*ImportDomainPackResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ImportDomainPack not implemented")
 }
 func (UnimplementedDomainPackServiceServer) mustEmbedUnimplementedDomainPackServiceServer() {}
 func (UnimplementedDomainPackServiceServer) testEmbeddedByValue()                           {}
@@ -260,6 +310,42 @@ func _DomainPackService_DisableDomainPack_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DomainPackService_ExportDomainPack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExportDomainPackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DomainPackServiceServer).ExportDomainPack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DomainPackService_ExportDomainPack_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DomainPackServiceServer).ExportDomainPack(ctx, req.(*ExportDomainPackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DomainPackService_ImportDomainPack_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportDomainPackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DomainPackServiceServer).ImportDomainPack(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DomainPackService_ImportDomainPack_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DomainPackServiceServer).ImportDomainPack(ctx, req.(*ImportDomainPackRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DomainPackService_ServiceDesc is the grpc.ServiceDesc for DomainPackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -282,6 +368,14 @@ var DomainPackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DisableDomainPack",
 			Handler:    _DomainPackService_DisableDomainPack_Handler,
+		},
+		{
+			MethodName: "ExportDomainPack",
+			Handler:    _DomainPackService_ExportDomainPack_Handler,
+		},
+		{
+			MethodName: "ImportDomainPack",
+			Handler:    _DomainPackService_ImportDomainPack_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

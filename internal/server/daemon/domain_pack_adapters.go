@@ -36,7 +36,13 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 	if d.domainPackCatalog == nil {
 		d.domainPackCatalog = ontology.EmbeddedCatalog()
 	}
-	tenantv1.RegisterDomainPackServiceServer(srv, api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer))
+	imports, err := ontology.NewImportStore(d.platformDB)
+	if err != nil {
+		d.logger.Warn(ctx, "DomainPackService: not registered", "error", err.Error())
+		return
+	}
+	tenantv1.RegisterDomainPackServiceServer(srv,
+		api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer, imports))
 	d.logger.Info(ctx, "DomainPackService registered (ADR-0133)")
 
 	// ComplianceService reads the same catalog and the same Worlds: a

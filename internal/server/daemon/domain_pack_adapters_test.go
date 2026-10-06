@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -24,6 +25,7 @@ func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background()),
 		authorizer:    wiringAuthorizer{},
+		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
 
@@ -44,6 +46,7 @@ func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background()),
 		authorizer:    wiringAuthorizer{},
+		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
 
@@ -68,6 +71,7 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 		logger:            testObservabilityLogger(),
 		brainRegistry:     brain.NewRegistry(context.Background()),
 		authorizer:        wiringAuthorizer{},
+		platformDB:        testPlatformDB(t),
 		domainPackCatalog: want,
 	}
 	srv := grpc.NewServer()
@@ -97,6 +101,7 @@ func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger:     testObservabilityLogger(),
 		authorizer: wiringAuthorizer{},
+		platformDB: testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
 
@@ -107,19 +112,27 @@ func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
 	}
 }
 
-// TestRegisterDomainPack_RegistersTheComplianceService: the compliance
-// reader is served next to the Domain Pack service (gibson#674).
-func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
+// testPlatformDB returns a database handle for a wiring test. The wiring
+// opens no query, so a mock with no expectation is enough. In production
+// platformDB is never nil after Start (gibson#246).
+func testPlatformDB(t *testing.T) *sql.DB {
+	t.Helper()
 	db, _, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// TestRegisterDomainPack_RegistersTheComplianceService: the compliance
+// reader is served next to the Domain Pack service (gibson#674).
+func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background()),
 		authorizer:    wiringAuthorizer{},
-		platformDB:    db,
+		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
 	d.registerDomainPack(context.Background(), srv)

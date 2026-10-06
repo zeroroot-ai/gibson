@@ -15,6 +15,7 @@ package audit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -41,4 +42,19 @@ func (w *Writer) WriteSync(ctx context.Context, event Event) error {
 	}
 	auditEventsTotal.WithLabelValues(event.Action).Inc()
 	return nil
+}
+
+// WriteSyncID is WriteSync, and it also returns the id of the audit_log row,
+// so that a caller can name the record in its response.
+func (w *Writer) WriteSyncID(ctx context.Context, event Event) (int64, error) {
+	if w == nil {
+		return 0, errors.New("audit: WriteSyncID called on nil Writer")
+	}
+	id, err := w.insert(ctx, []Event{event}, true)
+	if err != nil {
+		w.writeError([]Event{event}, err, "the caller gets the error and fails its action")
+		return 0, err
+	}
+	auditEventsTotal.WithLabelValues(event.Action).Inc()
+	return id, nil
 }
