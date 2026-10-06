@@ -578,6 +578,15 @@ check-crd-field-consumers:
 		-exempt scripts/crd-field-consumers-exempt.txt \
 		-min-served 50 \
 		-tags setec_integration
+# nist-pack — regenerate the control list of the catalog pack nist-800-53-r5
+# from the pinned OSCAL catalog (gibson#766, tools/oscalgen/README.md).
+# check-nist-pack — fail when the committed pack file is stale. The same check
+# runs in the unit lane as tools/oscalgen TestCommittedPackMatchesTheCatalog.
+.PHONY: nist-pack check-nist-pack
+nist-pack:
+	@$(GOCMD) run ./tools/oscalgen -dir . -write
+check-nist-pack:
+	@$(GOCMD) run ./tools/oscalgen -dir . -check
 # env-readers — refresh configs/env-readers.txt, the env reader set that
 # zeroroot-ai/charts vendors (ADR-0094 layer 2, charts#303).
 # check-env-readers — fail when the file is stale. The same check runs in the

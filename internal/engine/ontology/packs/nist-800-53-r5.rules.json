@@ -1,0 +1,32 @@
+{
+  "mapping_rules": [
+    {
+      "control_id": "ac-2",
+      "expression": "event.action in [\"agent_identity.created\", \"agent_identity.revoked\", \"agent_registered\", \"agent_revoked\", \"tenant_user_mfa_reset\"]"
+    },
+    {
+      "control_id": "ac-3",
+      "expression": "event.action in [\"capability_executed\", \"model_resolved\"]"
+    },
+    {
+      "control_id": "ac-6",
+      "expression": "event.action in [\"agent_grant_added\", \"agent_grant_removed\", \"access_tuple_change\"]"
+    },
+    {
+      "control_id": "cm-3",
+      "expression": "event.action in [\"plugin.enable\", \"plugin.disable\", \"plugin.config.update\", \"provider_created\", \"provider_updated\", \"provider_deleted\", \"provider_default_changed\"]"
+    },
+    {
+      "control_id": "ia-4",
+      "expression": "event.action in [\"agent_identity.created\", \"agent_identity.revoked\"]"
+    },
+    {
+      "control_id": "ia-5",
+      "expression": "event.action in [\"tenant_user_mfa_reset\", \"secret_rotated\"]"
+    },
+    {
+      "control_id": "sc-12",
+      "expression": "event.action in [\"secret_rotated\", \"secret_revoked\", \"tenant_secrets_backend_configured\"]"
+    }
+  ]
+}

@@ -1651,6 +1651,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.ComplianceService/ListComplianceEvidence":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.ConnectorAuthService/CompleteConnectorAuthorization":
     relation: "admin"
     object_type: "tenant"

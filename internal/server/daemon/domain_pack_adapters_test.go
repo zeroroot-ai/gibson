@@ -7,6 +7,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
@@ -103,5 +104,26 @@ func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
 		t.Fatal("DomainPackService must not be registered without a brain registry")
+	}
+}
+
+// TestRegisterDomainPack_RegistersTheComplianceService: the compliance
+// reader is served next to the Domain Pack service (gibson#674).
+func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	d := &daemonImpl{
+		logger:        testObservabilityLogger(),
+		brainRegistry: brain.NewRegistry(context.Background()),
+		authorizer:    wiringAuthorizer{},
+		platformDB:    db,
+	}
+	srv := grpc.NewServer()
+	d.registerDomainPack(context.Background(), srv)
+	if _, ok := srv.GetServiceInfo()["gibson.tenant.v1.ComplianceService"]; !ok {
+		t.Fatal("ComplianceService must be registered with the Domain Pack service")
 	}
 }

@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/compliance"
 
 	"google.golang.org/grpc"
 
@@ -37,4 +38,16 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 	}
 	tenantv1.RegisterDomainPackServiceServer(srv, api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer))
 	d.logger.Info(ctx, "DomainPackService registered (ADR-0133)")
+
+	// ComplianceService reads the same catalog and the same Worlds: a
+	// framework pack is a Domain Pack, and the reader needs the packs that a
+	// tenant enabled (ADR-0113, gibson#674). The audit log is in the
+	// platform database.
+	reader, err := compliance.NewReader(d.platformDB, d.domainPackCatalog, api.BrainEnabledPacks{Registry: d.brainRegistry})
+	if err != nil {
+		d.logger.Warn(ctx, "ComplianceService: not registered", "error", err.Error())
+		return
+	}
+	tenantv1.RegisterComplianceServiceServer(srv, api.NewComplianceService(reader))
+	d.logger.Info(ctx, "ComplianceService registered (ADR-0113)")
 }

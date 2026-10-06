@@ -624,3 +624,25 @@ func TestDomainPack_Validate_NonDestructivePredicates(t *testing.T) {
 	pack.NonDestructivePredicates = []string{"exposed_dashboard", "exposed_dashboard"}
 	require.ErrorContains(t, pack.Validate(), "is listed twice")
 }
+
+func TestValidate_MappingRules(t *testing.T) {
+	ok := []MappingRule{
+		{ControlID: "ac-2", Expression: `event.action == "x"`},
+		{ControlID: "ac-2(4)", Expression: `true`},
+		{ControlID: "AU_2.a", Expression: `true`},
+	}
+	require.NoError(t, (&DomainPack{Name: "p", MappingRules: ok}).Validate())
+
+	bad := map[string][]MappingRule{
+		"empty control":     {{ControlID: "", Expression: "true"}},
+		"space in control":  {{ControlID: "ac 2", Expression: "true"}},
+		"long control":      {{ControlID: strings.Repeat("a", MaxControlIDBytes+1), Expression: "true"}},
+		"empty expression":  {{ControlID: "ac-2", Expression: " "}},
+		"duplicate control": {{ControlID: "ac-2", Expression: "true"}, {ControlID: "ac-2", Expression: "false"}},
+	}
+	for name, rules := range bad {
+		t.Run(name, func(t *testing.T) {
+			require.Error(t, (&DomainPack{Name: "p", MappingRules: rules}).Validate())
+		})
+	}
+}
