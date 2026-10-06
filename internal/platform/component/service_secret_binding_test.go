@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -215,6 +217,54 @@ func TestBindDeclaredSecrets_TokenEnrolledCallerWritesNothing(t *testing.T) {
 				t.Fatalf("wrote %d tuples in %d calls, want none", len(rec.written), rec.calls)
 			}
 		})
+	}
+}
+
+// TestBindDeclaredSecrets_EachSkipIsCounted: the check-in succeeds when its
+// binding is skipped, so the skip must be visible outside the log. Each skip
+// adds one to the counter of its reason, and a binding that is written adds
+// nothing.
+func TestBindDeclaredSecrets_EachSkipIsCounted(t *testing.T) {
+	ctx := credCallerCtx(t, "plugin_principal:github", "primary")
+	gateDown := offering("plugin", "github")
+	gateDown.checkErr = errors.New("fga unreachable")
+	writeDown := offering("plugin", "github")
+	writeDown.err = errors.New("fga down")
+	cases := []struct {
+		reason string
+		svc    *ComponentServiceServer
+		name   string
+	}{
+		{skipNoAuthorizer, newParityServer(), "github"},
+		{skipGateCheckFailed, newParityServer().WithAuthorizer(gateDown).WithEnrollmentReader(attestedCaller{}), "github"},
+		{skipNotInCatalog, newParityServer().WithAuthorizer(offering("plugin", "github")).WithEnrollmentReader(attestedCaller{}), "my-own-plugin"},
+		{skipNoEnrollmentReader, newParityServer().WithAuthorizer(offering("plugin", "github")), "github"},
+		{skipEnrollmentReadFails, newParityServer().WithAuthorizer(offering("plugin", "github")).
+			WithEnrollmentReader(enrollmentAnswer{err: errors.New("db down")}), "github"},
+		{skipNotAttested, newParityServer().WithAuthorizer(offering("plugin", "github")).
+			WithEnrollmentReader(enrollmentAnswer{attested: false}), "github"},
+		{skipWriteFailed, newParityServer().WithAuthorizer(writeDown).WithEnrollmentReader(attestedCaller{}), "github"},
+	}
+	for _, c := range cases {
+		before := testutil.ToFloat64(secretBindingSkipped.WithLabelValues(c.reason))
+		c.svc.bindDeclaredSecrets(ctx, "primary", "plugin", c.name, declaring("cred:github_token"))
+		if got := testutil.ToFloat64(secretBindingSkipped.WithLabelValues(c.reason)) - before; got != 1 {
+			t.Errorf("%s: counter rose by %v, want 1", c.reason, got)
+		}
+	}
+
+	total := func() float64 {
+		sum := 0.0
+		for _, c := range cases {
+			sum += testutil.ToFloat64(secretBindingSkipped.WithLabelValues(c.reason))
+		}
+		return sum
+	}
+	before := total()
+	newParityServer().WithAuthorizer(offering("plugin", "github")).WithEnrollmentReader(attestedCaller{}).
+		bindDeclaredSecrets(ctx, "primary", "plugin", "github", declaring("cred:github_token"))
+	if total() != before {
+		t.Error("a written binding must not count as a skip")
 	}
 }
 

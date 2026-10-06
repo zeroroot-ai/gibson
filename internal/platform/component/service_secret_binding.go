@@ -8,6 +8,9 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -50,6 +53,32 @@ const (
 // on every restart, so a transient write failure self-heals on the next start
 // (and surfaces meanwhile as a clear can_resolve deny plus this WARN). It never
 // fails registration.
+// secretBindingSkipped counts the check-ins whose declared secrets got no
+// can_resolve binding, by reason. The check-in still succeeds, so a log line
+// alone would be the only record of the skip (ADR-0097). An operator alerts
+// on the reasons that mean a fault: gate_check_failed,
+// enrollment_read_failed and write_failed.
+var secretBindingSkipped = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "gibson_component_secret_binding_skipped_total",
+		Help: "Check-ins with declared secrets that got no can_resolve binding, by reason.",
+	},
+	[]string{"reason"},
+)
+
+// The reasons of secretBindingSkipped.
+const (
+	skipNoAuthorizer        = "no_authorizer"
+	skipGateCheckFailed     = "gate_check_failed"
+	skipNotInCatalog        = "not_in_catalog"
+	skipNoIdentity          = "no_identity"
+	skipNotAPlugin          = "not_a_plugin_principal"
+	skipNoEnrollmentReader  = "no_enrollment_reader"
+	skipEnrollmentReadFails = "enrollment_read_failed"
+	skipNotAttested         = "not_attested"
+	skipWriteFailed         = "write_failed"
+)
+
 func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant, kind, name string, md map[string]string) {
 	// Reading a nil map is safe in Go, so no md-nil guard is needed; an absent
 	// or empty key ends the work here.
@@ -62,6 +91,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 	// does not offer, writes nothing. An undecidable gate is a closed gate.
 	if s.authorizer == nil {
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: no authorizer wired, the catalog gate cannot be asked")
+		secretBindingSkipped.WithLabelValues(skipNoAuthorizer).Inc()
 		return
 	}
 	object := authz.ComponentObject(kind, name)
@@ -70,6 +100,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: catalog gate check failed",
 			slog.String("fga_object", object),
 			slog.String("error", err.Error()))
+		secretBindingSkipped.WithLabelValues(skipGateCheckFailed).Inc()
 		return
 	}
 	if !offered {
@@ -77,12 +108,14 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 			slog.String("kind", kind),
 			slog.String("name", name),
 			slog.String("tenant", tenant))
+		secretBindingSkipped.WithLabelValues(skipNotInCatalog).Inc()
 		return
 	}
 
 	identity, err := auth.IdentityFromContext(ctx)
 	if err != nil || identity.Subject == "" {
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: no caller identity in context")
+		secretBindingSkipped.WithLabelValues(skipNoIdentity).Inc()
 		return
 	}
 	fgaUser := componentFGAUser(identity.Subject)
@@ -91,6 +124,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 	if !strings.HasPrefix(fgaUser, "plugin_principal:") {
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: caller is not a plugin_principal",
 			slog.String("fga_user", fgaUser))
+		secretBindingSkipped.WithLabelValues(skipNotAPlugin).Inc()
 		return
 	}
 
@@ -101,6 +135,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 	// writes nothing.
 	if s.enrollment == nil {
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: no enrollment reader wired, the caller's enrollment cannot be read")
+		secretBindingSkipped.WithLabelValues(skipNoEnrollmentReader).Inc()
 		return
 	}
 	attested, err := s.enrollment.PrincipalIsAttested(ctx, tenant, fgaUser)
@@ -108,6 +143,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 		s.logger.WarnContext(ctx, "declared-secret binding skipped: enrollment read failed",
 			slog.String("fga_user", fgaUser),
 			slog.String("error", err.Error()))
+		secretBindingSkipped.WithLabelValues(skipEnrollmentReadFails).Inc()
 		return
 	}
 	if !attested {
@@ -116,6 +152,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 			slog.String("kind", kind),
 			slog.String("name", name),
 			slog.String("tenant", tenant))
+		secretBindingSkipped.WithLabelValues(skipNotAttested).Inc()
 		return
 	}
 
@@ -145,6 +182,7 @@ func (s *ComponentServiceServer) bindDeclaredSecrets(ctx context.Context, tenant
 			slog.String("fga_user", fgaUser),
 			slog.Int("count", len(tuples)),
 			slog.String("error", err.Error()))
+		secretBindingSkipped.WithLabelValues(skipWriteFailed).Inc()
 		return
 	}
 	s.logger.InfoContext(ctx, "bound plugin can_resolve on declared secrets",
