@@ -120,7 +120,7 @@ func TestEvidence_PagesARangeWithMoreEventsThanOnePage(t *testing.T) {
 	for i := int64(1); i <= 5; i++ {
 		rows = append(rows, row(i, "agent_grant_added", start.Add(time.Duration(i)*time.Hour)))
 	}
-	var ids []string
+	ids := make([]string, 0, len(rows))
 	token := ""
 	for page := range 3 {
 		r := newTestReader(t, rows, enabledFw())
