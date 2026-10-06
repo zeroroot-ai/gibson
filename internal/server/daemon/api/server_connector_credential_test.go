@@ -29,7 +29,7 @@ import (
 const (
 	testConnectorOperatorSVID = "spiffe://install.example/platform/connector-operator"
 	testTenantOperatorSVID    = "spiffe://install.example/platform/tenant-operator"
-	testEnvoySVID             = "spiffe://install.example/platform/envoy"
+	testCredEnvoySVID         = "spiffe://install.example/platform/envoy"
 	testAccessToken           = "vendor-access-token-do-not-log"
 )
 
@@ -111,7 +111,7 @@ func TestGetConnectorCredential_OnlyTheConnectorOperator(t *testing.T) {
 	srv := credServer(liveTokenStore(t))
 
 	refused := map[string]context.Context{
-		"through the edge with a platform_operator token": auth.WithIdentity(peerCtx(t, testEnvoySVID), auth.Identity{
+		"through the edge with a platform_operator token": auth.WithIdentity(peerCtx(t, testCredEnvoySVID), auth.Identity{
 			Subject: "platform-admin", CredentialType: auth.CredentialType("client-credentials"),
 		}),
 		"another operator SVID":         peerCtx(t, testTenantOperatorSVID),

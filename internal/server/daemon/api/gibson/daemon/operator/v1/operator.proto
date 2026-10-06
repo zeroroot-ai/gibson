@@ -785,9 +785,9 @@ message ConnectorCredentialRef {
 
 message GetConnectorCredentialRequest {
   // tenant_id is the tenant slug. Required.
-  string tenant_id = 1;
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // connector_id is the catalog id of the connector. Required.
-  string connector_id = 2;
+  string connector_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // credentials are the credential refs that the ConnectorInstance declares.
   repeated ConnectorCredentialRef credentials = 3;
 }

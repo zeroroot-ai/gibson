@@ -5,17 +5,12 @@ package api
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"errors"
-	"net/url"
 	"testing"
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
@@ -27,19 +22,6 @@ const (
 	testActivationSVID = "spiffe://zeroroot.ai/component/activation"
 	testEnvoySVID      = "spiffe://zeroroot.ai/platform/envoy"
 )
-
-// peerCtx returns a context whose TLS peer carries svid.
-func peerCtx(t *testing.T, svid string) context.Context {
-	t.Helper()
-	u, err := url.Parse(svid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info := credentials.TLSInfo{State: tls.ConnectionState{
-		PeerCertificates: []*x509.Certificate{{URIs: []*url.URL{u}}},
-	}}
-	return peer.NewContext(context.Background(), &peer.Peer{AuthInfo: info})
-}
 
 func connectionServer() *DaemonServer {
 	return newPendingServer().WithConnectionPointCallers(ConnectionPointCallers{
