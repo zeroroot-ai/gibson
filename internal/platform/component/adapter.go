@@ -132,12 +132,6 @@ type RegistryAdapter struct {
 	// pool manages gRPC connections with automatic health checking
 	pool *GRPCPool
 
-	// callbackManager provides callback server for external agents (optional)
-	callbackManager CallbackManager
-
-	// authConfig provides authentication configuration for callback connections (optional)
-	authConfig *AuthConfig
-
 	// resolver provides proto type resolution for dynamically typed tool responses
 	resolver protoresolver.ProtoResolver
 }
@@ -162,12 +156,10 @@ func NewRegistryAdapter(reg ComponentRegistry) *RegistryAdapter {
 
 // SetCallbackManager configures the callback manager for this adapter.
 func (a *RegistryAdapter) SetCallbackManager(cm CallbackManager) {
-	a.callbackManager = cm
 }
 
 // SetAuthConfig configures authentication for callback connections.
 func (a *RegistryAdapter) SetAuthConfig(cfg *AuthConfig) {
-	a.authConfig = cfg
 }
 
 // SetResolver configures a custom ProtoResolver for this adapter.

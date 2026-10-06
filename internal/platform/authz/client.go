@@ -61,9 +61,6 @@ type FgaConfig struct {
 	// TimeoutMs is the per-call timeout in milliseconds. Defaults to 500ms.
 	TimeoutMs int
 
-	// TLSEnabled controls whether TLS is enabled. The Endpoint must be an https:// URL.
-	TLSEnabled bool
-
 	// Logger for structured log output. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
 }

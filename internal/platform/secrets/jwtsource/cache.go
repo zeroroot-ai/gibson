@@ -75,7 +75,6 @@ type JWTCache struct {
 
 	mu      sync.RWMutex
 	token   string
-	expiry  time.Time
 	started bool
 
 	cancel context.CancelFunc
@@ -111,7 +110,6 @@ func (c *JWTCache) Start(ctx context.Context) error {
 	bgCtx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
 	c.token = tok
-	c.expiry = expiry
 	c.started = true
 	c.cancel = cancel
 	c.mu.Unlock()
@@ -167,7 +165,6 @@ func (c *JWTCache) refreshLoop(ctx context.Context, initialToken string, initial
 		expiry := parseExp(tok)
 		c.mu.Lock()
 		c.token = tok
-		c.expiry = expiry
 		c.mu.Unlock()
 
 		currentToken = tok

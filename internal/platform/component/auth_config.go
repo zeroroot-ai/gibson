@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 )
 
 // AuthConfig holds authentication configuration for gRPC connections
@@ -18,10 +17,6 @@ type AuthConfig struct {
 	// TokenFile is a path to a file containing the token
 	// Useful for Kubernetes service account tokens
 	TokenFile string
-
-	// TokenRefreshInterval is how often to reload token from file
-	// Only applies when TokenFile is set
-	TokenRefreshInterval time.Duration
 }
 
 // GetToken returns the current authentication token

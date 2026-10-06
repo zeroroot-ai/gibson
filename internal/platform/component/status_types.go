@@ -3,10 +3,6 @@
 
 package component
 
-import (
-	"time"
-)
-
 // ProcessState represents the state of a component's process.
 type ProcessState string
 
@@ -53,9 +49,6 @@ type HealthCheckResult struct {
 	// Protocol is the health check protocol that was used
 	Protocol HealthCheckProtocol
 
-	// ResponseTime is the duration of the health check operation
-	ResponseTime time.Duration
-
 	// Error contains the error message if the health check failed.
 	// Empty string if the health check succeeded.
 	Error string
@@ -64,12 +57,7 @@ type HealthCheckResult struct {
 // LogError represents an error found in component logs.
 // This is used to track recent errors for debugging purposes.
 type LogError struct {
-	// Timestamp is when the log error occurred
-	Timestamp time.Time
 
 	// Message is the error message content
 	Message string
-
-	// Level is the log level (e.g., "ERROR", "WARN", "FATAL")
-	Level string
 }

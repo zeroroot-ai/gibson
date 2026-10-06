@@ -84,9 +84,6 @@ type LLMSlotSource interface {
 // manifest is about, which under impersonation is the impersonated
 // principal, not the admin who requested it.
 type Issuance struct {
-	// Actor is the authenticated caller that requested the manifest. Never
-	// empty — Build attributes self-issuance to the subject.
-	Actor Actor
 
 	// Subject is the principal the manifest resolves capabilities for, as
 	// the FGA "<type>:<id>" reference.
@@ -94,12 +91,6 @@ type Issuance struct {
 
 	// TenantID is the tenant the manifest was issued in.
 	TenantID string
-
-	// ImpersonatedAgentPrincipalID is the agent_principal an admin was
-	// previewing, or empty for ordinary self-issuance. A non-empty value is
-	// the audit-relevant signal: someone obtained a manifest that is not
-	// their own.
-	ImpersonatedAgentPrincipalID string
 }
 
 // AuditWriter records manifest issuances for the 7-day audit retention

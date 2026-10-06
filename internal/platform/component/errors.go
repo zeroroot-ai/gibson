@@ -36,7 +36,6 @@ type ComponentError struct {
 	Cause     error              // Underlying error (if any)
 	Component string             // Component name that caused the error
 	Context   map[string]any     // Additional context for debugging
-	Retryable bool               // Whether the operation can be retried
 }
 
 // Error implements the error interface, returning a formatted error message.

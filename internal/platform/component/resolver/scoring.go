@@ -83,13 +83,8 @@ type ComponentScorer interface {
 
 // ScoredComponent represents a component with its calculated score.
 type ScoredComponent struct {
-	Component       *component.Component
-	Score           float64
-	CapabilityScore float64
-	VersionScore    float64
-	HealthScore     float64
-	LoadScore       float64
-	LocalityScore   float64
+	Component *component.Component
+	Score     float64
 }
 
 const (
@@ -190,13 +185,8 @@ func (s *DefaultComponentScorer) ScoreMultiple(ctx context.Context, components [
 		}
 
 		results = append(results, ScoredComponent{
-			Component:       comp,
-			Score:           totalScore,
-			CapabilityScore: capScore,
-			VersionScore:    verScore,
-			HealthScore:     healthScore,
-			LoadScore:       loadScore,
-			LocalityScore:   localityScore,
+			Component: comp,
+			Score:     totalScore,
 		})
 	}
 

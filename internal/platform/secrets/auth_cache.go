@@ -87,8 +87,7 @@ type AuthRefreshFn func(ctx context.Context, tenant, provider string) (token str
 
 // authCacheKey is the composite map key for the per-(tenant, provider) cache.
 type authCacheKey struct {
-	tenant   string
-	provider string
+	tenant string
 }
 
 // authCacheEntry holds a single cached token and its effective expiry.
@@ -149,7 +148,7 @@ func NewAuthCache(refreshFn AuthRefreshFn, logger *slog.Logger, clock func() tim
 // GetOrRefresh returns an error only when the refresh function itself returns
 // an error.
 func (c *AuthCache) GetOrRefresh(ctx context.Context, tenant, provider string) (string, error) {
-	key := authCacheKey{tenant: tenant, provider: provider}
+	key := authCacheKey{tenant: tenant}
 	now := c.clock()
 
 	// Fast path: check for a valid cached entry under a read lock.
@@ -214,7 +213,7 @@ func (c *AuthCache) refresh(ctx context.Context, tenant, provider string) (strin
 
 	expiresAt := c.clock().Add(effectiveTTL)
 	c.mu.Lock()
-	c.store[authCacheKey{tenant: tenant, provider: provider}] = &authCacheEntry{
+	c.store[authCacheKey{tenant: tenant}] = &authCacheEntry{
 		token:     token,
 		expiresAt: expiresAt,
 	}
@@ -235,7 +234,7 @@ func (c *AuthCache) refresh(ctx context.Context, tenant, provider string) (strin
 // This method is typically called when a provider signals that its current
 // token has been revoked.
 func (c *AuthCache) Invalidate(tenant, provider string) {
-	key := authCacheKey{tenant: tenant, provider: provider}
+	key := authCacheKey{tenant: tenant}
 	c.mu.Lock()
 	delete(c.store, key)
 	c.mu.Unlock()
