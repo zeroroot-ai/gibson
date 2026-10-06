@@ -88,8 +88,11 @@ func TestRequestDestructiveAuthorization_Success_EnqueuesAndReturnsImmediately(t
 	svc := newSubmitProofService(t, h, "recon-agent", newFakeBeliefSubstrate(), engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
-	resp, err := svc.RequestDestructiveAuthorization(ctx, requestDestructiveAuthorizationRequest(
-		"mission-A", "recon-agent", "hyp-1", "T1490", "T1490", "delete the production database"))
+	req := requestDestructiveAuthorizationRequest(
+		"mission-A", "recon-agent", "hyp-1", "T1490", "T1490", "delete the production database")
+	req.BlastRadius = "one host: db-01"
+	req.Reversibility = harnesspb.Reversibility_REVERSIBILITY_IRREVERSIBLE
+	resp, err := svc.RequestDestructiveAuthorization(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.Equal(t, "hyp-1", resp.GetAuthorizationRequestId())
@@ -102,6 +105,10 @@ func TestRequestDestructiveAuthorization_Success_EnqueuesAndReturnsImmediately(t
 	assert.Equal(t, "T1490", got[0].Technique)
 	assert.Equal(t, "T1490", got[0].PredicateType)
 	assert.False(t, got[0].Decided, "a freshly requested action must not already be decided")
+	// The two fields that the agent reported are in the durable record
+	// (gibson#706).
+	assert.Equal(t, "one host: db-01", got[0].BlastRadius)
+	assert.Equal(t, brain.ReversibilityIrreversible, got[0].Reversibility)
 
 	// SettleBetTrue's verification must find it pending (no decision), never
 	// approved — that is exactly the point of asking before acting.
