@@ -28,7 +28,7 @@ func discoveryFixture() *graphragpb.DiscoveryResult {
 		Domains:  []*graphragpb.Domain{{Id: sp("d1"), Name: "example.test"}},
 		Findings: []*graphragpb.Finding{{
 			Id: sp("f1"), Title: "Directory listing enabled", Severity: "medium",
-			ParentId: sp("h1"), ParentType: sp("host"),
+			ParentId: sp("h1"),
 		}},
 	}
 }
