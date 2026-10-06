@@ -212,7 +212,10 @@ func (s *OntologyExtensionService) SubmitOntologyExtensionUpstream(
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.Internal, "SubmitOntologyExtensionUpstream: %v", err)
 	}
-	id, _ := auth.IdentityFromContext(ctx)
+	id, err := auth.IdentityFromContext(ctx)
+	if err != nil || id.Subject == "" {
+		return nil, status_grpc.Error(codes.Unauthenticated, "SubmitOntologyExtensionUpstream: the caller has no identity")
+	}
 	recordID, err := s.audit.WriteSyncID(ctx, audit.Event{
 		TenantID:   pack.Author,
 		ActorID:    id.Subject,

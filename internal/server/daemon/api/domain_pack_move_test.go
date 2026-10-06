@@ -166,7 +166,8 @@ func TestSubmitOntologyExtensionUpstream_WritesTheFragmentAsAnAuditRecord(t *tes
 	s.audit = w
 	promoteForTest(t, s, taxonomy.ProposedNodeLabel, "Container")
 
-	resp, err := s.SubmitOntologyExtensionUpstream(ownerCtx("acme", "owner-1"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+	caller := subjectCtx(t, "acme", "owner-1")
+	resp, err := s.SubmitOntologyExtensionUpstream(caller, &tenantv1.SubmitOntologyExtensionUpstreamRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
 	})
 	require.NoError(t, err)
@@ -176,15 +177,24 @@ func TestSubmitOntologyExtensionUpstream_WritesTheFragmentAsAnAuditRecord(t *tes
 	assert.Equal(t, SubmittedFragmentAction, ev.Action)
 	assert.Equal(t, "acme", ev.TenantID)
 	assert.Equal(t, "Container", ev.TargetID)
+	assert.Equal(t, "owner-1", ev.ActorID)
 	pack, err := ontology.DecodePackJSON(ev.Metadata)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Container"}, pack.TaxonomyNodeLabels)
 
 	w.err = errors.New("postgres down")
-	_, err = s.SubmitOntologyExtensionUpstream(ownerCtx("acme", "owner-1"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+	_, err = s.SubmitOntologyExtensionUpstream(caller, &tenantv1.SubmitOntologyExtensionUpstreamRequest{
 		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
 	})
 	assert.Equal(t, codes.Unavailable, grpcCode(err))
+
+	// A caller with a tenant and no subject gets no record with an empty actor.
+	w.err = nil
+	_, err = s.SubmitOntologyExtensionUpstream(tenantCtx("acme"), &tenantv1.SubmitOntologyExtensionUpstreamRequest{
+		Kind: tenantv1.OntologyProposalKind_ONTOLOGY_PROPOSAL_KIND_NODE_LABEL, Label: "Container",
+	})
+	assert.Equal(t, codes.Unauthenticated, grpcCode(err))
+	assert.Len(t, w.events, 1, "no second record")
 }
 
 // TestPackMoveAuthzEntries pins the authorization of the two RPCs.
@@ -196,4 +206,13 @@ func TestPackMoveAuthzEntries(t *testing.T) {
 	assert.Equal(t, "platform_owner", imp.Relation)
 	assert.Equal(t, "system_tenant", imp.ObjectType)
 	assert.Equal(t, registry.IdentityUser, imp.AllowedIdentities)
+}
+
+// subjectCtx is a caller context of tenantID with a verified identity whose
+// subject is subject.
+func subjectCtx(t *testing.T, tenantID, subject string) context.Context {
+	t.Helper()
+	tid, err := auth.NewTenantID(tenantID)
+	require.NoError(t, err)
+	return auth.WithIdentity(tenantCtx(tenantID), auth.Identity{Subject: subject, Tenant: tid})
 }
