@@ -23,6 +23,6 @@ func TestSandboxConfig_RequireSetec(t *testing.T) {
 		t.Errorf("address set: %v", err)
 	}
 	if err := set.Validate(); err == nil {
-		t.Error("an address with no mTLS files passed the shape check")
+		t.Error("an address with no fleet SPIFFE ID passed the shape check")
 	}
 }

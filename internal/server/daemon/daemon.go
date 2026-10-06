@@ -597,14 +597,14 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 	callbackOpts := make([]harness.CallbackServiceOption, 0, 10)
 	callbackOpts = append(callbackOpts, harness.WithEventBus(NewEventBusAdapter(d.eventBus)))
-	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox)
+	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox, daemonSVIDSource{d: d})
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
 			"error", sessErr)
 	}
 	// The fork checks take the sandbox of a caller from its setec identity
 	// token, never from a header that the process writes (setec#235, D74).
-	identityVerifier, idErr := NewSetecIdentityVerifier(cfg.Sandbox)
+	identityVerifier, idErr := NewSetecIdentityVerifier(cfg.Sandbox, daemonSVIDSource{d: d})
 	if idErr != nil {
 		slogLogger.Warn("sandbox identity check unavailable; a forked grant is refused everywhere",
 			"error", idErr)

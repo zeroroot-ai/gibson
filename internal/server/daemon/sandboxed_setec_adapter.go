@@ -17,8 +17,8 @@
 //
 // # Wiring
 //
-// `NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer, logger)` dials
-// the Setec frontend with mTLS using `component.TLSConfig.BuildTLSConfig()`,
+// `NewSetecSandboxedExecutor(cfg config.SandboxConfig, src, tracer, logger)`
+// dials the Setec frontend with the SVID of the daemon (SPIFFE mTLS),
 // builds the client, wires a `sandboxed.Executor`, and returns it. The
 // sandbox fleet is required (ADR-0142), so a TLS build failure stops the
 // daemon start. The dial itself is lazy: an unreachable frontend surfaces at
@@ -34,6 +34,9 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -63,11 +66,14 @@ const maxSetecRecvMsgBytes = 4 * 1024 * 1024 // 4 MiB
 // interactive session client. The catalog refresher that once used it to
 // launch `gibson-runner --list-tools` on a schedule is gone: tools are
 // manifest-seeded now (ADR-0117).
-func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, error) {
-	tlsCfg, err := cfg.Setec.MTLS.BuildTLSConfig()
+func NewSetecSandboxClient(cfg config.SandboxConfig, src setecSVIDSource) (sandboxed.SandboxClient, error) {
+	// The daemon presents its SVID and accepts only the SPIFFE ID of the
+	// fleet (ADR-0142). No certificate file is read.
+	fleet, err := spiffeid.FromString(cfg.Setec.SpiffeID)
 	if err != nil {
-		return nil, fmt.Errorf("build setec mTLS config: %w", err)
+		return nil, fmt.Errorf("sandbox.setec.spiffe_id: %w", err)
 	}
+	tlsCfg := tlsconfig.MTLSClientConfig(src, src, tlsconfig.AuthorizeID(fleet))
 	conn, err := grpc.NewClient(
 		cfg.Setec.Address,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
@@ -87,17 +93,6 @@ func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, e
 	}, nil
 }
 
-// NewSetecPinger constructs a health.Pinger from the Setec gRPC connection.
-// Returns the same setecClient cast to the health.Pinger interface so the
-// startup health check and periodic probe can reuse the mTLS connection.
-func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) error }, error) {
-	sc, err := NewSetecSandboxClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return sc.(*setecClient), nil
-}
-
 // NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
 // Setec gRPC client.
 //
@@ -105,8 +100,8 @@ func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) 
 // field-100 DiscoveryResult from successful tool responses and folds them into
 // the tenant's World asynchronously, matching what the live-callback path does
 // with the same payload.
-func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor, events sandboxed.EventPublisher) (*sandboxed.Executor, error) {
-	client, err := NewSetecSandboxClient(cfg)
+func NewSetecSandboxedExecutor(cfg config.SandboxConfig, src setecSVIDSource, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor, events sandboxed.EventPublisher) (*sandboxed.Executor, error) {
+	client, err := NewSetecSandboxClient(cfg, src)
 	if err != nil {
 		return nil, err
 	}
