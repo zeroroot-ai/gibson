@@ -64,7 +64,11 @@ func (s *OntologyExtensionService) engine(ctx context.Context, rpc string) (*bra
 	if !ok || tenantID.IsZero() {
 		return nil, status_grpc.Errorf(codes.PermissionDenied, "%s: missing tenant in context", rpc)
 	}
-	return s.registry.For(tenantID.String()), nil
+	eng, ok := TenantEngine(s.registry, tenantID.String())
+	if !ok {
+		return nil, ErrWorldUnavailable
+	}
+	return eng, nil
 }
 
 // ontologyProposalKind converts the wire OntologyProposalKind to the

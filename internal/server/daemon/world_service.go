@@ -24,6 +24,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -54,7 +55,11 @@ func (s *worldServer) engine(ctx context.Context) (*brain.Engine, error) {
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(t.String()), nil
+	eng, ok := api.TenantEngine(s.registry, t.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return eng, nil
 }
 
 func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {

@@ -13,6 +13,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -45,7 +46,11 @@ func (s *tenantRoutedProofSettlement) forTenant(ctx context.Context) (*brain.Eng
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(tenant.String()), nil
+	eng, ok := api.TenantEngine(s.registry, tenant.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return eng, nil
 }
 
 // DomainPackPredicate implements brain.ProofSettlementEngine. It searches
@@ -106,7 +111,10 @@ func (s *tenantRoutedProofSettlement) RequestDestructiveAuthorization(
 	if !ok {
 		return "", status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	e := s.registry.For(tenant.String())
+	e, ok := api.TenantEngine(s.registry, tenant.String())
+	if !ok {
+		return "", api.ErrWorldUnavailable
+	}
 	id, err := e.DestructiveAuthorizationQueue().Request(tenant.String(), req)
 	if err != nil {
 		return "", fmt.Errorf("request destructive authorization: %w", err)

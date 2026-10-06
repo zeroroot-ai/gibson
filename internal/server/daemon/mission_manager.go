@@ -1283,7 +1283,10 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 	if tenantErr != nil {
 		return nil, 0, tenantErr
 	}
-	eng := m.brainRegistry.For(tenant.String())
+	eng, ok := api.TenantEngine(m.brainRegistry, tenant.String())
+	if !ok {
+		return nil, 0, api.ErrWorldUnavailable
+	}
 	snapshots := eng.Missions()
 
 	var result []api.MissionData
@@ -1325,7 +1328,10 @@ func (m *missionManager) Get(ctx context.Context, missionID string) (*api.Missio
 	if tenantErr != nil {
 		return nil, tenantErr
 	}
-	eng := m.brainRegistry.For(tenant.String())
+	eng, ok := api.TenantEngine(m.brainRegistry, tenant.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
 	for _, ms := range eng.Missions() {
 		if ms.ID != missionID {
 			continue

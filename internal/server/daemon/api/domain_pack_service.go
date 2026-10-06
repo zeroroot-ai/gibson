@@ -61,7 +61,11 @@ func (s *DomainPackService) engine(ctx context.Context, rpc string) (*brain.Engi
 	if !ok || tenantID.IsZero() {
 		return nil, auth.TenantID{}, status_grpc.Errorf(codes.PermissionDenied, "%s: missing tenant in context", rpc)
 	}
-	return s.registry.For(tenantID.String()), tenantID, nil
+	eng, ok := TenantEngine(s.registry, tenantID.String())
+	if !ok {
+		return nil, auth.TenantID{}, ErrWorldUnavailable
+	}
+	return eng, tenantID, nil
 }
 
 // ListDomainPackCatalog returns the curated Domain Packs the tenant may

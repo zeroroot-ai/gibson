@@ -49,7 +49,10 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		return []api.MissionData{}, 0, nil
 	}
 
-	eng := d.brainRegistry.For(tenant.String())
+	eng, ok := api.TenantEngine(d.brainRegistry, tenant.String())
+	if !ok {
+		return nil, 0, api.ErrWorldUnavailable
+	}
 	snapshots := eng.Missions()
 
 	var result []api.MissionData

@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	destructiveauthzv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -56,7 +57,11 @@ func (s *destructiveAuthzServer) queue(ctx context.Context) (*brain.DestructiveA
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	return s.registry.For(t.String()).DestructiveAuthorizationQueue(), nil
+	eng, ok := api.TenantEngine(s.registry, t.String())
+	if !ok {
+		return nil, api.ErrWorldUnavailable
+	}
+	return eng.DestructiveAuthorizationQueue(), nil
 }
 
 // toPendingDestructiveActionPB converts a brain.DestructiveActionSnapshot
