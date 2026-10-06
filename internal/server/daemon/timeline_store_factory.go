@@ -58,16 +58,29 @@ func assertTimelineDurability(ctx context.Context, redisAddr, redisPassword stri
 var errNoTimelineRedis = errors.New("timeline durability boot guard: no data-plane Redis address is set; " +
 	"each tenant needs a durable Timeline (ADR-0163)")
 
-// requireDurableTimeline refuses a daemon whose brain registry has no durable
-// Timeline store. The store needs the key provider, the data-plane pool and a
-// data-plane Redis with AOF. A missing one is a start failure, never an engine
-// in memory only (ADR-0163, ADR-0003).
-func requireDurableTimeline(hasBrainRegistry, storeWired bool) error {
-	if hasBrainRegistry && !storeWired {
-		return errors.New("the durable Timeline store is not wired: the daemon needs security.key_provider, " +
-			"a data-plane pool and a data-plane Redis with appendonly=yes (ADR-0163)")
+// errNoDataPool reports a tenant engine asked for before the data-plane pool
+// exists. The Timeline of each tenant lives in that pool, so the registry
+// builds no engine for the tenant, and the next call tries again (ADR-0163).
+var errNoDataPool = errors.New("the data-plane pool is not up, so the tenant has no durable Timeline")
+
+// lazyTimelinePool reads the data-plane pool at each call. The daemon gives
+// the brain registry its store factory when it creates the registry, before
+// the pool starts, so no tenant engine ever runs without a durable Timeline:
+// with no pool, the factory fails and the registry builds no engine.
+type lazyTimelinePool struct {
+	pool func() timelinePoolForer
+}
+
+func (l lazyTimelinePool) For(ctx context.Context, tenant auth.TenantID) (*datapool.Conn, error) {
+	p := l.pool()
+	if p == nil {
+		return nil, errNoDataPool
 	}
-	return nil
+	conn, err := p.For(ctx, tenant)
+	if err != nil {
+		return nil, fmt.Errorf("timeline pool: %w", err)
+	}
+	return conn, nil
 }
 
 // timelinePoolForer is the narrow interface timelineStoreFactory needs from

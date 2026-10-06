@@ -202,9 +202,27 @@ func TestTimelineStoreFactory_AcquireErrorIsReturned(t *testing.T) {
 	require.ErrorContains(t, err, "the pool is gone")
 }
 
-func TestRequireDurableTimeline(t *testing.T) {
+// The lazy pool reads the pool at each call: with no pool it refuses, and with
+// one it hands over the connection or the wrapped pool error.
+func TestLazyTimelinePool(t *testing.T) {
 	t.Parallel()
-	require.Error(t, requireDurableTimeline(true, false), "a brain registry with no durable store must stop the start")
-	require.NoError(t, requireDurableTimeline(true, true))
-	require.NoError(t, requireDurableTimeline(false, false), "a daemon with no brain has no Timeline to require")
+	tenant := auth.MustNewTenantID("acme")
+	none := lazyTimelinePool{pool: func() timelinePoolForer { return nil }}
+	_, err := none.For(context.Background(), tenant)
+	require.ErrorIs(t, err, errNoDataPool)
+
+	conn := &datapool.Conn{}
+	up := lazyTimelinePool{pool: func() timelinePoolForer { return &fakePool{conn: conn} }}
+	got, err := up.For(context.Background(), tenant)
+	require.NoError(t, err)
+	require.Same(t, conn, got)
+
+	down := lazyTimelinePool{pool: func() timelinePoolForer { return &fakePool{err: errors.New("pool down")} }}
+	_, err = down.For(context.Background(), tenant)
+	require.ErrorContains(t, err, "pool down")
+
+	// Through the store factory, no pool means no store for the tenant.
+	store, err := timelineStoreFactory(none, discardSlog())(context.Background(), "acme")
+	require.ErrorIs(t, err, errNoDataPool)
+	require.Nil(t, store)
 }
