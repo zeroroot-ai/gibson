@@ -487,13 +487,15 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 					// image, never with NEO4J_PLUGINS — see neo4j_apoc.go and
 					// pkg/platform/dataplane/apoc.go for why that distinction
 					// is load-bearing (ADR-0112, gibson#1257).
-					InitContainers: []corev1.Container{apocInitContainer()},
-					Volumes:        []corev1.Volume{apocPluginVolume()},
+					SecurityContext: neo4jPodSecurityContext(),
+					InitContainers:  []corev1.Container{apocInitContainer()},
+					Volumes:         []corev1.Volume{apocPluginVolume()},
 					Containers: []corev1.Container{
 						{
-							Name:  "neo4j",
-							Image: neo4jImage,
-							Env:   append(neo4jSecurityEnv(), neo4jMemoryEnv(memRequest)...),
+							Name:            "neo4j",
+							Image:           neo4jImage,
+							SecurityContext: neo4jContainerSecurityContext(),
+							Env:             append(neo4jSecurityEnv(), neo4jMemoryEnv(memRequest)...),
 							Ports: []corev1.ContainerPort{
 								{
 									Name:          "bolt",
