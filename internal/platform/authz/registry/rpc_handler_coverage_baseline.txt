@@ -32,7 +32,6 @@
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples
-/gibson.daemon.v1.DaemonService/BuildComponent
 /gibson.daemon.v1.DaemonService/Connect
 /gibson.daemon.v1.DaemonService/CreateTarget
 /gibson.daemon.v1.DaemonService/DeleteTarget
@@ -42,7 +41,6 @@
 /gibson.daemon.v1.DaemonService/ListTargets
 /gibson.daemon.v1.DaemonService/PauseMission
 /gibson.daemon.v1.DaemonService/QueryPlugin
-/gibson.daemon.v1.DaemonService/ShowComponent
 /gibson.daemon.v1.DaemonService/StartComponent
 /gibson.daemon.v1.DaemonService/Status
 /gibson.daemon.v1.DaemonService/StopComponent

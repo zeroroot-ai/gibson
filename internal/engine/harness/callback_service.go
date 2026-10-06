@@ -25,6 +25,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -3483,10 +3484,19 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 		}, nil
 	}
 
-	filter := &MissionFilter{}
+	// Window returns ErrBadToken only. The harness reports a refusal in the
+	// response, as for every other refusal of this service.
+	offset, limit, pageErr := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if errors.Is(pageErr, pagetoken.ErrBadToken) {
+		return &harnesspb.ListMissionsResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+				Message: pagetoken.ErrBadToken.Error(),
+			},
+		}, nil
+	}
+	filter := &MissionFilter{Limit: limit, Offset: offset}
 	if req.Filter != nil {
-		filter.Limit = int(req.Filter.Limit)
-		filter.Offset = int(req.Filter.Offset)
 		if req.Filter.Status != harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED {
 			// Map proto MissionStatus enum back to internal string representation.
 			st := MissionStatus(strings.ToLower(strings.TrimPrefix(req.Filter.Status.String(), "MISSION_STATUS_")))
@@ -3514,7 +3524,10 @@ func (s *HarnessCallbackService) ListMissions(ctx context.Context, req *harnessp
 	}
 
 	s.logger.Info("ListMissions: listed missions", "count", len(missions))
-	return &harnesspb.ListMissionsResponse{Missions: missions}, nil
+	return &harnesspb.ListMissionsResponse{
+		Missions:      missions,
+		NextPageToken: pagetoken.Next(offset, limit, len(missions), -1),
+	}, nil
 }
 
 // CancelMission implements the mission cancellation RPC by delegating to the MissionOperator.

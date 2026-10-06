@@ -34,6 +34,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
@@ -490,12 +491,6 @@ type DaemonInterface interface {
 	// nothing. It returns the id of the new run.
 	RewindMission(ctx context.Context, req RewindRequest) (string, error)
 
-	// BuildComponent rebuilds a component from source
-	BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error)
-
-	// ShowComponent returns detailed information about a component
-	ShowComponent(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
-
 	// GetComponentLogs streams log entries for a component
 	GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
 
@@ -729,29 +724,6 @@ type StartComponentResult struct {
 type StopComponentResult struct {
 	StoppedCount int
 	TotalCount   int
-}
-
-// BuildComponentResult represents the result of building a component.
-type BuildComponentResult struct {
-	Success    bool
-	Stdout     string
-	Stderr     string
-	DurationMs int64
-}
-
-// ComponentInfoInternal represents detailed component information.
-type ComponentInfoInternal struct {
-	Name      string
-	Version   string
-	Kind      string
-	Status    string
-	Source    string
-	RepoPath  string
-	BinPath   string
-	Port      int
-	PID       int
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 // LogEntryData represents a single log entry.
@@ -1475,17 +1447,21 @@ func (s *DaemonServer) StopMission(ctx context.Context, req *daemonpb.StopMissio
 // disabled (empty tenant) all missions are returned for backward compatibility.
 func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissionsRequest) (*daemonpb.ListMissionsResponse, error) {
 	tenant := auth.TenantStringFromContext(ctx)
+	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
 
 	s.logger.Debug("mission list request received",
 		"active_only", req.ActiveOnly,
 		"status_filter", req.StatusFilter,
 		"name_pattern", req.NamePattern,
-		"limit", req.Limit,
-		"offset", req.Offset,
+		"page_size", limit,
+		"offset", offset,
 		"tenant", tenant,
 	)
 
-	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, int(req.Limit), int(req.Offset))
+	missions, total, err := s.daemon.ListMissions(ctx, req.ActiveOnly, req.StatusFilter, req.NamePattern, limit, offset)
 	if err != nil {
 		s.logger.Error("failed to list missions", "error", err)
 		return nil, preserveStatus(err, "failed to list missions")
@@ -1526,8 +1502,9 @@ func (s *DaemonServer) ListMissions(ctx context.Context, req *daemonpb.ListMissi
 	}
 
 	return &daemonpb.ListMissionsResponse{
-		Missions: protoMissions,
-		Total:    int32(total),
+		Missions:      protoMissions,
+		Total:         int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoMissions), total),
 	}, nil
 }
 
@@ -2117,26 +2094,19 @@ func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream 
 
 // GetMissionHistory returns all runs for a mission name.
 func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetMissionHistoryRequest) (*daemonpb.GetMissionHistoryResponse, error) {
-	s.logger.Debug("mission history request received",
-		"name", req.Name,
-		"limit", req.Limit,
-		"offset", req.Offset,
-	)
-
 	// Validate request
 	if req.Name == "" {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "mission name is required")
 	}
-
-	// Set defaults for pagination
-	limit := int(req.Limit)
-	if limit <= 0 {
-		limit = 100
+	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
 	}
-	offset := int(req.Offset)
-	if offset < 0 {
-		offset = 0
-	}
+	s.logger.Debug("mission history request received",
+		"name", req.Name,
+		"page_size", limit,
+		"offset", offset,
+	)
 
 	// Call daemon implementation
 	runs, total, err := s.daemon.GetMissionHistory(ctx, req.Name, limit, offset)
@@ -2165,115 +2135,9 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 	s.logger.Debug("mission history retrieved", "name", req.Name, "count", len(runs), "total", total)
 
 	return &daemonpb.GetMissionHistoryResponse{
-		Runs:  protoRuns,
-		Total: int32(total),
-	}, nil
-}
-
-// BuildComponent rebuilds a component (agent, tool, or plugin) from source.
-func (s *DaemonServer) BuildComponent(ctx context.Context, req *daemonpb.BuildComponentRequest) (*daemonpb.BuildComponentResponse, error) {
-	s.logger.Info("build component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	result, err := s.daemon.BuildComponent(ctx, req.Kind, req.Name)
-	if err != nil {
-		s.logger.Error("failed to build component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to build component: %v", err)
-	}
-
-	s.logger.Info("component build completed",
-		"kind", req.Kind,
-		"name", req.Name,
-		"success", result.Success,
-	)
-
-	msg := fmt.Sprintf("Component '%s' built successfully", req.Name)
-	if !result.Success {
-		msg = fmt.Sprintf("Component '%s' build failed", req.Name)
-	}
-
-	return &daemonpb.BuildComponentResponse{
-		Success:    result.Success,
-		Stdout:     result.Stdout,
-		Stderr:     result.Stderr,
-		DurationMs: result.DurationMs,
-		Message:    msg,
-	}, nil
-}
-
-// ShowComponent returns detailed information about a component (agent, tool, or plugin).
-func (s *DaemonServer) ShowComponent(ctx context.Context, req *daemonpb.ShowComponentRequest) (*daemonpb.ShowComponentResponse, error) {
-	s.logger.Debug("show component request received",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	// Validate request
-	if req.Kind == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component kind is required")
-	}
-	if req.Name == "" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "component name is required")
-	}
-
-	// Validate kind is one of the supported types
-	if req.Kind != "agent" && req.Kind != "tool" && req.Kind != "plugin" {
-		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid component kind: %s (must be agent, tool, or plugin)", req.Kind)
-	}
-
-	// Call daemon implementation
-	info, err := s.daemon.ShowComponent(ctx, req.Kind, req.Name)
-	if err != nil {
-		s.logger.Error("failed to show component", "error", err, "kind", req.Kind, "name", req.Name)
-
-		// Map errors to appropriate gRPC codes
-		if strings.Contains(err.Error(), "not found") {
-			return nil, status_grpc.Errorf(codes.NotFound, "component '%s' not found", req.Name)
-		}
-
-		return nil, status_grpc.Errorf(codes.Internal, "failed to show component: %v", err)
-	}
-
-	s.logger.Debug("component info retrieved",
-		"kind", req.Kind,
-		"name", req.Name,
-	)
-
-	return &daemonpb.ShowComponentResponse{
-		Success:   true,
-		Name:      info.Name,
-		Version:   info.Version,
-		Kind:      info.Kind,
-		Status:    info.Status,
-		Source:    info.Source,
-		RepoPath:  info.RepoPath,
-		BinPath:   info.BinPath,
-		Port:      int32(info.Port),
-		Pid:       int32(info.PID),
-		CreatedAt: info.CreatedAt.Unix(),
-		UpdatedAt: info.UpdatedAt.Unix(),
+		Runs:          protoRuns,
+		Total:         int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoRuns), total),
 	}, nil
 }
 
@@ -2344,14 +2208,14 @@ func (s *DaemonServer) GetComponentLogs(req *daemonpb.GetComponentLogsRequest, s
 
 // ListMissionDefinitions returns all installed mission definitions.
 func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb.ListMissionDefinitionsRequest) (*daemonpb.ListMissionDefinitionsResponse, error) {
+	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
 	s.logger.Debug("list mission definitions request received",
-		"limit", req.Limit,
-		"offset", req.Offset,
+		"page_size", limit,
+		"offset", offset,
 	)
-
-	// Convert limit/offset to int (proto uses int32)
-	limit := int(req.Limit)
-	offset := int(req.Offset)
 
 	// Call daemon implementation
 	definitions, total, err := s.daemon.ListMissionDefinitions(ctx, limit, offset)
@@ -2378,8 +2242,9 @@ func (s *DaemonServer) ListMissionDefinitions(ctx context.Context, req *daemonpb
 	s.logger.Debug("listed mission definitions", "count", len(definitions), "total", total)
 
 	return &daemonpb.ListMissionDefinitionsResponse{
-		Missions: protoDefinitions,
-		Total:    int32(total),
+		Missions:      protoDefinitions,
+		Total:         int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(protoDefinitions), total),
 	}, nil
 }
 

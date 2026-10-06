@@ -85,7 +85,7 @@ func WaitForMissionState(
 		// Fetch mission list and find the target mission.
 		resp, err := client.ListMissions(deadlineCtx, &daemonpb.ListMissionsRequest{
 			ActiveOnly: false,
-			Limit:      100,
+			PageSize:   100,
 		})
 		if err != nil {
 			// Transient error — retry after backoff.
@@ -294,7 +294,7 @@ func PrintMissionDiagnostic(
 	// Mission status from store.
 	resp, err := client.ListMissions(ctx, &daemonpb.ListMissionsRequest{
 		ActiveOnly: false,
-		Limit:      100,
+		PageSize:   100,
 	})
 	if err != nil {
 		t.Logf("  mission_poller: ListMissions error: %v", err)

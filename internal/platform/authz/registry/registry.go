@@ -884,15 +884,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.daemon.v1.DaemonService/BuildComponent": {
-		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "admin",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.daemon.v1.DaemonService/CompleteMissionCUE": {
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
@@ -1193,15 +1184,6 @@ var Registry = map[string]Entry{
 	"/gibson.daemon.v1.DaemonService/SaveMissionLayout": {
 		Service:           "gibson.daemon.v1.DaemonService",
 		Relation:          "writer",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityUser | IdentityService,
-		Unauthenticated:   false,
-		Self:              false,
-	},
-	"/gibson.daemon.v1.DaemonService/ShowComponent": {
-		Service:           "gibson.daemon.v1.DaemonService",
-		Relation:          "member",
 		ObjectType:        "tenant",
 		ObjectDeriver:     "tenant_from_identity",
 		AllowedIdentities: IdentityUser | IdentityService,

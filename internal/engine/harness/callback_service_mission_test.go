@@ -244,6 +244,24 @@ func TestListMissions_Success(t *testing.T) {
 	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_RUNNING, resp.Missions[0].Status)
 }
 
+// A full page carries a next page token. A token that the harness did not
+// write is a refusal (ADR-0028, rule 3).
+func TestListMissions_PageToken(t *testing.T) {
+	id1, _ := types.ParseID(validMissionID)
+	mgr := &cbMockMissionOperator{listRecords: []*MissionRecord{{ID: id1, Status: MissionStatusRunning}}}
+	svc := newCBCallbackServiceWithMgr(mgr)
+
+	resp, err := svc.ListMissions(context.Background(), &harnesspb.ListMissionsRequest{PageSize: 1})
+	require.NoError(t, err)
+	assert.Nil(t, resp.Error)
+	assert.NotEmpty(t, resp.GetNextPageToken(), "a full page has a next page token")
+
+	resp, err = svc.ListMissions(context.Background(), &harnesspb.ListMissionsRequest{PageToken: "not-a-token"})
+	require.NoError(t, err)
+	require.NotNil(t, resp.Error)
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, resp.Error.Code)
+}
+
 func TestListMissions_ManagerError_ReturnsInternal(t *testing.T) {
 	mgr := &cbMockMissionOperator{listErr: errors.New("redis timeout")}
 	svc := newCBCallbackServiceWithMgr(mgr)

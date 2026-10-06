@@ -36,8 +36,6 @@ type mockDaemon struct {
 	getMissionHistoryFn       func(ctx context.Context, name string, limit int, offset int) ([]MissionRunData, int, error)
 	getMissionCheckpointsFn   func(ctx context.Context, missionID string) ([]MissionCheckpoint, error)
 	rewindMissionFn           func(ctx context.Context, req RewindRequest) (string, error)
-	buildComponentFn          func(ctx context.Context, kind string, name string) (BuildComponentResult, error)
-	showComponentFn           func(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
 	getComponentLogsFn        func(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
 	listMissionDefinitionsFn  func(ctx context.Context, limit int, offset int) ([]MissionDefinitionData, int, error)
 	getMissionDefinitionFn    func(ctx context.Context, name string) (*missionpb.MissionDefinition, error)
@@ -163,20 +161,6 @@ func (m *mockDaemon) RewindMission(ctx context.Context, req RewindRequest) (stri
 		return m.rewindMissionFn(ctx, req)
 	}
 	return "", nil
-}
-
-func (m *mockDaemon) BuildComponent(ctx context.Context, kind string, name string) (BuildComponentResult, error) {
-	if m.buildComponentFn != nil {
-		return m.buildComponentFn(ctx, kind, name)
-	}
-	return BuildComponentResult{}, nil
-}
-
-func (m *mockDaemon) ShowComponent(ctx context.Context, kind string, name string) (ComponentInfoInternal, error) {
-	if m.showComponentFn != nil {
-		return m.showComponentFn(ctx, kind, name)
-	}
-	return ComponentInfoInternal{}, nil
 }
 
 func (m *mockDaemon) GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error) {

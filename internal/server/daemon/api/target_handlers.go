@@ -19,6 +19,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/target"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 )
 
 // CreateTarget registers a new target for the calling tenant and returns its
@@ -71,7 +72,11 @@ func (s *DaemonServer) ListTargets(ctx context.Context, req *daemonpb.ListTarget
 	if tenantID == "" {
 		return nil, status_grpc.Error(codes.Internal, "ListTargets: no tenant in context")
 	}
-	targets, err := s.targetService.List(ctx, tenantID, protoTargetFilter(req.GetFilter()))
+	offset, limit, err := pageWindow(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	targets, err := s.targetService.List(ctx, tenantID, protoTargetFilter(req.GetFilter(), offset, limit))
 	if err != nil {
 		return nil, mapTargetError(err)
 	}
@@ -83,7 +88,7 @@ func (s *DaemonServer) ListTargets(ctx context.Context, req *daemonpb.ListTarget
 		}
 		out = append(out, p)
 	}
-	return &daemonpb.ListTargetsResponse{Targets: out}, nil
+	return &daemonpb.ListTargetsResponse{Targets: out, NextPageToken: pagetoken.Next(offset, limit, len(out), -1)}, nil
 }
 
 // UpdateTarget replaces a target's metadata. The id is the lookup key and is
@@ -200,14 +205,13 @@ func fromProtoTarget(p *targetpb.Target) *types.Target {
 	return t
 }
 
-func protoTargetFilter(f *targetpb.TargetFilter) *types.TargetFilter {
-	if f == nil {
-		return nil
-	}
+// protoTargetFilter builds the store filter from the request filter and the
+// page window. A nil request filter still carries the window.
+func protoTargetFilter(f *targetpb.TargetFilter, offset, limit int) *types.TargetFilter {
 	out := &types.TargetFilter{
 		Tags:   f.GetTags(),
-		Limit:  int(f.GetLimit()),
-		Offset: int(f.GetOffset()),
+		Limit:  limit,
+		Offset: offset,
 	}
 	if p := f.GetProvider(); p != "" {
 		prov := types.Provider(p)
