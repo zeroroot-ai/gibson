@@ -273,3 +273,96 @@ func TestGetConnectorCredential_BadRequests(t *testing.T) {
 		t.Errorf("unwired: code %v, want Unavailable", status.Code(err))
 	}
 }
+
+// failOnName is a secret store that fails the read of one name only.
+type failOnName struct {
+	*fakeCredStore
+	name string
+}
+
+func (s failOnName) Resolve(ctx context.Context, name string) ([]byte, error) {
+	if name == s.name {
+		return nil, errors.New("broker down")
+	}
+	return s.fakeCredStore.Resolve(ctx, name)
+}
+
+// The reader keys each answer on the secrets it reads: a missing or empty
+// token gives no header, a failed read is an error, and a declared
+// credential is served raw, as a JSON string or as raw JSON.
+func TestConnectorCredentialReader_Read(t *testing.T) {
+	ref := func(key, property string) []*daemonoperatorv1.ConnectorCredentialRef {
+		return []*daemonoperatorv1.ConnectorCredentialRef{{Key: key, Property: property, TargetEnv: "STATIC"}}
+	}
+	withData := func(extra map[string][]byte) *fakeCredStore {
+		s := liveTokenStore(t)
+		for k, v := range extra {
+			s.data[k] = v
+		}
+		return s
+	}
+	now := func() time.Time { return credNow }
+	cases := map[string]struct {
+		store   ConnectorSecretResolver
+		refs    []*daemonoperatorv1.ConnectorCredentialRef
+		want    map[string]string
+		wantErr bool
+	}{
+		"empty metadata": {
+			store: &fakeCredStore{data: map[string][]byte{connectorauth.AccessMetaSecretName("gitlab"): {}}},
+		},
+		"metadata but no token": {
+			store: &fakeCredStore{data: map[string][]byte{connectorauth.AccessMetaSecretName("gitlab"): credMeta(t, time.Hour)}},
+		},
+		"empty token": {
+			store: withData(map[string][]byte{connectorauth.AccessSecretName("gitlab"): {}}),
+		},
+		"token read fails": {
+			store:   failOnName{fakeCredStore: liveTokenStore(t), name: connectorauth.AccessSecretName("gitlab")},
+			wantErr: true,
+		},
+		"credential with no target env": {
+			store:   liveTokenStore(t),
+			refs:    []*daemonoperatorv1.ConnectorCredentialRef{{Key: "gitlab-pat"}},
+			wantErr: true,
+		},
+		"credential not found": {store: liveTokenStore(t), refs: ref("gitlab-pat", ""), wantErr: true},
+		"raw credential": {
+			store: withData(map[string][]byte{"gitlab-pat": []byte("raw-value")}),
+			refs:  ref("gitlab-pat", ""),
+			want:  map[string]string{connectorCredSecretKey: "Bearer " + testVendorValue, "STATIC": "raw-value"},
+		},
+		"property that is not a string": {
+			store: withData(map[string][]byte{"gitlab-pat": []byte(`{"port":8443}`)}),
+			refs:  ref("gitlab-pat", "port"),
+			want:  map[string]string{connectorCredSecretKey: "Bearer " + testVendorValue, "STATIC": "8443"},
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			data, withdraw, err := connectorCredentialReader{secrets: c.store, now: now}.read(context.Background(), "gitlab", c.refs)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("err = %v, wantErr = %v", err, c.wantErr)
+			}
+			if withdraw {
+				t.Fatal("withdraw = true, want false")
+			}
+			if len(data) != len(c.want) {
+				t.Fatalf("data keys = %v, want %d keys", keysOf(data), len(c.want))
+			}
+			for k, v := range c.want {
+				if string(data[k]) != v {
+					t.Errorf("data[%s] = %q, want %q", k, data[k], v)
+				}
+			}
+		})
+	}
+}
+
+// With no clock set, the reader measures expiry on the wall clock.
+func TestConnectorCredentialReader_DefaultClock(t *testing.T) {
+	before := time.Now()
+	if got := (connectorCredentialReader{}).clock(); got.Before(before) {
+		t.Fatalf("clock = %v, want a time after %v", got, before)
+	}
+}
