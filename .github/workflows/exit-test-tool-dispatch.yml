@@ -362,6 +362,15 @@ jobs:
           kill "$pf" || true
           exit "$status"
 
+      # Cilium enforces each network policy of the chart on this cluster
+      # (hosted#436). Prove it for the daemon before the tests run, so a
+      # missing policy rule fails here and not on staging (gibson#220).
+      - name: The daemon refuses a pod that no policy admits
+        uses: ./gibson/.github/actions/policy-refuses-an-unadmitted-pod
+        with:
+          namespace: ${{ env.NS }}
+          release: ${{ env.RELEASE }}
+
       - name: Build the e2e suite into an image
         id: suite-image
         working-directory: gibson

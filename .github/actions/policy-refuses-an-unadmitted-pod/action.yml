@@ -1,0 +1,75 @@
+name: The daemon refuses a pod that no policy admits
+description: >
+  The in-cluster exit tests run on kind with Cilium, which enforces each
+  network policy of the chart (hosted#436, gibson#220). This action proves it
+  for the daemon. A pod with the labels of the e2e runner reaches the daemon
+  port. A pod with no network label does not: the connection times out. When
+  the second pod connects, the policy is not enforced, and the run fails. When
+  the first pod cannot connect, the probe looked at nothing, and the run fails.
+inputs:
+  namespace:
+    description: The release namespace.
+    required: true
+  release:
+    description: The Helm release name.
+    required: true
+  image:
+    description: An image with curl. The hosted bring-up already pulled this one for its Cilium proof.
+    required: false
+    default: ghcr.io/zeroroot-ai/mirror/curl:8.10.1
+runs:
+  using: composite
+  steps:
+    - name: Probe the daemon port from an admitted and an unadmitted pod
+      shell: bash
+      env:
+        NS: ${{ inputs.namespace }}
+        RELEASE: ${{ inputs.release }}
+        IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        target="https://gibson-gibson-workloads.${NS}.svc.cluster.local:50051/"
+        admitted=policy-probe-admitted
+        denied=policy-probe-denied
+        cleanup() { kubectl -n "$NS" delete pod "$admitted" "$denied" --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
+        trap cleanup EXIT
+
+        # The admitted pod carries the labels of the e2e runner Job.
+        kubectl -n "$NS" run "$admitted" --image="$IMAGE" --restart=Never \
+          --labels="app.kubernetes.io/name=gibson-workloads,app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=e2e-runner,gibson.zeroroot.ai/net-role=platform,gibson.zeroroot.ai/client-redis=true" \
+          --command -- sleep 600
+        # The denied pod carries no label that a policy of the chart selects.
+        kubectl -n "$NS" run "$denied" --image="$IMAGE" --restart=Never \
+          --labels="app.kubernetes.io/component=policy-probe" \
+          --command -- sleep 600
+        kubectl -n "$NS" wait --for=condition=Ready "pod/$admitted" "pod/$denied" --timeout=180s
+
+        # curl exits 28 when the connection gets no answer: a dropped packet.
+        # The daemon listener is SPIFFE mTLS, so a connection that is admitted
+        # ends in a TLS failure (35 or 56), never in 28. Exit 6 is a DNS fault
+        # and exit 7 a closed port: in both cases the probe looked at nothing.
+        probe() {
+          local rc=0
+          kubectl -n "$NS" exec "$1" -- curl -sSk -o /dev/null --connect-timeout 8 --max-time 12 "$target" >/dev/null 2>&1 || rc=$?
+          echo "$rc"
+        }
+
+        rc=28
+        for _ in $(seq 1 12); do
+          rc=$(probe "$admitted")
+          [ "$rc" != "28" ] && break
+          sleep 5
+        done
+        case "$rc" in
+          6|7|28)
+            echo "::error::the admitted probe could not reach the daemon (curl exit $rc); the policy probe looked at nothing"
+            exit 1 ;;
+        esac
+        echo "admitted pod reached the daemon port (curl exit $rc, a TLS refusal of a client with no SVID)"
+
+        rc=$(probe "$denied")
+        if [ "$rc" != "28" ]; then
+          echo "::error::a pod that no policy admits reached the daemon port (curl exit $rc, want 28). The cluster does not enforce the network policy of the chart."
+          exit 1
+        fi
+        echo "unadmitted pod was refused (curl exit 28): the cluster enforces the policy"
