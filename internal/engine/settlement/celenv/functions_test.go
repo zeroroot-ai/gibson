@@ -54,8 +54,8 @@ func TestHTTPStatusImpl(t *testing.T) {
 		assert.Equal(t, types.Int(-1), got)
 	})
 
-	t.Run("a non-http_response type is not applicable", func(t *testing.T) {
-		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "text"))
+	t.Run("an item of a type with no status is not applicable", func(t *testing.T) {
+		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidencePayload, "payload", "text"))
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(-1), got)
 	})
@@ -80,6 +80,33 @@ func TestHTTPStatusImpl(t *testing.T) {
 		got := httpStatusImpl(nativeVal(item))
 		assert.Equal(t, types.Int(204), got)
 	})
+	t.Run("a recorded tool result with a status_code returns it", func(t *testing.T) {
+		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", `{"status_code":200,"body":"ok"}`))
+		got := httpStatusImpl(nativeVal(item))
+		assert.Equal(t, types.Int(200), got)
+	})
+
+	t.Run("a recorded tool result that is an object returns its status_code", func(t *testing.T) {
+		item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", map[string]any{"status_code": 403}))
+		got := httpStatusImpl(nativeVal(item))
+		assert.Equal(t, types.Int(403), got)
+	})
+
+	for name, content := range map[string]string{
+		"no status_code":             `{"body":"ok"}`,
+		"a nested status_code":       `{"response":{"status_code":200}}`,
+		"a string status_code":       `{"status_code":"200"}`,
+		"a fractional status_code":   `{"status_code":200.5}`,
+		"a status_code out of range": `{"status_code":42}`,
+		"a JSON array":               `[{"status_code":200}]`,
+		"plain text":                 `status_code 200`,
+	} {
+		t.Run("a recorded tool result with "+name+" is not applicable", func(t *testing.T) {
+			item := evidenceItemMap(finding.NewEnhancedEvidence(finding.EvidenceLog, "tool call", content))
+			got := httpStatusImpl(nativeVal(item))
+			assert.Equal(t, types.Int(-1), got)
+		})
+	}
 }
 
 func TestRegexMatchImpl(t *testing.T) {
