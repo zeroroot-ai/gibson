@@ -53,7 +53,25 @@ func (m *mockClient) Recovery(ctx context.Context, _, id string) (SessionRecover
 }
 
 func (m *mockClient) Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error) {
-	return m.launch(ctx, req)
+	resp, err := m.launch(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	return reportedIsolation(req, resp), nil
+}
+
+// reportedIsolation fills the class and the runtime that setec reports on a
+// launch, as setec does: the class it bound (the requested one) and the
+// launcher backend. A stub that sets either field keeps its own value, so a
+// test can still report a mismatch or a runtime that is refused.
+func reportedIsolation(req LaunchRequest, resp LaunchResponse) LaunchResponse {
+	if resp.SandboxClass == "" {
+		resp.SandboxClass = req.SandboxClass
+	}
+	if resp.Runtime == "" {
+		resp.Runtime = IsolatedRuntime
+	}
+	return resp
 }
 func (m *mockClient) StreamLogs(ctx context.Context, _, id string) (LogStream, error) {
 	return m.streamLog(ctx, id)

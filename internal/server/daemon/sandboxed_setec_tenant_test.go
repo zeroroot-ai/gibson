@@ -25,7 +25,7 @@ type recordingSetec struct {
 
 func (r *recordingSetec) Launch(_ context.Context, in *setecv1.LaunchRequest, _ ...grpc.CallOption) (*setecv1.LaunchResponse, error) {
 	r.tenants = append(r.tenants, in.GetTenant())
-	return &setecv1.LaunchResponse{SandboxId: "sbx-1"}, nil
+	return &setecv1.LaunchResponse{SandboxId: "sbx-1", SandboxClass: in.GetSandboxClass(), Runtime: "launcher"}, nil
 }
 
 func (r *recordingSetec) Wait(_ context.Context, in *setecv1.WaitRequest, _ ...grpc.CallOption) (*setecv1.WaitResponse, error) {
@@ -116,5 +116,22 @@ func TestSetecClient_SuspendAndResumeNameTheTenant(t *testing.T) {
 	}
 	if err := c.Resume(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
 		t.Errorf("Resume with no tenant: err = %v", err)
+	}
+}
+
+// TestSetecClient_LaunchCopiesTheReportedIsolation: the adapter hands the
+// class and the runtime that setec reports to the isolation check, so a
+// launch with no reported runtime is refused there.
+func TestSetecClient_LaunchCopiesTheReportedIsolation(t *testing.T) {
+	c := &setecClient{inner: &recordingSetec{}}
+	resp, err := c.Launch(context.Background(), sandboxed.LaunchRequest{Tenant: "acme", SandboxClass: "standard", Image: "img"})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if resp.SandboxClass != "standard" || resp.Runtime != "launcher" {
+		t.Fatalf("launch response = %+v, want the class and the runtime that setec reported", resp)
+	}
+	if err := sandboxed.VerifyIsolation("standard", resp); err != nil {
+		t.Fatalf("VerifyIsolation of a reported launcher sandbox: %v", err)
 	}
 }

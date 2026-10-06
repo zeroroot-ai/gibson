@@ -776,6 +776,8 @@ github.com/zeroroot-ai/sdk v0.201.0 h1:U+IC6n+vxZUwPYzDRTICdysYqGOmuyelNcw8wkboZ
 github.com/zeroroot-ai/sdk v0.201.0/go.mod h1:uO5pUB3d5lC+EaA/Z0Jfquzxo1KsXak+oigIRQXCf2A=
 github.com/zeroroot-ai/setec v0.124.0 h1:uFWO045liS2QKf2cmdNAa6Hjg66dHuJqk1wzqOJ5MWI=
 github.com/zeroroot-ai/setec v0.124.0/go.mod h1:ynfxKiuNc8VN75a4yX/sAF/j3thHuRRdP5mKR86bJ50=
+github.com/zeroroot-ai/setec v0.125.0 h1:6l3aEipwd512YLUzfC+7LDQxK9J37M+qVAW55DD0swE=
+github.com/zeroroot-ai/setec v0.125.0/go.mod h1:ynfxKiuNc8VN75a4yX/sAF/j3thHuRRdP5mKR86bJ50=
 github.com/zeroroot-ai/testfixtures v0.3.0 h1:c0pjwhGxFHhahZZjf9uDleeTYh2q0sIcTRLJFjbXXXk=
 github.com/zeroroot-ai/testfixtures v0.3.0/go.mod h1:JFWLYycHPPyxSC5HU8F0AsWcwcHXpEKRdI5+7WOify0=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=

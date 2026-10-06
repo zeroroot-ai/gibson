@@ -29,10 +29,22 @@ func TestVerifyIsolation(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "class the transport does not report is accepted",
+			name:      "an empty runtime is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool"},
+			wantErr:   true,
+		},
+		{
+			name:      "an empty class is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", Runtime: "launcher"},
+			wantErr:   true,
+		},
+		{
+			name:      "nothing reported is a denial",
 			requested: "tool",
 			resp:      LaunchResponse{SandboxID: "ns/sbx/uid"},
-			wantErr:   false,
+			wantErr:   true,
 		},
 		{
 			name:      "reported class matching the request is accepted",
