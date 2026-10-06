@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zeroroot-ai/sdk/fork"
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -174,7 +175,7 @@ func (l *AgentLauncher) followFork(ctx context.Context, tenant, sandboxID, class
 }
 
 // EnvForkable tells a process that a later node may fork it (sdk#248).
-const EnvForkable = "GIBSON_FORKABLE"
+const EnvForkable = fork.EnvForkable
 
 // parkPoll is how often the launcher looks for the result line of a
 // forkable source.
