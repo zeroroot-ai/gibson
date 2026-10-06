@@ -83,6 +83,36 @@ func (c *Client) AuthStatus(ctx context.Context, tenantID, connector string) (*t
 	return resp.GetStatus(), nil
 }
 
+// ListDesiredConnectors pulls every connector that a tenant enabled, with the
+// fields of the catalog entry (gibson#662).
+func (c *Client) ListDesiredConnectors(ctx context.Context) ([]*daemonoperatorv1.DesiredConnector, error) {
+	resp, err := c.operator.ListDesiredConnectors(ctx, &daemonoperatorv1.ListDesiredConnectorsRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("list desired connectors: %w", err)
+	}
+	return resp.GetConnectors(), nil
+}
+
+// ReportConnectorStatus reports the state of one ConnectorInstance to the
+// daemon (gibson#662).
+func (c *Client) ReportConnectorStatus(ctx context.Context, req *daemonoperatorv1.ReportConnectorStatusRequest) error {
+	if _, err := c.operator.ReportConnectorStatus(ctx, req); err != nil {
+		return fmt.Errorf("report connector status %s/%s: %w", req.GetTenantId(), req.GetConnectorId(), err)
+	}
+	return nil
+}
+
+// AdoptConnector records a ConnectorInstance that the daemon wrote before it
+// kept the desired state in its table (gibson#662).
+func (c *Client) AdoptConnector(ctx context.Context, tenantID, connector string) error {
+	if _, err := c.operator.AdoptConnector(ctx, &daemonoperatorv1.AdoptConnectorRequest{
+		TenantId: tenantID, ConnectorId: connector,
+	}); err != nil {
+		return fmt.Errorf("adopt connector %s/%s: %w", tenantID, connector, err)
+	}
+	return nil
+}
+
 // Close releases the connection and the SPIRE X509Source. Idempotent; a
 // Client built with NewWithConn owns no transport and closes nothing.
 func (c *Client) Close() error {

@@ -5,20 +5,16 @@ package api
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 // stubCatalogGate answers the platform catalog gate in tests. The zero value
@@ -56,27 +52,78 @@ func (g *stubCatalogGate) BatchCheck(_ context.Context, checks []authz.CheckRequ
 	return out, nil
 }
 
-// newConnectorService builds a ConnectorService over a fake ConnectorInstance
-// client seeded with the given objects and an allow-all catalog gate. The
-// scheme knows the ConnectorInstance kinds so the fake client can create,
-// list and delete them.
-func newConnectorService(t *testing.T, seed ...client.Object) *ConnectorService {
+// memConnectorStore is an in-memory ConnectorStore with the semantics of
+// tenantconnector.Store. err fails every call.
+type memConnectorStore struct {
+	rows []tenantconnector.Connector
+	err  error
+}
+
+func (m *memConnectorStore) find(tenant, connector string) int {
+	for i, r := range m.rows {
+		if r.TenantID == tenant && r.ConnectorID == connector {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *memConnectorStore) Enable(_ context.Context, tenant, connector string) (tenantconnector.Connector, error) {
+	if m.err != nil {
+		return tenantconnector.Connector{}, m.err
+	}
+	if m.find(tenant, connector) >= 0 {
+		return tenantconnector.Connector{}, tenantconnector.ErrAlreadyEnabled
+	}
+	c := tenantconnector.Connector{TenantID: tenant, ConnectorID: connector, Phase: tenantconnector.PhasePending}
+	m.rows = append(m.rows, c)
+	return c, nil
+}
+
+func (m *memConnectorStore) Disable(_ context.Context, tenant, connector string) error {
+	if m.err != nil {
+		return m.err
+	}
+	i := m.find(tenant, connector)
+	if i < 0 {
+		return tenantconnector.ErrNotEnabled
+	}
+	m.rows = append(m.rows[:i], m.rows[i+1:]...)
+	return nil
+}
+
+func (m *memConnectorStore) List(_ context.Context, tenant string) ([]tenantconnector.Connector, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	var out []tenantconnector.Connector
+	for _, r := range m.rows {
+		if r.TenantID == tenant {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// newConnectorService builds a ConnectorService over an in-memory store
+// seeded with the given rows and an allow-all catalog gate.
+func newConnectorService(t *testing.T, seed ...tenantconnector.Connector) (*ConnectorService, *memConnectorStore) {
 	t.Helper()
 	return newConnectorServiceWithGate(t, &stubCatalogGate{}, seed...)
 }
 
-func newConnectorServiceWithGate(t *testing.T, gate CatalogGate, seed ...client.Object) *ConnectorService {
+func newConnectorServiceWithGate(
+	t *testing.T, gate CatalogGate, seed ...tenantconnector.Connector,
+) (*ConnectorService, *memConnectorStore) {
 	t.Helper()
-	scheme := runtime.NewScheme()
-	require.NoError(t, connectorv1alpha1.AddToScheme(scheme))
-	kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(seed...).Build()
-	return NewConnectorService(kube, gate)
+	store := &memConnectorStore{rows: seed}
+	return NewConnectorService(store, gate), store
 }
 
 // TestListCatalog covers the success path (a tenant member sees the curated
 // entries) and the error path (no tenant in the context is PermissionDenied).
 func TestListCatalog(t *testing.T) {
-	s := newConnectorService(t)
+	s, _ := newConnectorService(t)
 
 	resp, err := s.ListCatalog(tenantCtx("acme"), &tenantv1.ListCatalogRequest{})
 	require.NoError(t, err)
@@ -93,21 +140,20 @@ func TestListCatalog(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }
 
-// TestEnableConnector covers a successful enable (a ConnectorInstance lands in
-// the tenant namespace), the already-enabled path (AlreadyExists), and an
-// unknown catalog id (NotFound). The missing-tenant path is PermissionDenied.
+// TestEnableConnector covers a successful enable (a row for the tenant is in
+// the store, and nothing else), the already-enabled path (AlreadyExists), and
+// an unknown catalog id (NotFound). The missing-tenant path is
+// PermissionDenied.
 func TestEnableConnector(t *testing.T) {
-	s := newConnectorService(t)
+	s, store := newConnectorService(t)
 
 	resp, err := s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
 	require.NoError(t, err)
 	assert.Equal(t, "gitlab", resp.GetConnector())
-
-	// The CR must exist in the tenant namespace.
-	var ci connectorv1alpha1.ConnectorInstance
-	require.NoError(t, s.kube.Get(context.Background(),
-		client.ObjectKey{Namespace: "tenant-acme", Name: "gitlab"}, &ci))
-	assert.Equal(t, "gitlab", ci.Spec.Connector)
+	assert.Equal(t, "Pending", resp.GetPhase())
+	assert.Equal(t, []tenantconnector.Connector{
+		{TenantID: "acme", ConnectorID: "gitlab", Phase: tenantconnector.PhasePending},
+	}, store.rows)
 
 	// Enabling the same connector twice is AlreadyExists.
 	_, err = s.EnableConnector(tenantCtx("acme"), &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
@@ -123,16 +169,23 @@ func TestEnableConnector(t *testing.T) {
 }
 
 // TestListConnectors covers the success path (only the caller's tenant's
-// connectors are returned) and the missing-tenant PermissionDenied path.
+// connectors are returned, with the state the operator reported and the shape
+// of the catalog entry) and the missing-tenant PermissionDenied path.
 func TestListConnectors(t *testing.T) {
-	acme := connectorcatalogInstance("hosted-fixture", "tenant-acme")
-	other := connectorcatalogInstance("gitlab", "tenant-other")
-	s := newConnectorService(t, acme, other)
+	s, _ := newConnectorService(t,
+		tenantconnector.Connector{TenantID: "acme", ConnectorID: "gitlab", Phase: "Ready", DiscoveredTools: 9},
+		tenantconnector.Connector{TenantID: "other", ConnectorID: "hosted-fixture", Phase: "Pending"},
+	)
 
 	resp, err := s.ListConnectors(tenantCtx("acme"), &tenantv1.ListConnectorsRequest{})
 	require.NoError(t, err)
 	require.Len(t, resp.GetConnectors(), 1)
-	assert.Equal(t, "hosted-fixture", resp.GetConnectors()[0].GetId())
+	got := resp.GetConnectors()[0]
+	assert.Equal(t, "gitlab", got.GetId())
+	assert.Equal(t, "Ready", got.GetPhase())
+	assert.Equal(t, int32(9), got.GetDiscoveredTools())
+	assert.Equal(t, "Remote", got.GetShape())
+	assert.Equal(t, "pod", got.GetRuntime())
 
 	_, err = s.ListConnectors(context.Background(), &tenantv1.ListConnectorsRequest{})
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
@@ -142,17 +195,12 @@ func TestListConnectors(t *testing.T) {
 // (NotFound), the empty-connector path (InvalidArgument), and the
 // missing-tenant PermissionDenied path.
 func TestDisableConnector(t *testing.T) {
-	s := newConnectorService(t, connectorcatalogInstance("hosted-fixture", "tenant-acme"))
+	s, store := newConnectorService(t, tenantconnector.Connector{TenantID: "acme", ConnectorID: "hosted-fixture"})
 
 	_, err := s.DisableConnector(tenantCtx("acme"),
 		&tenantv1.DisableConnectorRequest{Connector: "hosted-fixture"})
 	require.NoError(t, err)
-
-	// The CR must be gone.
-	var ci connectorv1alpha1.ConnectorInstance
-	getErr := s.kube.Get(context.Background(),
-		client.ObjectKey{Namespace: "tenant-acme", Name: "hosted-fixture"}, &ci)
-	require.Error(t, getErr)
+	assert.Empty(t, store.rows, "the row must be gone")
 
 	// Disabling a connector that is not enabled is NotFound.
 	_, err = s.DisableConnector(tenantCtx("acme"),
@@ -170,53 +218,13 @@ func TestDisableConnector(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }
 
-// connectorcatalogInstance builds a minimal ConnectorInstance for a fake-client
-// seed: the name and namespace are what the service reads back.
-func connectorcatalogInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance {
-	return &connectorv1alpha1.ConnectorInstance{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-		Spec: connectorv1alpha1.ConnectorInstanceSpec{
-			Connector: name,
-			Shape:     connectorv1alpha1.ConnectorShapeHosted,
-			Runtime:   connectorv1alpha1.ConnectorRuntimePod,
-		},
-	}
-}
+var errConnectorBoom = errors.New("the database is on fire")
 
-// newFailingConnectorService builds a service whose kube client fails Create,
-// List and Delete with a generic error, so the Internal-error branches of each
-// RPC are exercised.
-func newFailingConnectorService(t *testing.T) *ConnectorService {
-	t.Helper()
-	scheme := runtime.NewScheme()
-	require.NoError(t, connectorv1alpha1.AddToScheme(scheme))
-	kube := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithInterceptorFuncs(interceptor.Funcs{
-			Create: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.CreateOption) error {
-				return errConnectorBoom
-			},
-			List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
-				return errConnectorBoom
-			},
-			Delete: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.DeleteOption) error {
-				return errConnectorBoom
-			},
-		}).
-		Build()
-	return NewConnectorService(kube, &stubCatalogGate{})
-}
-
-var errConnectorBoom = errConnectorBoomError("kube is on fire")
-
-type errConnectorBoomError string
-
-func (e errConnectorBoomError) Error() string { return string(e) }
-
-// TestConnectorService_InternalErrors maps an unexpected kube failure to a
+// TestConnectorService_InternalErrors maps an unexpected store failure to a
 // codes.Internal status for each write/read RPC.
 func TestConnectorService_InternalErrors(t *testing.T) {
-	s := newFailingConnectorService(t)
+	s, store := newConnectorService(t)
+	store.err = errConnectorBoom
 	ctx := tenantCtx("acme")
 
 	_, err := s.EnableConnector(ctx, &tenantv1.EnableConnectorRequest{CatalogId: "gitlab"})
@@ -235,7 +243,7 @@ func TestConnectorService_InternalErrors(t *testing.T) {
 func TestCatalogGate(t *testing.T) {
 	t.Run("de-listed entry is hidden and refused", func(t *testing.T) {
 		gate := &stubCatalogGate{denied: []string{authz.ConnectorComponentObject("gitlab")}}
-		s := newConnectorServiceWithGate(t, gate)
+		s, _ := newConnectorServiceWithGate(t, gate)
 
 		resp, err := s.ListCatalog(tenantCtx("acme"), &tenantv1.ListCatalogRequest{})
 		require.NoError(t, err)
@@ -250,7 +258,7 @@ func TestCatalogGate(t *testing.T) {
 
 	t.Run("gate failure is Internal, fail closed", func(t *testing.T) {
 		gate := &stubCatalogGate{err: errConnectorBoom}
-		s := newConnectorServiceWithGate(t, gate)
+		s, _ := newConnectorServiceWithGate(t, gate)
 
 		_, err := s.ListCatalog(tenantCtx("acme"), &tenantv1.ListCatalogRequest{})
 		assert.Equal(t, codes.Internal, grpcCode(err))

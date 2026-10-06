@@ -112,7 +112,17 @@ func TestConnectorOperatorMethodPolicy_AllowedSetIsExactlyTheConnectorRPCs(t *te
 	assert.ElementsMatch(t, []string{
 		daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName,
 		daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName,
-	}, got, "connector-operator may call exactly its revoke and its status read")
+		daemonoperatorv1.DaemonOperatorService_ListDesiredConnectors_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName,
+	}, got, "connector-operator may call exactly its revoke, its status read and its connector loop RPCs")
+	for _, m := range []string{
+		daemonoperatorv1.DaemonOperatorService_ListDesiredConnectors_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName,
+		daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName,
+	} {
+		assert.False(t, operatorAllowedMethods()[m], "the tenant-operator must not call %s", m)
+	}
 	assert.False(t, operatorAllowedMethods()[daemonoperatorv1.DaemonOperatorService_RevokeConnectorGrant_FullMethodName],
 		"the tenant-operator must not inherit the connector-operator's finalizer RPC")
 	assert.False(t, operatorAllowedMethods()[daemonoperatorv1.DaemonOperatorService_GetConnectorAuthStatus_FullMethodName],

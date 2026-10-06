@@ -132,6 +132,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The desired connectors loop (gibson#662): the daemon keeps the
+	// connectors each tenant enabled, and this loop makes the
+	// ConnectorInstances. The daemon makes no Kubernetes call.
+	if err := (&controller.DesiredConnectorsRunnable{
+		Client: mgr.GetClient(),
+		Daemon: daemon,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to add the desired connectors loop")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)

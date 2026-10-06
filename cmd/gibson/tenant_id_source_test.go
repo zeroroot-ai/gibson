@@ -56,7 +56,8 @@ func TestTenantIDSource(t *testing.T) {
 		// tenant being acted upon), not the authz SUBJECT. The authz
 		// subject comes from the x-gibson-identity-tenant header on the
 		// caller's identity (typically platform-operator for these).
-		`internal/server/daemon/api/server_model_access.go :: TenantId:      r.TenantID,`: "response event shape; TenantId echoes the stored audit row, and is never read as the authz subject",
+		`internal/server/daemon/api/server_model_access.go :: TenantId:      r.TenantID,`:    "response event shape; TenantId echoes the stored audit row, and is never read as the authz subject",
+		`internal/server/daemon/api/server_tenant_connectors.go :: TenantId:    r.TenantID,`: "response payload of ListDesiredConnectors to the connector operator; TenantId names the stored row, and is never read as the authz subject",
 
 		`internal/server/daemon/api/tenant_admin_onboarding_get.go :: if req.TenantId == "" {`:                                                                                    "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",
 		`internal/server/daemon/api/tenant_admin_onboarding_get.go :: if auth.TenantStringFromContext(ctx) != req.TenantId {`:                                                     "platform-operator action; req.TenantId is the object being acted upon, not the authz subject",

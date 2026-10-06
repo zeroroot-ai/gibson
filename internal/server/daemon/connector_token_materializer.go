@@ -30,6 +30,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -229,4 +233,46 @@ func (m *connectorTokenMaterializer) withdraw(ctx context.Context, d reconciler.
 			d.Namespace, connectorCredSecretName(d.InstanceName), err)
 	}
 	return nil
+}
+
+// connectorKubeClient returns the narrow ConnectorInstance controller-runtime
+// client, building it once and caching it on the daemon. registerConnectorAuth
+// lists ConnectorInstances with it to drive the OAuth token freshener and the
+// credential Secret writer (ADR-0065). gibson#663 moves that work to the
+// connector operator and deletes this client. The client is built lazily and
+// does no API-server round trip here. A test may pre-set d.connectorKube (e.g.
+// with the controller-runtime fake client) to inject a lister without a cluster.
+func (d *daemonImpl) connectorKubeClient() (client.Client, error) {
+	if d.connectorKube != nil {
+		return d.connectorKube, nil
+	}
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		return nil, fmt.Errorf("connector kube config: %w", err)
+	}
+	kube, err := newConnectorKubeClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	d.connectorKube = kube
+	return kube, nil
+}
+
+// newConnectorKubeClient builds the narrow controller-runtime client the
+// ConnectorService writes ConnectorInstance CRs with. The scheme carries the
+// core Kubernetes types and the ConnectorInstance API; the client is built
+// lazily, so no API-server round trip happens here.
+func newConnectorKubeClient(cfg *rest.Config) (client.Client, error) {
+	scheme := apiruntime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("connector kube scheme: %w", err)
+	}
+	if err := connectorv1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("connector CRD scheme: %w", err)
+	}
+	kube, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return nil, fmt.Errorf("connector kube client: %w", err)
+	}
+	return kube, nil
 }
