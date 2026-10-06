@@ -32,34 +32,3 @@ type RedisPinger interface {
 type Neo4jPinger interface {
 	Ping(ctx context.Context) error
 }
-
-// PingDashboard verifies the dashboard admin API is reachable. Uses a 1s per-call timeout.
-func PingDashboard(ctx context.Context, c DashboardPinger) error {
-	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
-	defer cancel()
-	return c.Ping(ctx)
-}
-
-// PingFGA verifies the OpenFGA store is reachable by performing a cheap read
-// with an empty filter. Uses a 1s per-call timeout.
-func PingFGA(ctx context.Context, c FGAPinger) error {
-	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
-	defer cancel()
-	return c.Ping(ctx)
-}
-
-// PingRedis verifies the Redis connection by sending a PING command.
-// Uses a 1s per-call timeout.
-func PingRedis(ctx context.Context, c RedisPinger) error {
-	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
-	defer cancel()
-	return c.Ping(ctx)
-}
-
-// PingNeo4j verifies the Neo4j connection by running CALL dbms.components().
-// Uses a 1s per-call timeout.
-func PingNeo4j(ctx context.Context, c Neo4jPinger) error {
-	ctx, cancel := context.WithTimeout(ctx, subCheckTimeout)
-	defer cancel()
-	return c.Ping(ctx)
-}

@@ -32,16 +32,6 @@ const (
 	ReasonStepFailed       = psaga.ReasonStepFailed
 )
 
-// SetCondition delegates to platform/saga.SetCondition.
-func SetCondition(conditions *[]metav1.Condition, newCond metav1.Condition) {
-	psaga.SetCondition(conditions, newCond)
-}
-
-// FindCondition delegates to platform/saga.FindCondition.
-func FindCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
-	return psaga.FindCondition(conditions, condType)
-}
-
 // IsConditionTrue delegates to platform/saga.IsConditionTrue.
 func IsConditionTrue(conditions []metav1.Condition, condType string) bool {
 	return psaga.IsConditionTrue(conditions, condType)

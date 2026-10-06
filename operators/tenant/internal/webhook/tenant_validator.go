@@ -141,17 +141,6 @@ func (v *TenantValidator) checkReservedName(ctx context.Context, slug string) er
 	return nil
 }
 
-// ValidatorWebhook returns an admission.Webhook that uses WithValidator to
-// serve the TenantValidator without a reserved-names provider.
-//
-// Production callers should prefer ValidatorWebhookWithReserved which wires
-// the chart-managed denylist into the validator. ValidatorWebhook is kept
-// for tests and for legacy callers that do not have a K8s client to feed
-// the provider.
-func ValidatorWebhook(scheme *runtime.Scheme) *admission.Webhook {
-	return admission.WithValidator[*gibsonv1alpha1.Tenant](scheme, &TenantValidator{})
-}
-
 // ValidatorWebhookWithReserved is the production constructor; it wires the
 // reserved-names provider so the chart's gibson-reserved-names ConfigMap
 // gates Tenant CR creation.

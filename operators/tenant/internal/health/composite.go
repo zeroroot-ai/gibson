@@ -58,15 +58,6 @@ type Composite struct {
 	timeout time.Duration
 }
 
-// NewComposite constructs a Composite probe with the given dependencies and
-// outer timeout. If timeout is zero CompositeTimeout is used.
-func NewComposite(deps []Dep, timeout time.Duration) *Composite {
-	if timeout <= 0 {
-		timeout = CompositeTimeout
-	}
-	return &Composite{deps: deps, timeout: timeout}
-}
-
 // Run executes all pings concurrently under the composite timeout and returns
 // the Summary. Callers that only need the structured result use this method
 // directly; the Checker method adapts it to the controller-runtime interface.
@@ -109,18 +100,6 @@ func (c *Composite) Run(ctx context.Context) Summary {
 		}
 	}
 	return summary
-}
-
-// Checker satisfies the controller-runtime healthz.Checker type
-// (func(*http.Request) error). On failure it returns a *compositeError whose
-// Error() string is the JSON Summary — visible in kubectl describe and logs.
-// On success it returns nil and controller-runtime writes "ok".
-func (c *Composite) Checker(req *http.Request) error {
-	summary := c.Run(req.Context())
-	if !summary.OK {
-		return &compositeError{summary: summary}
-	}
-	return nil
 }
 
 // ServeHTTP implements http.Handler. It always writes the JSON Summary body
