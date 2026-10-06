@@ -149,13 +149,16 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 	// factory a getter; each harness reads it when it is built.
 	config.CGMinter = func() *capabilitygrant.Minter { return d.cgMinter }
 
-	// Sandboxed tool executor (Setec microVM dispatch) — constructed only
-	// when sandbox.enabled=true in config AND gibson was built with
-	// -tags=setec_integration. The no-op constructor for the un-tagged
-	// build returns (nil, nil) so config.Sandbox.Enabled=true without the
-	// tag logs a warning and continues; per-call failures surface at
-	// tool invocation time (design Requirement 5.4).
-	if d.config != nil && d.config.Sandbox.Enabled {
+	// Sandboxed tool executor (Setec microVM dispatch). The sandbox fleet is
+	// required (ADR-0142): every published image is built with
+	// -tags=setec_integration, and a failed executor build stops the start.
+	// The no-op constructor of an un-tagged build returns (nil, nil), which
+	// logs a warning; per-call failures surface at tool invocation time
+	// (design Requirement 5.4).
+	if d.config != nil {
+		if err := d.config.Sandbox.RequireSetec(); err != nil {
+			return nil, fmt.Errorf("daemon start: %w", err)
+		}
 		sandboxTracer := func() trace.Tracer {
 			if d.infrastructure != nil && d.infrastructure.otelStack != nil {
 				return d.infrastructure.otelStack.TracerProvider.Tracer("gibson.sandboxed")
@@ -171,10 +174,11 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		sbxDiscovery := d.newDiscoveryProcessor()
 		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger, sbxDiscovery, newLiveEventPublisher(d.liveAgents))
 		if err != nil {
-			d.logger.Warn(ctx, "sandboxed tool executor construction failed; continuing without sandboxed dispatch",
-				"error", err)
+			// The sandbox fleet is required (ADR-0142): a daemon that cannot
+			// build its executor does not start.
+			return nil, fmt.Errorf("sandboxed tool executor: %w", err)
 		} else if execer == nil {
-			d.logger.Warn(ctx, "sandbox.enabled=true but setec_integration build tag is not set; sandboxed tool calls will fail at invocation time (rebuild with -tags=setec_integration to enable)")
+			d.logger.Warn(ctx, "the setec_integration build tag is not set; sandboxed tool calls will fail at invocation time (rebuild with -tags=setec_integration to enable)")
 		} else {
 			config.SandboxedExecutor = execer
 			d.logger.Info(ctx, "sandboxed tool executor wired",

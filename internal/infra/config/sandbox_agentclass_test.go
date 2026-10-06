@@ -14,13 +14,13 @@ import "testing"
 // and does not depend on a fully valid mTLS config — an empty class must never
 // reach the launcher (it would defer to the cluster-default posture, ADR-0052).
 func TestSandboxConfig_DefaultsAgentSandboxClass(t *testing.T) {
-	c := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443"}}
+	c := &SandboxConfig{Setec: SandboxSetecConfig{Address: "setec:8443"}}
 	_ = c.Validate() // may fail later on mTLS; the class default runs first
 	if c.Setec.AgentSandboxClass != DefaultAgentSandboxClass {
 		t.Fatalf("AgentSandboxClass = %q, want default %q", c.Setec.AgentSandboxClass, DefaultAgentSandboxClass)
 	}
 
-	explicit := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443", AgentSandboxClass: "hardened-agent"}}
+	explicit := &SandboxConfig{Setec: SandboxSetecConfig{Address: "setec:8443", AgentSandboxClass: "hardened-agent"}}
 	_ = explicit.Validate()
 	if explicit.Setec.AgentSandboxClass != "hardened-agent" {
 		t.Fatalf("explicit AgentSandboxClass overwritten to %q", explicit.Setec.AgentSandboxClass)
@@ -31,12 +31,12 @@ func TestSandboxConfig_DefaultsAgentSandboxClass(t *testing.T) {
 // launch is handed comes from the chart's projection unless the install
 // names another file (gibson#13).
 func TestSandboxConfig_DefaultsPlatformCAFile(t *testing.T) {
-	c := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443"}}
+	c := &SandboxConfig{Setec: SandboxSetecConfig{Address: "setec:8443"}}
 	_ = c.Validate()
 	if c.Setec.PlatformCAFile != DefaultPlatformCAFile {
 		t.Fatalf("PlatformCAFile = %q, want default %q", c.Setec.PlatformCAFile, DefaultPlatformCAFile)
 	}
-	explicit := &SandboxConfig{Enabled: true, Setec: SandboxSetecConfig{Address: "setec:8443", PlatformCAFile: "/etc/gibson/edge-ca.pem"}}
+	explicit := &SandboxConfig{Setec: SandboxSetecConfig{Address: "setec:8443", PlatformCAFile: "/etc/gibson/edge-ca.pem"}}
 	_ = explicit.Validate()
 	if explicit.Setec.PlatformCAFile != "/etc/gibson/edge-ca.pem" {
 		t.Fatalf("explicit PlatformCAFile overwritten to %q", explicit.Setec.PlatformCAFile)

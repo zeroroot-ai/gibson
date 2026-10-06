@@ -19,12 +19,10 @@
 //
 // `NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer, logger)` dials
 // the Setec frontend with mTLS using `component.TLSConfig.BuildTLSConfig()`,
-// builds the client, wires a `sandboxed.Executor`, and returns it. Returns
-// (nil, nil) when cfg.Enabled is false so the daemon can unconditionally
-// call this during infrastructure init. On dial/TLS failure, returns
-// (nil, err) — per design Requirement 5.4 the daemon LOGS the warning and
-// continues startup; per-call failures surface at tool invocation time
-// rather than blocking daemon start.
+// builds the client, wires a `sandboxed.Executor`, and returns it. The
+// sandbox fleet is required (ADR-0142), so a TLS build failure stops the
+// daemon start. The dial itself is lazy: an unreachable frontend surfaces at
+// tool invocation time (design Requirement 5.4).
 
 package daemon
 
@@ -107,9 +105,6 @@ func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) 
 // the tenant's World asynchronously, matching what the live-callback path does
 // with the same payload.
 func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor, events sandboxed.EventPublisher) (*sandboxed.Executor, error) {
-	if !cfg.Enabled {
-		return nil, nil
-	}
 	client, err := NewSetecSandboxClient(cfg)
 	if err != nil {
 		return nil, err
