@@ -75,31 +75,16 @@ func TestCreateMission_CanonicalConstraintsReachTheMission(t *testing.T) {
 	assert.True(t, proto.Equal(want, got), "stored constraints:\n got %v\nwant %v", got, want)
 }
 
-// A request with both fields uses the canonical one.
-func TestCreateMission_CanonicalConstraintsWinOverTheDeprecatedMessage(t *testing.T) {
+// The deprecated four-field message is not read. A request that sets only
+// that message keeps the constraints of the definition (gibson#683).
+func TestCreateMission_TheDeprecatedMessageIsNotRead(t *testing.T) {
 	req := originRequest()
-	req.CanonicalConstraints = &missionv1.MissionConstraints{MaxTokens: 100, BlockedTools: []string{"native:nmap"}}
+	req.MissionDefinitionJson = []byte(`{"name":"scan","constraints":{"max_tokens":"77"}}`)
 	req.Constraints = &harnesspb.MissionConstraints{MaxTokens: 999, MaxFindings: 5} //nolint:staticcheck // SA1019: the deprecated field under test
 
 	got := storedConstraints(t, req)
-	assert.EqualValues(t, 100, got.GetMaxTokens())
-	assert.Zero(t, got.GetMaxFindings(), "the deprecated message must not be merged in")
-	assert.Equal(t, []string{"native:nmap"}, got.GetBlockedTools())
-}
-
-// The sdk writes only the deprecated message until zeroroot-ai/sdk#180. Its
-// four fields reach the mission.
-func TestCreateMission_DeprecatedConstraintsStillReachTheMission(t *testing.T) {
-	req := originRequest()
-	req.Constraints = &harnesspb.MissionConstraints{ //nolint:staticcheck // SA1019: the deprecated field under test
-		MaxDurationMs: 60000, MaxTokens: 42, MaxCost: 1.5, MaxFindings: 3,
-	}
-
-	got := storedConstraints(t, req)
-	assert.Equal(t, time.Minute, got.GetMaxDuration().AsDuration())
-	assert.EqualValues(t, 42, got.GetMaxTokens())
-	assert.InDelta(t, 1.5, got.GetMaxCost(), 1e-9)
-	assert.EqualValues(t, 3, got.GetMaxFindings())
+	assert.EqualValues(t, 77, got.GetMaxTokens())
+	assert.Zero(t, got.GetMaxFindings(), "the deprecated message must not be read")
 }
 
 // A request with no constraints leaves the constraints of the definition.

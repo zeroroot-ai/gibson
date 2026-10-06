@@ -3215,7 +3215,9 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
-	constraints := requestedMissionConstraints(req)
+	// canonical_constraints is the one constraint field (ADR-0004). The sdk
+	// writes it since v0.197.0, and the daemon reads no other (gibson#683).
+	constraints := req.GetCanonicalConstraints()
 
 	// Convert metadata
 	metadata := make(map[string]any)
