@@ -44,6 +44,10 @@ type GRPCProviderOptions struct {
 	// DefaultProviderTTL (60 s). Matches the configProvider's default so
 	// callers see the same freshness semantics regardless of which backend
 	// is selected.
+	//
+	// By decision, nothing removes an entry before it expires: a plan change
+	// reaches the daemon after up to one CacheTTL (ADR-0060, owner decision of
+	// 2026-10-05, gibson#721). Do not add invalidation code.
 	CacheTTL time.Duration
 
 	// Logger is used for error reporting. Defaults to slog.Default() when nil.
