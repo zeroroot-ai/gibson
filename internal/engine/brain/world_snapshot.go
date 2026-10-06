@@ -385,6 +385,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			MissionID:         a.MissionID,
 			Technique:         a.Technique,
 			PredicateType:     a.PredicateType,
+			BlastRadius:       a.BlastRadius,
+			Reversibility:     a.Reversibility,
 			RequestedAtUnixMS: a.RequestedAtUnixMS,
 		})
 		if a.Decided {
