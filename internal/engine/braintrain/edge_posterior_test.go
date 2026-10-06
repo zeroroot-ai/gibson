@@ -97,3 +97,25 @@ func TestLoadEdgePosteriorArtifact_LoadsAValidFile(t *testing.T) {
 		t.Errorf("posterior = %+v, want Beta(8,4)", got)
 	}
 }
+
+// The provider gives the fitted in-node strength and leak, and the
+// uninformative prior for a value that the artifact did not fit (gibson#720).
+func TestEdgePosteriorProvider_InNodeStrengthAndLeak(t *testing.T) {
+	a := fittedArtifact()
+	a.InNode = map[string]fit.BetaPosterior{fit.InNodeKey("Host", "exploitable", "reachable"): {Alpha: 5, Beta: 2}}
+	a.Leaks = map[string]fit.BetaPosterior{fit.LeakKey("Host", "exploitable"): {Alpha: 1, Beta: 4}}
+	p := EdgePosteriorProvider(a)
+	if got := p.InNodeStrength("Host", "exploitable", "reachable"); got.Alpha != 5 || got.Beta != 2 {
+		t.Errorf("InNodeStrength = %+v, want Beta(5,2)", got)
+	}
+	if got := p.Leak("Host", "exploitable"); got.Alpha != 1 || got.Beta != 4 {
+		t.Errorf("Leak = %+v, want Beta(1,4)", got)
+	}
+	want := brain.UninformativeEdgePosteriors{}.Posterior("")
+	if got := p.InNodeStrength("Host", "juicy", "exploitable"); got != want {
+		t.Errorf("unfitted InNodeStrength = %+v, want %+v", got, want)
+	}
+	if got := p.Leak("Host", "juicy"); got != want {
+		t.Errorf("unfitted Leak = %+v, want %+v", got, want)
+	}
+}

@@ -113,6 +113,12 @@ func TestRun_FitsAndStoresBothArtifacts(t *testing.T) {
 	p := braintrain.EdgePosteriorProvider(edges).Posterior("RESOLVES_TO")
 	assert.InDelta(t, 3.0, p.Alpha, 1e-9)
 	assert.InDelta(t, 2.0, p.Beta, 1e-9)
+	// gibson#720: the rows fit the in-node strengths and the leaks of a host.
+	// Two of three reachable hosts are exploitable.
+	s := braintrain.EdgePosteriorProvider(edges).InNodeStrength("Host", "exploitable", "reachable")
+	assert.InDelta(t, 3.0, s.Alpha, 1e-9)
+	assert.InDelta(t, 2.0, s.Beta, 1e-9)
+	assert.Len(t, edges.Leaks, 3, "one leak for each Host variable")
 	assert.Contains(t, logs.String(), "stored a new belief artifact version")
 }
 
@@ -185,14 +191,17 @@ func TestRun_RequiresTenantAndDaemon(t *testing.T) {
 }
 
 // The owner decision of gibson#614: the trainer talks only to the daemon. Its
-// binary imports no Redis client and no Postgres driver.
+// binary imports no Redis client and no Postgres driver. The standard library
+// package database/sql is no driver: without one it cannot open a database.
+// The ontology package that the trainer reads its belief schema from imports
+// it.
 func TestTrainerImportsNoDataStore(t *testing.T) {
 	out, err := exec.Command("go", "list", "-deps", ".").Output()
 	require.NoError(t, err)
 	deps := strings.Fields(string(out))
 	require.Contains(t, deps, "github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit", "the list is the deps of the trainer")
 	for _, dep := range deps {
-		for _, banned := range []string{"github.com/redis/", "github.com/jackc/", "github.com/lib/pq", "database/sql"} {
+		for _, banned := range []string{"github.com/redis/", "github.com/jackc/", "github.com/lib/pq"} {
 			assert.False(t, strings.HasPrefix(dep, banned), "the trainer imports %s", dep)
 		}
 	}

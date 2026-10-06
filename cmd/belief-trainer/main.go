@@ -12,7 +12,8 @@
 //     count of each enablement edge type.
 //  2. It fits the belief-CPT model, with the embedded OSS base model
 //     (beliefvi.DefaultArtifact) as the structure and the prior, and the Beta
-//     posterior of each edge type.
+//     posterior of each learned strength: each edge type, each dependency
+//     inside a host and the leak of each host variable.
 //  3. It stores both artifacts as one new version of the tenant through the
 //     daemon (StoreBeliefArtifact). The daemon numbers the version and its
 //     quality gate decides whether the version becomes current (gibson#789).
@@ -49,6 +50,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain/fit"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 )
@@ -165,6 +167,16 @@ func fitArtifacts(data *daemonoperatorv1.GetBeliefTrainingDataResponse, version 
 	posteriors, err := fit.EdgePosteriors(counts, version)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fit the edge posteriors: %w", err)
+	}
+	// A row is the evidence of one host, so the rows fit the in-node strengths
+	// and the leaks of the Host node type (gibson#720).
+	for _, schema := range ontology.SeedBeliefSchemaExtension().Nodes {
+		if schema.NodeType == ontology.HostNodeType {
+			posteriors.InNode, posteriors.Leaks = fit.NodeStrengths(rows, schema)
+		}
+	}
+	if err := posteriors.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("fit the node strengths: %w", err)
 	}
 
 	if model, err = json.Marshal(fitted); err != nil {

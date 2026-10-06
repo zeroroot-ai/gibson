@@ -22,18 +22,15 @@ import (
 // #401), so a bounded AttackGraph slice grounds to real noisy-OR causes
 // instead of the deterministic placeholder.
 //
-// Strength is NEVER hand-authored here (ADR-0137): every
-// intra-node DependsOn cause always uses UninformativePriorStrength — ADR-0137
-// scopes the learned posterior to ENABLEMENT edges only (bamcp.go's bamcpVar
-// doc comment applies the same scoping to BAMCP's rollouts). A cross-node
-// enablement cause uses the SAME constant only until a per-edge-type Beta
-// posterior is pinned (gibson#395, ADR-0137): when
-// NativeSliceBeliefProvider is given a non-nil PinnedEdgeStrengthPosteriorProvider
-// (braintrain.EdgePosteriorProvider, fit offline by braintrain from
-// recorded outcomes), groundAttackGraph reads that edge type's posterior MEAN
-// instead — the grounding STRUCTURE (which variable is a cause of which)
-// never changes, only the strength number plugged into
-// beliefvi.EnablementCause.Strength.
+// Strength is NEVER hand-authored here (ADR-0137). Each strength grounds at
+// UninformativePriorStrength until a fitted artifact is pinned: when
+// NativeSliceBeliefProvider is given a non-nil
+// PinnedEdgeStrengthPosteriorProvider (braintrain.EdgePosteriorProvider, fit
+// offline by the belief trainer), groundAttackGraph reads the posterior MEAN
+// of each enablement edge type (gibson#395), of each intra-node DependsOn
+// strength and of each leak (gibson#720) instead. The grounding STRUCTURE
+// (which variable is a cause of which) never changes, only the strength
+// numbers.
 
 // UninformativePriorStrength is the cold-start noisy-OR strength (and leak)
 // every intra-node cause grounds at, and every enablement-edge cause grounds
@@ -145,11 +142,12 @@ func (p *nativeSliceBelief) version() string {
 // consume:
 //
 //   - every node's own declared variables (AttackGraphNode.Variables) become
-//     a beliefvi.NodeSpec, with each intra-node DependsOn parent contributing
-//     UninformativePriorStrength as its noisy-OR cause strength, and the same
-//     constant as the variable's leak — no per-parent number exists yet to
-//     author or learn (ADR-0129/ADR-0137's shared "learned, not authored"
-//     discipline), so the cold-start prior is the only defensible default.
+//     a beliefvi.NodeSpec. Each intra-node DependsOn parent contributes the
+//     posterior MEAN of its fitted in-node strength as its noisy-OR cause
+//     strength, and the variable's leak is the posterior MEAN of its fitted
+//     leak (gibson#720). With no pinned posteriors both are
+//     UninformativePriorStrength, and a pinned artifact with no fitted value
+//     falls back to the same Beta(1,1) mean.
 //   - every kept enablement edge (graph.Edges, already ontology-filtered by
 //     DeriveAttackGraph) becomes one beliefvi.EnablementCause per TERMINAL
 //     variable of its source node's OWN intra-node dependency chain (see
@@ -173,7 +171,7 @@ func (p *nativeSliceBelief) version() string {
 // caught up. Likewise an edge type absent from the registry entirely (should
 // not happen — DeriveAttackGraph already only keeps registry-flagged types —
 // but this function does not assume its caller's invariant) is skipped.
-func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistry, posteriors EdgeStrengthPosteriorProvider) ([]beliefvi.NodeSpec, []beliefvi.EnablementCause) {
+func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistry, posteriors PinnedEdgeStrengthPosteriorProvider) ([]beliefvi.NodeSpec, []beliefvi.EnablementCause) {
 	nodeVariables := make(map[string]map[string]struct{}, len(graph.Nodes))
 	nodeKind := make(map[string]string, len(graph.Nodes))
 	specs := make([]beliefvi.NodeSpec, 0, len(graph.Nodes))
@@ -189,10 +187,17 @@ func groundAttackGraph(graph AttackGraph, registry *ontology.BeliefSchemaRegistr
 		vars := make(map[string]beliefvi.VariableSpec, len(n.Variables))
 		for _, v := range n.Variables {
 			dependsOn := make(map[string]float64, len(v.DependsOn))
+			leak := UninformativePriorStrength
+			if posteriors != nil {
+				leak = posteriors.Leak(n.Kind, v.Name).Mean()
+			}
 			for _, parent := range v.DependsOn {
 				dependsOn[parent] = UninformativePriorStrength
+				if posteriors != nil {
+					dependsOn[parent] = posteriors.InNodeStrength(n.Kind, v.Name, parent).Mean()
+				}
 			}
-			vars[v.Name] = beliefvi.VariableSpec{DependsOn: dependsOn, Leak: UninformativePriorStrength}
+			vars[v.Name] = beliefvi.VariableSpec{DependsOn: dependsOn, Leak: leak}
 		}
 		specs = append(specs, beliefvi.NodeSpec{NodeID: n.ID, Variables: vars})
 	}
