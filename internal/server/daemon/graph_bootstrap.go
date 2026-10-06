@@ -13,8 +13,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/queries"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/schema"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
@@ -27,10 +25,10 @@ import (
 // It converts mission state from SQLite into graph nodes and relationships
 // for semantic querying and graph-based reasoning.
 type GraphBootstrapper struct {
-	graphClient graph.GraphClient
-	// graphWriter is the sole writer of a :Mission node (ADR-0112). The
-	// bootstrap used to MERGE its own, on a different key and a different
-	// property name than the projector's; see gibson#551.
+	// graphWriter is the sole writer of the knowledge graph (ADR-0112). The
+	// bootstrap decides what the run graph holds, and the writer writes it:
+	// the :Mission (gibson#551), the :Target (gibson#550), and the :MissionRun,
+	// :MissionNode and DEPENDS_ON writes (gibson#673).
 	graphWriter GraphWriter
 	logger      *slog.Logger
 }
@@ -60,15 +58,13 @@ var bootstrapRelationshipTypes = []string{
 	"PART_OF",    // MissionNode -> Mission
 }
 
-// NewGraphBootstrapper creates a new GraphBootstrapper instance.
-// The graph client must be connected before use. writer is the graph projector,
-// which owns every :Mission write; a nil writer makes Bootstrap fail rather than
-// skip, because a run whose Mission node is missing cannot hang its MissionRun
-// off anything.
-func NewGraphBootstrapper(client graph.GraphClient, writer GraphWriter, logger *slog.Logger) *GraphBootstrapper {
+// NewGraphBootstrapper creates a new GraphBootstrapper instance. writer is the
+// graph projector, which owns every graph write; a nil writer makes Bootstrap
+// fail rather than skip, because a run whose Mission node is missing cannot
+// hang its MissionRun off anything.
+func NewGraphBootstrapper(writer GraphWriter, logger *slog.Logger) *GraphBootstrapper {
 	mustMatchTaxonomy("graph bootstrap", taxonomy.Global, bootstrapNodeLabels, bootstrapRelationshipTypes)
 	return &GraphBootstrapper{
-		graphClient: client,
 		graphWriter: writer,
 		logger:      logger,
 	}
@@ -261,7 +257,7 @@ func missionNodeGraphID(missionID types.ID, workNodeID string) types.ID {
 // each node's own `dependencies` list (gibson#528).
 //
 // All operations use MERGE for Mission/MissionNodes to ensure idempotency.
-// MissionRuns always use CREATE to ensure each execution is tracked uniquely.
+// A MissionRun is keyed by its run id, which is unique for each execution.
 func (b *GraphBootstrapper) Bootstrap(
 	ctx context.Context,
 	tenant string,
@@ -272,9 +268,6 @@ func (b *GraphBootstrapper) Bootstrap(
 	origins fanOutOrigins,
 	targets []forEachTarget,
 ) (*BootstrapResult, error) {
-	// Create MissionQueries instance for graph operations
-	missionQueries := queries.NewMissionQueries(b.graphClient)
-
 	b.logger.Info("bootstrapping mission to graph",
 		"mission_id", m.ID,
 		"mission_name", m.Name,
@@ -339,7 +332,11 @@ func (b *GraphBootstrapper) Bootstrap(
 
 	// Step 2: Create a new MissionRun node for this execution
 	// Uses SQLite run ID for consistency between SQLite and Neo4j
-	if err := missionQueries.CreateMissionRun(ctx, m.ID, run.ID, run.RunNumber); err != nil {
+	if err := b.graphWriter.UpsertMissionRun(ctx, tenant, MissionRunProjection{
+		ID:        run.ID.String(),
+		MissionID: m.ID.String(),
+		RunNumber: run.RunNumber,
+	}); err != nil {
 		return nil, fmt.Errorf("failed to create mission run node: %w", err)
 	}
 
@@ -362,7 +359,7 @@ func (b *GraphBootstrapper) Bootstrap(
 
 		schemaNode := convertToSchemaNode(m.ID, defNode, wn.ID, len(wn.DependsOn) > 0, origin, isInstance)
 
-		if err := missionQueries.CreateMissionNode(ctx, schemaNode); err != nil {
+		if err := b.graphWriter.UpsertMissionNode(ctx, tenant, schemaNode); err != nil {
 			return nil, fmt.Errorf("failed to create mission node %s: %w", wn.ID, err)
 		}
 
@@ -393,7 +390,7 @@ func (b *GraphBootstrapper) Bootstrap(
 				return nil, fmt.Errorf("projected node %s depends on %s, which the projection did not produce", wn.ID, depID)
 			}
 
-			if err := missionQueries.CreateNodeDependency(ctx, fromNodeID, toNodeID); err != nil {
+			if err := b.graphWriter.LinkMissionNodes(ctx, tenant, fromNodeID.String(), toNodeID.String()); err != nil {
 				return nil, fmt.Errorf("failed to create dependency %s->%s: %w", wn.ID, depID, err)
 			}
 
