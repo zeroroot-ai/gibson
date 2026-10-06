@@ -21,7 +21,12 @@ type gateSeedAuthorizer struct {
 	deletes  []authz.Tuple
 }
 
-func (a *gateSeedAuthorizer) ListObjects(context.Context, string, string, string) ([]string, error) {
+// ListObjects answers existing only for the query of the catalog gate: the
+// platform_enabled components of the system tenant.
+func (a *gateSeedAuthorizer) ListObjects(_ context.Context, user, relation, objectType string) ([]string, error) {
+	if user != "system_tenant:_system" || relation != "platform_enabled" || objectType != "component" {
+		return nil, nil
+	}
 	return a.existing, nil
 }
 
