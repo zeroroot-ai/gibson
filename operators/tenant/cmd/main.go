@@ -1184,7 +1184,11 @@ func buildStorePipeline(
 	cfg.Vector = vp
 	// The KEKInitProvisioner checks that derivation works for a new tenant.
 	cfg.KEK = &dataplane.KEKInitProvisioner{KEKDeriver: kekDeriver}
-	return dataplane.New(cfg)
+	pipeline, err := dataplane.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("data-plane pipeline: %w", err)
+	}
+	return pipeline, nil
 }
 
 // buildKEKDeriver constructs the per-tenant KEKDeriver. Source order:
