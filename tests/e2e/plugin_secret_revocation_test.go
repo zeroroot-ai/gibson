@@ -15,12 +15,12 @@
 //
 //  1. The GitHub plugin image (ghcr.io/zeroroot-ai/gibson-plugin-github)
 //     runs beside Envoy the way a customer deploys it: chart-rendered pod,
-//     SPIFFE-SVID enrolment, cred:github_token declared as a required
-//     startup secret. It reaches the daemon through Envoy and ext-authz,
+//     SPIFFE-SVID enrolment, cred:github_token resolved in its start hook.
+//     It reaches the daemon through Envoy and ext-authz,
 //     never through the mTLS listener this suite dials.
-//  2. This suite seeds cred:github_token, waits for the install to report
-//     SERVING, and reads the binding the plugin wrote for itself
-//     (bindDeclaredSecrets, ADR-0066).
+//  2. This suite seeds cred:github_token, grants it to the plugin principal
+//     as a tenant admin (GrantsService.WriteSecretGrants, ADR-0097), waits
+//     for the install to report SERVING, and reads the granted binding.
 //  3. Negative arm: with nothing revoked, the status holds SERVING for the
 //     whole assertion window.
 //  4. RevokePluginSecretBinding. The daemon publishes secret_access_revoked
@@ -50,19 +50,24 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
 	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 )
 
 const (
-	// revocationPluginName is the plugin's declared metadata name
-	// (plugins/github/declaration.go) and the vendor key the chart renders
-	// it under (plugins.github).
+	// revocationPluginName is the name the plugin declares in code
+	// (plugins/github/handler.go, pluginName) and the vendor key the chart
+	// renders it under (plugins.github).
 	revocationPluginName = "github"
+
+	// revocationPrincipal is the FGA user the chart-deployed plugin enrols
+	// as. The tenant admin grants it the secret (ADR-0097, sdk#129).
+	revocationPrincipal = "plugin_principal:github"
 
 	// revocationSecretName is the caller-facing name; SetSecret stores it
 	// under the category prefix as revocationDeclaredName, which is the
-	// exact ref the manifest declares (secrets[0].name).
+	// exact ref the plugin resolves (credName).
 	revocationSecretName   = "github_token"
 	revocationDeclaredName = "cred:github_token"
 
@@ -105,10 +110,11 @@ func TestPluginSecretRevocation(t *testing.T) {
 
 	plugins := pluginadminv1.NewPluginAdminServiceClient(clients.Conn())
 	secretsAdmin := secretsv1.NewSecretsServiceClient(clients.Conn())
+	grants := tenantv1.NewGrantsServiceClient(clients.Conn())
 	ctx := auth.ContextWithTenantString(context.Background(), revocationTenant)
 
-	// The plugin declares cred:github_token as a required startup secret:
-	// plugin.Serve refuses to start until it resolves. Seed it first, so the
+	// The plugin resolves cred:github_token in its OnStart hook: plugin.Serve
+	// fails until it can. Seed the secret and grant it to the plugin, so the
 	// pod the workflow already deployed comes up on its next restart.
 	t.Run("the declared secret exists for the tenant", func(t *testing.T) {
 		_, err := secretsAdmin.SetSecret(ctx, &secretsv1.SetSecretRequest{
@@ -118,6 +124,13 @@ func TestPluginSecretRevocation(t *testing.T) {
 		})
 		require.NoError(t, err, "SetSecret(%s) for %q", revocationDeclaredName, revocationTenant)
 	})
+	t.Run("a tenant admin grants the plugin its secret", func(t *testing.T) {
+		_, err := grants.WriteSecretGrants(ctx, &tenantv1.WriteSecretGrantsRequest{
+			TargetPrincipalId: revocationPrincipal,
+			SecretNames:       []string{revocationDeclaredName},
+		})
+		require.NoError(t, err, "WriteSecretGrants(%s, %s)", revocationPrincipal, revocationDeclaredName)
+	})
 	t.Cleanup(func() {
 		c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -126,7 +139,7 @@ func TestPluginSecretRevocation(t *testing.T) {
 	})
 
 	var install *pluginadminv1.PluginInstallSummary
-	t.Run("the plugin install reports serving and holds its declared binding", func(t *testing.T) {
+	t.Run("the plugin install reports serving and holds its granted binding", func(t *testing.T) {
 		waitCtx, cancel := context.WithTimeout(ctx, pluginReadyBudget+time.Minute)
 		defer cancel()
 		deadline := time.Now().Add(pluginReadyBudget)
@@ -153,11 +166,11 @@ func TestPluginSecretRevocation(t *testing.T) {
 			}
 			install = alive
 		}
-		// The binding the revocation deletes is the one the plugin wrote for
-		// itself at registration. Without it there is nothing to revoke and
-		// the plugin could not have resolved its startup secret.
+		// The binding the revocation deletes is the one the tenant admin
+		// granted above. Without it there is nothing to revoke and the plugin
+		// could not have resolved its startup secret.
 		require.Contains(t, install.GetBoundSecretRefs(), revocationDeclaredName,
-			"install %s must hold can_resolve on its declared secret (bindDeclaredSecrets); got %v",
+			"install %s must hold can_resolve on its granted secret; got %v",
 			install.GetInstallId(), install.GetBoundSecretRefs())
 		t.Logf("plugin install %s is serving and heartbeating after %d polls", install.GetInstallId(), len(history))
 	})
