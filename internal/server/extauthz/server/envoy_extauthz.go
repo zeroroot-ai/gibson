@@ -87,10 +87,10 @@ type Config struct {
 	CGJWT *cgjwt.Verifier
 
 	// Component verifies a component's self-signed per-RPC CG-JWT against the
-	// daemon's per-kid key descriptor (ADR-0045). Optional — when nil, a
-	// request bearing only an x-capability-grant component token and no Zitadel
-	// JWT is unauthenticated. When set, such a request is authenticated as the
-	// daemon-asserted principal and authorized by the normal per-method FGA
+	// daemon's per-kid key descriptor (ADR-0045). Required — NewEnvoyAuthzServer
+	// panics without it (gibson#681). A request that bears only an
+	// x-capability-grant component token and no Zitadel JWT is authenticated as
+	// the daemon-asserted principal and authorized by the normal per-method FGA
 	// check.
 	Component *cgjwt.ComponentVerifier
 
@@ -141,11 +141,14 @@ type EnvoyAuthzServer struct {
 	orgTenants OrgTenantResolver
 }
 
-// NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache, logger and
-// orgTenants are required; cgjwt may be nil.
+// NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache, component,
+// logger and orgTenants are required; cgjwt may be nil.
 func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 	if cfg.Cache == nil {
 		panic("server.NewEnvoyAuthzServer: Cache required")
+	}
+	if cfg.Component == nil {
+		panic("server.NewEnvoyAuthzServer: Component required")
 	}
 	if cfg.Logger == nil {
 		panic("server.NewEnvoyAuthzServer: Logger required")
@@ -411,8 +414,8 @@ func nowUTC() time.Time { return time.Now().UTC() }
 // tryComponentAuth authenticates + authorizes a request that carries a
 // component's self-signed Capability-Grant JWT in x-capability-grant and no
 // Zitadel JWT (ADR-0045 / gibson#648). It returns (resp, true) when it owns the
-// decision, or (nil, false) when there is no component verifier or no component
-// token — leaving the caller to fall through to the unauthenticated deny.
+// decision, or (nil, false) when there is no component token, which leaves the
+// caller to fall through to the unauthenticated deny.
 //
 // The component token proves only key-possession; identity (the typed FGA
 // principal + tenant) comes from the daemon's per-kid descriptor, never the
@@ -420,9 +423,6 @@ func nowUTC() time.Time { return time.Now().UTC() }
 // human and S2S callers — there is no allowed_rpcs short-circuit here; FGA is
 // the boundary.
 func (s *EnvoyAuthzServer) tryComponentAuth(ctx context.Context, method string, httpHeaders map[string]string) (*authv3.CheckResponse, bool) {
-	if s.component == nil {
-		return nil, false
-	}
 	token := extractCapabilityGrant(httpHeaders)
 	if token == "" {
 		return nil, false

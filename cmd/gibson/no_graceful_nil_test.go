@@ -172,7 +172,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		"internal/server/daemon/graph_projector.go :: if p.reg == nil || p.writer == nil { ... }":                             astchecks.Entry{Category: astchecks.CategoryReceiverNilGuard, Reason: "composite reg/writer nil-guard in background projection loop (ADR-0107); both wired by NewGraphProjector in production — nil-safe for zero-value test construction"},
 		"internal/server/daemon/log_watcher.go :: if w.file == nil { ... }":                                                   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "log watcher file handle nil-guard during teardown"},
 		"internal/server/extauthz/fga/check.go :: if resp.Allowed == nil { ... }":                                             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "OpenFGA *bool Allowed response field, legitimately nil-able; nil maps to fail-closed DENY in CanInvokeTool"},
-		"internal/server/extauthz/server/envoy_extauthz.go :: if s.component == nil { ... }":                                  astchecks.Entry{Category: astchecks.CategoryLegacyOptional, Reason: "component CG-JWT verifier conditionally wired; nil falls through to unauthenticated DENY (fail-closed) — reassert with component-auth-required follow-up"},
 	}
 
 	// Real-code subtest: walk every gibson `internal/` package and fail

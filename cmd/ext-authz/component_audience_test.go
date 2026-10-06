@@ -44,20 +44,6 @@ func TestBuildComponentVerifier_PinsStableAudience(t *testing.T) {
 	}
 }
 
-// TestBuildComponentVerifier_DisabledPath — when the keys URL is unset the
-// component path is off entirely and no verifier is built.
-func TestBuildComponentVerifier_DisabledPath(t *testing.T) {
-	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "")
-
-	v, err := buildComponentVerifier(discardLogger(), &http.Client{}, testReplayStore(t))
-	if err != nil {
-		t.Fatalf("buildComponentVerifier with the component path disabled: %v", err)
-	}
-	if v != nil {
-		t.Fatal("component verifier built despite EXT_AUTHZ_CGJWT_KEYS_URL being unset")
-	}
-}
-
 // TestBuildComponentVerifier_RefusesNoReplayStore: with the component path
 // enabled, a verifier with no replay store is not built.
 func TestBuildComponentVerifier_RefusesNoReplayStore(t *testing.T) {
