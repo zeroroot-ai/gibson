@@ -219,6 +219,7 @@ var connectorOperatorMethodPolicy = denyAllExcept(operatorMethodPolicy, map[stri
 	daemonoperatorv1.DaemonOperatorService_ReportConnectorStatus_FullMethodName:  "the connector loop reports the state of each ConnectorInstance (gibson#662)",
 	daemonoperatorv1.DaemonOperatorService_AdoptConnector_FullMethodName:         "the connector loop records a ConnectorInstance from before the table (gibson#662)",
 	daemonoperatorv1.DaemonOperatorService_GetConnectorCredential_FullMethodName: "the connector loop reads the content of the connector-cred Secret (gibson#663); the handler also checks the TLS peer",
+	daemonoperatorv1.DaemonOperatorService_EmitAuditEvent_FullMethodName:         "the connector operator records each runtime, network, grant and credential change before it (gibson#583)",
 }, "tenant-operator surface; not a connector concern")
 
 // denyAllExcept builds a policy table over the same method set as base:

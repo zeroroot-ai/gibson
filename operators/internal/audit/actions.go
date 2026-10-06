@@ -85,6 +85,12 @@ const (
 	// ActionConnectorAdopt is the record before the connector operator
 	// adopts a connector into the daemon table.
 	ActionConnectorAdopt = "operator.connector_adopt"
+	// ActionConnectorCredentialWrite is the record before the connector
+	// operator writes the connector-cred Secret of a connector.
+	ActionConnectorCredentialWrite = "operator.connector_credential_write"
+	// ActionConnectorCredentialWithdraw is the record before the connector
+	// operator deletes the connector-cred Secret of a connector.
+	ActionConnectorCredentialWithdraw = "operator.connector_credential_withdraw"
 
 	// Platform operator.
 

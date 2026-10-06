@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 // The desired connectors loop (gibson#662).
@@ -72,6 +74,9 @@ type DesiredConnectorsRunnable struct {
 	Client   client.Client
 	Daemon   DesiredConnectorsDaemon
 	Interval time.Duration
+	// Audit writes the record of each ConnectorInstance and credential
+	// change before the change (gibson#583). Required.
+	Audit *audit.SagaEmitter
 }
 
 // NeedLeaderElection makes one replica run the loop.
@@ -81,6 +86,9 @@ func (r *DesiredConnectorsRunnable) NeedLeaderElection() bool { return true }
 func (r *DesiredConnectorsRunnable) SetupWithManager(mgr manager.Manager) error {
 	if r.Daemon == nil {
 		return errors.New("desired connectors: Daemon client is nil")
+	}
+	if r.Audit == nil {
+		return fmt.Errorf("desired connectors: %w", audit.ErrNoSink)
 	}
 	if r.Client == nil {
 		r.Client = mgr.GetClient()
@@ -185,14 +193,17 @@ func (r *DesiredConnectorsRunnable) adopt(ctx context.Context, ci *connectorv1al
 	}
 	// A connector that left the catalog is not adopted. The loop still puts
 	// its label on the object, so the prune of this pass deletes it.
-	if err := r.Daemon.AdoptConnector(ctx, tenant, ci.Name); err != nil && status.Code(err) != codes.NotFound {
-		return fmt.Errorf("adopt ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
-	}
-	ci.Labels[labelManagedBy] = connectorOperatorManagedBy
-	if err := r.Client.Update(ctx, ci); err != nil {
-		return fmt.Errorf("label adopted ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
-	}
-	return nil
+	ev := audit.ObjectEvent(audit.ActionConnectorAdopt, ci, map[string]string{"connector": ci.Name})
+	return r.Audit.Change(ctx, ev, func() error {
+		if err := r.Daemon.AdoptConnector(ctx, tenant, ci.Name); err != nil && status.Code(err) != codes.NotFound {
+			return fmt.Errorf("adopt ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
+		}
+		ci.Labels[labelManagedBy] = connectorOperatorManagedBy
+		if err := r.Client.Update(ctx, ci); err != nil {
+			return fmt.Errorf("label adopted ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
+		}
+		return nil
+	})
 }
 
 // desiredSpec is the ConnectorInstance spec of a desired connector. It is the
@@ -235,7 +246,8 @@ func (r *DesiredConnectorsRunnable) ensure(
 			},
 			Spec: want,
 		}
-		if cerr := r.Client.Create(ctx, ci); cerr != nil {
+		ev := audit.ObjectEvent(audit.ActionConnectorApply, ci, map[string]string{"connector": d.GetConnectorId(), "op": "create"})
+		if cerr := r.Audit.Change(ctx, ev, func() error { return r.Client.Create(ctx, ci) }); cerr != nil {
 			return nil, fmt.Errorf("create ConnectorInstance %s/%s: %w", ns, d.GetConnectorId(), cerr)
 		}
 		return ci, nil
@@ -249,7 +261,8 @@ func (r *DesiredConnectorsRunnable) ensure(
 	want.Credentials = ci.Spec.Credentials
 	if !reflect.DeepEqual(ci.Spec, want) {
 		ci.Spec = want
-		if uerr := r.Client.Update(ctx, ci); uerr != nil {
+		ev := audit.ObjectEvent(audit.ActionConnectorApply, ci, map[string]string{"connector": ci.Name, "op": "update"})
+		if uerr := r.Audit.Change(ctx, ev, func() error { return r.Client.Update(ctx, ci) }); uerr != nil {
 			return nil, fmt.Errorf("update ConnectorInstance %s/%s: %w", ns, ci.Name, uerr)
 		}
 	}
@@ -274,7 +287,13 @@ func (r *DesiredConnectorsRunnable) prune(
 		if _, keep := wanted[pairKey(tenant, ci.Name)]; keep {
 			continue
 		}
-		if err := r.Client.Delete(ctx, ci); err != nil && !apierrors.IsNotFound(err) {
+		ev := audit.ObjectEvent(audit.ActionConnectorDelete, ci, map[string]string{"connector": ci.Name, "op": "prune"})
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Client.Delete(ctx, ci); err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+			return nil
+		}); err != nil {
 			failures = append(failures, fmt.Errorf("delete ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err))
 		}
 	}
@@ -311,30 +330,56 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 		return fmt.Errorf("read the credential of %s/%s: %w", ci.Namespace, ci.Name, err)
 	}
 	name := credentialSecretName(ci.Name)
+	var live corev1.Secret
+	getErr := r.Client.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: name}, &live)
+	if getErr != nil && !apierrors.IsNotFound(getErr) {
+		return fmt.Errorf("read Secret %s/%s: %w", ci.Namespace, name, getErr)
+	}
+	exists := getErr == nil
+	// The record names the Secret and its keys, never a value (gibson#583).
+	fields := map[string]string{"connector": ci.Name, "secret": name}
 	if resp.GetWithdraw() {
-		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
-		if derr := r.Client.Delete(ctx, sec); derr != nil && !apierrors.IsNotFound(derr) {
-			return fmt.Errorf("withdraw Secret %s/%s: %w", ci.Namespace, name, derr)
+		if !exists {
+			return nil
 		}
-		return nil
+		ev := audit.ObjectEvent(audit.ActionConnectorCredentialWithdraw, ci, fields)
+		return r.Audit.Change(ctx, ev, func() error {
+			if derr := r.Client.Delete(ctx, &live); derr != nil && !apierrors.IsNotFound(derr) {
+				return fmt.Errorf("withdraw Secret %s/%s: %w", ci.Namespace, name, derr)
+			}
+			return nil
+		})
 	}
 	if len(resp.GetData()) == 0 {
 		return nil // nothing minted and nothing declared
 	}
-	sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
 	owner := metav1.OwnerReference{
 		APIVersion: connectorv1alpha1.GroupVersion.String(),
 		Kind:       "ConnectorInstance",
 		Name:       ci.Name,
 		UID:        ci.UID,
 	}
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
-		sec.Type = corev1.SecretTypeOpaque
-		sec.Data = resp.GetData()
-		sec.OwnerReferences = []metav1.OwnerReference{owner}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
+	if exists && reflect.DeepEqual(live.Data, resp.GetData()) &&
+		reflect.DeepEqual(live.OwnerReferences, []metav1.OwnerReference{owner}) {
+		return nil // the Secret already holds this credential
 	}
-	return nil
+	keys := make([]string, 0, len(resp.GetData()))
+	for k := range resp.GetData() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fields["keys"] = strings.Join(keys, ",")
+	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWrite, ci, fields)
+	return r.Audit.Change(ctx, ev, func() error {
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
+		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
+			sec.Type = corev1.SecretTypeOpaque
+			sec.Data = resp.GetData()
+			sec.OwnerReferences = []metav1.OwnerReference{owner}
+			return nil
+		}); err != nil {
+			return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
+		}
+		return nil
+	})
 }

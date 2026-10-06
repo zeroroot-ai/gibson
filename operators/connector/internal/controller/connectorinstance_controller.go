@@ -14,11 +14,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +32,7 @@ import (
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 const (
@@ -116,6 +119,9 @@ type ConnectorInstanceReconciler struct {
 	AuthReader ConnectorAuthReader
 	// Now is the clock the revoke deadline is measured on. Nil means time.Now.
 	Now func() time.Time
+	// Audit writes the record of each runtime, network or grant change
+	// before the change (gibson#583). Required.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;create;update;patch;delete
@@ -137,6 +143,9 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		return ctrl.Result{}, fmt.Errorf("get connectorinstance: %w", err)
 	}
+	if r.Audit == nil {
+		return ctrl.Result{}, fmt.Errorf("connectorinstance: %w", audit.ErrNoSink)
+	}
 
 	// Deletion: run the finalizer, then let Kubernetes remove the object. The
 	// owner references garbage-collect the ToolHive resource and the
@@ -151,15 +160,38 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	// The network, egress and runtime changes of a generation are recorded
+	// once, before the first of them (gibson#583). A pass at a generation
+	// that is already applied is an idempotent re-check with no new record.
+	var record *audit.Event
+	if !applySettled(&ci) {
+		ev := audit.ObjectEvent(audit.ActionConnectorApply, &ci, map[string]string{
+			"connector":  ci.Spec.Connector,
+			"generation": strconv.FormatInt(ci.Generation, 10),
+		})
+		if err := r.Audit.Record(ctx, ev); err != nil {
+			return r.fail(ctx, &ci, "AuditRecord", fmt.Errorf("%w: %w", audit.ErrNotRecorded, err))
+		}
+		record = &ev
+	}
+	failed := func(reason string, cause error) (ctrl.Result, error) {
+		if record != nil {
+			if ferr := r.Audit.RecordFailure(ctx, *record, cause); ferr != nil {
+				logger.Error(ferr, "the failure record was not written")
+			}
+		}
+		return r.fail(ctx, &ci, reason, cause)
+	}
+
 	// The tenant default-deny NetworkPolicy severs the connector; open exactly
 	// the paths it needs (ADR-0114, Slice 3).
 	if err := r.reconcileNetworkPolicy(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "NetworkPolicy", err)
+		return failed("NetworkPolicy", err)
 	}
 
 	// The egress of the connector follows its host list (ADR-0114).
 	if err := r.reconcileCiliumEgressPolicy(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "EgressPolicy", err)
+		return failed("EgressPolicy", err)
 	}
 
 	// The connector's credential is NOT reconciled here. For auth secret and
@@ -170,19 +202,19 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Confine egress to the vendor hosts, when declared (ADR-0114).
 	if err := r.reconcileEgressProfile(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "EgressProfile", err)
+		return failed("EgressProfile", err)
 	}
 
 	// Reconcile the ToolHive resource the ConnectorInstance owns.
 	th, err := r.desiredToolHive(&ci)
 	if err != nil {
-		return r.fail(ctx, &ci, "InvalidSpec", err)
+		return failed("InvalidSpec", err)
 	}
 	if err := controllerutil.SetControllerReference(&ci, th, r.Scheme); err != nil {
-		return r.fail(ctx, &ci, "OwnerRef", err)
+		return failed("OwnerRef", err)
 	}
 	if err := r.applyToolHive(ctx, th); err != nil {
-		return r.fail(ctx, &ci, "ApplyToolHive", err)
+		return failed("ApplyToolHive", err)
 	}
 
 	// Read the live ToolHive resource to reflect its phase.
@@ -353,7 +385,12 @@ func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connecto
 	logger := log.FromContext(ctx)
 
 	if ci.Spec.Auth != connectorv1alpha1.ConnectorAuthNone {
-		if err := r.revokeGrant(ctx, ci); err != nil {
+		ev := audit.ObjectEvent(audit.ActionConnectorDelete, ci, map[string]string{"connector": ci.Spec.Connector})
+		if err := r.Audit.Change(ctx, ev, func() error { return r.revokeGrant(ctx, ci) }); errors.Is(err, audit.ErrNotRecorded) {
+			// No record, no revoke: retry, and never release the finalizer
+			// on a revoke that did not run.
+			return ctrl.Result{}, err
+		} else if err != nil {
 			if r.now().Sub(ci.DeletionTimestamp.Time) < revokeDeadline {
 				ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseDeprovisioning
 				ci.Status.LastError = fmt.Sprintf("GrantRevoke: %v", err)
@@ -397,6 +434,16 @@ func (r *ConnectorInstanceReconciler) revokeGrant(ctx context.Context, ci *conne
 		return fmt.Errorf("daemon revoke for %s/%s: %w", tenantID, connector, err)
 	}
 	return nil
+}
+
+// applySettled reports a ConnectorInstance whose network, egress and runtime
+// are already applied at its current generation.
+func applySettled(ci *connectorv1alpha1.ConnectorInstance) bool {
+	if ci.Status.ObservedGeneration != ci.Generation {
+		return false
+	}
+	c := meta.FindStatusCondition(ci.Status.Conditions, condProvisioned)
+	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == ci.Generation
 }
 
 func (r *ConnectorInstanceReconciler) now() time.Time {
@@ -589,6 +636,9 @@ func newToolHive(kind string) *unstructured.Unstructured {
 
 // SetupWithManager wires the controller and watches the owned ToolHive kinds.
 func (r *ConnectorInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("connectorinstance controller: %w", audit.ErrNoSink)
+	}
 	mcpServer := newToolHive(kindMCPServer)
 	if err := ctrl.NewControllerManagedBy(mgr).
 		For(&connectorv1alpha1.ConnectorInstance{}).

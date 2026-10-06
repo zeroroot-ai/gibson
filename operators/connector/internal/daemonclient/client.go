@@ -22,6 +22,7 @@ import (
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
 )
 
@@ -53,6 +54,16 @@ func New(ctx context.Context, addr, daemonSVID string) (*Client, error) {
 // bufconn-backed or fake connection; production uses New.
 func NewWithConn(conn grpc.ClientConnInterface) *Client {
 	return &Client{operator: daemonoperatorv1.NewDaemonOperatorServiceClient(conn)}
+}
+
+// EmitAuditEvent sends one audit record of a connector-operator change to the
+// daemon, which writes it to Postgres before it answers (gibson#583). It
+// implements audit.Sink.
+func (c *Client) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+	if _, err := c.operator.EmitAuditEvent(ctx, audit.MessageOf(ev)); err != nil {
+		return fmt.Errorf("emit audit event %s: %w", ev.Action, err)
+	}
+	return nil
 }
 
 // Revoke revokes the tenant's connector grant. Idempotent on the daemon side:
