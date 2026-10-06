@@ -64,14 +64,12 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 			errors.New("setec: refusing to launch a session without a sandbox class")
 	}
 
-	env := req.Env
-	if c.masterKEK != nil && !c.tenantID.IsZero() {
-		wrapped, err := wrapSecretEnvVars(c.masterKEK, c.tenantID, req.Env)
-		if err != nil {
-			return sandboxed.LaunchResponse{},
-				fmt.Errorf("setec: KEK envelope-wrap failed: %w", err)
-		}
-		env = wrapped
+	if req.Tenant == "" {
+		return sandboxed.LaunchResponse{}, errNoTenant
+	}
+	env, err := c.wrapEnv(req.Tenant, req.Env)
+	if err != nil {
+		return sandboxed.LaunchResponse{}, err
 	}
 
 	lifecycle := &setecv1.Lifecycle{
@@ -88,6 +86,7 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 	lifecycle.Timeout = req.Idle.String()
 
 	resp, err := c.inner.Launch(ctx, &setecv1.LaunchRequest{
+		Tenant:       req.Tenant,
 		SandboxClass: req.SandboxClass,
 		Image:        req.Image,
 		// setec requires a command. A session's PID 1 exists only to keep the
@@ -113,7 +112,10 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 // setec's Exec is bidirectional; the start message must be first and exactly
 // once. This sends it eagerly so a caller that never writes stdin still gets
 // the command running.
-func (c *setecClient) Exec(ctx context.Context, _, sandboxID string, argv []string) (sandboxed.ExecStream, error) {
+func (c *setecClient) Exec(ctx context.Context, tenant, sandboxID string, argv []string) (sandboxed.ExecStream, error) {
+	if tenant == "" {
+		return nil, errNoTenant
+	}
 	if sandboxID == "" {
 		return nil, errors.New("setec: exec needs a sandbox id")
 	}
@@ -128,6 +130,7 @@ func (c *setecClient) Exec(ctx context.Context, _, sandboxID string, argv []stri
 	if err := stream.Send(&setecv1.SandboxServiceExecRequest{
 		Request: &setecv1.SandboxServiceExecRequest_Start{
 			Start: &setecv1.SessionExecStart{
+				Tenant:    tenant,
 				SandboxId: sandboxID,
 				Command:   argv,
 			},

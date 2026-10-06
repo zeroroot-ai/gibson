@@ -179,7 +179,6 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			config.SandboxedExecutor = execer
 			d.logger.Info(ctx, "sandboxed tool executor wired",
 				"setec_address", d.config.Sandbox.Setec.Address,
-				"tenant", d.config.Sandbox.Setec.Tenant,
 				"catalog_source", "component_registry")
 		}
 

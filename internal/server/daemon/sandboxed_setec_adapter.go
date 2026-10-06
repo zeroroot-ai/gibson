@@ -31,6 +31,7 @@ package daemon
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -146,7 +147,20 @@ type setecClient struct {
 	inner     setecv1.SandboxServiceClient
 	conn      *grpc.ClientConn // kept for connectivity state checks
 	masterKEK []byte           // optional; when nil, KEK wrapping is skipped
-	tenantID  sdkauth.TenantID // AAD for KEK wrapping
+}
+
+// errNoTenant refuses a setec call that names no tenant. setec selects the
+// namespace of a sandbox from the pair of the caller cluster and the tenant
+// of the request (ADR-0142), so a call with no tenant has no sandbox.
+var errNoTenant = errors.New("setec: refusing a call that names no tenant")
+
+// tenantForKEK parses the tenant of a request for the KEK envelope.
+func tenantForKEK(tenant string) (sdkauth.TenantID, error) {
+	id, err := sdkauth.NewTenantID(tenant)
+	if err != nil {
+		return sdkauth.TenantID{}, fmt.Errorf("setec: tenant %q: %w", tenant, err)
+	}
+	return id, nil
 }
 
 // Ping verifies that the Setec frontend gRPC connection is in a usable state.
@@ -182,16 +196,12 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	//
 	// When masterKEK is nil (dev/kind, tests), wrapping is skipped so that
 	// dev deployments without a KMS still function — intentional degraded mode.
-	env := req.Env
-	if c.masterKEK != nil && !c.tenantID.IsZero() {
-		wrapped, err := wrapSecretEnvVars(c.masterKEK, c.tenantID, req.Env)
-		if err != nil {
-			// Wrapping failure is fatal: never send plaintext credentials to Setec
-			// when we were supposed to wrap them (cross-tenant leakage risk).
-			return sandboxed.LaunchResponse{},
-				fmt.Errorf("setec: KEK envelope-wrap failed: %w", err)
-		}
-		env = wrapped
+	if req.Tenant == "" {
+		return sandboxed.LaunchResponse{}, errNoTenant
+	}
+	env, err := c.wrapEnv(req.Tenant, req.Env)
+	if err != nil {
+		return sandboxed.LaunchResponse{}, err
 	}
 
 	// Isolation posture (ADR-0052). gibson names the SandboxClass on every
@@ -205,6 +215,7 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	}
 
 	pbReq := &setecv1.LaunchRequest{
+		Tenant:       req.Tenant,
 		SandboxClass: req.SandboxClass,
 		Image:        req.Image,
 		Command:      req.Command,
@@ -280,18 +291,43 @@ func wrapSecretEnvVars(masterKEK []byte, tenantID sdkauth.TenantID, env map[stri
 	return out, nil
 }
 
-// The tenant argument of StreamLogs, Wait and Kill reaches the wire in
-// gibson#756 step 3. LaunchRequest.Tenant does too.
-func (c *setecClient) StreamLogs(ctx context.Context, _, sandboxID string) (sandboxed.LogStream, error) {
-	stream, err := c.inner.StreamLogs(ctx, &setecv1.StreamLogsRequest{SandboxId: sandboxID, Follow: true})
+// wrapEnv envelope-wraps the secret env vars of a launch under the KEK of the
+// tenant of the request. Wrapping failure is fatal: never send plaintext
+// credentials to Setec when we were supposed to wrap them (cross-tenant
+// leakage risk). With no master KEK (dev/kind, tests), the env is sent as is.
+func (c *setecClient) wrapEnv(tenant string, env map[string]string) (map[string]string, error) {
+	if c.masterKEK == nil {
+		return env, nil
+	}
+	id, err := tenantForKEK(tenant)
+	if err != nil {
+		return nil, err
+	}
+	wrapped, err := wrapSecretEnvVars(c.masterKEK, id, env)
+	if err != nil {
+		return nil, fmt.Errorf("setec: KEK envelope-wrap failed: %w", err)
+	}
+	return wrapped, nil
+}
+
+// StreamLogs, Wait and Kill name the tenant of the caller on the wire
+// (ADR-0142, gibson#756).
+func (c *setecClient) StreamLogs(ctx context.Context, tenant, sandboxID string) (sandboxed.LogStream, error) {
+	if tenant == "" {
+		return nil, errNoTenant
+	}
+	stream, err := c.inner.StreamLogs(ctx, &setecv1.StreamLogsRequest{Tenant: tenant, SandboxId: sandboxID, Follow: true})
 	if err != nil {
 		return nil, err
 	}
 	return &setecLogStream{inner: stream}, nil
 }
 
-func (c *setecClient) Wait(ctx context.Context, _, sandboxID string) (sandboxed.WaitResponse, error) {
-	resp, err := c.inner.Wait(ctx, &setecv1.WaitRequest{SandboxId: sandboxID})
+func (c *setecClient) Wait(ctx context.Context, tenant, sandboxID string) (sandboxed.WaitResponse, error) {
+	if tenant == "" {
+		return sandboxed.WaitResponse{}, errNoTenant
+	}
+	resp, err := c.inner.Wait(ctx, &setecv1.WaitRequest{Tenant: tenant, SandboxId: sandboxID})
 	if err != nil {
 		return sandboxed.WaitResponse{}, err
 	}
@@ -301,8 +337,11 @@ func (c *setecClient) Wait(ctx context.Context, _, sandboxID string) (sandboxed.
 	}, nil
 }
 
-func (c *setecClient) Kill(ctx context.Context, _, sandboxID string) error {
-	_, err := c.inner.Kill(ctx, &setecv1.KillRequest{SandboxId: sandboxID})
+func (c *setecClient) Kill(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errNoTenant
+	}
+	_, err := c.inner.Kill(ctx, &setecv1.KillRequest{Tenant: tenant, SandboxId: sandboxID})
 	return err
 }
 
