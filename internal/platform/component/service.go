@@ -235,6 +235,10 @@ type ComponentServiceServer struct {
 	// May be nil; GetTaxonomySchema returns codes.Unimplemented when nil.
 	taxonomyProvider TaxonomyProvider
 
+	// producedEnroller enrolls a component that an agent produced (gibson#33).
+	// May be nil; EnrollComponent returns codes.Unavailable when nil.
+	producedEnroller ProducedComponentEnroller
+
 	// stepHintsReporter accepts planning step hints from remote agents.
 	// May be nil; ReportStepHints returns codes.Unimplemented when nil.
 	stepHintsReporter StepHintsReporter

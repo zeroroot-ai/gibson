@@ -719,6 +719,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err != nil {
 		return nil, err
 	}
+	// The record and the quota of the components that agents enroll
+	// (gibson#33). A bad quota value stops the daemon.
+	producedLimit, err := api.ProducedComponentLimitFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("produced components: %w", err)
+	}
+	daemonSvc.WithProducedComponents(d.platformDB, producedLimit)
 	// SSRF egress policy for every LLM provider this server constructs from a
 	// tenant-supplied base_url. Off by default (guard on); operators running an
 	// in-cluster or air-gapped model server opt in via
@@ -1949,6 +1956,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// FGA client after initAuthorizer.
 			compSvc.WithAuthorizer(d.authorizer)
 			compSvc.WithEnrollmentReader(capabilitygrant.NewCapabilityGrantStore(d.platformDB))
+			// An agent enrolls a component that it produced through the
+			// identity provisioning of the tenant-admin surface (gibson#33).
+			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
 			compSvc.WithConnectorTools(d.connectorMCPClient())
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
