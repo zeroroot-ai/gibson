@@ -215,7 +215,11 @@ func main() {
 	// FGA client + cached checker. The internal/infra/authz FGAClient
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
-	checker, fgaClient := buildChecker(log, reg)
+	checker, fgaClient, err := buildChecker(ctx, log, reg)
+	if err != nil {
+		log.Error("init FGA checker", "err", err)
+		os.Exit(1)
+	}
 	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
 
@@ -406,25 +410,23 @@ func intOr(key string, fallback int) int {
 // derivation, header emission, and the daemon-side HMAC validation.
 //
 // Returns the Checker plus the underlying fga.FGAClient so the
-// readiness probe can share the same dialled client.
-func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGAClient) {
+// readiness probe can share the same dialled client. A missing setting or a
+// failed self-check returns an error, and main refuses to start.
+func buildChecker(ctx context.Context, log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGAClient, error) {
 	fgaAddr := os.Getenv("EXT_AUTHZ_FGA_ADDR")
 	if fgaAddr == "" {
-		// Fail fast: a missing FGA address means every authenticated RPC
-		// would silently deny all callers. This is a mis-configured start,
-		// not a graceful degradation. Req 11.1 — refuse to start.
-		log.Error("EXT_AUTHZ_FGA_ADDR is required — refusing to start without FGA endpoint (zero-trust-hardening Req 11.1)")
-		os.Exit(1)
+		// A missing FGA address means every authenticated RPC would deny all
+		// callers. This is a mis-configured start, not a graceful
+		// degradation. Req 11.1: refuse to start.
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_ADDR is required: ext-authz refuses to start without an FGA endpoint")
 	}
 	storeID := os.Getenv("EXT_AUTHZ_FGA_STORE_ID")
 	if storeID == "" {
-		log.Error("EXT_AUTHZ_FGA_STORE_ID required when EXT_AUTHZ_FGA_ADDR is set")
-		os.Exit(1)
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_STORE_ID is required when EXT_AUTHZ_FGA_ADDR is set")
 	}
 	modelID := os.Getenv("EXT_AUTHZ_FGA_MODEL_ID")
 	if modelID == "" {
-		log.Error("EXT_AUTHZ_FGA_MODEL_ID required (platform-clients FGAClient requires an authorization model ID)")
-		os.Exit(1)
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_MODEL_ID is required: the internal/infra/authz FGA client needs an authorization model ID")
 	}
 
 	perCallTimeout := durationOr("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", 1500*time.Millisecond)
@@ -437,25 +439,21 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 		Logger:         log,
 	})
 	if err != nil {
-		log.Error("create platform-clients FGA client", "addr", fgaAddr, "err", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("create the internal/infra/authz FGA client for %q: %w", fgaAddr, err)
 	}
 
 	// Startup self-check (ext-authz#24). The internal/infra/authz constructor
-	// does NOT dial; an explicit round-trip catches port/protocol
-	// mismatches the way deploy#140 did. Fail-fast on transport-class
-	// errors so kubelet's CrashLoopBackoff + container log surface the
-	// misconfiguration immediately instead of having the dashboard 500
-	// silently for hours.
-	if err := fga.SelfCheck(context.Background(), client, fgaAddr); err != nil {
-		log.Error("FGA startup self-check failed — refusing to start",
-			"addr", fgaAddr, "err", err)
-		os.Exit(1)
+	// does NOT dial. An explicit round-trip catches port/protocol mismatches
+	// the way deploy#140 did. A transport-class error stops the start, so
+	// kubelet's CrashLoopBackoff and the container log show the
+	// misconfiguration at once.
+	if err := fga.SelfCheck(ctx, client, fgaAddr); err != nil {
+		return nil, nil, fmt.Errorf("FGA startup self-check failed: %w", err)
 	}
-	log.Info("OpenFGA client (platform-clients/authz) connected and self-check passed",
+	log.Info("OpenFGA client (internal/infra/authz) connected and self-check passed",
 		"addr", fgaAddr, "store_id", storeID, "model_id", modelID,
 		"per_call_timeout", perCallTimeout.String())
-	return fga.NewChecker(client, reg), client
+	return fga.NewChecker(client, reg), client, nil
 }
 
 // buildCGVerifiers wires both capability-grant verifiers onto ONE transport to

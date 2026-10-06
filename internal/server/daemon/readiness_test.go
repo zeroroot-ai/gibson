@@ -8,8 +8,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
+	pcreadiness "github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/sdk/auth"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
 )
 
 // readinessFakeBroker is a Broker whose Health result is controllable.
@@ -79,5 +82,39 @@ func TestSecretsBrokerReadinessCheck(t *testing.T) {
 				t.Fatalf("expected ready, got: %v", err)
 			}
 		})
+	}
+}
+
+// fakeReadinessRegistrar records each registered readiness check.
+type fakeReadinessRegistrar struct {
+	checks map[string]healthhttp.CheckFunc
+}
+
+func (f *fakeReadinessRegistrar) RegisterReadinessCheck(name string, check healthhttp.CheckFunc) {
+	f.checks[name] = check
+}
+
+// TestRegisterPlatformReadinessProbes: each probe registers under the "pc_"
+// prefix, and its status text names internal/infra, not the removed
+// platform-clients module (gibson#997).
+func TestRegisterPlatformReadinessProbes(t *testing.T) {
+	d := newMinimalDaemon(config.DefaultConfig())
+	reg := &fakeReadinessRegistrar{checks: map[string]healthhttp.CheckFunc{}}
+	probes := []pcreadiness.Probe{
+		&platformReadinessProbe{name: "up", check: func(context.Context) error { return nil }},
+		&platformReadinessProbe{name: "down", check: func(context.Context) error { return errors.New("refused") }},
+	}
+	d.registerPlatformReadinessProbes(context.Background(), reg, probes)
+
+	if len(reg.checks) != 2 {
+		t.Fatalf("registered %d checks, want 2", len(reg.checks))
+	}
+	up := reg.checks["pc_up"](context.Background())
+	if !up.IsHealthy() || up.Message != "internal/infra/readiness probe 'up' passed" {
+		t.Fatalf("pc_up = %+v", up)
+	}
+	down := reg.checks["pc_down"](context.Background())
+	if !down.IsDegraded() || down.Message != "internal/infra/readiness probe 'down' failed: refused" {
+		t.Fatalf("pc_down = %+v", down)
 	}
 }
