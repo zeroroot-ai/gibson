@@ -28,7 +28,7 @@ func (c *tenantClient) note(call, tenant string) {
 
 func (c *tenantClient) Launch(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
 	c.note("launch", req.Tenant)
-	return LaunchResponse{SandboxID: "sbx-" + req.Tenant}, nil
+	return reportedIsolation(req, LaunchResponse{SandboxID: "sbx-" + req.Tenant}), nil
 }
 
 func (c *tenantClient) StreamLogs(_ context.Context, tenant, _ string) (LogStream, error) {

@@ -34,7 +34,7 @@ func (c *memberClient) Launch(_ context.Context, req LaunchRequest) (LaunchRespo
 		return LaunchResponse{}, c.launchErr
 	}
 	c.launched = append(c.launched, req)
-	return LaunchResponse{SandboxID: "sbx-member-1", Runtime: c.runtime}, nil
+	return LaunchResponse{SandboxID: "sbx-member-1", SandboxClass: req.SandboxClass, Runtime: c.runtime}, nil
 }
 
 func (c *memberClient) StreamLogs(context.Context, string, string) (LogStream, error) {
