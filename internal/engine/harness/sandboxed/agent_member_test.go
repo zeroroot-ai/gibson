@@ -25,7 +25,7 @@ type memberClient struct {
 }
 
 func newMemberClient() *memberClient {
-	return &memberClient{runtime: "gvisor", ended: make(chan struct{})}
+	return &memberClient{runtime: "launcher", ended: make(chan struct{})}
 }
 
 func (c *memberClient) Launch(_ context.Context, req LaunchRequest) (LaunchResponse, error) {

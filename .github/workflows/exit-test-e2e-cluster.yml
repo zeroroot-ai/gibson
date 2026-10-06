@@ -23,7 +23,7 @@
 #     kubectl, port-forward to a NodePort, or read files the browser driver
 #     writes. They run as plain `go test -tags=e2e`.
 #
-# The bring-up (stage 0, recreate, gvisor check, test-mode daemon) is the
+# The bring-up (stage 0, recreate, KVM check, test-mode daemon) is the
 # tool-dispatch one, copied. ONE bring-up path.
 #
 # ADR-0080: NEVER on pull_request. It needs a live cluster, so it cannot gate
@@ -89,9 +89,8 @@ jobs:
       - name: The verdict parser passes its own fixtures
         run: bash gibson/.github/scripts/e2e-suite-verdict.sh --selftest
 
-      # The kind bring-up (make substrate / make recreate ENV=kind), the
-      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
-      # hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
+      # The kind bring-up (make substrate / make recreate ENV=kind) and the
+      # sanctioned setec profile live in the hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
       # so the checkout needs the org read PAT.
       - name: Checkout hosted
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,31 +144,25 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
-      # --fresh-kind does the gvisor node-prep and installs the umbrella with
-      # values-baseline.yaml. The 2-core overlay shrinks REQUESTS so the whole
-      # platform packs onto the runner.
-      - name: Stand up the setec+gvisor cluster
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
+      - name: Open /dev/kvm for the launcher
+        uses: ./gibson/.github/actions/open-kvm
+
+      # Stand up kind with the sanctioned setec profile. The 2-core overlay
+      # shrinks REQUESTS so the whole platform packs onto the runner.
+      - name: Stand up the setec cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
             RUNG=ci make recreate ENV=kind
 
-      # The node must actually advertise gvisor, or every sandbox stays Pending.
-      - name: Node advertises gvisor
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 30); do
-            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
-            sleep 5
-          done
-          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-          if [ "$v" != "true" ]; then
-            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
-            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
-            exit 1
-          fi
+      # With no KVM on the node every sandbox stays Pending. Fail here with a
+      # clear message, not as a timeout later.
+      - name: Node offers KVM to the launcher
+        uses: ./gibson/.github/actions/node-offers-kvm
+        with:
+          node: ${{ env.NODE }}
 
       # The overlay below builds FROM the private daemon image on ghcr.io.
       # The runner's own docker needs the same read-only token the cluster

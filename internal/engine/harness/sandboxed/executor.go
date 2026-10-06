@@ -195,8 +195,8 @@ type LaunchResponse struct {
 	SandboxID string
 
 	// SandboxClass is the class setec actually bound the sandbox to, and
-	// Runtime is the isolation backend that class resolved to (one of
-	// kata-fc, kata-qemu, gvisor, runc). Both are checked by VerifyIsolation
+	// Runtime is the isolation backend that class resolved to (launcher, the
+	// one backend of setec). Both are checked by VerifyIsolation
 	// before the sandbox is used. An adapter leaves a field empty when its
 	// transport does not report it; see isolation.go for why the setec.v1 ABI
 	// currently reports neither.
