@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 )
 
@@ -388,30 +387,6 @@ func EscapeTag(s string) string {
 	return result
 }
 
-// EscapeQuery escapes special characters in full-text query strings for RediSearch.
-// Full-text queries require escaping of: , . < > { } [ ] " ' : ; ! @ # $ % ^ & * ( ) - + = ~ |
-//
-// Example:
-//
-//	// Search for text containing special characters
-//	userInput := "alice@example.com"
-//	query := state.EscapeQuery(userInput)
-//	result, err := client.Search(ctx, "users_idx", query, nil)
-func EscapeQuery(s string) string {
-	// Characters that need escaping in full-text queries
-	specialChars := []string{
-		",", ".", "<", ">", "{", "}", "[", "]", "\"", "'",
-		":", ";", "!", "@", "#", "$", "%", "^", "&", "*",
-		"(", ")", "-", "+", "=", "~", "|",
-	}
-
-	result := s
-	for _, char := range specialChars {
-		result = strings.ReplaceAll(result, char, "\\"+char)
-	}
-	return result
-}
-
 // QueryBuilder provides a fluent API for building RediSearch queries safely.
 // It handles proper escaping and formatting of query components.
 //
@@ -429,83 +404,12 @@ type QueryBuilder struct {
 	parts []string
 }
 
-// NewQueryBuilder creates a new QueryBuilder instance.
-func NewQueryBuilder() *QueryBuilder {
-	return &QueryBuilder{
-		parts: make([]string, 0),
-	}
-}
-
-// Text adds a full-text search term to the query.
-// The text is automatically escaped for safe query construction.
-func (qb *QueryBuilder) Text(text string) *QueryBuilder {
-	if text != "" {
-		escaped := EscapeQuery(text)
-		qb.parts = append(qb.parts, escaped)
-	}
-	return qb
-}
-
-// Tag adds a TAG field filter to the query.
-// Multiple values can be provided for OR matching within the same tag.
-//
-// Example:
-//
-//	qb.Tag("status", "open", "in-progress")  // matches status:open OR status:in-progress
-func (qb *QueryBuilder) Tag(field string, values ...string) *QueryBuilder {
-	if len(values) == 0 {
-		return qb
-	}
-
-	escapedValues := make([]string, len(values))
-	for i, v := range values {
-		escapedValues[i] = EscapeTag(v)
-	}
-
-	tagQuery := fmt.Sprintf("@%s:{%s}", field, strings.Join(escapedValues, "|"))
-	qb.parts = append(qb.parts, tagQuery)
-	return qb
-}
-
-// NumericRange adds a numeric range filter to the query.
-// Use math.Inf(-1) for -inf and math.Inf(1) for +inf.
-//
-// Example:
-//
-//	qb.NumericRange("price", 10.0, 100.0)  // price between 10 and 100
-//	qb.NumericRange("age", 18.0, math.Inf(1))  // age >= 18
-func (qb *QueryBuilder) NumericRange(field string, min, max float64) *QueryBuilder {
-	minStr := formatNumericBound(min)
-	maxStr := formatNumericBound(max)
-	numQuery := fmt.Sprintf("@%s:[%s %s]", field, minStr, maxStr)
-	qb.parts = append(qb.parts, numQuery)
-	return qb
-}
-
-// NumericEquals adds an exact numeric match filter to the query.
-func (qb *QueryBuilder) NumericEquals(field string, value float64) *QueryBuilder {
-	return qb.NumericRange(field, value, value)
-}
-
 // And adds an AND operator between query parts.
 // This is the default behavior, so it's optional.
 func (qb *QueryBuilder) And() *QueryBuilder {
 	if len(qb.parts) > 0 {
 		// AND is implicit in RediSearch, but we can make it explicit
 		// by wrapping the last part in parentheses if needed
-	}
-	return qb
-}
-
-// Or adds an OR operator to combine the last two query parts.
-// Note: This modifies the last two parts to create an OR relationship.
-func (qb *QueryBuilder) Or() *QueryBuilder {
-	if len(qb.parts) >= 2 {
-		last := qb.parts[len(qb.parts)-1]
-		secondLast := qb.parts[len(qb.parts)-2]
-		combined := fmt.Sprintf("(%s | %s)", secondLast, last)
-		qb.parts = qb.parts[:len(qb.parts)-2]
-		qb.parts = append(qb.parts, combined)
 	}
 	return qb
 }
@@ -519,44 +423,6 @@ func (qb *QueryBuilder) Not() *QueryBuilder {
 	return qb
 }
 
-// Group wraps the last N parts in parentheses for grouping.
-func (qb *QueryBuilder) Group(n int) *QueryBuilder {
-	if n <= 0 || n > len(qb.parts) {
-		return qb
-	}
-
-	startIdx := len(qb.parts) - n
-	grouped := strings.Join(qb.parts[startIdx:], " ")
-	qb.parts = qb.parts[:startIdx]
-	qb.parts = append(qb.parts, fmt.Sprintf("(%s)", grouped))
-	return qb
-}
-
-// Raw adds a raw query string without escaping.
-// Use this for advanced queries that require special syntax.
-//
-// Warning: This bypasses safety checks. Ensure the query is properly formatted.
-func (qb *QueryBuilder) Raw(query string) *QueryBuilder {
-	if query != "" {
-		qb.parts = append(qb.parts, query)
-	}
-	return qb
-}
-
-// Prefix adds a prefix search for a TEXT field.
-//
-// Example:
-//
-//	qb.Prefix("name", "john")  // matches "john*"
-func (qb *QueryBuilder) Prefix(field, prefix string) *QueryBuilder {
-	if prefix != "" {
-		escaped := EscapeQuery(prefix)
-		prefixQuery := fmt.Sprintf("@%s:%s*", field, escaped)
-		qb.parts = append(qb.parts, prefixQuery)
-	}
-	return qb
-}
-
 // Build constructs the final query string.
 // Returns "*" if no query parts were added.
 func (qb *QueryBuilder) Build() string {
@@ -564,19 +430,4 @@ func (qb *QueryBuilder) Build() string {
 		return "*"
 	}
 	return strings.Join(qb.parts, " ")
-}
-
-// formatNumericBound formats a float64 value for RediSearch numeric queries.
-// Handles infinity values properly.
-func formatNumericBound(value float64) string {
-	// Check for infinity using the standard library approach
-	switch {
-	case value > 1e307: // Effectively positive infinity
-		return "+inf"
-	case value < -1e307: // Effectively negative infinity
-		return "-inf"
-	default:
-		// Format without scientific notation
-		return strconv.FormatFloat(value, 'f', -1, 64)
-	}
 }

@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestHuggingFaceProvider_Name(t *testing.T) {
 
 func TestNewHuggingFaceProvider_MissingToken(t *testing.T) {
 	t.Setenv("HUGGINGFACE_API_TOKEN", "")
-	_, err := NewHuggingFaceProvider(llm.ProviderConfig{
+	_, err := newHuggingFaceProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderHuggingFace,
 		DefaultModel: "meta-llama/Llama-3.1-8B-Instruct",
 	})

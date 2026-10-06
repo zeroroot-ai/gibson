@@ -455,40 +455,6 @@ func TestEventBus_Close(t *testing.T) {
 	}
 }
 
-// TestEventBus_SubscriberCount tests the SubscriberCount method.
-func TestEventBus_SubscriberCount(t *testing.T) {
-	bus := NewEventBus()
-	defer bus.Close()
-
-	ctx := context.Background()
-
-	if bus.SubscriberCount() != 0 {
-		t.Errorf("Expected 0 subscribers, got %d", bus.SubscriberCount())
-	}
-
-	// Add subscribers
-	_, cleanup1 := bus.Subscribe(ctx, Filter{}, 10)
-	defer cleanup1()
-
-	if bus.SubscriberCount() != 1 {
-		t.Errorf("Expected 1 subscriber, got %d", bus.SubscriberCount())
-	}
-
-	_, cleanup2 := bus.Subscribe(ctx, Filter{}, 10)
-	defer cleanup2()
-
-	if bus.SubscriberCount() != 2 {
-		t.Errorf("Expected 2 subscribers, got %d", bus.SubscriberCount())
-	}
-
-	// Remove one subscriber
-	cleanup1()
-
-	if bus.SubscriberCount() != 1 {
-		t.Errorf("Expected 1 subscriber after cleanup, got %d", bus.SubscriberCount())
-	}
-}
-
 // TestEventBus_WithOptions tests functional options.
 func TestEventBus_WithOptions(t *testing.T) {
 	var errorCalled bool

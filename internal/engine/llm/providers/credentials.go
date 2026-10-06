@@ -60,35 +60,3 @@ func describeCredentialSource(extraKey string) string {
 	}
 	return "set cfg.APIKey in the tenant's provider configuration"
 }
-
-// redactCredentialKeys returns the canonical list of cfg.Extra keys carrying
-// provider credentials. The observability layer consumes this to populate
-// its log-attribute redaction allowlist so no credential ever appears in a
-// structured log line. Keep this list in sync with every provider's
-// CredentialSchema().
-func redactCredentialKeys() []string {
-	return []string{
-		// Generic
-		"api_key",
-		"base_url", // not a secret, but we redact to be conservative in logs
-
-		// AWS Bedrock
-		"aws_access_key_id",
-		"aws_secret_access_key",
-		"aws_session_token",
-		"aws_region",
-
-		// Cloudflare Workers AI
-		"cloudflare_account_id",
-		"cloudflare_api_token",
-
-		// HuggingFace
-		"huggingface_api_token",
-
-		// Mistral / Cohere share the generic api_key field but also expose typed
-		// env-var-equivalent keys in case operators want to store them in
-		// cfg.Extra alongside multi-provider configs.
-		"mistral_api_key",
-		"cohere_api_key",
-	}
-}

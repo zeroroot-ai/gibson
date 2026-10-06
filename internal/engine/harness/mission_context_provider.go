@@ -128,27 +128,6 @@ type DefaultMissionContextProvider struct {
 	cachedContext *MissionExecutionContext
 }
 
-// NewMissionContextProvider creates a new DefaultMissionContextProvider.
-//
-// Parameters:
-//   - missionStore: Store for querying mission data and history
-//   - currentMission: The currently executing mission
-//   - logger: Structured logger for debugging and tracing
-//
-// Returns:
-//   - *DefaultMissionContextProvider: Ready-to-use context provider
-func NewMissionContextProvider(
-	missionStore MissionStore,
-	currentMission MissionData,
-	logger *slog.Logger,
-) *DefaultMissionContextProvider {
-	return &DefaultMissionContextProvider{
-		missionStore:   missionStore,
-		currentMission: currentMission,
-		logger:         logger,
-	}
-}
-
 // GetContext returns the full mission execution context.
 // This method builds a comprehensive view of the current mission including:
 //   - Basic mission metadata (ID, name, run number)

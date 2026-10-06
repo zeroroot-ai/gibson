@@ -47,31 +47,9 @@ type PluginExecutor interface {
 	QueryPlugin(ctx context.Context, plugin, method string, params map[string]any) (any, error)
 }
 
-// NewDelegationHarness creates a new delegation harness with registry-based executors
-func NewDelegationHarness(delegator AgentDelegator, discovery ComponentDiscovery) *DelegationHarness {
-	return &DelegationHarness{
-		delegator:  delegator,
-		logger:     &defaultLogger{},
-		toolExec:   &registryToolExecutor{discovery: discovery},
-		pluginExec: &registryPluginExecutor{discovery: discovery},
-	}
-}
-
 // WithLogger sets the logger for this harness
 func (h *DelegationHarness) WithLogger(logger Logger) *DelegationHarness {
 	h.logger = logger
-	return h
-}
-
-// WithToolExecutor sets the tool executor for this harness
-func (h *DelegationHarness) WithToolExecutor(exec ToolExecutor) *DelegationHarness {
-	h.toolExec = exec
-	return h
-}
-
-// WithPluginExecutor sets the plugin executor for this harness
-func (h *DelegationHarness) WithPluginExecutor(exec PluginExecutor) *DelegationHarness {
-	h.pluginExec = exec
 	return h
 }
 

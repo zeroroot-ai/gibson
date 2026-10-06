@@ -23,16 +23,6 @@ type AgentConfig struct {
 	Timeout       time.Duration         `json:"timeout"`        // Default task timeout
 }
 
-// NewAgentConfig creates a new agent configuration
-func NewAgentConfig(name string) AgentConfig {
-	return AgentConfig{
-		Name:          name,
-		Settings:      make(map[string]any),
-		SlotOverrides: make(map[string]SlotConfig),
-		Timeout:       30 * time.Minute,
-	}
-}
-
 // WithSetting adds a setting to the configuration
 func (c AgentConfig) WithSetting(key string, value any) AgentConfig {
 	c.Settings[key] = value
@@ -108,34 +98,6 @@ type AgentDescriptor struct {
 	IsExternal     bool                  `json:"is_external"` // True if agent runs via gRPC
 }
 
-// NewAgentDescriptor creates a descriptor from an agent instance
-func NewAgentDescriptor(a Agent) AgentDescriptor {
-	return AgentDescriptor{
-		Name:           a.Name(),
-		Version:        a.Version(),
-		Description:    a.Description(),
-		Capabilities:   a.Capabilities(),
-		TargetTypes:    a.TargetTypes(),
-		TechniqueTypes: a.TechniqueTypes(),
-		Slots:          a.LLMSlots(),
-		IsExternal:     false,
-	}
-}
-
-// NewExternalAgentDescriptor creates a descriptor for an external agent
-func NewExternalAgentDescriptor(name, version, description string) AgentDescriptor {
-	return AgentDescriptor{
-		Name:           name,
-		Version:        version,
-		Description:    description,
-		Capabilities:   []string{},
-		TargetTypes:    []types.TargetType{},
-		TechniqueTypes: []taxonomy.CategoryID{},
-		Slots:          []SlotDefinition{},
-		IsExternal:     true,
-	}
-}
-
 // RequiresSlot checks if the agent requires a specific slot
 func (d AgentDescriptor) RequiresSlot(slotName string) bool {
 	for _, slot := range d.Slots {
@@ -205,17 +167,6 @@ type AgentRuntime struct {
 	Status    string    `json:"status"`
 }
 
-// NewAgentRuntime creates a new runtime tracker
-func NewAgentRuntime(agentName string, taskID types.ID) *AgentRuntime {
-	return &AgentRuntime{
-		ID:        types.NewID(),
-		AgentName: agentName,
-		TaskID:    taskID,
-		StartedAt: time.Now(),
-		Status:    "running",
-	}
-}
-
 // Complete marks the runtime as completed
 func (r *AgentRuntime) Complete() {
 	r.Status = "completed"
@@ -229,9 +180,4 @@ func (r *AgentRuntime) Fail() {
 // Cancel marks the runtime as cancelled
 func (r *AgentRuntime) Cancel() {
 	r.Status = "cancelled"
-}
-
-// Duration returns how long the agent has been running
-func (r *AgentRuntime) Duration() time.Duration {
-	return time.Since(r.StartedAt)
 }

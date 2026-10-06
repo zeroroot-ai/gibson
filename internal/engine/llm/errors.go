@@ -60,68 +60,6 @@ const (
 	ErrNetworkTimeout types.ErrorCode = "LLM_NETWORK_TIMEOUT"
 )
 
-// IsRetryable determines if an error is transient and may succeed on retry.
-// This helps implement intelligent retry logic for LLM operations.
-func IsRetryable(err error) bool {
-	var gibsonErr *types.GibsonError
-	if !errors.As(err, &gibsonErr) {
-		return false
-	}
-
-	// Check if error is already marked as retryable
-	if gibsonErr.Retryable {
-		return true
-	}
-
-	// Determine retryability based on error code
-	switch gibsonErr.Code {
-	// Network errors are typically retryable
-	case ErrNetworkFailed, ErrNetworkTimeout:
-		return true
-
-	// Rate limiting and quota errors may succeed after waiting
-	case ErrProviderRateLimited, ErrProviderQuotaExceeded:
-		return true
-
-	// Provider unavailable may be temporary
-	case ErrProviderUnavailable:
-		return true
-
-	// Timeout errors may succeed with more time
-	case ErrTimeoutExceeded:
-		return true
-
-	// Context cancellation is not retryable (user-initiated)
-	case ErrContextCanceled:
-		return false
-
-	// Auth errors are not retryable
-	case ErrProviderUnauthorized:
-		return false
-
-	// Invalid requests won't succeed on retry
-	case ErrInvalidRequest, ErrInvalidMessage, ErrInvalidTemperature,
-		ErrInvalidMaxTokens, ErrInvalidTopP, ErrInvalidTool, ErrInvalidToolArgs:
-		return false
-
-	// Model not found or not supported won't change
-	case ErrModelNotFound, ErrModelNotSupported:
-		return false
-
-	// Content filtering won't change
-	case ErrContentFiltered:
-		return false
-
-	// Context exceeded won't change
-	case ErrModelContextExceeded:
-		return false
-
-	// Default to not retryable for safety
-	default:
-		return false
-	}
-}
-
 // Helper functions for creating common LLM errors
 
 // NewProviderNotFoundError creates an error for when a provider is not found
@@ -149,25 +87,9 @@ func NewRateLimitError(providerName string) *types.GibsonError {
 	}
 }
 
-// NewModelNotFoundError creates an error for when a model is not found
-func NewModelNotFoundError(modelName string) *types.GibsonError {
-	return types.NewError(ErrModelNotFound, "model not found: "+modelName)
-}
-
-// NewContextExceededError creates an error for when context window is exceeded
-func NewContextExceededError(tokenCount, maxTokens int) *types.GibsonError {
-	return types.NewError(ErrModelContextExceeded,
-		fmt.Sprintf("context window exceeded: %d tokens exceeds maximum of %d", tokenCount, maxTokens))
-}
-
 // NewInvalidRequestError creates an error for invalid requests
 func NewInvalidRequestError(message string) *types.GibsonError {
 	return types.NewError(ErrInvalidRequest, message)
-}
-
-// NewToolCallError creates an error for tool call failures
-func NewToolCallError(toolName string, cause error) *types.GibsonError {
-	return types.WrapError(ErrToolCallFailed, "tool call failed: "+toolName, cause)
 }
 
 // NewCompletionError creates an error for completion failures
@@ -383,17 +305,5 @@ func NewStructuredOutputError(op, provider, raw string, err error) *StructuredOu
 		Provider: provider,
 		Raw:      raw,
 		Err:      err,
-	}
-}
-
-// NewValidationError creates an error for schema validation failures.
-// This satisfies requirement 1.4: SDK SHALL return an error with details
-// about the validation failure.
-func NewValidationError(provider, raw string, err error) *StructuredOutputError {
-	return &StructuredOutputError{
-		Op:       "validate",
-		Provider: provider,
-		Raw:      raw,
-		Err:      errors.Join(ErrValidationFailedSentinel, err),
 	}
 }

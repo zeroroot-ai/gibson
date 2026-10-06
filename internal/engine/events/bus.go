@@ -135,17 +135,6 @@ func WithErrorHandler(handler ErrorHandler) Option {
 	}
 }
 
-// WithMetrics sets the metrics recorder for event bus operations.
-// The recorder receives metrics about publishes, drops, subscriptions, etc.
-// Default: no-op recorder.
-func WithMetrics(recorder MetricsRecorder) Option {
-	return func(opts *eventBusOptions) {
-		if recorder != nil {
-			opts.metricsRecorder = recorder
-		}
-	}
-}
-
 // NewEventBus creates a new DefaultEventBus with the given options.
 //
 // Example:
@@ -371,14 +360,6 @@ func (eb *DefaultEventBus) Close() error {
 	}
 
 	return nil
-}
-
-// SubscriberCount returns the current number of active subscribers.
-// Useful for monitoring and testing.
-func (eb *DefaultEventBus) SubscriberCount() int {
-	eb.mu.RLock()
-	defer eb.mu.RUnlock()
-	return len(eb.subscribers)
 }
 
 // matchesFilter checks if an event matches a subscription filter.

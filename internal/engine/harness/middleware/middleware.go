@@ -5,7 +5,6 @@ package middleware
 
 import (
 	"context"
-	"time"
 )
 
 // Middleware intercepts harness operations for cross-cutting concerns like
@@ -156,15 +155,6 @@ func WithOperationType(ctx context.Context, op OperationType) context.Context {
 	return context.WithValue(ctx, CtxOperationType, op)
 }
 
-// GetOperationType retrieves the operation type from the context.
-// Returns empty string if not set.
-func GetOperationType(ctx context.Context) OperationType {
-	if op, ok := ctx.Value(CtxOperationType).(OperationType); ok {
-		return op
-	}
-	return ""
-}
-
 // WithMissionContext returns a new context with mission ID and agent name set.
 func WithMissionContext(ctx context.Context, missionID, agentName string) context.Context {
 	ctx = context.WithValue(ctx, CtxMissionID, missionID)
@@ -182,39 +172,6 @@ func GetMissionContext(ctx context.Context) (missionID, agentName string) {
 		agentName = name
 	}
 	return missionID, agentName
-}
-
-// WithTraceContext returns a new context with trace ID and span ID set.
-func WithTraceContext(ctx context.Context, traceID, spanID string) context.Context {
-	ctx = context.WithValue(ctx, CtxTraceID, traceID)
-	ctx = context.WithValue(ctx, CtxSpanID, spanID)
-	return ctx
-}
-
-// GetTraceContext retrieves trace ID and span ID from the context.
-// Returns empty strings if not set.
-func GetTraceContext(ctx context.Context) (traceID, spanID string) {
-	if id, ok := ctx.Value(CtxTraceID).(string); ok {
-		traceID = id
-	}
-	if span, ok := ctx.Value(CtxSpanID).(string); ok {
-		spanID = span
-	}
-	return traceID, spanID
-}
-
-// WithStartTime returns a new context with the start time set.
-func WithStartTime(ctx context.Context, t time.Time) context.Context {
-	return context.WithValue(ctx, CtxStartTime, t)
-}
-
-// GetStartTime retrieves the start time from the context.
-// Returns zero time if not set.
-func GetStartTime(ctx context.Context) time.Time {
-	if t, ok := ctx.Value(CtxStartTime).(time.Time); ok {
-		return t
-	}
-	return time.Time{}
 }
 
 // Request and response wrapper types for type-safe operation payloads.
@@ -310,15 +267,6 @@ type StreamingResponse struct {
 	Error error
 }
 
-// GetSlotName retrieves the LLM slot name from the context.
-// Returns empty string if not set.
-func GetSlotName(ctx context.Context) string {
-	if slot, ok := ctx.Value(CtxSlotName).(string); ok {
-		return slot
-	}
-	return ""
-}
-
 // WithSlotName returns a new context with the LLM slot name set.
 func WithSlotName(ctx context.Context, slot string) context.Context {
 	return context.WithValue(ctx, CtxSlotName, slot)
@@ -347,23 +295,6 @@ func GetToolName(ctx context.Context) string {
 	return ""
 }
 
-// WithToolName returns a new context with the tool name set.
-func WithToolName(ctx context.Context, name string) context.Context {
-	return context.WithValue(ctx, CtxToolName, name)
-}
-
-// GetPluginInfo retrieves plugin name and method from the context.
-// Returns empty strings if not set.
-func GetPluginInfo(ctx context.Context) (name, method string) {
-	if n, ok := ctx.Value(CtxPluginName).(string); ok {
-		name = n
-	}
-	if m, ok := ctx.Value(CtxPluginMethod).(string); ok {
-		method = m
-	}
-	return name, method
-}
-
 // WithPluginInfo returns a new context with plugin name and method set.
 func WithPluginInfo(ctx context.Context, name, method string) context.Context {
 	ctx = context.WithValue(ctx, CtxPluginName, name)
@@ -371,27 +302,9 @@ func WithPluginInfo(ctx context.Context, name, method string) context.Context {
 	return ctx
 }
 
-// GetAgentTargetName retrieves the target agent name from the context.
-// Returns empty string if not set.
-func GetAgentTargetName(ctx context.Context) string {
-	if name, ok := ctx.Value(CtxAgentTargetName).(string); ok {
-		return name
-	}
-	return ""
-}
-
 // WithAgentTargetName returns a new context with the target agent name set.
 func WithAgentTargetName(ctx context.Context, name string) context.Context {
 	return context.WithValue(ctx, CtxAgentTargetName, name)
-}
-
-// GetMessages retrieves the LLM messages from the context.
-// Returns nil if not set.
-func GetMessages(ctx context.Context) []Message {
-	if msgs, ok := ctx.Value(CtxMessages).([]Message); ok {
-		return msgs
-	}
-	return nil
 }
 
 // WithMessages returns a new context with the LLM messages set.

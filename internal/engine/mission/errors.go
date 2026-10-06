@@ -104,16 +104,6 @@ func NewMissionError(code MissionErrorCode, message string) *MissionError {
 	}
 }
 
-// WrapMissionError wraps an existing error with mission error context.
-func WrapMissionError(code MissionErrorCode, message string, cause error) *MissionError {
-	return &MissionError{
-		Code:    code,
-		Message: message,
-		Cause:   cause,
-		Context: make(map[string]any),
-	}
-}
-
 // Helper functions for common mission errors
 
 // NewNotFoundError creates a mission not found error.
@@ -131,123 +121,11 @@ func NewInvalidStateError(currentState, targetState MissionStatus) *MissionError
 		WithContext("target_state", targetState)
 }
 
-// NewValidationError creates a validation error.
-func NewValidationError(message string) *MissionError {
-	return NewMissionError(ErrMissionValidation, message)
-}
-
-// NewTargetNotFoundError creates a target not found error.
-func NewTargetNotFoundError(targetID string) *MissionError {
-	return NewMissionError(ErrMissionTargetNotFound, fmt.Sprintf("target not found: %s", targetID)).
-		WithContext("target_id", targetID)
-}
-
-// NewMissionNotFoundError creates a mission not found error.
-func NewMissionNotFoundError(missionDefinitionID string) *MissionError {
-	return NewMissionError(ErrMissionMissionNotFound, fmt.Sprintf("mission not found: %s", missionDefinitionID)).
-		WithContext("mission_definition_id", missionDefinitionID)
-}
-
-// NewMissionFailedError creates a mission execution failed error.
-func NewMissionFailedError(missionDefinitionID string, cause error) *MissionError {
-	return WrapMissionError(
-		ErrMissionMissionFailed,
-		fmt.Sprintf("mission execution failed: %s", missionDefinitionID),
-		cause,
-	).WithContext("mission_definition_id", missionDefinitionID)
-}
-
-// NewConstraintViolationError creates a constraint violation error.
-func NewConstraintViolationError(violation *ConstraintViolation) *MissionError {
-	return NewMissionError(
-		ErrMissionConstraint,
-		violation.Message,
-	).WithContext("constraint", violation.Constraint).
-		WithContext("action", violation.Action).
-		WithContext("current_value", violation.CurrentValue).
-		WithContext("threshold_value", violation.ThresholdValue)
-}
-
-// NewTimeoutError creates a mission timeout error.
-func NewTimeoutError(maxDuration string) *MissionError {
-	return NewMissionError(
-		ErrMissionTimeout,
-		fmt.Sprintf("mission exceeded maximum duration: %s", maxDuration),
-	).WithContext("max_duration", maxDuration)
-}
-
-// NewCheckpointError creates a checkpoint error.
-func NewCheckpointError(operation string, cause error) *MissionError {
-	return WrapMissionError(
-		ErrMissionCheckpoint,
-		fmt.Sprintf("checkpoint %s failed", operation),
-		cause,
-	).WithContext("operation", operation)
-}
-
-// NewCancelledError creates a mission cancelled error.
-func NewCancelledError(reason string) *MissionError {
-	return NewMissionError(
-		ErrMissionCancelled,
-		fmt.Sprintf("mission cancelled: %s", reason),
-	).WithContext("reason", reason)
-}
-
-// NewInternalError creates an internal mission error.
-func NewInternalError(message string, cause error) *MissionError {
-	return WrapMissionError(ErrMissionInternal, message, cause)
-}
-
 // IsNotFoundError checks if an error is a mission not found error.
 func IsNotFoundError(err error) bool {
 	var missionErr *MissionError
 	if errors.As(err, &missionErr) {
 		return missionErr.Code == ErrMissionNotFound
-	}
-	return false
-}
-
-// IsInvalidStateError checks if an error is an invalid state transition error.
-func IsInvalidStateError(err error) bool {
-	var missionErr *MissionError
-	if errors.As(err, &missionErr) {
-		return missionErr.Code == ErrMissionInvalidState
-	}
-	return false
-}
-
-// IsValidationError checks if an error is a validation error.
-func IsValidationError(err error) bool {
-	var missionErr *MissionError
-	if errors.As(err, &missionErr) {
-		return missionErr.Code == ErrMissionValidation
-	}
-	return false
-}
-
-// IsConstraintViolationError checks if an error is a constraint violation error.
-func IsConstraintViolationError(err error) bool {
-	var missionErr *MissionError
-	if errors.As(err, &missionErr) {
-		return missionErr.Code == ErrMissionConstraint
-	}
-	return false
-}
-
-// IsTimeoutError checks if an error is a timeout error.
-func IsTimeoutError(err error) bool {
-	var missionErr *MissionError
-	if errors.As(err, &missionErr) {
-		return missionErr.Code == ErrMissionTimeout
-	}
-	return false
-}
-
-// IsCancelledError checks if an error is a cancelled error.
-func IsCancelledError(err error) bool {
-	var missionErr *MissionError
-	if errors.As(err, &missionErr) {
-		return missionErr.Code == ErrMissionCancelled
 	}
 	return false
 }

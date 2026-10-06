@@ -51,23 +51,6 @@ func NewSlotManager(registry LLMRegistry) *DefaultSlotManager {
 	}
 }
 
-// WithModelFilter wires a modelgate.Filter so ResolveSlot checks the
-// calling user's FGA grants against the picked (provider, model).
-// Returning an empty slice from Filter triggers PermissionDenied at the
-// resolver's surface. Pass nil to disable gating.
-func (m *DefaultSlotManager) WithModelFilter(f modelgate.Filter) *DefaultSlotManager {
-	m.modelFilter = f
-	return m
-}
-
-// WithResolveCallback wires a callback fired after every successful slot
-// resolution with the picked candidate. Callers use this to emit the
-// `model_resolved` audit event.
-func (m *DefaultSlotManager) WithResolveCallback(cb func(ctx context.Context, picked modelgate.Candidate, allowed bool)) *DefaultSlotManager {
-	m.onResolve = cb
-	return m
-}
-
 // ResolveSlot resolves a slot definition to a specific provider and model.
 // It applies configuration overrides and validates that the selected provider/model
 // meets all constraints defined in the slot.

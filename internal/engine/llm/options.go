@@ -69,31 +69,3 @@ func WithMetadataOption(key string, value any) CompletionOption {
 		req.Metadata[key] = value
 	}
 }
-
-// ApplyOptions applies a list of options to a completion request.
-// This is a helper function for implementing providers.
-func ApplyOptions(req *CompletionRequest, opts ...CompletionOption) {
-	for _, opt := range opts {
-		opt(req)
-	}
-}
-
-// NewCompletionRequest creates a new completion request with the given model and messages.
-// Additional options can be applied using the functional options pattern.
-//
-// Example:
-//
-//	req := NewCompletionRequest("claude-3-opus-20240229",
-//	    []Message{NewUserMessage("Hello, world!")},
-//	    WithTemperature(0.7),
-//	    WithMaxTokens(1000),
-//	)
-func NewCompletionRequest(model string, messages []Message, opts ...CompletionOption) CompletionRequest {
-	req := CompletionRequest{
-		Model:    model,
-		Messages: messages,
-	}
-
-	ApplyOptions(&req, opts...)
-	return req
-}

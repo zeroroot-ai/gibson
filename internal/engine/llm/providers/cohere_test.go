@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestCohereProvider_Name(t *testing.T) {
 
 func TestNewCohereProvider_MissingToken(t *testing.T) {
 	t.Setenv("COHERE_API_KEY", "")
-	_, err := NewCohereProvider(llm.ProviderConfig{
+	_, err := newCohereProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCohere,
 		DefaultModel: "command-r",
 	})
