@@ -123,6 +123,7 @@ type ConnectorInstanceReconciler struct {
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances/finalizers,verbs=update
 // +kubebuilder:rbac:groups=toolhive.stacklok.dev,resources=mcpservers;mcpremoteproxies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=cilium.io,resources=ciliumnetworkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile drives a ConnectorInstance toward its desired state.
@@ -154,6 +155,11 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// the paths it needs (ADR-0114, Slice 3).
 	if err := r.reconcileNetworkPolicy(ctx, &ci); err != nil {
 		return r.fail(ctx, &ci, "NetworkPolicy", err)
+	}
+
+	// The egress of the connector follows its host list (ADR-0114).
+	if err := r.reconcileCiliumEgressPolicy(ctx, &ci); err != nil {
+		return r.fail(ctx, &ci, "EgressPolicy", err)
 	}
 
 	// The connector's credential is NOT reconciled here. For auth secret and
@@ -432,10 +438,9 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		th.SetName(ci.Name)
 		th.SetNamespace(ci.Namespace)
 		// The MCPServer keeps ToolHive's builtin "network" profile. Egress is
-		// enforced by the owned NetworkPolicy (reconcileNetworkPolicy), which
-		// confines the connector to 443 on public IPs (private ranges blocked
-		// for SSRF containment). Host-level egress from spec.egressAllow is NOT
-		// applied to the MCPServer: ToolHive v0.12.1 reads a "configmap" profile
+		// enforced by the owned CiliumNetworkPolicy (reconcileCiliumEgressPolicy),
+		// which permits each host of spec.egressAllow and nothing else on a
+		// public address. The host list is NOT applied to the MCPServer: ToolHive v0.12.1 reads a "configmap" profile
 		// from an operator-local path (/etc/toolhive/profiles/<key>), not from
 		// the referenced tenant ConfigMap, so a per-connector custom profile
 		// breaks the run-config validation. reconcileEgressProfile still records
