@@ -186,3 +186,17 @@ func PaginationViolations(file protoreflect.FileDescriptor) []string {
 	sort.Strings(out)
 	return out
 }
+
+// ImportPath returns the import path of a proto file of the module. repoRel
+// is the path of the file from the repo root, with forward slashes. The
+// import path is the path from the proto root that holds the file. ok is
+// false when no root holds the file.
+func ImportPath(roots []string, repoRel string) (importPath string, ok bool) {
+	for _, root := range roots {
+		prefix := strings.TrimSuffix(root, "/") + "/"
+		if strings.HasPrefix(repoRel, prefix) {
+			return strings.TrimPrefix(repoRel, prefix), true
+		}
+	}
+	return "", false
+}

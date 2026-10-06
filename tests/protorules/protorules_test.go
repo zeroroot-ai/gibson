@@ -31,10 +31,22 @@ import (
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	_ "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
+	_ "github.com/zeroroot-ai/gibson/pkg/billing/entitlements/v1"
 )
 
-// protoRoot is the directory of the daemon-local protos, from the repo root.
-const protoRoot = "internal/server/daemon/api"
+// protoRoots are the proto roots of the module, from the repo root. Each
+// proto file of the module is under one of them. The import path of a file is
+// its path from its root, as the Makefile compiles it.
+var protoRoots = []string{
+	"internal/server/daemon/api",
+	"pkg/billing/entitlements/v1",
+}
+
+// skippedDirs hold no tracked proto file: tool output, worktrees and
+// dependencies.
+var skippedDirs = map[string]bool{
+	".git": true, ".tmp": true, ".worktrees": true, "node_modules": true, "bin": true, "tmp": true,
+}
 
 // The floors. A run that loads fewer files, services or RPCs than these read
 // the wrong tree and must not pass.
@@ -62,30 +74,58 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// trackedProtoPaths returns the import path of each proto file under
-// protoRoot, for example gibson/tenant/v1/secrets.proto.
+// trackedProtoPaths returns the import path of each proto file of the module,
+// for example gibson/tenant/v1/secrets.proto. It reads the whole module, so a
+// proto file outside each root fails the test (gibson#996).
 func trackedProtoPaths(t *testing.T) []string {
 	t.Helper()
-	root := filepath.Join(repoRoot(t), protoRoot)
+	root := repoRoot(t)
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("walk %s: %w", path, err)
 		}
-		if d.IsDir() || !strings.HasSuffix(path, ".proto") {
+		if d.IsDir() {
+			if path != root && skippedDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".proto") {
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return fmt.Errorf("relativize %s against %s: %w", path, root, relErr)
 		}
-		out = append(out, filepath.ToSlash(rel))
+		importPath, ok := ImportPath(protoRoots, filepath.ToSlash(rel))
+		if !ok {
+			t.Errorf("%s is a proto file under no proto root. Add its root to protoRoots.", rel)
+			return nil
+		}
+		out = append(out, importPath)
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk %s: %v", root, err)
 	}
 	return out
+}
+
+// TestImportPath: a file under a root gets its path from that root. A file
+// under no root is refused, so the walk cannot skip it.
+func TestImportPath(t *testing.T) {
+	got, ok := ImportPath(protoRoots, "pkg/billing/entitlements/v1/entitlements.proto")
+	if !ok || got != "entitlements.proto" {
+		t.Fatalf("entitlements: got %q, %v", got, ok)
+	}
+	got, ok = ImportPath(protoRoots, "internal/server/daemon/api/gibson/tenant/v1/tenant.proto")
+	if !ok || got != "gibson/tenant/v1/tenant.proto" {
+		t.Fatalf("tenant: got %q, %v", got, ok)
+	}
+	if _, ok := ImportPath(protoRoots, "internal/other/x.proto"); ok {
+		t.Fatal("a file under no root must be refused")
+	}
 }
 
 // loadedFiles returns the descriptor of each tracked proto file. It fails the
