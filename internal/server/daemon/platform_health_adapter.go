@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
@@ -34,17 +35,27 @@ func (a *secretPlaneProbeAdapter) Probe(ctx context.Context) error {
 	return nil
 }
 
-// secretSourceReadiness is the readiness check of the secret source. Each
-// call probes the source with the bound of AdminGetPlatformHealth. The
-// daemon is not ready until a probe passes, and a later failed probe makes
-// it not ready again: a silent source is never read as healthy (hosted#174).
+// secretSourceReadiness is the readiness check of the secret source. It is
+// a start gate (hosted#174): each call probes the source with the bound of
+// AdminGetPlatformHealth, and the daemon is not ready until a probe passes.
+// After the first pass a failed probe does not change readiness. A short
+// outage of the source must not take every daemon pod out of its Service at
+// once, while the pods still serve on the secrets they loaded. That failure
+// shows on AdminGetPlatformHealth and in the ExternalSecretNotReady alert.
 func secretSourceReadiness(probe api.SecretPlaneProbe) func(context.Context) sdktypes.HealthStatus {
+	var passed atomic.Bool
 	return func(ctx context.Context) sdktypes.HealthStatus {
 		probeCtx, cancel := context.WithTimeout(ctx, api.SecretPlaneProbeTimeout)
 		defer cancel()
-		if err := probe.Probe(probeCtx); err != nil {
-			return sdktypes.NewUnhealthyStatus("broker: the system-tenant secret source did not answer: "+err.Error(), nil)
+		err := probe.Probe(probeCtx)
+		switch {
+		case err == nil:
+			passed.Store(true)
+			return sdktypes.NewHealthyStatus("broker: the system-tenant secret source answered")
+		case !passed.Load():
+			return sdktypes.NewUnhealthyStatus("broker: the system-tenant secret source has not answered since start: "+err.Error(), nil)
+		default:
+			return sdktypes.NewHealthyStatus("broker: the secret source did not answer; the daemon serves on its loaded secrets, see the platform health: " + err.Error())
 		}
-		return sdktypes.NewHealthyStatus("broker: the system-tenant secret source answered")
 	}
 }

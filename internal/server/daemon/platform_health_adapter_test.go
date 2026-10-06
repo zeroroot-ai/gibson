@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 type readinessProbe func(ctx context.Context) error
@@ -33,14 +34,15 @@ func TestSecretSourceReadiness_ADeadSourceAtStartIsNotReady(t *testing.T) {
 	}
 }
 
-func TestSecretSourceReadiness_ReadyOnlyAfterAProbePasses(t *testing.T) {
+func TestSecretSourceReadiness_IsAStartGateOnly(t *testing.T) {
 	alive := false
-	check := secretSourceReadiness(readinessProbe(func(context.Context) error {
+	probe := readinessProbe(func(context.Context) error {
 		if !alive {
 			return errors.New("no answer")
 		}
 		return nil
-	}))
+	})
+	check := secretSourceReadiness(probe)
 	if check(context.Background()).IsHealthy() {
 		t.Fatal("ready before the source answered")
 	}
@@ -48,9 +50,20 @@ func TestSecretSourceReadiness_ReadyOnlyAfterAProbePasses(t *testing.T) {
 	if !check(context.Background()).IsHealthy() {
 		t.Fatal("not ready after the source answered")
 	}
+
+	// The source stops answering after the start. The pod stays ready, so a
+	// short outage does not empty the Service. The platform health shows it.
 	alive = false
-	if check(context.Background()).IsHealthy() {
-		t.Fatal("still ready after the source stopped answering")
+	if !check(context.Background()).IsHealthy() {
+		t.Fatal("a later outage of the source made the daemon not ready")
+	}
+	health, err := api.NewDaemonServer(nil, nil, nil).WithSecretPlaneProbe(probe).
+		AdminGetPlatformHealth(context.Background(), &tenantv1.AdminGetPlatformHealthRequest{})
+	if err != nil {
+		t.Fatalf("AdminGetPlatformHealth: %v", err)
+	}
+	if got := health.GetPlanes()[0].GetState(); got != tenantv1.PlatformPlaneState_PLATFORM_PLANE_STATE_UNHEALTHY {
+		t.Fatalf("platform health = %s, want UNHEALTHY", got)
 	}
 }
 

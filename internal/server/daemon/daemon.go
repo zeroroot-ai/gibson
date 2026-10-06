@@ -1768,8 +1768,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// The check asks the source to answer, with the same bounded probe as
 		// AdminGetPlatformHealth. It never reads the cached health map for
 		// this answer: that map holds nothing until a secret operation ran,
-		// and a dead source then read as healthy (hosted#174). Not ready until
-		// a probe passes.
+		// and a dead source then read as healthy (hosted#174). It is a start
+		// gate: not ready until a probe passes, and a later failure does not
+		// change readiness (secretSourceReadiness).
 		d.healthServer.RegisterReadinessCheck("secrets_broker",
 			secretSourceReadiness(&secretPlaneProbeAdapter{registry: brokerReg}))
 		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
