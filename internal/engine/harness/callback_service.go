@@ -337,9 +337,9 @@ func WithCredentialStore(store CredentialStore) CallbackServiceOption {
 	}
 }
 
-// WithEventBus sets the event bus for publishing tool and LLM events.
-// When set, the callback service publishes events for tool calls and LLM requests
-// that can be consumed by the execution graph engine.
+// WithEventBus sets the event bus for publishing tool and LLM events, which
+// the execution graph engine consumes. It is required: each constructor
+// panics without it (gibson#681).
 func WithEventBus(eventBus EventBusPublisher) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.eventBus = eventBus
@@ -635,6 +635,7 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
+	requireEventBus(s)
 	return s
 }
 
@@ -677,6 +678,7 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
+	requireEventBus(s)
 	return s
 }
 
@@ -2363,14 +2365,19 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *harness
 // Helper Methods for Taxonomy Engine Integration
 // ============================================================================
 
-// publishEvent publishes an event to the event bus if configured.
-// This is a helper method that safely publishes events without blocking
-// callback responses. Events are published in a goroutine to avoid latency.
-func (s *HarnessCallbackService) publishEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+// requireEventBus stops a constructor that got no event bus (gibson#681). A
+// callback service without one drops each tool and LLM event, and the
+// execution graph then shows a run that did nothing.
+func requireEventBus(s *HarnessCallbackService) {
 	if s.eventBus == nil {
-		return // Event bus not configured, skip
+		panic("harness: the callback service requires an event bus (WithEventBus)")
 	}
+}
 
+// publishEvent publishes an event to the event bus. This is a helper method
+// that publishes events without blocking callback responses. Events are
+// published in a goroutine to avoid latency.
+func (s *HarnessCallbackService) publishEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	// Extract trace context from OpenTelemetry span
 	var traceID, spanID, parentSpanID string
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {

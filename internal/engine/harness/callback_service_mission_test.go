@@ -40,12 +40,12 @@ var cbTestLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 
 // newCallbackService returns a HarnessCallbackService with no mission manager.
 func newCallbackService() *HarnessCallbackService {
-	return NewHarnessCallbackService(cbTestLogger)
+	return NewHarnessCallbackService(cbTestLogger, testEventBus())
 }
 
 // newCallbackServiceWithMgr returns a service wired to mgr.
 func newCBCallbackServiceWithMgr(mgr MissionOperator) *HarnessCallbackService {
-	return NewHarnessCallbackService(cbTestLogger, WithMissionManager(mgr))
+	return NewHarnessCallbackService(cbTestLogger, WithMissionManager(mgr), testEventBus())
 }
 
 // validMissionID is a well-formed UUID string accepted by types.ParseID.

@@ -35,6 +35,7 @@ func TestSubmitFinding_ClassifierDisabled(t *testing.T) {
 	// Create a minimal harness config with no classifier
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 	}
 	config.ApplyDefaults()
 
@@ -95,6 +96,7 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -156,6 +158,7 @@ func TestSubmitFinding_ClassifierUnchanged(t *testing.T) {
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -217,6 +220,7 @@ func TestSubmitFinding_ClassifierGracefulDegradation(t *testing.T) {
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -271,6 +275,7 @@ func TestSubmitFinding_ClassifierEnabledButNotProvided(t *testing.T) {
 	// Create harness config with classifier enabled but no classifier instance
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
 			Threshold:    0.85,
@@ -334,6 +339,7 @@ func TestDefaultClassifierConfig(t *testing.T) {
 func TestClassifierConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		// ClassifierConfig not set
 	}
 

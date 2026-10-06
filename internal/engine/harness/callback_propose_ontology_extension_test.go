@@ -70,7 +70,7 @@ func newProposeOntologyExtensionService(
 	if engine != nil {
 		opts = append(opts, WithOntologyDiscovery(engine))
 	}
-	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
+	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, append(opts, testEventBus())...)
 }
 
 func proposeOntologyExtensionRequest(missionID, agentName string, kind harnesspb.OntologyExtensionKind, label, proposer, claim string) *harnesspb.ProposeOntologyExtensionRequest {

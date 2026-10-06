@@ -99,6 +99,9 @@ type HarnessConfig struct {
 	// nothing reading it for scope needs the rest. Deriving a tool's facts from
 	// that view would hand it the instance's id beside another target's host,
 	// and the tool would scan the wrong machine and report a clean result for it.
+	//
+	// Required (gibson#681): Validate refuses a nil provider, and Create
+	// refuses a provider that answers nil.
 	TargetFacts func() TargetFactsLookup
 
 	// MissionSecrets resolves a declared secret's VALUE at dispatch.
@@ -315,6 +318,15 @@ func (c *HarnessConfig) Validate() error {
 		return types.NewError(
 			ErrHarnessInvalidConfig,
 			"SlotManager is required (cannot be nil)",
+		)
+	}
+
+	// TargetFacts is required: a dispatched tool always learns its target from
+	// the store (gibson#681).
+	if c.TargetFacts == nil {
+		return types.NewError(
+			ErrHarnessInvalidConfig,
+			"TargetFacts is required (cannot be nil)",
 		)
 	}
 

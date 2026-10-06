@@ -82,7 +82,7 @@ func knowledgeService(t *testing.T, q *stubQuerier) (*HarnessCallbackService, *h
 	h.tracer = noop.NewTracerProvider().Tracer("test")
 	registry := NewCallbackHarnessRegistry()
 	registry.Register(mid.String(), "recon-agent", h)
-	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
 }
 
@@ -421,7 +421,7 @@ func findingHandlerService(t *testing.T, cp MissionContextProvider, fs FindingSt
 	h.findingStore = fs
 	registry := NewCallbackHarnessRegistry()
 	registry.Register(mid.String(), "recon-agent", &runHistoryHarness{observeMockHarness: h, runs: runs})
-	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
 }
 

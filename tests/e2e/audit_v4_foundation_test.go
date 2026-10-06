@@ -166,13 +166,10 @@ func newKindNeo4jClient(t *testing.T) graph.GraphClient {
 		MaxTransactionRetryTime: 15 * time.Second,
 	}
 
-	client, err := graph.NewNeo4jClient(cfg)
-	require.NoError(t, err, "construct Neo4j client for gibson cluster")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err = client.Connect(ctx)
+	client, err := graph.NewNeo4jClient(ctx, cfg)
 	require.NoError(t, err, "connect to Neo4j at %s", kindGibsonNeo4jBoltAddr)
 
 	t.Cleanup(func() {

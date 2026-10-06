@@ -78,7 +78,7 @@ func newOriginService(t *testing.T, mgr MissionOperator, missionID, agentName st
 			DelegationDepth: 2,
 		},
 	})
-	return NewHarnessCallbackServiceWithRegistry(logger, registry, WithMissionManager(mgr))
+	return NewHarnessCallbackServiceWithRegistry(logger, registry, WithMissionManager(mgr), testEventBus())
 }
 
 func originRequest() *harnesspb.CreateMissionRequest {
@@ -219,7 +219,7 @@ func TestCreateMission_LineageComesFromTheParentNotThePayload(t *testing.T) {
 // harness lookup so an unconfigured daemon does not look like a denial.
 func TestCreateMission_NilManager_ReturnsUnavailable(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	svc := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry())
+	svc := NewHarnessCallbackServiceWithRegistry(logger, NewCallbackHarnessRegistry(), testEventBus())
 
 	resp, err := svc.CreateMission(originCtx(), originRequest())
 	require.NoError(t, err, "an unconfigured manager is reported in-band, not as a gRPC error")

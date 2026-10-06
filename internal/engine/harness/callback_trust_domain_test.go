@@ -17,7 +17,7 @@ import (
 // The validation in Start runs before the listener opens and never reads the
 // source, so a zero source stands in for a wired one.
 func wiredCallbackServer(td spiffeid.TrustDomain, peers ...spiffeid.ID) *CallbackServer {
-	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry())
+	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry(), testEventBus())
 	s.SetSPIFFE(&workloadapi.X509Source{}, td, peers)
 	return s
 }
@@ -44,10 +44,11 @@ func TestCallbackServer_StartRefusesAPeerOfAnotherTrustDomain(t *testing.T) {
 func TestCallbackManager_CarriesTheTrustDomain(t *testing.T) {
 	envoy := spiffeid.RequireFromString(callbackEnvoySVID(callbackTestTD))
 	m := NewCallbackManager(CallbackConfig{
-		ListenAddress: "127.0.0.1:0",
-		X509Source:    &workloadapi.X509Source{},
-		TrustDomain:   callbackTestTD,
-		PeerSVIDs:     []spiffeid.ID{envoy},
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+		ListenAddress:  "127.0.0.1:0",
+		X509Source:     &workloadapi.X509Source{},
+		TrustDomain:    callbackTestTD,
+		PeerSVIDs:      []spiffeid.ID{envoy},
 	}, slog.Default())
 	assert.Equal(t, callbackTestTD, m.server.trustDomain)
 

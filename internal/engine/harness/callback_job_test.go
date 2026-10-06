@@ -168,7 +168,7 @@ func (m *recordingMinter) Mint(req capabilitygrant.MintRequest) (string, error) 
 func memberService(t *testing.T, jobs JobSurface, members MemberLookup, minter TurnGrantMinter) *HarnessCallbackService {
 	t.Helper()
 	return NewHarnessCallbackService(nil,
-		WithJobSurface(jobs), WithMemberLookup(members), WithTurnGrantMinter(minter))
+		WithJobSurface(jobs), WithMemberLookup(members), WithTurnGrantMinter(minter), testEventBus())
 }
 
 func memberCtx(tenant string) context.Context {
@@ -255,7 +255,7 @@ func TestPullJob_NeedsATenantAndARun(t *testing.T) {
 }
 
 func TestPullJob_ADaemonThatServesNoBanksSaysSo(t *testing.T) {
-	s := NewHarnessCallbackService(nil)
+	s := NewHarnessCallbackService(nil, testEventBus())
 	_, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: memberInfo("run-1")})
 	if status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("err = %v, want FailedPrecondition", err)
@@ -367,7 +367,7 @@ func TestSubscribeInput_ADaemonThatCannotMintRefuses(t *testing.T) {
 	jobs.jobs["job-1"] = openJob("job-1")
 	jobs.pending = []*job.Input{{ID: "in-1", JobID: "job-1", Kind: job.InputTurn,
 		Sender: job.Principal{Kind: job.PrincipalUser, ID: "alice"}}}
-	s := NewHarnessCallbackService(nil, WithJobSurface(jobs), WithMemberLookup(liveMembers()))
+	s := NewHarnessCallbackService(nil, WithJobSurface(jobs), WithMemberLookup(liveMembers()), testEventBus())
 
 	ctx, cancel := context.WithCancel(memberCtx("acme"))
 	defer cancel()
@@ -806,7 +806,7 @@ func TestMemberCallbacks_PutTheJobLinesOnTheMembersStream(t *testing.T) {
 		Sender: job.Principal{Kind: job.PrincipalUser, ID: "alice"}}}
 	events := &recordingMemberEvents{}
 	s := NewHarnessCallbackService(nil, WithJobSurface(jobs), WithMemberLookup(liveMembers()),
-		WithTurnGrantMinter(&recordingMinter{}), WithMemberEventSink(events))
+		WithTurnGrantMinter(&recordingMinter{}), WithMemberEventSink(events), testEventBus())
 	ctx := memberCtx("acme")
 
 	if _, err := s.PullJob(ctx, &harnesspb.PullJobRequest{Context: memberInfo("run-1")}); err != nil {
@@ -875,7 +875,7 @@ func TestSubscribeInput_ControlInputsComeFirstAndCarryNoGrant(t *testing.T) {
 	control.StartSignIn("acme", "m-1", "alice")
 	control.SubmitSignInCode("acme", "m-1", "CODE-1", "alice")
 	s := NewHarnessCallbackService(nil, WithJobSurface(jobs), WithMemberLookup(liveMembers()),
-		WithTurnGrantMinter(&recordingMinter{}), WithMemberControl(control))
+		WithTurnGrantMinter(&recordingMinter{}), WithMemberControl(control), testEventBus())
 
 	ctx, cancel := context.WithCancel(memberCtx("acme"))
 	stream := &recordingInputStream{ctx: ctx, cancel: cancel}

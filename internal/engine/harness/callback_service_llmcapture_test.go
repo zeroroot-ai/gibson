@@ -128,6 +128,7 @@ func newCaptureService(t *testing.T, tenant string, captured *[]capturedCall) *H
 		WithLLMCallSink(func(_ context.Context, tn string, call LLMCallRecord) {
 			*captured = append(*captured, capturedCall{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 }
 
@@ -254,6 +255,7 @@ func TestLLMStream_ErrorMidStream_NoCapture(t *testing.T) {
 		WithLLMCallSink(func(_ context.Context, tn string, call LLMCallRecord) {
 			captured = append(captured, capturedCall{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -337,6 +339,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 		WithLLMCallSink(func(_ context.Context, tn string, call LLMCallRecord) {
 			captured = append(captured, capturedCall{tenant: tn, call: call})
 		}),
+		testEventBus(),
 	)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -367,7 +370,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 func TestLLMComplete_NoSink_NoPanic(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
 	registry.Register("mission-A", "recon-agent", newCompletingHarness("acme"))
-	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.NewTextHandler(io.Discard, nil)), registry)
+	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	resp, err := svc.LLMComplete(ctx, &harnesspb.LLMCompleteRequest{

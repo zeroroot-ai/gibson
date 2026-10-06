@@ -133,6 +133,7 @@ func newAuthorizeService(
 		logger,
 		WithAuthzStore(store),
 		WithComponentAuthorizer(authorizer),
+		testEventBus(),
 	)
 }
 

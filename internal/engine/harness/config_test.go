@@ -20,6 +20,7 @@ func TestHarnessConfig_Validate(t *testing.T) {
 			name: "valid config with SlotManager",
 			config: HarnessConfig{
 				SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+				TargetFacts: testTargetFacts,
 			},
 			expectErr: false,
 		},
@@ -47,6 +48,7 @@ func TestHarnessConfig_Validate(t *testing.T) {
 func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 		// All other fields are nil
 	}
 
@@ -88,6 +90,7 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 	}
 
 	// Apply defaults first time
@@ -127,6 +130,7 @@ func TestHarnessFactoryConfig_Alias(t *testing.T) {
 func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 	config := HarnessFactoryConfig{
 		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
 	}
 
 	// Test that NewDefaultHarnessFactory works

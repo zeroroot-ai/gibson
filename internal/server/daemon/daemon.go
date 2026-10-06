@@ -592,7 +592,11 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// build-tag branch here. A dial failure is logged and startup continues,
 	// matching the per-call executor: the failure belongs at invocation, not at
 	// boot (design Requirement 5.4).
-	var callbackOpts []harness.CallbackServiceOption
+	// The event bus comes first: the callback service requires it at
+	// construction (gibson#681).
+	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
+	callbackOpts := make([]harness.CallbackServiceOption, 0, 10)
+	callbackOpts = append(callbackOpts, harness.WithEventBus(NewEventBusAdapter(d.eventBus)))
 	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox)
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
@@ -651,9 +655,6 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	}, d.logger.Slog())
 
 	d.callback = callbackMgr
-
-	// Initialize event bus
-	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 
 	// Determine gRPC address from config or default.
 	// Note: environment variable override (GIBSON_DAEMON_GRPC_ADDR) is intentionally
@@ -1466,12 +1467,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	} else {
 		d.logger.Info(ctx, "credential store disabled - no key provider configured (set security.key_provider in config)")
-	}
-
-	// Configure callback service with event bus for tool/LLM event publishing
-	if d.eventBus != nil {
-		d.callback.SetEventBus(NewEventBusAdapter(d.eventBus))
-		d.logger.Info(ctx, "configured callback service with event bus")
 	}
 
 	// Wire the Observe RPC to the per-tenant brain (ADR-0107): typed agent
