@@ -19,7 +19,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
@@ -56,9 +55,6 @@ type TenantReconciler struct {
 
 	// Runner executes provisioning and teardown sagas.
 	Runner *saga.Runner
-
-	// Audit emitter for structured lifecycle events.
-	Audit audit.Emitter
 
 	// Provisioning steps. Foundation contributes Namespace. Other specs
 	// append additional steps via ProvisionSteps.
