@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -55,11 +57,9 @@ type PipelineConfig struct {
 	KEK      *KEKInitProvisioner
 
 	// K8sClient is used to update Tenant CRD status after each step.
-	// May be nil (status updates are skipped).
 	K8sClient client.Client
 
 	// Recorder emits Kubernetes events for each step transition.
-	// May be nil.
 	Recorder events.EventRecorder
 
 	// Log is the structured logger. Defaults to slog.Default() when nil.
@@ -78,17 +78,35 @@ type pipelineProvisioner struct {
 // compile-time interface check
 var _ Provisioner = (*pipelineProvisioner)(nil)
 
-// New constructs a pipelineProvisioner wiring the five steps. Any provisioner
-// field in cfg that is nil results in that step being a no-op (safe for dev
-// environments where not all stores are available).
-func New(cfg PipelineConfig) *pipelineProvisioner {
+// New constructs a pipelineProvisioner wiring the five steps. Each store, the
+// Kubernetes client and the event recorder are required: a tenant gets every
+// store or none (ADR-0003, gibson#681).
+func New(cfg PipelineConfig) (Provisioner, error) {
+	var missing []string
+	for name, absent := range map[string]bool{
+		"Postgres":  cfg.Postgres == nil,
+		"Neo4j":     cfg.Neo4j == nil,
+		"Redis":     cfg.Redis == nil,
+		"Vector":    cfg.Vector == nil,
+		"KEK":       cfg.KEK == nil,
+		"K8sClient": cfg.K8sClient == nil,
+		"Recorder":  cfg.Recorder == nil,
+	} {
+		if absent {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("dataplane: the pipeline needs %s", strings.Join(missing, ", "))
+	}
 	log := cfg.Log
 	if log == nil {
 		log = slog.Default()
 	}
 	p := &pipelineProvisioner{cfg: cfg, log: log}
 	p.steps = p.buildSteps()
-	return p
+	return p, nil
 }
 
 func (p *pipelineProvisioner) buildSteps() []Step {
@@ -96,15 +114,9 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		{
 			Name: "Postgres",
 			Provision: func(ctx context.Context, tenantID string, limits Limits) error {
-				if p.cfg.Postgres == nil {
-					return nil
-				}
 				return p.cfg.Postgres.Provision(ctx, tenantID, limits)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
-				if p.cfg.Postgres == nil {
-					return nil
-				}
 				return p.cfg.Postgres.Deprovision(ctx, tenantID)
 			},
 			StatusUpdate: func(dp *gibsonv1alpha1.TenantDataPlaneStatus) {
@@ -117,15 +129,9 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		{
 			Name: "Neo4j",
 			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
-				if p.cfg.Neo4j == nil {
-					return nil
-				}
 				return p.cfg.Neo4j.Provision(ctx, tenantID)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
-				if p.cfg.Neo4j == nil {
-					return nil
-				}
 				return p.cfg.Neo4j.Deprovision(ctx, tenantID)
 			},
 			StatusUpdate: func(dp *gibsonv1alpha1.TenantDataPlaneStatus) {
@@ -138,15 +144,9 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		{
 			Name: "Redis",
 			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
-				if p.cfg.Redis == nil {
-					return nil
-				}
 				return p.cfg.Redis.Provision(ctx, tenantID)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
-				if p.cfg.Redis == nil {
-					return nil
-				}
 				return p.cfg.Redis.Deprovision(ctx, tenantID)
 			},
 			StatusUpdate: func(dp *gibsonv1alpha1.TenantDataPlaneStatus) {
@@ -159,15 +159,9 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		{
 			Name: "Vector",
 			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
-				if p.cfg.Vector == nil {
-					return nil
-				}
 				return p.cfg.Vector.Provision(ctx, tenantID)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
-				if p.cfg.Vector == nil {
-					return nil
-				}
 				return p.cfg.Vector.Deprovision(ctx, tenantID)
 			},
 			StatusUpdate: func(dp *gibsonv1alpha1.TenantDataPlaneStatus) {
@@ -180,9 +174,6 @@ func (p *pipelineProvisioner) buildSteps() []Step {
 		{
 			Name: "KEKInit",
 			Provision: func(ctx context.Context, tenantID string, _ Limits) error {
-				if p.cfg.KEK == nil {
-					return nil
-				}
 				return p.cfg.KEK.Provision(ctx, tenantID)
 			},
 			Rollback: func(ctx context.Context, tenantID string) error {
@@ -337,12 +328,8 @@ func (p *pipelineProvisioner) rollbackIndices(ctx context.Context, tenantID stri
 	return errors.Join(errs...)
 }
 
-// getTenant fetches the Tenant CR from the API server. Returns nil when the
-// K8sClient is not configured or the Tenant cannot be found.
+// getTenant fetches the Tenant CR from the API server.
 func (p *pipelineProvisioner) getTenant(ctx context.Context, tenantID string) (*gibsonv1alpha1.Tenant, error) {
-	if p.cfg.K8sClient == nil {
-		return nil, nil
-	}
 	var tenant gibsonv1alpha1.Tenant
 	if err := p.cfg.K8sClient.Get(ctx, types.NamespacedName{Name: tenantID}, &tenant); err != nil {
 		return nil, err
@@ -352,7 +339,7 @@ func (p *pipelineProvisioner) getTenant(ctx context.Context, tenantID string) (*
 
 // patchStatus persists the Tenant status via status subresource patch.
 // Errors are logged but not propagated so status write failures do not block
-// the provisioning pipeline.
+// the provisioning pipeline. Each caller passes a Tenant it read.
 //
 // Uses Patch with an empty MergeFrom base so the resulting JSON merge-patch
 // contains only the fields we want to update (status.dataPlane.*) and does
@@ -361,9 +348,6 @@ func (p *pipelineProvisioner) getTenant(ctx context.Context, tenantID string) (*
 // write because merge-patch applies field-by-field instead of replacing the
 // whole object.
 func (p *pipelineProvisioner) patchStatus(ctx context.Context, tenant *gibsonv1alpha1.Tenant) {
-	if tenant == nil || p.cfg.K8sClient == nil {
-		return
-	}
 	// Build a minimal "before" containing just identity + an empty status,
 	// so MergeFrom emits the full current status as the patch body.
 	base := &gibsonv1alpha1.Tenant{}
@@ -375,16 +359,15 @@ func (p *pipelineProvisioner) patchStatus(ctx context.Context, tenant *gibsonv1a
 	}
 }
 
-// emitEvent records a Kubernetes event on the Tenant object. No-ops when the
-// recorder or tenant are nil.
+// emitEvent records a Kubernetes event on the Tenant object. It does nothing
+// when the Tenant CR could not be read: there is no object to attach it to.
 func (p *pipelineProvisioner) emitEvent(ctx context.Context, tenant *gibsonv1alpha1.Tenant, eventType, reason, message string) {
-	if p.cfg.Recorder == nil || tenant == nil {
-		return
-	}
 	_ = ctx // EventRecorder does not accept a context in the current API
 	// events.EventRecorder.Eventf signature: (regarding, related, eventtype,
 	// reason, action, note, args...). No related object; reuse reason as action.
-	p.cfg.Recorder.Eventf(tenant, nil, eventType, reason, reason, "%s", message)
+	if tenant != nil {
+		p.cfg.Recorder.Eventf(tenant, nil, eventType, reason, reason, "%s", message)
+	}
 }
 
 // DataPlane phase constants used in TenantDataPlaneStatus.Phase.

@@ -103,7 +103,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// Long-form rationale documented in the comments above each block.
 	// Removed in M7 (tenant-operator#95): stripeOpt, teardownTol, fgaShape, dpReq (saga).
 	const (
-		dpReq       = "predates dataplane-required hardening"
 		httpDiscard = "HTTP helper: out=nil means discard body (caller convention, not dep)"
 		ctorGuard   = "client constructor guard; reassert with constructor-inversion slice"
 		k8sShape    = "k8s API may return nil map/slice; map-shape guard, not dep"
@@ -127,19 +126,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// "known-tolerated defensive guards" list that is acceptable — arguably
 	// better, since you stop re-litigating the same pattern per occurrence.
 	requestPathAllowlist := map[string]string{
-		// internal/dataplane/pipeline.go — sub-client optionality within the
-		// pipeline provisioner; each sub-client (Postgres, Neo4j, Redis, Vector,
-		// KEK) is optional by design. Follow-up: make each required after the
-		// dataplane-required hardening spec ships.
-		"internal/dataplane/pipeline.go :: if p.cfg.Postgres == nil { ... }":                   dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.Neo4j == nil { ... }":                      dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.Redis == nil { ... }":                      dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.Vector == nil { ... }":                     dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.KEK == nil { ... }":                        dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.K8sClient == nil { ... }":                  dpReq,
-		"internal/dataplane/pipeline.go :: if tenant == nil || p.cfg.K8sClient == nil { ... }": dpReq,
-		"internal/dataplane/pipeline.go :: if p.cfg.Recorder == nil || tenant == nil { ... }":  dpReq,
-
 		// internal/clients/* — HTTP unmarshal helpers (caller passes out=nil to discard body)
 		"internal/clients/fga/http.go :: if out == nil || len(raw) == 0 { ... }":                      httpDiscard,
 		"internal/clients/zitadel/client.go :: if out == nil || len(raw) == 0 { ... }":                httpDiscard,

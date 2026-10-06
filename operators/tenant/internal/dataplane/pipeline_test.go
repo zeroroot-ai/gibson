@@ -6,7 +6,13 @@ package dataplane
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
@@ -31,12 +37,32 @@ func stubStep(name string, called *[]string, provErr, rbErr error) Step {
 }
 
 // buildTestPipeline constructs a pipelineProvisioner whose steps are replaced
-// with the provided stubs. The K8sClient and Recorder are left nil so CRD
-// updates are skipped (no envtest needed).
+// with the provided stubs. The Kubernetes client is a fake that holds no
+// Tenant, so the pipeline finds no CR to update.
 func buildTestPipeline(steps []Step) *pipelineProvisioner {
-	p := New(PipelineConfig{})
-	p.steps = steps
-	return p
+	scheme := runtime.NewScheme()
+	_ = gibsonv1alpha1.AddToScheme(scheme)
+	return &pipelineProvisioner{
+		cfg: PipelineConfig{
+			K8sClient: fake.NewClientBuilder().WithScheme(scheme).Build(),
+			Recorder:  events.NewFakeRecorder(100),
+		},
+		steps: steps,
+		log:   slog.Default(),
+	}
+}
+
+// The pipeline refuses a missing store, client or recorder (gibson#681).
+func TestNew_RequiresEveryDependency(t *testing.T) {
+	_, err := New(PipelineConfig{})
+	if err == nil {
+		t.Fatal("New with no dependency succeeded")
+	}
+	for _, name := range []string{"Postgres", "Neo4j", "Redis", "Vector", "KEK", "K8sClient", "Recorder"} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("error %q does not name %s", err, name)
+		}
+	}
 }
 
 func TestPipelineProvisionHappyPath(t *testing.T) {
@@ -313,5 +339,50 @@ func TestPipelineDoubleProvisionIdempotent(t *testing.T) {
 	// Both provisions should succeed (stubs are always idempotent).
 	if len(called) != 4 {
 		t.Errorf("expected 4 provision calls (2 per step × 2 runs), got %d: %v", len(called), called)
+	}
+}
+
+// With a Tenant CR, each step emits an event on it.
+func TestPipelineProvision_EmitsEventsOnTheTenant(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = gibsonv1alpha1.AddToScheme(scheme)
+	tenant := &gibsonv1alpha1.Tenant{}
+	tenant.Name = "acme"
+	rec := events.NewFakeRecorder(100)
+	var called []string
+	p := &pipelineProvisioner{
+		cfg: PipelineConfig{
+			K8sClient: fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).WithStatusSubresource(tenant).Build(),
+			Recorder:  rec,
+		},
+		steps: []Step{stubStep("Postgres", &called, nil, nil)},
+		log:   slog.Default(),
+	}
+	if err := p.Provision(context.Background(), "acme", Limits{}); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if len(rec.Events) == 0 {
+		t.Fatal("no event on the Tenant")
+	}
+}
+
+// With every dependency, New builds the five steps in order.
+func TestNew_BuildsTheFiveSteps(t *testing.T) {
+	scheme := runtime.NewScheme()
+	p, err := New(PipelineConfig{
+		Postgres:  &pgProvisioner{},
+		Neo4j:     &Neo4jProvisioner{},
+		Redis:     &redisProvisioner{},
+		Vector:    &redisVSSProvisioner{},
+		KEK:       &KEKInitProvisioner{},
+		K8sClient: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Recorder:  events.NewFakeRecorder(1),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	pp, ok := p.(*pipelineProvisioner)
+	if !ok || len(pp.steps) != 5 || pp.steps[0].Name != "Postgres" || pp.steps[4].Name != "KEKInit" {
+		t.Fatalf("pipeline = %+v", p)
 	}
 }

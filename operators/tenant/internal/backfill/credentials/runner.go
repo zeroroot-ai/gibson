@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package credentials implements the per-tenant credentials backfill
-// that previously ran as a standalone CLI (cmd/backfill-credentials/)
-// under a Helm pre-upgrade hook. It is now callable both as a startup
-// Runnable inside the operator (internal/startup/backfills.go, with
-// the operator's existing dataplane.Provisioner injected) and as the
-// same standalone CLI (which builds its own Provisioner from env vars).
+// Package credentials implements the per-tenant credentials backfill. It
+// runs as a startup Runnable inside the operator
+// (internal/startup/backfills.go), with the operator's dataplane.Provisioner
+// injected. The standalone CLI that ran it under a Helm pre-upgrade hook is
+// deleted (gibson#681).
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 5.2).
 package credentials
