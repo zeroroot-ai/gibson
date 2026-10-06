@@ -113,35 +113,11 @@ func (l *AgentLauncher) ForkAgent(ctx context.Context, sourceSandboxID string, s
 		attribute.Int("setec.fork_count", len(dispatches)),
 	)
 
-	forkCtx, forkSpan := l.tracer.Start(ctx, "setec.fork")
-	resp, err := l.client.Fork(forkCtx, ForkRequest{
-		Tenant:      tenant,
-		SandboxID:   sourceSandboxID,
-		Count:       len(dispatches),
-		NetworkMode: spec.NetworkMode,
-		Egress:      spec.Egress,
-		SnapshotTTL: spec.SnapshotTTL,
-	})
-	forkSpan.End()
+	resp, err := l.fork(ctx, tenant, sourceSandboxID, len(dispatches), spec)
 	if err != nil {
-		return ForkRun{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "fork agent sandbox "+sourceSandboxID, err)
-	}
-	if len(resp.SandboxIDs) != len(dispatches) {
-		for _, id := range resp.SandboxIDs {
-			l.kill(ctx, tenant, id)
-		}
-		return ForkRun{}, types.NewError(types.SANDBOX_LAUNCH_FAILED,
-			fmt.Sprintf("agent fork: setec started %d forks, want %d", len(resp.SandboxIDs), len(dispatches)))
+		return ForkRun{}, err
 	}
 	span.SetAttributes(attribute.String("setec.snapshot", resp.Snapshot))
-	if spec.OnForked != nil {
-		if err := spec.OnForked(resp); err != nil {
-			for _, id := range resp.SandboxIDs {
-				l.kill(ctx, tenant, id)
-			}
-			return ForkRun{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "record the forks of "+sourceSandboxID, err)
-		}
-	}
 
 	run := ForkRun{
 		Snapshot: resp.Snapshot,
@@ -158,6 +134,81 @@ func (l *AgentLauncher) ForkAgent(ctx context.Context, sourceSandboxID string, s
 	}
 	wg.Wait()
 	return run, nil
+}
+
+// fork asks setec for count forks of the source, and runs spec.OnForked. A
+// wrong fork count or an OnForked error kills each fork.
+func (l *AgentLauncher) fork(ctx context.Context, tenant, sourceSandboxID string, count int, spec AgentForkSpec) (ForkResponse, error) {
+	forkCtx, forkSpan := l.tracer.Start(ctx, "setec.fork")
+	resp, err := l.client.Fork(forkCtx, ForkRequest{
+		Tenant:      tenant,
+		SandboxID:   sourceSandboxID,
+		Count:       count,
+		NetworkMode: spec.NetworkMode,
+		Egress:      spec.Egress,
+		SnapshotTTL: spec.SnapshotTTL,
+	})
+	forkSpan.End()
+	if err != nil {
+		return ForkResponse{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "fork agent sandbox "+sourceSandboxID, err)
+	}
+	if len(resp.SandboxIDs) != count {
+		for _, id := range resp.SandboxIDs {
+			l.kill(ctx, tenant, id)
+		}
+		return ForkResponse{}, types.NewError(types.SANDBOX_LAUNCH_FAILED,
+			fmt.Sprintf("agent fork: setec started %d forks, want %d", len(resp.SandboxIDs), count))
+	}
+	if spec.OnForked != nil {
+		if err := spec.OnForked(resp); err != nil {
+			for _, id := range resp.SandboxIDs {
+				l.kill(ctx, tenant, id)
+			}
+			return ForkResponse{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "record the forks of "+sourceSandboxID, err)
+		}
+	}
+	return resp, nil
+}
+
+// ForkSandbox forks the running source sandbox of the tenant once, and does
+// not follow the fork. An agent that forks at run time (gibson#803) uses it:
+// the fork waits in ClaimFork until the first node of the child mission is
+// dispatched, and FollowAgent then follows it.
+func (l *AgentLauncher) ForkSandbox(ctx context.Context, tenant, sourceSandboxID string, spec AgentForkSpec) (string, error) {
+	ctx, span := l.tracer.Start(ctx, "harness.sandboxed.fork_sandbox")
+	defer span.End()
+	if sourceSandboxID == "" {
+		return "", types.WrapError(types.SANDBOX_POLICY_DENIED, "agent fork", ErrForkSource)
+	}
+	if tenant == "" {
+		return "", types.NewError(types.SANDBOX_POLICY_DENIED, "agent fork: the request names no tenant")
+	}
+	span.SetAttributes(
+		attribute.String("setec.tenant", tenant),
+		attribute.String("setec.source_sandbox_id", sourceSandboxID),
+	)
+	resp, err := l.fork(ctx, tenant, sourceSandboxID, 1, spec)
+	if err != nil {
+		return "", err
+	}
+	span.SetAttributes(attribute.String("setec.snapshot", resp.Snapshot))
+	return resp.SandboxIDs[0], nil
+}
+
+// FollowAgent follows a running fork that ForkSandbox started, as ForkAgent
+// follows each of its forks. class is the sandbox class of the fork. Empty
+// takes the class of the launcher.
+func (l *AgentLauncher) FollowAgent(ctx context.Context, sandboxID, class string, d AgentDispatch) (AgentRunResult, error) {
+	if sandboxID == "" {
+		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED, "follow agent fork", ErrForkSource)
+	}
+	if d.Tenant == "" {
+		return AgentRunResult{}, types.NewError(types.SANDBOX_POLICY_DENIED, "follow agent fork: the dispatch names no tenant")
+	}
+	if class == "" {
+		class = l.sandboxClass
+	}
+	return l.followFork(ctx, d.Tenant, sandboxID, class, d)
 }
 
 // followFork checks the isolation of one fork, and follows it to its end.

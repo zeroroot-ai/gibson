@@ -98,7 +98,10 @@ func TestClaimFork_Refusals(t *testing.T) {
 	if _, err := s.ClaimFork(ctx, req); status.Code(err) != codes.Unauthenticated {
 		t.Errorf("no grant: code = %v", status.Code(err))
 	}
-	if _, err := s.ClaimFork(forkCtx("jti-p", "tok-fork-1", ""), req); status.Code(err) != codes.Unavailable {
+	wait := forkClaimWait
+	forkClaimWait = 50 * time.Millisecond
+	t.Cleanup(func() { forkClaimWait = wait })
+	if _, err := s.ClaimFork(forkCtx("jti-p", "tok-fork-1", ""), req); status.Code(err) != codes.DeadlineExceeded {
 		t.Errorf("pending: code = %v", status.Code(err))
 	}
 	if _, err := s.ClaimFork(forkCtx("jti-none", "tok-fork-1", ""), req); status.Code(err) != codes.PermissionDenied {

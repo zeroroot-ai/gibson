@@ -49,6 +49,33 @@ type ForkLedger interface {
 	// from the identity token of the caller (setec#235), never a value that
 	// the process sent.
 	Claim(ctx context.Context, sourceJTI, forkSandboxID string) (ForkDispatch, error)
+	// ReserveForkSeat records a fork of a caller that waits for the first
+	// node of a child mission (gibson#803). Until RecordForks records its
+	// dispatch, a claim of the fork gets ErrForkPending.
+	ReserveForkSeat(ctx context.Context, seat ForkSeat, ttl time.Duration) error
+	// TakeForkSeat returns the waiting fork of a node of a mission, one
+	// time. ok is false when the node has no waiting fork.
+	TakeForkSeat(ctx context.Context, missionID, nodeID string) (seat ForkSeat, ok bool, err error)
+}
+
+// ForkSeat is a fork of a caller sandbox that waits for the first node of
+// the child mission that the caller originated (ADR-0169, gibson#803). The
+// fork took the network scope of that node at the Fork call.
+type ForkSeat struct {
+	MissionID string `json:"mission_id"`
+	NodeID    string `json:"node_id"`
+	Tenant    string `json:"tenant"`
+	// AgentName is the agent of the caller. Only that agent can continue the
+	// state of the fork.
+	AgentName string `json:"agent_name"`
+	// SandboxID is the fork.
+	SandboxID string `json:"sandbox_id"`
+	// SandboxClass is the class of the fork.
+	SandboxClass string `json:"sandbox_class"`
+	// SourceSandboxID and SourceJTI are the caller sandbox and the id of
+	// its grant. The fork claims its dispatch with that grant.
+	SourceSandboxID string `json:"source_sandbox_id"`
+	SourceJTI       string `json:"source_jti"`
 }
 
 // ErrNotAFork refuses a claim for a sandbox that is not a fork of the grant.
@@ -75,6 +102,10 @@ func NewRedisForkLedger(client redis.UniversalClient) *RedisForkLedger {
 }
 
 func forkLedgerKey(jti string) string { return "gibson:fork:" + jti }
+
+func forkSeatKey(missionID, nodeID string) string {
+	return "gibson:forkseat:" + missionID + ":" + nodeID
+}
 
 // BeginFork implements ForkLedger.
 func (l *RedisForkLedger) BeginFork(ctx context.Context, sourceJTI, sourceSandboxID string, ttl time.Duration) error {
@@ -107,8 +138,13 @@ func (l *RedisForkLedger) RecordForks(ctx context.Context, sourceJTI, sourceSand
 	}
 	key := forkLedgerKey(sourceJTI)
 	pipe := l.client.TxPipeline()
+	pending := make([]string, 0, len(forks)+1)
+	pending = append(pending, "pending")
+	for _, f := range forks {
+		pending = append(pending, "p:"+f.SandboxID)
+	}
 	pipe.HSet(ctx, key, fields)
-	pipe.HDel(ctx, key, "pending")
+	pipe.HDel(ctx, key, pending...)
 	pipe.Expire(ctx, key, ttl)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return fmt.Errorf("record forks: %w", err)
@@ -136,12 +172,14 @@ func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkSandboxID st
 	}
 	raw, err := l.client.HGet(ctx, key, "d:"+forkSandboxID).Bytes()
 	if errors.Is(err, redis.Nil) {
-		pending, perr := l.client.HExists(ctx, key, "pending").Result()
+		marks, perr := l.client.HMGet(ctx, key, "pending", "p:"+forkSandboxID).Result()
 		if perr != nil {
 			return ForkDispatch{}, fmt.Errorf("read fork record: %w", perr)
 		}
-		if pending {
-			return ForkDispatch{}, ErrForkPending
+		for _, m := range marks {
+			if m != nil {
+				return ForkDispatch{}, ErrForkPending
+			}
 		}
 		return ForkDispatch{}, ErrNotAFork
 	}
@@ -160,6 +198,45 @@ func (l *RedisForkLedger) Claim(ctx context.Context, sourceJTI, forkSandboxID st
 		return ForkDispatch{}, fmt.Errorf("decode fork dispatch: %w", err)
 	}
 	return d, nil
+}
+
+// ReserveForkSeat implements ForkLedger. The fork counts as pending in the
+// record of the source grant first, so a claim never finds it unknown.
+func (l *RedisForkLedger) ReserveForkSeat(ctx context.Context, seat ForkSeat, ttl time.Duration) error {
+	if seat.SourceJTI == "" || seat.SourceSandboxID == "" || seat.SandboxID == "" || seat.MissionID == "" || seat.NodeID == "" {
+		return errors.New("harness: a fork seat needs the grant id, the source, the fork, the mission and the node")
+	}
+	raw, err := json.Marshal(seat)
+	if err != nil {
+		return fmt.Errorf("encode fork seat: %w", err)
+	}
+	key := forkLedgerKey(seat.SourceJTI)
+	pipe := l.client.TxPipeline()
+	pipe.HSet(ctx, key, "source", seat.SourceSandboxID, "p:"+seat.SandboxID, 1)
+	pipe.Expire(ctx, key, ttl)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return fmt.Errorf("record pending fork: %w", err)
+	}
+	if err := l.client.Set(ctx, forkSeatKey(seat.MissionID, seat.NodeID), raw, ttl).Err(); err != nil {
+		return fmt.Errorf("record fork seat: %w", err)
+	}
+	return nil
+}
+
+// TakeForkSeat implements ForkLedger.
+func (l *RedisForkLedger) TakeForkSeat(ctx context.Context, missionID, nodeID string) (ForkSeat, bool, error) {
+	raw, err := l.client.GetDel(ctx, forkSeatKey(missionID, nodeID)).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return ForkSeat{}, false, nil
+	}
+	if err != nil {
+		return ForkSeat{}, false, fmt.Errorf("take fork seat: %w", err)
+	}
+	var seat ForkSeat
+	if err := json.Unmarshal(raw, &seat); err != nil {
+		return ForkSeat{}, false, fmt.Errorf("decode fork seat: %w", err)
+	}
+	return seat, true, nil
 }
 
 // hostnameStrip matches each character that a hostname label refuses.
