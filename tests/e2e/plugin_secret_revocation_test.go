@@ -13,7 +13,7 @@
 //
 // The proof on a live kind cluster:
 //
-//  1. The GitHub plugin image (ghcr.io/zeroroot-ai/integrations/github)
+//  1. The GitHub plugin image (ghcr.io/zeroroot-ai/gibson-plugin-github)
 //     runs beside Envoy the way a customer deploys it: chart-rendered pod,
 //     SPIFFE-SVID enrolment, cred:github_token declared as a required
 //     startup secret. It reaches the daemon through Envoy and ext-authz,
