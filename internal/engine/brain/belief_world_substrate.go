@@ -76,7 +76,9 @@ func (s *WorldBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelie
 		}
 		for _, h := range s.eng.Hosts() {
 			if h.ID == id {
-				return NodeBelief{Belief: h.Belief, EvidenceDigest: h.EvidenceDigest}, true, nil
+				// The read returns each field that SetBelief writes, the causes
+				// too, so a reader can tell a new score from the stored one.
+				return NodeBelief{Belief: h.Belief, EvidenceDigest: h.EvidenceDigest, CauseEdgeTypes: h.CauseEdgeTypes}, true, nil
 			}
 		}
 		return NodeBelief{}, false, nil
@@ -86,7 +88,7 @@ func (s *WorldBeliefSubstrate) Belief(_ context.Context, ref NodeRef) (NodeBelie
 	}
 	for _, nb := range s.eng.NodeBeliefs() {
 		if nb.Ref == ref {
-			return NodeBelief{Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest}, true, nil
+			return NodeBelief{Belief: nb.Belief, EvidenceDigest: nb.EvidenceDigest, CauseEdgeTypes: nb.CauseEdgeTypes}, true, nil
 		}
 	}
 	return NodeBelief{}, false, nil

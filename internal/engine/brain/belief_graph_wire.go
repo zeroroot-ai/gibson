@@ -83,7 +83,8 @@ func SliceBeliefRound(
 	propagateOpts SliceOptions,
 ) (checked, scored int, err error) {
 	hosts := eng.Hosts()
-	graph := LiveAttackGraph(eng, hosts, registry)
+	// The uncut graph: each slice breaks its own cycles (gibson#700).
+	graph := LiveEnablementGraph(eng, hosts, registry)
 
 	relevance := make(map[string]float64, len(hosts))
 	for _, h := range hosts {
