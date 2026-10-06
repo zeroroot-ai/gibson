@@ -68,6 +68,25 @@ message OntologyExtensionProposal {
   // reviewer is the tenant owner who approved or rejected this proposal.
   // Empty while status is PENDING.
   string reviewer = 7;
+  // The fields below return the review data to the dashboard (gibson#618).
+  // They take new numbers and names because the old ones stay reserved.
+  //
+  // sighting_count is how many independent times this exact (kind, label)
+  // has been sighted (the running count of taxonomy.PromotionGate.Observe).
+  int32 sighting_count = 11;
+  // latest_proposer is the agent that proposed it most recently.
+  string latest_proposer = 12;
+  // latest_claim is the claim of the most recent proposal.
+  string latest_claim = 13;
+  // rejection_reason is set only when status is REJECTED.
+  string rejection_reason = 14;
+  // is_promoted is true once the proposal is in the live Taxonomy of the
+  // tenant. status APPROVED alone does not imply it: the proposal can still
+  // be short of the recurrence that settlement requires.
+  bool is_promoted = 15;
+  // taxonomy_version is the Taxonomy registry version that the promotion
+  // made. Zero while is_promoted is false.
+  int32 taxonomy_version = 16;
 }
 
 message ListOntologyExtensionProposalsRequest {}
@@ -76,6 +95,10 @@ message ListOntologyExtensionProposalsResponse {
   // Removed in gibson#502: served and never read by any consumer.
   reserved 1;
   reserved "proposals";
+  // ontology_proposals holds each proposal of the tenant, pending and
+  // decided, in (kind, label) order. The dashboard review page reads it
+  // (gibson#618).
+  repeated OntologyExtensionProposal ontology_proposals = 2;
 }
 
 message ApproveOntologyExtensionProposalRequest {
@@ -133,6 +156,20 @@ message SubmitOntologyExtensionUpstreamResponse {
   // the audit record with the action "ontology.extension.submitted", whose
   // metadata holds the pack JSON. The Platform owner reviews it there.
   string audit_record_id = 5;
+  // The fields below return the contribution to the dashboard (gibson#618).
+  // They take new numbers and names because the old ones stay reserved.
+  //
+  // fragment_json is the ontology.DomainPack fragment, JSON-encoded exactly
+  // as Export/Import round-trip it (gibson#378). It is the same bytes as the
+  // metadata of the audit record that audit_record_id names.
+  bytes fragment_json = 6;
+  // pack_file_path is where this fragment belongs in the pack source tree
+  // of the SDK, e.g. "packs/<name>.json".
+  string pack_file_path = 7;
+  // pull_request_title and pull_request_body are the text of the pull
+  // request that the tenant owner opens by hand.
+  string pull_request_title = 8;
+  string pull_request_body = 9;
 }
 
 service OntologyExtensionService {

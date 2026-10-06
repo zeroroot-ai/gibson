@@ -227,6 +227,20 @@ message AuditEvent {
   string target_user_id = 6;
   map<string, string> details = 8;
   string trace_id = 9;
+  // The fields below name the actor and the target of the record
+  // (gibson#544, lane 11 row G23). They take new numbers and names because
+  // the old ones stay reserved.
+  //
+  // actor_source is the class of the actor: "user", "agent" or "system". The
+  // writer derives it from the credential of the caller. It is the
+  // actor_type column of the durable audit_log row.
+  string actor_source = 10;
+  // actor_id is the subject of the identity that acted. The writer takes it
+  // from the identity of the request, never from the request body.
+  string actor_id = 11;
+  // target_object names what the action changed, as "<type>:<id>", or as
+  // "<type>" when the action has no single object.
+  string target_object = 12;
 }
 
 // ListAuditEventsRequest queries audit events for a tenant.
