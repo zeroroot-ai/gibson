@@ -12,6 +12,7 @@ import (
 	"time"
 
 	bankstore "github.com/zeroroot-ai/gibson/internal/platform/bank"
+	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -162,6 +163,34 @@ func testBank(desired int32) *bankstore.Bank {
 type fakeJobs struct {
 	released []string
 	err      error
+
+	// stale is the answer of Stale for each bank id. staleErr and closeErr
+	// make the two calls fail. gotStaleSeconds records the limit that the
+	// reconciler asked for, and closed records each close.
+	stale           map[string][]*job.Job
+	staleErr        error
+	closeErr        map[string]error
+	gotStaleSeconds []int64
+	closed          []job.CloseInput
+}
+
+func (f *fakeJobs) Stale(_ context.Context, _, bankID string, staleSeconds int64, _ int32) ([]*job.Job, error) {
+	f.gotStaleSeconds = append(f.gotStaleSeconds, staleSeconds)
+	if f.staleErr != nil {
+		return nil, f.staleErr
+	}
+	return f.stale[bankID], nil
+}
+
+func (f *fakeJobs) Close(_ context.Context, _ string, in job.CloseInput) (*job.Job, error) {
+	if err := in.Validate(); err != nil {
+		return nil, fmt.Errorf("fake close: %w", err)
+	}
+	if err := f.closeErr[in.JobID]; err != nil {
+		return nil, err
+	}
+	f.closed = append(f.closed, in)
+	return &job.Job{ID: in.JobID, State: job.StateClosed, Verdict: in.Verdict}, nil
 }
 
 func (f *fakeJobs) ReleaseMember(_ context.Context, _, memberID string) (int64, error) {
@@ -177,7 +206,7 @@ func newReconciler(t *testing.T, store bankstore.Store, l MemberLauncher, e Even
 	return newReconcilerWithJobs(t, store, l, &fakeJobs{}, e)
 }
 
-func newReconcilerWithJobs(t *testing.T, store bankstore.Store, l MemberLauncher, jobs JobReleaser, e Events) *Reconciler {
+func newReconcilerWithJobs(t *testing.T, store bankstore.Store, l MemberLauncher, jobs Jobs, e Events) *Reconciler {
 	t.Helper()
 	r, err := New(Config{Store: store, Launcher: l, Jobs: jobs, Events: e, Now: func() time.Time { return testNow }})
 	if err != nil {
@@ -729,4 +758,86 @@ func (f *fakeStore) GetMember(_ context.Context, _, memberID string) (*bankstore
 		}
 	}
 	return nil, bankstore.ErrNotFound
+}
+
+// A job past the stale limit of its bank is closed with the verdict
+// abandoned (ADR-0119, gibson#687).
+func TestReconcileBank_ClosesStaleJobsAsAbandoned(t *testing.T) {
+	store := newFakeStore()
+	b := testBank(0)
+	b.StaleLimit = 2 * time.Hour
+	jobs := &fakeJobs{stale: map[string][]*job.Job{
+		b.ID: {{ID: "job-old-1", BankID: b.ID}, {ID: "job-old-2", BankID: b.ID}},
+	}}
+	r := newReconcilerWithJobs(t, store, &fakeLauncher{}, jobs, nil)
+
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if len(jobs.gotStaleSeconds) != 1 || jobs.gotStaleSeconds[0] != 7200 {
+		t.Fatalf("the reconciler asked for the stale limits %v, want [7200]", jobs.gotStaleSeconds)
+	}
+	if len(jobs.closed) != 2 {
+		t.Fatalf("%d jobs were closed, want 2: %+v", len(jobs.closed), jobs.closed)
+	}
+	for _, in := range jobs.closed {
+		if in.Verdict != job.VerdictAbandoned {
+			t.Errorf("job %s was closed with the verdict %q, want abandoned", in.JobID, in.Verdict)
+		}
+		if in.Closer != staleJobCloser {
+			t.Errorf("job %s was closed by %+v, want %+v", in.JobID, in.Closer, staleJobCloser)
+		}
+	}
+}
+
+// A bank with no stale limit has no stale job, so the reconciler does not ask.
+func TestReconcileBank_NoStaleLimitClosesNothing(t *testing.T) {
+	b := testBank(0)
+	jobs := &fakeJobs{stale: map[string][]*job.Job{b.ID: {{ID: "job-1", BankID: b.ID}}}}
+	r := newReconcilerWithJobs(t, newFakeStore(), &fakeLauncher{}, jobs, nil)
+
+	if err := r.ReconcileBank(context.Background(), "acme", b); err != nil {
+		t.Fatalf("ReconcileBank: %v", err)
+	}
+	if len(jobs.gotStaleSeconds) != 0 || len(jobs.closed) != 0 {
+		t.Fatalf("asked %v and closed %v for a bank with no stale limit", jobs.gotStaleSeconds, jobs.closed)
+	}
+}
+
+// One job that fails to close does not stop the others, and a job that a
+// scorer closed in the meantime is not an error.
+func TestReconcileBank_StaleCloseFailures(t *testing.T) {
+	b := testBank(0)
+	b.StaleLimit = time.Hour
+	boom := errors.New("postgres down")
+	jobs := &fakeJobs{
+		stale: map[string][]*job.Job{b.ID: {{ID: "job-fails"}, {ID: "job-raced"}, {ID: "job-ok"}}},
+		closeErr: map[string]error{
+			"job-fails": boom,
+			"job-raced": fmt.Errorf("%w: job-raced", job.ErrClosed),
+		},
+	}
+	r := newReconcilerWithJobs(t, newFakeStore(), &fakeLauncher{}, jobs, nil)
+
+	err := r.ReconcileBank(context.Background(), "acme", b)
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the close error", err)
+	}
+	if errors.Is(err, job.ErrClosed) {
+		t.Errorf("a job that was closed in the meantime is reported as an error: %v", err)
+	}
+	if len(jobs.closed) != 1 || jobs.closed[0].JobID != "job-ok" {
+		t.Fatalf("closed = %+v, want job-ok only", jobs.closed)
+	}
+}
+
+// A failed list is an error of the pass.
+func TestReconcileBank_StaleListError(t *testing.T) {
+	b := testBank(0)
+	b.StaleLimit = time.Hour
+	boom := errors.New("postgres down")
+	r := newReconcilerWithJobs(t, newFakeStore(), &fakeLauncher{}, &fakeJobs{staleErr: boom}, nil)
+	if err := r.ReconcileBank(context.Background(), "acme", b); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the list error", err)
+	}
 }

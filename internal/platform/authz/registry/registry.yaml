@@ -529,6 +529,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -586,6 +593,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -664,6 +678,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.v1.DaemonService/GetComponentLogs":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/GetMissionCheckpoints":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -798,6 +819,13 @@ entries:
     allowed_identities:
       - COMPONENT
   "/gibson.daemon.v1.DaemonService/ResumeMission":
+    relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.v1.DaemonService/RewindMission":
     relation: "writer"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -1988,66 +2016,6 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
-  "/gibson.tenant.v1.SecretsService/CountSecrets":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/DeleteSecret":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/GetBrokerConfig":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/GetMissionAudit":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/GetSecret":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/ListSecrets":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/ProbeBrokerConfig":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/RotateSecret":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/SetBrokerConfig":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
-  "/gibson.tenant.v1.SecretsService/SetSecret":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
   "/gibson.tenant.v1.SignupService/AttachSignupCustomer":
     unauthenticated: true
   "/gibson.tenant.v1.SignupService/RedeemEmailVerification":

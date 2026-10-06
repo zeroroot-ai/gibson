@@ -34,7 +34,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -59,7 +59,7 @@ type SecretsAdminAuditQuery interface {
 	List(ctx context.Context, tenantID string, filters audit.Filters, limit, offset int) ([]audit.PgEntry, int, error)
 }
 
-// SecretsAdminServer implements the secrets-CRUD portion of tenantv1.SecretsServiceServer (ADR-0058).
+// SecretsAdminServer implements the secrets-CRUD portion of secretsv1.SecretsServiceServer (ADR-0058).
 // Broker-config methods (GetBrokerConfig/ProbeBrokerConfig/SetBrokerConfig/CountSecrets) are
 // handled by CombinedSecretsServer, which delegates to TenantAdminServer for those RPCs.
 //
@@ -68,7 +68,7 @@ type SecretsAdminAuditQuery interface {
 // associations are read via the PluginAssociations bridge; per-mission
 // audit aggregation reads the audit_log via AuditQuery.
 type SecretsAdminServer struct {
-	tenantv1.UnimplementedSecretsServiceServer
+	secretsv1.UnimplementedSecretsServiceServer
 
 	service        *secrets.Service
 	broker         SecretsAdminBroker
@@ -147,7 +147,7 @@ func NewSecretsAdminServer(cfg SecretsAdminConfig) (*SecretsAdminServer, error) 
 
 // ListSecrets returns the metadata-only list of secrets for the tenant
 // derived from the call context.
-func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *tenantv1.ListSecretsRequest) (*tenantv1.ListSecretsResponse, error) {
+func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *secretsv1.ListSecretsRequest) (*secretsv1.ListSecretsResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -170,7 +170,7 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *tenantv1.List
 	// to a namespace-mode root LIST, so Put succeeded while List returned empty.
 	callerPrefix := req.GetNamePrefix()
 	var prefix string
-	if cat := req.GetCategoryFilter(); cat != tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
+	if cat := req.GetCategoryFilter(); cat != secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
 		// categoryPrefix returns "cred:" or "provider_config:" — append the
 		// caller-supplied name sub-prefix.
 		prefix = categoryPrefix(cat) + callerPrefix
@@ -189,22 +189,12 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *tenantv1.List
 		return nil, err // already a gRPC status from secrets.Service
 	}
 
-	out := make([]*tenantv1.SecretMetadata, 0, len(names))
+	out := make([]*secretsv1.SecretMetadata, 0, len(names))
 	for _, stored := range names {
-		md, mdErr := s.buildMetadata(ctx, tenant, stored)
-		if mdErr != nil {
-			// A metadata-build failure for a single row should not poison
-			// the whole list response; surface a degraded entry that has
-			// at least the name + category populated.
-			md = &tenantv1.SecretMetadata{
-				Name:     callerName(stored),
-				Category: parseCategory(stored),
-			}
-		}
-		out = append(out, md)
+		out = append(out, s.buildMetadata(ctx, tenant, stored))
 	}
 
-	return &tenantv1.ListSecretsResponse{
+	return &secretsv1.ListSecretsResponse{
 		Secrets: out,
 		Total:   int32(len(out) + offset),
 	}, nil
@@ -213,7 +203,7 @@ func (s *SecretsAdminServer) ListSecrets(ctx context.Context, req *tenantv1.List
 // GetSecret returns metadata-only information for one named secret.
 //
 // SECURITY: the response carries no value field — by proto contract.
-func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *tenantv1.GetSecretRequest) (*tenantv1.GetSecretResponse, error) {
+func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *secretsv1.GetSecretRequest) (*secretsv1.GetSecretResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -247,16 +237,12 @@ func (s *SecretsAdminServer) GetSecret(ctx context.Context, req *tenantv1.GetSec
 		return nil, status.Errorf(codes.NotFound, "secret %q not found", callerReq)
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, storedReq)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "build metadata: %v", err)
-	}
-	return &tenantv1.GetSecretResponse{Metadata: md}, nil
+	return &secretsv1.GetSecretResponse{Metadata: s.buildMetadata(ctx, tenant, storedReq)}, nil
 }
 
 // SetSecret creates or overwrites a secret with the supplied value bytes.
 // The response never contains the value.
-func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *tenantv1.SetSecretRequest) (*tenantv1.SetSecretResponse, error) {
+func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *secretsv1.SetSecretRequest) (*secretsv1.SetSecretResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -267,7 +253,7 @@ func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *tenantv1.SetSec
 	if len(req.GetValue()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "value is required")
 	}
-	if req.GetCategory() == tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
+	if req.GetCategory() == secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED {
 		return nil, status.Error(codes.InvalidArgument, "category is required")
 	}
 
@@ -279,23 +265,13 @@ func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *tenantv1.SetSec
 		return nil, err
 	}
 
-	md, err := s.buildMetadata(ctx, tenant, stored)
-	if err != nil {
-		// Write succeeded; metadata read-back failed. Return a minimal
-		// metadata so the dashboard can still render its toast.
-		md = &tenantv1.SecretMetadata{
-			Name:          stored,
-			Category:      req.GetCategory(),
-			UpdatedAtUnix: s.now().UTC().Unix(),
-		}
-	}
-	return &tenantv1.SetSecretResponse{Metadata: md}, nil
+	return &secretsv1.SetSecretResponse{Metadata: s.buildMetadata(ctx, tenant, stored)}, nil
 }
 
 // RotateSecret writes a new value to an existing secret. It additionally
 // emits a secret_rotated audit event so the dashboard's audit page shows
 // rotations distinctly from initial creates.
-func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *tenantv1.RotateSecretRequest) (*tenantv1.RotateSecretResponse, error) {
+func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *secretsv1.RotateSecretRequest) (*secretsv1.RotateSecretResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -360,19 +336,11 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *tenantv1.Rot
 			slog.Default().WarnContext(ctx, "secret rotated but a plugin was not told", "secret", callerReq, "principal", id, "error", err)
 		}
 	}
-	md, err := s.buildMetadata(ctx, tenant, storedReq)
-	if err != nil {
-		md = &tenantv1.SecretMetadata{
-			Name:          callerReq,
-			Category:      parseCategory(storedReq),
-			UpdatedAtUnix: s.now().UTC().Unix(),
-		}
-	}
-	return &tenantv1.RotateSecretResponse{Metadata: md}, nil
+	return &secretsv1.RotateSecretResponse{Metadata: s.buildMetadata(ctx, tenant, storedReq)}, nil
 }
 
 // DeleteSecret removes a secret and emits a secret_revoked audit event.
-func (s *SecretsAdminServer) DeleteSecret(ctx context.Context, req *tenantv1.DeleteSecretRequest) (*tenantv1.DeleteSecretResponse, error) {
+func (s *SecretsAdminServer) DeleteSecret(ctx context.Context, req *secretsv1.DeleteSecretRequest) (*secretsv1.DeleteSecretResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -403,13 +371,13 @@ func (s *SecretsAdminServer) DeleteSecret(ctx context.Context, req *tenantv1.Del
 		})
 	}
 
-	return &tenantv1.DeleteSecretResponse{}, nil
+	return &secretsv1.DeleteSecretResponse{}, nil
 }
 
 // GetMissionAudit returns the per-mission resolved-secret refs for the
 // dashboard's mission detail "Secrets accessed" panel. Refs only — never
 // values.
-func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.GetMissionAuditRequest) (*tenantv1.GetMissionAuditResponse, error) {
+func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *secretsv1.GetMissionAuditRequest) (*secretsv1.GetMissionAuditResponse, error) {
 	tenant, ok := auth.TenantFromContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
@@ -438,7 +406,7 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.
 		lastAt   time.Time
 		count    int32
 		installs map[string]struct{}
-		category tenantv1.SecretCategory
+		category secretsv1.SecretCategory
 	}
 	agg := map[string]*aggRow{}
 
@@ -484,13 +452,13 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.
 		}
 	}
 
-	out := make([]*tenantv1.MissionSecretAccess, 0, len(agg))
+	out := make([]*secretsv1.MissionSecretAccess, 0, len(agg))
 	for ref, row := range agg {
 		installs := make([]string, 0, len(row.installs))
 		for id := range row.installs {
 			installs = append(installs, id)
 		}
-		out = append(out, &tenantv1.MissionSecretAccess{
+		out = append(out, &secretsv1.MissionSecretAccess{
 			Ref:               ref,
 			Category:          row.category,
 			FirstAccessAtUnix: row.firstAt.Unix(),
@@ -511,7 +479,7 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.
 		}
 	}
 
-	return &tenantv1.GetMissionAuditResponse{
+	return &secretsv1.GetMissionAuditResponse{
 		Accesses:              out,
 		AggregationLagSeconds: lag,
 	}, nil
@@ -528,11 +496,7 @@ func (s *SecretsAdminServer) GetMissionAudit(ctx context.Context, req *tenantv1.
 //
 // Tenant secrets are stored colon-flat at the KV root, so the stored name is
 // already the caller-facing name; callerName is an identity normaliser.
-func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) (*tenantv1.SecretMetadata, error) {
-	if stored == "" {
-		return nil, errors.New("name must not be empty")
-	}
-
+func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.TenantID, stored string) *secretsv1.SecretMetadata {
 	cat := parseCategory(stored)
 	name := callerName(stored)
 
@@ -542,7 +506,7 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 		plugins = nil
 	}
 
-	return &tenantv1.SecretMetadata{
+	return &secretsv1.SecretMetadata{
 		Name:               name,
 		Category:           cat,
 		Version:            0,
@@ -552,7 +516,7 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 		UpdatedBy:          "",
 		LastAccessedAtUnix: 0,
 		PluginAssociations: plugins,
-	}, nil
+	}
 }
 
 // Tenant secrets are stored colon-flat at the KV root, keyed by
@@ -570,25 +534,25 @@ func (s *SecretsAdminServer) buildMetadata(ctx context.Context, tenant auth.Tena
 // SecretCategory enum value. Names that don't carry a recognised category
 // prefix are classified as SECRET_CATEGORY_UNSPECIFIED (rendered as
 // "uncategorised" in the dashboard).
-func parseCategory(name string) tenantv1.SecretCategory {
+func parseCategory(name string) secretsv1.SecretCategory {
 	switch {
 	case strings.HasPrefix(name, "cred:"):
-		return tenantv1.SecretCategory_SECRET_CATEGORY_CRED
+		return secretsv1.SecretCategory_SECRET_CATEGORY_CRED
 	case strings.HasPrefix(name, "provider_config:"):
-		return tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG
+		return secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG
 	default:
-		return tenantv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED
+		return secretsv1.SecretCategory_SECRET_CATEGORY_UNSPECIFIED
 	}
 }
 
 // categoryPrefix returns the colon-flat key prefix for a category enum value.
 // Used to convert ListSecrets category_filter into a broker List filter so
 // that only the correct category is scanned.
-func categoryPrefix(cat tenantv1.SecretCategory) string {
+func categoryPrefix(cat secretsv1.SecretCategory) string {
 	switch cat {
-	case tenantv1.SecretCategory_SECRET_CATEGORY_CRED:
+	case secretsv1.SecretCategory_SECRET_CATEGORY_CRED:
 		return "cred:"
-	case tenantv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
+	case secretsv1.SecretCategory_SECRET_CATEGORY_PROVIDER_CONFIG:
 		return "provider_config:"
 	default:
 		return ""
@@ -598,7 +562,7 @@ func categoryPrefix(cat tenantv1.SecretCategory) string {
 // storedName returns the broker key for a SetSecret request. Tenant secrets
 // are stored colon-flat at the KV root as "<category>:<name>". If the supplied
 // name already carries the category prefix it is returned as-is (idempotent).
-func storedName(cat tenantv1.SecretCategory, name string) string {
+func storedName(cat secretsv1.SecretCategory, name string) string {
 	prefix := categoryPrefix(cat)
 	if prefix == "" {
 		return name

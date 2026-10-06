@@ -77,11 +77,6 @@ type PluginInvokeService struct {
 	// logger is the structured logger for handler operations.
 	logger *slog.Logger
 
-	// deploymentShape is the untrusted-execution isolation policy (ADR-0110 /
-	// gibson#997), from GIBSON_UNTRUSTED_EXEC. The zero value (ShapeSetecOnly)
-	// fail-closes: an unwired service denies untrusted plugin invocation.
-	deploymentShape dispatchpolicy.DeploymentShape
-
 	// authorizer performs the per-plugin can_invoke FGA check (gibson#1245).
 	// PluginInvoke's registry rule derives its FGA object from the request's
 	// PluginName field (tenant_and_field('PluginName')), which ext-authz cannot
@@ -127,16 +122,14 @@ func (s *PluginInvokeService) installStanding(ctx context.Context, tenant, name 
 }
 
 // NewPluginInvokeService constructs a PluginInvokeService.
-// registry must not be nil. shape is the daemon's untrusted-execution
-// deployment shape; the zero value (ShapeSetecOnly) fail-closes.
-func NewPluginInvokeService(registry ComponentInstallRegistry, shape dispatchpolicy.DeploymentShape, logger *slog.Logger) *PluginInvokeService {
+// registry must not be nil.
+func NewPluginInvokeService(registry ComponentInstallRegistry, logger *slog.Logger) *PluginInvokeService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &PluginInvokeService{
-		registry:        registry,
-		logger:          logger.With("service", "PluginInvokeService"),
-		deploymentShape: shape,
+		registry: registry,
+		logger:   logger.With("service", "PluginInvokeService"),
 	}
 }
 
@@ -272,7 +265,7 @@ func (s *PluginInvokeService) PluginInvoke(
 				fmt.Sprintf("plugin %s: the placement of an install could not be read, try again", componentName),
 			), nil
 		}
-		if dispatchpolicy.Decide(placement, trust, false, s.deploymentShape) != dispatchpolicy.Deny {
+		if dispatchpolicy.Decide(placement, trust, false) != dispatchpolicy.Deny {
 			continue
 		}
 		s.logger.WarnContext(ctx, "PluginInvoke: denied untrusted plugin with no sandboxed dispatch",
@@ -281,7 +274,7 @@ func (s *PluginInvokeService) PluginInvoke(
 		)
 		return pluginErrorResponse(
 			pluginpb.PluginError_PLUGIN_ERROR_KIND_UNAUTHORIZED,
-			fmt.Sprintf("plugin %s is untrusted but has no sandboxed dispatch; GIBSON_UNTRUSTED_EXEC=setec-only forbids in-process execution", componentName),
+			fmt.Sprintf("plugin %s runs in the cluster, the catalog does not state it as trusted, and it has no sandboxed dispatch", componentName),
 		), nil
 	}
 

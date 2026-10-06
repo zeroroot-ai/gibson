@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,6 +53,17 @@ type SystemClient interface {
 	// ListInstanceDomains returns the domain strings currently registered on
 	// the instance.
 	ListInstanceDomains(ctx context.Context) ([]string, error)
+
+	// MintAdminToken mints a personal access token for the IAM_OWNER machine
+	// user userName of the default organization, and creates that user and its
+	// IAM_OWNER membership when they do not exist (gibson#794). The system
+	// user needs the System roles SYSTEM_OWNER and IAM_OWNER; no admin token
+	// has to exist before. It returns the user id and the token.
+	MintAdminToken(ctx context.Context, userName string, expires time.Time) (userID, pat string, err error)
+
+	// AdminTokenValid reports whether pat still authorizes an admin call. A
+	// refused token is (false, nil); a transport fault is an error.
+	AdminTokenValid(ctx context.Context, pat string) (bool, error)
 }
 
 // NewSystemClient constructs a SystemClient.
@@ -322,6 +334,12 @@ func (c *systemHTTPClient) ListInstanceDomains(ctx context.Context) ([]string, e
 // decodes the response into out (or discards when out==nil). Maps HTTP
 // status codes to the same sentinel errors used by the PAT-based client.
 func (c *systemHTTPClient) doJSON(ctx context.Context, token, method, path string, body, out any) error {
+	return c.doJSONOrg(ctx, token, "", method, path, body, out)
+}
+
+// doJSONOrg is doJSON with the organization of a Management API call in the
+// x-zitadel-orgid header. An empty orgID sends no header.
+func (c *systemHTTPClient) doJSONOrg(ctx context.Context, token, orgID, method, path string, body, out any) error {
 	var bodyReader io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -343,6 +361,9 @@ func (c *systemHTTPClient) doJSON(ctx context.Context, token, method, path strin
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if orgID != "" {
+		req.Header.Set("x-zitadel-orgid", orgID)
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -392,4 +413,97 @@ func isAlreadyExistsBody(err error) bool {
 	return strings.Contains(msg, "already exists") ||
 		strings.Contains(msg, "AlreadyExists") ||
 		strings.Contains(msg, "ALREADY_EXISTS")
+}
+
+// MintAdminToken implements SystemClient. Each step was proven on Zitadel
+// v4.19.4 with a system user that holds the System roles SYSTEM_OWNER and
+// IAM_OWNER (gibson#794).
+func (c *systemHTTPClient) MintAdminToken(
+	ctx context.Context, userName string, expires time.Time,
+) (userID, pat string, err error) {
+	if userName == "" {
+		return "", "", fmt.Errorf("zitadel system: MintAdminToken: user name is required: %w", ErrInvalidInput)
+	}
+	tok, err := c.token(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	var org struct {
+		Org struct {
+			ID string `json:"id"`
+		} `json:"org"`
+	}
+	if err := c.doJSON(ctx, tok, http.MethodGet, "/admin/v1/orgs/default", nil, &org); err != nil {
+		return "", "", fmt.Errorf("zitadel system: default org: %w", err)
+	}
+	if org.Org.ID == "" {
+		return "", "", fmt.Errorf("zitadel system: default org has no id: %w", ErrNotFound)
+	}
+	userID, err = c.ensureMachineUser(ctx, tok, org.Org.ID, userName)
+	if err != nil {
+		return "", "", err
+	}
+	member := map[string]any{"userId": userID, "roles": []string{"IAM_OWNER"}}
+	if err := c.doJSON(ctx, tok, http.MethodPost, "/admin/v1/members", member, nil); err != nil &&
+		!errors.Is(err, ErrAlreadyExists) && !isAlreadyExistsBody(err) {
+		return "", "", fmt.Errorf("zitadel system: IAM_OWNER membership of %s: %w", userName, err)
+	}
+	var minted struct {
+		Token string `json:"token"`
+	}
+	body := map[string]any{"expirationDate": expires.UTC().Format(time.RFC3339)}
+	if err := c.doJSONOrg(ctx, tok, org.Org.ID, http.MethodPost,
+		"/management/v1/users/"+url.PathEscape(userID)+"/pats", body, &minted); err != nil {
+		return "", "", fmt.Errorf("zitadel system: personal access token of %s: %w", userName, err)
+	}
+	if minted.Token == "" {
+		return "", "", fmt.Errorf("zitadel system: the personal access token of %s is empty: %w", userName, ErrInvalidInput)
+	}
+	return userID, minted.Token, nil
+}
+
+// ensureMachineUser returns the id of the machine user userName of the
+// organization orgID, and creates the user when it does not exist.
+func (c *systemHTTPClient) ensureMachineUser(ctx context.Context, tok, orgID, userName string) (string, error) {
+	search := map[string]any{"queries": []any{map[string]any{
+		"userNameQuery": map[string]any{"userName": userName, "method": "TEXT_QUERY_METHOD_EQUALS"},
+	}}}
+	var found struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if err := c.doJSONOrg(ctx, tok, orgID, http.MethodPost, "/management/v1/users/_search", search, &found); err != nil {
+		return "", fmt.Errorf("zitadel system: search user %s: %w", userName, err)
+	}
+	if len(found.Result) > 0 && found.Result[0].ID != "" {
+		return found.Result[0].ID, nil
+	}
+	create := map[string]any{"userName": userName, "name": userName, "accessTokenType": "ACCESS_TOKEN_TYPE_BEARER"}
+	var created struct {
+		UserID string `json:"userId"`
+	}
+	if err := c.doJSONOrg(ctx, tok, orgID, http.MethodPost, "/management/v1/users/machine", create, &created); err != nil {
+		return "", fmt.Errorf("zitadel system: create machine user %s: %w", userName, err)
+	}
+	if created.UserID == "" {
+		return "", fmt.Errorf("zitadel system: machine user %s has no id: %w", userName, ErrInvalidInput)
+	}
+	return created.UserID, nil
+}
+
+// AdminTokenValid implements SystemClient.
+func (c *systemHTTPClient) AdminTokenValid(ctx context.Context, pat string) (bool, error) {
+	if pat == "" {
+		return false, nil
+	}
+	err := c.doJSON(ctx, pat, http.MethodGet, "/admin/v1/orgs/default", nil, nil)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, ErrUnauthorized):
+		return false, nil
+	default:
+		return false, err
+	}
 }

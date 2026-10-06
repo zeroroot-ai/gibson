@@ -42,7 +42,7 @@ func TestScopeValidator_ExactDomainMatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -94,7 +94,7 @@ func TestScopeValidator_WildcardDomainMatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -141,7 +141,7 @@ func TestScopeValidator_BlockedPathExactMatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -193,7 +193,7 @@ func TestScopeValidator_BlockedPathWildcardMatch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -232,7 +232,7 @@ func TestScopeValidator_EmptyAllowedDomains(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -271,7 +271,7 @@ func TestScopeValidator_EmptyBlockedPaths(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 
@@ -294,7 +294,7 @@ func TestScopeValidator_InvalidURL(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "://invalid-url",
+			Connection: map[string]any{"url": "://invalid-url"},
 		},
 	}
 
@@ -315,7 +315,7 @@ func TestScopeValidator_MissingURL(t *testing.T) {
 
 	input := guardrail.GuardrailInput{
 		TargetInfo: &harness.TargetInfo{
-			URL: "",
+			Connection: map[string]any{"url": ""},
 		},
 	}
 
@@ -396,7 +396,7 @@ func TestScopeValidator_Combined(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			input := guardrail.GuardrailInput{
 				TargetInfo: &harness.TargetInfo{
-					URL: tt.url,
+					Connection: map[string]any{"url": tt.url},
 				},
 			}
 

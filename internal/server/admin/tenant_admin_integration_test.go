@@ -15,7 +15,7 @@ import (
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault"
 	"github.com/zeroroot-ai/gibson/internal/infra/secrets/vault/brokercodec"
-	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -200,9 +200,9 @@ func TestSetBrokerConfig_PersistAndReload_FullPath(t *testing.T) {
 	}
 
 	// Drive SetBrokerConfig with a vault candidate.
-	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	if _, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -268,9 +268,9 @@ func TestSetBrokerConfig_PersistFailure_NoReload_FullPath(t *testing.T) {
 	}
 
 	// Drive SetBrokerConfig — writer fails.
-	_, err = srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:   tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+	_, err = srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
 			Address:    "https://vault",
 			AuthMethod: "token",
 			VaultToken: []byte("hvs.xyz"),
@@ -320,7 +320,7 @@ func TestGetBrokerConfig_ReflectsActiveBackend(t *testing.T) {
 	ctx := withTenant(t, "acme")
 
 	// (1) Genuinely-unprovisioned tenant: no row → configured:false.
-	resp, err := srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	resp, err := srv.GetBrokerConfig(ctx, &secretsv1.GetBrokerConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetBrokerConfig(unprovisioned): %v", err)
 	}
@@ -343,22 +343,22 @@ func TestGetBrokerConfig_ReflectsActiveBackend(t *testing.T) {
 	}
 	getter.rows[tenant] = secrets.BrokerConfig{Provider: provider, ConfigBlob: blob}
 
-	resp, err = srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	resp, err = srv.GetBrokerConfig(ctx, &secretsv1.GetBrokerConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetBrokerConfig(seeded): %v", err)
 	}
 	if !resp.GetConfigured() {
 		t.Fatalf("seeded tenant must report configured:true, got %+v", resp)
 	}
-	if got := resp.GetConfig().GetProvider(); got != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
+	if got := resp.GetConfig().GetProvider(); got != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED {
 		t.Fatalf("seeded active backend: got %v, want VAULT_HOSTED", got)
 	}
 
 	// (3) Tenant switches to BYO via SetBrokerConfig; the write lands in the
 	// same store the reader sees, so the next read flips to VAULT_BYO.
-	if _, err := srv.SetBrokerConfig(ctx, &tenantv1.SetBrokerConfigRequest{
-		Candidate: &tenantv1.CandidateConfig{
-			Provider:        tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
+	if _, err := srv.SetBrokerConfig(ctx, &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:        secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO,
 			Address:         "https://byo-vault.example:8200",
 			NamespaceOrPath: "tenant/acme",
 			AuthMethod:      "token",
@@ -368,14 +368,14 @@ func TestGetBrokerConfig_ReflectsActiveBackend(t *testing.T) {
 		t.Fatalf("SetBrokerConfig(BYO): %v", err)
 	}
 
-	resp, err = srv.GetBrokerConfig(ctx, &tenantv1.GetBrokerConfigRequest{})
+	resp, err = srv.GetBrokerConfig(ctx, &secretsv1.GetBrokerConfigRequest{})
 	if err != nil {
 		t.Fatalf("GetBrokerConfig(after BYO): %v", err)
 	}
 	if !resp.GetConfigured() {
 		t.Fatalf("BYO tenant must report configured:true, got %+v", resp)
 	}
-	if got := resp.GetConfig().GetProvider(); got != tenantv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
+	if got := resp.GetConfig().GetProvider(); got != secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_BYO {
 		t.Fatalf("after BYO set: got %v, want VAULT_BYO", got)
 	}
 }

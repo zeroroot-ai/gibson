@@ -13,12 +13,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"reflect"
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
-	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	"github.com/zeroroot-ai/sdk/types"
@@ -76,9 +74,6 @@ type ComponentDiscovery interface {
 
 	// ListPlugins returns information about all registered plugins.
 	ListPlugins(ctx context.Context) ([]PluginInfo, error)
-
-	// DelegateToAgent executes a task on a remote agent via gRPC.
-	DelegateToAgent(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error)
 }
 
 // AgentInfo provides metadata about a registered agent.
@@ -486,116 +481,6 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 	for _, tracker := range pluginMap {
 		tracker.info.Health = aggregateHealth(tracker.healthyCount, tracker.unhealthyCount)
 		result = append(result, *tracker.info)
-	}
-	return result, nil
-}
-
-// DelegateToAgent discovers an agent and executes a task on it.
-func (a *RegistryAdapter) DelegateToAgent(ctx context.Context, name string, task agent.Task, harness agent.AgentHarness) (agent.Result, error) {
-	agentClient, err := a.DiscoverAgent(ctx, name)
-	if err != nil {
-		return agent.Result{}, err
-	}
-
-	grpcAgent, isGRPCAgent := agentClient.(*GRPCAgentClient)
-
-	if isGRPCAgent && a.callbackManager != nil {
-		var missionID, agentName string
-		var mission, target any
-
-		harnessVal := reflect.ValueOf(harness)
-
-		missionMethod := harnessVal.MethodByName("Mission")
-		if missionMethod.IsValid() {
-			results := missionMethod.Call(nil)
-			if len(results) > 0 {
-				mission = results[0].Interface()
-			}
-		}
-
-		targetMethod := harnessVal.MethodByName("Target")
-		if targetMethod.IsValid() {
-			results := targetMethod.Call(nil)
-			if len(results) > 0 {
-				target = results[0].Interface()
-			}
-		}
-
-		var missionRunID, agentRunID string
-		var runNumber int32
-		if mission != nil {
-			missionVal := reflect.ValueOf(mission)
-			if idField := missionVal.FieldByName("ID"); idField.IsValid() {
-				if stringMethod := idField.MethodByName("String"); stringMethod.IsValid() {
-					if results := stringMethod.Call(nil); len(results) > 0 {
-						missionID = results[0].String()
-					}
-				}
-			}
-			if f := missionVal.FieldByName("CurrentAgent"); f.IsValid() {
-				agentName = f.String()
-			}
-			if f := missionVal.FieldByName("MissionRunID"); f.IsValid() {
-				missionRunID = f.String()
-			}
-			if f := missionVal.FieldByName("AgentRunID"); f.IsValid() {
-				agentRunID = f.String()
-			}
-			if f := missionVal.FieldByName("RunNumber"); f.IsValid() && f.CanInt() {
-				runNumber = int32(f.Int())
-			}
-		}
-
-		if agentRunID == "" {
-			agentRunID = contextkeys.GetAgentRunID(ctx)
-		}
-
-		var registrationKey string
-		slog.Info("harness registration context",
-			"mission_id", missionID,
-			"agent_name", agentName,
-			"task_id", task.ID.String(),
-			"mission_run_id", missionRunID,
-			"agent_run_id", agentRunID,
-		)
-
-		if missionID != "" && agentName != "" {
-			registrationKey = a.callbackManager.RegisterHarnessForMission(missionID, agentName, harness)
-		} else {
-			registrationKey = a.callbackManager.RegisterHarnessForMission("", task.ID.String(), harness)
-		}
-
-		defer a.callbackManager.UnregisterHarness(registrationKey)
-
-		var token string
-		if a.authConfig != nil {
-			var err error
-			token, err = a.authConfig.GetToken()
-			if err != nil {
-				return agent.Result{}, fmt.Errorf("failed to get auth token: %w", err)
-			}
-		}
-
-		callbackInfo := &CallbackInfo{
-			Endpoint:     a.callbackManager.CallbackEndpoint(),
-			Token:        token,
-			Mission:      mission,
-			Target:       target,
-			MissionRunID: missionRunID,
-			AgentRunID:   agentRunID,
-			RunNumber:    runNumber,
-		}
-
-		result, err := grpcAgent.ExecuteWithCallback(ctx, task, callbackInfo)
-		if err != nil {
-			return agent.Result{}, fmt.Errorf("agent execution failed: %w", err)
-		}
-		return result, nil
-	}
-
-	result, err := agentClient.Execute(ctx, task, harness)
-	if err != nil {
-		return agent.Result{}, fmt.Errorf("agent execution failed: %w", err)
 	}
 	return result, nil
 }

@@ -46,8 +46,9 @@ const PROTO_ROOT = join(REPO_ROOT, 'internal/server/daemon/api');
 // daemon-local paths (e.g. the old gibson/user/v1/user.proto is now
 // gibson/tenant/v1/user.proto, and ListAuditEvents moved from tenant_admin.proto
 // to tenant.proto). These are MOVED-not-new RPCs with unchanged wire shape —
-// not new pagination violations. ListActiveGrants/ListSecrets were grandfathered
-// upstream in the SDK and carry the same legacy shape.
+// not new pagination violations. ListActiveGrants was grandfathered
+// upstream in the SDK and carries the same legacy shape. ListSecrets is now only
+// in the SDK (gibson.secrets.v1), so it has no entry here.
 const GRANDFATHER_LIST = [
   // Pre-existing daemon-local user service (unchanged by E6).
   { file: 'gibson/user/v1/user.proto',      method: 'ListAlerts' },
@@ -55,7 +56,6 @@ const GRANDFATHER_LIST = [
   // E6-rehomed tenant-admin services (new daemon-local paths).
   { file: 'gibson/tenant/v1/tenant.proto',  method: 'ListAuditEvents' },
   { file: 'gibson/tenant/v1/grants.proto',  method: 'ListActiveGrants' },
-  { file: 'gibson/tenant/v1/secrets.proto', method: 'ListSecrets' },
   { file: 'gibson/tenant/v1/user.proto',    method: 'ListAlerts' },
   { file: 'gibson/tenant/v1/user.proto',    method: 'ListConversations' },
 ];

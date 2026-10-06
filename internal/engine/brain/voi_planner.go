@@ -187,12 +187,6 @@ type VoIWorker struct {
 	registry  *ontology.BeliefSchemaRegistry
 	scorer    VoIScorer
 	topK      int
-	// catalog returns the mission's enrolled capability catalog (the same
-	// shape ExecutorDeps.Catalog supplies to DeciderWorker) — the set VoI
-	// dispatch gating's technique -> capability bridge resolves each
-	// candidate's CoveringCapabilities against (ADR-0135,
-	// gibson#387). Never nil (NewVoIWorker defaults it).
-	catalog func(missionID string) []Capability
 	// hierarchy is the taxonomy technique hierarchy a candidate's Technique
 	// rolls up through (gibson#379's TechniqueHierarchy.CategoryOf). Never
 	// nil (NewVoIWorker defaults it to taxonomy.GlobalTechniques, the same
@@ -213,11 +207,11 @@ type VoIWorker struct {
 // NewVoIWorker builds a worker. substrate is typically a WorldBeliefSubstrate
 // bound to the same eng (reputation/stake reads must see the live belief
 // field); scorer is typically ExactVoIScorer(); topK is typically
-// DefaultVoITopK. catalog may be nil (no capabilities offered, matching
-// NewDeciderWorker's own convention) — VoI dispatch gating then resolves no
-// covering capabilities for any candidate. hierarchy may be nil, which
-// defaults to taxonomy.GlobalTechniques. bamcp may be nil, which defaults to
-// NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig()) — the same
+// DefaultVoITopK. The worker reads the capability catalog of the mission from
+// eng (Engine.Capabilities), the same source that the Decider reads, so the
+// planner and the gate cannot disagree (ADR-0126, gibson#693). hierarchy may be
+// nil, which defaults to taxonomy.GlobalTechniques. bamcp may be nil, which
+// defaults to NewBAMCPPlanner(registry, nil, DefaultBAMCPConfig()) — the same
 // uninformative-prior cold start belief_slice_native.go uses until braintrain
 // (gibson#395) fits real per-edge-type posteriors.
 func NewVoIWorker(
@@ -226,13 +220,9 @@ func NewVoIWorker(
 	registry *ontology.BeliefSchemaRegistry,
 	scorer VoIScorer,
 	topK int,
-	catalog func(missionID string) []Capability,
 	hierarchy *taxonomy.TechniqueHierarchy,
 	bamcp *BAMCPPlanner,
 ) *VoIWorker {
-	if catalog == nil {
-		catalog = func(string) []Capability { return nil }
-	}
 	if hierarchy == nil {
 		hierarchy = taxonomy.GlobalTechniques
 	}
@@ -241,7 +231,7 @@ func NewVoIWorker(
 	}
 	return &VoIWorker{
 		eng: eng, substrate: substrate, registry: registry, scorer: scorer, topK: topK,
-		catalog: catalog, hierarchy: hierarchy, bamcp: bamcp,
+		hierarchy: hierarchy, bamcp: bamcp,
 	}
 }
 
@@ -306,8 +296,8 @@ func voiPlanCursor(w *World, missionID string) int {
 // Findings() precedent — tenant-wide, since Mission carries no ScopeID to
 // filter by), and the current attack graph (DeriveAttackGraph over
 // HostsToInfraGraph, gibson#275/#286's live-wiring machinery, reused
-// unchanged) — plus the mission's capability catalog and the technique
-// hierarchy (vw.catalog/vw.hierarchy), so PlanVoI can resolve each
+// unchanged) — plus the mission's capability catalog (Engine.Capabilities) and
+// the technique hierarchy (vw.hierarchy), so PlanVoI can resolve each
 // candidate's CoveringCapabilities (ADR-0135, gibson#387).
 func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
@@ -318,17 +308,64 @@ func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
 		Hypotheses:   vw.eng.Hypotheses(),
 		Graph:        graph,
 		Tenant:       vw.eng.World.Tenant,
-		Capabilities: vw.catalog(missionID),
+		Capabilities: vw.eng.Capabilities(missionID),
 		Hierarchy:    vw.hierarchy,
+
+		Budget:                vw.missionBudget(missionID),
+		DestructiveTechniques: destructiveTechniques(vw.eng.DomainPacks()),
 	}
+}
+
+// missionBudget reads the budget state of the mission from the World: the
+// limits of Mission.Budget, the dispatch attempts of the mission's work, and
+// its token count. These are the two numbers that BudgetSystem enforces
+// (budget.go), so the planner prices the same budget that stops the mission.
+// A mission that the World does not hold has no limit.
+func (vw *VoIWorker) missionBudget(missionID string) VoIBudget {
+	var b VoIBudget
+	for _, m := range vw.eng.Missions() {
+		if m.ID == missionID {
+			b.MaxExecutions = m.Budget.MaxExecutions
+			b.MaxTokens = m.Budget.MaxTokens
+			b.TokensUsed = m.TokensUsed
+			break
+		}
+	}
+	for _, wi := range vw.eng.Work() {
+		if wi.MissionID == missionID {
+			b.Executions += wi.Attempts
+		}
+	}
+	return b
+}
+
+// destructiveTechniques returns each technique whose predicate an enabled
+// Domain Pack marks as destructive (ADR-0132). When two packs bind the same
+// technique, one destructive mark is sufficient.
+func destructiveTechniques(packs []DomainPackSnapshot) map[string]bool {
+	var out map[string]bool
+	for _, pack := range packs {
+		for technique := range pack.Predicates {
+			if !pack.PredicateIsDestructive(technique) {
+				continue
+			}
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[technique] = true
+		}
+	}
+	return out
 }
 
 // WireVoIPlanner installs VoI planning against eng: VoIGateSystem must already
 // be registered as a System (ExecutorSystems, or a test's own AddSystem) —
 // this function only starts the off-tick worker and its drain loop, mirroring
 // WireExecutor/WireSliceBelief's ticker pattern exactly. interval <= 0 uses
-// TickInterval. catalog, hierarchy and bamcp are forwarded to NewVoIWorker
-// verbatim (all three may be nil; see its own doc comment).
+// TickInterval. hierarchy and bamcp are forwarded to NewVoIWorker verbatim (see
+// its doc comment). The capability catalog is the catalog of eng, which
+// WireExecutor sets. The order of the two Wire calls does not matter, because
+// the worker reads the catalog when it plans.
 func WireVoIPlanner(
 	ctx context.Context,
 	eng *Engine,
@@ -336,7 +373,6 @@ func WireVoIPlanner(
 	scorer VoIScorer,
 	topK int,
 	interval time.Duration,
-	catalog func(missionID string) []Capability,
 	hierarchy *taxonomy.TechniqueHierarchy,
 	bamcp *BAMCPPlanner,
 ) *VoIWorker {
@@ -344,7 +380,7 @@ func WireVoIPlanner(
 		interval = TickInterval
 	}
 	substrate := NewWorldBeliefSubstrate(eng)
-	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, catalog, hierarchy, bamcp)
+	worker := NewVoIWorker(eng, substrate, registry, scorer, topK, hierarchy, bamcp)
 	eng.Subscribe(worker.Tap)
 
 	go func() {

@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	"io"
 	"log/slog"
 	"net"
@@ -25,7 +26,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/reembed"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
@@ -64,6 +64,7 @@ import (
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	pluginpb "github.com/zeroroot-ai/sdk/api/gen/gibson/plugin/v1"
 	pluginadminv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
+	secretsv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/secrets/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
@@ -502,6 +503,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// unrestricted access (fail-closed, gibson#1052). EnvoyID is not bypassed
 		// — browser-path traffic always carries the ext-authz headers and must
 		// continue to do so (spiffeBypassDecision returns matched=false for it).
+		// A belief trainer identity of a tenant (ADR-0106, gibson#788) is not
+		// on the exact peer list: there is one for each tenant. It may call
+		// the two trainer methods only, and each handler checks its tenant.
+		if trainerAllow, terr := trainerBypassDecision(svid, method, d.trainerTrustDomain()); terr != nil {
+			return ctx, false, terr
+		} else if trainerAllow {
+			return auth.WithIdentity(ctx, spiffePeerIdentity(ctx, svid)), true, nil
+		}
 		allow, err := spiffeBypassDecision(svid, method, d.config.Auth.SPIFFE.AllowedPeerIDs, spiffeMethodAllowlist)
 		if err != nil {
 			return ctx, false, err
@@ -605,7 +614,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			}
 			allowed = append(allowed, id)
 		}
-		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source, tlsconfig.AuthorizeOneOf(allowed...))
+		tlsCfg := tlsconfig.MTLSServerConfig(x509Source, x509Source,
+			authorizePeersOrTrainers(tlsconfig.AuthorizeOneOf(allowed...), d.trainerTrustDomain()))
 		d.logger.Info(ctx, "SPIFFE mTLS pinned to allow-list",
 			"envoy_id", envoyID,
 			"additional_peer_ids", d.config.Auth.SPIFFE.AllowedPeerIDs,
@@ -1394,7 +1404,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			tenantv1.RegisterMembershipServiceServer(srv, admin.NewUnavailableMembershipServer())
 		}
 
-		// SecretsService (gibson.tenant.v1.SecretsService) — combined broker-config + CRUD
+		// SecretsService (gibson.secrets.v1.SecretsService) — combined broker-config + CRUD
 		if brokerStackOK && secretsStackOK {
 			secretsAdminSvc, saErr := admin.NewSecretsAdminServer(admin.SecretsAdminConfig{
 				Service:            d.secretsService,
@@ -1405,14 +1415,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			})
 			if saErr != nil {
 				d.logger.Warn(ctx, "SecretsService CRUD side not constructed; registering Unavailable stub", slog.String("error", saErr.Error()))
-				tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+				secretsv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
 			} else {
-				tenantv1.RegisterSecretsServiceServer(srv, admin.NewCombinedSecretsServer(tenantAdminSvc, secretsAdminSvc))
-				d.logger.Info(ctx, "registered gibson.tenant.v1.SecretsService gRPC endpoint")
+				secretsv1.RegisterSecretsServiceServer(srv, admin.NewCombinedSecretsServer(tenantAdminSvc, secretsAdminSvc))
+				d.logger.Info(ctx, "registered gibson.secrets.v1.SecretsService gRPC endpoint")
 			}
 		} else {
-			d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.tenant.v1.SecretsService")
-			tenantv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
+			d.logger.Warn(ctx, "secrets stack not initialised: registering Unavailable stub for gibson.secrets.v1.SecretsService")
+			secretsv1.RegisterSecretsServiceServer(srv, admin.NewUnavailableSecretsServer())
 		}
 
 		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
@@ -1477,6 +1487,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.connectorAuthSrv != nil {
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
 		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
+	}
+	// The two belief trainer RPCs (ADR-0106, gibson#788). Each one serves only
+	// the trainer identity of the tenant in the request.
+	if d.brainRegistry != nil {
+		daemonSvc.WithBeliefTrainer(d.brainRegistry, d.trainerTrustDomain())
 	}
 
 	// Register ConnectorService — the connector lifecycle (catalog, enable,
@@ -1569,6 +1584,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			d.logger.Warn(ctx, "JobService not registered", slog.String("error", jobErr.Error()))
 		} else {
 			jobpb.RegisterJobServiceServer(srv, jobSvc)
+			d.jobService = jobSvc
 			d.logger.Info(ctx, "registered gibson.job.v1.JobService gRPC endpoint")
 		}
 	} else {
@@ -1796,9 +1812,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				compRegistry,
 				compQueue,
 				d.logger.Slog(),
-				llmCompleterIface,   // LLMRegistryAdapter or nil
-				findingSubmitter,    // GraphRAGFindingSubmitter or nil
-				d.pluginAccessStore, // nil when no KeyProvider configured
+				llmCompleterIface,      // LLMRegistryAdapter or nil
+				findingSubmitter,       // GraphRAGFindingSubmitter or nil
+				d.componentAccessStore, // nil when no KeyProvider configured
 				auditLogger,
 			)
 
@@ -1992,11 +2008,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithComponentInstallRegistry(componentInstallRegistry)
 			d.logger.Info(ctx, "ComponentInstallRegistry wired into ComponentService (Postgres + Redis transient state)")
 
-			// Register PluginInvokeService on the same gRPC port. The deployment
-			// shape gates untrusted plugin invocation (ADR-0110 / gibson#997).
+			// Register PluginInvokeService on the same gRPC port.
 			pluginInvokeSvc := component.NewPluginInvokeService(
 				componentInstallRegistry,
-				dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
 				d.logger.WithComponent("plugin-invoke").Slog(),
 			)
 			// Wire the FGA authorizer so PluginInvoke makes the per-plugin
@@ -2672,38 +2686,37 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 			Error:         r.Error,
 			TraceID:       traceID,
 		}
+		if d.brainRegistry != nil {
+			if rw, ok := d.brainRegistry.For(tenant.String()).MissionRewind(r.MissionID.String()); ok {
+				runs[i].ParentMissionID = rw.ParentMissionID
+				runs[i].ParentCheckpointID = rw.ParentCheckpointID
+			}
+		}
 	}
 
 	d.logger.Debug(ctx, "mission history retrieved", "name", name, "count", len(runs), "total", total)
 	return runs, total, nil
 }
 
-// GetMissionCheckpoints returns all checkpoints for a mission.
-// Legacy checkpoint store removed (gibson#1117); returns empty list.
-func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpoints called (legacy checkpoint store removed)", "mission_id", missionID)
-	return []api.CheckpointData{}, nil
+// GetMissionCheckpoints returns the node ends of a mission run (ADR-0170).
+func (d *daemonImpl) GetMissionCheckpoints(ctx context.Context, missionID string) ([]api.MissionCheckpoint, error) {
+	if d.missionManager == nil {
+		return nil, status.Error(codes.Unavailable, "mission manager not initialized")
+	}
+	return d.missionManager.Checkpoints(ctx, missionID)
 }
 
-// GetMissionCheckpointPayload returns the checkpoint payload for the given (mission, checkpoint) pair.
-// Legacy checkpoint store removed (gibson#1117); returns not-found.
-func (d *daemonImpl) GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*api.CheckpointData, error) {
-	d.logger.Debug(ctx, "GetMissionCheckpointPayload called (legacy checkpoint store removed)",
-		"mission_id", missionID,
-		"checkpoint_id", checkpointID,
+// RewindMission starts a new mission run at a checkpoint of an earlier run
+// (ADR-0170). It returns the id of the new run.
+func (d *daemonImpl) RewindMission(ctx context.Context, req api.RewindRequest) (string, error) {
+	if d.missionManager == nil {
+		return "", status.Error(codes.Unavailable, "mission manager not initialized")
+	}
+	d.logger.Info(ctx, "RewindMission called",
+		"mission_id", req.MissionID,
+		"checkpoint_id", req.CheckpointID,
 	)
-	return nil, fmt.Errorf("checkpoint %s not found for mission %s: not found", checkpointID, missionID)
-}
-
-// RewindMission rewinds the mission's state to the target checkpoint.
-// Legacy checkpoint store removed (gibson#1117); returns not-found.
-func (d *daemonImpl) RewindMission(ctx context.Context, missionID, targetCheckpointID string) (string, error) {
-	d.logger.Info(ctx, "RewindMission called (legacy checkpoint store removed)",
-		"mission_id", missionID,
-		"target_checkpoint_id", targetCheckpointID,
-	)
-	return "", fmt.Errorf("target checkpoint %s not found for mission %s: not found",
-		targetCheckpointID, missionID)
+	return d.missionManager.Rewind(ctx, req)
 }
 
 // BuildComponent is not supported; component store has been removed.
@@ -3283,4 +3296,36 @@ func (d *daemonImpl) UpdateMissionDefinition(ctx context.Context, req api.Update
 	return api.UpdateMissionDefinitionResultData{
 		MissionDefinitionID: existingID,
 	}, nil
+}
+
+// trainerTrustDomain is the trust domain in which the daemon accepts a belief
+// trainer identity: the trust domain of the install. It is zero when SPIFFE is
+// not configured.
+func (d *daemonImpl) trainerTrustDomain() spiffeid.TrustDomain {
+	if d.config == nil || d.config.Auth.SPIFFE == nil {
+		return spiffeid.TrustDomain{}
+	}
+	td, err := spiffeid.TrustDomainFromString(d.config.Auth.SPIFFE.TrustDomain)
+	if err != nil {
+		return spiffeid.TrustDomain{}
+	}
+	return td
+}
+
+// authorizePeersOrTrainers accepts a TLS peer that peers accepts, or a belief
+// trainer identity spiffe://<td>/trainer/<tenant> of the trust domain td
+// (gibson#788). There is one trainer identity for each tenant, so an exact
+// list cannot hold them. The method policy and the handlers limit a trainer
+// to the two trainer RPCs of its own tenant.
+func authorizePeersOrTrainers(peers tlsconfig.Authorizer, td spiffeid.TrustDomain) tlsconfig.Authorizer {
+	return func(id spiffeid.ID, chains [][]*x509.Certificate) error {
+		if err := peers(id, chains); err == nil {
+			return nil
+		} else if td.IsZero() {
+			return err
+		} else if _, ok := trainerid.Tenant(id, td); !ok {
+			return err
+		}
+		return nil
+	}
 }

@@ -107,7 +107,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 		httpDiscard = "HTTP helper: out=nil means discard body (caller convention, not dep)"
 		ctorGuard   = "client constructor guard; reassert with constructor-inversion slice"
 		k8sShape    = "k8s API may return nil map/slice; map-shape guard, not dep"
-		veleroOpt   = "FinalBackup tenant-spec style; predates Velero-always-on"
 		ctrlShim    = "controller-runtime cleanup-only reconcile tolerates nil"
 		applyShim   = "ApplyOpts helper accepts nil dst as no-op"
 		emitterOpt  = "emitter optional in early-boot; emitter-required follow-up"
@@ -128,10 +127,6 @@ func TestNoGracefulNilInRequestPaths(t *testing.T) {
 	// "known-tolerated defensive guards" list that is acceptable — arguably
 	// better, since you stop re-litigating the same pattern per occurrence.
 	requestPathAllowlist := map[string]string{
-		// FinalBackup — VeleroEnabled is a spec/cluster-topology flag, not a
-		// dep-nil. K8sClient is always set from mgr. Delete after Velero-always-on.
-		"internal/saga/flows/final_backup.go :: if s.deps.K8sClient == nil || !s.deps.VeleroEnabled { ... }": veleroOpt,
-
 		// internal/dataplane/pipeline.go — sub-client optionality within the
 		// pipeline provisioner; each sub-client (Postgres, Neo4j, Redis, Vector,
 		// KEK) is optional by design. Follow-up: make each required after the

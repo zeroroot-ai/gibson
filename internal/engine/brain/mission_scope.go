@@ -94,6 +94,10 @@ func eventInMission(ev Event, missionID string, owned map[string]bool) bool {
 		return e.ID == missionID
 	case MissionDone:
 		return e.ID == missionID
+	case MissionRewound:
+		return e.MissionID == missionID
+	case MissionOriginated:
+		return e.MissionID == missionID
 	case WorkDispatched:
 		return e.MissionID == missionID
 	case WorkRetried:

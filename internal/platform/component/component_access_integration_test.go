@@ -84,7 +84,7 @@ func newIntegrationStore(t *testing.T, registry ComponentRegistry) *RedisCompone
 		Level: slog.LevelError,
 	}))
 
-	return NewRedisPluginAccessStore(
+	return NewRedisComponentAccessStore(
 		client,
 		crypto.NewAESGCMEncryptor(),
 		newStaticKeyProvider(),
@@ -187,7 +187,7 @@ func Test_SystemPluginEnableQueryFlow(t *testing.T) {
 
 // Test_SelfHostedPluginAutoAccess registers a tenant-scoped plugin in the
 // registry, calls EnableSelfHosted, and verifies:
-//   - The plugin appears in ListTenantPlugins with source="self-hosted"
+//   - The plugin appears in ListTenantAccess with source="self-hosted"
 //   - GetAccess returns a valid record
 //   - A second EnableSelfHosted call is idempotent (no duplicate records)
 func Test_SelfHostedPluginAutoAccess(t *testing.T) {
@@ -212,19 +212,19 @@ func Test_SelfHostedPluginAutoAccess(t *testing.T) {
 	access, err := store.GetAccess(ctx, "tenant-a", "custom-scanner")
 	require.NoError(t, err)
 	assert.Equal(t, "tenant-a", access.TenantID)
-	assert.Equal(t, "custom-scanner", access.PluginName)
+	assert.Equal(t, "custom-scanner", access.ComponentName)
 	assert.True(t, access.Enabled)
 	assert.Equal(t, "self-hosted", access.Source)
 	assert.False(t, access.HasConfig)
 
-	// ListTenantPlugins must include the self-hosted record with correct source.
-	plugins, err := store.ListTenantPlugins(ctx, "tenant-a")
+	// ListTenantAccess must include the self-hosted record with correct source.
+	plugins, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 	assert.Contains(t, pluginAccessNames(plugins), "custom-scanner")
 
 	var found *ComponentAccess
 	for i := range plugins {
-		if plugins[i].PluginName == "custom-scanner" {
+		if plugins[i].ComponentName == "custom-scanner" {
 			found = &plugins[i]
 			break
 		}
@@ -234,11 +234,11 @@ func Test_SelfHostedPluginAutoAccess(t *testing.T) {
 
 	// Second call must be idempotent — still exactly one record.
 	require.NoError(t, store.EnableSelfHosted(ctx, "tenant-a", "custom-scanner"))
-	plugins2, err := store.ListTenantPlugins(ctx, "tenant-a")
+	plugins2, err := store.ListTenantAccess(ctx, "tenant-a")
 	require.NoError(t, err)
 	count := 0
 	for _, p := range plugins2 {
-		if p.PluginName == "custom-scanner" {
+		if p.ComponentName == "custom-scanner" {
 			count++
 		}
 	}

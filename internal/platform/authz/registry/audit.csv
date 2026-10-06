@@ -80,6 +80,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.operator.v1.DaemonOperatorService/AckTenantProvisioned,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/EmitAuditEvent,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/EnqueueTenantProvisioning,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
@@ -89,6 +90,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.operator.v1.DaemonOperatorService/SeedCatalogTenantEnabled,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SetAgentEnrollmentLimits,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/SetTenantZitadelOrg,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/StoreBeliefArtifact,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/UpsertTenantQuota,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/WriteAccessTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.v1.DaemonService/BuildComponent,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -101,6 +103,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/GetAgentStatus,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetCapabilityManifest,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetComponentLogs,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/GetMissionCheckpoints,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionDefinition,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionGraph,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/GetMissionHistory,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -122,6 +125,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.v1.DaemonService/RenderCatalogMission,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/RenewCapabilityGrant,member,tenant,tenant_from_identity,COMPONENT,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ResumeMission,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
+/gibson.daemon.v1.DaemonService/RewindMission,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/RunMission,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/SaveMissionLayout,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
 /gibson.daemon.v1.DaemonService/ShowComponent,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/v1/daemon.proto,rule
@@ -310,16 +314,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.ProviderService/SetDefaultProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/TestProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
 /gibson.tenant.v1.ProviderService/UpdateProvider,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/provider.proto,rule
-/gibson.tenant.v1.SecretsService/CountSecrets,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/DeleteSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/GetBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/GetMissionAudit,member,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/GetSecret,member,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/ListSecrets,member,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/ProbeBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/RotateSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/SetBrokerConfig,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
-/gibson.tenant.v1.SecretsService/SetSecret,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/secrets.proto,rule
 /gibson.tenant.v1.SignupService/AttachSignupCustomer,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/RedeemEmailVerification,,,,,gibson/tenant/v1/signup.proto,unauthenticated
 /gibson.tenant.v1.SignupService/Register,,,,,gibson/tenant/v1/signup.proto,unauthenticated

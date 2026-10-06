@@ -146,7 +146,7 @@ func verifierAgainst(t *testing.T, keysURL string, clientSource *staticSource) *
 	t.Setenv("EXT_AUTHZ_DAEMON_SVID", testDaemonSVID)
 	t.Setenv("EXT_AUTHZ_CGJWT_ISSUER", "https://api.zeroroot.ai")
 
-	dispatch, component, err := buildCGVerifiers(discardLogger(), clientSource, clientSource)
+	dispatch, component, err := buildCGVerifiers(discardLogger(), clientSource, clientSource, testReplayStore(t))
 	if err != nil {
 		t.Fatalf("buildCGVerifiers: %v", err)
 	}
@@ -168,7 +168,7 @@ func TestCGVerifiers_DisabledTogether(t *testing.T) {
 	extAuthz := newStaticSource(t, ca, mustSPIFFEID(t, testExtAuthzSVID), ca)
 
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "")
-	dispatch, component, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz)
+	dispatch, component, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz, testReplayStore(t))
 	if err != nil {
 		t.Fatalf("buildCGVerifiers with the keys URL unset: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestCGVerifiers_PropagateTransportFailure(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "http://gibson:8085/capabilitygrant/v1/keys")
 	t.Setenv("EXT_AUTHZ_DAEMON_SVID", testDaemonSVID)
 
-	if _, _, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz); err == nil {
+	if _, _, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz, testReplayStore(t)); err == nil {
 		t.Fatal("buildCGVerifiers accepted a plaintext keys URL")
 	}
 }
@@ -203,7 +203,7 @@ func TestCGVerifiers_PropagateDispatchFailure(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_DAEMON_SVID", testDaemonSVID)
 	t.Setenv("EXT_AUTHZ_CGJWT_ISSUER", "")
 
-	_, _, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz)
+	_, _, err := buildCGVerifiers(discardLogger(), extAuthz, extAuthz, testReplayStore(t))
 	if err == nil {
 		t.Fatal("buildCGVerifiers accepted a dispatch verifier with no pinned issuer")
 	}
@@ -376,7 +376,7 @@ func TestVerifiersRefuseUnpinnedTransport(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_CGJWT_KEYS_URL", "https://gibson:8086/capabilitygrant/v1/keys")
 	t.Setenv("EXT_AUTHZ_CGJWT_ISSUER", "https://api.zeroroot.ai")
 
-	if v, err := buildComponentVerifier(discardLogger(), nil); err == nil {
+	if v, err := buildComponentVerifier(discardLogger(), nil, testReplayStore(t)); err == nil {
 		t.Fatalf("buildComponentVerifier = %v, nil — a nil transport must not be defaulted", v)
 	}
 	if v, err := buildCGVerifier(discardLogger(), nil); err == nil {

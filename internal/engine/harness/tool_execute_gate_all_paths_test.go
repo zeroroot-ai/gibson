@@ -13,7 +13,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -27,7 +26,7 @@ import (
 // it is found in the manifest catalog, the component registry or the registry
 // adapter, and whether the call is unary or streaming.
 //
-// Each test uses a TRUSTED component under the setec-only shape, so the trust
+// Each test uses a TRUSTED component, so the trust
 // gate would let the call through. The execute gate is the only thing that
 // can refuse it.
 
@@ -35,7 +34,7 @@ import (
 // component registry, for a tenant that did not enable it, is refused and no
 // dispatch path is reached.
 func TestExecuteGate_RegistryTool_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	deny := &recordingAuthorizer{allow: false}
 	h.componentAuthorizer = deny
 
@@ -58,7 +57,7 @@ func TestExecuteGate_RegistryTool_RefusedWhenNotEnabled(t *testing.T) {
 // registry adapter knows (no component registry at all) is refused the same
 // way. This is the last dispatch path.
 func TestExecuteGate_AdapterOnlyTool_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	h.componentRegistry = nil
 	h.componentAuthorizer = &recordingAuthorizer{allow: false}
 
@@ -77,7 +76,7 @@ func TestExecuteGate_AdapterOnlyTool_RefusedWhenNotEnabled(t *testing.T) {
 // TestExecuteGate_Stream_RefusedWhenNotEnabled: the streaming harness call is
 // another road to the same tool, and it is refused before any lookup.
 func TestExecuteGate_Stream_RefusedWhenNotEnabled(t *testing.T) {
-	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+	h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 	h.componentAuthorizer = &recordingAuthorizer{allow: false}
 
 	err := h.CallToolProtoStream(callerCtx(t, "user-42", "acme"), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}, nil)
@@ -116,7 +115,7 @@ func TestExecuteGate_FailsClosedOnEveryPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED, dispatchpolicy.ShapeSetecOnly)
+			h, spy := newNoFallbackHarness(t, componentpb.ContentTrust_CONTENT_TRUST_TRUSTED)
 			h.componentAuthorizer = tc.az
 
 			if err := h.CallToolProto(tc.ctx(t), "acme-registry-tool", wrapperspb.String("in"), &wrapperspb.StringValue{}); err == nil {

@@ -72,7 +72,7 @@ var Manifest = []CriticalPath{
 		Purpose: "Provisioning saga steps are idempotent on re-run and have a rollback/teardown path.",
 		Tests: []CoveringTest{
 			{Dir: "operators/tenant/internal/saga/flows", Func: "TestInitRedisStep_Idempotent"},
-			{Dir: "operators/tenant/internal/saga/flows", Func: "TestFinalBackupStep_IdempotentCompletedBackup"},
+			{Dir: "operators/tenant/internal/finalbackup", Func: "TestEnsure_OneBackupForEachDelete"},
 			{Dir: "operators/tenant/internal/saga/flows", Func: "TestEnrollmentRevocationSteps_RegistryContract"},
 		},
 	},

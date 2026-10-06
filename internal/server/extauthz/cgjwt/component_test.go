@@ -94,6 +94,7 @@ func newComponentVerifier(t *testing.T, base string) *ComponentVerifier {
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{testAudience},
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
+		ReplayStore:       newTestReplayStore(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -274,6 +275,7 @@ func TestComponentVerify_AudiencePinned(t *testing.T) {
 		TTL:               time.Minute,
 		ExpectedAudiences: []string{"https://daemon/expected"},
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
+		ReplayStore:       newTestReplayStore(t),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -330,6 +332,7 @@ func TestNewComponentVerifier_RequiresAudiences(t *testing.T) {
 				KeysBaseURL:       "https://daemon/capabilitygrant/v1/keys",
 				ExpectedAudiences: auds,
 				HTTPClient:        &http.Client{Timeout: 5 * time.Second},
+				ReplayStore:       newTestReplayStore(t),
 			})
 			if err == nil {
 				t.Fatal("NewComponentVerifier accepted an empty audience pin; it must fail closed")
@@ -354,6 +357,7 @@ func TestComponentVerify_AudienceListIsOredNotOverwritten(t *testing.T) {
 		TTL:               time.Minute,
 		ExpectedAudiences: auds,
 		HTTPClient:        &http.Client{Timeout: 5 * time.Second},
+		ReplayStore:       newTestReplayStore(t),
 	})
 	if err != nil {
 		t.Fatal(err)

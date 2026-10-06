@@ -15,7 +15,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
@@ -107,7 +106,6 @@ func newSandboxDelegateHarness(
 		componentRegistry:       &gateFakeRegistry{tenantInstances: instances},
 		workQueue:               q,
 		componentAuthorizer:     &recordingAuthorizer{allow: true},
-		deploymentShape:         dispatchpolicy.ShapeSetecOnly,
 		agentLauncher:           launcher,
 		agentLaunchSpecResolver: resolver,
 		cgMinter:                minter,
@@ -178,7 +176,7 @@ func TestDelegateToAgent_UntrustedWithLauncher_Launches(t *testing.T) {
 }
 
 // TestDelegateToAgent_UntrustedNoLauncher_Denied is the fail-closed control:
-// an untrusted agent with NO launcher wired is denied under setec-only and
+// an untrusted agent with NO launcher wired is denied and
 // nothing is enqueued.
 func TestDelegateToAgent_UntrustedNoLauncher_Denied(t *testing.T) {
 	q := successResultQueue(t)

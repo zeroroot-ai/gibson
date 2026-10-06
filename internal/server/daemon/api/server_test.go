@@ -34,9 +34,8 @@ type mockDaemon struct {
 	pauseMissionFn            func(ctx context.Context, missionID string, force bool) error
 	resumeMissionFn           func(ctx context.Context, missionID string) error
 	getMissionHistoryFn       func(ctx context.Context, name string, limit int, offset int) ([]MissionRunData, int, error)
-	getMissionCheckpointsFn   func(ctx context.Context, missionID string) ([]CheckpointData, error)
-	getCheckpointPayloadFn    func(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error)
-	rewindMissionFn           func(ctx context.Context, missionID, targetCheckpointID string) (string, error)
+	getMissionCheckpointsFn   func(ctx context.Context, missionID string) ([]MissionCheckpoint, error)
+	rewindMissionFn           func(ctx context.Context, req RewindRequest) (string, error)
 	buildComponentFn          func(ctx context.Context, kind string, name string) (BuildComponentResult, error)
 	showComponentFn           func(ctx context.Context, kind string, name string) (ComponentInfoInternal, error)
 	getComponentLogsFn        func(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan LogEntryData, error)
@@ -152,23 +151,16 @@ func (m *mockDaemon) GetMissionHistory(ctx context.Context, name string, limit i
 	return nil, 0, nil
 }
 
-func (m *mockDaemon) GetMissionCheckpoints(ctx context.Context, missionID string) ([]CheckpointData, error) {
+func (m *mockDaemon) GetMissionCheckpoints(ctx context.Context, missionID string) ([]MissionCheckpoint, error) {
 	if m.getMissionCheckpointsFn != nil {
 		return m.getMissionCheckpointsFn(ctx, missionID)
 	}
 	return nil, nil
 }
 
-func (m *mockDaemon) GetMissionCheckpointPayload(ctx context.Context, missionID, checkpointID string) (*CheckpointData, error) {
-	if m.getCheckpointPayloadFn != nil {
-		return m.getCheckpointPayloadFn(ctx, missionID, checkpointID)
-	}
-	return nil, nil
-}
-
-func (m *mockDaemon) RewindMission(ctx context.Context, missionID, targetCheckpointID string) (string, error) {
+func (m *mockDaemon) RewindMission(ctx context.Context, req RewindRequest) (string, error) {
 	if m.rewindMissionFn != nil {
-		return m.rewindMissionFn(ctx, missionID, targetCheckpointID)
+		return m.rewindMissionFn(ctx, req)
 	}
 	return "", nil
 }

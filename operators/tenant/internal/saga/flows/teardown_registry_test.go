@@ -99,7 +99,6 @@ func TestTeardownSteps_NamesStableContract(t *testing.T) {
 	// retained teardown saga owns only the foundation cleanup with no
 	// owning sub-CRD.
 	want := []string{
-		"FinalNeo4jBackup",
 		"DeleteTenantName",
 		"DeleteRedisKeyspace",
 	}

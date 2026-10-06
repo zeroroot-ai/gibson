@@ -16,7 +16,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
@@ -67,7 +66,6 @@ func newLookupHarness(reg component.ComponentRegistry) *DefaultAgentHarness {
 		logger:            slog.New(slog.NewTextHandler(noopWriter{}, nil)),
 		tracer:            noop.NewTracerProvider().Tracer("test"),
 		componentRegistry: reg,
-		deploymentShape:   dispatchpolicy.ShapeSetecOnly,
 	}
 }
 
@@ -76,7 +74,7 @@ func newLookupHarness(reg component.ComponentRegistry) *DefaultAgentHarness {
 
 // TestCallToolProto_UntrustedWithNoSandboxedDispatch_Denied: a tool with no
 // kind:tool manifest has no sandboxed dispatch (ADR-0117). When such a tool is
-// UNTRUSTED, every remaining path runs it in-process, so under setec-only the
+// UNTRUSTED, every remaining path runs it in-process, so the
 // call is denied rather than continued — even though a direct gRPC endpoint is
 // registered and would otherwise have been selected.
 func TestCallToolProto_UntrustedWithNoSandboxedDispatch_Denied(t *testing.T) {

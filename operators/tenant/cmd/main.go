@@ -52,6 +52,7 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	dataplaneclient "github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane/client"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/finalbackup"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
@@ -776,10 +777,20 @@ func main() {
 		dataplane.NewProductionVersionReader(os.Getenv("DATAPLANE_PG_ADMIN_DSN"), mgr.GetClient()),
 	)
 
+	// The last backup of a tenant delete (ADR-0075). VELERO_NAMESPACE is
+	// required: no switch turns the backup off, so an operator with no Velero
+	// namespace must not start.
+	finalBackup, err := finalbackup.New(mgr.GetClient(), os.Getenv("VELERO_NAMESPACE"))
+	if err != nil {
+		setupLog.Error(err, "VELERO_NAMESPACE is required: the tenant delete flow takes a last Velero backup")
+		os.Exit(1)
+	}
+
 	if err := (&controller.TenantReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
+		FinalBackup:       finalBackup,
 		ProvisionSteps:    provisionSteps,
 		TeardownSteps:     teardownSteps,
 		Deps:              psagaDeps,

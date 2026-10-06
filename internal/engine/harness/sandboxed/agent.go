@@ -118,6 +118,9 @@ type AgentLaunchSpec struct {
 	// exactly these targets. Build it from a manifest egressAllow ceiling with
 	// EgressRulesFromAllow.
 	Egress []EgressRule
+	// NetworkMode, when set, is the network mode of the launch. It carries
+	// the network scope of the mission node (gibson#865).
+	NetworkMode string
 	// Model is the model string resolved for the tenant at dispatch. Injected
 	// as GIBSON_MODEL so the signed manifest never goes stale as models ship.
 	Model string
@@ -255,7 +258,7 @@ type AgentLauncherConfig struct {
 // NewAgentLauncher constructs an AgentLauncher. It returns a clear error on
 // misconfiguration so the daemon can log a warning and continue without
 // sandboxed agent dispatch (the harness then denies untrusted agents
-// fail-closed under setec-only).
+// fail-closed).
 func NewAgentLauncher(cfg AgentLauncherConfig) (*AgentLauncher, error) {
 	if cfg.Client == nil {
 		return nil, errors.New("sandboxed.NewAgentLauncher: Client is required")
@@ -335,6 +338,7 @@ func (l *AgentLauncher) LaunchAgent(ctx context.Context, spec AgentLaunchSpec, d
 		SandboxClass: class,
 		Timeout:      runTimeout + killGrace,
 		Egress:       spec.Egress,
+		NetworkMode:  spec.NetworkMode,
 	})
 	launchSpan.End()
 	if err != nil {

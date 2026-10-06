@@ -43,3 +43,8 @@ jobs:
 
   exit-tests-off-pr:
     uses: zeroroot-ai/.github/.github/workflows/exit-tests-off-pr.yml@53a2406de391869c35d5cf5b851a21b80185ff48 # v0.14.0
+
+  # Each ADR citation names a live ADR of the public index docs/adr-index.md,
+  # a copy of the file in zeroroot-ai/gibson (gibson#740, ADR-0068).
+  adr-citations:
+    uses: zeroroot-ai/.github/.github/workflows/adr-citations.yml@5d38e1f714d47b502cf18709a7d5e63430155f62 # v0.16.0

@@ -102,7 +102,7 @@ func TestLoadDomainPack_MainCatalogPackEvaluates(t *testing.T) {
 // mustMainPack returns the main pack from the embedded catalog.
 func mustMainPack(t *testing.T) ontology.DomainPack {
 	t.Helper()
-	p, ok := ontology.EmbeddedPack(ontology.MainDomainPackName)
+	p, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
 	if !ok {
 		t.Fatal("the embedded catalog must hold the main pack")
 	}

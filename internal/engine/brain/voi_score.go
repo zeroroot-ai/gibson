@@ -10,36 +10,48 @@ import "math"
 // risk cost) × reputation × stake — for a SINGLE candidate move, computed
 // exactly (no sampling), never a multi-step lookahead.
 //
-// ADR-0126 calls for full multi-step BAMCP (Bayes-Adaptive Monte Carlo
-// Planning, Thompson-sampled, fully Bayesian, no UCB) because exact
-// enumeration of a multi-step plan tree is intractable. This package does NOT
-// implement that tree search: it computes each candidate's value exactly for
-// the CURRENT belief state, and "sequential planning" is achieved by
-// recomputing it every cycle as evidence changes (voi_plan.go's gate/worker,
-// mirroring decider.go's own off-tick re-evaluation loop) — a receding
-// one-step horizon rather than an internal search tree. This is a deliberate
-// scope decision, not an oversight: a genuine BAMCP implementation needs a
-// generative belief-network simulator and a consumable Dirichlet-over-CPT
-// posterior from braintrain, neither of which exists as data the Go daemon
-// can read yet. VoIScorer is the seam a future planner (or Jev, ADR-0126's own
-// "not yet" note) plugs into without disturbing the gate/worker around it.
+// The multi-step part is the BAMCP planner in bamcp.go. It starts from the
+// one-step values of this file and grows a search tree over them. VoIScorer is
+// the seam a different scorer plugs into without a change to the gate or the
+// worker around it.
+//
+// The two costs come from the mission (gibson#695, ADR-0126):
+//
+//   - The resource cost scales with the budget that the mission has left. A
+//     mission with its full budget pays the base cost. A mission that spent a
+//     part of its budget pays the base cost divided by the part that is left.
+//   - The risk cost is higher for a candidate that the code marks as
+//     destructive: a hypothesis whose technique has a destructive predicate in
+//     an enabled Domain Pack (ADR-0132).
 
-// Tunable constants. Costs and priors are simple, documented placeholders
-// pending real integration with BudgetSystem (resource cost) and a RoE/
-// blast-radius model (risk cost) — neither exists as a consumable cost
-// function in this codebase yet. Reputation and stake priors are the
-// "optimism under uncertainty" ADR-0126 calls for: no data yet means
-// "do not penalize", not "assume the worst" — VoI must be able to DRIVE a
-// fleet's first bet on a hypothesis, not merely re-rank already-staked ones.
+// Tunable constants. Reputation and stake priors are the "optimism under
+// uncertainty" ADR-0126 calls for: no data yet means "do not penalize", not
+// "assume the worst" — VoI must be able to DRIVE a fleet's first bet on a
+// hypothesis, not merely re-rank already-staked ones.
 const (
 	// DefaultVoITopK is the default number of top-ranked candidates VoIPlan
 	// keeps (ADR-0126: "VoI gates to top-k").
 	DefaultVoITopK = 10
 
+	// The base costs are the costs of a mission with its full budget and a
+	// candidate with no destructive mark.
 	voiEvidenceMoveResourceCost   = 1.0 // an evidence move is the cheapest action
 	voiHypothesisTestResourceCost = 2.0 // pursuing a hypothesis is an active probe/bet
 	voiEvidenceMoveRiskCost       = 0.5
 	voiHypothesisTestRiskCost     = 1.0
+
+	// voiDestructiveRiskMultiplier scales the risk cost of a candidate with
+	// the destructive mark. 4 puts the risk of a destructive test above its
+	// resource cost at a full budget, so the planner prefers a test with no
+	// mark unless the destructive one gives clearly more information.
+	voiDestructiveRiskMultiplier = 4.0
+
+	// voiMaxBudgetSpent caps the spent part of the budget that the resource
+	// cost uses. The resource cost is the base cost divided by the part that
+	// is left, so the cap keeps the cost finite: at most 20 times the base.
+	// BudgetSystem stops a mission that passes its budget. The planner only
+	// prices the approach to that limit.
+	voiMaxBudgetSpent = 0.95
 
 	// voiNeutralReputationPrior is used when a candidate names no resolvable
 	// technique×environment key yet (every candidate, today — see voi_plan.go).
@@ -50,6 +62,32 @@ const (
 	// maximal uncertainty (no bet has narrowed it at all).
 	voiUnstakedConfidence = 0.5
 )
+
+// VoIBudget is the budget state of one mission, as the planner costs against
+// it. The limits come from Mission.Budget and the use comes from the World:
+// the dispatch attempts of the mission's work and its token count, the same
+// two numbers that BudgetSystem enforces (budget.go). A zero limit means that
+// the mission has no limit on that dimension.
+type VoIBudget struct {
+	MaxExecutions int
+	Executions    int
+	MaxTokens     int64
+	TokensUsed    int64
+}
+
+// SpentFraction returns the spent part of the budget, in [0, 1]. It is the
+// larger of the two dimensions, because the mission stops when either limit is
+// reached. A mission with no limit has spent 0.
+func (b VoIBudget) SpentFraction() float64 {
+	spent := 0.0
+	if b.MaxExecutions > 0 {
+		spent = math.Max(spent, float64(b.Executions)/float64(b.MaxExecutions))
+	}
+	if b.MaxTokens > 0 {
+		spent = math.Max(spent, float64(b.TokensUsed)/float64(b.MaxTokens))
+	}
+	return math.Min(math.Max(spent, 0), 1)
+}
 
 // VoICandidateKind distinguishes the two candidate shapes ADR-0126 names.
 // Both are scored on one scale; they are not costed identically.
@@ -91,6 +129,13 @@ type VoIScoreInput struct {
 	// (ADR-0129), or voiNeutralReputationPrior when no technique×
 	// environment key is resolvable yet.
 	Reputation float64
+	// BudgetSpent is the spent part of the mission budget, in [0, 1]
+	// (VoIBudget.SpentFraction). 0 means a full budget or no limit.
+	BudgetSpent float64
+	// Destructive reports that the code marks this candidate as destructive:
+	// a hypothesis whose technique has a destructive predicate in an enabled
+	// Domain Pack. Always false for an evidence move.
+	Destructive bool
 }
 
 // VoICandidate is one scored candidate with its full value breakdown recorded
@@ -107,6 +152,9 @@ type VoICandidate struct {
 	Reputation   float64
 	Stake        float64
 	Value        float64
+	// Destructive records the destructive mark that RiskCost was computed
+	// with, so the plan shows why the risk cost of this candidate is higher.
+	Destructive bool
 
 	// Technique names the taxonomy technique (a taxonomy.TechniqueID, kept as
 	// a plain string the same way Hypothesis.Technique is) this candidate
@@ -151,7 +199,7 @@ func (exactVoIScorer) Score(in VoIScoreInput) VoICandidate {
 	if in.Surprised {
 		surprise = surpriseBoost
 	}
-	resourceCost, riskCost := voiCosts(in.Kind)
+	resourceCost, riskCost := voiCosts(in.Kind, in.BudgetSpent, in.Destructive)
 	stake := voiNeutralStakePrior
 	if in.HasStake {
 		stake = in.Confidence
@@ -171,17 +219,28 @@ func (exactVoIScorer) Score(in VoIScoreInput) VoICandidate {
 		Reputation:   in.Reputation,
 		Stake:        stake,
 		Value:        value,
+		Destructive:  in.Destructive,
 	}
 }
 
-// voiCosts returns kind's (resourceCost, riskCost) — a simple, documented
-// placeholder pending real BudgetSystem / RoE integration (see file doc
-// comment). Both are always strictly positive, so Score never divides by zero.
-func voiCosts(kind VoICandidateKind) (resourceCost, riskCost float64) {
+// voiCosts returns the resource cost and the risk cost of one candidate.
+//
+// The resource cost is the base cost of the kind, divided by the part of the
+// mission budget that is left. budgetSpent is the spent part, capped at
+// voiMaxBudgetSpent. The risk cost is the base risk of the kind, times
+// voiDestructiveRiskMultiplier for a candidate with the destructive mark.
+// Both are always strictly positive, so Score never divides by zero.
+func voiCosts(kind VoICandidateKind, budgetSpent float64, destructive bool) (resourceCost, riskCost float64) {
+	resourceCost, riskCost = voiEvidenceMoveResourceCost, voiEvidenceMoveRiskCost
 	if kind == VoICandidateHypothesis {
-		return voiHypothesisTestResourceCost, voiHypothesisTestRiskCost
+		resourceCost, riskCost = voiHypothesisTestResourceCost, voiHypothesisTestRiskCost
 	}
-	return voiEvidenceMoveResourceCost, voiEvidenceMoveRiskCost
+	spent := math.Min(math.Max(budgetSpent, 0), voiMaxBudgetSpent)
+	resourceCost /= 1 - spent
+	if destructive {
+		riskCost *= voiDestructiveRiskMultiplier
+	}
+	return resourceCost, riskCost
 }
 
 // binaryEntropy is the Shannon entropy (bits) of a Bernoulli(p) variable: 0 at

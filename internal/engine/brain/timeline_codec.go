@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-//go:build !embedder_tests
-
 // Package brain — event codec for durable Timeline serialisation (ADR-0163).
 package brain
 
@@ -77,6 +75,9 @@ func init() {
 	registerEvent("mission.resume", func() Event { return &MissionResumed{} })
 	registerEvent("mission.done", func() Event { return &MissionDone{} })
 
+	// mission_rewind.go
+	registerEvent("mission.rewound", func() Event { return &MissionRewound{} })
+
 	// belief.go
 	registerEvent("belief.requested", func() Event { return &BeliefScoreRequested{} })
 	registerEvent("belief.scored", func() Event { return &BeliefScored{} })
@@ -141,6 +142,7 @@ func init() {
 	registerEvent("flight_recorder.retention_swept", func() Event { return &FlightRecorderRetentionSwept{} })
 
 	// domain_pack.go
+	registerEvent("mission.originated", func() Event { return &MissionOriginated{} })
 	registerEvent("domain_pack.enabled", func() Event { return &DomainPackEnabled{} })
 	registerEvent("domain_pack.disabled", func() Event { return &DomainPackDisabled{} })
 
@@ -236,6 +238,8 @@ func dereferenceEvent(ev Event) Event {
 		return *v
 	case *MissionDone:
 		return *v
+	case *MissionRewound:
+		return *v
 	case *BeliefScoreRequested:
 		return *v
 	case *BeliefScored:
@@ -275,6 +279,8 @@ func dereferenceEvent(ev Event) Event {
 	case *FlightRecorderPolicySet:
 		return *v
 	case *FlightRecorderRetentionSwept:
+		return *v
+	case *MissionOriginated:
 		return *v
 	case *DomainPackEnabled:
 		return *v

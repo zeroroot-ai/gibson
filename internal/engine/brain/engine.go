@@ -89,6 +89,11 @@ type Engine struct {
 	stopOnce sync.Once
 	stopErr  error
 	onStop   func(*Engine)
+
+	// capabilityCatalog returns the capabilities enrolled for a mission. The
+	// Decider and the VoI planner both read it through Capabilities, so the
+	// two cannot use two different catalogs (ADR-0126). WireExecutor sets it.
+	capabilityCatalog func(missionID string) []Capability
 }
 
 // NewEngine creates an Engine with an empty Tenant World and Timeline.
@@ -145,6 +150,29 @@ func (e *Engine) WithSnapshotCadence(n int) *Engine {
 func (e *Engine) WithStore(s TimelineStore) *Engine {
 	e.store = s
 	return e
+}
+
+// SetCapabilityCatalog sets the source of the capabilities enrolled for a
+// mission. It takes the mission id because the catalog is per-tenant and a
+// worker runs off the tick with no ambient identity. WireExecutor calls it.
+func (e *Engine) SetCapabilityCatalog(catalog func(missionID string) []Capability) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.capabilityCatalog = catalog
+}
+
+// Capabilities returns the capabilities enrolled for the mission: the set that
+// the Decider can dispatch and that the VoI planner resolves a candidate
+// against (ADR-0126, ADR-0135). It returns nil while no catalog is set. The
+// catalog runs outside the engine lock, so it can read the engine.
+func (e *Engine) Capabilities(missionID string) []Capability {
+	e.mu.RLock()
+	catalog := e.capabilityCatalog
+	e.mu.RUnlock()
+	if catalog == nil {
+		return nil
+	}
+	return catalog(missionID)
 }
 
 // AddSystem registers a system to run every tick (e.g., the Orchestrator).
@@ -435,33 +463,6 @@ func (e *Engine) Hydrate(ctx context.Context) error {
 	return nil
 }
 
-// RewindTo makes the frame after folding the first n Timeline events the new live
-// state: it truncates the Timeline to n events and rebuilds the World by replay
-// (ADR-0101: World == fold(Timeline)). Brain-native rewind — the durable record IS
-// the Timeline, so rewinding is discarding the tail and re-folding; no checkpoint
-// store. n is clamped to [0, len(Timeline)].
-//
-// Work that was `running` in the rewound frame is left as recorded; the caller
-// should reconcile in-flight work (e.g. ResumeFailInFlight) so the engine
-// re-engages it, since the original dispatch is no longer outstanding.
-func (e *Engine) RewindTo(n int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	evs := e.Timeline.Events()
-	if n < 0 {
-		n = 0
-	}
-	if n > len(evs) {
-		n = len(evs)
-	}
-	tl := &Timeline{}
-	for _, ev := range evs[:n] {
-		tl.Append(ev)
-	}
-	e.Timeline = tl
-	e.World = Replay(e.World.Tenant, tl)
-}
-
 // Read accessors — read-locked, safe to call concurrently with the tick loop
 // (the read path / Scroller use these). They return value snapshots, never live
 // references into the World.
@@ -614,6 +615,15 @@ func (e *Engine) DomainPacks() []DomainPackSnapshot {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.World.DomainPackSnapshot()
+}
+
+// ReadWorld runs fn with the live World under the read lock. fn must not keep
+// the pointer or change the World. The belief trainer reads its training rows
+// this way (gibson#788), because the trimmed Timeline can lose rows.
+func (e *Engine) ReadWorld(fn func(*World)) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	fn(e.World)
 }
 
 // Events returns a copy of the Timeline (the Scroller scrubs this).

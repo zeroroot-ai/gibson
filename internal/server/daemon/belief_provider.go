@@ -12,6 +12,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/beliefvi"
 	"github.com/zeroroot-ai/gibson/internal/engine/braintrain"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
 // resolveBeliefProvider selects the brain's belief-field provider (ADR-0134,
@@ -148,6 +149,23 @@ func wireBrainRegistry(
 	beliefSchemaRegistry *ontology.BeliefSchemaRegistry,
 	edgePosteriorProvider brain.PinnedEdgeStrengthPosteriorProvider,
 ) {
+	wireBrainRegistryWithHierarchy(ctx, registry, beliefProvider, sliceBeliefProvider,
+		beliefSchemaRegistry, edgePosteriorProvider, taxonomy.GlobalTechniques)
+}
+
+// wireBrainRegistryWithHierarchy is wireBrainRegistry with the technique
+// hierarchy as a parameter. The daemon always passes taxonomy.GlobalTechniques.
+// A test passes a hierarchy that holds a technique, because the global
+// hierarchy holds none until a Domain Pack can declare one (gibson#699).
+func wireBrainRegistryWithHierarchy(
+	ctx context.Context,
+	registry *brain.Registry,
+	beliefProvider brain.BeliefProvider,
+	sliceBeliefProvider brain.SliceBeliefProvider,
+	beliefSchemaRegistry *ontology.BeliefSchemaRegistry,
+	edgePosteriorProvider brain.PinnedEdgeStrengthPosteriorProvider,
+	hierarchy *taxonomy.TechniqueHierarchy,
+) {
 	sliceOpts, propagateOpts := brain.DefaultSliceSchedule()
 	// bamcp Thompson-samples edgePosteriorProvider's SAME fitted posterior
 	// (ADR-0137's "one output, two uses" — sliceBeliefProvider
@@ -170,16 +188,11 @@ func wireBrainRegistry(
 		// generative-simulator/Thompson-sampling item is this repo's
 		// gibson#396 (brain.BAMCPPlanner, wired below).
 		//
-		// catalog is nil here (no covering-capability resolution yet, ADR-0135/gibson#387):
-		// the live per-mission capability catalog
-		// (brainExecutor.catalog) is built later in Start(), after this
-		// per-tenant-engine wiring runs, the same way ExecutorDeps.Catalog is
-		// wired onto DeciderWorker in a SEPARATE, later OnEngine registration
-		// (daemon.go). Threading it through here is follow-up wiring for
-		// gibson#397, which consumes VoICandidate.CoveringCapabilities; nil is
-		// safe and documented (NewVoIWorker/WireVoIPlanner), and preserves
-		// today's behavior exactly (no candidate resolves a covering
-		// capability).
-		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, nil, nil, bamcp)
+		// The planner reads the capability catalog of the mission from the
+		// engine (brain.Engine.Capabilities). brain.WireExecutor sets that
+		// catalog in a later OnEngine hook (daemon.go), and the planner reads
+		// it when it plans, so the order of the two hooks does not matter
+		// (gibson#693).
+		brain.WireVoIPlanner(ctx, e, beliefSchemaRegistry, brain.ExactVoIScorer(), brain.DefaultVoITopK, 0, hierarchy, bamcp)
 	})
 }

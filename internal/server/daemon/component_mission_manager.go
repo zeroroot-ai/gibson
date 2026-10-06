@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -110,8 +111,83 @@ type componentMissionRecord struct {
 	// Lineage echoes the four origination keys back to the caller so a
 	// component can see the attribution the daemon recorded for it — and so
 	// a support conversation about "which grant let this run" has an answer
-	// on the same surface that started it.
+	// on the same surface that started it. The source is the World of the
+	// tenant (brain.MissionLineage), which folds the mission.originated
+	// event of the Timeline (ADR-0163, gibson#734).
 	Lineage map[string]string `json:"lineage,omitempty"`
+}
+
+// The keys of componentMissionRecord.Lineage. They are a wire contract of this
+// record, not keys of Mission.Metadata.
+const (
+	lineageKeyOriginatingComponent = "originating_component"
+	lineageKeyCapabilityGrantID    = "capability_grant_id"
+	lineageKeyParentMissionID      = "parent_mission_id"
+	lineageKeyParentWorkID         = "parent_work_id"
+)
+
+// engineLineageRecorder records the lineage of an originated mission in the
+// Timeline of one tenant: it submits the event to the engine of that tenant.
+type engineLineageRecorder struct{ eng *brain.Engine }
+
+func (r engineLineageRecorder) RecordLineage(l mission.Lineage) {
+	r.eng.Submit(lineageEvent(l))
+}
+
+// lineageEvent is the Timeline event for one lineage.
+func lineageEvent(l mission.Lineage) brain.MissionOriginated {
+	return brain.MissionOriginated{
+		MissionID:            l.MissionID.String(),
+		ParentMissionID:      l.ParentMissionID.String(),
+		ParentWorkID:         l.ParentWorkID,
+		OriginatingComponent: l.OriginatingComponent,
+		CapabilityGrantID:    l.CapabilityGrantID,
+	}
+}
+
+// lineageRecord is the wire form of one lineage. An empty value has no key.
+func lineageRecord(l brain.MissionLineage) map[string]string {
+	out := map[string]string{}
+	for k, v := range map[string]string{
+		lineageKeyOriginatingComponent: l.OriginatingComponent,
+		lineageKeyCapabilityGrantID:    l.CapabilityGrantID,
+		lineageKeyParentMissionID:      l.ParentMissionID,
+		lineageKeyParentWorkID:         l.ParentWorkID,
+	} {
+		if v != "" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// tenantEngine returns the brain engine of the caller's tenant. The tenant
+// comes from the request context only.
+func (m *componentMissionManager) tenantEngine(ctx context.Context) (*brain.Engine, error) {
+	if m.daemon.brainRegistry == nil {
+		return nil, status.Error(codes.Unavailable, "the brain registry is not up, so no mission lineage is available")
+	}
+	tenant, err := tenantFromCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.daemon.brainRegistry.For(tenant.String()), nil
+}
+
+// lineageOf reads the lineage of a mission from the World of the tenant. A
+// mission that no component originated has none.
+func lineageOf(eng *brain.Engine, m *mission.Mission) map[string]string {
+	if m == nil {
+		return nil
+	}
+	l, ok := eng.MissionLineage(m.ID.String())
+	if !ok {
+		return nil
+	}
+	return lineageRecord(l)
 }
 
 // componentMissionRunRecord is one entry of GetMissionRunHistory.
@@ -165,6 +241,10 @@ func (m *componentMissionManager) OriginateMission(ctx context.Context, req comp
 		return nil, err
 	}
 	defer release()
+	eng, engErr := m.tenantEngine(ctx)
+	if engErr != nil {
+		return nil, engErr
+	}
 
 	if req.ParentMissionID == "" {
 		// Permanent, not a not-yet. A component originates a mission only
@@ -192,7 +272,8 @@ func (m *componentMissionManager) OriginateMission(ctx context.Context, req comp
 		return nil, targetErr
 	}
 
-	originator := mission.NewOriginator(store, ledger, m.daemon.logger.WithComponent("mission-originator").Slog())
+	originator := mission.NewOriginator(store, ledger, engineLineageRecorder{eng: eng},
+		m.daemon.logger.WithComponent("mission-originator").Slog())
 	child, origErr := originator.Originate(ctx, mission.OriginateRequest{
 		Parent:         parent,
 		ParentWorkID:   req.ParentWorkID,
@@ -204,7 +285,16 @@ func (m *componentMissionManager) OriginateMission(ctx context.Context, req comp
 	if origErr != nil {
 		return nil, originationStatus(origErr)
 	}
-	return json.Marshal(missionRecord(child)) //nolint:wrapcheck // marshalling our own struct
+	// The engine folds the lineage event on its next tick. The reply carries
+	// the same values now, so the caller does not wait for the tick.
+	lineage := lineageRecord(brain.MissionLineage(lineageEvent(mission.Lineage{
+		MissionID:            child.ID,
+		ParentMissionID:      parent.ID,
+		ParentWorkID:         req.ParentWorkID,
+		OriginatingComponent: req.Principal,
+		CapabilityGrantID:    req.GrantID,
+	})))
+	return json.Marshal(missionRecord(child, lineage)) //nolint:wrapcheck // marshalling our own struct
 }
 
 // parseTargetIDs turns the request's single target field into the child's
@@ -235,8 +325,6 @@ func originationStatus(err error) error {
 			"%v — a child mission may only test targets the originating mission already holds, and widening needs a human", err)
 	case errors.Is(err, mission.ErrDepthExceeded):
 		return status.Errorf(codes.FailedPrecondition, "%v", err)
-	case errors.Is(err, mission.ErrLineageSupplied):
-		return status.Errorf(codes.InvalidArgument, "%v", err)
 	case errors.Is(err, mission.ErrMissingAttribution):
 		return status.Errorf(codes.Unauthenticated, "%v", err)
 	default:
@@ -305,7 +393,11 @@ func (m *componentMissionManager) oneMission(ctx context.Context, tenant, missio
 	if getErr != nil {
 		return nil, status.Errorf(codes.NotFound, "mission %s not found", missionID)
 	}
-	return json.Marshal(missionRecord(found)) //nolint:wrapcheck // marshalling our own struct
+	eng, engErr := m.tenantEngine(ctx)
+	if engErr != nil {
+		return nil, engErr
+	}
+	return json.Marshal(missionRecord(found, lineageOf(eng, found))) //nolint:wrapcheck // marshalling our own struct
 }
 
 // WaitForMission implements component.MissionManager.
@@ -343,7 +435,11 @@ func (m *componentMissionManager) WaitForMission(ctx context.Context, tenant, mi
 			return nil, status.Errorf(codes.NotFound, "mission %s not found", missionID)
 		}
 		if found.Status.IsTerminal() {
-			return json.Marshal(missionRecord(found)) //nolint:wrapcheck // marshalling our own struct
+			eng, engErr := m.tenantEngine(ctx)
+			if engErr != nil {
+				return nil, engErr
+			}
+			return json.Marshal(missionRecord(found, lineageOf(eng, found))) //nolint:wrapcheck // marshalling our own struct
 		}
 		select {
 		case <-ctx.Done():
@@ -376,9 +472,13 @@ func (m *componentMissionManager) ListMissions(ctx context.Context, tenant strin
 	if listErr != nil {
 		return nil, status.Errorf(codes.Internal, "list missions: %v", listErr)
 	}
+	eng, engErr := m.tenantEngine(ctx)
+	if engErr != nil {
+		return nil, engErr
+	}
 	records := make([]componentMissionRecord, 0, len(missions))
 	for _, found := range missions {
-		records = append(records, missionRecord(found))
+		records = append(records, missionRecord(found, lineageOf(eng, found)))
 	}
 	return json.Marshal(records) //nolint:wrapcheck // marshalling our own struct
 }
@@ -431,8 +531,9 @@ func (m *componentMissionManager) GetMissionRunHistory(ctx context.Context, tena
 	return json.Marshal(records) //nolint:wrapcheck // marshalling our own struct
 }
 
-// missionRecord projects a mission onto the component wire shape.
-func missionRecord(m *mission.Mission) componentMissionRecord {
+// missionRecord projects a mission onto the component wire shape. lineage is
+// the lineage of the mission from the World of the tenant, or nil.
+func missionRecord(m *mission.Mission, lineage map[string]string) componentMissionRecord {
 	if m == nil {
 		return componentMissionRecord{}
 	}
@@ -463,29 +564,6 @@ func missionRecord(m *mission.Mission) componentMissionRecord {
 	if !m.CompletedAt.IsNil() {
 		rec.CompletedAt = m.CompletedAt.Time
 	}
-	if lineage := lineageOf(m); len(lineage) > 0 {
-		rec.Lineage = lineage
-	}
+	rec.Lineage = lineage
 	return rec
-}
-
-// lineageOf extracts the four origination keys from a mission's metadata.
-// Only those four: Metadata is a free-form map, and echoing all of it back
-// would turn an internal scratch area into a wire contract by accident.
-func lineageOf(m *mission.Mission) map[string]string {
-	out := map[string]string{}
-	for _, k := range []string{
-		mission.LineageOriginatingComponent,
-		mission.LineageCapabilityGrantID,
-		mission.LineageParentMissionID,
-		mission.LineageParentWorkID,
-	} {
-		if v, ok := m.Metadata[k].(string); ok && v != "" {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

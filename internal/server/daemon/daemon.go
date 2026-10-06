@@ -25,7 +25,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/harness/dispatchpolicy"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
@@ -249,6 +248,12 @@ type daemonImpl struct {
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 
+	// jobService is the server of JobService. The callback service hands the
+	// job calls of a dispatched agent to it (lazyJobDriver), so one
+	// implementation makes each check. Nil until the gRPC services are
+	// registered, and on a daemon that serves no jobs.
+	jobService harness.JobDriver
+
 	// memberControl is the in-memory sign-in control queue the bank service
 	// enqueues on and the callback service delivers from (gibson#1715).
 	memberControl *harness.MemberControl
@@ -360,10 +365,10 @@ type daemonImpl struct {
 	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
 	llmConfigHandler *api.LLMConfigHandler
 
-	// pluginAccessStore manages tenant opt-in and encrypted configuration for platform plugins.
+	// componentAccessStore manages tenant opt-in and encrypted configuration for components of each kind.
 	// Initialized alongside credentialStore when a KeyProvider is configured.
-	// May be nil when no key provider is set (plugin access RPCs will return Unimplemented).
-	pluginAccessStore component.ComponentAccessStore
+	// May be nil when no key provider is set (component access RPCs will return Unimplemented).
+	componentAccessStore component.ComponentAccessStore
 
 	// toolAccessStore manages tenant opt-in for tools.
 	// Initialized when a standalone Redis client is available.
@@ -607,6 +612,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// than failing obscurely.
 	callbackOpts = append(callbackOpts,
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
+		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
@@ -1265,9 +1271,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// projected the signing-key Secret. Announced below.
 				KeyProvider: keyProvider,
 				KeyID:       cgJWTKeyID(),
-				// ADR-0110 / gibson#998: the Minter rejects non-hosted isolation
-				// modes at issuance under the hosted setec-only shape.
-				Shape: dispatchpolicy.ParseShape(d.config.UntrustedExecMode()),
 			}); mErr != nil {
 				d.logger.Warn(ctx, "CG Minter init failed; capability-grant registration disabled", "error", mErr)
 			} else {
@@ -1454,7 +1457,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 			// Plugin access store still uses Redis (plugin store migration is Phase D).
 			if redisClient, ok := d.stateClient.Client().(*goredis.Client); ok {
-				d.pluginAccessStore = component.NewRedisPluginAccessStore(
+				d.componentAccessStore = component.NewRedisComponentAccessStore(
 					redisClient,
 					crypto.NewAESGCMEncryptor(),
 					keyProvider,
@@ -1468,7 +1471,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				// to inject the store without rebuilding the entire factory.
 				if d.infrastructure != nil && d.infrastructure.harnessFactory != nil {
 					if df, ok := d.infrastructure.harnessFactory.(*harness.DefaultHarnessFactory); ok {
-						df.SetPluginAccess(d.pluginAccessStore)
+						df.SetPluginAccess(d.componentAccessStore)
 						d.logger.Info(ctx, "wired plugin access store into harness factory")
 					}
 				}

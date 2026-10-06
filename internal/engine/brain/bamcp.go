@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"math/rand/v2"
 	"sort"
 	"strconv"
@@ -30,55 +31,64 @@ import (
 // real one -- the day it does, only the EdgeStrengthPosteriorProvider passed
 // to NewBAMCPPlanner changes, never this file's rollout/sampling code.
 //
-// ADR-0126 calls for full multi-step sequential planning "off-tick
-// ... it plans over the belief network as the simulator, samples promising
-// trajectories deep." PlanVoI (voi_plan.go) already computes the one-step-
-// exact candidate set VoI dispatch gating gates on (decision 1); BAMCPPlanner
-// refines that set's ranking Value into a genuine multi-step, model-
-// uncertainty-aware estimate:
+// ADR-0126 calls for multi-step sequential planning off the tick. PlanVoI
+// (voi_plan.go) computes the one-step-exact candidate set. BAMCPPlanner turns
+// the one-step Value of each candidate into a multi-step estimate that covers
+// the uncertainty about the model. It is UCT with root sampling, as the BAMCP
+// paper describes (Guez, Silver and Dayan, 2012):
 //
 //  1. Ground the mission's AttackGraph slice into the same noisy-OR structure
 //     belief_slice_native.go grounds for exact inference (bamcpGround) --
 //     but keep each cross-node cause's edge TYPE, so its strength can be
 //     Thompson-sampled from the right posterior instead of read as a fixed
 //     number.
-//  2. For each candidate, run Config.Simulations independent rollouts: each
-//     draws a fresh Thompson sample of every enablement edge's Beta
-//     posterior (ADR-0137 -- "BAMCP Thompson-samples the full
-//     posterior for model-uncertainty planning"), ancestrally samples one
-//     entire possible world from the resulting noisy-OR network
-//     (bamcpSampleWorld -- the generative simulator), then walks a fixed,
-//     Value-ranked sequence of candidates starting from the one under
-//     evaluation, accumulating discounted reward (ADR-0126:
-//     heavily-weighted info-gain shaping plus a terminal bonus for a
-//     demonstrated finding).
-//  3. Average the Config.Simulations returns into the candidate's
-//     PlannedValue, re-rank by it, and truncate to topK -- ADR-0126's
+//  2. Run the simulations. Each simulation samples one world at the root: a
+//     fresh Thompson sample of every enablement edge's Beta posterior
+//     (ADR-0137), one ancestral sample of the noisy-OR network
+//     (bamcpSampleWorld), and one outcome for each hypothesis. The world
+//     stays fixed for the whole simulation.
+//  3. Inside that world, descend the search tree. A tree node is the sequence
+//     of candidates taken so far. At a node with an untried candidate, the
+//     simulation expands one child. At a node with no untried candidate, it
+//     selects the child with the highest UCB1 score. After the expansion it
+//     finishes with the rollout policy: the candidates not yet taken, in the
+//     order of their one-step Value.
+//  4. Back the discounted return up the path. The reward of one step is
+//     ADR-0126's info-gain shaping plus a terminal bonus for a demonstrated
+//     finding.
+//  5. The Value of a candidate is the mean return of the simulations that took
+//     it as the first move. Re-rank by it and truncate to topK -- ADR-0126's
 //     "the planner computes the top-k" is this step.
 //
-// "Fully Bayesian, no UCB" (ADR-0126): action selection never uses a UCB1
-// exploration bonus. Instead every simulation samples ONE full model
-// instantiation from the posterior and acts w.r.t. it (bamcpSampleWorld) --
-// that IS Thompson sampling, applied at the model-uncertainty layer instead
-// of at a tree-policy layer, which is exactly what ADR-0137 asks
-// the planner to do with the learned posterior.
+// The order of the moves matters, and that is why a tree is necessary. A host
+// that an enablement edge points at gives its terminal bonus only when the
+// trajectory already took one of the hosts that enable it (bamcpTree.unlocked):
+// an attack path reaches a host through the host before it. So the best first
+// move can be a host with a low one-step Value that opens a host with a high
+// one. The one-step rank cannot see that, and the tree can.
 //
-// Determinism (this issue's hard acceptance criterion): every random draw in
-// this file flows through the one *rand.Rand a caller passes into Plan,
-// built from an explicit seed (never rand/v2's package-level functions,
-// never map iteration order -- every map this file builds is walked through
-// a sorted key list before it drives a decision). The same (VoIPlanInput,
-// seed) pair therefore always produces the exact same rollouts and the same
-// final ranking; see bamcp_test.go's determinism tests.
+// The planner is Bayesian about the MODEL and uses UCB1 only for the choice of
+// a move inside one sampled world (ADR-0126). The model uncertainty comes from
+// the root sample, never from the tree policy.
+//
+// Determinism (a hard acceptance criterion): every random draw in this file
+// flows through the one *rand.Rand that Plan builds from an explicit seed
+// (never rand/v2's package-level functions, never map iteration order -- every
+// map this file builds is walked through a sorted key list before it drives a
+// decision). The tree itself draws nothing: it breaks each tie by the lower
+// candidate index. The same (VoIPlanInput, seed) pair therefore always
+// produces the exact same simulations and the same final ranking; see
+// bamcp_test.go's determinism tests.
 
 // Named, justified rollout constants (never a bare literal in the rollout
 // loop itself -- every one is a BAMCPConfig field with a documented default
 // below).
 const (
-	// DefaultBAMCPSimulations is the number of Monte Carlo rollouts averaged
-	// per root candidate. BAMCP's model uncertainty comes entirely from the
-	// Thompson-sampled edge posteriors (there is no UCB bonus to smooth
-	// noise, ADR-0126), so enough rollouts must run to average that sampling
+	// DefaultBAMCPSimulations is the number of simulations for each root
+	// candidate. One planning round runs this number times the number of
+	// candidates, and the tree decides which first move each simulation
+	// takes. BAMCP's model uncertainty comes from the Thompson-sampled edge
+	// posteriors, so enough simulations must run to average that sampling
 	// noise out; a few hundred is the range Bayes-Adaptive MCP literature
 	// reports for a branching factor this small (the ambient-bounded slice,
 	// at most a few dozen candidates) converging comfortably, while staying
@@ -123,6 +133,15 @@ const (
 	// terminal bonus: exploration is rewarded richly at every step, but a
 	// path that reaches a demonstrated finding still wins the ranking.
 	DefaultBAMCPInfoGainWeight = 5.0
+
+	// DefaultBAMCPExploration is the UCB1 exploration constant c: a child's
+	// score is its mean return plus c * sqrt(ln(parent visits) / child
+	// visits). UCB1 assumes a return in [0, 1]. A return here is a sum of
+	// step rewards, and one step reward is of the size of one terminal
+	// reward, so the default equals DefaultBAMCPTerminalReward. A smaller
+	// value commits to the first good move sooner. A larger value spends
+	// more simulations on moves that look worse.
+	DefaultBAMCPExploration = 10.0
 
 	// uninformativeBetaAlpha/uninformativeBetaBeta are the cold-start Beta
 	// prior parameters BAMCP Thompson-samples for an enablement-edge type
@@ -215,11 +234,11 @@ func (UninformativeEdgePosteriors) Posterior(string) EdgeStrengthPosterior {
 // DefaultBAMCPConfig returns the values this package ships wired with
 // (internal/server/daemon/belief_provider.go).
 type BAMCPConfig struct {
-	// Simulations is the number of Monte Carlo rollouts averaged per root
-	// candidate.
+	// Simulations is the number of simulations for each root candidate. One
+	// planning round runs Simulations times the number of candidates.
 	Simulations int
-	// Depth bounds how many candidates one rollout resolves, including its
-	// root action -- the planning horizon.
+	// Depth bounds how many candidates one simulation takes, including its
+	// first move -- the planning horizon.
 	Depth int
 	// Discount is the per-step reward discount (gamma), in (0, 1].
 	Discount float64
@@ -229,6 +248,8 @@ type BAMCPConfig struct {
 	// InfoGainWeight scales the one-step VoICandidate.Value used as the
 	// rollout's per-step shaping reward.
 	InfoGainWeight float64
+	// Exploration is the UCB1 exploration constant of the tree policy.
+	Exploration float64
 }
 
 // DefaultBAMCPConfig returns the package's documented default tuning.
@@ -239,6 +260,7 @@ func DefaultBAMCPConfig() BAMCPConfig {
 		Discount:       DefaultBAMCPDiscount,
 		TerminalReward: DefaultBAMCPTerminalReward,
 		InfoGainWeight: DefaultBAMCPInfoGainWeight,
+		Exploration:    DefaultBAMCPExploration,
 	}
 }
 
@@ -262,6 +284,9 @@ func (cfg BAMCPConfig) sanitized() BAMCPConfig {
 	}
 	if cfg.InfoGainWeight <= 0 {
 		cfg.InfoGainWeight = DefaultBAMCPInfoGainWeight
+	}
+	if cfg.Exploration <= 0 {
+		cfg.Exploration = DefaultBAMCPExploration
 	}
 	return cfg
 }
@@ -308,12 +333,13 @@ func BAMCPSeed(missionID string, cursor int) uint64 {
 }
 
 // Plan computes in's one-step candidate set (PlanVoI, unbounded) and refines
-// each candidate's ranking Value into a BAMCP multi-step estimate, seeded
-// from seed so the same (in, seed) pair always reproduces the identical
-// rollouts and therefore an identical ranking. It returns the same
-// []VoICandidate shape voi_planner.go already Submits as VoIPlanned --
-// re-ranked and truncated to topK, which IS ADR-0126's "the
-// planner computes the top-k" now that this planner exists.
+// each candidate's ranking Value into a BAMCP multi-step estimate: the mean
+// return of the tree simulations that took the candidate as the first move.
+// seed makes the round reproducible: the same (in, seed) pair always gives
+// the identical simulations and therefore an identical ranking. It returns the
+// same []VoICandidate shape voi_planner.go already Submits as VoIPlanned --
+// re-ranked and truncated to topK, which IS ADR-0126's "the planner computes
+// the top-k".
 func (p *BAMCPPlanner) Plan(ctx context.Context, in VoIPlanInput, substrate BeliefSubstrate, scorer VoIScorer, topK int, seed uint64) ([]VoICandidate, error) {
 	candidates, err := PlanVoI(ctx, in, substrate, scorer, 0)
 	if err != nil {
@@ -328,32 +354,25 @@ func (p *BAMCPPlanner) Plan(ctx context.Context, in VoIPlanInput, substrate Beli
 		return nil, err
 	}
 
-	nodeKind := make(map[string]string, len(in.Graph.Nodes))
-	for _, n := range in.Graph.Nodes {
-		nodeKind[n.ID] = n.Kind
-	}
-
 	vars := bamcpGround(in.Graph, p.Registry)
 	order := bamcpTopoOrder(vars)
 
 	cfg := p.Config.sanitized()
-	depth := cfg.Depth
-	if depth > len(candidates) {
-		depth = len(candidates)
-	}
+	tree := newBAMCPTree(cfg, candidates, in.Graph, p.Registry, hypothesisOutcomeProb)
 
 	rng := rand.New(rand.NewPCG(seed, seed)) //nolint:gosec // deterministic seeded PRNG is required for reproducible BAMCP rollouts, not security-sensitive
 
+	for range cfg.Simulations * len(candidates) {
+		// Root sampling: one world for the whole simulation.
+		realized := bamcpSampleWorld(vars, order, p.Posteriors, rng)
+		tree.sampleOutcomes(realized, rng)
+		tree.simulate(tree.root, 0)
+	}
+
 	out := make([]VoICandidate, len(candidates))
 	copy(out, candidates)
-	for root := range candidates {
-		seq := bamcpRolloutSequence(candidates, root, depth)
-		var total float64
-		for range cfg.Simulations {
-			realized := bamcpSampleWorld(vars, order, p.Posteriors, rng)
-			total += bamcpRolloutReturn(cfg, seq, candidates, nodeKind, hypothesisOutcomeProb, p.Registry, realized, rng)
-		}
-		out[root].Value = total / float64(cfg.Simulations)
+	for i := range out {
+		out[i].Value = tree.root.mean(i)
 	}
 
 	sortVoICandidates(out)
@@ -387,92 +406,266 @@ func (p *BAMCPPlanner) hypothesisOutcomeProbs(ctx context.Context, in VoIPlanInp
 	return out, nil
 }
 
-// bamcpRolloutSequence is the rollout/default policy for one root candidate:
-// itself first, then every other candidate in PlanVoI's own stable one-step
-// ranking order (candidates is already sorted by descending Value --
-// sortVoICandidates, called inside PlanVoI), truncated to depth. Fixing the
-// policy this way (rather than re-scoring it per simulation) is a deliberate,
-// documented simplification (see bamcp.go's file doc comment): the
-// stochastic element BAMCP needs -- model uncertainty -- lives entirely in
-// bamcpSampleWorld's Thompson-sampled world, not in the policy that walks it.
-func bamcpRolloutSequence(candidates []VoICandidate, root, depth int) []int {
-	seq := make([]int, 0, depth)
-	seq = append(seq, root)
-	for i := range candidates {
-		if len(seq) >= depth {
-			break
+// bamcpNode is one node of the search tree: the sequence of candidates that
+// the path from the root took. Each slice has one entry for each candidate,
+// so the tree needs no map and no iteration order.
+type bamcpNode struct {
+	visits   int          // simulations that passed through this node
+	count    []int        // simulations that took candidate i from this node
+	total    []float64    // sum of the returns of those simulations, from this node on
+	children []*bamcpNode // the node after candidate i, made when i is taken a second time
+}
+
+func newBAMCPNode(candidates int) *bamcpNode {
+	return &bamcpNode{
+		count:    make([]int, candidates),
+		total:    make([]float64, candidates),
+		children: make([]*bamcpNode, candidates),
+	}
+}
+
+// mean returns the mean return of the simulations that took candidate i from
+// this node, or 0 when none did.
+func (n *bamcpNode) mean(i int) float64 {
+	if n.count[i] == 0 {
+		return 0
+	}
+	return n.total[i] / float64(n.count[i])
+}
+
+// bamcpTree is the UCT search tree of one planning round, with the state of
+// the simulation in progress. candidates is in the order of the one-step
+// Value (PlanVoI sorts it), and that order is the rollout policy.
+type bamcpTree struct {
+	cfg        BAMCPConfig
+	candidates []VoICandidate
+	depth      int // moves in one simulation: cfg.Depth, or fewer when there are fewer candidates
+	root       *bamcpNode
+
+	// terminals[i] holds the ground names of the terminal belief variables of
+	// evidence candidate i. The candidate resolves true when one of them is
+	// true in the sampled world. Empty for a hypothesis.
+	terminals [][]string
+	// outcomeProb[i] is the claim confidence of hypothesis candidate i: the
+	// probability that its sampled outcome is true. Unused for evidence.
+	outcomeProb []float64
+	// enablers[i] holds the candidates whose node has an enablement edge to
+	// the node of evidence candidate i. See unlocked.
+	enablers [][]int
+
+	// The state of the simulation in progress.
+	outcome []bool // the root sample: does candidate i resolve true in this world
+	taken   []bool // the candidates on the current trajectory
+	marked  []int  // scratch of rollout: the candidates that it took
+}
+
+func newBAMCPTree(
+	cfg BAMCPConfig,
+	candidates []VoICandidate,
+	graph AttackGraph,
+	registry *ontology.BeliefSchemaRegistry,
+	hypothesisOutcomeProb map[string]float64,
+) *bamcpTree {
+	n := len(candidates)
+	t := &bamcpTree{
+		cfg:         cfg,
+		candidates:  candidates,
+		depth:       min(cfg.Depth, n),
+		root:        newBAMCPNode(n),
+		terminals:   make([][]string, n),
+		outcomeProb: make([]float64, n),
+		enablers:    make([][]int, n),
+		outcome:     make([]bool, n),
+		taken:       make([]bool, n),
+	}
+
+	nodeKind := make(map[string]string, len(graph.Nodes))
+	nodeVariables := make(map[string]map[string]struct{}, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		nodeKind[node.ID] = node.Kind
+		names := make(map[string]struct{}, len(node.Variables))
+		for _, v := range node.Variables {
+			names[v.Name] = struct{}{}
 		}
-		if i == root {
+		nodeVariables[node.ID] = names
+	}
+
+	evidenceIndex := make(map[string]int, n)
+	for i, c := range candidates {
+		switch c.Kind {
+		case VoICandidateEvidence:
+			evidenceIndex[c.RefID] = i
+			for _, v := range terminalVariables(registry, nodeKind[c.RefID]) {
+				if gname, err := beliefvi.GroundName(c.RefID, v); err == nil {
+					t.terminals[i] = append(t.terminals[i], gname)
+				}
+			}
+		case VoICandidateHypothesis:
+			t.outcomeProb[i] = hypothesisOutcomeProb[c.RefID]
+		}
+	}
+
+	// An edge enables its target under the same two conditions as bamcpGround:
+	// the registry names the edge type as an enablement edge, and the target
+	// node declares the variable that the edge feeds. graph.Edges is a slice,
+	// so the order of each enablers list is the order of the graph.
+	for _, e := range graph.Edges {
+		targetVar, ok := registry.EnablementEdgeTargetVariable(e.Type)
+		if !ok {
 			continue
 		}
-		seq = append(seq, i)
+		if _, declared := nodeVariables[e.To][targetVar]; !declared {
+			continue
+		}
+		from, fromIsCandidate := evidenceIndex[e.From]
+		to, toIsCandidate := evidenceIndex[e.To]
+		if fromIsCandidate && toIsCandidate && from != to {
+			t.enablers[to] = append(t.enablers[to], from)
+		}
 	}
-	return seq
+	return t
 }
 
-// bamcpRolloutReturn walks seq (bamcpRolloutSequence's fixed policy) over one
-// already-sampled possible world (realized, from bamcpSampleWorld), summing
-// discounted reward: InfoGainWeight * the candidate's one-step VoICandidate
-// value (ADR-0126's heavily-weighted shaping term) plus
-// TerminalReward when this rollout's sampled outcome for that candidate
-// resolves true (the terminal, demonstrated-finding bonus).
-func bamcpRolloutReturn(
-	cfg BAMCPConfig,
-	seq []int,
-	candidates []VoICandidate,
-	nodeKind map[string]string,
-	hypothesisOutcomeProb map[string]float64,
-	registry *ontology.BeliefSchemaRegistry,
-	realized map[string]bool,
-	rng *rand.Rand,
-) float64 {
+// sampleOutcomes completes the root sample of one simulation: for each
+// candidate, does its move resolve true in this world. An evidence move
+// resolves true when one of the terminal variables of its node is true in
+// realized. A hypothesis names no node in the grounded graph, so its outcome
+// is one Bernoulli draw against its claim confidence. The draws run in
+// candidate order, so a fixed seed gives the same outcomes.
+func (t *bamcpTree) sampleOutcomes(realized map[string]bool, rng *rand.Rand) {
+	for i, c := range t.candidates {
+		switch c.Kind {
+		case VoICandidateEvidence:
+			t.outcome[i] = false
+			for _, gname := range t.terminals[i] {
+				if realized[gname] {
+					t.outcome[i] = true
+					break
+				}
+			}
+		case VoICandidateHypothesis:
+			t.outcome[i] = rng.Float64() < t.outcomeProb[i]
+		default:
+			t.outcome[i] = false
+		}
+	}
+}
+
+// unlocked reports whether candidate i can give its terminal reward at this
+// point of the trajectory. A candidate with no enabler is always unlocked. A
+// candidate with enablers is unlocked after the trajectory took one of them:
+// an attack path reaches a host through a host that enables it. An enabler
+// that is not a candidate does not count, because the planner cannot take it.
+func (t *bamcpTree) unlocked(i int) bool {
+	if len(t.enablers[i]) == 0 {
+		return true
+	}
+	for _, e := range t.enablers[i] {
+		if t.taken[e] {
+			return true
+		}
+	}
+	return false
+}
+
+// reward is the reward of taking candidate i at this point of the trajectory:
+// InfoGainWeight times the one-step Value (ADR-0126's shaping term), plus
+// TerminalReward when the candidate resolves true in the sampled world and is
+// unlocked (the bonus for a demonstrated finding).
+func (t *bamcpTree) reward(i int) float64 {
+	r := t.cfg.InfoGainWeight * t.candidates[i].Value
+	if t.outcome[i] && t.unlocked(i) {
+		r += t.cfg.TerminalReward
+	}
+	return r
+}
+
+// simulate runs one simulation from node, with step moves already taken, and
+// returns the discounted return from node on. It takes one move by the tree
+// policy (selectMove). The first time a move is taken from a node, the
+// simulation leaves the tree and finishes with the rollout policy. The next
+// time, it descends into the child of that move, which it makes if necessary:
+// each simulation expands the tree by at most one node.
+func (t *bamcpTree) simulate(node *bamcpNode, step int) float64 {
+	if step >= t.depth {
+		return 0
+	}
+	move := t.selectMove(node)
+	firstVisit := node.count[move] == 0
+
+	reward := t.reward(move)
+	t.taken[move] = true
+	var future float64
+	if firstVisit {
+		future = t.rollout(step + 1)
+	} else {
+		if node.children[move] == nil {
+			node.children[move] = newBAMCPNode(len(t.candidates))
+		}
+		future = t.simulate(node.children[move], step+1)
+	}
+	t.taken[move] = false
+
+	ret := reward + t.cfg.Discount*future
+	node.visits++
+	node.count[move]++
+	node.total[move] += ret
+	return ret
+}
+
+// selectMove is the tree policy. It returns the first untried candidate in
+// the order of the one-step Value. When each candidate that is still free was
+// tried, it returns the one with the highest UCB1 score:
+//
+//	mean return + Exploration * sqrt(ln(node visits) / move visits)
+//
+// A tie goes to the lower index, so the choice needs no random draw. The
+// caller makes sure that one candidate is free (step < depth <= candidates).
+func (t *bamcpTree) selectMove(node *bamcpNode) int {
+	for i := range t.candidates {
+		if !t.taken[i] && node.count[i] == 0 {
+			return i
+		}
+	}
+	best, bestScore := -1, 0.0
+	logVisits := math.Log(float64(node.visits))
+	for i := range t.candidates {
+		if t.taken[i] {
+			continue
+		}
+		score := node.mean(i) + t.cfg.Exploration*math.Sqrt(logVisits/float64(node.count[i]))
+		if best == -1 || score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	return best
+}
+
+// rollout is the rollout policy: from step on, take the candidates that are
+// still free in the order of their one-step Value, up to the depth. It returns
+// the discounted return and leaves the trajectory as it found it.
+func (t *bamcpTree) rollout(step int) float64 {
 	var total float64
 	discount := 1.0
-	for _, idx := range seq {
-		c := candidates[idx]
-		reward := cfg.InfoGainWeight * c.Value
-		if bamcpOutcome(c, nodeKind, hypothesisOutcomeProb, registry, realized, rng) {
-			reward += cfg.TerminalReward
+	marked := t.marked[:0]
+	for i := range t.candidates {
+		if step >= t.depth {
+			break
 		}
-		total += discount * reward
-		discount *= cfg.Discount
+		if t.taken[i] {
+			continue
+		}
+		total += discount * t.reward(i)
+		discount *= t.cfg.Discount
+		t.taken[i] = true
+		marked = append(marked, i)
+		step++
 	}
+	for _, i := range marked {
+		t.taken[i] = false
+	}
+	t.marked = marked
 	return total
-}
-
-// bamcpOutcome reports whether candidate c's move "resolves true" in this
-// rollout's sampled world: for an evidence move, whether any of its node's
-// terminal belief variables (terminalVariables, belief_slice_native.go) was
-// ancestrally sampled true; for a hypothesis, a fresh Bernoulli draw against
-// its pre-resolved claim confidence (hypothesisOutcomeProbs) -- a hypothesis
-// names no node in the grounded AttackGraph, so it has nothing for
-// bamcpSampleWorld to have realized, and is resolved directly instead.
-func bamcpOutcome(
-	c VoICandidate,
-	nodeKind map[string]string,
-	hypothesisOutcomeProb map[string]float64,
-	registry *ontology.BeliefSchemaRegistry,
-	realized map[string]bool,
-	rng *rand.Rand,
-) bool {
-	switch c.Kind {
-	case VoICandidateEvidence:
-		kind := nodeKind[c.RefID]
-		for _, v := range terminalVariables(registry, kind) {
-			gname, err := beliefvi.GroundName(c.RefID, v)
-			if err != nil {
-				continue
-			}
-			if realized[gname] {
-				return true
-			}
-		}
-		return false
-	case VoICandidateHypothesis:
-		return rng.Float64() < hypothesisOutcomeProb[c.RefID]
-	default:
-		return false
-	}
 }
 
 // bamcpVar is one grounded belief variable, ready for ancestral (generative)

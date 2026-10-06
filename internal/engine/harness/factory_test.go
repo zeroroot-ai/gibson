@@ -212,7 +212,7 @@ func TestFactory_Create_Success(t *testing.T) {
 	assert.Equal(t, missionID, harness.Mission().ID)
 	assert.Equal(t, "test-mission", harness.Mission().Name)
 	assert.Equal(t, "test-target", harness.Target().Name)
-	assert.Equal(t, "https://example.com", harness.Target().URL)
+	assert.Equal(t, "https://example.com", harness.Target().URL())
 }
 
 func TestFactory_Create_UpdatesMissionContext(t *testing.T) {
@@ -394,7 +394,7 @@ func TestFactory_CreateChild_Success(t *testing.T) {
 	// Verify child shares target info with parent
 	assert.Equal(t, parentHarness.Target().ID, childHarness.Target().ID)
 	assert.Equal(t, parentHarness.Target().Name, childHarness.Target().Name)
-	assert.Equal(t, parentHarness.Target().URL, childHarness.Target().URL)
+	assert.Equal(t, parentHarness.Target().URL(), childHarness.Target().URL())
 }
 
 func TestFactory_CreateChild_NilParent(t *testing.T) {

@@ -8,9 +8,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -137,6 +139,42 @@ var operatorMethodPolicy = map[string]operatorMethodDecision{
 		allowed: false,
 		reason:  "the connector-operator's status RPC (connectorOperatorMethodPolicy); the tenant-operator never calls it",
 	},
+	daemonoperatorv1.DaemonOperatorService_GetBeliefTrainingData_FullMethodName: {
+		allowed: false,
+		reason:  "the belief trainer's read RPC (trainerMethods); the tenant-operator never calls it",
+	},
+	daemonoperatorv1.DaemonOperatorService_StoreBeliefArtifact_FullMethodName: {
+		allowed: false,
+		reason:  "the belief trainer's store RPC (trainerMethods); the tenant-operator never calls it",
+	},
+}
+
+// trainerMethods are the only methods a belief trainer identity
+// spiffe://<trust domain>/trainer/<tenant> may call (ADR-0106, gibson#788).
+// Each handler also checks that the tenant of the request is the tenant of
+// the identity.
+var trainerMethods = map[string]bool{
+	daemonoperatorv1.DaemonOperatorService_GetBeliefTrainingData_FullMethodName: true,
+	daemonoperatorv1.DaemonOperatorService_StoreBeliefArtifact_FullMethodName:   true,
+}
+
+// trainerBypassDecision is the direct-dial decision for a belief trainer
+// identity. It returns (false, nil) when svid is not a trainer identity of
+// the trust domain td, so the caller goes on with the other peer checks;
+// (true, nil) when the method is a trainer method; and PermissionDenied for
+// each other method.
+func trainerBypassDecision(svid, method string, td spiffeid.TrustDomain) (bool, error) {
+	if td.IsZero() {
+		return false, nil
+	}
+	if _, ok := trainerid.TenantOfString(svid, td); !ok {
+		return false, nil
+	}
+	if !trainerMethods[method] {
+		return false, grpcstatus.Errorf(grpccodes.PermissionDenied,
+			"a belief trainer identity is not authorised to call %q", method)
+	}
+	return true, nil
 }
 
 // connectorOperatorMethodPolicy classifies EVERY DaemonOperatorService method

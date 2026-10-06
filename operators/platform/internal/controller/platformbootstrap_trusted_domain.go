@@ -59,40 +59,8 @@ func (r *PlatformBootstrapReconciler) reconcileTrustedDomain(
 		return ctrl.Result{}, nil
 	}
 
-	sc := pb.Spec.Zitadel.SystemClient
-
-	// Resolve the target cluster-service domain. If the spec field is empty,
-	// derive it from the Helm release name and namespace convention:
-	// "<releaseName>-zitadel.<namespace>.svc.cluster.local".
-	targetDomain := sc.TrustedClusterDomain
-	if targetDomain == "" {
-		// Derive from the release name embedded in the CR name. By convention
-		// the CR is named after the Helm release (e.g. "gibson"). If no
-		// namespace is set on the CR we use the defaultChildNamespace.
-		releaseName := pb.Name
-		ns := defaultChildNamespace
-		targetDomain = fmt.Sprintf("%s-zitadel.%s.svc.cluster.local", releaseName, ns)
-	}
-
-	// Build the System API base URL. This is ALWAYS a cluster-internal
-	// address — see systemAPIBaseURL.
-	apiURL := systemAPIBaseURL(sc.APIURL, targetDomain)
-	systemUserName := sc.SystemUserName
-	if systemUserName == "" {
-		systemUserName = "gibson-system-bot"
-	}
-
-	// Construct the system client via the factory (real or test-injected).
-	factory := r.SystemClientFactory
-	if factory == nil {
-		factory = DefaultSystemClientFactory
-	}
-	// The claimed host (ADR-0092). The connection goes to the in-cluster
-	// Service, and the x-zitadel-instance-host header names the public
-	// domain, so the call lands on the right instance before the
-	// cluster-internal hostname is a trusted domain.
-	externalDomain := systemAPIClaimedHost(pb.Spec.Zitadel.ExternalDomain)
-	sysCli, err := factory(apiURL, systemUserName, externalDomain, sc.KeyPath)
+	targetDomain := trustedClusterDomain(pb)
+	sysCli, err := r.systemClient(pb)
 	if err != nil {
 		setBootstrapCond(pb, gibsonv1alpha1.ConditionTrustedDomainReady, metav1.ConditionFalse,
 			"SystemClientInitFailed", err.Error())
@@ -102,7 +70,6 @@ func (r *PlatformBootstrapReconciler) reconcileTrustedDomain(
 		}
 		return ctrl.Result{RequeueAfter: requeueMedium}, nil
 	}
-
 	// List current domains to short-circuit if already registered (avoid
 	// a write RPC on every reconcile loop).
 	domains, err := sysCli.ListInstanceDomains(ctx)
@@ -182,4 +149,30 @@ func systemAPIClaimedHost(specExternalDomain string) string {
 		return specExternalDomain
 	}
 	return os.Getenv(zitadelconn.EnvExternalDomain)
+}
+
+// trustedClusterDomain is the cluster-internal Zitadel Service host: the spec
+// value, or "<cr-name>-zitadel.<namespace>.svc.cluster.local".
+func trustedClusterDomain(pb *gibsonv1alpha1.PlatformBootstrap) string {
+	if d := pb.Spec.Zitadel.SystemClient.TrustedClusterDomain; d != "" {
+		return d
+	}
+	return fmt.Sprintf("%s-zitadel.%s.svc.cluster.local", pb.Name, defaultChildNamespace)
+}
+
+// systemClient builds the Zitadel System API client of the PlatformBootstrap.
+// It dials the cluster-internal address and claims the public host
+// (ADR-0092). spec.zitadel.systemClient must be set.
+func (r *PlatformBootstrapReconciler) systemClient(pb *gibsonv1alpha1.PlatformBootstrap) (zitadel.SystemClient, error) {
+	sc := pb.Spec.Zitadel.SystemClient
+	apiURL := systemAPIBaseURL(sc.APIURL, trustedClusterDomain(pb))
+	systemUserName := sc.SystemUserName
+	if systemUserName == "" {
+		systemUserName = "gibson-system-bot"
+	}
+	factory := r.SystemClientFactory
+	if factory == nil {
+		factory = DefaultSystemClientFactory
+	}
+	return factory(apiURL, systemUserName, systemAPIClaimedHost(pb.Spec.Zitadel.ExternalDomain), sc.KeyPath)
 }

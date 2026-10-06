@@ -30,18 +30,24 @@
 # the KVM runner; `e2e` needs a live cluster and does not run yet — tracked
 # separately). This guard only guarantees the code still builds.
 #
-# NEGATED TAGS are not checked. A file constrained `//go:build !embedder_tests`
-# is part of the DEFAULT build, so the untagged matrix leg already compiles it.
+# NEGATED TAGS follow the same rule. A file constrained `//go:build !some_tag`
+# is part of the default build, so the untagged matrix leg compiles it. But
+# when no matrix leg selects `some_tag`, the constraint is always true: it
+# selects nothing, and it reads as a second code path that does not exist
+# (ADR-0027). Three files carried such a constraint for a tag that no build
+# ever set (gibson#719). So a negated tag must also name a tag that a matrix
+# leg selects.
 #
 # Exit codes:
-#   0  Every build tag is selected by a matrix leg.
+#   0  Every build tag, plain or negated, is selected by a matrix leg.
 #   1  One or more tags are selected by nothing.
 #   2  Operational error (could not parse the matrix).
 #
 # Self-test mode (--selftest):
 #   Drives the scanner over a synthetic source tree in a temp dir (via
 #   BUILD_TAGS_SCAN_ROOT) against the REAL go-ci.yml matrix, asserting it accepts
-#   a selected tag and rejects an unselected one. Writes nothing into the repo.
+#   a selected tag and rejects an unselected one, plain and negated. Writes
+#   nothing into the repo.
 
 set -euo pipefail
 
@@ -117,6 +123,21 @@ collect_used_tags() {
 }
 
 # ---------------------------------------------------------------------------
+# Collect every negated build tag used in the module, without the "!".
+# ---------------------------------------------------------------------------
+collect_negated_tags() {
+    grep -rhE '^//go:build ' --include='*.go' "${SCAN_ROOT}" 2>/dev/null |
+        sed 's#^//go:build ##' |
+        tr '()&|' '    ' |
+        tr ' ' '\n' |
+        sed 's/^[[:space:]]*//;s/[[:space:]]*$//' |
+        grep '^!' |
+        sed 's/^!//' |
+        grep -v '^$' |
+        sort -u
+}
+
+# ---------------------------------------------------------------------------
 # Self-test
 # ---------------------------------------------------------------------------
 if [[ "${1:-}" == "--selftest" ]]; then
@@ -142,11 +163,26 @@ if [[ "${1:-}" == "--selftest" ]]; then
         exit 1
     fi
 
-    log_info "Self-test: a NEGATED tag must be ignored (it is in the default build)..."
+    log_info "Self-test: a NEGATED tag that a leg selects must be accepted..."
     rm -f "${TMP}/bad.go"
-    printf '//go:build !a_tag_nothing_selects\n\npackage fixture\n' >"${TMP}/neg.go"
+    printf '//go:build !e2e\n\npackage fixture\n' >"${TMP}/neg_ok.go"
     if ! run_scanner; then
-        log_err "SELFTEST FAILED: scanner flagged a negated tag."
+        log_err "SELFTEST FAILED: scanner rejected the negation of a selected tag."
+        exit 1
+    fi
+
+    log_info "Self-test: a NEGATED builtin token must be accepted..."
+    printf '//go:build !windows\n\npackage fixture\n' >"${TMP}/neg_builtin.go"
+    if ! run_scanner; then
+        log_err "SELFTEST FAILED: scanner rejected the negation of a builtin token."
+        exit 1
+    fi
+
+    log_info "Self-test: a NEGATED tag that nothing selects must be rejected..."
+    printf '//go:build !a_tag_nothing_selects\n\npackage fixture\n' >"${TMP}/neg_bad.go"
+    if run_scanner; then
+        log_err "SELFTEST FAILED: scanner accepted a negated tag that no matrix leg selects."
+        log_err "That constraint is always true and selects nothing (gibson#719)."
         exit 1
     fi
 
@@ -191,14 +227,27 @@ for tag in "${USED[@]}"; do
     fi
 done
 
+mapfile -t NEGATED < <(collect_negated_tags)
+for tag in "${NEGATED[@]}"; do
+    is_builtin_token "${tag}" && continue
+    if ! is_selected "${tag}"; then
+        log_err "negated build tag '!${tag}' names a tag that no vet-tags matrix leg selects."
+        log_err "The constraint is always true and selects nothing. Remove it from:"
+        grep -rlE "^//go:build .*!${tag}\b" --include='*.go' "${SCAN_ROOT}" 2>/dev/null |
+            sed "s#^${SCAN_ROOT}/#    #" | head -10
+        VIOLATIONS=$((VIOLATIONS + 1))
+    fi
+done
+
 if [[ "${VIOLATIONS}" -gt 0 ]]; then
     log_err "${VIOLATIONS} build tag(s) that nothing builds (gibson#1280)."
-    log_err "Add the tag as a leg of the vet-tags matrix in .github/workflows/go-ci.yml"
-    log_err "so the files at least have to compile, then decide separately whether the"
-    log_err "suite should also run somewhere."
+    log_err "For a plain tag: add it as a leg of the vet-tags matrix in"
+    log_err ".github/workflows/go-ci.yml so the files at least have to compile, then"
+    log_err "decide separately whether the suite should also run somewhere."
+    log_err "For a negated tag: remove the constraint. It selects nothing."
     exit 1
 fi
 
-log_info "All ${#USED[@]} build tag(s) in use are selected by a vet-tags matrix leg."
+log_info "All ${#USED[@]} build tag(s) and ${#NEGATED[@]} negated tag(s) in use are selected by a vet-tags matrix leg."
 log_info "Selected: ${SELECTED[*]}"
 exit 0

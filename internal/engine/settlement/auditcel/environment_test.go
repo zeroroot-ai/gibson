@@ -132,7 +132,7 @@ func TestEmbeddedCatalog_EveryMappingRuleCompiles(t *testing.T) {
 // TestNISTPack: the pack nist-800-53-r5 is in the catalog, with its 300
 // active base controls and its first-party rules. It states its coverage.
 func TestNISTPack(t *testing.T) {
-	pack, ok := ontology.EmbeddedPack("nist-800-53-r5")
+	pack, ok := ontology.EmbeddedCatalog().Get("nist-800-53-r5")
 	require.True(t, ok)
 	withRule, total := pack.RuleCoverage()
 	assert.Equal(t, 300, total)

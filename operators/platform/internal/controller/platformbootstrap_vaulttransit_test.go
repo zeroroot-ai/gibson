@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -79,6 +80,36 @@ func TestReconcileVaultTransit_VaultClientInitFailureRequeues(t *testing.T) {
 type fakeVaultClient struct {
 	mountErr error
 	keyErr   error
+
+	// kv is the KV v2 store of the admin token tests (gibson#794); writes
+	// counts each write, and readErr and writeErr fail the calls.
+	kv       map[string]map[string]string
+	writes   int
+	readErr  error
+	writeErr error
+}
+
+func (f *fakeVaultClient) ReadKV(_ context.Context, key string) (map[string]string, error) {
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
+	v, ok := f.kv[key]
+	if !ok {
+		return nil, fmt.Errorf("kv %s: %w", key, vault.ErrNotFound)
+	}
+	return v, nil
+}
+
+func (f *fakeVaultClient) WriteKV(_ context.Context, key string, data map[string]string) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
+	if f.kv == nil {
+		f.kv = map[string]map[string]string{}
+	}
+	f.kv[key] = data
+	f.writes++
+	return nil
 }
 
 func (f *fakeVaultClient) EnsureTransitMounted(_ context.Context) error { return f.mountErr }

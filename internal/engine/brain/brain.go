@@ -92,6 +92,10 @@ type World struct {
 	// sighted facts.
 	domainPacks map[string]DomainPackState
 
+	// missionLineage holds the lineage of each mission that a component
+	// originated (mission_lineage.go, gibson#734), keyed by mission id.
+	missionLineage map[string]MissionLineage
+
 	// proofReviews holds the latest proof with agent-typed evidence for each
 	// hypothesis (proof_review.go, ADR-0131), keyed by hypothesis id.
 	proofReviews map[string]BetProofSubmittedForReview
@@ -122,6 +126,10 @@ type World struct {
 	// ADR-0137 learns from (gibson#613), folded from
 	// EdgeOutcomeObserved and carried by WorldSnapshot so TrimTo loses none.
 	edgeOutcomes map[string]EdgeOutcomeCount
+
+	// missionRewinds holds the parent of each mission that a rewind started
+	// (mission_rewind.go, ADR-0170). Keyed by the new mission id.
+	missionRewinds map[string]MissionRewind
 
 	// observations holds out-of-taxonomy shapes (ADR-0112). Keyed by Timeline
 	// event id rather than by content, so repeat sightings stay distinct.
@@ -251,10 +259,12 @@ func NewWorld(tenant string) *World {
 		voiPlans:           ecs.NewMap1[VoIPlanState](w),
 		nodeBeliefs:        ecs.NewMap1[NodeBeliefRecord](w),
 		domainPacks:        make(map[string]DomainPackState),
+		missionLineage:     make(map[string]MissionLineage),
 		proofReviews:       make(map[string]BetProofSubmittedForReview),
 		ontologyGate:       taxonomy.NewPromotionGate(taxonomy.Global),
 		ontologyProposals:  make(map[ontologyProposalKey]OntologyProposalState),
 		edgeOutcomes:       make(map[string]EdgeOutcomeCount),
+		missionRewinds:     make(map[string]MissionRewind),
 	}
 }
 
@@ -435,6 +445,8 @@ func Reduce(w *World, ev Event) {
 		applyMissionResumed(w, e)
 	case MissionDone:
 		applyMissionDone(w, e)
+	case MissionRewound:
+		applyMissionRewound(w, e)
 	case BeliefScoreRequested:
 		applyBeliefScoreRequested(w, e)
 	case BeliefScored:
@@ -481,6 +493,8 @@ func Reduce(w *World, ev Event) {
 		applyEdgeOutcomeObserved(w, e)
 	case NodeBeliefSet:
 		applyNodeBeliefSet(w, e)
+	case MissionOriginated:
+		applyMissionOriginated(w, e)
 	case DomainPackEnabled:
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:
