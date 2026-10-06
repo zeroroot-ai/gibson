@@ -5,14 +5,7 @@
 // event Timeline (ADR-0163, gibson#1112/#1113).
 package brain
 
-import (
-	"context"
-	"errors"
-)
-
-// ErrNotImplemented is returned by stub methods declared for interface
-// completeness but implemented in a later slice (#1117).
-var ErrNotImplemented = errors.New("brain: not implemented (pending slice)")
+import "context"
 
 // TimelineStore is the durable-log abstraction the brain writes through
 // (ADR-0163). The brain package depends only on this interface — no Redis
@@ -24,7 +17,7 @@ var ErrNotImplemented = errors.New("brain: not implemented (pending slice)")
 //
 //	{"kind":"<Event.Kind()>","payload":<json of concrete type>}
 //
-// The "kind" field drives type reconstruction on replay (slice #1114). Every
+// The "kind" field drives type reconstruction on replay (Hydrate). Every
 // concrete brain.Event type is registered in timeline_codec.go. The codec is
 // the ONLY place that maps kind → Go type; Reduce is the ONLY place that maps
 // kind → World mutation.
@@ -60,7 +53,7 @@ type TimelineStore interface {
 
 	// LoadForReplay returns the ordered slice of events from the tenant's
 	// durable Timeline, starting after afterSeq (pass "" to load from the
-	// beginning of the stream). Used by slice #1114 (hydrate-on-startup).
+	// beginning of the stream). Hydrate uses it after it restores the snapshot.
 	// The returned events are ready to fold via Reduce.
 	//
 	// Implementations should read in batches internally; callers receive a
@@ -78,13 +71,12 @@ type TimelineStore interface {
 	// returns an opaque snapshot handle. The handle is passed to TrimTo to
 	// prune the Timeline prefix the snapshot covers.
 	//
-	// Implemented in slice #1117. Stub: returns ("", ErrNotImplemented).
+	// The Redis store keeps one snapshot for each tenant, and the handle is
+	// snap.AtSeq.
 	WriteSnapshot(ctx context.Context, tenant string, snap WorldSnapshot) (handle string, err error)
 
 	// LoadSnapshot loads the latest World snapshot for the tenant. Returns
 	// (nil, nil) when no snapshot exists yet.
-	//
-	// Implemented in slice #1117. Stub: returns (nil, nil).
 	LoadSnapshot(ctx context.Context, tenant string) (*WorldSnapshot, error)
 
 	// TrimTo removes Timeline entries that precede the snapshot identified by
@@ -92,17 +84,16 @@ type TimelineStore interface {
 	// The store writes each entry to its durable history before it removes
 	// the entry. When that write fails, TrimTo removes nothing and returns
 	// the error.
-	//
-	// Implemented in slice #1117. Stub: returns ErrNotImplemented.
 	TrimTo(ctx context.Context, tenant string, handle string) error
 }
 
 // WorldSnapshot is the serialised form of a tenant World at a point in the
-// Timeline. Opaque to this slice; shape is finalised in slice #1117.
+// Timeline. SnapshotWorld makes it and RestoreWorld reads it (world_snapshot.go).
 type WorldSnapshot struct {
 	// AtSeq is the Timeline sequence ID of the last event folded into this
 	// snapshot. TrimTo prunes events up to and including AtSeq.
 	AtSeq string
-	// Data carries the serialised World bytes (encoding TBD by #1117).
+	// Data carries the serialised World: the JSON of the snapshot data that
+	// SnapshotWorld writes.
 	Data []byte
 }
