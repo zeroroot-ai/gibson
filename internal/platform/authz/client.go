@@ -5,10 +5,13 @@ package authz
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -61,8 +64,14 @@ type FgaConfig struct {
 	// TimeoutMs is the per-call timeout in milliseconds. Defaults to 500ms.
 	TimeoutMs int
 
-	// TLSEnabled controls whether TLS is enabled. The Endpoint must be an https:// URL.
+	// TLSEnabled makes the client connect over TLS and verify the server with
+	// the CA in TLSCAFile only. The Endpoint must be https:// or carry no
+	// scheme. When false, the client adds no TLS settings of its own.
 	TLSEnabled bool
+
+	// TLSCAFile is the PEM CA bundle that signs the FGA server certificate.
+	// Required when TLSEnabled is true.
+	TLSCAFile string
 
 	// Logger for structured log output. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
@@ -113,11 +122,9 @@ func NewFgaAuthorizer(_ context.Context, cfg FgaConfig) (Authorizer, error) {
 		timeoutMs = defaultTimeoutMs
 	}
 
-	// Normalize the endpoint: ensure it starts with a scheme.
-	endpoint := cfg.Endpoint
-	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-		// Default to http for in-cluster traffic (no TLS by default)
-		endpoint = "http://" + endpoint
+	endpoint, transport, err := fgaTransport(cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	clientCfg := &fgaclient.ClientConfiguration{
@@ -125,7 +132,8 @@ func NewFgaAuthorizer(_ context.Context, cfg FgaConfig) (Authorizer, error) {
 		StoreId:              cfg.StoreID,
 		AuthorizationModelId: cfg.ModelID,
 		HTTPClient: &http.Client{
-			Timeout: time.Duration(timeoutMs) * time.Millisecond * 2, // Transport timeout is 2x the per-call timeout
+			Transport: transport,
+			Timeout:   time.Duration(timeoutMs) * time.Millisecond * 2, // Transport timeout is 2x the per-call timeout
 		},
 	}
 
@@ -142,6 +150,60 @@ func NewFgaAuthorizer(_ context.Context, cfg FgaConfig) (Authorizer, error) {
 		logger:    logger,
 		tracer:    otel.Tracer(tracerName),
 	}, nil
+}
+
+// fgaTransport returns the endpoint with its scheme and the HTTP transport
+// that dials it.
+//
+// With TLSEnabled, the endpoint is https and the transport trusts only the
+// CA in TLSCAFile. A missing, unreadable or empty CA file is an error, so a
+// caller that asks for TLS never gets a client that skips it. Without
+// TLSEnabled, an endpoint with no scheme gets http and the transport carries
+// no TLS settings.
+func fgaTransport(cfg FgaConfig) (string, *http.Transport, error) {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return "", nil, newInvalidArgumentError("http.DefaultTransport is not an *http.Transport")
+	}
+	transport := base.Clone()
+	endpoint := cfg.Endpoint
+	hasScheme := strings.HasPrefix(endpoint, "http://") || strings.HasPrefix(endpoint, "https://")
+
+	if !cfg.TLSEnabled {
+		// The clone can carry the HTTP/2 TLS defaults of the shared
+		// transport. TLS off means this client sets no TLS config.
+		transport.TLSClientConfig = nil
+		if !hasScheme {
+			endpoint = "http://" + endpoint
+		}
+		return endpoint, transport, nil
+	}
+
+	if strings.HasPrefix(endpoint, "http://") {
+		return "", nil, newInvalidArgumentError(
+			"FgaConfig.Endpoint " + endpoint + " is plain http, but TLSEnabled is true")
+	}
+	if !hasScheme {
+		endpoint = "https://" + endpoint
+	}
+	if cfg.TLSCAFile == "" {
+		return "", nil, newInvalidArgumentError("FgaConfig.TLSCAFile must not be empty when TLSEnabled is true")
+	}
+	caPEM, err := os.ReadFile(cfg.TLSCAFile)
+	if err != nil {
+		return "", nil, newInvalidArgumentError(
+			fmt.Sprintf("FgaConfig.TLSCAFile %s cannot be read: %v", cfg.TLSCAFile, err))
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caPEM) {
+		return "", nil, newInvalidArgumentError(
+			"FgaConfig.TLSCAFile " + cfg.TLSCAFile + " holds no PEM certificate")
+	}
+	transport.TLSClientConfig = &tls.Config{
+		RootCAs:    pool,
+		MinVersion: tls.VersionTLS12,
+	}
+	return endpoint, transport, nil
 }
 
 // StoreID returns the FGA store ID this authorizer is connected to.

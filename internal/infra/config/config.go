@@ -661,7 +661,11 @@ type FgaClientConfig struct {
 
 // FgaTLSConfig holds TLS settings for the FGA client connection.
 type FgaTLSConfig struct {
-	// Enabled controls whether TLS is used when connecting to FGA.
-	// Default: false (in-cluster pod-to-pod traffic is already protected)
+	// Enabled makes the FGA client connect over TLS (https) and verify the
+	// server with CAFile only. When false, the endpoint must not be https.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// CAFile is the PEM CA bundle that signs the FGA server certificate.
+	// Required when Enabled is true: the daemon does not start without it.
+	CAFile string `mapstructure:"ca_file" yaml:"ca_file"`
 }
