@@ -302,7 +302,9 @@ func connectionPointPeerPolicies(callers api.ConnectionPointCallers) map[string]
 			out[svid][m] = true
 		}
 	}
-	add(callers.SignupStepCompleter, connectionv1.ConnectionPointService_CompleteSignupStep_FullMethodName)
+	add(callers.SignupStepCompleter,
+		connectionv1.ConnectionPointService_CompleteSignupStep_FullMethodName,
+		connectionv1.ConnectionPointService_DescribeSignupStep_FullMethodName)
 	add(callers.TenantActivation,
 		connectionv1.ConnectionPointService_SetTenantActivation_FullMethodName,
 		connectionv1.ConnectionPointService_ListTenantUsage_FullMethodName)
