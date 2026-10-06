@@ -82,11 +82,11 @@ func TestWhoAmI_SelfQueryAggregatesGrants(t *testing.T) {
 				t.Fatalf("listObjects user mismatch: got %q want %q", user, subject)
 			}
 			switch {
-			case objectType == "component" && relation == "component_read_enabled":
+			case objectType == "component" && relation == "can_read":
 				return []string{"component:gitlab", "component:nmap"}, nil
-			case objectType == "component" && relation == "component_write_enabled":
+			case objectType == "component" && relation == "can_configure":
 				return []string{"component:gitlab"}, nil
-			case objectType == "component" && relation == "component_execute_enabled":
+			case objectType == "component" && relation == "can_execute":
 				return []string{"component:nmap"}, nil
 			case objectType == "plugin" && relation == "can_invoke":
 				return nil, nil

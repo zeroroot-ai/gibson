@@ -398,9 +398,9 @@ func agentRow(id, tenant string) *sqlmock.Rows {
 	)
 }
 
-// The FGA check names the component principal and the component-scoped
-// relation — not the fetched row's owner, whose own authority the component
-// would otherwise borrow in full.
+// The FGA check names the component principal, not the fetched row's owner,
+// whose own authority the component would otherwise borrow in full. The
+// relation is can_execute, the same as for a user (ADR-0041).
 func TestExecuteAgentCapability_AuthorizesTheComponentPrincipal(t *testing.T) {
 	m := newMockedService(t)
 
@@ -419,7 +419,7 @@ func TestExecuteAgentCapability_AuthorizesTheComponentPrincipal(t *testing.T) {
 	assert.Equal(t, "error", res.Status)
 	assert.Equal(t, "agent_principal:acct-1", gotSubject,
 		"the executing component is the subject, not its enroller")
-	assert.Equal(t, "can_execute_as_component", gotRelation)
+	assert.Equal(t, "can_execute", gotRelation)
 	require.NoError(t, m.mock.ExpectationsWereMet())
 }
 
@@ -1103,7 +1103,7 @@ func (m *mockedService) grantFGA(names ...string) {
 		objects = append(objects, "component:tool/"+n)
 	}
 	m.fga.listObjectsFunc = func(_, relation, _ string) ([]string, error) {
-		if relation == "can_execute" || relation == "component_execute_enabled" {
+		if relation == "can_execute" {
 			return objects, nil
 		}
 		return nil, nil

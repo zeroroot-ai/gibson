@@ -25,7 +25,7 @@ import (
 // derived from the caller's own verified component_scope claim.
 const componentScopeTestYAML = `entries:
   "/gibson.daemon.discovery.v1.DiscoveryService/ListFindings":
-    relation: "can_read_as_component"
+    relation: "can_read"
     object_type: "component"
     object_deriver: "component_from_identity"
     allowed_identities:
