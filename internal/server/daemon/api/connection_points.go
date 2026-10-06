@@ -67,16 +67,17 @@ func tlsPeerSVID(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// requireCaller refuses a call whose TLS peer is not the configured SPIFFE ID.
-func requireCaller(ctx context.Context, want string) error {
+// callerRefusal returns why a call is refused when its TLS peer is not the
+// configured SPIFFE ID, and ok when the peer is that ID.
+func callerRefusal(ctx context.Context, want string) (reason string, ok bool) {
 	if want == "" {
-		return status.Error(codes.PermissionDenied, "this connection point has no configured caller")
+		return "this connection point has no configured caller", false
 	}
-	got, ok := tlsPeerSVID(ctx)
-	if !ok || got != want {
-		return status.Error(codes.PermissionDenied, "the caller is not the configured identity of this connection point")
+	got, found := tlsPeerSVID(ctx)
+	if !found || got != want {
+		return "the caller is not the configured identity of this connection point", false
 	}
-	return nil
+	return "", true
 }
 
 // tenantUsageReader is the part of the budget enforcer that reads the usage
@@ -87,8 +88,8 @@ type tenantUsageReader interface {
 
 // CompleteSignupStep implements ConnectionPointServiceServer.
 func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1.CompleteSignupStepRequest) (*connectionv1.CompleteSignupStepResponse, error) {
-	if err := requireCaller(ctx, s.connectionCallers.SignupStepCompleter); err != nil {
-		return nil, err
+	if reason, ok := callerRefusal(ctx, s.connectionCallers.SignupStepCompleter); !ok {
+		return nil, status.Error(codes.PermissionDenied, reason)
 	}
 	if req.GetStepToken() == "" {
 		return nil, status.Error(codes.InvalidArgument, "step_token is required")
@@ -127,8 +128,8 @@ func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1
 // activation identity, checked from the TLS peer above. It names a tenant by
 // design: it starts and stops tenants of the platform.
 func (s *DaemonServer) SetTenantActivation(ctx context.Context, req *connectionv1.SetTenantActivationRequest) (*connectionv1.SetTenantActivationResponse, error) {
-	if err := requireCaller(ctx, s.connectionCallers.TenantActivation); err != nil {
-		return nil, err
+	if reason, ok := callerRefusal(ctx, s.connectionCallers.TenantActivation); !ok {
+		return nil, status.Error(codes.PermissionDenied, reason)
 	}
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
@@ -165,8 +166,8 @@ func (s *DaemonServer) SetTenantActivation(ctx context.Context, req *connectionv
 
 // ListTenantUsage implements ConnectionPointServiceServer.
 func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.ListTenantUsageRequest) (*connectionv1.ListTenantUsageResponse, error) {
-	if err := requireCaller(ctx, s.connectionCallers.TenantActivation); err != nil {
-		return nil, err
+	if reason, ok := callerRefusal(ctx, s.connectionCallers.TenantActivation); !ok {
+		return nil, status.Error(codes.PermissionDenied, reason)
 	}
 	usage, ok := s.budgetEnforcer.(tenantUsageReader)
 	if !ok {
