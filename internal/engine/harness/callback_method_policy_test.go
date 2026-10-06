@@ -25,6 +25,11 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// callbackTestTD is the trust domain of the policy tests. It is not
+// zeroroot.ai on purpose: the policy must work in the trust domain of any
+// install (ADR-0164).
+var callbackTestTD = spiffeid.RequireTrustDomainFromString("example.org")
+
 // serviceDescMethods enumerates every fully-qualified method name on the
 // generated HarnessCallbackService descriptor — unary and streaming.
 func serviceDescMethods() []string {
@@ -123,9 +128,9 @@ func TestCallbackAgentSurface_MatchesImplementedRPCs(t *testing.T) {
 // policed-but-empty policy: present so startup validation passes, granting zero
 // methods so every request is denied.
 func TestCallbackPeerMethodPolicies_DashboardGetsNothing(t *testing.T) {
-	policies := callbackPeerMethodPolicies()
+	policies := callbackPeerMethodPolicies(callbackTestTD)
 
-	methods, policed := policies[callbackDashboardSVID]
+	methods, policed := policies[callbackDashboardSVID(callbackTestTD)]
 	require.True(t, policed, "the dashboard must be POLICED (present with an empty set), not absent — "+
 		"absence would trip validateCallbackPeerPolicies at boot")
 	assert.Empty(t, methods, "the dashboard must be granted zero HarnessCallbackService methods")
@@ -135,9 +140,9 @@ func TestCallbackPeerMethodPolicies_DashboardGetsNothing(t *testing.T) {
 // daemon-loopback peers to the classified agent surface plus the health probes —
 // and NOT to anything outside it.
 func TestCallbackPeerMethodPolicies_AgentPeersGetTheAgentSurface(t *testing.T) {
-	policies := callbackPeerMethodPolicies()
+	policies := callbackPeerMethodPolicies(callbackTestTD)
 
-	for _, svid := range []string{callbackEnvoySVID, callbackDaemonSVID} {
+	for _, svid := range []string{callbackEnvoySVID(callbackTestTD), callbackDaemonSVID(callbackTestTD)} {
 		t.Run(svid, func(t *testing.T) {
 			methods, policed := policies[svid]
 			require.True(t, policed, "%s must have an explicit method policy", svid)
@@ -161,7 +166,7 @@ func TestCallbackPeerMethodPolicies_AgentPeersGetTheAgentSurface(t *testing.T) {
 // classifying it must stop the daemon, not produce a peer that is silently
 // denied every call.
 func TestValidateCallbackPeerPolicies_RejectsUnclassifiedPeer(t *testing.T) {
-	policies := callbackPeerMethodPolicies()
+	policies := callbackPeerMethodPolicies(callbackTestTD)
 
 	newPeer := spiffeid.RequireFromString("spiffe://zeroroot.ai/platform/some-new-thing")
 	err := validateCallbackPeerPolicies([]spiffeid.ID{newPeer}, policies)
@@ -175,11 +180,11 @@ func TestValidateCallbackPeerPolicies_RejectsUnclassifiedPeer(t *testing.T) {
 // drifted and the callback path would be dead on arrival.
 func TestValidateCallbackPeerPolicies_AcceptsConfiguredPeers(t *testing.T) {
 	configured := []spiffeid.ID{
-		spiffeid.RequireFromString(callbackDashboardSVID),
-		spiffeid.RequireFromString(callbackEnvoySVID),
-		spiffeid.RequireFromString(callbackDaemonSVID),
+		spiffeid.RequireFromString(callbackDashboardSVID(callbackTestTD)),
+		spiffeid.RequireFromString(callbackEnvoySVID(callbackTestTD)),
+		spiffeid.RequireFromString(callbackDaemonSVID(callbackTestTD)),
 	}
-	require.NoError(t, validateCallbackPeerPolicies(configured, callbackPeerMethodPolicies()))
+	require.NoError(t, validateCallbackPeerPolicies(configured, callbackPeerMethodPolicies(callbackTestTD)))
 }
 
 // --- checkCallbackPeerAuthz: the three fail-closed axes ---
@@ -190,7 +195,7 @@ func TestCheckCallbackPeerAuthz_UnknownPeerDenied(t *testing.T) {
 		context.Background(),
 		"spiffe://zeroroot.ai/platform/some-new-thing", true,
 		harnesspb.HarnessCallbackService_GetCredential_FullMethodName,
-		callbackPeerMethodPolicies(), logger,
+		callbackPeerMethodPolicies(callbackTestTD), logger,
 	)
 	require.Error(t, err, "REGRESSION (GHSA-cwgm-qw3c-4ph7): a peer SVID with no method policy must be "+
 		"DENIED, not defaulted to allowed. Under the old denylist any peer it did not name — including "+
@@ -204,7 +209,7 @@ func TestCheckCallbackPeerAuthz_UnresolvedSVIDDenied(t *testing.T) {
 		context.Background(),
 		"", false,
 		harnesspb.HarnessCallbackService_GetCredential_FullMethodName,
-		callbackPeerMethodPolicies(), logger,
+		callbackPeerMethodPolicies(callbackTestTD), logger,
 	)
 	require.Error(t, err, "REGRESSION (GHSA-cwgm-qw3c-4ph7): a peer whose SPIFFE ID cannot be resolved "+
 		"must be DENIED. The old interceptors skipped the check entirely when peerSPIFFEID returned "+
@@ -216,9 +221,9 @@ func TestCheckCallbackPeerAuthz_KnownPeerDeniedOutsidePolicy(t *testing.T) {
 	logger, _ := newBufferLogger()
 	err := checkCallbackPeerAuthz(
 		context.Background(),
-		callbackEnvoySVID, true,
+		callbackEnvoySVID(callbackTestTD), true,
 		harnesspb.HarnessCallbackService_GetPlanContext_FullMethodName,
-		callbackPeerMethodPolicies(), logger,
+		callbackPeerMethodPolicies(callbackTestTD), logger,
 	)
 	require.Error(t, err, "a KNOWN peer must still be denied a method outside its policy — the old "+
 		"denylist had no per-method dimension at all")
@@ -229,8 +234,8 @@ func TestCheckCallbackPeerAuthz_DashboardDeniedEverything(t *testing.T) {
 	logger, _ := newBufferLogger()
 	for _, method := range serviceDescMethods() {
 		err := checkCallbackPeerAuthz(
-			context.Background(), callbackDashboardSVID, true, method,
-			callbackPeerMethodPolicies(), logger,
+			context.Background(), callbackDashboardSVID(callbackTestTD), true, method,
+			callbackPeerMethodPolicies(callbackTestTD), logger,
 		)
 		require.Error(t, err, "the dashboard SVID must be denied %s", method)
 		assert.Equal(t, codes.PermissionDenied, status.Code(err))
@@ -239,13 +244,28 @@ func TestCheckCallbackPeerAuthz_DashboardDeniedEverything(t *testing.T) {
 
 func TestCheckCallbackPeerAuthz_AgentPeerAllowedInPolicy(t *testing.T) {
 	logger, _ := newBufferLogger()
-	for _, svid := range []string{callbackEnvoySVID, callbackDaemonSVID} {
+	for _, svid := range []string{callbackEnvoySVID(callbackTestTD), callbackDaemonSVID(callbackTestTD)} {
 		err := checkCallbackPeerAuthz(
 			context.Background(), svid, true,
 			harnesspb.HarnessCallbackService_LLMComplete_FullMethodName,
-			callbackPeerMethodPolicies(), logger,
+			callbackPeerMethodPolicies(callbackTestTD), logger,
 		)
 		assert.NoError(t, err, "%s must still reach its classified agent-surface methods — this fix "+
 			"must not break the live in-mission callback path", svid)
 	}
+}
+
+// TestCallbackPeerMethodPolicies_FollowTheTrustDomain proves that the peer
+// policies are keyed on the trust domain of the install. A peer in a different
+// trust domain has no policy, so the server refuses to start with it.
+func TestCallbackPeerMethodPolicies_FollowTheTrustDomain(t *testing.T) {
+	policies := callbackPeerMethodPolicies(callbackTestTD)
+	for _, name := range []string{"dashboard", "envoy", "daemon"} {
+		_, ok := policies["spiffe://example.org/platform/"+name]
+		assert.True(t, ok, "no policy for the %s peer in the configured trust domain", name)
+	}
+
+	other := spiffeid.RequireFromString("spiffe://zeroroot.ai/platform/envoy")
+	err := validateCallbackPeerPolicies([]spiffeid.ID{other}, policies)
+	require.Error(t, err, "a peer of a different trust domain must have no policy")
 }

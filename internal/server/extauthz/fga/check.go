@@ -297,8 +297,8 @@ func (c *Checker) Check(ctx context.Context, method string, identity headers.Ide
 
 	// Derive the FGA user string. SPIFFE IDs include "://" which OpenFGA's
 	// user-ID validator rejects ("malformed user field"); strip the scheme so
-	// "spiffe://zeroroot.ai/platform/dashboard" becomes
-	// "user:zeroroot.ai/platform/dashboard". Non-SPIFFE issuers (e.g. UUID
+	// "spiffe://example.org/platform/dashboard" becomes
+	// "user:example.org/platform/dashboard". Non-SPIFFE issuers (e.g. UUID
 	// subjects from the configured OIDC IdP) are passed through unchanged.
 	// The matching transformation runs in the fga-init Job that seeds
 	// platform_operator tuples.

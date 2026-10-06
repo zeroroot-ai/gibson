@@ -35,9 +35,9 @@ func requireSessionRPCDenied(t *testing.T, method string) {
 	logger, _ := newBufferLogger()
 	err := checkCallbackPeerAuthz(
 		context.Background(),
-		callbackEnvoySVID, true,
+		callbackEnvoySVID(callbackTestTD), true,
 		method,
-		callbackPeerMethodPolicies(), logger,
+		callbackPeerMethodPolicies(callbackTestTD), logger,
 	)
 	require.Error(t, err,
 		"an unimplemented session RPC must be denied to every peer until its handler lands")
@@ -55,9 +55,9 @@ func TestDevboxExec_IsOnTheAgentSurface(t *testing.T) {
 	logger, _ := newBufferLogger()
 	err := checkCallbackPeerAuthz(
 		context.Background(),
-		callbackEnvoySVID, true,
+		callbackEnvoySVID(callbackTestTD), true,
 		harnesspb.HarnessCallbackService_DevboxExec_FullMethodName,
-		callbackPeerMethodPolicies(), logger,
+		callbackPeerMethodPolicies(callbackTestTD), logger,
 	)
 	require.NoError(t, err,
 		"DevboxExec must be reachable now that its handler exists; a silent "+
@@ -330,9 +330,9 @@ func TestPutSessionContext_PeerPolicyAllowsCallbackPeers(t *testing.T) {
 	} {
 		err := checkCallbackPeerAuthz(
 			context.Background(),
-			callbackEnvoySVID, true,
+			callbackEnvoySVID(callbackTestTD), true,
 			method,
-			callbackPeerMethodPolicies(), logger,
+			callbackPeerMethodPolicies(callbackTestTD), logger,
 		)
 		assert.NoError(t, err, "%s is served here; the envoy callback peer must reach it", method)
 	}

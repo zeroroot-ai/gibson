@@ -972,7 +972,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// here for the manager's typed setter.
 	if d.spiffeX509Source != nil {
 		if src, ok := d.spiffeX509Source.(*workloadapi.X509Source); ok {
-			d.callback.SetSPIFFE(src, d.callbackPeerSVIDs)
+			d.callback.SetSPIFFE(src, d.spiffeTrustDomain(), d.callbackPeerSVIDs)
 		} else {
 			return fmt.Errorf(
 				"daemon.spiffeX509Source is not a *workloadapi.X509Source (got %T); "+

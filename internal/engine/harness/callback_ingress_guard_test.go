@@ -78,14 +78,14 @@ func shortMethodName(fullMethod string) string {
 // a real server handler on the listener Envoy targets.
 //
 // "Method Envoy routes" is expressed here as the method set the Envoy peer's
-// policy admits (callbackPeerMethodPolicies()[callbackEnvoySVID]) — Envoy is
+// policy admits (callbackPeerMethodPolicies(callbackTestTD)[callbackEnvoySVID(callbackTestTD)]) — Envoy is
 // the sole ingress for external callers, and the peer policy is the second gate
 // every Envoy-forwarded request passes. A method in that set with no handler in
 // this package would return codes.Unimplemented to a caller that passed
 // jwt_authn, ext-authz, FGA and the peer policy: the exact failure gibson#1450
 // reported, one gate later.
 func TestCallbackIngress_EveryEnvoyRoutedMethodHasAHandler(t *testing.T) {
-	envoyMethods, policed := callbackPeerMethodPolicies()[callbackEnvoySVID]
+	envoyMethods, policed := callbackPeerMethodPolicies(callbackTestTD)[callbackEnvoySVID(callbackTestTD)]
 	require.True(t, policed, "the Envoy peer must have an explicit method policy — it is the ingress peer")
 	require.NotEmpty(t, envoyMethods, "the Envoy peer policy is empty; no external component could call anything")
 
@@ -231,7 +231,7 @@ func TestCallbackIngress_DeniedMethodsHaveNoHandler(t *testing.T) {
 // gibson#1450 was a launch blocker: merged, classified agent-surface, and
 // unreachable by the only component that calls them.
 func TestCallbackIngress_SessionRPCsAreReachable(t *testing.T) {
-	envoyMethods := callbackPeerMethodPolicies()[callbackEnvoySVID]
+	envoyMethods := callbackPeerMethodPolicies(callbackTestTD)[callbackEnvoySVID(callbackTestTD)]
 
 	for _, method := range []string{
 		harnesspb.HarnessCallbackService_PutSessionContext_FullMethodName,
