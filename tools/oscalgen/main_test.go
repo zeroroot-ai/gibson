@@ -31,7 +31,7 @@ func TestCommittedPackMatchesTheCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed, err := os.ReadFile(filepath.Join(root, PackFile))
+	committed, err := os.ReadFile(filepath.Clean(filepath.Join(root, PackFile)))
 	if err != nil {
 		t.Fatal(err)
 	}

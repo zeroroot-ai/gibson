@@ -122,7 +122,7 @@ func TestEvidence_PagesARangeWithMoreEventsThanOnePage(t *testing.T) {
 	}
 	var ids []string
 	token := ""
-	for page := 0; page < 3; page++ {
+	for page := range 3 {
 		r := newTestReader(t, rows, enabledFw())
 		rep, err := r.Evidence(context.Background(), Query{
 			Tenant: "acme", Pack: "fw", Start: start, End: end, PageSize: 2, PageToken: token,
