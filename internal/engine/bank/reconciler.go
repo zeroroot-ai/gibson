@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	bankstore "github.com/zeroroot-ai/gibson/internal/platform/bank"
+	"github.com/zeroroot-ai/gibson/internal/platform/job"
 )
 
 // MemberLauncher is the mechanism half: what it takes to make one member exist
@@ -64,6 +65,32 @@ type JobReleaser interface {
 	ReleaseMember(ctx context.Context, tenantID, memberID string) (int64, error)
 }
 
+// StaleJobCloser finds the jobs of a bank that got no input for longer than
+// the stale limit of the bank, and closes one job. The daemon backs it with
+// the job store.
+//
+// A worker never closes its own job (ADR-0119), so a job on a member that
+// stopped would stay open with no end. The reconciler closes it with the
+// verdict abandoned.
+type StaleJobCloser interface {
+	Stale(ctx context.Context, tenantID, bankID string, staleSeconds int64, limit int32) ([]*job.Job, error)
+	Close(ctx context.Context, tenantID string, in job.CloseInput) (*job.Job, error)
+}
+
+// Jobs is everything the reconciler needs from the job store.
+type Jobs interface {
+	JobReleaser
+	StaleJobCloser
+}
+
+// staleJobBatch is the largest number of stale jobs that one pass closes for
+// one bank. The next pass takes the rest.
+const staleJobBatch = 100
+
+// staleJobCloser is the principal that closes a stale job: the daemon, for
+// the owner of the bank.
+var staleJobCloser = job.Principal{Kind: job.PrincipalService, ID: "bank-reconciler"}
+
 // Events reports what the reconciler did, so a console and the Timeline see a
 // bank move. A nil sink is allowed: the reconciler still reconciles.
 type Events interface {
@@ -77,7 +104,7 @@ type Events interface {
 type Config struct {
 	Store    bankstore.Store
 	Launcher MemberLauncher
-	Jobs     JobReleaser
+	Jobs     Jobs
 	Events   Events
 	Logger   *slog.Logger
 	// HeartbeatTimeout is how long a member may go without reporting before it
@@ -106,7 +133,7 @@ const DefaultLaunchTimeout = 5 * time.Minute
 type Reconciler struct {
 	store         bankstore.Store
 	launcher      MemberLauncher
-	jobs          JobReleaser
+	jobs          Jobs
 	events        Events
 	logger        *slog.Logger
 	heartbeat     time.Duration
@@ -166,7 +193,7 @@ func (r *Reconciler) ReconcileTenant(ctx context.Context, tenantID string) error
 }
 
 // ReconcileBank brings one bank to its desired state, in three passes that must
-// happen in this order:
+// happen in this order, and then closes the stale jobs of the bank:
 //
 //  1. Mark the dead. A member whose heartbeat stopped is not running, so it
 //     must not count toward the desired total — otherwise a bank of five with
@@ -213,6 +240,40 @@ func (r *Reconciler) ReconcileBank(ctx context.Context, tenantID string, b *bank
 	case running < b.DesiredCount:
 		if lerr := r.launch(ctx, tenantID, b, b.DesiredCount-running); lerr != nil {
 			failures = append(failures, lerr)
+		}
+	}
+	if cerr := r.closeStaleJobs(ctx, tenantID, b); cerr != nil {
+		failures = append(failures, cerr)
+	}
+	return errors.Join(failures...)
+}
+
+// closeStaleJobs closes each job of the bank that got no input for longer
+// than the stale limit of the bank, with the verdict abandoned. A bank with
+// no stale limit has no stale job. One job that fails to close does not stop
+// the others.
+func (r *Reconciler) closeStaleJobs(ctx context.Context, tenantID string, b *bankstore.Bank) error {
+	staleSeconds := int64(b.StaleLimit / time.Second)
+	if staleSeconds <= 0 {
+		return nil
+	}
+	stale, err := r.jobs.Stale(ctx, tenantID, b.ID, staleSeconds, staleJobBatch)
+	if err != nil {
+		return fmt.Errorf("list the stale jobs of bank %s: %w", b.ID, err)
+	}
+	var failures []error
+	for _, j := range stale {
+		_, cerr := r.jobs.Close(ctx, tenantID, job.CloseInput{
+			JobID: j.ID, Verdict: job.VerdictAbandoned, Closer: staleJobCloser,
+		})
+		switch {
+		case cerr == nil:
+			r.logger.InfoContext(ctx, "closed a stale job as abandoned",
+				"tenant", tenantID, "bank", b.ID, "job", j.ID, "last_input_at", j.LastInputAt)
+		case errors.Is(cerr, job.ErrClosed), errors.Is(cerr, job.ErrNotFound):
+			// A scorer or the opener closed the job after the list was read.
+		default:
+			failures = append(failures, fmt.Errorf("close stale job %s: %w", j.ID, cerr))
 		}
 	}
 	return errors.Join(failures...)
