@@ -652,8 +652,8 @@ func main() {
 	// Build the daemon gRPC client (SPIFFE mTLS, ADR-0002) and bind it as the
 	// DaemonGRPC saga capability so steps that call DaemonOperatorService
 	// (SetTenantZitadelOrg, FGA tuple writes, catalog seeding, …) are
-	// satisfied. The daemon's expected SVID is read from GIBSON_DAEMON_SPIFFE_ID
-	// (defaults to spiffe://zeroroot.ai/platform/daemon).
+	// satisfied. The daemon's expected SVID is read from GIBSON_DAEMON_SPIFFE_ID,
+	// which is required.
 	//
 	// Plan→quota and Stripe subscription reconciliation moved to the closed
 	// billing tier (E7/gibson#798): the operator no longer loads a plan
@@ -663,28 +663,17 @@ func main() {
 	// mapping in it (ADR-0093 decision 4), sends the enrollment runtime cap
 	// to it (gibson#597) and drains its provisioning queues. With no daemon
 	// address the operator does not start.
-	grpcAddr, addrErr := requireDaemonGRPCAddress(os.Getenv)
-	if addrErr != nil {
-		setupLog.Error(addrErr, "the operator cannot start")
-		os.Exit(1)
-	}
 	var tenantStatusReporter controller.TenantStatusReporter
 	var orgMappingSeeder controller.TenantOrgSeeder
 	var agentLimits flows.AgentLimitsReporter
 	// One block for the wiring of the daemon client and of each loop that
 	// needs it.
 	{
-		daemonSVID := os.Getenv("GIBSON_DAEMON_SPIFFE_ID")
-		if daemonSVID == "" {
-			daemonSVID = "spiffe://zeroroot.ai/platform/daemon"
-		}
-		grpcClient, gerr := provision.NewEntitlementsGRPCClient(
-			context.Background(), grpcAddr, daemonSVID, operatorTokenSource)
+		grpcClient, grpcAddr, gerr := daemonClientFromEnv(context.Background(), os.Getenv, operatorTokenSource, provision.NewEntitlementsGRPCClient)
 		if gerr != nil {
 			setupLog.Error(gerr, "daemon gRPC client init failed", "addr", grpcAddr)
 			os.Exit(1)
 		}
-		setupLog.Info("daemon provisioner: gRPC (SPIFFE mTLS)", "addr", grpcAddr, "daemon_svid", daemonSVID)
 		psagaDeps.DaemonGRPC = grpcClient
 		tenantStatusReporter = grpcClient
 		orgMappingSeeder = grpcClient
