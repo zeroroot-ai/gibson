@@ -57,3 +57,11 @@ func TestCallbackManager_CarriesTheTrustDomain(t *testing.T) {
 	assert.Equal(t, other, m.server.trustDomain)
 	assert.True(t, m.config.SPIFFEEnabled)
 }
+
+// The callback server refuses to start with no fork ledger (D74).
+func TestCallbackServer_StartRefusesNoForkLedger(t *testing.T) {
+	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry())
+	err := s.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fork ledger")
+}

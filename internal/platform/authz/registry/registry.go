@@ -1469,6 +1469,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.harness.v1.HarnessCallbackService/ClaimFork": {
+		Service:           "gibson.harness.v1.HarnessCallbackService",
+		Relation:          "can_use",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.harness.v1.HarnessCallbackService/CloseJob": {
 		Service:           "gibson.harness.v1.HarnessCallbackService",
 		Relation:          "can_use",

@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
@@ -353,12 +354,12 @@ func (s *setecLogStream) Close() error {
 	return nil
 }
 
-// setecNetwork maps the network of a launch onto the wire. A set mode wins,
-// with the egress rules for the allow-list mode. With no mode, egress rules
-// select the allow-list mode, and no rules keep the default of the class
-// (nil). Each rule keeps its CIDR and its port ranges (zeroroot-ai/setec#200),
-// so the network scope of a mission node reaches setec as the node states it
-// (gibson#865).
+// setecNetwork maps the network of a launch or a fork onto the wire. A set
+// mode wins, with the egress rules for the allow-list mode. With no mode,
+// egress rules select the allow-list mode, and no rules keep the default of
+// the class (nil). Each rule keeps its CIDR and its port ranges
+// (zeroroot-ai/setec#200), so the network scope of a mission node reaches
+// setec as the node states it (gibson#865).
 func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 	if mode == "" {
 		if len(egress) == 0 {
@@ -381,4 +382,26 @@ func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 		n.Allow = append(n.Allow, allow)
 	}
 	return n
+}
+
+// Fork forks a running sandbox of the tenant (setec#195). The forks get
+// the network of the request, never the network of the source.
+func (c *setecClient) Fork(ctx context.Context, req sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	if req.Tenant == "" {
+		return sandboxed.ForkResponse{}, errNoTenant
+	}
+	if req.Count < 1 || req.Count > sandboxed.MaxForks {
+		return sandboxed.ForkResponse{}, fmt.Errorf("setec: fork count %d, want 1 to %d", req.Count, sandboxed.MaxForks)
+	}
+	resp, err := c.inner.Fork(ctx, &setecv1.ForkRequest{
+		SandboxId:          req.SandboxID,
+		Tenant:             req.Tenant,
+		Count:              uint32(req.Count), //nolint:gosec // G115: bounded to 1..MaxForks above
+		Network:            setecNetwork(req.NetworkMode, req.Egress),
+		SnapshotTtlSeconds: int64(req.SnapshotTTL / time.Second),
+	})
+	if err != nil {
+		return sandboxed.ForkResponse{}, fmt.Errorf("setec: fork %s: %w", req.SandboxID, err)
+	}
+	return sandboxed.ForkResponse{Snapshot: resp.GetSnapshot(), SandboxIDs: resp.GetSandboxIds()}, nil
 }

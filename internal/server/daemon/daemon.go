@@ -244,7 +244,10 @@ type daemonImpl struct {
 	// (ADR-0119, gibson#1709). Captured when newHarnessFactory wires them so
 	// the bank reconciler can launch a member outside any mission harness.
 	// Nil when setec dispatch is not built or not enabled.
-	agentLauncher           *sandboxed.AgentLauncher
+	agentLauncher *sandboxed.AgentLauncher
+
+	// forks holds the parked sources and the fork ledger (ADR-0169, D74).
+	forks                   *harness.ForkSupport
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 
@@ -575,6 +578,8 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// launcher (setec_integration build) tees a run into it.
 	d.liveAgents = liveagents.NewRegistry(liveagents.WithLogger(d.logger.WithComponent("live-agents").Slog()))
 	d.memberControl = harness.NewMemberControl()
+	// One fork state for each harness and the callback service (ADR-0169).
+	d.forks = &harness.ForkSupport{Parked: harness.NewParkedSources(), Ledger: &lazyForkLedger{daemon: d}}
 
 	// Session sandboxes for DevboxExec (gibson#1183). A component's successive
 	// commands must land in ONE long-lived microVM with a durable /workspace,
@@ -592,6 +597,13 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
 			"error", sessErr)
+	}
+	// The fork checks take the sandbox of a caller from its setec identity
+	// token, never from a header that the process writes (setec#235, D74).
+	identityVerifier, idErr := NewSetecIdentityVerifier(cfg.Sandbox)
+	if idErr != nil {
+		slogLogger.Warn("sandbox identity check unavailable; a forked grant is refused everywhere",
+			"error", idErr)
 	}
 	if cfg.Sandbox.Devbox.Image == "" {
 		// No image means no session surface at all. Say so once at startup
@@ -617,6 +629,8 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
 		harness.WithMemberControl(d.memberControl),
 		harness.WithTaskGrantVerifier(d.taskGrantVerifier),
+		harness.WithForkLedger(d.forks.Ledger),
+		harness.WithSandboxIdentityVerifier(identityVerifier),
 		harness.WithSessionSandboxes(
 			sandboxed.NewSessionRegistry(sessionClient, sandboxed.SessionSpec{
 				Image:         cfg.Sandbox.Devbox.Image,

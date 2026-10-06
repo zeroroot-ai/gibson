@@ -57,15 +57,17 @@ func SchedulerSystem(w *World) []Event {
 			running[key]++
 		}
 		out = append(out, WorkDispatched{
-			ID:        wi.ID,
-			MissionID: wi.MissionID,
-			ItemKind:  wi.Kind,
-			Target:    wi.Target,
-			Input:     wi.Input,
-			Timeout:   wi.Timeout,
-			Group:     wi.Group,
-			Limit:     wi.Limit,
-			Network:   wi.Network,
+			ID:         wi.ID,
+			MissionID:  wi.MissionID,
+			ItemKind:   wi.Kind,
+			Target:     wi.Target,
+			Input:      wi.Input,
+			Timeout:    wi.Timeout,
+			Group:      wi.Group,
+			Limit:      wi.Limit,
+			Network:    wi.Network,
+			StartsFrom: wi.StartsFrom,
+			Forkable:   wi.Forkable,
 		})
 	}
 	return out

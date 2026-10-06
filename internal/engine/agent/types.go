@@ -40,6 +40,19 @@ type Task struct {
 	// sandbox that the node starts, get this scope. Nil keeps the egress of
 	// the catalog manifest.
 	Network *NodeNetwork `json:"network,omitempty"`
+
+	// NodeID is the id of the mission node that this task runs. A fork
+	// claims it (ADR-0169).
+	NodeID string `json:"node_id,omitempty"`
+
+	// StartsFrom names an earlier node of the same mission run. The task
+	// starts in a fork of the parked sandbox of that node, not in a fresh
+	// sandbox (ADR-0169, gibson#802).
+	StartsFrom string `json:"starts_from,omitempty"`
+
+	// Forkable marks a node that a later node names in starts_from. Its
+	// sandbox parks after the result line, so the later node can fork it.
+	Forkable bool `json:"forkable,omitempty"`
 }
 
 // NodeNetwork is the network scope of one mission node.

@@ -36,6 +36,11 @@ type DispatchRequest struct {
 	// gibson#865). The Dispatcher copies it into agent.Task.Network. Nil
 	// keeps the egress of the catalog manifest.
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
 }
 
 // Dispatcher actuates a single unit of work against the real world. It is the
@@ -70,13 +75,15 @@ func (h *DispatchHandler) Tap(ev Event) {
 	}
 	h.mu.Lock()
 	h.pending = append(h.pending, DispatchRequest{
-		WorkID:    d.ID,
-		MissionID: d.MissionID,
-		Kind:      d.ItemKind,
-		Target:    d.Target,
-		Input:     d.Input,
-		Timeout:   d.Timeout,
-		Network:   d.Network,
+		WorkID:     d.ID,
+		MissionID:  d.MissionID,
+		Kind:       d.ItemKind,
+		Target:     d.Target,
+		Input:      d.Input,
+		Timeout:    d.Timeout,
+		Network:    d.Network,
+		StartsFrom: d.StartsFrom,
+		Forkable:   d.Forkable,
 	})
 	h.mu.Unlock()
 }

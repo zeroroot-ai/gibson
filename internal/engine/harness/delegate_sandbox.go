@@ -28,6 +28,9 @@ import (
 // agent fail-closed.
 type AgentSandboxLauncher interface {
 	LaunchAgent(ctx context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
+	// ForkAgent starts the dispatches in forks of a running source sandbox
+	// (ADR-0169).
+	ForkAgent(ctx context.Context, sourceSandboxID string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error)
 }
 
 // AgentLaunchSpecResolver resolves the per-agent launch spec — image, sandbox
@@ -131,6 +134,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
+		childMissionCtx.NodeID = task.NodeID
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -171,6 +175,13 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		RunTimeout: capRunTimeout(task.Timeout, spec.MaxRuntime),
 	}
 
+	if task.StartsFrom != "" {
+		return h.delegateToAgentViaFork(ctx, name, task, spec, dispatch)
+	}
+	if task.Forkable && h.forks != nil {
+		dispatch.Forkable = true
+	}
+
 	h.logger.Info("dispatching agent to ephemeral sandbox",
 		"agent", name,
 		"tenant", tenant,
@@ -186,6 +197,19 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 			"agent sandbox launch failed: "+name, launchErr)
 	}
+	if outcome.Parked {
+		h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{
+			Tenant:    tenant,
+			SandboxID: outcome.SandboxID,
+			GrantJTI:  grantJTI(grant),
+		})
+	}
+	return h.sandboxOutcome(name, tenant, task, outcome, nil)
+}
+
+// sandboxOutcome turns the outcome of a sandboxed agent run into the result
+// of the node. extra adds keys to the metadata of the result.
+func (h *DefaultAgentHarness) sandboxOutcome(name, tenant string, task agent.Task, outcome sandboxed.AgentRunResult, extra map[string]any) (agent.Result, error) {
 	if outcome.ExitCode != 0 {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "sandbox",
@@ -216,8 +240,19 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	h.logger.Info("agent sandbox delegation completed",
 		"agent", name, "tenant", tenant, "sandbox_id", outcome.SandboxID)
 
+	out := sandboxResultOutput(outcome.Result)
+	if len(extra) > 0 {
+		meta, _ := out["metadata"].(map[string]any)
+		if meta == nil {
+			meta = make(map[string]any, len(extra))
+		}
+		for k, v := range extra {
+			meta[k] = v
+		}
+		out["metadata"] = meta
+	}
 	result := agent.NewResult(task.ID)
-	result.Complete(sandboxResultOutput(outcome.Result))
+	result.Complete(out)
 	return result, nil
 }
 

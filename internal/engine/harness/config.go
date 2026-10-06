@@ -255,6 +255,11 @@ type HarnessConfig struct {
 	// Optional.
 	AgentLauncher AgentSandboxLauncher
 
+	// Forks holds the parked sources and the fork ledger (ADR-0169). One
+	// value serves each harness of the daemon. Nil means no fork support.
+	// Optional.
+	Forks *ForkSupport
+
 	// AgentLaunchSpecResolver resolves the per-agent launch spec (image,
 	// sandbox class, egress envelope, model) for a sandboxed agent. Typed seam
 	// for gibson#1597 (S5). Nil means a sandboxed dispatch cannot proceed and

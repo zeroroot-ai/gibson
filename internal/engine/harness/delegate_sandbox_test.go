@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -32,6 +33,28 @@ type recordingLauncher struct {
 	gotDispatch sandboxed.AgentDispatch
 	outcome     sandboxed.AgentRunResult
 	err         error
+
+	forkCalls int
+	gotSource string
+	gotFork   sandboxed.AgentForkSpec
+	forkRun   sandboxed.ForkRun
+	forkErr   error
+	forkIDs   []string
+}
+
+func (r *recordingLauncher) ForkAgent(_ context.Context, source string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error) {
+	r.forkCalls++
+	r.gotSource, r.gotFork = source, spec
+	r.gotDispatch = dispatches[0]
+	if r.forkErr != nil {
+		return sandboxed.ForkRun{}, r.forkErr
+	}
+	if spec.OnForked != nil {
+		if err := spec.OnForked(sandboxed.ForkResponse{Snapshot: r.forkRun.Snapshot, SandboxIDs: r.forkIDs}); err != nil {
+			return sandboxed.ForkRun{}, fmt.Errorf("on forked: %w", err)
+		}
+	}
+	return r.forkRun, nil
 }
 
 func (r *recordingLauncher) LaunchAgent(_ context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error) {
