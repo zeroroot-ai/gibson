@@ -153,3 +153,42 @@ func TestReconcileCiliumEgressPolicy(t *testing.T) {
 		t.Fatalf("bad entry: err = %v, want errBadEgressEntry", err)
 	}
 }
+
+// The MCP server pod of a Hosted connector meets the restricted standard:
+// the MCPServer carries the pod template with the seccomp profile, a non-root
+// user and no capability on the mcp container (gibson#767).
+func TestMCPServerPodTemplateMeetsRestricted(t *testing.T) {
+	r := newReconciler(t)
+	th, err := r.desiredToolHive(hostedInstance("gh", "tenant-acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	podSpec, found, _ := unstructured.NestedMap(th.Object, "spec", "podTemplateSpec", "spec")
+	if !found {
+		t.Fatal("the MCPServer has no podTemplateSpec")
+	}
+	if nonRoot, _, _ := unstructured.NestedBool(podSpec, "securityContext", "runAsNonRoot"); !nonRoot {
+		t.Error("runAsNonRoot is not true")
+	}
+	if p, _, _ := unstructured.NestedString(podSpec, "securityContext", "seccompProfile", "type"); p != "RuntimeDefault" {
+		t.Errorf("pod seccomp = %q", p)
+	}
+	containers, _, _ := unstructured.NestedSlice(podSpec, "containers")
+	if len(containers) != 1 {
+		t.Fatalf("containers = %v", containers)
+	}
+	c := containers[0].(map[string]interface{})
+	if c["name"] != "mcp" {
+		t.Errorf("container name = %v, want mcp", c["name"])
+	}
+	if esc, _, _ := unstructured.NestedBool(c, "securityContext", "allowPrivilegeEscalation"); esc {
+		t.Error("allowPrivilegeEscalation is true")
+	}
+	drop, _, _ := unstructured.NestedStringSlice(c, "securityContext", "capabilities", "drop")
+	if len(drop) != 1 || drop[0] != "ALL" {
+		t.Errorf("drop = %v, want [ALL]", drop)
+	}
+	if p, _, _ := unstructured.NestedString(c, "securityContext", "seccompProfile", "type"); p != "RuntimeDefault" {
+		t.Errorf("container seccomp = %q", p)
+	}
+}

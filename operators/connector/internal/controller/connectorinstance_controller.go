@@ -453,6 +453,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"mcpPort":           int64(proxyPort),
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
+			"podTemplateSpec":   mcpServerPodTemplate(),
 		}
 		// The declared vendor credentials (spec.credentials, gibson#597): the
 		// daemon publishes each one as a key of the same connector-cred
@@ -597,4 +598,29 @@ func (r *ConnectorInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return fmt.Errorf("build connectorinstance controller: %w", err)
 	}
 	return nil
+}
+
+// mcpServerPodTemplate makes the MCP server pod of a Hosted connector meet the
+// restricted Pod Security standard of its tenant namespace (gibson#767).
+// ToolHive v0.12.1 builds that pod from the MCPServer, and the install
+// setting that secures the proxy pods does not reach it, so each MCPServer
+// sets the fields itself. ToolHive names the server container "mcp".
+func mcpServerPodTemplate() map[string]interface{} {
+	seccomp := map[string]interface{}{"type": "RuntimeDefault"}
+	return map[string]interface{}{
+		"spec": map[string]interface{}{
+			"securityContext": map[string]interface{}{
+				"runAsNonRoot":   true,
+				"seccompProfile": seccomp,
+			},
+			"containers": []interface{}{map[string]interface{}{
+				"name": "mcp",
+				"securityContext": map[string]interface{}{
+					"allowPrivilegeEscalation": false,
+					"capabilities":             map[string]interface{}{"drop": []interface{}{"ALL"}},
+					"seccompProfile":           map[string]interface{}{"type": "RuntimeDefault"},
+				},
+			}},
+		},
+	}
 }
