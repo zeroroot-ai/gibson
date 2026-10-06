@@ -1315,6 +1315,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					port = 5432
 				}
 				poolCfg.PostgresHost = fmt.Sprintf("%s:%d", d.config.TenantPostgres.Host, port)
+				poolCfg.PostgresUser = d.config.TenantPostgres.AdminUsername
 			} else {
 				d.logger.Warn(ctx, "tenant_postgres.host is not configured; per-tenant Postgres bootstrap will be unavailable — set dataPlane.postgres.host in helm values")
 			}
