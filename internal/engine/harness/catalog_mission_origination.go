@@ -11,8 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/platform/missioncatalog"
@@ -88,4 +91,33 @@ func resolveMissionDefinitionJSON(ctx context.Context, req *harnesspb.CreateMiss
 		return "", fmt.Errorf("marshal the rendered mission %q: %w", name, err)
 	}
 	return string(body), nil
+}
+
+// requestedMissionConstraints returns the constraints that a CreateMission
+// request asks for, in the one constraint type of the platform (ADR-0004).
+//
+// `canonical_constraints` is the field to read. A request that sets it gets
+// all its fields, and the deprecated field is ignored.
+//
+// The deprecated four-field message is still read when the request has no
+// canonical constraints. The sdk writes only that message today
+// (zeroroot-ai/sdk#180). This branch leaves in the change that follows the
+// sdk release which writes `canonical_constraints` (gibson#683).
+func requestedMissionConstraints(req *harnesspb.CreateMissionRequest) *missionv1.MissionConstraints {
+	if c := req.GetCanonicalConstraints(); c != nil {
+		return c
+	}
+	old := req.GetConstraints() //nolint:staticcheck // SA1019: read until sdk#180 writes canonical_constraints, see above
+	if old == nil {
+		return nil
+	}
+	out := &missionv1.MissionConstraints{
+		MaxTokens:   old.GetMaxTokens(),
+		MaxCost:     old.GetMaxCost(),
+		MaxFindings: old.GetMaxFindings(),
+	}
+	if ms := old.GetMaxDurationMs(); ms > 0 {
+		out.MaxDuration = durationpb.New(time.Duration(ms) * time.Millisecond)
+	}
+	return out
 }

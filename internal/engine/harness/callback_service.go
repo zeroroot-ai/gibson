@@ -3208,16 +3208,7 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
-	// Convert proto constraints to internal type
-	var constraints *MissionConstraints
-	if req.Constraints != nil {
-		constraints = &MissionConstraints{
-			MaxDuration: time.Duration(req.Constraints.MaxDurationMs) * time.Millisecond,
-			MaxTokens:   req.Constraints.MaxTokens,
-			MaxCost:     req.Constraints.MaxCost,
-			MaxFindings: int(req.Constraints.MaxFindings),
-		}
-	}
+	constraints := requestedMissionConstraints(req)
 
 	// Convert metadata
 	metadata := make(map[string]any)

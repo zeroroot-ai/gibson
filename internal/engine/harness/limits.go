@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	missionv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
 // MissionLister is an interface for querying missions.
@@ -65,17 +67,33 @@ type CreateMissionRequest struct {
 	ParentDepth           int
 	Name                  string
 	Description           string
-	Constraints           *MissionConstraints
-	Metadata              map[string]any
-	Tags                  []string
+	// Constraints is the constraint set that the caller asks for, in the one
+	// constraint type of the platform (ADR-0004). When it is set, it replaces
+	// the constraints of the mission definition before the mission is
+	// created. Origination treats the two budget fields as a request and
+	// writes what the ledger grants.
+	Constraints *missionv1.MissionConstraints
+	Metadata    map[string]any
+	Tags        []string
 }
 
-// MissionConstraints limits mission execution.
-type MissionConstraints struct {
-	MaxDuration time.Duration
-	MaxTokens   int64
-	MaxCost     float64
-	MaxFindings int
+// withRequestedConstraints returns the mission definition JSON with its
+// constraints replaced by the constraints of the request. With no requested
+// constraints, the definition returns unchanged.
+func withRequestedConstraints(definitionJSON string, requested *missionv1.MissionConstraints) (string, error) {
+	if requested == nil {
+		return definitionJSON, nil
+	}
+	def, err := mission.UnmarshalDefinitionJSON([]byte(definitionJSON))
+	if err != nil {
+		return "", fmt.Errorf("apply the requested constraints: %w", err)
+	}
+	def.Constraints = requested
+	body, err := mission.MarshalDefinitionJSON(def)
+	if err != nil {
+		return "", fmt.Errorf("apply the requested constraints: %w", err)
+	}
+	return string(body), nil
 }
 
 // MissionInfo provides metadata about a mission.
