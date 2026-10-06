@@ -67,11 +67,6 @@ const (
 	// pluginNamespaceRoleBinding is the name of that RoleBinding.
 	pluginNamespaceRoleBinding = "gibson-tenant-operator-plugins"
 
-	// The Pod Security label of a plugin namespace. A plugin pod is a secure
-	// pod, so the API server refuses a pod that is not "restricted".
-	labelPodSecurityEnforce = "pod-security.kubernetes.io/enforce"
-	podSecurityRestricted   = "restricted"
-
 	// The SPIRE agent socket, as the CSI driver mounts it. The init container
 	// waits for the socket, and the plugin reads it at a second mount path.
 	spireSocketVolume     = "spire-agent-socket"
@@ -365,7 +360,7 @@ func (r *CatalogPluginRunnable) ensureNamespace(ctx context.Context, p provision
 		ns.Labels[labelPluginTenant] = p.TenantID
 		// For NetworkPolicy selectors only. No admission rule reads it.
 		ns.Labels[labelPluginNamespaceOf] = p.TenantID
-		ns.Labels[labelPodSecurityEnforce] = podSecurityRestricted
+		ns.Labels[podSecurityEnforceLabel] = podSecurityRestricted // a plugin pod must meet "restricted"
 		return nil
 	})
 	if err != nil {
