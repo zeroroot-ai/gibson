@@ -786,25 +786,13 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 	// The callers of the neutral connection points (ADR-0060, gibson#713) dial
 	// the daemon directly over mTLS. Each one is allowed at the TLS layer here,
 	// and spiffePeerMethodPolicies gives it only its own methods.
-	for _, raw := range []string{
-		os.Getenv(api.EnvSignupStepCompleterSVID),
-		os.Getenv(api.EnvTenantActivationSVID),
-	} {
-		raw = strings.TrimSpace(raw)
-		if raw == "" || slices.Contains(d.config.Auth.SPIFFE.AllowedPeerIDs, raw) {
-			continue
-		}
-		id, err := spiffeid.FromString(raw)
-		if err != nil {
-			_ = source.Close()
-			return fmt.Errorf("connection point caller %q is not a parseable SPIFFE ID: %w", raw, err)
-		}
-		if td, tdErr := spiffeid.TrustDomainFromString(configuredTD); tdErr == nil && configuredTD != "" && !id.MemberOf(td) {
-			_ = source.Close()
-			return fmt.Errorf("connection point caller %q is not in the configured trust domain %q", raw, configuredTD)
-		}
-		d.config.Auth.SPIFFE.AllowedPeerIDs = append(d.config.Auth.SPIFFE.AllowedPeerIDs, raw)
+	peers, err := withConnectionPointPeers(d.config.Auth.SPIFFE.AllowedPeerIDs, configuredTD,
+		os.Getenv(api.EnvSignupStepCompleterSVID), os.Getenv(api.EnvTenantActivationSVID))
+	if err != nil {
+		_ = source.Close()
+		return err
 	}
+	d.config.Auth.SPIFFE.AllowedPeerIDs = peers
 
 	// Parse and validate the callback listener peer-SVID allowlist.
 	rawPeers := strings.TrimSpace(os.Getenv("GIBSON_CALLBACK_PEER_SVIDS"))
@@ -2492,4 +2480,26 @@ func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 // Returns nil if the LLM config handler was not initialized.
 func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
 	return d.llmConfigHandler
+}
+
+// withConnectionPointPeers returns allowed plus each configured connection
+// point caller that is not in it yet. A caller that is not a SPIFFE ID, or
+// that is outside the configured trust domain, is an error.
+func withConnectionPointPeers(allowed []string, configuredTD string, callers ...string) ([]string, error) {
+	out := slices.Clone(allowed)
+	for _, raw := range callers {
+		raw = strings.TrimSpace(raw)
+		if raw == "" || slices.Contains(out, raw) {
+			continue
+		}
+		id, err := spiffeid.FromString(raw)
+		if err != nil {
+			return nil, fmt.Errorf("connection point caller %q is not a parseable SPIFFE ID: %w", raw, err)
+		}
+		if td, tdErr := spiffeid.TrustDomainFromString(configuredTD); tdErr == nil && configuredTD != "" && !id.MemberOf(td) {
+			return nil, fmt.Errorf("connection point caller %q is not in the configured trust domain %q", raw, configuredTD)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
 }

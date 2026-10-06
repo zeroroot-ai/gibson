@@ -99,6 +99,8 @@ func (s *DaemonServer) CompleteSignupStep(ctx context.Context, req *connectionv1
 		done = true
 	case connectionv1.SignupStepOutcome_SIGNUP_STEP_OUTCOME_FAILED:
 		done = false
+	case connectionv1.SignupStepOutcome_SIGNUP_STEP_OUTCOME_UNSPECIFIED:
+		return nil, status.Error(codes.InvalidArgument, "outcome must be DONE or FAILED")
 	default:
 		return nil, status.Error(codes.InvalidArgument, "outcome must be DONE or FAILED")
 	}
@@ -137,6 +139,8 @@ func (s *DaemonServer) SetTenantActivation(ctx context.Context, req *connectionv
 		activation = activationActive
 	case connectionv1.TenantActivationState_TENANT_ACTIVATION_STATE_SUSPENDED:
 		activation = activationSuspended
+	case connectionv1.TenantActivationState_TENANT_ACTIVATION_STATE_UNSPECIFIED:
+		return nil, status.Error(codes.InvalidArgument, "state must be ACTIVE or SUSPENDED")
 	default:
 		return nil, status.Error(codes.InvalidArgument, "state must be ACTIVE or SUSPENDED")
 	}
