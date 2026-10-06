@@ -43,8 +43,8 @@ func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2
 // stops being able to prove that a denial is a denial — if the harness has more
 // authority than the thing under test, a passing assertion says nothing. These
 // are the RPCs tests/e2e/tool_dispatch_test.go,
-// tests/e2e/sandboxed_agent_dispatch_test.go and tests/e2e/bank_test.go
-// actually use. A suite that calls an RPC not listed here is denied at the
+// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go and
+// tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
@@ -97,6 +97,12 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.world.v1.WorldService/ListReviewQueue": true,
 			"/gibson.world.v1.WorldService/SubmitLabel":     true,
 			"/gibson.world.v1.WorldService/ListMissions":    true,
+			// The secrets isolation suite (tests/e2e/secrets, gibson#213):
+			// create the principals that check in at the edge, and revoke
+			// them. The secret itself is set and deleted with the two
+			// SecretsService methods above.
+			"/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity": true,
+			"/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity": true,
 		},
 	}
 }

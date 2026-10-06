@@ -255,12 +255,12 @@ jobs:
       # fails the job.
       # ------------------------------------------------------------------
 
-      # tests/e2e/secrets/* (five files, four tests): in-cluster, SVID peer.
-      # The suites name their tenant with GIBSON_TEST_TENANT_ID and expect a
-      # tenant admin JWT in GIBSON_TEST_TENANT_ADMIN_TOKEN. No such token is
-      # minted in this venue (the SVID is the identity), so the token is not
-      # set and the suites report their own skip reason. gibson#213 moves
-      # them to the SVID path; until then this row reads SKIP.
+      # tests/e2e/secrets/* (two tests): in-cluster, SVID peer for the admin
+      # calls, and the Envoy edge for the component calls (gibson#213). A
+      # component checks in at the public api origin and its capability grant
+      # is verified by ext-authz, which makes the can_resolve decision. The
+      # Job reaches Envoy by its Service and names the api host in SNI and
+      # :authority, so no pod needs the public name in DNS.
       - name: "Suite: secrets (in-cluster)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         env:
@@ -268,10 +268,22 @@ jobs:
           E2E_RUNNER_ENV_FILE: ${{ runner.temp }}/secrets.env
         run: |
           set +e
-          printf 'GIBSON_TEST_TENANT_ID=%s\nGIBSON_PLATFORM_URL=http://%s-gibson-workloads.%s.svc.cluster.local:8085\n' \
-            "$TENANT" "$RELEASE" "$NS" > "$E2E_RUNNER_ENV_FILE"
+          api_origin=$(kubectl -n "$NS" get configmap gibson-domains -o jsonpath='{.data.apiOrigin}')
+          edge_ca=$(kubectl -n "$NS" get secret gibson-envoy-tls -o jsonpath='{.data.ca\.crt}')
+          if [ -z "$api_origin" ] || [ -z "$edge_ca" ]; then
+            echo "::error::the secrets suite needs gibson-domains apiOrigin and the ca.crt of gibson-envoy-tls; one is missing"
+            gibson/.github/scripts/e2e-suite-verdict.sh secrets /dev/null 1 "$RESULTS"
+            exit 0
+          fi
+          api_port=$(printf '%s' "$api_origin" | sed -n 's#^https://[^:/]*:\([0-9]*\).*#\1#p')
+          {
+            printf 'GIBSON_TEST_TENANT_ID=%s\n' "$TENANT"
+            printf 'GIBSON_URL=%s\n' "$api_origin"
+            printf 'GIBSON_EDGE_ADDR=gibson-envoy.%s.svc.cluster.local:%s\n' "$NS" "${api_port:-443}"
+            printf 'GIBSON_EDGE_CA_PEM_B64=%s\n' "$edge_ca"
+          } > "$E2E_RUNNER_ENV_FILE"
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-secrets \
-            'TestFGAEnforcement_Secrets|TestNonPluginDeny_HarnessAndComponent|TestForgedCGJWT_AgentDeniedByFGA|TestAgentLLMPreserved' 15m \
+            'TestNonPluginDeny|TestForgedCGJWT' 15m \
             2>&1 | tee "$E2E_OUT/secrets.log"
           rc=${PIPESTATUS[0]}
           gibson/.github/scripts/e2e-suite-verdict.sh secrets "$E2E_OUT/secrets.log" "$rc" "$RESULTS"
