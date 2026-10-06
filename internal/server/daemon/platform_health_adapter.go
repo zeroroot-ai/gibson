@@ -10,6 +10,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // secretPlaneProbeAdapter asks the secret source of the platform (the
@@ -31,4 +32,19 @@ func (a *secretPlaneProbeAdapter) Probe(ctx context.Context) error {
 		return fmt.Errorf("system-tenant broker health: %w", err)
 	}
 	return nil
+}
+
+// secretSourceReadiness is the readiness check of the secret source. Each
+// call probes the source with the bound of AdminGetPlatformHealth. The
+// daemon is not ready until a probe passes, and a later failed probe makes
+// it not ready again: a silent source is never read as healthy (hosted#174).
+func secretSourceReadiness(probe api.SecretPlaneProbe) func(context.Context) sdktypes.HealthStatus {
+	return func(ctx context.Context) sdktypes.HealthStatus {
+		probeCtx, cancel := context.WithTimeout(ctx, api.SecretPlaneProbeTimeout)
+		defer cancel()
+		if err := probe.Probe(probeCtx); err != nil {
+			return sdktypes.NewUnhealthyStatus("broker: the system-tenant secret source did not answer: "+err.Error(), nil)
+		}
+		return sdktypes.NewHealthyStatus("broker: the system-tenant secret source answered")
+	}
 }

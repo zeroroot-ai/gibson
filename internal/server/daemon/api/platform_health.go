@@ -19,9 +19,10 @@ import (
 // planeSecret is the name of the secret plane in AdminGetPlatformHealth.
 const planeSecret = "secret_plane"
 
-// secretPlaneProbeTimeout bounds one probe. A source that does not answer
+// SecretPlaneProbeTimeout bounds one probe of the secret source, here and in
+// the readiness check of the daemon. A source that does not answer
 // in time is unhealthy: silence must not read as healthy.
-const secretPlaneProbeTimeout = 5 * time.Second
+const SecretPlaneProbeTimeout = 5 * time.Second
 
 // SecretPlaneProbe asks the secret source of the platform to answer. A nil
 // error means that the source answered.
@@ -52,7 +53,7 @@ func (s *DaemonServer) secretPlaneHealth(ctx context.Context) *tenantv1.Platform
 		out.Detail = "the daemon has no secret source to probe"
 		return out
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, secretPlaneProbeTimeout)
+	probeCtx, cancel := context.WithTimeout(ctx, SecretPlaneProbeTimeout)
 	defer cancel()
 	if err := s.secretPlaneProbe.Probe(probeCtx); err != nil {
 		s.logger.WarnContext(ctx, "platform health: the secret source did not answer",

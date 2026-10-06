@@ -57,7 +57,7 @@ func TestAdminGetPlatformHealth_SilentSourceIsUnhealthy(t *testing.T) {
 func TestAdminGetPlatformHealth_TheProbeHasADeadline(t *testing.T) {
 	s := (&DaemonServer{logger: slog.Default()}).WithSecretPlaneProbe(probeFunc(func(ctx context.Context) error {
 		dl, ok := ctx.Deadline()
-		if !ok || time.Until(dl) > secretPlaneProbeTimeout {
+		if !ok || time.Until(dl) > SecretPlaneProbeTimeout {
 			return errors.New("the probe has no bound")
 		}
 		return nil

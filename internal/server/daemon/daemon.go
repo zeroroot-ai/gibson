@@ -1737,7 +1737,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// check is the sole gating condition here.
 	if d.secretsRegistry != nil {
 		brokerReg := d.secretsRegistry
-		sysTenant := auth.SystemTenant
 
 		// Background goroutine emits per-tenant health gauges periodically.
 		// It iterates only the cached registry entries (tenants that have done
@@ -1766,23 +1765,13 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			}
 		}()
 
-		d.healthServer.RegisterReadinessCheck("secrets_broker", func(checkCtx context.Context) sdktypes.HealthStatus {
-			// Probe system tenant health. The Postgres provider's Health() checks
-			// connectivity (nil = healthy). Any non-nil error means the daemon's
-			// own secrets backend is unreachable; flip readiness to unhealthy.
-			healthMap := brokerReg.Health(checkCtx)
-			sysTenantErr, ok := healthMap[sysTenant]
-			if !ok {
-				// System tenant not yet in the cache (no secret operation issued yet) —
-				// attempt an eager probe by forcing a For() call which will populate the
-				// cache and run Health on the next tick. For now, report healthy.
-				return sdktypes.NewHealthyStatus("broker: system tenant not yet accessed; assuming healthy")
-			}
-			if sysTenantErr != nil {
-				return sdktypes.NewUnhealthyStatus("broker: system-tenant provider unhealthy: "+sysTenantErr.Error(), nil)
-			}
-			return sdktypes.NewHealthyStatus("broker: system-tenant provider healthy")
-		})
+		// The check asks the source to answer, with the same bounded probe as
+		// AdminGetPlatformHealth. It never reads the cached health map for
+		// this answer: that map holds nothing until a secret operation ran,
+		// and a dead source then read as healthy (hosted#174). Not ready until
+		// a probe passes.
+		d.healthServer.RegisterReadinessCheck("secrets_broker",
+			secretSourceReadiness(&secretPlaneProbeAdapter{registry: brokerReg}))
 		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
 	}
 
