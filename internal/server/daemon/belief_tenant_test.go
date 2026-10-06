@@ -231,7 +231,6 @@ func TestTenantBeliefs_AReadErrorFailsThePin(t *testing.T) {
 	if _, _, err := b.Pin(context.Background(), "acme"); err == nil {
 		t.Fatal("Pin succeeded while the store was down")
 	}
-
 }
 
 // The store is a required dependency: a nil store fails at construction.
