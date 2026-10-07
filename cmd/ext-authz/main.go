@@ -4,8 +4,10 @@
 // Command ext-authz is the Gibson external authorization sidecar.
 //
 // It serves the Envoy External Authorization gRPC service
-// (envoy.service.auth.v3.Authorization/Check) and a small HTTPS
-// listener for /healthz.
+// (envoy.service.auth.v3.Authorization/Check), a small HTTPS listener for
+// /healthz and /readyz, and a separate HTTPS listener that serves only
+// /metrics. The metrics port carries no API, so a network policy can admit
+// the cluster scraper to it and to nothing else (charts#515).
 //
 // Per the unified-identity-and-authorization spec:
 //
@@ -39,7 +41,9 @@
 // Configuration (env vars):
 //
 //	EXT_AUTHZ_GRPC_ADDR             default :9001
-//	EXT_AUTHZ_HTTP_ADDR             default :9002
+//	EXT_AUTHZ_HTTP_ADDR             default :9002 (health and readiness)
+//	EXT_AUTHZ_METRICS_ADDR          default :9003 (metrics only, mTLS with the
+//	                                same material as the health listener)
 //	EXT_AUTHZ_REGISTRY_PATH         default /etc/gibson/registry.yaml
 //	                                (mounted from a ConfigMap rendered
 //	                                from the SDK release artifact)
@@ -129,6 +133,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/infra/authz"
+	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	"google.golang.org/grpc"
@@ -334,6 +339,12 @@ func main() {
 			grpcErrC <- fmt.Errorf("gRPC server: %w", err)
 		}
 	}()
+	metricsErrC, err := startMetricsListener(ctx, log, envOr("EXT_AUTHZ_METRICS_ADDR", ":9003"), healthCertDir)
+	if err != nil {
+		log.Error("init metrics listener", "err", err)
+		os.Exit(1)
+	}
+
 	httpErrC := make(chan error, 1)
 	go func() {
 		log.Info("HTTPS health server starting", "addr", httpAddr, "cert_dir", healthCertDir)
@@ -352,6 +363,9 @@ func main() {
 		os.Exit(1)
 	case err := <-httpErrC:
 		log.Error("fatal HTTPS error", "err", err)
+		os.Exit(1)
+	case err := <-metricsErrC:
+		log.Error("fatal metrics listener error", "err", err)
 		os.Exit(1)
 	}
 
@@ -928,6 +942,37 @@ func buildHealthTLSConfig(log *slog.Logger, dir string) (*tls.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// startMetricsListener starts the metrics listener (charts#515). It serves
+// /metrics only, with client mTLS against the same CA bundle as the health
+// listener. A serve error arrives on the returned channel.
+func startMetricsListener(ctx context.Context, log *slog.Logger, addr, certDir string) (<-chan error, error) {
+	srv, err := observability.NewMetricsServer(observability.MetricsServerConfig{
+		Addr:         addr,
+		CertPath:     filepath.Join(certDir, "tls.crt"),
+		KeyPath:      filepath.Join(certDir, "tls.key"),
+		ClientCAPath: filepath.Join(certDir, "ca.crt"),
+		Handler:      metricsMux(observability.DefaultPrometheusHandler()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("metrics listener %s: %w", addr, err)
+	}
+	errC := make(chan error, 1)
+	go func() {
+		log.Info("HTTPS metrics server starting", "addr", addr)
+		if err := srv.Serve(ctx); err != nil {
+			errC <- err
+		}
+	}()
+	return errC, nil
+}
+
+// metricsMux serves the metrics handler at GET /metrics and nothing else.
+func metricsMux(h http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", h)
+	return mux
 }
 
 func parseHealthPeerSVIDs() ([]string, error) {
