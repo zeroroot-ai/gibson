@@ -27,7 +27,7 @@ func TestMetricsMuxServesOnlyMetrics(t *testing.T) {
 	}
 	for _, c := range cases {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, http.NoBody))
 		if rec.Code != c.want {
 			t.Errorf("%s %s: got %d, want %d", c.method, c.path, rec.Code, c.want)
 		}
