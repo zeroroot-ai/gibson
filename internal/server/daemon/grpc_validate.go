@@ -13,6 +13,8 @@ import (
 	grpccodes "google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // newProtovalidateUnaryInterceptor returns a gRPC unary interceptor
@@ -39,7 +41,7 @@ func newProtovalidateUnaryInterceptor(v protovalidate.Validator) grpc.UnaryServe
 		if err := v.Validate(msg); err != nil {
 			var verr *protovalidate.ValidationError
 			if errors.As(err, &verr) {
-				return nil, grpcstatus.Error(grpccodes.InvalidArgument, verr.Error())
+				return nil, validationStatus(verr)
 			}
 			// Compilation or other internal errors from the validator
 			// are programming bugs — surface as Internal so callers
@@ -73,7 +75,7 @@ func (s *validatingServerStream) RecvMsg(m any) error {
 		if err := s.validator.Validate(msg); err != nil {
 			var verr *protovalidate.ValidationError
 			if errors.As(err, &verr) {
-				return grpcstatus.Error(grpccodes.InvalidArgument, verr.Error())
+				return validationStatus(verr)
 			}
 			return grpcstatus.Errorf(grpccodes.Internal, "protovalidate: %v", err)
 		}
@@ -91,4 +93,24 @@ func buildProtovalidateValidator() (protovalidate.Validator, error) {
 		return nil, fmt.Errorf("protovalidate.New: %w", err)
 	}
 	return v, nil
+}
+
+// validationStatus returns the InvalidArgument status of one validation
+// failure. Its details hold one ErrorDetail with one FieldError for each
+// violation: the field path, the rule id and the message (gibson#847). The
+// message of the status is the text of the validation error, as before.
+func validationStatus(verr *protovalidate.ValidationError) error {
+	detail := &commonpb.ErrorDetail{
+		Code:   commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		Reason: "INVALID_ARGUMENT",
+	}
+	for _, v := range verr.Violations {
+		detail.FieldErrors = append(detail.FieldErrors, &commonpb.FieldError{
+			Field:   protovalidate.FieldPathString(v.Proto.GetField()),
+			Rule:    v.Proto.GetRuleId(),
+			Message: v.Proto.GetMessage(),
+		})
+	}
+	st := grpcstatus.New(grpccodes.InvalidArgument, verr.Error())
+	return attachDetail(grpcstatus.ErrorProto(st.Proto()), st, detail)
 }

@@ -125,9 +125,13 @@ func scrubError(
 		)
 	}
 
-	// Build a safe message based on the gRPC code and error classification
+	// Build a safe message based on the gRPC code and error classification.
+	// The details of the status stay: an ErrorDetail names no internal path.
 	safeMsg := buildSafeMessage(st.Code(), originalMsg, err)
-	return status.Error(st.Code(), safeMsg)
+	// Proto returns a copy, so the original status stays unchanged.
+	scrubbed := st.Proto()
+	scrubbed.Message = safeMsg
+	return status.ErrorProto(scrubbed)
 }
 
 // needsScrubbing returns true if the error message contains internal details
