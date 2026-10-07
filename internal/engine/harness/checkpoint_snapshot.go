@@ -34,6 +34,18 @@ func (h *DefaultAgentHarness) checkpointSnapshot(ctx context.Context, tenant str
 			"node", task.NodeID, "sandbox_id", sandboxID, "error", err)
 		return nil
 	}
+	if h.forks != nil && h.forks.Ledger != nil {
+		if grantID == "" {
+			h.logger.Warn("checkpoint snapshot dropped: the grant of the node has no id",
+				"node", task.NodeID, "sandbox_id", sandboxID)
+			return nil
+		}
+		if err := h.forks.Ledger.BeginFork(ctx, grantID, sandboxID, forkRecordTTL); err != nil {
+			h.logger.Warn("checkpoint snapshot dropped: the grant of the node was not marked as forked",
+				"node", task.NodeID, "sandbox_id", sandboxID, "error", err)
+			return nil
+		}
+	}
 	return map[string]any{checkpointSnapshotKey: snap}
 }
 

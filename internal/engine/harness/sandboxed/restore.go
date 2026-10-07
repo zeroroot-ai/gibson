@@ -68,6 +68,11 @@ func (l *AgentLauncher) LaunchFromSnapshot(ctx context.Context, snapshot string,
 	if err != nil {
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED, "launch from snapshot "+snapshot, err)
 	}
+	// The runtime and the class are proven before the dispatch is recorded,
+	// so a sandbox that fails the check cannot claim a grant (D80).
+	if err := l.verifyStarted(ctx, tenant, resp.SandboxID, class); err != nil {
+		return AgentRunResult{}, err
+	}
 	if err := onStarted(resp.SandboxID); err != nil {
 		l.kill(ctx, tenant, resp.SandboxID)
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED,

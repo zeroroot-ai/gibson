@@ -231,7 +231,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	var extra map[string]any
 	if outcome.Parked {
 		if task.Checkpoint {
-			extra = h.checkpointSnapshot(ctx, tenant, task, outcome.SandboxID)
+			extra = h.checkpointSnapshot(ctx, tenant, task, outcome.SandboxID, grantJTI(grant))
 		}
 		if forkable {
 			h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{

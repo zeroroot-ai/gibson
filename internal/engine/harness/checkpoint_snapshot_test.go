@@ -20,7 +20,7 @@ func parkedOutcome(id string) sandboxed.AgentRunResult {
 // result names, and its sandbox stops when no later node forks it.
 func TestCheckpointMode_TheNodeLeavesASnapshot(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
-	h, _ := forkHarness(t, launcher)
+	h, ledger := forkHarness(t, launcher)
 	task := agent.NewTask("recon", "map the host", nil)
 	task.NodeID, task.Checkpoint = "recon", true
 
@@ -33,6 +33,16 @@ func TestCheckpointMode_TheNodeLeavesASnapshot(t *testing.T) {
 	}
 	if got := CheckpointSnapshot(res); got != "snap-1" {
 		t.Fatalf("checkpoint snapshot = %q, want snap-1", got)
+	}
+	// The grant of the node works only in its own sandbox from now on, so a
+	// sandbox restored from the snapshot cannot use it (D80).
+	if len(ledger.forks) != 1 {
+		t.Fatalf("fork records = %d, want the grant of the checkpoint node marked", len(ledger.forks))
+	}
+	for jti, rec := range ledger.forks {
+		if jti == "" || rec.source != "ns/n1/u1" {
+			t.Fatalf("fork record = %q %+v, want the checkpoint sandbox as the source", jti, rec)
+		}
 	}
 	if len(launcher.stopped) != 1 || launcher.stopped[0] != "ns/n1/u1" {
 		t.Fatalf("stopped = %v; the parked sandbox must stop", launcher.stopped)
@@ -52,6 +62,22 @@ func TestCheckpointMode_TheStateModeLeavesNone(t *testing.T) {
 	}
 	if launcher.gotDispatch.Forkable || len(launcher.snapshotted) != 0 || CheckpointSnapshot(res) != "" {
 		t.Fatal("a node of the state mode must not park or snapshot")
+	}
+}
+
+// When the grant of a checkpoint node cannot be marked, the snapshot is
+// dropped: a rewind then starts a fresh sandbox and never a restore that could
+// use the grant.
+func TestCheckpointMode_NoMarkMeansNoSnapshot(t *testing.T) {
+	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
+	h, ledger := forkHarness(t, launcher)
+	ledger.Close()
+	task := agent.NewTask("recon", "x", nil)
+	task.NodeID, task.Checkpoint = "recon", true
+
+	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
+	if err != nil || CheckpointSnapshot(res) != "" {
+		t.Fatalf("snapshot = %q, err = %v; want the node and no snapshot", CheckpointSnapshot(res), err)
 	}
 }
 

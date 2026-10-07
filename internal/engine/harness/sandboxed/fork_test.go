@@ -262,12 +262,14 @@ func TestForkAgent_RefusesAForkWithoutProvenIsolation(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			c, _, killed := forkClient([]string{"ns/f1/u1"}, nil)
 			c.isolation = isolation
-			run, err := newAgentLauncher(t, c).ForkAgent(context.Background(), "ns/src/u0", AgentForkSpec{}, []AgentDispatch{{Tenant: "acme"}})
-			if err != nil {
-				t.Fatalf("ForkAgent: %v", err)
+			recorded := false
+			spec := AgentForkSpec{OnForked: func(ForkResponse) error { recorded = true; return nil }}
+			_, err := newAgentLauncher(t, c).ForkAgent(context.Background(), "ns/src/u0", spec, []AgentDispatch{{Tenant: "acme"}})
+			if err == nil || !strings.Contains(err.Error(), "refused") {
+				t.Fatalf("ForkAgent error = %v; want the fork refused", err)
 			}
-			if run.Errs[0] == nil || !strings.Contains(run.Errs[0].Error(), "refused") {
-				t.Fatalf("fork error = %v; want the fork refused", run.Errs[0])
+			if recorded {
+				t.Fatal("the dispatch of a fork with no proven isolation was recorded, so it could claim a grant")
 			}
 			if len(*killed) != 1 || (*killed)[0] != "ns/f1/u1" {
 				t.Fatalf("killed = %v; want the refused fork", *killed)
