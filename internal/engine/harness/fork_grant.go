@@ -138,7 +138,7 @@ func verifiedSandbox(ctx context.Context, v SandboxIdentityVerifier, tenant stri
 // the verified id. The caller sends the hostname of its sandbox or the full
 // id. An empty value agrees, because the token is the proof.
 func namesSandbox(claimed, verified string) bool {
-	return claimed == "" || claimed == verified || claimed == sandboxHostname(verified)
+	return claimed == "" || claimed == verified || claimed == SandboxHostname(verified)
 }
 
 // firstMetadata returns the first value of an incoming metadata key, or "".

@@ -27,10 +27,10 @@ func (s stubForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (string
 	return "new-grant-for-" + d.SandboxID, nil
 }
 
-func claimService(t *testing.T) (*HarnessCallbackService, *RedisForkLedger) {
+func claimService(t *testing.T) (*HarnessCallbackService, *memForkLedger) {
 	t.Helper()
 	shortTargetWait(t)
-	l, _ := newForkLedger(t)
+	l := newForkLedger(t)
 	return &HarnessCallbackService{
 		forkLedger: l, forkGrants: stubForkGrants{}, sandboxIdentity: testIdentity(), logger: discardLogger(),
 	}, l
@@ -42,7 +42,7 @@ func identityCtx(token string) context.Context {
 	return metadata.NewIncomingContext(context.Background(), metadata.Pairs(fork.MetadataSandboxIdentity, token))
 }
 
-func recordFork(t *testing.T, l *RedisForkLedger, sandboxID, node string) {
+func recordFork(t *testing.T, l *memForkLedger, sandboxID, node string) {
 	t.Helper()
 	d := ForkDispatch{SandboxID: sandboxID, Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1", NodeID: node}
 	if err := l.RecordStart(context.Background(), d, time.Hour); err != nil {
@@ -101,13 +101,13 @@ func TestClaimFork_AGrantIsRefused(t *testing.T) {
 // A claim days after the start works: the claim needs no grant, and the
 // record lives as long as the snapshot (7 days).
 func TestClaimFork_AClaimAfterSevenDaysWorks(t *testing.T) {
-	l, mr := newForkLedger(t)
+	l := newForkLedger(t)
 	s := &HarnessCallbackService{forkLedger: l, forkGrants: stubForkGrants{}, sandboxIdentity: testIdentity(), logger: discardLogger()}
 	d := ForkDispatch{SandboxID: "ns/fork-1/u1", Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1", NodeID: "n2"}
 	if err := l.RecordStart(context.Background(), d, SnapshotLife); err != nil {
 		t.Fatal(err)
 	}
-	mr.FastForward(SnapshotLife - time.Minute)
+	l.FastForward(SnapshotLife - time.Minute)
 	if _, err := s.ClaimFork(identityCtx("tok-fork-1"), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"}); err != nil {
 		t.Fatalf("ClaimFork after 7 days: %v", err)
 	}

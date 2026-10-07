@@ -24,45 +24,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// A seat records the fork as pending for the grant of its source. The fork
-// waits until RecordForks records its dispatch, and a seat is taken once.
-func TestRedisForkLedger_ForkSeat(t *testing.T) {
-	l, _ := newForkLedger(t)
-	ctx := context.Background()
-	seat := ForkSeat{
-		MissionID: "child-1", NodeID: "exploit", Tenant: "acme", AgentName: "zerocool",
-		SandboxID: "ns/fork-1/u1", SourceSandboxID: "ns/src-1/u0", SourceJTI: "jti-c",
-	}
-	if err := l.ReserveForkSeat(ctx, seat, time.Hour); err != nil {
-		t.Fatalf("ReserveForkSeat: %v", err)
-	}
-	if src, forked, _ := l.ForkedSource(ctx, "jti-c"); !forked || src != "ns/src-1/u0" {
-		t.Fatalf("the grant of the caller must count as forked: %q %v", src, forked)
-	}
-	if _, err := l.Claim(ctx, "ns/fork-1/u1"); !errors.Is(err, ErrForkPending) {
-		t.Fatalf("claim before the dispatch: err = %v, want ErrForkPending", err)
-	}
-	if _, err := l.Claim(ctx, "ns/fork-9/u9"); !errors.Is(err, ErrNotAFork) {
-		t.Fatalf("claim of another sandbox: err = %v, want ErrNotAFork", err)
-	}
-	got, ok, err := l.TakeForkSeat(ctx, "child-1", "exploit")
-	if err != nil || !ok || got != seat {
-		t.Fatalf("TakeForkSeat = %+v, %v, %v", got, ok, err)
-	}
-	if _, ok, _ := l.TakeForkSeat(ctx, "child-1", "exploit"); ok {
-		t.Fatal("a seat must be taken once")
-	}
-	if err := l.RecordForks(ctx, "jti-c", seat.SourceSandboxID, []ForkDispatch{{SandboxID: seat.SandboxID, Tenant: "acme", NodeID: "exploit"}}, time.Hour); err != nil {
-		t.Fatal(err)
-	}
-	if d, err := l.Claim(ctx, "ns/fork-1/u1"); err != nil || d.NodeID != "exploit" {
-		t.Fatalf("claim after the dispatch = %+v, %v", d, err)
-	}
-	if err := l.ReserveForkSeat(ctx, ForkSeat{MissionID: "m"}, time.Hour); err == nil {
-		t.Fatal("an incomplete seat must be refused")
-	}
-}
-
 // ClaimFork waits in the call until the dispatch of the fork is recorded.
 func TestClaimFork_WaitsForTheDispatch(t *testing.T) {
 	s, l := claimService(t)
@@ -225,7 +186,7 @@ func forkOriginService(t *testing.T, mgr *childNodeOperator, parent *forkingPare
 	}
 	parent.mission = MissionContext{ID: parentID, TenantID: originTenant, MissionRunID: "run-7"}
 	svc.registry.Register(originParentMissionID, "zerocool", parent)
-	l, _ := newForkLedger(t)
+	l := newForkLedger(t)
 	svc.forkLedger = l
 	svc.sandboxIdentity = testIdentity()
 	return svc

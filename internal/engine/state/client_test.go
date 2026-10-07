@@ -733,6 +733,8 @@ func TestParseFloat(t *testing.T) {
 	}
 }
 
+// The shared Gibson indexes belong to every test package of the module that
+// runs against the one Redis Stack of the CI job, so this test drops none.
 func TestStateClient_EnsureIndexes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -748,24 +750,12 @@ func TestStateClient_EnsureIndexes(t *testing.T) {
 	defer client.Close()
 
 	manager := NewIndexManager(client.Client())
-
-	// Clean up all Gibson indexes before test
 	indexes := AllIndexDefinitions()
-	for _, idx := range indexes {
-		_ = manager.DropIndex(ctx, idx.Name)
-	}
-	defer func() {
-		// Clean up after test
-		for _, idx := range indexes {
-			_ = manager.DropIndex(ctx, idx.Name)
-		}
-	}()
 
-	t.Run("creates all indexes on first call", func(t *testing.T) {
+	t.Run("every index exists after a call", func(t *testing.T) {
 		err := client.EnsureIndexes(ctx)
 		require.NoError(t, err)
 
-		// Verify all indexes were created
 		for _, idx := range indexes {
 			exists, err := manager.IndexExists(ctx, idx.Name)
 			require.NoError(t, err, "failed to check existence of %s", idx.Name)

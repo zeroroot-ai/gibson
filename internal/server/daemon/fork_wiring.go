@@ -23,14 +23,14 @@ var errNoForkStore = errors.New("daemon: no state store for the fork ledger")
 type lazyForkLedger struct {
 	daemon *daemonImpl
 	mu     sync.Mutex
-	l      *harness.RedisForkLedger
+	l      *redisForkLedger
 }
 
-func (z *lazyForkLedger) ledger() *harness.RedisForkLedger {
+func (z *lazyForkLedger) ledger() *redisForkLedger {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 	if z.l == nil && z.daemon.stateClient != nil {
-		z.l = harness.NewRedisForkLedger(z.daemon.stateClient.Client())
+		z.l = newRedisForkLedger(z.daemon.stateClient.Client())
 	}
 	return z.l
 }

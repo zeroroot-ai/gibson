@@ -19,9 +19,9 @@ func forkSpecResolver() *stubSpecResolver {
 	}}
 }
 
-func forkHarness(t *testing.T, launcher *recordingLauncher) (*DefaultAgentHarness, *RedisForkLedger) {
+func forkHarness(t *testing.T, launcher *recordingLauncher) (*DefaultAgentHarness, *memForkLedger) {
 	t.Helper()
-	ledger, _ := newForkLedger(t)
+	ledger := newForkLedger(t)
 	h := newSandboxDelegateHarness(launcher, forkSpecResolver(), successResultQueue(t), untrustedAgentInstances(), testMinter(t))
 	h.forks = &ForkSupport{Parked: NewParkedSources(), Ledger: ledger}
 	return h, ledger

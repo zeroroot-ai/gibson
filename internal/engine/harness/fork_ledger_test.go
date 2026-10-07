@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
@@ -20,76 +18,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func newForkLedger(t *testing.T) (*RedisForkLedger, *miniredis.Miniredis) {
-	t.Helper()
-	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
-	return NewRedisForkLedger(client), mr
-}
-
-// A fork claims its dispatch once, by its hostname. A sandbox that the
-// daemon did not start gets ErrNotAFork.
-func TestRedisForkLedger_ClaimOnce(t *testing.T) {
-	l, _ := newForkLedger(t)
-	ctx := context.Background()
-	if _, forked, err := l.ForkedSource(ctx, "jti-1"); err != nil || forked {
-		t.Fatalf("before a fork: forked = %v, err = %v", forked, err)
-	}
-	err := l.RecordForks(ctx, "jti-1", "ns/src/u0", []ForkDispatch{{SandboxID: "ns/f1/u1", Tenant: "acme", NodeID: "n2"}}, time.Hour)
-	if err != nil {
-		t.Fatalf("RecordForks: %v", err)
-	}
-	src, forked, err := l.ForkedSource(ctx, "jti-1")
-	if err != nil || !forked || src != "ns/src/u0" {
-		t.Fatalf("ForkedSource = %q %v %v", src, forked, err)
-	}
-	if target, err := l.ClaimTarget(ctx, "f1"); err != nil || target.SandboxID != "ns/f1/u1" || target.Tenant != "acme" {
-		t.Fatalf("ClaimTarget = %+v, %v", target, err)
-	}
-	if _, err := l.Claim(ctx, ""); !errors.Is(err, ErrNotAFork) {
-		t.Fatalf("empty fork id: err = %v, want ErrNotAFork", err)
-	}
-	d, err := l.Claim(ctx, "f1")
-	if err != nil || d.NodeID != "n2" {
-		t.Fatalf("Claim = %+v, %v", d, err)
-	}
-	if _, err := l.Claim(ctx, "f1"); !errors.Is(err, ErrForkClaimed) {
-		t.Fatalf("second claim: err = %v, want ErrForkClaimed", err)
-	}
-	if _, err := l.Claim(ctx, "f9"); !errors.Is(err, ErrNotAFork) {
-		t.Fatalf("unknown fork: err = %v, want ErrNotAFork", err)
-	}
-	if _, err := l.ClaimTarget(ctx, "f9"); !errors.Is(err, ErrNotAFork) {
-		t.Fatalf("unknown target: err = %v, want ErrNotAFork", err)
-	}
-	if err := l.RecordForks(ctx, "", "src", nil, time.Hour); err == nil {
-		t.Fatal("a record with no grant id must fail")
-	}
-	if err := l.RecordStart(ctx, ForkDispatch{SandboxID: "ns/x/u"}, time.Hour); err == nil {
-		t.Fatal("a start with no tenant must fail")
-	}
-}
-
-// Redis errors return as errors, never as "no fork".
-func TestRedisForkLedger_RedisDown(t *testing.T) {
-	l, mr := newForkLedger(t)
-	mr.Close()
-	ctx := context.Background()
-	if _, _, err := l.ForkedSource(ctx, "j"); err == nil {
-		t.Error("ForkedSource: want an error")
-	}
-	if _, err := l.Claim(ctx, "f"); err == nil {
-		t.Error("Claim: want an error")
-	}
-	if _, err := l.ClaimTarget(ctx, "f"); err == nil {
-		t.Error("ClaimTarget: want an error")
-	}
-	if err := l.RecordForks(ctx, "j", "s", nil, time.Hour); err == nil {
-		t.Error("RecordForks: want an error")
-	}
-}
-
 func TestSandboxHostname(t *testing.T) {
 	cases := map[string]string{
 		"setec-acme/Agent_Run.1/uid-9": "agent-run-1",
@@ -97,12 +25,12 @@ func TestSandboxHostname(t *testing.T) {
 		"ns/___/uid":                   "setec-sandbox",
 	}
 	for in, want := range cases {
-		if got := sandboxHostname(in); got != want {
-			t.Errorf("sandboxHostname(%q) = %q, want %q", in, got, want)
+		if got := SandboxHostname(in); got != want {
+			t.Errorf("SandboxHostname(%q) = %q, want %q", in, got, want)
 		}
 	}
 	long := "ns/a123456789a123456789a123456789a123456789a123456789a123456789a123456789/u"
-	if got := sandboxHostname(long); len(got) != 63 {
+	if got := SandboxHostname(long); len(got) != 63 {
 		t.Errorf("long name: len = %d, want 63", len(got))
 	}
 }
@@ -181,7 +109,7 @@ func requireForkUnclaimed(t *testing.T, name string, err error) {
 // The grant of a forked source works only in the source sandbox, as setec
 // verifies it, and in a fork only for ClaimFork (D74, setec#235).
 func TestCheckForkGrant(t *testing.T) {
-	l, _ := newForkLedger(t)
+	l := newForkLedger(t)
 	ctx := context.Background()
 	if err := l.RecordForks(ctx, "jti-src", "ns/src-1/u0", []ForkDispatch{{SandboxID: "ns/fork-1/u1", Tenant: "acme"}}, time.Hour); err != nil {
 		t.Fatal(err)
@@ -243,32 +171,16 @@ func TestCheckForkGrant(t *testing.T) {
 
 // A ledger that cannot be read refuses the call.
 func TestCheckForkGrant_LedgerDown(t *testing.T) {
-	l, mr := newForkLedger(t)
-	mr.Close()
+	l := newForkLedger(t)
+	l.Close()
 	err := checkForkGrant(forkCtx("jti-src", "tok-src", ""), &forkGuard{ledger: l, identity: testIdentity()}, "/m", nil)
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("err = %v, want Unavailable", err)
 	}
 }
 
-// A begun fork counts as forked before its forks are recorded.
-func TestRedisForkLedger_PendingFork(t *testing.T) {
-	l, _ := newForkLedger(t)
-	ctx := context.Background()
-	if err := l.BeginFork(ctx, "jti-p", "ns/src/u0", time.Hour); err != nil {
-		t.Fatalf("BeginFork: %v", err)
-	}
-	if _, forked, _ := l.ForkedSource(ctx, "jti-p"); !forked {
-		t.Fatal("a begun fork must count as forked")
-	}
-	if err := l.BeginFork(ctx, "", "s", time.Hour); err == nil {
-		t.Fatal("BeginFork with no grant id must fail")
-	}
-}
-
-// testForkGuard is a fork guard over an empty ledger: no grant is forked.
 func testForkGuard(t *testing.T) *forkGuard {
 	t.Helper()
-	l, _ := newForkLedger(t)
+	l := newForkLedger(t)
 	return &forkGuard{ledger: l}
 }
