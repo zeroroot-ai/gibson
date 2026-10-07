@@ -289,11 +289,12 @@ func parseAddedLines(diff []byte) map[string][]int {
 	var hunkAdded []pendingAdd
 	hunkRemoved := map[string]int{}
 
+	commentCols := map[string]map[int]int{}
 	flush := func() {
 		for _, a := range hunkAdded {
-			if n := hunkRemoved[a.norm]; n > 0 && a.norm != "" {
+			if n := hunkRemoved[a.norm]; n > 0 && a.norm != "" && a.commentFree(commentCols) {
 				hunkRemoved[a.norm] = n - 1
-				continue // whitespace-only change — same content existed before
+				continue // whitespace or trailing-comment change — same statement existed before
 			}
 			out[a.file] = append(out[a.file], a.line)
 		}
@@ -320,7 +321,11 @@ func parseAddedLines(diff []byte) map[string][]int {
 			}
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			if curFile != "" {
-				hunkAdded = append(hunkAdded, pendingAdd{file: curFile, line: newLine, norm: normalizeStatement(line[1:])})
+				text := line[1:]
+				hunkAdded = append(hunkAdded, pendingAdd{
+					file: curFile, line: newLine, norm: normalizeStatement(text),
+					cut: len(stripLineComment(text)), length: len(text),
+				})
 				newLine++
 			}
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
@@ -345,6 +350,53 @@ type pendingAdd struct {
 	file string
 	line int
 	norm string
+	// cut is the byte offset where stripLineComment cut the line, and length
+	// is the length of the whole line. cut < length means the line has text
+	// that the statement match ignores as a trailing comment.
+	cut, length int
+}
+
+// commentFree reports whether the statement match of a may ignore the text
+// after a.cut. It may when nothing was cut. When text was cut, the new file
+// must hold a comment token that starts at that byte on that line. A `//`
+// inside a raw string that spans lines is not a comment, so that line still
+// counts as changed (gibson#1017). cols caches the comment columns per file.
+func (a pendingAdd) commentFree(cols map[string]map[int]int) bool {
+	if a.cut >= a.length {
+		return true
+	}
+	c, ok := cols[a.file]
+	if !ok {
+		c = lineCommentColumns(a.file)
+		cols[a.file] = c
+	}
+	col, ok := c[a.line]
+	return ok && col == a.cut+1
+}
+
+// lineCommentColumns returns, for each line of a Go file that holds a `//`
+// comment, the 1-based byte column where that comment starts. It returns nil
+// when the file cannot be read, and the caller then keeps every line.
+func lineCommentColumns(path string) map[int]int {
+	src, err := readSource(path)
+	if err != nil {
+		return nil
+	}
+	fset := token.NewFileSet()
+	f := fset.AddFile(path, fset.Base(), len(src))
+	var s scanner.Scanner
+	s.Init(f, src, nil, scanner.ScanComments)
+	out := map[int]int{}
+	for {
+		pos, tok, lit := s.Scan()
+		if tok == token.EOF {
+			return out
+		}
+		if tok == token.COMMENT && strings.HasPrefix(lit, "//") {
+			p := f.Position(pos)
+			out[p.Line] = p.Column
+		}
+	}
 }
 
 // normalizeStatement returns the statement text of one source line: the
