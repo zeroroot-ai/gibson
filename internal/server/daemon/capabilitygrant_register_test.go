@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -172,14 +174,15 @@ func TestCGRegister_RejectsMissingKeys(t *testing.T) {
 // reRegBody is a re-registration body that carries a real host key and the
 // name that a caller may try to choose. It returns the body and the host id
 // that the key has.
-func reRegBody(t *testing.T, x, agentName string) (string, string) {
+func reRegBody(t *testing.T, x, agentName string) (body, hostID string) {
 	t.Helper()
 	jwk := json.RawMessage(`{"kty":"OKP","crv":"Ed25519","x":"` + x + `"}`)
-	id, err := capabilitygrant.HostKeyID(jwk)
+	hostID, err := capabilitygrant.HostKeyID(jwk)
 	if err != nil {
 		t.Fatalf("HostKeyID: %v", err)
 	}
-	return `{"agent_name":"` + agentName + `","agent_mode":"autonomous","host_key_jwk":` + string(jwk) + `,"agent_key_jwk":{"kty":"OKP"}}`, id
+	body = `{"agent_name":"` + agentName + `","agent_mode":"autonomous","host_key_jwk":` + string(jwk) + `,"agent_key_jwk":{"kty":"OKP"}}`
+	return body, hostID
 }
 
 func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
@@ -219,6 +222,23 @@ func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
 	// from the public base URL.
 	if reg.gotHostAud != "https://api.test/capabilitygrant/v1/register" {
 		t.Errorf("host+jwt expected audience = %q", reg.gotHostAud)
+	}
+}
+
+// A re-registration for a host that is not registrable answers 403, not 500.
+func TestCGRegister_HostJWT_NotRegistrableIs403(t *testing.T) {
+	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "")
+	reg := &fakeRegistrar{
+		hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello"},
+		err:        fmt.Errorf("enroll: %w", capabilitygrant.ErrHostNotRegistrable),
+	}
+	h := capabilityGrantRegisterHandler(fakeBootstrapVerifier{}, reg, nil, "https://api.test", nil)
+	if rr := postRegister(t, h, "Bearer "+hostJWTToken(), body); rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rr.Code)
+	}
+	reg.err = errors.New("db down")
+	if rr := postRegister(t, h, "Bearer "+hostJWTToken(), body); rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", rr.Code)
 	}
 }
 

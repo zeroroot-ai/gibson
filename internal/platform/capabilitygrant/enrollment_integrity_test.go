@@ -1380,3 +1380,58 @@ func TestGetHost_ReadsTheEnrollmentBounds(t *testing.T) {
 	assert.Equal(t, "hello-agent", h.AgentName)
 	assert.Equal(t, []string{"execute:tool:nmap"}, h.CapabilityCeiling)
 }
+
+// A stored ceiling that is not a list is an error, not an empty ceiling.
+func TestGetHost_RefusesACorruptCeiling(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+			"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+			AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+				"hello-agent", []byte(`{"not":"a list"}`), time.Now(), time.Now()))
+	_, err := m.svc.store.GetHost(context.Background(), "h1")
+	require.Error(t, err)
+}
+
+// HostKeyID is the id that a host stores itself under.
+func TestHostKeyID_IsTheStoredHostID(t *testing.T) {
+	got, err := HostKeyID(json.RawMessage(hostJWK))
+	require.NoError(t, err)
+	want, err := jwkThumbprint(json.RawMessage(hostJWK))
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	_, err = HostKeyID(nil)
+	require.Error(t, err)
+}
+
+// A failing UPDATE of a re-registration is an error, and the ceiling of a
+// first enrollment is stored as a list.
+func TestEnroll_StoresTheCeilingAndTouchFailsLoudly(t *testing.T) {
+	assert.Equal(t, "[]", ceilingJSON(nil))
+	assert.Equal(t, `["a","b"]`, ceilingJSON([]string{"a", "b"}))
+
+	m := newMockedService(t)
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnError(errors.New("db down"))
+	m.mock.ExpectRollback()
+	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrHostNotRegistrable)
+
+	m = newMockedService(t)
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewErrorResult(errors.New("no rows info")))
+	m.mock.ExpectRollback()
+	_, err = m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.Error(t, err)
+}

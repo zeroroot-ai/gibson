@@ -305,13 +305,6 @@ func upsertHostTx(ctx context.Context, tx *sql.Tx, host Host, keepAttestation bo
 	if keepAttestation {
 		return touchHostTx(ctx, tx, host)
 	}
-	ceiling, err := json.Marshal(host.CapabilityCeiling)
-	if err != nil {
-		return fmt.Errorf("capabilitygrant: UpsertHost %q: capability ceiling: %w", host.ID, err)
-	}
-	if host.CapabilityCeiling == nil {
-		ceiling = []byte("[]")
-	}
 	const query = `
 INSERT INTO capability_grant_hosts (
     id, tenant_id, user_id, display_name, public_key_jwk, status,
@@ -348,7 +341,7 @@ WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
 		host.Attested,
 		keepAttestation,
 		host.AgentName,
-		string(ceiling),
+		ceilingJSON(host.CapabilityCeiling),
 	)
 	if err != nil {
 		return fmt.Errorf("capabilitygrant: UpsertHost %q: %w", host.ID, err)
@@ -362,6 +355,19 @@ WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
 		return ErrHostNotRegistrable
 	}
 	return nil
+}
+
+// ceilingJSON is the jsonb form of a capability ceiling. No ceiling is "[]".
+// Marshaling a list of strings cannot fail.
+func ceilingJSON(ceiling []string) string {
+	if len(ceiling) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(ceiling)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
 }
 
 // touchHostTx marks a host that re-registers with its own key. It never
