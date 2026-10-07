@@ -36,12 +36,13 @@ func machineUserChild(name, clientID string) *gibsonv1alpha1.OIDCClient {
 	}
 }
 
+// iamAdminSecret is the admin token Secret that the ExternalSecret
+// iam-admin-pat writes: the token and the user id of the iam-admin user.
 func iamAdminSecret(userID string) *corev1.Secret {
-	body := []byte(`{"userId":"` + userID + `","type":"serviceaccount"}`)
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: iamAdminSecretName},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: defaultAdminTokenSecret},
 		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{iamAdminMachineKeyFile: body},
+		Data:       map[string][]byte{"pat": []byte("fake-pat"), iamAdminUserIDKey: []byte(userID)},
 	}
 }
 
