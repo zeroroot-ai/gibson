@@ -24,6 +24,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag"
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
@@ -765,6 +766,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// listener uses, over the daemon's own key set, which is the only key
 		// a task grant is ever signed with.
 		daemonSvc.WithCGRenewal(d.cgMinter, d.taskGrantVerifier())
+		// A renewal gives a new grant id, so the fork check of the callback
+		// listener does not see it. The same check runs here (D74, D80).
+		if d.forks != nil {
+			daemonSvc.WithRenewalForkGuard(harness.NewForkGrantGuard(d.forks.Ledger, d.sandboxIdentity, d.logger.Slog()))
+		}
 		d.logger.Info(ctx, "capability-grant renewal wired into DaemonServer")
 	}
 	// Bound capability-grant renewal to the life of the mission run

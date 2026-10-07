@@ -95,6 +95,7 @@ func newRenewServer(t *testing.T, lookup LiveMissionLookup) *DaemonServer {
 	}
 	s := &DaemonServer{}
 	s.WithCGRenewal(m, stubVerifier{claims: renewTestClaims()})
+	s.WithRenewalForkGuard(forkGuardStub{})
 	if lookup != nil {
 		s.WithLiveMissionLookup(lookup)
 	}
@@ -160,5 +161,31 @@ func TestRenewCapabilityGrant_TheGateRunsAfterTheClaimChecks(t *testing.T) {
 	_, err := s.RenewCapabilityGrant(renewCtx(), req)
 	if got := status.Code(err); got != codes.PermissionDenied {
 		t.Fatalf("code = %s, want PermissionDenied from the claim cross-check", got)
+	}
+}
+
+// forkGuardStub is a fork check that accepts or refuses every grant.
+type forkGuardStub struct{ err error }
+
+func (g forkGuardStub) CheckGrant(context.Context, sdkcg.Claims) error { return g.err }
+
+// The grant of a forked source cannot be renewed from another sandbox: the
+// renewal would give a fork or a restored sandbox a grant with a new id.
+func TestRenewCapabilityGrant_RefusesTheGrantOfAForkedSource(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{"m1": true}})
+	s.WithRenewalForkGuard(forkGuardStub{err: status.Error(codes.FailedPrecondition, "this grant belongs to the source sandbox")})
+
+	resp, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if status.Code(err) != codes.FailedPrecondition || resp != nil {
+		t.Fatalf("resp = %v, err = %v; want the renewal refused", resp, err)
+	}
+}
+
+// A daemon with no fork check refuses to renew, so a renewal never skips it.
+func TestRenewCapabilityGrant_RefusesWithNoForkCheck(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{"m1": true}})
+	s.renewalForks = nil
+	if _, err := s.RenewCapabilityGrant(renewCtx(), renewRequest()); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}
 }

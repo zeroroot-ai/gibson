@@ -135,6 +135,10 @@ type DaemonServer struct {
 	// rather than renewing an unbounded grant.
 	liveMissions LiveMissionLookup
 
+	// renewalForks refuses the renewal of the grant of a forked source outside
+	// the source sandbox. Wired via WithRenewalForkGuard.
+	renewalForks RenewalForkGuard
+
 	// Wired via WithCGRenewal; nil-checked at handler entry.
 	cgMinter   *capabilitygrant.Minter
 	cgVerifier CGJWTVerifier

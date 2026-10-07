@@ -159,6 +159,23 @@ func (l *AgentLauncher) fork(ctx context.Context, tenant, sourceSandboxID string
 		return ForkResponse{}, types.NewError(types.SANDBOX_LAUNCH_FAILED,
 			fmt.Sprintf("agent fork: setec started %d forks, want %d", len(resp.SandboxIDs), count))
 	}
+	// The isolation of each fork is proven before OnForked records the
+	// dispatch. A record exists only for a sandbox that passed the check, so
+	// a fork that fails it cannot claim a grant.
+	class := spec.SandboxClass
+	if class == "" {
+		class = l.sandboxClass
+	}
+	for _, id := range resp.SandboxIDs {
+		if err := l.verifyStarted(ctx, tenant, id, class); err != nil {
+			for _, other := range resp.SandboxIDs {
+				if other != id {
+					l.kill(ctx, tenant, other) // verifyStarted killed id
+				}
+			}
+			return ForkResponse{}, err
+		}
+	}
 	if spec.OnForked != nil {
 		if err := spec.OnForked(resp); err != nil {
 			for _, id := range resp.SandboxIDs {
@@ -211,18 +228,30 @@ func (l *AgentLauncher) FollowAgent(ctx context.Context, sandboxID, class string
 	return l.followFork(ctx, d.Tenant, sandboxID, class, d)
 }
 
-// followFork checks the isolation of one fork, and follows it to its end.
-func (l *AgentLauncher) followFork(ctx context.Context, tenant, sandboxID, class string, d AgentDispatch) (AgentRunResult, error) {
+// verifyStarted reads the isolation of a sandbox that setec just started and
+// checks it against class. A sandbox that fails the check, or whose isolation
+// cannot be read, is killed. The caller records a dispatch for the sandbox only
+// after this returns nil: a sandbox that has no proven runtime and class can
+// claim nothing (D80).
+func (l *AgentLauncher) verifyStarted(ctx context.Context, tenant, sandboxID, class string) error {
 	iso, err := l.client.Isolation(ctx, tenant, sandboxID)
 	if err != nil {
 		l.kill(ctx, tenant, sandboxID)
-		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent fork %s refused: read its isolation", sandboxID), err)
 	}
 	if isoErr := VerifyIsolation(class, iso); isoErr != nil {
 		l.kill(ctx, tenant, sandboxID)
-		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
+		return types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent fork %s refused", sandboxID), isoErr)
+	}
+	return nil
+}
+
+// followFork checks the isolation of one fork, and follows it to its end.
+func (l *AgentLauncher) followFork(ctx context.Context, tenant, sandboxID, class string, d AgentDispatch) (AgentRunResult, error) {
+	if err := l.verifyStarted(ctx, tenant, sandboxID, class); err != nil {
+		return AgentRunResult{}, err
 	}
 	runTimeout := l.runTimeout
 	if d.RunTimeout > 0 {

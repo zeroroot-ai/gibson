@@ -78,6 +78,27 @@ func TestLaunchFromSnapshot_Failures(t *testing.T) {
 	}
 }
 
+// A restored sandbox with no proven isolation is killed before its start is
+// recorded, so it can claim nothing.
+func TestLaunchFromSnapshot_RefusesAnUnprovenSandboxBeforeRecording(t *testing.T) {
+	c, _, killed := restoreClient(nil)
+	c.isolation = func(_ context.Context, id string) (LaunchResponse, error) {
+		return LaunchResponse{SandboxID: id, SandboxClass: mockBoundClass, Runtime: "runc"}, nil
+	}
+	recorded := false
+	_, err := newAgentLauncher(t, c).LaunchFromSnapshot(context.Background(), "snap", AgentForkSpec{}, AgentDispatch{Tenant: "acme"},
+		func(string) error { recorded = true; return nil })
+	if err == nil {
+		t.Fatal("want the restored sandbox refused")
+	}
+	if recorded {
+		t.Fatal("the start of a sandbox with no proven isolation was recorded")
+	}
+	if len(*killed) != 1 {
+		t.Fatalf("killed = %v, want the refused sandbox", *killed)
+	}
+}
+
 // SnapshotSandbox names the sandbox, and refuses a call with no tenant.
 func TestSnapshotSandbox(t *testing.T) {
 	c, _, _ := restoreClient(nil)
