@@ -72,6 +72,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -118,15 +119,18 @@ type Config struct {
 
 // Minter mints capability-grant JWTs.
 //
-// Construction loads the signing key set once and caches it for the
-// process lifetime; picking up a rotated mount requires a restart. That
-// is what the previous key in the set is for — the outgoing key keeps
-// verifying while replicas roll, so a rotation does not have to be
-// simultaneous across them.
+// Construction loads the signing key set. WatchSigningKeys reads the mount
+// again when it changes, so a rotation needs no restart (ADR-0171). The next
+// and previous keys of the set are what make that safe across replicas: each
+// replica publishes the incoming kid before any replica signs with it, and the
+// outgoing key keeps verifying after the switch.
 type Minter struct {
 	issuer   string
 	audience string
-	keys     *SigningKeySet
+	// dir is the signing-key mount the set was read from. It is empty when
+	// the set came from the master-KEK fallback, which has nothing to reload.
+	dir  string
+	keys atomic.Pointer[SigningKeySet]
 }
 
 // NewMinter constructs a Minter from cfg. It synchronously loads the
@@ -142,11 +146,79 @@ func NewMinter(ctx context.Context, cfg Config) (*Minter, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Minter{
+	m := &Minter{
 		issuer:   cfg.Issuer,
 		audience: cfg.Audience,
-		keys:     keys,
-	}, nil
+	}
+	if !keys.DerivedFromMasterKEK() {
+		m.dir = cfg.SigningKeyDir
+	}
+	m.keys.Store(keys)
+	return m, nil
+}
+
+// keySet returns the signing key set in force now.
+func (m *Minter) keySet() *SigningKeySet { return m.keys.Load() }
+
+// ReloadSigningKeys reads the signing-key mount again. It returns true when the
+// set changed. A mount that does not load returns the error and keeps the set
+// in force: a half-written rotation must never replace a working key with
+// nothing. A Minter on the master-KEK fallback has no mount and never changes.
+func (m *Minter) ReloadSigningKeys() (bool, error) {
+	if m.dir == "" {
+		return false, nil
+	}
+	next, err := LoadSigningKeySetFromDir(m.dir)
+	if err != nil {
+		return false, fmt.Errorf("capabilitygrant: reload signing keys from %q: %w", m.dir, err)
+	}
+	if sameKeySet(m.keySet(), next) {
+		return false, nil
+	}
+	m.keys.Store(next)
+	return true, nil
+}
+
+// WatchSigningKeys calls ReloadSigningKeys every interval until ctx ends. The
+// kubelet updates a projected Secret volume in place, so a poll is the whole
+// watch. onChange gets the kids of each new set, current first. onError gets
+// each failed reload. Either may be nil.
+func (m *Minter) WatchSigningKeys(ctx context.Context, interval time.Duration,
+	onChange func(keyIDs []string), onError func(error)) {
+	if m.dir == "" || interval <= 0 {
+		return
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		changed, err := m.ReloadSigningKeys()
+		switch {
+		case err != nil && onError != nil:
+			onError(err)
+		case changed && onChange != nil:
+			onChange(m.KeyIDs())
+		}
+	}
+}
+
+// sameKeySet reports whether two sets hold the same keys in the same slots.
+func sameKeySet(a, b *SigningKeySet) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return sameKey(&a.Current, &b.Current) && sameKey(a.Next, b.Next) && sameKey(a.Previous, b.Previous)
+}
+
+func sameKey(a, b *SigningKey) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.keyID == b.keyID && a.pub.Equal(b.pub)
 }
 
 // loadSigningKeys resolves the signing key set: the dedicated mount when it is
@@ -319,9 +391,12 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		"jti":          jti,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	tok.Header["kid"] = m.keyID()
+	// One read of the set, so the kid and the key that signs come from the
+	// same set even when a reload swaps it in between.
+	signer := m.keySet().Current
+	tok.Header["kid"] = signer.keyID
 	tok.Header["typ"] = "JWT"
-	signed, err := tok.SignedString(m.keys.Current.priv)
+	signed, err := tok.SignedString(signer.priv)
 	if err != nil {
 		return "", fmt.Errorf("capabilitygrant: sign: %w", err)
 	}
@@ -329,24 +404,23 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 }
 
 // PublicKey returns the Ed25519 public key the Minter currently signs with.
-func (m *Minter) PublicKey() ed25519.PublicKey { return m.keys.Current.pub }
+func (m *Minter) PublicKey() ed25519.PublicKey { return m.keySet().Current.pub }
 
 // KeyID returns the JWS kid the Minter stamps on each token — the current key.
 func (m *Minter) KeyID() string { return m.keyID() }
 
 // keyID is the kid of the key in force.
-func (m *Minter) keyID() string { return m.keys.Current.keyID }
+func (m *Minter) keyID() string { return m.keySet().Current.keyID }
 
 // KeyIDs returns every kid this daemon still honours, current first. During a
-// rotation window that is two: the key that signs and the key that only
-// verifies.
-func (m *Minter) KeyIDs() []string { return m.keys.KeyIDs() }
+// rotation that is the key that signs and the keys that only verify.
+func (m *Minter) KeyIDs() []string { return m.keySet().KeyIDs() }
 
 // KnowsKeyID reports whether kid names a daemon signing key that is still
 // honoured. A retired kid — one dropped from the mount at the end of a rotation
 // window — is not.
 func (m *Minter) KnowsKeyID(kid string) bool {
-	_, ok := m.keys.Verifier(kid)
+	_, ok := m.keySet().Verifier(kid)
 	return ok
 }
 
@@ -354,7 +428,7 @@ func (m *Minter) KnowsKeyID(kid string) bool {
 // master-KEK derivation because no dedicated signing key is provisioned. The
 // daemon surfaces this at startup; see the provenance note at the top of this
 // file.
-func (m *Minter) DerivedFromMasterKEK() bool { return m.keys.DerivedFromMasterKEK() }
+func (m *Minter) DerivedFromMasterKEK() bool { return m.keySet().DerivedFromMasterKEK() }
 
 // PublicKeyJWKS returns the JWKS document for the daemon's CG signing keys. The
 // per-kid key endpoint serves this when the requested kid is a daemon key
@@ -365,7 +439,7 @@ func (m *Minter) DerivedFromMasterKEK() bool { return m.keys.DerivedFromMasterKE
 // window rather than a mass invalidation: a verifier holding a cached copy, or
 // one that fetched before the rotation, still resolves the outgoing kid for
 // tokens minted under it.
-func (m *Minter) PublicKeyJWKS() ([]byte, error) { return buildJWKS(m.keys.publicKeys()...) }
+func (m *Minter) PublicKeyJWKS() ([]byte, error) { return buildJWKS(m.keySet().publicKeys()...) }
 
 // deriveEd25519FromMaster derives a deterministic Ed25519 keypair
 // from the supplied master key bytes via HKDF-SHA256 with a domain-

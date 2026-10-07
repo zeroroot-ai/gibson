@@ -1255,6 +1255,16 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				} else {
 					d.logger.Info(ctx, "CG signing key loaded from the dedicated mount",
 						"key_ids", minter.KeyIDs())
+					// A rotation changes the mount in place (ADR-0171), so the
+					// daemon reads it again and needs no restart.
+					go minter.WatchSigningKeys(ctx, cgSigningKeyReloadInterval,
+						func(keyIDs []string) {
+							d.logger.Info(ctx, "CG signing key set changed", "key_ids", keyIDs)
+						},
+						func(err error) {
+							cgSigningKeyReloadFailuresTotal.Inc()
+							d.logger.Warn(ctx, "CG signing key reload failed; the key set in force stays", "error", err)
+						})
 				}
 			}
 
