@@ -24,13 +24,13 @@ import (
 )
 
 // claimChainClient serves s behind the interceptor chain of the callback
-// listener (the same chain that CallbackServer.Start builds) and returns a
+// listener (identityUnaryChain, which CallbackServer.Start also uses) and returns a
 // client of it.
 func claimChainClient(t *testing.T, s *HarnessCallbackService) harnesspb.HarnessCallbackServiceClient {
 	t.Helper()
 	grantUnary, _ := taskGrantScopeInterceptors(getter(&fakeGrantVerifier{}),
 		&forkGuard{ledger: s.forkLedger, identity: s.sandboxIdentity}, slog.Default())
-	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(s.claimForkTenantInterceptor(), auth.UnaryServerInterceptor(), grantUnary))
+	srv := grpc.NewServer(grpc.ChainUnaryInterceptor(s.identityUnaryChain(grantUnary)...))
 	harnesspb.RegisterHarnessCallbackServiceServer(srv, s)
 	lis := bufconn.Listen(1 << 20)
 	go func() { _ = srv.Serve(lis) }()

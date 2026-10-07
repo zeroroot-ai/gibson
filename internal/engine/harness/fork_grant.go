@@ -344,6 +344,15 @@ func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (str
 	return tok, nil
 }
 
+// identityUnaryChain is the part of the unary interceptor chain of the
+// callback listener that builds the identity and binds the request to its
+// grant. CallbackServer.Start and the tests share it, so the order cannot
+// differ. The fork claim sets its tenant first: the sdk auth interceptor
+// refuses a call with no valid tenant.
+func (s *HarnessCallbackService) identityUnaryChain(grant grpc.UnaryServerInterceptor) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{s.claimForkTenantInterceptor(), auth.UnaryServerInterceptor(), grant}
+}
+
 // claimForkTenantInterceptor gives a ClaimFork call the tenant of its sandbox.
 // The edge asserts the sandbox identity credential with no tenant, because
 // only the daemon can know it: the start record that the daemon wrote when it
