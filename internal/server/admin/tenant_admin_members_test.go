@@ -37,6 +37,9 @@ type membersAuthorizer struct {
 	// model would: owner implies admin implies writer.
 	owners  map[string]bool
 	writers map[string]bool
+	// strangers are listed by ListUsers but hold no relation when checked:
+	// the role copy changed between the two calls.
+	strangers map[string]bool
 	// listUsersErr is returned by ListUsers when non-nil.
 	listUsersErr error
 	// batchCheckErr is returned by BatchCheck when non-nil.
@@ -79,6 +82,10 @@ func (m *membersAuthorizer) BatchCheck(_ context.Context, checks []authz.CheckRe
 		uid := c.User
 		if len(uid) > 5 && uid[:5] == "user:" {
 			uid = uid[5:]
+		}
+		if m.strangers[uid] {
+			out[i] = false
+			continue
 		}
 		switch c.Relation {
 		case "owner":
@@ -373,6 +380,25 @@ func TestListMembers_BootstrappedOwnerIsNamedAndOwner(t *testing.T) {
 	m := resp.GetMembers()[0]
 	if m.GetRole() != "owner" || m.GetDisplayName() != "First Admin" || m.GetEmail() != "admin@example.com" {
 		t.Errorf("owner row = %+v, want role owner with a name and an email", m)
+	}
+}
+
+// TestListMembers_AUserWithNoRelationIsNotAMember is the disagreement that
+// remained on main: ListUsers names a user who holds no relation when the
+// roles are checked. The roster reported that user as "member", while
+// ListMyMemberships reports no membership for the same answers. The roster
+// now omits the row (gibson#482).
+func TestListMembers_AUserWithNoRelationIsNotAMember(t *testing.T) {
+	az := &membersAuthorizer{
+		members:   []string{"user:kept", "user:removed"},
+		strangers: map[string]bool{"removed": true},
+	}
+	resp, err := newMembersTestServer(t, az, nil).ListMembers(ctxWithTenant(t, "acme"), &tenantv1.ListMembersRequest{})
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(resp.GetMembers()) != 1 || resp.GetMembers()[0].GetUserId() != "kept" {
+		t.Fatalf("members = %v, want only the user who holds a relation", resp.GetMembers())
 	}
 }
 
