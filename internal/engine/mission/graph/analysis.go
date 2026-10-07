@@ -275,8 +275,8 @@ func dedupe(ss []string) []string {
 
 // findStartsFromRefusals returns one StartsFromRefusal for each node whose
 // starts_from field is invalid (ADR-0169, gibson#802): it names a node that
-// does not exist, names the node itself, or names a node that does not run
-// before it. "Runs before it" means the named node is an ancestor: there is a
+// does not exist, names the node itself, names a node that does not run
+// before it, or names a node that runs another agent. "Runs before it" means the named node is an ancestor: there is a
 // directed path from the named node to this node, so the named node ends
 // before this node starts.
 //
@@ -298,6 +298,10 @@ func findStartsFromRefusals(nodes map[string]*missionv1.MissionNode, edges []edg
 			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not exist"})
 		case !hasCycle && !reaches(adj, from, id):
 			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not run before it"})
+		case nodes[from].GetAgentConfig().GetAgentName() != nodes[id].GetAgentConfig().GetAgentName():
+			// A fork continues the process of the earlier node, so only the
+			// agent of that node can run the later one.
+			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "runs another agent"})
 		}
 	}
 	return out

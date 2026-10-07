@@ -505,7 +505,7 @@ func TestProject_StartsFrom_AncestorIsAccepted(t *testing.T) {
 	def := &missionv1.MissionDefinition{
 		Nodes: map[string]*missionv1.MissionNode{
 			"scan":    agent("scan", "recon"),
-			"exploit": agentFrom("exploit", "attacker", "scan"),
+			"exploit": agentFrom("exploit", "recon", "scan"),
 		},
 		Edges: []*missionv1.MissionEdge{{From: "scan", To: "exploit"}},
 	}
@@ -544,6 +544,16 @@ func TestProject_StartsFrom_Refusals(t *testing.T) {
 				Edges: []*missionv1.MissionEdge{{From: "first", To: "second"}},
 			},
 			node: "first", from: "second", reason: "does not run before it",
+		},
+		"another agent": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{
+					"scan":    agent("scan", "alpha"),
+					"exploit": agentFrom("exploit", "beta", "scan"),
+				},
+				Edges: []*missionv1.MissionEdge{{From: "scan", To: "exploit"}},
+			},
+			node: "exploit", from: "scan", reason: "runs another agent",
 		},
 		"a node on another branch": {
 			def: &missionv1.MissionDefinition{

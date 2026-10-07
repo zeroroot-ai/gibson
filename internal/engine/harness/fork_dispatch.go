@@ -33,7 +33,10 @@ type ForkSupport struct {
 // ParkedSource is a sandbox whose node ended and whose process waits for a
 // fork.
 type ParkedSource struct {
-	Tenant    string
+	Tenant string
+	// AgentName is the agent that ran the node. A fork continues its
+	// process, so only the same agent can run a node that starts from it.
+	AgentName string
 	SandboxID string
 	// GrantJTI is the id of the grant of the source. The callback service
 	// refuses that grant in a fork.
@@ -92,6 +95,10 @@ func (h *DefaultAgentHarness) delegateToAgentViaFork(
 	if src.Tenant != dispatch.Tenant {
 		return agent.Result{}, types.NewError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("node %q starts from a sandbox of another tenant", task.NodeID))
+	}
+	if src.AgentName == "" || src.AgentName != name {
+		return agent.Result{}, types.NewError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("node %q starts from a sandbox of another agent", task.NodeID))
 	}
 	if src.GrantJTI == "" {
 		return agent.Result{}, types.NewError(ErrHarnessDelegationFailed,
