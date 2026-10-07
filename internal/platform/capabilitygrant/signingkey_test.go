@@ -295,7 +295,7 @@ func TestUnknownKidIsRefused(t *testing.T) {
 	if m.KnowsKeyID("someone-elses-key") {
 		t.Fatal("a foreign kid must not resolve")
 	}
-	if _, ok := m.keys.Verifier("someone-elses-key"); ok {
+	if _, ok := m.keySet().Verifier("someone-elses-key"); ok {
 		t.Fatal("a foreign kid must not produce a verification key")
 	}
 }

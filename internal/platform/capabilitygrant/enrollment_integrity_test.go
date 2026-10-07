@@ -1058,7 +1058,7 @@ func TestVerifyBootstrapToken_RejectsACredentialWithoutJTI(t *testing.T) {
 	})
 	tok.Header["kid"] = m.keyID()
 	tok.Header["typ"] = bootstrapTokenType
-	signed, err := tok.SignedString(m.keys.Current.priv)
+	signed, err := tok.SignedString(m.keySet().Current.priv)
 	require.NoError(t, err)
 
 	_, err = m.VerifyBootstrapToken(signed)
@@ -1088,7 +1088,7 @@ func TestVerifyBootstrapToken_RejectsACredentialWithoutTheRegisterScope(t *testi
 	})
 	tok.Header["kid"] = m.keyID()
 	tok.Header["typ"] = bootstrapTokenType
-	signed, err := tok.SignedString(m.keys.Current.priv)
+	signed, err := tok.SignedString(m.keySet().Current.priv)
 	require.NoError(t, err)
 
 	_, err = m.VerifyBootstrapToken(signed)

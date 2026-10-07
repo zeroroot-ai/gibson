@@ -23,7 +23,7 @@ func (m *Minter) Audience() string { return m.audience }
 // that names a registered component key, returns ok=false. NewMinter always
 // loads a key set, so a constructed Minter always has one.
 func (m *Minter) PublicKeyByID(kid string) (ed25519.PublicKey, bool) {
-	for _, k := range m.keys.publicKeys() {
+	for _, k := range m.keySet().publicKeys() {
 		if k.kid == kid {
 			return k.pub, true
 		}

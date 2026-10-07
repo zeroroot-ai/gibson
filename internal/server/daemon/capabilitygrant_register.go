@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 )
@@ -51,6 +52,11 @@ func cgJWTKeyID() string {
 // the Minter falls back to the legacy master-KEK derivation and says so at
 // startup, so an upgrade that predates the chart change does not take
 // capability grants down.
+// cgSigningKeyReloadInterval is how often the daemon reads the signing-key
+// mount again. The kubelet syncs a projected Secret in about a minute, and the
+// chart waits longer than both before it moves a key between slots.
+const cgSigningKeyReloadInterval = 30 * time.Second
+
 func cgSigningKeyDir() string {
 	if v := os.Getenv("GIBSON_CGJWT_SIGNING_KEY_DIR"); v != "" {
 		return v

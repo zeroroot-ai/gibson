@@ -141,7 +141,7 @@ func (m *Minter) MintBootstrapToken(c BootstrapClaims, ttl time.Duration) (strin
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	tok.Header["kid"] = m.keyID()
 	tok.Header["typ"] = bootstrapTokenType
-	signed, err := tok.SignedString(m.keys.Current.priv)
+	signed, err := tok.SignedString(m.keySet().Current.priv)
 	if err != nil {
 		return "", fmt.Errorf("capabilitygrant: MintBootstrapToken: sign: %w", err)
 	}
@@ -173,7 +173,7 @@ func (m *Minter) VerifyBootstrapToken(tokenStr string) (*BootstrapClaims, error)
 	var claims jwt.MapClaims
 	tok, err := parser.ParseWithClaims(tokenStr, &claims, func(t *jwt.Token) (interface{}, error) {
 		kid, _ := t.Header["kid"].(string)
-		pub, ok := m.keys.Verifier(kid)
+		pub, ok := m.keySet().Verifier(kid)
 		if !ok {
 			return nil, fmt.Errorf("unknown or retired signing key id %q", kid)
 		}
