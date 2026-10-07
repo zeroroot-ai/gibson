@@ -146,15 +146,14 @@ func TestDesiredConnectors_MakesTheInstance(t *testing.T) {
 
 	// The phase that the ConnectorInstance controller sets reaches the daemon.
 	ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseReady
-	ci.Status.DiscoveredTools = 7
 	if err := c.Status().Update(context.Background(), ci); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
 	}
-	if got := d.lastReport(t); got.GetPhase() != "Ready" || got.GetDiscoveredTools() != 7 {
-		t.Errorf("report = %v, want Ready with 7 tools", got)
+	if got := d.lastReport(t); got.GetPhase() != "Ready" {
+		t.Errorf("report = %v, want Ready", got)
 	}
 }
 

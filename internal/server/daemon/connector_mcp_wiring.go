@@ -6,10 +6,12 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantconnector"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
@@ -21,7 +23,7 @@ func (d *daemonImpl) connectorMCPClient() *component.ConnectorMCP {
 		d.connectorMCP = component.NewConnectorMCP(
 			component.ConnectorHTTPClient(d.connectorProxyToken),
 			d.logger.WithComponent("connector-mcp").Slog(),
-		)
+		).WithToolCountRecorder(d.recordConnectorTools)
 	})
 	return d.connectorMCP
 }
@@ -40,4 +42,18 @@ func (d *daemonImpl) connectorProxyToken(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("fetch the JWT-SVID for the connector proxy: %w", err)
 	}
 	return svid.Marshal(), nil
+}
+
+// recordConnectorTools stores the tool count of one connector of a tenant,
+// which ListConnectors serves. A failed write is logged: the tool list of the
+// call is still correct without it.
+func (d *daemonImpl) recordConnectorTools(ctx context.Context, tenant, connector string, n int) {
+	if d.platformDB == nil {
+		return
+	}
+	count := int32(min(n, math.MaxInt32)) //nolint:gosec // bounded by the min above
+	if err := tenantconnector.NewStore(d.platformDB).SetDiscoveredTools(ctx, tenant, connector, count); err != nil {
+		d.logger.WithComponent("connector-mcp").Slog().WarnContext(ctx, "record the tool count of a connector",
+			"tenant", tenant, "connector", connector, "error", err.Error())
+	}
 }

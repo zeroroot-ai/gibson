@@ -171,7 +171,6 @@ func (r *DesiredConnectorsRunnable) converge(ctx context.Context) error {
 			if report.Phase == "" {
 				report.Phase = string(connectorv1alpha1.ConnectorInstancePhasePending)
 			}
-			report.DiscoveredTools = ci.Status.DiscoveredTools
 			report.LastError = ci.Status.LastError
 		}
 		if rerr := r.Daemon.ReportConnectorStatus(ctx, report); rerr != nil {

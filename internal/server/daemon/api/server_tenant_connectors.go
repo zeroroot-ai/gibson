@@ -84,9 +84,8 @@ func (s *DaemonServer) ReportConnectorStatus(
 		return nil, err
 	}
 	updated, err := store.ReportStatus(ctx, req.GetTenantId(), req.GetConnectorId(), tenantconnector.Status{
-		Phase:           req.GetPhase(),
-		DiscoveredTools: req.GetDiscoveredTools(),
-		LastError:       req.GetLastError(),
+		Phase:     req.GetPhase(),
+		LastError: req.GetLastError(),
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "report connector status: %v", err)

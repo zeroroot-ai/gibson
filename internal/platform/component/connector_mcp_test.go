@@ -178,3 +178,22 @@ func TestConnectorHTTPClient_SendsTheToken(t *testing.T) {
 	}
 	_ = resp.Body.Close()
 }
+
+// TestConnectorMCP_RecordsTheToolCountOfEachAnsweringConnector: the daemon is
+// the one MCP client, so it records how many tools each connector served
+// (gibson#723). A connector that does not answer records nothing.
+func TestConnectorMCP_RecordsTheToolCountOfEachAnsweringConnector(t *testing.T) {
+	srv, _ := newFakeConnector(t)
+	got := map[string]int{}
+	c := newTestConnectorMCP(srv, "github", "gitlab").WithToolCountRecorder(
+		func(_ context.Context, tenant, connector string, n int) {
+			got[tenant+"/"+connector] = n
+		})
+
+	if _, err := c.ListConnectorTools(context.Background(), "acme"); err != nil {
+		t.Fatalf("ListConnectorTools: %v", err)
+	}
+	if len(got) != 1 || got["acme/github"] != 2 {
+		t.Fatalf("recorded counts = %v; want acme/github = 2 only", got)
+	}
+}
