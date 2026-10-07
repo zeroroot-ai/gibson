@@ -34,6 +34,16 @@
 //     retry inside renewLoop, closing the same class of bug for a token
 //     that goes bad mid-life (e.g. revoked, then rotated) rather than only
 //     at initial acquisition.
+//
+// Rotation design (ADR-0171, row openbao-service-tokens):
+//   - The openbao-auto-init sidecar mints a NEW token by age and writes it to
+//     the projected Secret while the old token is still valid. It revokes the
+//     old token after a grace period.
+//   - renewLoop re-reads tokenPath every followInterval. When the file holds a
+//     different token and LookupSelf accepts it, the Renewer moves to it at
+//     once. So the operator uses the new token long before the sidecar
+//     revokes the old one. A file token that LookupSelf refuses is ignored,
+//     and the token in force stays.
 package vaulttoken
 
 import (
@@ -64,6 +74,12 @@ var acquirePollInterval = 5 * time.Second
 // minRenewInterval; a var (distinct from the clampInterval floor) so tests
 // can shorten it without changing renewal-cadence semantics. gibson#1173.
 var retryBackoff = minRenewInterval
+
+// followInterval is how often renewLoop re-reads tokenPath to find a rotated
+// token. The kubelet syncs a projected Secret in about a minute, and the
+// sidecar keeps the old token valid for much longer than both. A var so tests
+// can shorten it.
+var followInterval = 30 * time.Second
 
 // Renewer holds a Vault admin token and keeps it alive via background renewal.
 type Renewer struct {
@@ -244,15 +260,34 @@ func (r *Renewer) Close() error {
 // later point in the process lifetime. Re-reading picks up a corrected token
 // without a pod restart. A literal VAULT_TOKEN override (tokenPath == "") is
 // immutable for the process lifetime, so the re-read is a no-op in that mode.
+//
+// tokenPath, if non-empty, is also re-read every followInterval, so a token
+// that the sidecar rotated while the old one is still valid is used at once
+// (followRotatedToken). A token with no renewal (interval 0) still follows
+// the file.
 func (r *Renewer) renewLoop(ctx context.Context, client *vaultapi.Client, interval time.Duration, tokenPath string) {
-	if interval == 0 {
+	if interval == 0 && tokenPath == "" {
 		return
 	}
+	var follow <-chan time.Time
+	if tokenPath != "" {
+		t := time.NewTicker(followInterval)
+		defer t.Stop()
+		follow = t.C
+	}
+	renew := newRenewTimer(interval)
+	defer renew.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-follow:
+			if next, ok := r.followRotatedToken(ctx, client, tokenPath); ok {
+				interval = next
+				renew.Stop()
+				renew = newRenewTimer(interval)
+			}
+		case <-renew.C:
 			secret, err := client.Auth().Token().RenewSelfWithContext(ctx, 0)
 			if err != nil {
 				if ctx.Err() != nil {
@@ -270,6 +305,7 @@ func (r *Renewer) renewLoop(ctx context.Context, client *vaultapi.Client, interv
 						client.SetToken(fresh)
 					}
 				}
+				renew = newRenewTimer(interval)
 				continue
 			}
 			r.mu.Lock()
@@ -278,8 +314,50 @@ func (r *Renewer) renewLoop(ctx context.Context, client *vaultapi.Client, interv
 			if secret != nil && secret.Auth != nil && secret.Auth.LeaseDuration > 0 {
 				interval = clampInterval(time.Duration(secret.Auth.LeaseDuration) * time.Second * 2 / 3)
 			}
+			renew = newRenewTimer(interval)
 		}
 	}
+}
+
+// newRenewTimer returns a timer that fires after interval. An interval of 0
+// means no renewal: the timer never fires.
+func newRenewTimer(interval time.Duration) *time.Timer {
+	if interval <= 0 {
+		t := time.NewTimer(time.Hour)
+		t.Stop()
+		return t
+	}
+	return time.NewTimer(interval)
+}
+
+// followRotatedToken re-reads tokenPath. When the file holds a token that is
+// not the one in force, it checks the file token with LookupSelf on a copy of
+// the client. When OpenBao accepts it, the Renewer moves to it and returns its
+// renewal interval and true. Otherwise the token in force stays and it returns
+// false.
+func (r *Renewer) followRotatedToken(ctx context.Context, client *vaultapi.Client, tokenPath string) (time.Duration, bool) {
+	fresh := resolveToken("", tokenPath)
+	r.mu.RLock()
+	current := r.token
+	r.mu.RUnlock()
+	if fresh == "" || fresh == current {
+		return 0, false
+	}
+	probe, err := client.Clone()
+	if err != nil {
+		return 0, false
+	}
+	probe.SetToken(fresh)
+	interval, err := lookupRenewInterval(ctx, probe)
+	if err != nil {
+		return 0, false
+	}
+	client.SetToken(fresh)
+	r.mu.Lock()
+	r.token = fresh
+	r.renErr = nil
+	r.mu.Unlock()
+	return interval, true
 }
 
 // lookupRenewInterval calls LookupSelf to determine the renewal interval.
