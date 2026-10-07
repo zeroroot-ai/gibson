@@ -531,3 +531,22 @@ func TestVoIWorker_NoPackKeepsTheBase(t *testing.T) {
 	assert.Same(t, registry, tenantBeliefRegistry(registry, nil))
 	assert.Same(t, taxonomy.GlobalTechniques, tenantTechniques(taxonomy.GlobalTechniques, nil))
 }
+
+// Two packs that disagree: the first pack keeps the technique and the
+// schema, and the plan still builds.
+func TestVoIWorker_AConflictBetweenPacksKeepsTheFirst(t *testing.T) {
+	category := taxonomy.GlobalTechniques.Categories()[0]
+	schemaA := ontology.BeliefSchemaExtension{EnablementEdges: []ontology.EnablementEdgeSpec{{RelType: "X_REACHES", TargetVariable: "a"}}}
+	schemaB := ontology.BeliefSchemaExtension{EnablementEdges: []ontology.EnablementEdgeSpec{{RelType: "X_REACHES", TargetVariable: "b"}}}
+	packs := []DomainPackSnapshot{
+		{Name: "a", Techniques: map[string]string{"shared_probe": string(category)}, BeliefSchema: schemaA},
+		{Name: "b", Techniques: map[string]string{"shared_probe": string(category)}, BeliefSchema: schemaB},
+	}
+	h := tenantTechniques(taxonomy.GlobalTechniques, packs)
+	assert.True(t, h.HasTechnique("shared_probe"))
+
+	reg := tenantBeliefRegistry(liveBeliefRegistry(t), packs)
+	target, ok := reg.EnablementEdgeTargetVariable("X_REACHES")
+	require.True(t, ok)
+	assert.Equal(t, "a", target, "the first pack keeps the edge")
+}

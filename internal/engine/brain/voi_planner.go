@@ -5,6 +5,7 @@ package brain
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -357,9 +358,12 @@ func tenantTechniques(base *taxonomy.TechniqueHierarchy, packs []DomainPackSnaps
 		}
 		sort.Strings(techniques)
 		for _, t := range techniques {
-			if next, err := h.WithTechnique(taxonomy.TechniqueID(t), taxonomy.CategoryID(pack.Techniques[t])); err == nil {
-				h = next
+			next, err := h.WithTechnique(taxonomy.TechniqueID(t), taxonomy.CategoryID(pack.Techniques[t]))
+			if err != nil {
+				slog.Warn("VoI plan: a technique of an enabled pack is left out", "pack", pack.Name, "technique", t, "error", err.Error())
+				continue
 			}
+			h = next
 		}
 	}
 	return h
@@ -380,7 +384,9 @@ func tenantBeliefRegistry(base *ontology.BeliefSchemaRegistry, packs []DomainPac
 		if reg == nil {
 			reg = base.Clone()
 		}
-		_ = reg.RegisterExtension(ontology.PackBeliefSchemaExtensionName(pack.Name), pack.BeliefSchema)
+		if err := reg.RegisterExtension(ontology.PackBeliefSchemaExtensionName(pack.Name), pack.BeliefSchema); err != nil {
+			slog.Warn("VoI plan: the belief schema of an enabled pack is left out", "pack", pack.Name, "error", err.Error())
+		}
 	}
 	if reg == nil {
 		return base

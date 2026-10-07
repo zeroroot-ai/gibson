@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"reflect"
 	"testing"
 )
@@ -194,6 +195,11 @@ func TestDomainPackEvents_CodecRoundTrip(t *testing.T) {
 			TaxonomyNodeLabels:        []string{"Container"},
 			TaxonomyRelationshipTypes: []string{"RUNS_ON"},
 			Predicates:                map[string]string{"a": "expr"},
+			Techniques:                map[string]string{"t1": "recon"},
+			BeliefSchema: ontology.BeliefSchemaExtension{
+				Nodes:           []ontology.NodeBeliefSchema{{NodeType: "Container", Variables: []ontology.BeliefVariable{{Name: "exposed"}}}},
+				EnablementEdges: []ontology.EnablementEdgeSpec{{RelType: "RUNS_ON", TargetVariable: "exposed"}},
+			},
 		},
 		DomainPackDisabled{Name: "main"},
 	}
@@ -270,5 +276,27 @@ func TestDomainPackSnapshot_PredicateIsDestructive(t *testing.T) {
 	}
 	if restored.DomainPackSnapshot()[0].PredicateIsDestructive("read_only") {
 		t.Fatal("the non-destructive list must survive a snapshot round trip")
+	}
+}
+
+// The belief schema of an enabled pack survives a snapshot and its restore
+// (gibson#699).
+func TestDomainPack_SnapshotKeepsTheBeliefSchema(t *testing.T) {
+	schema := ontology.BeliefSchemaExtension{
+		Nodes: []ontology.NodeBeliefSchema{{NodeType: "Container", Variables: []ontology.BeliefVariable{{Name: "exposed"}}}},
+	}
+	w := NewWorld("t")
+	Reduce(w, DomainPackEnabled{Name: "k8s", Version: 1, BeliefSchema: schema})
+	got := w.DomainPackSnapshot()
+	if len(got) != 1 || !reflect.DeepEqual(got[0].BeliefSchema, schema) {
+		t.Fatalf("snapshot = %+v, want the pack schema", got)
+	}
+
+	restored := NewWorld("t")
+	for _, p := range got {
+		Reduce(restored, DomainPackEnabled{Name: p.Name, Version: p.Version, BeliefSchema: cloneBeliefSchema(p.BeliefSchema)})
+	}
+	if again := restored.DomainPackSnapshot(); !reflect.DeepEqual(again, got) {
+		t.Fatalf("restored snapshot = %+v, want %+v", again, got)
 	}
 }
