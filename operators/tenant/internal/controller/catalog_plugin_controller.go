@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -381,9 +382,35 @@ func (r *CatalogPluginRunnable) instanceChanges(ctx context.Context, p provision
 
 // dryRunClient reads through the client it wraps and writes nothing. It notes
 // that a write was asked for.
+//
+// controllerutil.CreateOrUpdate calls Update whenever the object after the
+// mutate function differs from the object it read. The API server fills
+// defaults into a stored object (a pod spec, a CRD with defaults), and the
+// mutate function of a step replaces whole fields, so the two differ on every
+// pass although nothing changed. So an Update counts as a write only when the
+// object it carries is not a derivative of the stored object: a field that the
+// desired object sets must equal the stored field, and a field that the desired
+// object leaves empty may hold any default. A changed, a removed and an added
+// list entry still count.
+//
+// It covers the writes that the steps make (Create, Update, Patch, Delete). It
+// does not cover Status() or SubResource() writes. No step makes one. A step
+// that does must not run through this client.
 type dryRunClient struct {
 	client.Client
 	wrote bool
+	seen  map[client.ObjectKey]client.Object
+}
+
+func (d *dryRunClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if err := d.Client.Get(ctx, key, obj, opts...); err != nil {
+		return err //nolint:wrapcheck // the caller tests apierrors on it
+	}
+	if d.seen == nil {
+		d.seen = map[client.ObjectKey]client.Object{}
+	}
+	d.seen[key] = obj.DeepCopyObject().(client.Object)
+	return nil
 }
 
 func (d *dryRunClient) Create(context.Context, client.Object, ...client.CreateOption) error {
@@ -391,8 +418,11 @@ func (d *dryRunClient) Create(context.Context, client.Object, ...client.CreateOp
 	return nil
 }
 
-func (d *dryRunClient) Update(context.Context, client.Object, ...client.UpdateOption) error {
-	d.wrote = true
+func (d *dryRunClient) Update(_ context.Context, obj client.Object, _ ...client.UpdateOption) error {
+	stored, ok := d.seen[client.ObjectKeyFromObject(obj)]
+	if !ok || !apiequality.Semantic.DeepDerivative(obj, stored) {
+		d.wrote = true
+	}
 	return nil
 }
 

@@ -174,3 +174,33 @@ func TestCatalogPlugins_ForbiddenReadMeansANewInstance(t *testing.T) {
 		t.Fatalf("changes = %v, err = %v; want a change, no error", changes, err)
 	}
 }
+
+// The API server fills defaults into a stored object. A pass over an instance
+// whose objects hold such defaults is not a change, or the loop would write a
+// record on every pass. A changed field and a changed list still are.
+func TestCatalogPlugins_ServerDefaultsAreNotAChange(t *testing.T) {
+	r, c, _ := convergedInstance(t)
+	key := client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-" + cpPlugin}
+	var dep appsv1.Deployment
+	cpGet(t, c, key, &dep)
+	dep.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyAlways
+	dep.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
+	dep.Spec.Template.Spec.SchedulerName = "default-scheduler"
+	dep.Spec.Template.Spec.Containers[0].TerminationMessagePath = "/dev/termination-log"
+	if err := c.Update(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin)); err != nil || changes {
+		t.Fatalf("with server defaults: changes = %v, err = %v; want none", changes, err)
+	}
+
+	// A changed image is a change.
+	cpGet(t, c, key, &dep)
+	dep.Spec.Template.Spec.Containers[0].Image = "attacker/image"
+	if err := c.Update(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin)); err != nil || !changes {
+		t.Fatalf("with a changed image: changes = %v, err = %v; want a change", changes, err)
+	}
+}

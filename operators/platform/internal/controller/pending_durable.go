@@ -33,6 +33,14 @@ import (
 // pendingAuditLabel marks the ConfigMaps that hold pending audit records.
 const pendingAuditLabel = "platform-operator.gibson.zeroroot.ai/pending-audit"
 
+// durableActions are the actions that a delete of this operator can leave in a
+// ConfigMap. The flusher refuses a record with any other action.
+var durableActions = map[string]bool{
+	audit.ActionOIDCClientApply:   true,
+	audit.ActionOIDCClientDelete:  true,
+	audit.ActionPlatformBootstrap: true,
+}
+
 // pendingAuditKey is the data key that holds the records, as JSON.
 const pendingAuditKey = "records"
 
@@ -50,7 +58,19 @@ func saveDurable(ctx context.Context, c client.Client, recs []gibsonv1alpha1.Pen
 	if err != nil {
 		return fmt.Errorf("encode the pending audit records: %w", err)
 	}
-	sum := sha256.Sum256(raw)
+	// The name comes from the records without their first-seen time, so a
+	// retry of the same delete, which stamps a new time, writes the same
+	// object and not a second one.
+	norm := make([]gibsonv1alpha1.PendingAuditRecord, len(recs))
+	copy(norm, recs)
+	for i := range norm {
+		norm[i].FirstAt = metav1.Time{}
+	}
+	nameRaw, err := json.Marshal(norm)
+	if err != nil {
+		return fmt.Errorf("encode the pending audit records: %w", err)
+	}
+	sum := sha256.Sum256(nameRaw)
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "gibson-pending-audit-" + hex.EncodeToString(sum[:])[:16],
@@ -131,7 +151,7 @@ func (f *PendingAuditFlusher) Start(ctx context.Context) error {
 			return nil
 		case <-t.C:
 			if err := f.FlushOnce(ctx); err != nil {
-				log.FromContext(ctx).V(1).Info("pending audit ConfigMaps stay; the daemon did not accept them", "err", err.Error())
+				log.FromContext(ctx).Error(err, "pending audit ConfigMaps stay; the daemon did not accept them")
 			}
 		}
 	}
@@ -139,6 +159,8 @@ func (f *PendingAuditFlusher) Start(ctx context.Context) error {
 
 // FlushOnce sends the records of each pending ConfigMap. A ConfigMap whose
 // records are all accepted is deleted. A partly accepted one keeps the rest.
+// Delivery is at least once: when the update after a send fails, the next
+// pass sends the same records again.
 func (f *PendingAuditFlusher) FlushOnce(ctx context.Context) error {
 	var cms corev1.ConfigMapList
 	if err := f.Client.List(ctx, &cms, client.InNamespace(defaultChildNamespace),
@@ -158,6 +180,14 @@ func (f *PendingAuditFlusher) flushOne(ctx context.Context, cm *corev1.ConfigMap
 	var recs []gibsonv1alpha1.PendingAuditRecord
 	if err := json.Unmarshal([]byte(cm.Data[pendingAuditKey]), &recs); err != nil {
 		return fmt.Errorf("decode the pending audit ConfigMap %s: %w", cm.Name, err)
+	}
+	// The flusher sends only the records that this operator writes for a
+	// delete. A ConfigMap with any other record is not sent and is left for a
+	// person to read.
+	for _, rec := range recs {
+		if !durableActions[rec.Action] {
+			return fmt.Errorf("the pending audit ConfigMap %s holds a record with the action %q, which the operator does not write for a delete", cm.Name, rec.Action)
+		}
 	}
 	ferr := flushPending(ctx, f.Audit, &recs)
 	if len(recs) == 0 {
