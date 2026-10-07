@@ -36,6 +36,9 @@ func TestClaimFork_EdgeAdmitsAnIdentityToken(t *testing.T) {
 		if h.GetHeader().GetKey() == headers.HeaderCredentialType {
 			credential = h.GetHeader().GetValue()
 		}
+		if h.GetHeader().GetKey() == headers.HeaderTenant {
+			t.Fatalf("the edge must not assert a tenant for ClaimFork, got %q", h.GetHeader().GetValue())
+		}
 	}
 	if credential != headers.CredentialSandboxIdentity {
 		t.Fatalf("credential type = %q, want %q", credential, headers.CredentialSandboxIdentity)
