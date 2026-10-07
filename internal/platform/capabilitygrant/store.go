@@ -536,7 +536,9 @@ WHERE  id = $1`
 		if err := json.Unmarshal(ceiling, &h.CapabilityCeiling); err != nil {
 			return nil, fmt.Errorf("capabilitygrant: GetHost %q: capability ceiling: %w", hostID, err)
 		}
-		h.CeilingRecorded = true
+		// A jsonb null decodes to a nil list. Only a list, empty or not, is a
+		// recorded ceiling.
+		h.CeilingRecorded = h.CapabilityCeiling != nil
 	}
 	h.PublicKeyJWK = json.RawMessage(jwk)
 	return &h, nil

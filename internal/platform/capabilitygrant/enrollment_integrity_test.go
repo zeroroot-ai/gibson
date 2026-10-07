@@ -1451,3 +1451,19 @@ func TestEnroll_StoresTheCeilingAndTouchFailsLoudly(t *testing.T) {
 	)
 	require.Error(t, err)
 }
+
+// A stored empty list is a recorded ceiling (the credential named none). A
+// stored jsonb null is unknown, like NULL.
+func TestGetHost_EmptyListIsRecordedAndNullLiteralIsNot(t *testing.T) {
+	for raw, wantRecorded := range map[string]bool{`[]`: true, `null`: false} {
+		m := newMockedService(t)
+		m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+			sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+				"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+				AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+					"hello-agent", []byte(raw), time.Now(), time.Now()))
+		h, err := m.svc.store.GetHost(context.Background(), "h1")
+		require.NoError(t, err)
+		assert.Equal(t, wantRecorded, h.CeilingRecorded, raw)
+	}
+}
