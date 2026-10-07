@@ -460,8 +460,8 @@ func TestParseAddedLines_TrailingCommentOnlyChangeExcluded(t *testing.T) {
 	diff := `--- a/pkg/x.go
 +++ b/pkg/x.go
 @@ -10 +10 @@
--	ingest(d.registry), // findings reach the projector (ADR-0007)
-+	ingest(d.registry), // findings reach the projector (ADR-0107)
+-	ingest(d.registry), // findings reach the projector (old text)
++	ingest(d.registry), // findings reach the projector (new text)
 `
 	got := parseAddedLines([]byte(diff))
 	if len(got["pkg/x.go"]) != 0 {
@@ -475,8 +475,8 @@ func TestParseAddedLines_StatementAndCommentChangeCounts(t *testing.T) {
 	diff := `--- a/pkg/x.go
 +++ b/pkg/x.go
 @@ -10 +10 @@
--	ingest(d.registry), // ADR-0007
-+	ingest(d.brain), // ADR-0107
+-	ingest(d.registry), // old note
++	ingest(d.brain), // new note
 `
 	got := parseAddedLines([]byte(diff))
 	if lines := got["pkg/x.go"]; len(lines) != 1 || lines[0] != 10 {
