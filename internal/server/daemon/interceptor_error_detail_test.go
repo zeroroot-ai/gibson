@@ -80,6 +80,7 @@ func TestErrorDetail_AddsCodeAndReasonAndKeepsTheMessage(t *testing.T) {
 		{status.Error(codes.Unauthenticated, "no token"),
 			commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "UNAUTHENTICATED"},
 		{status.Error(codes.Internal, "failed"), commonpb.ErrorCode_ERROR_CODE_INTERNAL, "INTERNAL"},
+		{status.Error(codes.Aborted, "conflict"), commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "ABORTED"},
 	}
 	for _, tc := range cases {
 		got := withErrorDetail(tc.in)

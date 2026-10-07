@@ -74,15 +74,19 @@ func errorCodeFor(code codes.Code) commonpb.ErrorCode {
 	switch code {
 	case codes.OK:
 		return commonpb.ErrorCode_ERROR_CODE_UNSPECIFIED
-	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange, codes.Aborted:
+	case codes.InvalidArgument, codes.FailedPrecondition, codes.OutOfRange:
 		return commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT
 	case codes.NotFound:
 		return commonpb.ErrorCode_ERROR_CODE_NOT_FOUND
 	case codes.DeadlineExceeded:
 		return commonpb.ErrorCode_ERROR_CODE_TIMEOUT
-	case codes.Unavailable:
+	case codes.Unavailable, codes.Aborted:
+		// Aborted is a concurrency conflict. The client retries, as it does
+		// for Unavailable.
 		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
 	case codes.PermissionDenied, codes.Unauthenticated:
+		// The API has no unauthenticated code. A client tells "sign in
+		// again" from "refused" by the reason: UNAUTHENTICATED.
 		return commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
 	case codes.AlreadyExists:
 		return commonpb.ErrorCode_ERROR_CODE_ALREADY_EXISTS
