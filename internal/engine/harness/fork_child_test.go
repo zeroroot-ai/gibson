@@ -270,27 +270,26 @@ func TestCreateMission_StartsFromCallerStateRefusals(t *testing.T) {
 }
 
 // The caller fork takes the agent from the verified grant. A request that
-// names another agent gets the agent of the grant, and a grant that is not an
-// agent grant cannot fork the caller.
-func TestCreateMission_CallerForkAgentComesFromTheGrant(t *testing.T) {
+// names another agent than the grant gets the agent of the grant, and a grant
+// that is not an agent grant cannot fork the caller.
+func TestPlanCallerFork_AgentComesFromTheGrant(t *testing.T) {
 	mgr := &childNodeOperator{node: brain.WorkNode{ID: "exploit", Kind: "agent", Target: "beta"}}
-	parent := &forkingParent{}
-	svc := forkOriginService(t, mgr, parent)
+	svc := forkOriginService(t, mgr, &forkingParent{})
 	req := forkOriginRequest()
-	req.Context.AgentName = "beta" // alpha's grant, beta in the request
-	_, err := svc.CreateMission(forkOriginCtx(t, "tok-src"), req)
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("code = %v, want FailedPrecondition (first node targets beta, grant is zerocool)", status.Code(err))
+	req.Context.AgentName = "beta" // the grant is for zerocool
+
+	plan, err := svc.planCallerFork(forkOriginCtx(t, "tok-src"), &forkingParent{}, req)
+	if err != nil {
+		t.Fatalf("planCallerFork: %v", err)
 	}
-	if parent.got.AgentName != "zerocool" {
-		t.Fatalf("fork agent = %q, want the agent of the grant", parent.got.AgentName)
+	if plan.agentName != "zerocool" {
+		t.Fatalf("plan agent = %q, want the agent of the grant (zerocool)", plan.agentName)
 	}
 
 	tenant, _ := auth.NewTenantID(originTenant)
 	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant, Subject: "component:tool:nmap"})
 	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, "tok-src"))
-	mgr2 := &childNodeOperator{node: brain.WorkNode{ID: "exploit", Kind: "agent", Target: "zerocool"}}
-	if _, err := forkOriginService(t, mgr2, &forkingParent{}).CreateMission(ctx, forkOriginRequest()); status.Code(err) != codes.PermissionDenied {
+	if _, err := svc.planCallerFork(ctx, &forkingParent{}, forkOriginRequest()); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("non-agent grant: code = %v, want PermissionDenied", status.Code(err))
 	}
 }
