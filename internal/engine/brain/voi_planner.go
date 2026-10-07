@@ -5,6 +5,7 @@ package brain
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -259,9 +260,13 @@ func (vw *VoIWorker) Drain(ctx context.Context) int {
 }
 
 func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
-	in := vw.buildInput(missionID)
+	packs := vw.eng.DomainPacks()
+	registry := tenantBeliefRegistry(vw.registry, packs)
+	in := vw.buildInput(missionID, packs, registry)
 	seed := BAMCPSeed(missionID, voiPlanCursor(vw.eng.World, missionID))
-	candidates, err := vw.bamcp.Plan(ctx, in, vw.substrate, vw.scorer, vw.topK, seed)
+	planner := *vw.bamcp
+	planner.Registry = registry
+	candidates, err := planner.Plan(ctx, in, vw.substrate, vw.scorer, vw.topK, seed)
 	if err != nil {
 		// A failed plan does not kill the mission; clear in-flight (with no
 		// candidates) and let the gate retry on the next evidence change —
@@ -299,19 +304,19 @@ func voiPlanCursor(w *World, missionID string) int {
 // mission's capability catalog (Engine.Capabilities) and the technique
 // hierarchy (vw.hierarchy), so PlanVoI can resolve each
 // candidate's CoveringCapabilities (ADR-0135, gibson#387).
-func (vw *VoIWorker) buildInput(missionID string) VoIPlanInput {
+func (vw *VoIWorker) buildInput(missionID string, packs []DomainPackSnapshot, registry *ontology.BeliefSchemaRegistry) VoIPlanInput {
 	hosts, _ := vw.eng.AmbientHosts(deciderHostBudget)
-	graph := LiveAttackGraph(vw.eng, hosts, vw.registry)
+	graph := LiveAttackGraph(vw.eng, hosts, registry)
 	return VoIPlanInput{
 		Hosts:        hosts,
 		Hypotheses:   vw.eng.Hypotheses(),
 		Graph:        graph,
 		Tenant:       vw.eng.World.Tenant,
 		Capabilities: vw.eng.Capabilities(missionID),
-		Hierarchy:    vw.hierarchy,
+		Hierarchy:    tenantTechniques(vw.hierarchy, packs),
 
 		Budget:                vw.missionBudget(missionID),
-		DestructiveTechniques: destructiveTechniques(vw.eng.DomainPacks()),
+		DestructiveTechniques: destructiveTechniques(packs),
 	}
 }
 
@@ -336,6 +341,57 @@ func (vw *VoIWorker) missionBudget(missionID string) VoIBudget {
 		}
 	}
 	return b
+}
+
+// tenantTechniques returns base with the techniques of each enabled pack, in
+// pack name order and technique order (ADR-0135, gibson#699). A technique
+// that base cannot take (its category is not admitted, or another pack
+// already added it) is left out: the pack was validated against the core
+// hierarchy when it was enabled, so only a conflict between two packs can
+// reach this, and the first pack keeps the technique.
+func tenantTechniques(base *taxonomy.TechniqueHierarchy, packs []DomainPackSnapshot) *taxonomy.TechniqueHierarchy {
+	h := base
+	for _, pack := range packs {
+		techniques := make([]string, 0, len(pack.Techniques))
+		for t := range pack.Techniques {
+			techniques = append(techniques, t)
+		}
+		sort.Strings(techniques)
+		for _, t := range techniques {
+			next, err := h.WithTechnique(taxonomy.TechniqueID(t), taxonomy.CategoryID(pack.Techniques[t]))
+			if err != nil {
+				slog.Warn("VoI plan: a technique of an enabled pack is left out", "pack", pack.Name, "technique", t, "error", err.Error())
+				continue
+			}
+			h = next
+		}
+	}
+	return h
+}
+
+// tenantBeliefRegistry returns base when no enabled pack declares a belief
+// schema. Otherwise it returns a clone of base with the schema of each pack
+// registered, in pack name order (ADR-0129, gibson#699). A schema that
+// conflicts with one already registered is left out, and the clone keeps the
+// state before it. base is never changed, so a tenant's packs never reach
+// another tenant's plan.
+func tenantBeliefRegistry(base *ontology.BeliefSchemaRegistry, packs []DomainPackSnapshot) *ontology.BeliefSchemaRegistry {
+	var reg *ontology.BeliefSchemaRegistry
+	for _, pack := range packs {
+		if len(pack.BeliefSchema.Nodes) == 0 && len(pack.BeliefSchema.EnablementEdges) == 0 {
+			continue
+		}
+		if reg == nil {
+			reg = base.Clone()
+		}
+		if err := reg.RegisterExtension(ontology.PackBeliefSchemaExtensionName(pack.Name), pack.BeliefSchema); err != nil {
+			slog.Warn("VoI plan: the belief schema of an enabled pack is left out", "pack", pack.Name, "error", err.Error())
+		}
+	}
+	if reg == nil {
+		return base
+	}
+	return reg
 }
 
 // destructiveTechniques returns each technique whose predicate an enabled

@@ -419,3 +419,28 @@ func TestRegisterCoreBeliefSchemaSeed_RegistersUnderCoreName(t *testing.T) {
 	require.NoError(t, RegisterCoreBeliefSchemaSeed(reg))
 	assert.True(t, reg.IsBeliefBearing("Host"))
 }
+
+// A clone holds the same schema, and a change to the clone does not reach
+// the original (gibson#699: each plan clones the base registry).
+func TestBeliefSchemaRegistry_CloneIsIndependent(t *testing.T) {
+	base := NewBeliefSchemaRegistry()
+	if err := RegisterCoreBeliefSchemaSeed(base); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	clone := base.Clone()
+	if !clone.IsBeliefBearing("Host") {
+		t.Fatal("the clone lost the Host schema")
+	}
+	if err := clone.RegisterExtension("pack/x/belief-schema", BeliefSchemaExtension{
+		Nodes:           []NodeBeliefSchema{{NodeType: "XThing", Variables: []BeliefVariable{{Name: "exposed"}}}},
+		EnablementEdges: []EnablementEdgeSpec{{RelType: "X_REACHES", TargetVariable: "exposed"}},
+	}); err != nil {
+		t.Fatalf("RegisterExtension on the clone: %v", err)
+	}
+	if base.IsBeliefBearing("XThing") || base.IsEnablementEdge("X_REACHES") {
+		t.Fatal("a change to the clone reached the base registry")
+	}
+	if !clone.IsBeliefBearing("XThing") || !clone.IsEnablementEdge("X_REACHES") {
+		t.Fatal("the clone did not take the extension")
+	}
+}
