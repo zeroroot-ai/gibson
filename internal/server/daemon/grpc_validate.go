@@ -114,7 +114,7 @@ func validationStatus(verr *protovalidate.ValidationError) error {
 	st := grpcstatus.New(grpccodes.InvalidArgument, verr.Error())
 	withDetail, err := st.WithDetails(detail)
 	if err != nil {
-		return st.Err()
+		return grpcstatus.ErrorProto(st.Proto())
 	}
-	return withDetail.Err()
+	return grpcstatus.ErrorProto(withDetail.Proto())
 }

@@ -54,9 +54,9 @@ func withErrorDetail(err error) error {
 	withDetail, derr := st.WithDetails(detail)
 	if derr != nil {
 		// The detail did not marshal. The status is still correct without it.
-		return st.Err()
+		return status.ErrorProto(st.Proto())
 	}
-	return withDetail.Err()
+	return status.ErrorProto(withDetail.Proto())
 }
 
 // hasErrorDetail reports whether st already carries an ErrorDetail.
@@ -90,11 +90,12 @@ func errorCodeFor(code codes.Code) commonpb.ErrorCode {
 		return commonpb.ErrorCode_ERROR_CODE_RESOURCE_EXHAUSTED
 	case codes.Canceled:
 		return commonpb.ErrorCode_ERROR_CODE_CANCELLED
-	default:
-		// Internal, Unknown, Unimplemented and DataLoss are faults of the
-		// daemon, not of the request.
+	case codes.Unknown, codes.Unimplemented, codes.Internal, codes.DataLoss:
+		// These are faults of the daemon, not of the request.
 		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
 	}
+	// A code that gRPC does not define is a fault of the daemon too.
+	return commonpb.ErrorCode_ERROR_CODE_INTERNAL
 }
 
 // reasonFor returns the stable reason for a status with no reason of its own:
