@@ -4,13 +4,19 @@
 package harness
 
 import (
+	"context"
 	"net"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // The network scope of a mission node (owner decision S6, gibson#865).
@@ -19,6 +25,9 @@ import (
 // node, plus the daemon and its model provider. A node that the mission
 // author marks `research` is unrestricted. A tool that runs inside a node
 // gets the network of that node. An empty list means no egress.
+//
+// No rule names the proxy of a connector: the daemon is the one caller of a
+// connector (ADR-0065), so an agent has no network path to one (gibson#723).
 
 // allPorts is every port of a target, for TCP and for UDP. A target is
 // reached on the ports that the work needs, and the scope does not guess
@@ -33,17 +42,17 @@ var allPorts = []sandboxed.PortRange{
 // beside the targets, for example the callback endpoint of the daemon. An
 // address that cannot be read is left out: the scope never widens on a bad
 // value.
-func nodeNetworkScope(n *agent.NodeNetwork, extra ...string) (mode string, rules []sandboxed.EgressRule) {
+func nodeNetworkScope(n *agent.NodeNetwork, guard proxyGuard, extra ...string) (mode string, rules []sandboxed.EgressRule) {
 	if n.Research {
 		return sandboxed.NetworkModeExternalOnly, nil
 	}
 	for _, target := range n.Targets {
-		if rule, ok := egressRuleForTarget(target); ok {
+		if rule, ok := egressRuleForTarget(target); ok && !guard.blocks(rule) {
 			rules = append(rules, rule)
 		}
 	}
 	for _, addr := range append(append([]string(nil), n.ProviderHosts...), extra...) {
-		if rule, ok := egressRuleForService(addr); ok {
+		if rule, ok := egressRuleForService(addr); ok && !guard.blocks(rule) {
 			rules = append(rules, rule)
 		}
 	}
@@ -125,4 +134,83 @@ func splitAddress(addr string) (host string, port uint32, ok bool) {
 		return "", 0, false
 	}
 	return addr, 0, true
+}
+
+// proxyGuard refuses an egress rule that reaches the proxy of a connector of
+// the tenant (gibson#723). addrs holds the resolved addresses of those
+// proxies. A rule is refused when its host has the name of a proxy, when its
+// IP or CIDR holds a proxy address, or when its host resolves to one. It is a
+// second layer: the network policy of the cluster (D76) is the control.
+type proxyGuard struct {
+	addrs  []netip.Addr
+	lookup func(host string) []netip.Addr
+}
+
+// blocks reports whether rule reaches a connector proxy.
+func (g proxyGuard) blocks(rule sandboxed.EgressRule) bool {
+	if rule.CIDR != "" {
+		p, err := netip.ParsePrefix(rule.CIDR)
+		if err != nil {
+			return true
+		}
+		for _, a := range g.addrs {
+			if p.Contains(a) {
+				return true
+			}
+		}
+		return false
+	}
+	if connectorv1alpha1.IsProxyHost(rule.Host) {
+		return true
+	}
+	if ip, err := netip.ParseAddr(rule.Host); err == nil {
+		return g.holds(ip)
+	}
+	if g.lookup != nil {
+		for _, ip := range g.lookup(rule.Host) {
+			if g.holds(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (g proxyGuard) holds(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	for _, a := range g.addrs {
+		if a.Unmap() == ip {
+			return true
+		}
+	}
+	return false
+}
+
+// proxyLookupTimeout bounds one name resolution of the guard.
+const proxyLookupTimeout = 2 * time.Second
+
+// lookupNetIP resolves a host name. Tests replace it.
+var lookupNetIP = func(ctx context.Context, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+}
+
+// connectorProxyGuard builds the guard for the tenant of ctx. A proxy that
+// does not resolve (a connector the tenant did not enable) adds no address.
+func connectorProxyGuard(ctx context.Context) proxyGuard {
+	lookup := func(host string) []netip.Addr {
+		lctx, cancel := context.WithTimeout(ctx, proxyLookupTimeout)
+		defer cancel()
+		addrs, err := lookupNetIP(lctx, host)
+		if err != nil {
+			return nil
+		}
+		return addrs
+	}
+	g := proxyGuard{lookup: lookup}
+	if tenant := auth.TenantStringFromContext(ctx); tenant != "" {
+		for _, host := range component.ConnectorProxyHosts(tenant) {
+			g.addrs = append(g.addrs, lookup(host)...)
+		}
+	}
+	return g
 }

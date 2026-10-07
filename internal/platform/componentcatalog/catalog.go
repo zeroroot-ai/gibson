@@ -27,6 +27,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -348,10 +350,26 @@ func (m *Manifest) validate() error {
 // validateEgressAllow refuses the value "*" (owner decision S6, gibson#865).
 // The network scope of a mission node decides the egress of each sandbox in
 // it. A manifest names hosts, or nothing.
+//
+// It also refuses the proxy of a connector: the daemon is the one caller of a
+// connector (ADR-0065), so a component has no network path to one
+// (gibson#723).
 func validateEgressAllow(id string, allow []string) error {
 	for _, a := range allow {
-		if strings.TrimSpace(a) == "*" {
+		entry := strings.TrimSpace(a)
+		if entry == "*" {
 			return fmt.Errorf(`%s: egressAllow holds "*": the catalog states no wildcard; the network scope of the mission node decides`, id)
+		}
+		host := entry
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil {
+				host = u.Hostname()
+			}
+		} else if h, _, err := net.SplitHostPort(entry); err == nil {
+			host = h
+		}
+		if connectorv1alpha1.IsProxyHost(host) {
+			return fmt.Errorf("%s: egressAllow names the connector proxy %q; only the daemon calls a connector", id, entry)
 		}
 	}
 	return nil

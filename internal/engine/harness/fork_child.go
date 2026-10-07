@@ -82,7 +82,7 @@ func (h *DefaultAgentHarness) ForkCaller(ctx context.Context, req CallerFork) (s
 	// of that node builds it. Never the scope of the caller.
 	mode, egress := spec.NetworkMode, spec.Egress
 	if req.Node.Network != nil {
-		mode, egress = nodeNetworkScope(req.Node.Network, h.agentCallbackEndpoint)
+		mode, egress = nodeNetworkScope(req.Node.Network, connectorProxyGuard(ctx), h.agentCallbackEndpoint)
 	}
 	if err := h.forks.Ledger.BeginFork(ctx, req.CallerJTI, req.CallerSandboxID, forkRecordTTL); err != nil {
 		return "", types.WrapError(ErrHarnessDelegationFailed, "record the fork of the caller", err)

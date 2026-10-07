@@ -129,7 +129,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	// targets of the node, the model provider and the callback endpoint of
 	// the daemon. A research node is unrestricted.
 	if task.Network != nil {
-		spec.NetworkMode, spec.Egress = nodeNetworkScope(task.Network, h.agentCallbackEndpoint)
+		spec.NetworkMode, spec.Egress = nodeNetworkScope(task.Network, connectorProxyGuard(ctx), h.agentCallbackEndpoint)
 	}
 
 	// The sandboxed agent calls back over HarnessCallbackService with

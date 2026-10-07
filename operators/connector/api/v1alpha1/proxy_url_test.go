@@ -3,12 +3,26 @@
 
 package v1alpha1
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+)
 
-func TestProxyURL(t *testing.T) {
-	got := ProxyURL("github", "tenant-acme")
-	want := "http://mcp-github-proxy.tenant-acme.svc.cluster.local:8080/mcp"
-	if got != want {
-		t.Fatalf("ProxyURL = %q; want %q", got, want)
+// IsProxyHost matches the host of ProxyURL, so the two cannot disagree, and
+// each short DNS form of it.
+func TestIsProxyHost(t *testing.T) {
+	u, err := url.Parse(ProxyURL("gitlab", "tenant-acme"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	for _, h := range []string{u.Hostname(), "mcp-gitlab-proxy", "mcp-gitlab-proxy.tenant-acme", "mcp-gitlab-proxy.tenant-acme.svc", "MCP-GITLAB-PROXY.tenant-acme.svc.cluster.local.", "mcp-gitlab-proxy.tenant-acme.svc.example.internal"} {
+		if !IsProxyHost(h) {
+			t.Errorf("IsProxyHost(%q) = false, want true", h)
+		}
+	}
+	for _, h := range []string{"mcp.example.com", "gitlab.com", "mcp-gitlab-proxy.example.com", "proxy.tenant-acme.svc"} {
+		if IsProxyHost(h) {
+			t.Errorf("IsProxyHost(%q) = true, want false", h)
+		}
 	}
 }

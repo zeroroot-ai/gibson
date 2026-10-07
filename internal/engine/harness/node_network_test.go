@@ -5,11 +5,15 @@ package harness
 
 import (
 	"context"
+	"errors"
+	"net/netip"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // TestNodeNetworkScope_ANodeReachesItsTargetsOnly is the default of S6
@@ -19,7 +23,7 @@ func TestNodeNetworkScope_ANodeReachesItsTargetsOnly(t *testing.T) {
 	mode, rules := nodeNetworkScope(&agent.NodeNetwork{
 		Targets:       []string{"10.0.0.0/24", "https://app.example.com:8443/login", "db.internal:5432", "scanme.example"},
 		ProviderHosts: []string{"api.anthropic.com"},
-	}, "gibson-daemon.gibson.svc:50051")
+	}, proxyGuard{}, "gibson-daemon.gibson.svc:50051")
 
 	if mode != sandboxed.NetworkModeAllowList {
 		t.Fatalf("mode = %q; want %q", mode, sandboxed.NetworkModeAllowList)
@@ -40,7 +44,7 @@ func TestNodeNetworkScope_ANodeReachesItsTargetsOnly(t *testing.T) {
 // TestNodeNetworkScope_AResearchNodeIsUnrestricted: a research node gets
 // external egress and no allow list.
 func TestNodeNetworkScope_AResearchNodeIsUnrestricted(t *testing.T) {
-	mode, rules := nodeNetworkScope(&agent.NodeNetwork{Research: true, Targets: []string{"10.0.0.1"}}, "daemon:50051")
+	mode, rules := nodeNetworkScope(&agent.NodeNetwork{Research: true, Targets: []string{"10.0.0.1"}}, proxyGuard{}, "daemon:50051")
 	if mode != sandboxed.NetworkModeExternalOnly || rules != nil {
 		t.Fatalf("mode = %q, rules = %+v; want external-only and no rules", mode, rules)
 	}
@@ -58,7 +62,7 @@ func TestNodeNetworkScope_AnEmptyListMeansNoEgress(t *testing.T) {
 		"a provider wildcard": {ProviderHosts: []string{"*"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			mode, rules := nodeNetworkScope(n)
+			mode, rules := nodeNetworkScope(n, proxyGuard{})
 			if mode != sandboxed.NetworkModeNone || rules != nil {
 				t.Fatalf("mode = %q, rules = %+v; want none and no rules", mode, rules)
 			}
@@ -94,7 +98,7 @@ func TestManifestTool_GetsTheNetworkOfItsNode(t *testing.T) {
 	h := &DefaultAgentHarness{missionCtx: MissionContext{
 		NodeNetwork: &agent.NodeNetwork{Targets: []string{"10.1.2.3:443"}},
 	}}
-	spec, ok := h.sandboxedToolSpecFromManifest("nmap")
+	spec, ok := h.sandboxedToolSpecFromManifest(context.Background(), "nmap")
 	if !ok {
 		t.Fatal("nmap must be a sandboxed manifest tool")
 	}
@@ -106,7 +110,7 @@ func TestManifestTool_GetsTheNetworkOfItsNode(t *testing.T) {
 	}
 
 	plain := &DefaultAgentHarness{}
-	spec, _ = plain.sandboxedToolSpecFromManifest("nmap")
+	spec, _ = plain.sandboxedToolSpecFromManifest(context.Background(), "nmap")
 	if spec.NetworkMode != "" {
 		t.Fatalf("with no node scope the mode must stay empty, got %q", spec.NetworkMode)
 	}
@@ -171,5 +175,83 @@ func TestDelegateToAgent_SandboxChildHarnessFailureIsReported(t *testing.T) {
 	}
 	if launcher.calls != 0 {
 		t.Fatalf("launcher calls = %d; want 0", launcher.calls)
+	}
+}
+
+// TestNodeNetworkScope_ANodeReachesNoConnector: a target or a service that
+// names the proxy of a connector gets no rule, in any DNS form. Only the
+// daemon calls a connector (ADR-0065), so an agent sandbox has no network
+// path to one (gibson#723).
+func TestNodeNetworkScope_ANodeReachesNoConnector(t *testing.T) {
+	mode, rules := nodeNetworkScope(&agent.NodeNetwork{
+		Targets: []string{
+			"http://mcp-gitlab-proxy.tenant-acme.svc.cluster.local:8080/mcp",
+			"mcp-gitlab-proxy.tenant-acme.svc:8080",
+			"mcp-gitlab-proxy",
+		},
+		ProviderHosts: []string{"MCP-GitLab-Proxy.tenant-acme"},
+	}, proxyGuard{}, "mcp-github-proxy.tenant-acme.svc.cluster.local:8080")
+	if mode != sandboxed.NetworkModeNone || len(rules) != 0 {
+		t.Fatalf("mode = %q, rules = %+v; want no egress to a connector", mode, rules)
+	}
+}
+
+// The guard compares addresses too (gibson#723). A CIDR that holds a proxy
+// address, the proxy IP itself, a host that resolves to a proxy and a proxy
+// name under another cluster domain get no rule. Other targets keep theirs.
+func TestNodeNetworkScope_TheGuardRefusesEachAddressFormOfAProxy(t *testing.T) {
+	proxyIP := netip.MustParseAddr("10.96.12.34")
+	guard := proxyGuard{
+		addrs: []netip.Addr{proxyIP},
+		lookup: func(host string) []netip.Addr {
+			if host == "alias.example" {
+				return []netip.Addr{proxyIP}
+			}
+			return []netip.Addr{netip.MustParseAddr("203.0.113.7")}
+		},
+	}
+	mode, rules := nodeNetworkScope(&agent.NodeNetwork{Targets: []string{
+		"10.0.0.0/8",
+		"10.96.12.34",
+		"10.96.12.34:8080",
+		"alias.example:443",
+		"mcp-gitlab-proxy.tenant-acme.svc.example.internal:8080",
+		"192.168.0.0/24",
+		"scanme.example",
+	}}, guard)
+	want := []sandboxed.EgressRule{
+		{CIDR: "192.168.0.0/24", Ports: allPorts},
+		{Host: "scanme.example", Ports: allPorts},
+	}
+	if mode != sandboxed.NetworkModeAllowList || !reflect.DeepEqual(rules, want) {
+		t.Fatalf("mode = %q, rules = %+v; want %+v", mode, rules, want)
+	}
+}
+
+// connectorProxyGuard resolves the proxy hosts of the tenant of the context.
+func TestConnectorProxyGuard_ResolvesTheProxiesOfTheTenant(t *testing.T) {
+	prev := lookupNetIP
+	t.Cleanup(func() { lookupNetIP = prev })
+	var asked []string
+	lookupNetIP = func(_ context.Context, host string) ([]netip.Addr, error) {
+		asked = append(asked, host)
+		if strings.HasSuffix(host, ".tenant-acme.svc.cluster.local") {
+			return []netip.Addr{netip.MustParseAddr("10.96.0.10")}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+
+	g := connectorProxyGuard(auth.ContextWithTenantString(context.Background(), "acme"))
+	if len(asked) == 0 || len(g.addrs) != len(asked) {
+		t.Fatalf("asked %v, addrs %v; want one address per catalog connector proxy", asked, g.addrs)
+	}
+	if !g.blocks(sandboxed.EgressRule{CIDR: "10.96.0.0/16"}) {
+		t.Fatal("a CIDR that holds a proxy address was allowed")
+	}
+	if g.blocks(sandboxed.EgressRule{Host: "unknown.example", Port: 443}) {
+		t.Fatal("a host that does not resolve was refused")
+	}
+	if none := connectorProxyGuard(context.Background()); len(none.addrs) != 0 {
+		t.Fatalf("a context with no tenant resolved %v", none.addrs)
 	}
 }
