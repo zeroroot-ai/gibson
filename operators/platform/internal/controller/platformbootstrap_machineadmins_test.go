@@ -226,9 +226,9 @@ func TestReconcileMachineAdminsScoped_WaitsForIAMAdminSecret(t *testing.T) {
 		t.Fatalf("reconcileMachineAdminsScoped: %v", err)
 	}
 	if res.RequeueAfter == 0 {
-		t.Fatal("expected a requeue while the iam-admin Secret is missing")
+		t.Fatal("expected a requeue while the admin token Secret is missing")
 	}
-	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForIAMAdminSecret")
+	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForIAMAdminUserID")
 }
 
 // TestReconcileMachineAdminsScoped_ZitadelErrors pins every Zitadel failure
@@ -295,16 +295,12 @@ func TestReconcileMachineAdminsScoped_WaitsForAdminToken(t *testing.T) {
 // API error reading the service accounts or the admin token is returned, so
 // controller-runtime retries with backoff.
 func TestReconcileMachineAdminsScoped_APIErrorsReturned(t *testing.T) {
-	for _, name := range []string{defaultAdminTokenSecret} {
-		t.Run(name, func(t *testing.T) {
-			r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid", machineAdminsObjects()...)
-			r.Client = failGetNamed(r.Client.(client.WithWatch), name)
-			pb := machineAdminsCR("http://unused.invalid")
+	r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid", machineAdminsObjects()...)
+	r.Client = failGetNamed(r.Client.(client.WithWatch), "iam-admin-pat")
+	pb := machineAdminsCR("http://unused.invalid")
 
-			if _, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard()); err == nil {
-				t.Fatal("expected the API error to be returned")
-			}
-		})
+	if _, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard()); err == nil {
+		t.Fatal("expected the API error to be returned")
 	}
 }
 

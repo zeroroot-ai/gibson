@@ -53,13 +53,13 @@ func TestPlatformServiceSubjects_IAMAdminSecretStates(t *testing.T) {
 		wantReason  string
 		wantRequeue bool
 	}{
-		{"missing key", map[string][]byte{"pat": []byte("p")}, "WaitingForIAMAdminSecret", true},
-		{"empty userId", map[string][]byte{iamAdminUserIDKey: []byte("  ")}, "WaitingForIAMAdminSecret", true},
+		{"missing key", map[string][]byte{"pat": []byte("p")}, "WaitingForIAMAdminUserID", true},
+		{"empty userId", map[string][]byte{adminUserProperty: []byte("  ")}, "WaitingForIAMAdminUserID", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sec := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: defaultAdminTokenSecret},
+				ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: "iam-admin-pat"},
 				Data:       tc.data,
 			}
 			r := newSubjectsTestReconciler(t, sec)
@@ -79,9 +79,9 @@ func TestPlatformServiceSubjects_IAMAdminSecretStates(t *testing.T) {
 }
 
 // TestPlatformServiceSubjects_APIErrors pins that an API error reading
-// either the iam-admin Secret or a declared child is returned as an error.
+// either the admin token Secret or a declared child is returned as an error.
 func TestPlatformServiceSubjects_APIErrors(t *testing.T) {
-	for _, name := range []string{defaultAdminTokenSecret, "gibson-tenant-operator"} {
+	for _, name := range []string{"iam-admin-pat", "gibson-tenant-operator"} {
 		t.Run(name, func(t *testing.T) {
 			r := newSubjectsTestReconciler(t, iamAdminSecret("UID-IAMADMIN"), machineUserChild("gibson-tenant-operator", "UID-TENANTOP"))
 			r.Client = failGetNamed(r.Client.(client.WithWatch), name)
@@ -95,7 +95,7 @@ func TestPlatformServiceSubjects_APIErrors(t *testing.T) {
 
 func TestReconcileSAIdentityMap_APIErrorReturned(t *testing.T) {
 	r := newSubjectsTestReconciler(t, iamAdminSecret("UID-IAMADMIN"))
-	r.Client = failGetNamed(r.Client.(client.WithWatch), defaultAdminTokenSecret)
+	r.Client = failGetNamed(r.Client.(client.WithWatch), "iam-admin-pat")
 
 	if _, err := r.reconcileSAIdentityMap(context.Background(), saIdentityMapBootstrap(), logr.Discard()); !errors.Is(err, errAPIDown) {
 		t.Fatalf("err = %v, want errAPIDown", err)

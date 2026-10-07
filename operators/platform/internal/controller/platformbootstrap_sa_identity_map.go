@@ -29,15 +29,6 @@ const (
 	// numeric before the ConfigMap is considered Ready.
 	saIdentityMapName = "gibson-sa-identity-map"
 
-	// defaultAdminTokenSecret is the Secret of the Zitadel admin token when
-	// spec.zitadel.adminTokenRef names none. The ExternalSecret iam-admin-pat
-	// writes it from the OpenBao entry that reconcileAdminToken keeps. Next
-	// to the token, the entry holds the user id of the iam-admin machine
-	// user, the numeric Zitadel subject this step needs. No machine key of
-	// that user is read: no code authenticates with one (ADR-0171).
-	defaultAdminTokenSecret = "iam-admin-pat"
-	iamAdminUserIDKey       = "userId"
-
 	// saIAMAdminEntry is the gibson-sa-identity-map key for the iam-admin
 	// machine user.
 	saIAMAdminEntry = "gibson-iam-admin"
@@ -145,20 +136,22 @@ type serviceSubjectsWait struct {
 func (r *PlatformBootstrapReconciler) platformServiceSubjects(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) (map[string]string, *serviceSubjectsWait, error) {
 	entries := map[string]string{}
 
-	// iam-admin numeric subject from the admin token Secret.
-	secretName := pb.Spec.Zitadel.AdminTokenRef.Name
-	if secretName == "" {
-		secretName = defaultAdminTokenSecret
-	}
+	// iam-admin numeric subject from the admin token Secret
+	// (spec.zitadel.adminTokenRef). The admin token step writes the user id
+	// next to the token, and the ExternalSecret iam-admin-pat projects both.
+	// No machine key of that user is read: no code authenticates with one
+	// (ADR-0171).
+	ref := pb.Spec.Zitadel.AdminTokenRef
+	ns := secretNamespace(ref, defaultChildNamespace)
 	userID, ok, err := r.readSecretKey(ctx, defaultChildNamespace,
-		gibsonv1alpha1.SecretKeyRef{Name: secretName, Namespace: pb.Spec.Zitadel.AdminTokenRef.Namespace, Key: iamAdminUserIDKey})
+		gibsonv1alpha1.SecretKeyRef{Name: ref.Name, Namespace: ref.Namespace, Key: adminUserProperty})
 	if err != nil {
-		return nil, nil, fmt.Errorf("get secret %s/%s: %w", defaultChildNamespace, secretName, err)
+		return nil, nil, fmt.Errorf("get secret %s/%s: %w", ns, ref.Name, err)
 	}
 	if !ok || userID == "" {
-		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
+		return nil, &serviceSubjectsWait{"WaitingForIAMAdminUserID",
 			fmt.Sprintf("Secret %s/%s has no %s yet (the admin token step and its ExternalSecret write it)",
-				defaultChildNamespace, secretName, iamAdminUserIDKey),
+				ns, ref.Name, adminUserProperty),
 			requeueShort}, nil
 	}
 	entries[saIAMAdminEntry] = userID

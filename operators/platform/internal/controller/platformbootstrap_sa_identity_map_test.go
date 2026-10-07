@@ -40,9 +40,9 @@ func machineUserChild(name, clientID string) *gibsonv1alpha1.OIDCClient {
 // iam-admin-pat writes: the token and the user id of the iam-admin user.
 func iamAdminSecret(userID string) *corev1.Secret {
 	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: defaultAdminTokenSecret},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "gibson", Name: "iam-admin-pat"},
 		Type:       corev1.SecretTypeOpaque,
-		Data:       map[string][]byte{"pat": []byte("fake-pat"), iamAdminUserIDKey: []byte(userID)},
+		Data:       map[string][]byte{"pat": []byte("fake-pat"), adminUserProperty: []byte(userID)},
 	}
 }
 
@@ -50,6 +50,9 @@ func saIdentityMapBootstrap() *gibsonv1alpha1.PlatformBootstrap {
 	return &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
+			Zitadel: gibsonv1alpha1.ZitadelSpec{
+				AdminTokenRef: gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Key: "pat"},
+			},
 			OIDCClients: []gibsonv1alpha1.OIDCClientReference{
 				{Name: "gibson-tenant-operator", ApplicationType: gibsonv1alpha1.OIDCAppTypeMachineUser},
 				// A WEB client must NOT appear in the identity map.
@@ -73,7 +76,7 @@ func TestReconcileSAIdentityMap_WaitsForIAMAdminSecret(t *testing.T) {
 		t.Fatalf("expected requeue while waiting for secret/iam-admin, got %+v", res)
 	}
 	c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionSAIdentityMapReady)
-	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForIAMAdminSecret" {
+	if c == nil || c.Status != metav1.ConditionFalse || c.Reason != "WaitingForIAMAdminUserID" {
 		t.Fatalf("expected WaitingForIAMAdminSecret/False, got %+v", c)
 	}
 	// ConfigMap must not be created prematurely.
