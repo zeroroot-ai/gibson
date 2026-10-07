@@ -2527,8 +2527,16 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
 	// resolution RPC. The current AllowedRPCs list does not include
 	// such RPCs, so non-plugin recipients still mint successfully here;
 	// the field is wired for forward compatibility with broader grants.
+	// A tool or a plugin acts for the agent that dispatches it. The grant
+	// carries that agent as a signed claim, and the daemon binds the
+	// callbacks of the tool or the plugin to it.
+	callingAgent := ""
+	if kind != "agent" {
+		callingAgent = h.missionCtx.CurrentAgent
+	}
 	tok, err := h.cgMinter.Mint(capabilitygrant.MintRequest{
 		Subject:        "component:" + kind + ":" + componentName,
+		CallingAgent:   callingAgent,
 		Tenant:         tenant,
 		MissionID:      h.missionCtx.ID.String(),
 		TaskID:         h.missionCtx.MissionRunID,

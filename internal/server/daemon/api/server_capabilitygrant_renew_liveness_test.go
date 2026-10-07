@@ -189,3 +189,42 @@ func TestRenewCapabilityGrant_RefusesWithNoForkCheck(t *testing.T) {
 		t.Fatalf("code = %v, want FailedPrecondition", status.Code(err))
 	}
 }
+
+// callerVerifierStub returns fixed claims and a fixed calling agent.
+type callerVerifierStub struct {
+	stubVerifier
+	caller string
+}
+
+func (v callerVerifierStub) VerifyCaller(context.Context, string) (sdkcg.Claims, string, error) {
+	return v.claims, v.caller, v.err
+}
+
+// The renewal of a tool or plugin grant keeps its calling agent, and it
+// cannot be renewed for another agent.
+func TestRenewCapabilityGrant_KeepsTheCallingAgent(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	claims.Subject = "component:tool:nmap"
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, callerVerifierStub{stubVerifier: stubVerifier{claims: claims}, caller: "alpha"})
+	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	req := renewRequest()
+	req.AgentId = "component:tool:nmap"
+
+	resp, err := s.RenewCapabilityGrant(renewCtx(), req)
+	if err != nil {
+		t.Fatalf("RenewCapabilityGrant: %v", err)
+	}
+	_, caller, err := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m }).
+		VerifyCaller(context.Background(), resp.GetCapabilityGrant())
+	if err != nil || caller != "alpha" {
+		t.Fatalf("renewed grant: caller = %q, err = %v; want alpha", caller, err)
+	}
+}

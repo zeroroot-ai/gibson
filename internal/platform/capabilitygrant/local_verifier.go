@@ -6,8 +6,11 @@ package capabilitygrant
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -67,18 +70,46 @@ func NewLocalVerifier(get func() *Minter) *LocalVerifier {
 // Minter's own keys are accepted, so a component-signed token is refused with
 // ErrUnknownKey.
 func (v *LocalVerifier) Verify(ctx context.Context, token string) (sdkcg.Claims, error) {
+	claims, _, err := v.VerifyCaller(ctx, token)
+	return claims, err
+}
+
+// VerifyCaller is Verify that also returns the calling agent of the grant, the
+// signed claim "cag" (CallingAgentClaim). It is empty for the grant of an
+// agent and for a grant minted before the claim existed. The claim is read
+// only after the signature check passed.
+func (v *LocalVerifier) VerifyCaller(ctx context.Context, token string) (sdkcg.Claims, string, error) {
 	m := v.minter()
 	if m == nil {
-		return sdkcg.Claims{}, ErrNoSigningKey
+		return sdkcg.Claims{}, "", ErrNoSigningKey
 	}
 	claims, err := sdkcg.Verify(ctx, minterKeys{m}, token, sdkcg.VerifyOptions{
 		ExpectedIssuer:   m.Issuer(),
 		ExpectedAudience: m.Audience(),
 	})
 	if err != nil {
-		return sdkcg.Claims{}, fmt.Errorf("capabilitygrant: verify task grant: %w", err)
+		return sdkcg.Claims{}, "", fmt.Errorf("capabilitygrant: verify task grant: %w", err)
 	}
-	return claims, nil
+	return claims, callingAgentOf(token), nil
+}
+
+// callingAgentOf reads the claim "cag" from the payload of a token whose
+// signature was verified. A token it cannot read has no calling agent.
+func callingAgentOf(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var p map[string]any
+	if json.Unmarshal(raw, &p) != nil {
+		return ""
+	}
+	cag, _ := p[CallingAgentClaim].(string)
+	return cag
 }
 
 // minterKeys adapts the Minter's key set to the SDK's JWKSFetcher.

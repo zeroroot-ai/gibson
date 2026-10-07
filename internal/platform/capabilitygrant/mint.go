@@ -261,6 +261,10 @@ func loadSigningKeys(ctx context.Context, cfg Config) (*SigningKeySet, error) {
 	}, nil
 }
 
+// CallingAgentClaim is the name of the signed claim that carries the agent
+// that dispatched a tool or plugin grant.
+const CallingAgentClaim = "cag"
+
 // MintRequest carries the per-task scope.
 type MintRequest struct {
 	// Subject is the agent's Zitadel service-account ID. Required.
@@ -284,6 +288,13 @@ type MintRequest struct {
 	// TTL is the requested CG-JWT lifetime. Capped at MaxLifetime.
 	// Defaults to MaxLifetime when zero.
 	TTL time.Duration
+
+	// CallingAgent names the agent that dispatched this grant to a tool or a
+	// plugin. It travels as the signed claim "cag". The daemon binds a
+	// callback of the tool or the plugin to that agent: a request that names
+	// another agent is refused. Empty for the grant of an agent, whose subject
+	// names the agent.
+	CallingAgent string
 
 	// RecipientClass is the recipient workload's class as recorded on
 	// its Zitadel service-account. Acceptable values are "agent",
@@ -390,6 +401,10 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		"exp":          now.Add(ttl).Unix(),
 		"jti":          jti,
 	}
+	if req.CallingAgent != "" {
+		claims[CallingAgentClaim] = req.CallingAgent
+	}
+
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
 	// One read of the set, so the kid and the key that signs come from the
 	// same set even when a reload swaps it in between.

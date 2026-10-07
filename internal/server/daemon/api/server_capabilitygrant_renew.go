@@ -67,6 +67,13 @@ type CGJWTVerifier interface {
 	Verify(ctx context.Context, token string) (sdkcg.Claims, error)
 }
 
+// callerGrantVerifier is a CGJWTVerifier that also returns the calling agent
+// of a tool or plugin grant (the signed claim "cag"). The daemon verifier is
+// one. A renewal keeps the claim.
+type callerGrantVerifier interface {
+	VerifyCaller(ctx context.Context, token string) (sdkcg.Claims, string, error)
+}
+
 // WithCGRenewal configures the DaemonServer with the CG-JWT minter
 // and verifier so the RenewCapabilityGrant RPC is operational.
 // Without this configuration the RPC returns FailedPrecondition.
@@ -126,7 +133,14 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		return nil, status.Error(codes.Unauthenticated, "missing X-Capability-Grant")
 	}
 
-	claims, err := s.cgVerifier.Verify(ctx, cgToken)
+	var claims sdkcg.Claims
+	var caller string
+	var err error
+	if cv, ok := s.cgVerifier.(callerGrantVerifier); ok {
+		claims, caller, err = cv.VerifyCaller(ctx, cgToken)
+	} else {
+		claims, err = s.cgVerifier.Verify(ctx, cgToken)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, sdkcg.ErrExpired):
@@ -190,6 +204,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	// not rejected and non-plugin renewals carry the same isolation.
 	fresh, err := s.cgMinter.Mint(capabilitygrant.MintRequest{
 		Subject:        claims.Subject,
+		CallingAgent:   caller, // the renewal keeps the calling agent of the grant
 		Tenant:         claims.Tenant.String(),
 		MissionID:      claims.MissionID,
 		TaskID:         claims.TaskID,
