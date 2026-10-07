@@ -179,7 +179,6 @@ func main() {
 
 	grpcAddr := envOr("EXT_AUTHZ_GRPC_ADDR", ":9001")
 	httpAddr := envOr("EXT_AUTHZ_HTTP_ADDR", ":9002")
-	metricsAddr := envOr("EXT_AUTHZ_METRICS_ADDR", ":9003")
 
 	// Identity-bearing context + SPIFFE source must come first: the FGA
 	// registry is fetched from the daemon over mTLS (deploy#852), which needs
@@ -340,26 +339,11 @@ func main() {
 			grpcErrC <- fmt.Errorf("gRPC server: %w", err)
 		}
 	}()
-	// The metrics listener (charts#515). It serves /metrics only, with
-	// client mTLS against the same CA bundle as the health listener.
-	metricsSrv, err := observability.NewMetricsServer(observability.MetricsServerConfig{
-		Addr:         metricsAddr,
-		CertPath:     filepath.Join(healthCertDir, "tls.crt"),
-		KeyPath:      filepath.Join(healthCertDir, "tls.key"),
-		ClientCAPath: filepath.Join(healthCertDir, "ca.crt"),
-		Handler:      metricsMux(observability.DefaultPrometheusHandler()),
-	})
+	metricsErrC, err := startMetricsListener(ctx, log, envOr("EXT_AUTHZ_METRICS_ADDR", ":9003"), healthCertDir)
 	if err != nil {
-		log.Error("init metrics listener", "addr", metricsAddr, "err", err)
+		log.Error("init metrics listener", "err", err)
 		os.Exit(1)
 	}
-	metricsErrC := make(chan error, 1)
-	go func() {
-		log.Info("HTTPS metrics server starting", "addr", metricsAddr)
-		if err := metricsSrv.Serve(ctx); err != nil {
-			metricsErrC <- err
-		}
-	}()
 
 	httpErrC := make(chan error, 1)
 	go func() {
@@ -958,6 +942,30 @@ func buildHealthTLSConfig(log *slog.Logger, dir string) (*tls.Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// startMetricsListener starts the metrics listener (charts#515). It serves
+// /metrics only, with client mTLS against the same CA bundle as the health
+// listener. A serve error arrives on the returned channel.
+func startMetricsListener(ctx context.Context, log *slog.Logger, addr, certDir string) (<-chan error, error) {
+	srv, err := observability.NewMetricsServer(observability.MetricsServerConfig{
+		Addr:         addr,
+		CertPath:     filepath.Join(certDir, "tls.crt"),
+		KeyPath:      filepath.Join(certDir, "tls.key"),
+		ClientCAPath: filepath.Join(certDir, "ca.crt"),
+		Handler:      metricsMux(observability.DefaultPrometheusHandler()),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("metrics listener %s: %w", addr, err)
+	}
+	errC := make(chan error, 1)
+	go func() {
+		log.Info("HTTPS metrics server starting", "addr", addr)
+		if err := srv.Serve(ctx); err != nil {
+			errC <- err
+		}
+	}()
+	return errC, nil
 }
 
 // metricsMux serves the metrics handler at GET /metrics and nothing else.

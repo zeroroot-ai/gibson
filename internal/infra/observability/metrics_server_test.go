@@ -370,3 +370,22 @@ func TestMetricsServer_ReloadsRenewedMaterial(t *testing.T) {
 		t.Fatal("the reloaded config does not present the renewed leaf")
 	}
 }
+
+// A server cert with no readable client CA bundle refuses the start, and an
+// unparsable bundle too.
+func TestMetricsServer_RejectsBadClientCA(t *testing.T) {
+	t.Parallel()
+	caCert, caKey, _, _ := mustGenerateCA(t)
+	certPath, keyPath := mustWriteServerLeaf(t, caCert, caKey)
+	h := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	for name, ca := range map[string]string{
+		"missing":   filepath.Join(t.TempDir(), "absent.crt"),
+		"not a PEM": mustWriteTempFile(t, []byte("not a certificate")),
+	} {
+		if _, err := NewMetricsServer(MetricsServerConfig{
+			CertPath: certPath, KeyPath: keyPath, ClientCAPath: ca, Handler: h,
+		}); err == nil {
+			t.Errorf("%s client CA: want an error", name)
+		}
+	}
+}
