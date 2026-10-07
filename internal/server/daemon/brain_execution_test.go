@@ -15,7 +15,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -145,7 +144,9 @@ type fakeDiscovery struct {
 }
 
 func (f *fakeDiscovery) DiscoverAgent(context.Context, string) (agent.Agent, error) { return nil, nil }
-func (f *fakeDiscovery) DiscoverTool(context.Context, string) (tool.Tool, error)    { return nil, nil }
+func (f *fakeDiscovery) DescribeTool(context.Context, string) (component.ComponentInfo, error) {
+	return component.ComponentInfo{}, nil
+}
 func (f *fakeDiscovery) ListAgents(context.Context) ([]component.AgentInfo, error) {
 	return f.agents, nil
 }

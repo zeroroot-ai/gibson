@@ -3,8 +3,9 @@
 
 // Package component provides unified component discovery and delegation for Gibson.
 //
-// This file implements RegistryAdapter, which bridges the component registry with
-// agent, tool, and plugin discovery using gRPC connection pooling and load balancing.
+// This file implements RegistryAdapter, which reads agent, tool and plugin
+// entries from the component registry. Work reaches a component through the
+// work queue. The daemon dials no component (gibson#813).
 package component
 
 import (
@@ -15,7 +16,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	"github.com/zeroroot-ai/sdk/types"
@@ -59,8 +59,10 @@ type CallbackManager interface {
 //
 // Thread-safe: All methods can be called concurrently.
 type ComponentDiscovery interface {
-	// DiscoverTool finds a tool by name and returns a gRPC client implementing tool.Tool.
-	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
+	// DescribeTool returns the registry entry of a tool by name: its version
+	// and the metadata it registered (description, tags, message types,
+	// capabilities). It dials nothing.
+	DescribeTool(ctx context.Context, name string) (ComponentInfo, error)
 
 	// ListAgents returns information about all registered agents.
 	ListAgents(ctx context.Context) ([]AgentInfo, error)
@@ -78,7 +80,6 @@ type AgentInfo struct {
 	Version        string   `json:"version"`
 	Description    string   `json:"description"`
 	Instances      int      `json:"instances"`
-	Endpoints      []string `json:"endpoints"`
 	Capabilities   []string `json:"capabilities"`
 	TargetTypes    []string `json:"target_types"`
 	TechniqueTypes []string `json:"technique_types"`
@@ -91,42 +92,29 @@ type ToolInfo struct {
 	Version      string              `json:"version"`
 	Description  string              `json:"description"`
 	Instances    int                 `json:"instances"`
-	Endpoints    []string            `json:"endpoints"`
 	Capabilities *types.Capabilities `json:"capabilities,omitempty"`
 	Health       string              `json:"health"`
 }
 
 // PluginInfo provides metadata about a registered plugin.
 type PluginInfo struct {
-	Name        string   `json:"name"`
-	Version     string   `json:"version"`
-	Description string   `json:"description"`
-	Instances   int      `json:"instances"`
-	Endpoints   []string `json:"endpoints"`
-	Health      string   `json:"health"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	Description string `json:"description"`
+	Instances   int    `json:"instances"`
+	Health      string `json:"health"`
 	// Methods is the list of declared method names for the plugin,
 	// derived from the component registry metadata set at registration time.
 	Methods []string `json:"methods,omitempty"`
 }
 
-// RegistryAdapter implements ComponentDiscovery using the Redis-backed ComponentRegistry
-// and gRPC connection pooling.
-//
-// It coordinates between:
-//   - ComponentRegistry: Redis-backed component discovery
-//   - LoadBalancer: Instance selection strategies
-//   - GRPCPool: Connection management and reuse
+// RegistryAdapter implements ComponentDiscovery on the Redis-backed
+// ComponentRegistry.
 //
 // Thread-safe: All methods can be called concurrently.
 type RegistryAdapter struct {
 	// registry provides component discovery via Redis
 	registry ComponentRegistry
-
-	// loadBalancer selects instances when multiple are available
-	loadBalancer *LoadBalancer
-
-	// pool manages gRPC connections with automatic health checking
-	pool *GRPCPool
 
 	// resolver provides proto type resolution for dynamically typed tool responses
 	resolver protoresolver.ProtoResolver
@@ -134,8 +122,7 @@ type RegistryAdapter struct {
 
 // NewRegistryAdapter creates a new adapter wrapping a ComponentRegistry.
 //
-// The adapter uses round-robin load balancing by default. It carries no default
-// tenant: every discovery query takes its tenant from the caller's context and
+// The adapter carries no default tenant: every discovery query takes its tenant from the caller's context and
 // is refused without one, so a single adapter serves every tenant without any
 // of them being able to see another's components. The configured-default it
 // used to hold was the mechanism by which they could.
@@ -143,10 +130,8 @@ type RegistryAdapter struct {
 // The caller is responsible for managing the registry lifecycle.
 func NewRegistryAdapter(reg ComponentRegistry) *RegistryAdapter {
 	return &RegistryAdapter{
-		registry:     reg,
-		loadBalancer: NewLoadBalancer(reg, StrategyRoundRobin),
-		pool:         NewGRPCPool(),
-		resolver:     protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
+		registry: reg,
+		resolver: protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
 	}
 }
 
@@ -199,39 +184,23 @@ func (a *RegistryAdapter) resolveTenant(ctx context.Context) (string, error) {
 	return tenant, nil
 }
 
-// DiscoverTool discovers and connects to a tool by name.
-func (a *RegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
+// DescribeTool returns the registry entry of a tool by name. When more than
+// one instance is registered, the entry of the first is returned: each
+// instance of one tool registers the same metadata.
+func (a *RegistryAdapter) DescribeTool(ctx context.Context, name string) (ComponentInfo, error) {
 	tenant, err := a.resolveTenant(ctx)
 	if err != nil {
-		return nil, err
+		return ComponentInfo{}, err
 	}
 	instances, err := a.registry.Discover(ctx, tenant, "tool", name)
 	if err != nil {
-		return nil, &RegistryUnavailableError{Cause: err}
+		return ComponentInfo{}, &RegistryUnavailableError{Cause: err}
 	}
-
 	if len(instances) == 0 {
 		available, _ := a.getAvailableToolNames(ctx)
-		return nil, &ToolNotFoundError{Name: name, Available: available}
+		return ComponentInfo{}, &ToolNotFoundError{Name: name, Available: available}
 	}
-
-	selected, err := a.loadBalancer.Select(ctx, tenant, "tool", name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select tool instance: %w", err)
-	}
-
-	endpoint := selected.Metadata["grpc_endpoint"]
-	if endpoint == "" {
-		return nil, fmt.Errorf("tool %s has no grpc_endpoint in metadata", name)
-	}
-
-	conn, err := a.pool.Get(ctx, endpoint)
-	if err != nil {
-		_ = a.pool.Remove(endpoint)
-		return nil, fmt.Errorf("failed to connect to tool %s at %s: %w", name, endpoint, err)
-	}
-
-	return NewGRPCToolClient(conn, *selected, a.resolver), nil
+	return instances[0], nil
 }
 
 // ListAgents returns information about all registered agents.
@@ -254,13 +223,9 @@ func (a *RegistryAdapter) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 	agentMap := make(map[string]*agentHealthTracker)
 	for _, inst := range instances {
 		health := GetHealthStatus(inst)
-		endpoint := inst.Metadata["grpc_endpoint"]
 
 		if tracker, exists := agentMap[inst.Name]; exists {
 			tracker.info.Instances++
-			if endpoint != "" {
-				tracker.info.Endpoints = append(tracker.info.Endpoints, endpoint)
-			}
 			if health == HealthStatusHealthy {
 				tracker.healthyCount++
 			} else {
@@ -273,17 +238,12 @@ func (a *RegistryAdapter) ListAgents(ctx context.Context) ([]AgentInfo, error) {
 			} else {
 				unhealthyCount = 1
 			}
-			endpoints := []string{}
-			if endpoint != "" {
-				endpoints = []string{endpoint}
-			}
 			agentMap[inst.Name] = &agentHealthTracker{
 				info: &AgentInfo{
 					Name:           inst.Name,
 					Version:        inst.Version,
 					Description:    inst.Metadata["description"],
 					Instances:      1,
-					Endpoints:      endpoints,
 					Capabilities:   parseCommaSeparated(inst.Metadata["capabilities"]),
 					TargetTypes:    parseCommaSeparated(inst.Metadata["target_types"]),
 					TechniqueTypes: parseCommaSeparated(inst.Metadata["technique_types"]),
@@ -322,13 +282,9 @@ func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 	toolMap := make(map[string]*toolHealthTracker)
 	for _, inst := range instances {
 		health := GetHealthStatus(inst)
-		endpoint := inst.Metadata["grpc_endpoint"]
 
 		if tracker, exists := toolMap[inst.Name]; exists {
 			tracker.info.Instances++
-			if endpoint != "" {
-				tracker.info.Endpoints = append(tracker.info.Endpoints, endpoint)
-			}
 			if health == HealthStatusHealthy {
 				tracker.healthyCount++
 			} else {
@@ -345,17 +301,12 @@ func (a *RegistryAdapter) ListTools(ctx context.Context) ([]ToolInfo, error) {
 			} else {
 				unhealthyCount = 1
 			}
-			endpoints := []string{}
-			if endpoint != "" {
-				endpoints = []string{endpoint}
-			}
 			toolMap[inst.Name] = &toolHealthTracker{
 				info: &ToolInfo{
 					Name:         inst.Name,
 					Version:      inst.Version,
 					Description:  inst.Metadata["description"],
 					Instances:    1,
-					Endpoints:    endpoints,
 					Capabilities: caps,
 				},
 				healthyCount:   healthyCount,
@@ -392,13 +343,9 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 	pluginMap := make(map[string]*pluginHealthTracker)
 	for _, inst := range instances {
 		health := GetHealthStatus(inst)
-		endpoint := inst.Metadata["grpc_endpoint"]
 
 		if tracker, exists := pluginMap[inst.Name]; exists {
 			tracker.info.Instances++
-			if endpoint != "" {
-				tracker.info.Endpoints = append(tracker.info.Endpoints, endpoint)
-			}
 			if health == HealthStatusHealthy {
 				tracker.healthyCount++
 			} else {
@@ -411,17 +358,12 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 			} else {
 				unhealthyCount = 1
 			}
-			endpoints := []string{}
-			if endpoint != "" {
-				endpoints = []string{endpoint}
-			}
 			pluginMap[inst.Name] = &pluginHealthTracker{
 				info: &PluginInfo{
 					Name:        inst.Name,
 					Version:     inst.Version,
 					Description: inst.Metadata["description"],
 					Instances:   1,
-					Endpoints:   endpoints,
 					Methods:     extractMethodNames(inst.Metadata),
 				},
 				healthyCount:   healthyCount,
@@ -436,14 +378,6 @@ func (a *RegistryAdapter) ListPlugins(ctx context.Context) ([]PluginInfo, error)
 		result = append(result, *tracker.info)
 	}
 	return result, nil
-}
-
-// Close releases resources held by the adapter.
-func (a *RegistryAdapter) Close() error {
-	if a.pool != nil {
-		return a.pool.Close()
-	}
-	return nil
 }
 
 func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, error) {
@@ -516,6 +450,12 @@ func (e *NoHealthyInstancesError) Error() string {
 }
 
 // parseCapabilitiesJSON deserializes a JSON-encoded Capabilities struct from metadata.
+// ToolCapabilities returns the capabilities a tool declared in its registry
+// metadata, or nil when it declared none.
+func ToolCapabilities(info ComponentInfo) *types.Capabilities {
+	return parseCapabilitiesJSON(info.Metadata["capabilities"])
+}
+
 func parseCapabilitiesJSON(capsJSON string) *types.Capabilities {
 	if capsJSON == "" {
 		return nil

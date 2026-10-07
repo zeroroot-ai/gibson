@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
@@ -52,8 +51,8 @@ func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.P
 	return []component.PluginInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
-	return nil, fmt.Errorf("not implemented in mock")
+func (m *mockComponentDiscovery) DescribeTool(ctx context.Context, name string) (component.ComponentInfo, error) {
+	return component.ComponentInfo{}, fmt.Errorf("not implemented in mock")
 }
 
 // DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime

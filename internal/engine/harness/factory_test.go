@@ -12,7 +12,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
@@ -27,7 +26,7 @@ import (
 
 type MockRegistryAdapter struct {
 	DiscoverAgentFn   func(ctx context.Context, name string) (agent.Agent, error)
-	DiscoverToolFn    func(ctx context.Context, name string) (tool.Tool, error)
+	DescribeToolFn    func(ctx context.Context, name string) (component.ComponentInfo, error)
 	ListAgentsFn      func(ctx context.Context) ([]component.AgentInfo, error)
 	ListToolsFn       func(ctx context.Context) ([]component.ToolInfo, error)
 	ListPluginsFn     func(ctx context.Context) ([]component.PluginInfo, error)
@@ -41,11 +40,11 @@ func (m *MockRegistryAdapter) DiscoverAgent(ctx context.Context, name string) (a
 	return nil, types.NewError("MOCK_ERROR", "DiscoverAgent not implemented")
 }
 
-func (m *MockRegistryAdapter) DiscoverTool(ctx context.Context, name string) (tool.Tool, error) {
-	if m.DiscoverToolFn != nil {
-		return m.DiscoverToolFn(ctx, name)
+func (m *MockRegistryAdapter) DescribeTool(ctx context.Context, name string) (component.ComponentInfo, error) {
+	if m.DescribeToolFn != nil {
+		return m.DescribeToolFn(ctx, name)
 	}
-	return nil, types.NewError("MOCK_ERROR", "DiscoverTool not implemented")
+	return component.ComponentInfo{}, types.NewError("MOCK_ERROR", "DescribeTool not implemented")
 }
 
 func (m *MockRegistryAdapter) ListAgents(ctx context.Context) ([]component.AgentInfo, error) {

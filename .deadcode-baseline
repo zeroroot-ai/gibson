@@ -1,14 +1,6 @@
 internal/engine/agent/config.go	AgentRuntime.Cancel
 internal/engine/agent/config.go	AgentRuntime.Complete
 internal/engine/agent/config.go	AgentRuntime.Fail
-internal/engine/agent/delegation.go	DelegationHarness.DelegateToAgent
-internal/engine/agent/delegation.go	DelegationHarness.ExecuteTool
-internal/engine/agent/delegation.go	DelegationHarness.Log
-internal/engine/agent/delegation.go	DelegationHarness.QueryPlugin
-internal/engine/agent/delegation.go	DelegationHarness.WithLogger
-internal/engine/agent/delegation.go	defaultLogger.Log
-internal/engine/agent/delegation.go	registryPluginExecutor.QueryPlugin
-internal/engine/agent/delegation.go	registryToolExecutor.ExecuteTool
 internal/engine/agent/types.go	NewEvidence
 internal/engine/agent/types.go	NewFinding
 internal/engine/agent/types.go	NewTask
