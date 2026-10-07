@@ -275,6 +275,22 @@ func TestLoad_RefusesAWildcardEgress(t *testing.T) {
 	}
 }
 
+// TestLoad_RefusesAConnectorProxyEgress: a component may not name the proxy
+// of a connector; only the daemon calls a connector (gibson#723).
+func TestLoad_RefusesAConnectorProxyEgress(t *testing.T) {
+	body := "id: t\nkind: tool\negressAllow:\n  - mcp-gitlab-proxy.tenant-acme.svc.cluster.local:8080\nspec:\n  contentTrust: untrusted\n  dispatchMode: sandboxed\n  command: t\n  image: ghcr.io/x/t@sha256:abc\n"
+	_, err := load(manifestFSWith(map[string]string{"m.yaml": body}))
+	if err == nil || !strings.Contains(err.Error(), "connector proxy") {
+		t.Fatalf("load error = %v, want the connector proxy refused", err)
+	}
+	if err := validateEgressAllow("t", []string{"api.example.com:443", "mcp-gitlab-proxy"}); err == nil {
+		t.Fatal("a bare proxy host was allowed")
+	}
+	if err := validateEgressAllow("t", []string{"api.example.com:443", "mcp.example.com"}); err != nil {
+		t.Fatalf("an ordinary host was refused: %v", err)
+	}
+}
+
 // The shipped catalog holds no "*".
 func TestCatalog_HoldsNoWildcardEgress(t *testing.T) {
 	for _, m := range catalog {

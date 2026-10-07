@@ -173,3 +173,21 @@ func TestDelegateToAgent_SandboxChildHarnessFailureIsReported(t *testing.T) {
 		t.Fatalf("launcher calls = %d; want 0", launcher.calls)
 	}
 }
+
+// TestNodeNetworkScope_ANodeReachesNoConnector: a target or a service that
+// names the proxy of a connector gets no rule, in any DNS form. Only the
+// daemon calls a connector (ADR-0065), so an agent sandbox has no network
+// path to one (gibson#723).
+func TestNodeNetworkScope_ANodeReachesNoConnector(t *testing.T) {
+	mode, rules := nodeNetworkScope(&agent.NodeNetwork{
+		Targets: []string{
+			"http://mcp-gitlab-proxy.tenant-acme.svc.cluster.local:8080/mcp",
+			"mcp-gitlab-proxy.tenant-acme.svc:8080",
+			"mcp-gitlab-proxy",
+		},
+		ProviderHosts: []string{"MCP-GitLab-Proxy.tenant-acme"},
+	}, "mcp-github-proxy.tenant-acme.svc.cluster.local:8080")
+	if mode != sandboxed.NetworkModeNone || len(rules) != 0 {
+		t.Fatalf("mode = %q, rules = %+v; want no egress to a connector", mode, rules)
+	}
+}

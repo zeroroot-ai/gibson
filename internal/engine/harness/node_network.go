@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 // The network scope of a mission node (owner decision S6, gibson#865).
@@ -19,6 +20,9 @@ import (
 // node, plus the daemon and its model provider. A node that the mission
 // author marks `research` is unrestricted. A tool that runs inside a node
 // gets the network of that node. An empty list means no egress.
+//
+// No rule names the proxy of a connector: the daemon is the one caller of a
+// connector (ADR-0065), so an agent has no network path to one (gibson#723).
 
 // allPorts is every port of a target, for TCP and for UDP. A target is
 // reached on the ports that the work needs, and the scope does not guess
@@ -64,7 +68,7 @@ func egressRuleForTarget(target string) (sandboxed.EgressRule, bool) {
 		return sandboxed.EgressRule{CIDR: block.String(), Ports: allPorts}, true
 	}
 	host, port, ok := splitAddress(target)
-	if !ok {
+	if !ok || connectorv1alpha1.IsProxyHost(host) {
 		return sandboxed.EgressRule{}, false
 	}
 	if port == 0 {
@@ -78,7 +82,7 @@ func egressRuleForTarget(target string) (sandboxed.EgressRule, bool) {
 // port is reached on 443.
 func egressRuleForService(addr string) (sandboxed.EgressRule, bool) {
 	host, port, ok := splitAddress(strings.TrimSpace(addr))
-	if !ok {
+	if !ok || connectorv1alpha1.IsProxyHost(host) {
 		return sandboxed.EgressRule{}, false
 	}
 	if port == 0 {
