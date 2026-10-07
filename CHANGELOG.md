@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.0](https://github.com/zeroroot-ai/gibson/compare/v0.154.0...v0.155.0) (2026-10-07)
+
+
+### Features
+
+* **signup:** a pending registration states when it arrived ([#1008](https://github.com/zeroroot-ai/gibson/issues/1008)) ([f6ddc76](https://github.com/zeroroot-ai/gibson/commit/f6ddc76ad3b4a56b14ecc3fec14651ba428724b2)), closes [#620](https://github.com/zeroroot-ai/gibson/issues/620)
+
 ## [0.154.0](https://github.com/zeroroot-ai/gibson/compare/v0.153.2...v0.154.0) (2026-10-07)
 
 
