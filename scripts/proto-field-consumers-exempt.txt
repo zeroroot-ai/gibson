@@ -15,5 +15,4 @@
 # ADR-0094 rule 5: build the consumer or delete the producer. A verdict here
 # is a dated hold, never a resting state.
 
-gibson.tenant.v1.RegisterResponse.registration_id | #620 | AdminApproveRegistration requires this id and no surface reads it yet; deleting it breaks the flow rather than trimming it
-gibson.tenant.v1.PendingRegistration.registration_id | #620 | same hold: the administrator view that reads it is the decision in #620
+gibson.tenant.v1.PendingRegistration.received_at | dashboard#193 | the registrations page adds the received column after this field ships; that pull request removes this line

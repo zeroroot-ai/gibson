@@ -50,6 +50,7 @@ import (
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
@@ -175,7 +176,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	s.logger.InfoContext(ctx, "Register: registration awaiting administrator approval",
 		"attempt_id", req.GetAttemptId(), "registration_id", row.ID)
 
-	return &tenantv1.RegisterResponse{RegistrationId: row.ID}, nil
+	return &tenantv1.RegisterResponse{}, nil
 }
 
 // validateRegister decides every rejection answerable from the request alone.
@@ -233,6 +234,7 @@ func (s *DaemonServer) AdminListPendingRegistrations(ctx context.Context, req *t
 			Tier:           r.Tier,
 			OwnerFirstName: r.OwnerFirstName,
 			OwnerLastName:  r.OwnerLastName,
+			ReceivedAt:     timestamppb.New(r.CreatedAt),
 		})
 	}
 	return resp, nil
