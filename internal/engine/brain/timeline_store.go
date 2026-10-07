@@ -60,11 +60,13 @@ type TimelineStore interface {
 	// flat slice.
 	LoadForReplay(ctx context.Context, tenant string, afterSeq string) ([]Event, error)
 
-	// LoadHistory returns the full ordered history of the tenant: each event
+	// LoadHistory returns the ordered history of the tenant: each event
 	// that a trim removed from the live stream, then the live stream. The
 	// store keeps the trimmed events in durable storage before it trims
-	// (ADR-0163), so this is each event that the tenant ever appended. A
-	// replay of an old frame and the belief trainer read it.
+	// (ADR-0163), so this is each event that the tenant appended in the
+	// retention period (13 months at least). Older events are in the durable
+	// bucket (gibson#992). A replay of an old frame and the belief trainer
+	// read it.
 	LoadHistory(ctx context.Context, tenant string) ([]Event, error)
 
 	// WriteSnapshot persists a serialised World snapshot for the tenant and

@@ -27,9 +27,6 @@ const (
 	// FieldTypeNumeric represents a NUMERIC field for range queries and sorting.
 	FieldTypeNumeric FieldType = "NUMERIC"
 
-	// FieldTypeGeo represents a GEO field for geospatial queries.
-	FieldTypeGeo FieldType = "GEO"
-
 	// FieldTypeVector represents a VECTOR field for similarity search.
 	FieldTypeVector FieldType = "VECTOR"
 )
@@ -51,9 +48,6 @@ type VectorDataType string
 const (
 	// VectorDataTypeFloat32 uses 32-bit floating point numbers.
 	VectorDataTypeFloat32 VectorDataType = "FLOAT32"
-
-	// VectorDataTypeFloat64 uses 64-bit floating point numbers.
-	VectorDataTypeFloat64 VectorDataType = "FLOAT64"
 )
 
 // VectorDistanceMetric represents the distance metric for vector similarity.
@@ -62,12 +56,6 @@ type VectorDistanceMetric string
 const (
 	// VectorDistanceMetricCosine uses cosine similarity.
 	VectorDistanceMetricCosine VectorDistanceMetric = "COSINE"
-
-	// VectorDistanceMetricL2 uses Euclidean distance.
-	VectorDistanceMetricL2 VectorDistanceMetric = "L2"
-
-	// VectorDistanceMetricIP uses inner product.
-	VectorDistanceMetricIP VectorDistanceMetric = "IP"
 )
 
 // VectorOptions configures vector field indexing parameters.

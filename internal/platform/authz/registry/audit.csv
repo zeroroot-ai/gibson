@@ -26,6 +26,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.component.v1.ComponentService/DelegateToAgent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/DisablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/EnablePlugin,can_configure,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
+/gibson.component.v1.ComponentService/EnrollComponent,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/FindSimilarAttacks,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/FindSimilarFindings,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/GetAttackChains,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
@@ -61,6 +62,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.agentconsole.v1.AgentConsoleService/ListRunningAgents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
 /gibson.daemon.agentconsole.v1.AgentConsoleService/StreamAgentEvents,member,tenant,tenant_from_identity,USER|SERVICE,gibson/daemon/agentconsole/v1/agentconsole.proto,rule
 /gibson.daemon.connection.v1.ConnectionPointService/CompleteSignupStep,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
+/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
 /gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
 /gibson.daemon.connection.v1.ConnectionPointService/SetTenantActivation,platform_operator,system_tenant,system_tenant,SERVICE,gibson/daemon/connection/v1/connection.proto,rule
 /gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService/ApproveDestructiveAction,admin,tenant,tenant_from_identity,USER,gibson/daemon/destructiveauthz/v1/destructive_authz.proto,rule
@@ -87,10 +89,12 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.daemon.operator.v1.DaemonOperatorService/GetBeliefTrainingData,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorAuthStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/GetConnectorCredential,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListFeatureTuples,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantOps,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
+/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ReportConnectorStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/ReportTenantStatus,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
 /gibson.daemon.operator.v1.DaemonOperatorService/RevokeConnectorGrant,platform_operator,system_tenant,system_tenant,USER|SERVICE,gibson/daemon/operator/v1/operator.proto,rule
@@ -158,6 +162,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.harness.v1.HarnessCallbackService/CallToolProto,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CallToolProtoStream,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CancelMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
+/gibson.harness.v1.HarnessCallbackService/ClaimFork,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CloseJob,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/CreateMission,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
 /gibson.harness.v1.HarnessCallbackService/DelegateToAgent,can_use,component,system_tenant,COMPONENT,gibson/harness/v1/harness_callback.proto,rule
@@ -230,7 +235,6 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.pluginadmin.v1.PluginAdminService/EditPluginSecretBinding,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/GetPluginInstall,member,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls,member,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
-/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding,admin,tenant,tenant_from_identity,USER,gibson/pluginadmin/v1/plugin_admin.proto,rule
 /gibson.secrets.v1.SecretsService/CountSecrets,admin,tenant,tenant_from_identity,USER,gibson/secrets/v1/secrets.proto,rule
 /gibson.secrets.v1.SecretsService/DeleteSecret,admin,tenant,tenant_from_identity,USER,gibson/secrets/v1/secrets.proto,rule
@@ -246,6 +250,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.session.v1.SessionService/RevokeMySession,member,tenant,tenant_from_identity,USER,gibson/session/v1/session.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminApproveRegistration,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminDeleteTenant,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
+/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminListPendingRegistrations,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminProvisionTenant,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
 /gibson.tenant.v1.AdminTenantService/AdminRejectRegistration,platform_owner,system_tenant,system_tenant,USER,gibson/tenant/v1/admin_tenant.proto,rule
@@ -279,6 +284,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.GrantsService/DeleteAgentGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.GrantsService/ListActiveGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.GrantsService/WriteAgentGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
+/gibson.tenant.v1.GrantsService/WriteSecretGrants,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/grants.proto,rule
 /gibson.tenant.v1.MembershipService/AcceptInvitation,,,,,gibson/tenant/v1/membership.proto,unauthenticated
 /gibson.tenant.v1.MembershipService/AddTeamMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/CancelInvitation,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
@@ -290,6 +296,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.MembershipService/ListMembers,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/ListTeamMembers,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/ListTeams,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
+/gibson.tenant.v1.MembershipService/ReassignAgentIdentity,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/RemoveMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/RemoveTeamMember,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
 /gibson.tenant.v1.MembershipService/ResendInvitation,admin,tenant,tenant_from_identity,USER,gibson/tenant/v1/membership.proto,rule
@@ -328,6 +335,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.TenantProvisioningService/GetTenantProvisioningStatus,,,,,gibson/tenant/v1/provisioning.proto,unauthenticated
 /gibson.tenant.v1.TenantService/DeleteMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ExportFindings,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
+/gibson.tenant.v1.TenantService/GetAuditRetention,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetOnboardingState,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/GetTenantQuota,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
@@ -335,6 +343,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.TenantService/ListAuditEvents,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/ListMissionDrafts,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/SaveMissionDraft,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
+/gibson.tenant.v1.TenantService/SetAuditRetention,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.TenantService/UpdateOnboardingState,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/tenant.proto,rule
 /gibson.tenant.v1.UsageService/ListUsage,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/usage.proto,rule
 /gibson.tenant.v1.UserService/ConsumeAttachment,member,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/user.proto,rule
@@ -378,6 +387,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.world.v1.WorldService/ListLlmCalls,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListMissions,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListOpenBets,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
+/gibson.world.v1.WorldService/ListProofReviews,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/ListReviewQueue,member,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/SettleBetByHITL,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule
 /gibson.world.v1.WorldService/SubmitLabel,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/world/v1/world.proto,rule

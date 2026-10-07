@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
@@ -143,7 +144,7 @@ func TestDispatchTool_RejectsNamelessTool(t *testing.T) {
 // is ticked until the event lands.
 func dispatchOutcome(t *testing.T, h gibsonharness.AgentHarness, req brain.DispatchRequest) brain.WorkCompleted {
 	t.Helper()
-	eng := brain.NewEngine("tenant-a")
+	eng := brain.NewEngine("tenant-a", braintest.NewMemTimelineStore())
 	got := make(chan brain.WorkCompleted, 1)
 	eng.Subscribe(func(ev brain.Event) {
 		if wc, ok := ev.(brain.WorkCompleted); ok {

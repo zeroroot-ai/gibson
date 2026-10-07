@@ -31,15 +31,6 @@ type AgentAccess struct {
 	ConfiguredBy    string `json:"configured_by,omitempty"`
 }
 
-// AgentAccessStore manages tenant opt-in for agents.
-type AgentAccessStore interface {
-	Enable(ctx context.Context, tenant, agentName, configuredBy string) error
-	Disable(ctx context.Context, tenant, agentName string) error
-	CheckAccess(ctx context.Context, tenant, agentName string) error
-	GetAccess(ctx context.Context, tenant, agentName string) (*AgentAccess, error)
-	ListTenantAgents(ctx context.Context, tenant string) ([]AgentAccess, error)
-}
-
 // RedisAgentAccessStore implements AgentAccessStore using Redis for storage.
 type RedisAgentAccessStore struct {
 	client *redis.Client

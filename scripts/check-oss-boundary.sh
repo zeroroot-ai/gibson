@@ -13,11 +13,10 @@
 #  1. Permissive layer (sdk, adk, setec): the pruned module graph
 #     (`go list -m all` = every module needed to build the main module and its
 #     tests) must not contain an ELv2 module (gibson, gibson-executor,
-#     dashboard), the closed module (billing), or a private one (hosted,
-#     testharness). Also each go.mod in the repo (examples, tooling) is
-#     searched for the same set. This is the gibson-side sweep that
-#     complements the local guard of each repo (e.g. `make check-no-gibson`
-#     of the sdk).
+#     dashboard), the closed module (billing), or a private one (hosted).
+#     Also each go.mod in the repo (examples, tooling) is searched for the
+#     same set. This is the gibson-side sweep that complements the local
+#     guard of each repo (e.g. `make check-no-gibson` of the sdk).
 #
 #  2. ELv2 layer, gibson-executor: the same two checks, against the closed
 #     module and the private ones only. An ELv2 repo can link an ELv2 module.
@@ -48,9 +47,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # slash or the end of the line. So `gibson` does not match `gibson-executor`.
 #
 # Forbidden for the permissive layer: each ELv2, closed and private module.
-FORBIDDEN_PERMISSIVE_RE='github\.com/zeroroot-ai/(gibson|gibson-executor|billing|dashboard|hosted|testharness)([[:space:]/]|$)'
+FORBIDDEN_PERMISSIVE_RE='github\.com/zeroroot-ai/(gibson|gibson-executor|billing|dashboard|hosted)([[:space:]/]|$)'
 # Forbidden for an ELv2 repo: the closed module and the private ones.
-FORBIDDEN_ELV2_RE='github\.com/zeroroot-ai/(billing|hosted|testharness)([[:space:]/]|$)'
+FORBIDDEN_ELV2_RE='github\.com/zeroroot-ai/(billing|hosted)([[:space:]/]|$)'
 # Forbidden for gibson itself: the closed module, and gibson-executor.
 FORBIDDEN_GIBSON_RE='github\.com/zeroroot-ai/(billing|gibson-executor)([[:space:]/]|$)'
 
@@ -96,7 +95,7 @@ selftest() {
   expect fail permissive "a go.mod requires billing" $'require (\n\tgithub.com/zeroroot-ai/billing v0.1.0\n)'
   expect fail permissive "the graph holds a sub-package of dashboard" "github.com/zeroroot-ai/dashboard/x v0.1.0"
   expect fail ELv2 "the graph holds billing" "github.com/zeroroot-ai/billing v0.1.0"
-  expect fail ELv2 "a go.mod requires testharness" $'\tgithub.com/zeroroot-ai/testharness v0.2.0 // indirect'
+  expect fail ELv2 "a go.mod requires hosted" $'\tgithub.com/zeroroot-ai/hosted v0.2.0 // indirect'
   expect fail gibson "go.mod requires billing" $'\tgithub.com/zeroroot-ai/billing v0.1.0'
   expect fail gibson "go.mod requires gibson-executor" $'\tgithub.com/zeroroot-ai/gibson-executor v0.9.0'
   # Fixtures that must PASS.

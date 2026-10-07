@@ -29,12 +29,6 @@ const (
 	// Error events
 )
 
-// LLMRequestEventData captures LLM request metadata (no sensitive content)
-type LLMRequestEventData struct {
-	Model        string `json:"model"`
-	MessageCount int    `json:"message_count"`
-}
-
 // LLMResponseEventData captures LLM response metadata and token usage
 type LLMResponseEventData struct {
 	Model            string `json:"model"`
@@ -42,21 +36,6 @@ type LLMResponseEventData struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
 	LatencyMs        int64  `json:"latency_ms"`
-}
-
-// ToolCallEventData captures tool invocation information
-type ToolCallEventData struct {
-	ToolName string `json:"tool_name"`
-	CallID   string `json:"call_id"`
-}
-
-// ToolResultEventData captures tool execution results
-type ToolResultEventData struct {
-	ToolName  string `json:"tool_name"`
-	CallID    string `json:"call_id"`
-	Success   bool   `json:"success"`
-	LatencyMs int64  `json:"latency_ms"`
-	Error     string `json:"error,omitempty"`
 }
 
 // FindingEventData captures security finding information

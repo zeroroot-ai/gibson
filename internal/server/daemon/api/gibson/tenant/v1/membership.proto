@@ -82,7 +82,9 @@ service MembershipService {
   // account is deleted and every one of their sessions is revoked at once, so
   // their next request fails immediately rather than waiting for a token to
   // expire. Their missions and findings stay in the tenant, attributed by the
-  // name and email recorded at the time.
+  // name and email recorded at the time. The agent, tool and plugin
+  // identities that the user owned move to the caller, so they keep working
+  // and a person stays accountable for each one (gibson#568).
   //
   // Refused when user_id holds the tenant's owner relation: the Owner cannot
   // be removed, only transferred out of first (TransferOwnership).
@@ -99,7 +101,8 @@ service MembershipService {
   // caller ends their own place in their tenant, exactly like RemoveMember
   // with themselves as the target. Gated on "member" (every tenant role
   // implies it) rather than "admin", since removing yourself needs no
-  // admin standing.
+  // admin standing. The agent, tool and plugin identities that the caller
+  // owned move to the tenant's Owner (gibson#568).
   //
   // Refused when the caller holds the tenant's owner relation: the Owner
   // cannot leave until ownership is transferred to another tenant user.
@@ -110,6 +113,19 @@ service MembershipService {
       object_deriver: "tenant_from_identity"
       allowed_identities: 1  // USER
       own_state: true
+    };
+  }
+
+  // ReassignAgentIdentity makes another tenant user the owner of an agent,
+  // tool or plugin identity of the tenant. The new owner is the accountable
+  // person for the identity. The dashboard uses it after RemoveMember, to
+  // hand each identity of the removed user to the right person (gibson#568).
+  rpc ReassignAgentIdentity(ReassignAgentIdentityRequest) returns (ReassignAgentIdentityResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
     };
   }
 
@@ -397,7 +413,24 @@ message RemoveMemberRequest {
   string user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
-message RemoveMemberResponse {}
+message RemoveMemberResponse {
+  // reassigned_principal_ids are the identities ("agent_principal:<id>",
+  // "tool_principal:<id>", "plugin_principal:<id>") that the removed user
+  // owned. Each one now belongs to new_owner_user_id.
+  repeated string reassigned_principal_ids = 1;
+  // new_owner_user_id is the user who owns them now: the caller.
+  string new_owner_user_id = 2;
+}
+
+message ReassignAgentIdentityRequest {
+  // principal_id is the identity, for example "agent_principal:<id>".
+  string principal_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // new_owner_user_id is the FGA user id (without type prefix) of a user of
+  // the caller's tenant.
+  string new_owner_user_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+}
+
+message ReassignAgentIdentityResponse {}
 
 message LeaveTenantRequest {
   // tenant_id is the FGA id of the tenant (e.g. "tenant:acme"). Must match

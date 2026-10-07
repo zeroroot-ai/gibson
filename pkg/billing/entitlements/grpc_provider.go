@@ -5,20 +5,29 @@ package entitlements
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/bundle/x509bundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	entitlementsv1 "github.com/zeroroot-ai/gibson/pkg/billing/entitlements/v1"
 )
+
+// ErrBillingServiceSVIDRequired is returned when the client has an endpoint
+// and no SPIFFE ID for the billing service. Without that ID the client could
+// only accept any workload of the trust domain as the server.
+var ErrBillingServiceSVIDRequired = errors.New(
+	"entitlements: ENTITLEMENTS_BILLING_SVID is required when ENTITLEMENTS_ENDPOINT is set")
 
 // GRPCProviderOptions configures a caching gRPC-client Provider.
 type GRPCProviderOptions struct {
@@ -27,11 +36,10 @@ type GRPCProviderOptions struct {
 	Endpoint string
 
 	// BillingServiceSVID is the SPIFFE ID the daemon expects to see in the
-	// billing service's leaf certificate during the mTLS handshake. When
-	// empty, the TLS config uses tlsconfig.AuthorizeAny() (permissive;
-	// suitable for tests / loopback environments). In production this MUST
-	// be set to the billing service's SPIFFE ID
-	// (e.g. "spiffe://example.org/platform/billing").
+	// billing service's leaf certificate during the mTLS handshake
+	// (e.g. "spiffe://example.org/platform/billing"). Required unless
+	// DialConn is set: the client accepts only this one server identity,
+	// never any workload of the trust domain (ADR-0060, ADR-0002).
 	BillingServiceSVID string
 
 	// WorkloadAPISocket overrides the SPIRE agent socket path. When empty,
@@ -109,6 +117,9 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 	if opts.Endpoint == "" {
 		return nil, errors.New("entitlements: NewGRPCProvider: Endpoint must not be empty")
 	}
+	if opts.DialConn == nil && opts.BillingServiceSVID == "" {
+		return nil, ErrBillingServiceSVIDRequired
+	}
 
 	ttl := opts.CacheTTL
 	if ttl <= 0 {
@@ -134,6 +145,11 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 
 	// Production path: open a streaming X509Source from the SPIRE Workload API
 	// and build an mTLS client config that authorizes the billing service's SVID.
+	id, err := spiffeid.FromString(opts.BillingServiceSVID)
+	if err != nil {
+		return nil, fmt.Errorf("entitlements: BillingServiceSVID %q is not a valid SPIFFE ID: %w",
+			opts.BillingServiceSVID, err)
+	}
 	var sourceOpts []workloadapi.X509SourceOption
 	if s := opts.WorkloadAPISocket; s != "" {
 		sourceOpts = append(sourceOpts, workloadapi.WithClientOptions(workloadapi.WithAddr(s)))
@@ -144,22 +160,8 @@ func NewGRPCProvider(opts GRPCProviderOptions) (Provider, error) {
 			opts.WorkloadAPISocket, err)
 	}
 
-	var authorizer tlsconfig.Authorizer
-	if opts.BillingServiceSVID != "" {
-		id, err := spiffeid.FromString(opts.BillingServiceSVID)
-		if err != nil {
-			_ = source.Close()
-			return nil, fmt.Errorf("entitlements: BillingServiceSVID %q is not a valid SPIFFE ID: %w",
-				opts.BillingServiceSVID, err)
-		}
-		authorizer = tlsconfig.AuthorizeID(id)
-	} else {
-		authorizer = tlsconfig.AuthorizeAny()
-	}
-
-	tlsCfg := tlsconfig.MTLSClientConfig(source, source, authorizer)
 	conn, err := grpc.NewClient(opts.Endpoint,
-		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
+		grpc.WithTransportCredentials(credentials.NewTLS(billingClientTLSConfig(source, source, id))))
 	if err != nil {
 		_ = source.Close()
 		return nil, fmt.Errorf("entitlements: dial billing service %q: %w",
@@ -273,4 +275,12 @@ func protoToLimits(pb *entitlementsv1.Limits) Limits {
 		MonthlyTokens:        pb.GetMonthlyTokens(),
 		MonthlySpendUSDCents: pb.GetMonthlySpendUsdCents(),
 	}
+}
+
+// billingClientTLSConfig is the mTLS client config of the entitlements
+// client. It presents the SVID of this workload and accepts exactly one
+// server identity, the SPIFFE ID of the billing service. Another workload of
+// the same trust domain fails the handshake.
+func billingClientTLSConfig(svid x509svid.Source, bundle x509bundle.Source, billing spiffeid.ID) *tls.Config {
+	return tlsconfig.MTLSClientConfig(svid, bundle, tlsconfig.AuthorizeID(billing))
 }

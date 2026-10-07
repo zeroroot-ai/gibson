@@ -100,19 +100,9 @@ func (t UnixTimePtr) IsNil() bool {
 	return t.Time == nil
 }
 
-// NewUnixTime creates a UnixTime from a time.Time value.
-func NewUnixTime(t time.Time) UnixTime {
-	return UnixTime{Time: t}
-}
-
 // NewUnixTimeNow creates a UnixTime set to the current time.
 func NewUnixTimeNow() UnixTime {
 	return UnixTime{Time: time.Now()}
-}
-
-// NewUnixTimePtr creates a UnixTimePtr from a *time.Time value.
-func NewUnixTimePtr(t *time.Time) UnixTimePtr {
-	return UnixTimePtr{Time: t}
 }
 
 // NewUnixTimePtrNow creates a UnixTimePtr set to the current time.

@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
@@ -140,6 +141,7 @@ func TestTenantRoleSync_TenantWithOrgIDIsSyncedAndRequeued(t *testing.T) {
 	}}
 	tuples := &fakeRoleTuples{}
 	r := &TenantRoleSyncReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: c, Recorder: events.NewFakeRecorder(10),
 		Syncer: tenantrole.NewSyncer(grants, tuples, nil), Interval: 5 * time.Second,
 	}
@@ -162,6 +164,7 @@ func TestTenantRoleSync_NoOrgIDRequeuesAt30Seconds(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
 
 	r := &TenantRoleSyncReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: c, Recorder: events.NewFakeRecorder(10),
 		Syncer: tenantrole.NewSyncer(&fakeRoleGrants{}, &fakeRoleTuples{}, nil), Interval: 5 * time.Second,
 	}
@@ -188,6 +191,7 @@ func TestTenantRoleSync_DeletingTenantIsSkipped(t *testing.T) {
 	}}
 	tuples := &fakeRoleTuples{}
 	r := &TenantRoleSyncReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: c, Recorder: events.NewFakeRecorder(10),
 		Syncer: tenantrole.NewSyncer(grants, tuples, nil),
 	}
@@ -216,6 +220,7 @@ func TestTenantRoleSync_OwnerConflictGivesAWarningEvent(t *testing.T) {
 	}}
 	rec := events.NewFakeRecorder(10)
 	r := &TenantRoleSyncReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: c, Recorder: rec,
 		Syncer: tenantrole.NewSyncer(grants, &fakeRoleTuples{}, nil), Interval: 5 * time.Second,
 	}
@@ -245,7 +250,7 @@ func TestTenantRoleSync_SetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager: %v", err)
 	}
-	r := &TenantRoleSyncReconciler{Client: mgr.GetClient()}
+	r := &TenantRoleSyncReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient()}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
 	}
@@ -319,7 +324,7 @@ func TestTenantRoleSyncPredicate_UpdateWithTheWrongType(t *testing.T) {
 func TestTenantRoleSync_UnknownTenantIgnoresNotFound(t *testing.T) {
 	scheme := setupScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	r := &TenantRoleSyncReconciler{Client: c, Recorder: events.NewFakeRecorder(1)}
+	r := &TenantRoleSyncReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: events.NewFakeRecorder(1)}
 
 	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "does-not-exist"}})
 	if err != nil {
@@ -336,7 +341,7 @@ func TestTenantRoleSync_UnsetSyncerRequeuesAndLogsWithoutPanicking(t *testing.T)
 	tenant.Status.ZitadelOrgID = "org-1"
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tenant).Build()
 
-	r := &TenantRoleSyncReconciler{Client: c, Recorder: events.NewFakeRecorder(1), Interval: 5 * time.Second}
+	r := &TenantRoleSyncReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Recorder: events.NewFakeRecorder(1), Interval: 5 * time.Second}
 	res, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "acme"}})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
@@ -355,6 +360,7 @@ func TestTenantRoleSync_NonConflictSyncErrorRequeuesWithoutAnEvent(t *testing.T)
 	grants := &fakeRoleGrants{listErr: errors.New("zitadel unreachable")}
 	rec := events.NewFakeRecorder(10)
 	r := &TenantRoleSyncReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: c, Recorder: rec,
 		Syncer: tenantrole.NewSyncer(grants, &fakeRoleTuples{}, nil), Interval: 5 * time.Second,
 	}

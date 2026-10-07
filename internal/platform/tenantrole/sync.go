@@ -116,7 +116,19 @@ func validRole(g Grant, t Tenant) (Role, bool) {
 // copies the Zitadel grants of the named users (or of every user of the
 // tenant, when users is empty) into FGA, in one FGA transaction.
 func (s *Syncer) Sync(ctx context.Context, t Tenant, users ...string) (Result, error) {
-	return s.syncMeasured(ctx, t, users, nil)
+	return s.syncMeasured(ctx, t, users, nil, nil)
+}
+
+// BeforeWrite runs after a Sync has computed its change and before it writes
+// the change to FGA. A Sync with nothing to change does not call it. An error
+// stops the Sync: nothing is written, and Sync returns the error.
+type BeforeWrite func(writes, deletes []Tuple) error
+
+// SyncTenantRecorded is Sync of a whole tenant that calls before when, and
+// only when, there is a change to write. The tenant-operator timer uses it to
+// write the audit record of a drift repair before the repair (gibson#583).
+func (s *Syncer) SyncTenantRecorded(ctx context.Context, t Tenant, before BeforeWrite) (Result, error) {
+	return s.syncMeasured(ctx, t, nil, nil, before)
 }
 
 // expectation is what a write just made true in Zitadel for one user: the
@@ -143,14 +155,14 @@ func (s *Syncer) syncExpecting(ctx context.Context, t Tenant, expects ...expecta
 	for _, e := range expects {
 		users = append(users, e.user)
 	}
-	return s.syncMeasured(ctx, t, users, expects)
+	return s.syncMeasured(ctx, t, users, expects, nil)
 }
 
-func (s *Syncer) syncMeasured(ctx context.Context, t Tenant, users []string, expects []expectation) (Result, error) {
+func (s *Syncer) syncMeasured(ctx context.Context, t Tenant, users []string, expects []expectation, before BeforeWrite) (Result, error) {
 	initMetrics()
 	start := time.Now()
 	caller := callerLabel(ctx)
-	result, err := s.sync(ctx, t, users, expects)
+	result, err := s.sync(ctx, t, users, expects, before)
 	syncDurationMS.Record(ctx, float64(time.Since(start).Milliseconds()))
 	outcome := "ok"
 	switch {
@@ -169,7 +181,7 @@ func (s *Syncer) syncMeasured(ctx context.Context, t Tenant, users []string, exp
 	return result, err
 }
 
-func (s *Syncer) sync(ctx context.Context, t Tenant, users []string, expects []expectation) (Result, error) {
+func (s *Syncer) sync(ctx context.Context, t Tenant, users []string, expects []expectation, before BeforeWrite) (Result, error) {
 	if t.ID == "" || t.OrgID == "" {
 		return Result{}, fmt.Errorf("tenantrole: Sync requires a tenant id and org id, got %+v", t)
 	}
@@ -207,6 +219,11 @@ func (s *Syncer) sync(ctx context.Context, t Tenant, users []string, expects []e
 	writes, deletes := diffTuples(scope, desired, actualByUser, t.ID)
 	if len(writes) == 0 && len(deletes) == 0 {
 		return Result{Invalid: invalid}, nil
+	}
+	if before != nil {
+		if err := before(writes, deletes); err != nil {
+			return Result{Invalid: invalid}, fmt.Errorf("tenantrole: Sync tenant=%s: before write: %w", t.ID, err)
+		}
 	}
 	if err := s.tuples.WriteAndDelete(ctx, writes, deletes); err != nil {
 		return Result{Invalid: invalid}, fmt.Errorf("tenantrole: Sync tenant=%s: write: %w", t.ID, err)

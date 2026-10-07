@@ -137,12 +137,21 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				Goal:    req.Input,
 				Timeout: req.Timeout,
 				Network: req.Network,
+				// The fork fields of the node (ADR-0169, gibson#802).
+				NodeID:     nodeIDOf(req.WorkID, req.MissionID),
+				StartsFrom: req.StartsFrom,
+				Forkable:   req.Forkable,
+				// The checkpoint fields of the node (ADR-0170).
+				Checkpoint:   req.Checkpoint,
+				FromSnapshot: req.FromSnapshot,
 			})
 			if err != nil {
 				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
 				return
 			}
-			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: resultSummary(res)})
+			// The snapshot id of the node end is part of the Timeline event,
+			// so a replay names the same checkpoint state (ADR-0170).
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: resultSummary(res), Snapshot: gibsonharness.CheckpointSnapshot(res)})
 
 		case "tool":
 			// A tool node is a mission node in its own right: it names a tool and

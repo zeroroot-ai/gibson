@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -163,14 +164,84 @@ func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
 	_, _ = failing.SetDefaultProvider(ctx, &tenantv1.SetDefaultProviderRequest{Name: "p1"})
 }
 
+// operatorCtx is the identity of the tenant-operator on the SPIFFE path.
+func operatorCtx() context.Context {
+	return auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/tenant-operator", Issuer: "spiffe"})
+}
+
+// stepEvent is one record that the tenant-operator writes before a saga step.
+func stepEvent() *daemonoperatorv1.AuditEventMessage {
+	return &daemonoperatorv1.AuditEventMessage{
+		Type:       "operator.saga_step",
+		TenantId:   "acme",
+		TargetType: "tenant",
+		TargetId:   "acme",
+		Fields:     map[string]string{"step": "InitRedisKeyspace"},
+	}
+}
+
 // An operator event that cannot be written durably is Unavailable.
 func TestEmitAuditEvent_NoRecordIsUnavailable(t *testing.T) {
 	srv := blankServer()
 	srv.auditLogger = auditLoggerOver(t, failingDurable{})
-	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/tenant-operator", Issuer: "spiffe"})
-	_, err := srv.EmitAuditEvent(ctx, &daemonoperatorv1.EmitAuditEventRequest{Event: &daemonoperatorv1.AuditEventMessage{Type: "tenant.created"}})
+	_, err := srv.EmitAuditEvent(operatorCtx(), &daemonoperatorv1.EmitAuditEventRequest{Event: stepEvent()})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v (%v), want Unavailable", status.Code(err), err)
+	}
+}
+
+// The record of an operator change belongs to the tenant of the target, and
+// its actor is the identity of the caller (gibson#583).
+func TestEmitAuditEvent_RecordsTheCallerForTheTenant(t *testing.T) {
+	rec := &audittest.Recorder{}
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, rec)
+	if _, err := srv.EmitAuditEvent(operatorCtx(), &daemonoperatorv1.EmitAuditEventRequest{Event: stepEvent()}); err != nil {
+		t.Fatalf("EmitAuditEvent: %v", err)
+	}
+	failed := stepEvent()
+	failed.Result = "failure"
+	failed.Reason = "redis down"
+	if _, err := srv.EmitAuditEvent(operatorCtx(), &daemonoperatorv1.EmitAuditEventRequest{Event: failed}); err != nil {
+		t.Fatalf("EmitAuditEvent (failure): %v", err)
+	}
+	got := rec.Events()
+	if len(got) != 2 {
+		t.Fatalf("records = %d, want 2", len(got))
+	}
+	for _, ev := range got {
+		if ev.TenantID != "acme" || ev.ActorID != "spiffe://zeroroot.ai/platform/tenant-operator" ||
+			ev.Action != "operator.saga_step" || ev.TargetType != "tenant" || ev.TargetID != "acme" {
+			t.Errorf("record = %+v", ev)
+		}
+	}
+	if !strings.Contains(string(got[0].Metadata), `"result":"success"`) ||
+		!strings.Contains(string(got[1].Metadata), `"result":"failure"`) ||
+		!strings.Contains(string(got[1].Metadata), `"reason":"redis down"`) {
+		t.Errorf("metadata = %s / %s", got[0].Metadata, got[1].Metadata)
+	}
+}
+
+// A user or an agent cannot write an operator record, and a record with no
+// tenant or no target is refused.
+func TestEmitAuditEvent_RefusesUsersAndIncompleteEvents(t *testing.T) {
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, &audittest.Recorder{})
+	userCtx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "user-1", Issuer: "zitadel"})
+	if _, err := srv.EmitAuditEvent(userCtx, &daemonoperatorv1.EmitAuditEventRequest{Event: stepEvent()}); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("user: code = %v, want PermissionDenied", status.Code(err))
+	}
+	for name, mutate := range map[string]func(*daemonoperatorv1.AuditEventMessage){
+		"no tenant":  func(e *daemonoperatorv1.AuditEventMessage) { e.TenantId = "" },
+		"no target":  func(e *daemonoperatorv1.AuditEventMessage) { e.TargetId = "" },
+		"bad result": func(e *daemonoperatorv1.AuditEventMessage) { e.Result = "success" },
+		"no type":    func(e *daemonoperatorv1.AuditEventMessage) { e.Type = "" },
+	} {
+		ev := stepEvent()
+		mutate(ev)
+		if _, err := srv.EmitAuditEvent(operatorCtx(), &daemonoperatorv1.EmitAuditEventRequest{Event: ev}); status.Code(err) != codes.InvalidArgument {
+			t.Errorf("%s: code = %v, want InvalidArgument", name, status.Code(err))
+		}
 	}
 }
 
@@ -213,5 +284,22 @@ func TestAdminApproveRegistration_FailureIsRecorded(t *testing.T) {
 	}
 	if !deny {
 		t.Errorf("events = %+v, want a deny record of the failed approval", aw.events)
+	}
+}
+
+// A platform record names the system tenant, and the daemon writes it there
+// (gibson#583).
+func TestEmitAuditEvent_PlatformRecordIsInTheSystemTenant(t *testing.T) {
+	rec := &audittest.Recorder{}
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, rec)
+	ev := stepEvent()
+	ev.TenantId = auth.SystemTenantString
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/platform-operator", Issuer: "spiffe"})
+	if _, err := srv.EmitAuditEvent(ctx, &daemonoperatorv1.EmitAuditEventRequest{Event: ev}); err != nil {
+		t.Fatalf("EmitAuditEvent: %v", err)
+	}
+	if got := rec.Events(); len(got) != 1 || got[0].TenantID != auth.SystemTenantString {
+		t.Fatalf("records = %+v, want one in the system tenant", got)
 	}
 }

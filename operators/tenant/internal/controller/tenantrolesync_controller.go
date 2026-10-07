@@ -6,6 +6,8 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"k8s.io/client-go/tools/events"
@@ -17,7 +19,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // DefaultTenantRoleSyncInterval is TENANT_ROLE_SYNC_INTERVAL's default (owner
@@ -40,6 +44,10 @@ type TenantRoleSyncReconciler struct {
 	Recorder events.EventRecorder
 	Syncer   *tenantrole.Syncer
 	Interval time.Duration // defaults to DefaultTenantRoleSyncInterval
+
+	// Audit writes the record of each drift repair before the repair
+	// (gibson#583). Required. A pass with nothing to repair writes no record.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenants,verbs=get;list;watch
@@ -74,8 +82,34 @@ func (r *TenantRoleSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{RequeueAfter: interval}, nil
 	}
 
+	if r.Audit == nil {
+		return ctrl.Result{}, fmt.Errorf("tenant role sync: %w", saga.ErrNoAudit)
+	}
+
 	syncCtx := tenantrole.WithCaller(ctx, "tenant-operator")
-	res, err := r.Syncer.Sync(syncCtx, tenantrole.Tenant{ID: tenant.Name, OrgID: tenant.Status.ZitadelOrgID})
+	var ev audit.Event
+	recorded := false
+	res, err := r.Syncer.SyncTenantRecorded(syncCtx, tenantrole.Tenant{ID: tenant.Name, OrgID: tenant.Status.ZitadelOrgID},
+		func(writes, deletes []tenantrole.Tuple) error {
+			ev = audit.ObjectEvent(audit.ActionTenantRoleSync, &tenant, map[string]string{
+				"written": strconv.Itoa(len(writes)),
+				"deleted": strconv.Itoa(len(deletes)),
+			})
+			if rerr := r.Audit.Record(ctx, ev); rerr != nil {
+				return fmt.Errorf("%w: %w", audit.ErrNotRecorded, rerr)
+			}
+			recorded = true
+			return nil
+		})
+	if err != nil && recorded {
+		if ferr := r.Audit.RecordFailure(ctx, ev, err); ferr != nil {
+			log.Error(ferr, "tenant role sync: the failure record was not written", "tenant", tenant.Name)
+		}
+	}
+	if errors.Is(err, audit.ErrNotRecorded) {
+		log.Error(err, "tenant role sync: no audit record; nothing repaired", "tenant", tenant.Name)
+		return ctrl.Result{}, fmt.Errorf("tenant role sync audit record: %w", err)
+	}
 	if err != nil {
 		if errors.Is(err, tenantrole.ErrOwnerConflict) {
 			log.Info("tenant role sync: owner conflict, reporting only", "tenant", tenant.Name)
@@ -107,6 +141,9 @@ func (r *TenantRoleSyncReconciler) emit(tenant *gibsonv1alpha1.Tenant, eventType
 // sync sooner than the timer would; every other reconcile is the RequeueAfter
 // timer itself.
 func (r *TenantRoleSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant role sync: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenantrolesync-controller")
 	}

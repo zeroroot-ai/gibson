@@ -48,5 +48,9 @@ func perTenantNamespaceCacheDisableTypes() []client.Object {
 		&networkingv1.NetworkPolicy{},
 		&rbacv1.Role{},
 		&rbacv1.RoleBinding{},
+		// The catalog plugin loop (gibson#815) writes these two kinds in the
+		// plugin namespaces tenant-<tenant>-plugins only.
+		&appsv1.Deployment{},
+		&corev1.ServiceAccount{},
 	}
 }

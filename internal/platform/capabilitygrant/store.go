@@ -1006,3 +1006,43 @@ func nullableTime(t *time.Time) sql.NullTime {
 	}
 	return sql.NullTime{Time: *t, Valid: true}
 }
+
+// ReassignOwner makes toUserID the owner user of each host and agent row of
+// the principal in the tenant (gibson#568). The owner user is the accountable
+// person that a verified CG-JWT carries as OwnerUserID. It returns the number
+// of rows that changed.
+func (s *CapabilityGrantStore) ReassignOwner(ctx context.Context, tenantID, principalRef, toUserID string) (int64, error) {
+	if tenantID == "" || principalRef == "" || toUserID == "" {
+		return 0, errors.New("capabilitygrant: ReassignOwner: tenant, principal and new owner are required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("capabilitygrant: ReassignOwner %q: begin tx: %w", principalRef, err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	var total int64
+	for _, q := range []string{
+		`UPDATE capability_grant_hosts SET user_id = $3, updated_at = now() WHERE tenant_id = $1 AND principal_ref = $2 AND user_id IS DISTINCT FROM $3`,
+		`UPDATE capability_grant_agents SET user_id = $3 WHERE tenant_id = $1 AND principal_ref = $2 AND user_id IS DISTINCT FROM $3`,
+	} {
+		res, err := tx.ExecContext(ctx, q, tenantID, principalRef, toUserID)
+		if err != nil {
+			return 0, fmt.Errorf("capabilitygrant: ReassignOwner %q: %w", principalRef, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("capabilitygrant: ReassignOwner %q: rows affected: %w", principalRef, err)
+		}
+		total += n
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("capabilitygrant: ReassignOwner %q: commit: %w", principalRef, err)
+	}
+	committed = true
+	return total, nil
+}

@@ -29,21 +29,33 @@ func TestVerifyIsolation(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "class the transport does not report is accepted",
+			name:      "an empty runtime is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool"},
+			wantErr:   true,
+		},
+		{
+			name:      "an empty class is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", Runtime: "launcher"},
+			wantErr:   true,
+		},
+		{
+			name:      "nothing reported is a denial",
 			requested: "tool",
 			resp:      LaunchResponse{SandboxID: "ns/sbx/uid"},
-			wantErr:   false,
+			wantErr:   true,
 		},
 		{
 			name:      "reported class matching the request is accepted",
 			requested: "tool",
-			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "kata-fc"},
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "launcher"},
 			wantErr:   false,
 		},
 		{
 			name:      "reported class differing from the request is a denial",
 			requested: "tool",
-			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "dev", Runtime: "kata-fc"},
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "dev", Runtime: "launcher"},
 			wantErr:   true,
 		},
 		{
@@ -59,16 +71,28 @@ func TestVerifyIsolation(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name:      "kata-qemu is accepted",
+			name:      "the launcher backend is accepted",
 			requested: "tool",
-			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "kata-qemu"},
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "launcher"},
 			wantErr:   false,
 		},
 		{
-			name:      "gvisor is accepted",
+			name:      "kata-fc left setec and is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "kata-fc"},
+			wantErr:   true,
+		},
+		{
+			name:      "kata-qemu left setec and is a denial",
+			requested: "tool",
+			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "kata-qemu"},
+			wantErr:   true,
+		},
+		{
+			name:      "gvisor left setec and is a denial",
 			requested: "tool",
 			resp:      LaunchResponse{SandboxID: "ns/sbx/uid", SandboxClass: "tool", Runtime: "gvisor"},
-			wantErr:   false,
+			wantErr:   true,
 		},
 	}
 	for _, tc := range cases {
@@ -102,7 +126,7 @@ func TestExecute_RequestsConfiguredSandboxClass(t *testing.T) {
 	c := &mockClient{
 		launch: func(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
 			gotClass = req.SandboxClass
-			return LaunchResponse{SandboxID: "sbx-1", SandboxClass: req.SandboxClass, Runtime: "kata-fc"}, nil
+			return LaunchResponse{SandboxID: "sbx-1", SandboxClass: req.SandboxClass, Runtime: "launcher"}, nil
 		},
 		streamLog: func(context.Context, string) (LogStream, error) {
 			return &fixedLogs{chunks: [][]byte{markerLine("ok")}}, nil
@@ -164,7 +188,7 @@ func TestExecute_MismatchedRuntime_Denied(t *testing.T) {
 func TestExecute_MismatchedClass_Denied(t *testing.T) {
 	c := &mockClient{
 		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
-			return LaunchResponse{SandboxID: "sbx-1", SandboxClass: "dev", Runtime: "kata-fc"}, nil
+			return LaunchResponse{SandboxID: "sbx-1", SandboxClass: "dev", Runtime: "launcher"}, nil
 		},
 		streamLog: func(context.Context, string) (LogStream, error) { return &fixedLogs{}, nil },
 		wait:      func(context.Context, string) (WaitResponse, error) { return WaitResponse{}, nil },

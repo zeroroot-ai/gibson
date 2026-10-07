@@ -80,10 +80,8 @@ type EvidenceEvent struct {
 	Time          time.Time
 	Action        string
 	ActorID       string
-	ActorType     string
 	ResourceType  string
 	ResourceID    string
-	Effect        string
 	ControlIDs    []string
 }
 
@@ -293,10 +291,8 @@ ORDER  BY id ASC`, q.Tenant, q.Start, q.End)
 			Time:          ev.Time,
 			Action:        ev.Action,
 			ActorID:       ev.ActorID,
-			ActorType:     ev.ActorType,
 			ResourceType:  ev.ResourceType,
 			ResourceID:    ev.ResourceID,
-			Effect:        ev.Effect,
 			ControlIDs:    matched,
 		})
 		lastID = id

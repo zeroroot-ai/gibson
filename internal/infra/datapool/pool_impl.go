@@ -33,16 +33,14 @@ type tenantEntry struct {
 // sub-pool wrappers and orchestrates lazy initialization, idle eviction,
 // and KEK lifecycle.
 type pool struct {
-	cfg         Config
-	pg          *pgPerTenant
-	redisPool   *redisPerTenant
-	neo4j       *neo4jPerTenant
-	vector      *vectorPerTenant
-	keyProvider crypto.KeyProvider
-	masterKEK   []byte // loaded once at startup; never written to disk
+	cfg       Config
+	pg        *pgPerTenant
+	redisPool *redisPerTenant
+	neo4j     *neo4jPerTenant
+	vector    *vectorPerTenant
+	masterKEK []byte // loaded once at startup; never written to disk
 
 	checker *provisioningChecker
-	evictor *evictor
 
 	// adminAcquirer is the wired admin.AdminPool (set via SetAdminPool).
 	adminAcquirer AdminAcquirer
@@ -144,7 +142,6 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 		pg:           pg,
 		redisPool:    rp,
 		neo4j:        n4j,
-		keyProvider:  keyProvider,
 		masterKEK:    masterKEK,
 		checker:      checker,
 		recoveryHook: noopRecoveryHook{},
@@ -167,7 +164,6 @@ func NewPool(ctx context.Context, cfg Config, keyProvider crypto.KeyProvider, ch
 	}
 
 	ev := newEvictor(p, cfg.EvictionCheckInterval, cfg.IdleTTL, realClock{})
-	p.evictor = ev
 	go ev.run(ctx)
 
 	return p, nil
@@ -418,23 +414,6 @@ func (p *pool) evictTenant(tenant auth.TenantID) {
 		p.redisPool.EvictTenant(tenant)
 	}
 	p.tenantEntries.Delete(tenant)
-}
-
-// lastAccess returns the last time a Conn for this tenant was released.
-func (p *pool) lastAccess(tenant auth.TenantID) time.Time {
-	if v, ok := p.tenantEntries.Load(tenant); ok {
-		ns := v.(*tenantEntry).lastReleased.Load()
-		return time.Unix(0, ns)
-	}
-	return time.Time{}
-}
-
-// activeConnCount returns the number of currently checked-out Conns for tenant.
-func (p *pool) activeConnCount(tenant auth.TenantID) int64 {
-	if v, ok := p.tenantEntries.Load(tenant); ok {
-		return v.(*tenantEntry).activeConns.Load()
-	}
-	return 0
 }
 
 // staticNeo4jResolver is a backward-compat resolver that returns the same

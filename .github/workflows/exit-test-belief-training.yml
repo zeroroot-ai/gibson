@@ -1,0 +1,281 @@
+# ----------------------------------------------------------------------------
+# The belief training exit test (ADR-0106, gibson#616).
+#
+# In plain words: a tenant gets something to learn from, its nightly trainer
+# runs once, and the next mission of the tenant pins the new belief version.
+#
+# The steps:
+#   1. The kind bring-up and the test-mode daemon of exit-test-e2e-cluster.yml,
+#      copied. ONE bring-up path.
+#   2. TestBeliefTraining_Seed (in-cluster, runner SVID) runs one nmap mission
+#      for the tenant and labels an item of its review queue.
+#   3. A Job from the belief-trainer CronJob that the tenant operator created
+#      in the tenant namespace runs once and must complete.
+#   4. After one reload interval of the daemon, TestBeliefTraining_NextMissionPins
+#      runs one more mission and asserts that it pins a stored version of the
+#      tenant (tenant-<id>-v<n>). The daemon pins a stored version only when
+#      tenant_belief_artifacts holds a current row for the tenant.
+#
+# ADR-0080: NEVER on pull_request. It needs a live cluster. It runs on main and
+# daily.
+# ----------------------------------------------------------------------------
+name: exit-test-belief-training
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cmd/belief-trainer/**'
+      - 'internal/engine/braintrain/**'
+      - 'internal/server/daemon/belief_*.go'
+      - 'internal/server/daemon/api/server_belief_trainer.go'
+      - 'internal/platform/beliefartifact/**'
+      - 'operators/tenant/internal/saga/flows/belief_trainer.go'
+      - 'tests/e2e/belief_training_test.go'
+      - '.github/workflows/exit-test-belief-training.yml'
+  schedule:
+    - cron: '45 7 * * *'
+  workflow_dispatch: {}
+
+# One run at a time, and a run that started finishes (gibson#151).
+concurrency:
+  group: exit-test-belief-training-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHARTS_ROOT: ${{ github.workspace }}/charts
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: gibson
+  NODE: gibson-control-plane
+  # The tenant the sanctioned baseline profile always provisions.
+  TENANT: primary
+  E2E_OUT: ${{ github.workspace }}/e2e-out
+
+jobs:
+  belief-training:
+    name: the trainer stores a version and the next mission pins it
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      # The kind bring-up (make substrate / make recreate ENV=kind), the
+      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
+      # hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
+      # so the checkout needs the org read PAT.
+      - name: Checkout hosted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      # The chart source lives in zeroroot-ai/charts (ADR-0086); hosted holds
+      # none and its recreate reads CHARTS_ROOT. charts is public.
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          path: charts
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          install_only: true
+
+      # `make recreate ENV=kind` runs stage 1 through terraform
+      # (scripts/recreate-kind.sh). Pinned to hosted's own CI version.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Stage 0 writes the bringup keyring the install reads (ADR-0083). The
+      # registry pull token is the keyring member GHCR_PULL_TOKEN. The state
+      # dir is the runner's temp, because nothing here owns /bulk.
+      - name: Stage 0, the substrate and the bringup keyring
+        working-directory: hosted
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is required to pull first-party images (daemon, setec)."
+            exit 1
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
+      # --fresh-kind does the gvisor node-prep and installs the umbrella with
+      # values-baseline.yaml. The 2-core overlay shrinks REQUESTS so the whole
+      # platform packs onto the runner.
+      - name: Stand up the setec+gvisor cluster
+        working-directory: hosted
+        run: |
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            RUNG=ci make recreate ENV=kind
+
+      # The node must actually advertise gvisor, or every sandbox stays Pending.
+      - name: Node advertises gvisor
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 30); do
+            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
+            sleep 5
+          done
+          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
+          if [ "$v" != "true" ]; then
+            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
+            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
+            exit 1
+          fi
+
+      # The overlay below builds FROM the private daemon image on ghcr.io.
+      # The runner's own docker needs the same read-only token the cluster
+      # pulls with (run 33643826807).
+      - name: Log the runner's docker in to ghcr.io
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Swap in a TEST-MODE daemon: authz disabled, test fixtures on, built
+      # with setec_integration so dispatch reaches the real setec executor.
+      # This changes ONLY how the client authenticates, never the runtime.
+      - name: Build + load the test-mode daemon
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+          echo "overlaying onto base daemon image: ${BASE}"
+          mkdir -p /tmp/dctx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags="setec_integration test_fixtures" \
+            -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+            -o /tmp/dctx/gibson ./cmd/gibson
+          cat > /tmp/dctx/Dockerfile <<EOF
+          FROM ${BASE}
+          COPY gibson /usr/local/bin/gibson
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson:belief-training /tmp/dctx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson:belief-training --name "$CLUSTER"
+
+      # The e2eRunner values register the runner's ClusterSPIFFEID, allow-list
+      # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
+      # on the daemon (charts#142). One patch means one Argo sync and one
+      # daemon rollout.
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
+        working-directory: hosted
+        run: |
+          set -euo pipefail
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"belief-training","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+            ]'
+
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:belief-training) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the belief-training image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+
+      - name: Build the e2e suite into an image
+        id: suite-image
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ectx "$E2E_OUT"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+      - name: Seed the tenant with a training row
+        run: |
+          set -o pipefail
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-belief-seed 'TestBeliefTraining_Seed$' 15m \
+            2>&1 | tee "$E2E_OUT/seed.log"
+
+      # The tenant operator creates the CronJob during provisioning. A Job from
+      # it is the nightly run, started now.
+      - name: Run the belief trainer of the tenant once
+        run: |
+          set -euo pipefail
+          tns="tenant-${TENANT}"
+          for _ in $(seq 1 30); do
+            kubectl -n "$tns" get cronjob belief-trainer >/dev/null 2>&1 && break
+            sleep 10
+          done
+          kubectl -n "$tns" get cronjob belief-trainer -o yaml > "$E2E_OUT/cronjob.yaml" || {
+            echo "::error::the tenant operator created no belief-trainer CronJob in $tns"; exit 1; }
+          job="belief-trainer-exit-${GITHUB_RUN_ID}"
+          kubectl -n "$tns" create job "$job" --from=cronjob/belief-trainer
+          if ! kubectl -n "$tns" wait --for=condition=complete "job/$job" --timeout=15m; then
+            kubectl -n "$tns" describe job "$job" || true
+            kubectl -n "$tns" logs "job/$job" --tail=200 || true
+            echo "::error::the belief trainer Job did not complete"
+            exit 1
+          fi
+          kubectl -n "$tns" logs "job/$job" --tail=200 | tee "$E2E_OUT/trainer.log"
+          grep -q 'stored a new belief artifact version' "$E2E_OUT/trainer.log" || {
+            echo "::error::the trainer completed but stored no version"; exit 1; }
+
+      # The daemon reads the current versions every belief.reload_interval
+      # (60s by default). The next mission must start after one read.
+      - name: The next mission pins the new version
+        run: |
+          set -o pipefail
+          sleep 90
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-belief-pin 'TestBeliefTraining_NextMissionPins$' 15m \
+            2>&1 | tee "$E2E_OUT/pin.log"
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: belief-training-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-out
+          if-no-files-found: ignore
+
+      # always(), not failure(): a job that hits timeout-minutes is cancelled,
+      # and a cancelled job skips failure() steps.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          kubectl -n "$NS" get pods || true
+          kubectl -n "tenant-${TENANT}" get cronjobs,jobs,pods || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 | grep -i belief || true

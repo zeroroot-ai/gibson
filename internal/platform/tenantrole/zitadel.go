@@ -54,7 +54,6 @@ type Grants interface {
 }
 
 const (
-	projectService       = "zitadel.project.v2.ProjectService"
 	authorizationService = "zitadel.authorization.v2.AuthorizationService"
 
 	listGrantsPageSize = 500

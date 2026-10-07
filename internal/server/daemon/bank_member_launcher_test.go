@@ -27,7 +27,7 @@ type memberSandboxClient struct {
 
 func (c *memberSandboxClient) Launch(_ context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
 	c.launched = append(c.launched, req)
-	return sandboxed.LaunchResponse{SandboxID: "sbx-1", Runtime: "gvisor"}, nil
+	return sandboxed.LaunchResponse{SandboxID: "sbx-1", SandboxClass: req.SandboxClass, Runtime: sandboxed.IsolatedRuntime}, nil
 }
 
 func (c *memberSandboxClient) StreamLogs(context.Context, string, string) (sandboxed.LogStream, error) {
@@ -120,7 +120,7 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 		"GIBSON_INSTANCE_MODE": "member", "GIBSON_CALLBACK_ENDPOINT": "callback.gibson:443",
 		"GIBSON_MISSION_ID": "bank-1", "GIBSON_MISSION_RUN_ID": launched.MissionRunID, "GIBSON_MODEL": "claude-opus-4",
 		// zerocool-plugins#66: the member refuses to start without this.
-		"GIBSON_SANDBOX": "gvisor",
+		"GIBSON_SANDBOX": sandboxed.IsolatedRuntime,
 	} {
 		if req.Env[k] != want {
 			t.Errorf("env[%s] = %q, want %q", k, req.Env[k], want)
@@ -271,4 +271,20 @@ func TestBuildBankRunner_NeedsThePoolAndTheSeams(t *testing.T) {
 	if _, err := d.buildBankRunner(staticTenants{}); err == nil {
 		t.Fatal("no signing key must refuse")
 	}
+}
+
+func (c *memberSandboxClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	return sandboxed.ForkResponse{}, errors.New("memberSandboxClient: fork is not used here")
+}
+
+func (c *memberSandboxClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
+	return sandboxed.SessionRecovery{}, false, nil
+}
+
+func (c *memberSandboxClient) Isolation(context.Context, string, string) (sandboxed.LaunchResponse, error) {
+	return sandboxed.LaunchResponse{}, errors.New("memberSandboxClient: isolation is not used here")
+}
+
+func (c *memberSandboxClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("memberSandboxClient: snapshot is not used here")
 }

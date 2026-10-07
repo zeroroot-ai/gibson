@@ -206,6 +206,11 @@ type DefaultAgentHarness struct {
 	// fail-closed rather than launching with an empty image.
 	agentLaunchSpecResolver AgentLaunchSpecResolver
 
+	// forks holds the parked sources and the fork ledger of ADR-0169. Nil
+	// means no fork support: a node with starts_from fails, and a forkable
+	// node runs as a normal node.
+	forks *ForkSupport
+
 	// agentCallbackEndpoint is the HarnessCallbackService address the daemon
 	// advertises. It is injected into an ephemeral agent sandbox so the agent
 	// dials the daemon back for LLM/tools/findings and to return its result.
@@ -901,6 +906,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
+		childMissionCtx.NodeID = task.NodeID
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -1756,15 +1762,13 @@ func (h *DefaultAgentHarness) liveScope(ctx context.Context) sandboxed.LiveScope
 // a mission author and the tool it dispatches cannot disagree about which host
 // was scanned.
 //
-// Every failure is silent and total: no lookup wired, no target id, a store that
-// errors, a target that has gone. The tool then receives no GIBSON_TARGET_* at
+// The factory refuses a harness with no lookup (gibson#681). Every other
+// failure is silent and total: no target id, a store that errors, a target
+// that has gone. The tool then receives no GIBSON_TARGET_* at
 // all, which is what it received before this existed. An EMPTY or PARTIAL set
 // would be worse than none — a tool cannot tell "this target has no host" from
 // "the platform did not tell me", and the two call for opposite behaviour.
 func (h *DefaultAgentHarness) addTargetFacts(ctx context.Context, spec *sandboxed.ToolSpec) {
-	if h.targetFacts == nil {
-		return
-	}
 	id := h.Target().ID
 	if id.IsZero() {
 		return

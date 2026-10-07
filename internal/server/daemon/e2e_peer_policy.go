@@ -43,8 +43,8 @@ func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2
 // stops being able to prove that a denial is a denial — if the harness has more
 // authority than the thing under test, a passing assertion says nothing. These
 // are the RPCs tests/e2e/tool_dispatch_test.go,
-// tests/e2e/sandboxed_agent_dispatch_test.go and tests/e2e/bank_test.go
-// actually use. A suite that calls an RPC not listed here is denied at the
+// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go and
+// tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
@@ -82,14 +82,27 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.job.v1.JobService/CloseJob":               true,
 			// The plugin secret revocation exit test (gibson#154,
 			// tests/e2e/plugin_secret_revocation_test.go): seed the secret
-			// the GitHub plugin declares, read the install's status, revoke
-			// the binding, and clean the secret up. RegisterPlugin is not
-			// here: a chart-deployed plugin enrols with its SVID and binds
-			// its declared secrets itself (ADR-0066).
+			// the GitHub plugin resolves, grant it to the plugin as a tenant
+			// admin, read the install's status, revoke the binding, and clean
+			// the secret up (ADR-0097).
 			"/gibson.secrets.v1.SecretsService/SetSecret":                         true,
+			"/gibson.tenant.v1.GrantsService/WriteSecretGrants":                   true,
 			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
 			"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls":        true,
 			"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding": true,
+			// The belief training exit test (gibson#616,
+			// tests/e2e/belief_training_test.go): label an item of the review
+			// queue so the tenant has a training row, then read the pinned
+			// belief version of the next mission.
+			"/gibson.world.v1.WorldService/ListReviewQueue": true,
+			"/gibson.world.v1.WorldService/SubmitLabel":     true,
+			"/gibson.world.v1.WorldService/ListMissions":    true,
+			// The secrets isolation suite (tests/e2e/secrets, gibson#213):
+			// create the principals that check in at the edge, and revoke
+			// them. The secret itself is set and deleted with the two
+			// SecretsService methods above.
+			"/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity": true,
+			"/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity": true,
 		},
 	}
 }

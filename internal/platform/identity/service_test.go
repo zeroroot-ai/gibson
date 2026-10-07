@@ -413,3 +413,21 @@ func TestWhoAmI_SelfKind(t *testing.T) {
 		})
 	}
 }
+
+// TestNewServer_RefusesAMissingDependency proves that no IdentityServer
+// exists without its authorizer and its lookup (gibson#681). Each request
+// path can then use both without a nil check.
+func TestNewServer_RefusesAMissingDependency(t *testing.T) {
+	cases := map[string]Config{
+		"no authorizer": {Lookup: &fakeLookup{}},
+		"no lookup":     {Authorizer: &fakeAuthorizer{}},
+	}
+	for name, cfg := range cases {
+		t.Run(name, func(t *testing.T) {
+			srv, err := NewServer(cfg)
+			if err == nil || srv != nil {
+				t.Fatalf("NewServer(%s) = %v, %v; want nil and an error", name, srv, err)
+			}
+		})
+	}
+}

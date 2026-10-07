@@ -124,7 +124,7 @@ func TestTaskGrantFromMetadata(t *testing.T) {
 // grant that names this tenant and this mission reaches the handler untouched.
 func TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
-	unary, _ := taskGrantScopeInterceptors(getter(v), slog.Default())
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), slog.Default())
 	called := false
 	resp, err := unary(grantCtx("acme", compactJWT("JWT")), observeReq("m-1"),
 		&grpc.UnaryServerInfo{FullMethod: scopeMethod},
@@ -138,7 +138,7 @@ func TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches(t *te
 // is returned as-is, not turned into an authorization refusal.
 func TestTaskGrantScopeInterceptors_StreamPropagatesARecvError(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
-	_, stream := taskGrantScopeInterceptors(getter(v), nil)
+	_, stream := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	want := errors.New("connection reset")
 	err := stream(nil, &failingRecvStream{ctx: grantCtx("acme", compactJWT("JWT")), err: want},
 		&grpc.StreamServerInfo{FullMethod: scopeMethod},
@@ -262,7 +262,7 @@ func TestCheckTaskGrantScope_RequestWithoutContextSkipsMissionCheck(t *testing.T
 
 func TestTaskGrantScopeInterceptors_UnaryDeniesBeforeTheHandler(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-A")}
-	unary, _ := taskGrantScopeInterceptors(getter(v), nil)
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	called := false
 	_, err := unary(grantCtx("acme", compactJWT("JWT")), observeReq("m-B"),
 		&grpc.UnaryServerInfo{FullMethod: scopeMethod},
@@ -295,7 +295,7 @@ func (s *recvStream) RecvMsg(m any) error {
 
 func TestTaskGrantScopeInterceptors_StreamChecksEachMessage(t *testing.T) {
 	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-A")}
-	_, stream := taskGrantScopeInterceptors(getter(v), nil)
+	_, stream := taskGrantScopeInterceptors(getter(v), testForkGuard(t), nil)
 	var got error
 	err := stream(nil, &recvStream{ctx: grantCtx("acme", compactJWT("JWT")), msg: observeReq("m-B")},
 		&grpc.StreamServerInfo{FullMethod: scopeMethod},
@@ -364,5 +364,37 @@ func TestTaskGrantScopedStream_ContextCarriesTheClaimsOnceSeen(t *testing.T) {
 	claims, ok := TaskGrantClaimsFromContext(s.Context())
 	if !ok || claims.TaskID != "job-1" {
 		t.Fatalf("claims = %+v, %v", claims, ok)
+	}
+}
+
+// TestClaimFork_AnExpiredSourceGrantIsRefused: a fork that sends the
+// expired grant of its source to ClaimFork never reaches the handler (D80).
+func TestClaimFork_AnExpiredSourceGrantIsRefused(t *testing.T) {
+	v := &fakeGrantVerifier{err: sdkcg.ErrExpired}
+	unary, _ := taskGrantScopeInterceptors(getter(v), testForkGuard(t), slog.Default())
+	called := false
+	_, err := unary(grantCtx("acme", compactJWT("JWT")), &harnesspb.ClaimForkRequest{SandboxId: "fork-1"},
+		&grpc.UnaryServerInfo{FullMethod: claimForkMethod},
+		func(context.Context, any) (any, error) { called = true; return nil, nil })
+	if status.Code(err) != codes.Unauthenticated || called {
+		t.Fatalf("code = %v, called = %v; want Unauthenticated and no handler", status.Code(err), called)
+	}
+}
+
+// TestSandboxIdentityCredential_ClaimForkOnly: the credential that the edge
+// asserts for ClaimFork is refused on each other method (D80).
+func TestSandboxIdentityCredential_ClaimForkOnly(t *testing.T) {
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{
+		Subject: "sandbox-identity-claim", Issuer: auth.IssuerCapabilityGrant,
+		CredentialType: auth.CredentialType(credentialSandboxIdentity), Tenant: auth.SystemTenant,
+	})
+	if err := checkSandboxIdentityCredential(ctx, claimForkMethod, nil); err != nil {
+		t.Errorf("ClaimFork: %v", err)
+	}
+	if err := checkSandboxIdentityCredential(ctx, scopeMethod, nil); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("other method: code = %v, want PermissionDenied", status.Code(err))
+	}
+	if err := checkSandboxIdentityCredential(context.Background(), scopeMethod, nil); err != nil {
+		t.Errorf("no identity: %v", err)
 	}
 }

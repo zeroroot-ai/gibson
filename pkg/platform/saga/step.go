@@ -93,14 +93,3 @@ const (
 	// topological order, then marks the CRD as Failed.
 	ErrorPermanent
 )
-
-// ClassifyError maps an error to its ErrorClassification. The default
-// implementation treats nil-safe wrapped errors via errors.Is checks
-// against a small sentinel set; steps may override by implementing the
-// optional ErrorClassifier interface.
-//
-// Step authors should use clients.WrapPermanent (in the operator's
-// internal/clients package) to mark errors that should NOT be retried.
-type ErrorClassifier interface {
-	ClassifyError(err error) ErrorClassification
-}

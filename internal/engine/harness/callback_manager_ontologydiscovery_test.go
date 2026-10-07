@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -21,11 +22,11 @@ import (
 // ProposeOntologyExtension has no engine on any daemon that only calls
 // CallbackManager (every real daemon) and always answers Unavailable.
 func TestCallbackManager_SetOntologyDiscovery(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx).For("acme")
+	engine := brain.NewRegistry(ctx, braintest.StoreFactory()).For("acme")
 	m.SetOntologyDiscovery(engine)
 
 	if m.server == nil || m.server.service == nil {
@@ -50,7 +51,7 @@ func TestCallbackManager_SetOntologyDiscovery_NilServerIsNoOp(_ *testing.T) {
 	m := &CallbackManager{logger: slog.Default()}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	m.SetOntologyDiscovery(brain.NewRegistry(ctx).For("acme"))
+	m.SetOntologyDiscovery(brain.NewRegistry(ctx, braintest.StoreFactory()).For("acme"))
 }
 
 // TestCallbackManager_OntologyDiscovery proves the getter is the read half of
@@ -59,14 +60,14 @@ func TestCallbackManager_SetOntologyDiscovery_NilServerIsNoOp(_ *testing.T) {
 // a request-path method that assumes a manager built through
 // NewCallbackManager (ADR-0003).
 func TestCallbackManager_OntologyDiscovery(t *testing.T) {
-	m := NewCallbackManager(CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	m := NewCallbackManager(CallbackConfig{ServiceOptions: []CallbackServiceOption{testEventBus()}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 	if got := m.OntologyDiscovery(); got != nil {
 		t.Fatalf("OntologyDiscovery() before SetOntologyDiscovery = %v, want nil", got)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx).For("acme")
+	engine := brain.NewRegistry(ctx, braintest.StoreFactory()).For("acme")
 	m.SetOntologyDiscovery(engine)
 	if got := m.OntologyDiscovery(); got != brain.OntologyDiscoveryEngine(engine) {
 		t.Fatalf("OntologyDiscovery() = %v, want the exact value passed to SetOntologyDiscovery", got)

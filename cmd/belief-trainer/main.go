@@ -10,8 +10,8 @@
 //  1. It reads the training data of the tenant from the daemon
 //     (GetBeliefTrainingData): the training rows of the World and the outcome
 //     count of each enablement edge type.
-//  2. It fits the belief-CPT model, with the embedded OSS base model
-//     (beliefvi.DefaultArtifact) as the structure and the prior, and the Beta
+//  2. It fits the belief-CPT model, with a base model as the structure and the
+//     prior, and the Beta
 //     posterior of each learned strength: each edge type, each dependency
 //     inside a host and the leak of each host variable.
 //  3. It stores both artifacts as one new version of the tenant through the
@@ -23,8 +23,15 @@
 // store: no Timeline store, no Redis, no Postgres. main_test.go proves that
 // the binary imports no Redis client and no Postgres driver.
 //
+// The base model is the embedded OSS base-v1 (beliefvi.DefaultArtifact),
+// unless BELIEF_BASE_MODEL names a model file. The commercial layer ships a
+// curated base model that way (gibson#31): a trainer image with the file and
+// the variable. The file must be a valid model with the three query variables.
+//
 // A tenant with no outcome to learn from gets no new version: the trainer
-// logs that and exits 0.
+// logs that and exits 0. One exception: with a base model file, a tenant that
+// has no current version gets the base as its first version, so a new tenant
+// starts on the curated model, not on base-v1.
 //
 // Usage:
 //
@@ -32,7 +39,7 @@
 //
 // GIBSON_DAEMON_GRPC_ADDRESS names the daemon, and GIBSON_DAEMON_SPIFFE_ID
 // names the SVID that the daemon must present. SPIFFE_ENDPOINT_SOCKET names the
-// socket of the SPIRE agent.
+// socket of the SPIRE agent. BELIEF_BASE_MODEL names the base model file.
 package main
 
 import (
@@ -101,6 +108,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, dial di
 	tenant := fs.String("tenant", "", "the tenant to train (required)")
 	addr := fs.String("daemon-addr", getenv("GIBSON_DAEMON_GRPC_ADDRESS"), "the gRPC address of the daemon")
 	daemonID := fs.String("daemon-spiffe-id", getenv("GIBSON_DAEMON_SPIFFE_ID"), "the SPIFFE ID that the daemon must present")
+	basePath := fs.String("base-model", getenv(BaseModelEnv), "a base model file; empty uses the embedded base-v1")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("parse flags: %w", err)
 	}
@@ -111,6 +119,11 @@ func run(ctx context.Context, args []string, getenv func(string) string, dial di
 		return errors.New("-daemon-addr or GIBSON_DAEMON_GRPC_ADDRESS is required")
 	case strings.TrimSpace(*daemonID) == "":
 		return errors.New("-daemon-spiffe-id or GIBSON_DAEMON_SPIFFE_ID is required")
+	}
+
+	base, err := loadBaseModel(*basePath)
+	if err != nil {
+		return err
 	}
 
 	client, closer, err := dial(ctx, *addr, *daemonID)
@@ -124,11 +137,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, dial di
 		return fmt.Errorf("read the training data of tenant %s: %w", *tenant, err)
 	}
 	if len(data.GetRows()) == 0 && len(data.GetEdgeOutcomes()) == 0 {
-		logger.Info("the tenant has no outcome to learn from, no new version", "tenant", *tenant)
-		return nil
+		if strings.TrimSpace(*basePath) == "" || data.GetHasCurrentVersion() {
+			logger.Info("the tenant has no outcome to learn from, no new version", "tenant", *tenant)
+			return nil
+		}
+		logger.Info("the tenant has no version: the base model becomes its first version",
+			"tenant", *tenant, "base", base.Version)
 	}
 
-	model, edges, err := fitArtifacts(data, candidateVersion(*tenant))
+	model, edges, err := fitArtifacts(base, data, candidateVersion(*tenant))
 	if err != nil {
 		return fmt.Errorf("fit the artifacts of tenant %s: %w", *tenant, err)
 	}
@@ -144,13 +161,51 @@ func run(ctx context.Context, args []string, getenv func(string) string, dial di
 	return nil
 }
 
-// fitArtifacts fits both artifacts from the training data and returns them as
-// JSON documents.
-func fitArtifacts(data *daemonoperatorv1.GetBeliefTrainingDataResponse, version string) (model, edges []byte, err error) {
-	base, err := beliefvi.DefaultArtifact()
-	if err != nil {
-		return nil, nil, fmt.Errorf("load the base model: %w", err)
+// BaseModelEnv names the base model file of the trainer (gibson#31).
+const BaseModelEnv = "BELIEF_BASE_MODEL"
+
+// queryVariables are the three variables each base model must hold: the
+// runtime asks them of each host.
+var queryVariables = []string{"juicy", "exploitable", "reachable"}
+
+// loadBaseModel returns the embedded base-v1 for an empty path, or the model
+// in the file. A file that is not a valid model, or that lacks a query
+// variable, is an error: a trainer must not fit on a structure the runtime
+// cannot query.
+func loadBaseModel(path string) (beliefvi.ModelArtifact, error) {
+	if strings.TrimSpace(path) == "" {
+		base, err := beliefvi.DefaultArtifact()
+		if err != nil {
+			return beliefvi.ModelArtifact{}, fmt.Errorf("load the embedded base model: %w", err)
+		}
+		return base, nil
 	}
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the operator names the file
+	if err != nil {
+		return beliefvi.ModelArtifact{}, fmt.Errorf("read the base model %s: %w", path, err)
+	}
+	art, err := beliefvi.ParseModelArtifact(raw)
+	if err != nil {
+		return beliefvi.ModelArtifact{}, fmt.Errorf("parse the base model %s: %w", path, err)
+	}
+	if _, err := beliefvi.NewBeliefModel(art); err != nil {
+		return beliefvi.ModelArtifact{}, fmt.Errorf("the base model %s is not valid: %w", path, err)
+	}
+	have := make(map[string]bool, len(art.Variables))
+	for _, v := range art.Variables {
+		have[v] = true
+	}
+	for _, q := range queryVariables {
+		if !have[q] {
+			return beliefvi.ModelArtifact{}, fmt.Errorf("the base model %s has no %q variable", path, q)
+		}
+	}
+	return art, nil
+}
+
+// fitArtifacts fits both artifacts from the training data on the base model
+// and returns them as JSON documents.
+func fitArtifacts(base beliefvi.ModelArtifact, data *daemonoperatorv1.GetBeliefTrainingDataResponse, version string) (model, edges []byte, err error) {
 	rows := make([]fit.Row, 0, len(data.GetRows()))
 	for _, r := range data.GetRows() {
 		rows = append(rows, fit.Row(r.GetVars()))

@@ -174,6 +174,21 @@ service WorldService {
     };
   }
 
+  // ListProofReviews returns the proofs that wait for a human review
+  // (ADR-0131, gibson#798). A proof that carries only evidence the agent
+  // typed settles nothing: the daemon records it, and a reviewer reads the
+  // evidence here and settles the bet with SettleBetByHITL. A proof leaves
+  // the list when its bet settles by any path. Read-only, so the relation is
+  // member like every other WorldService read.
+  rpc ListProofReviews(ListProofReviewsRequest) returns (ListProofReviewsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member",
+      object_type: "tenant",
+      object_deriver: "tenant_from_identity",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // SettleBetByHITL records a human review verdict on a bet (gibson#280,
   // ADR-0123 decision 3): true_positive/false_positive settle the bet
   // (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
@@ -501,6 +516,43 @@ message ListOpenBetsResponse {
   repeated OpenBet bets = 1;
 }
 
+// ListProofReviewsRequest pages through the proofs that wait for a review,
+// in hypothesis id order (ADR-0028 rule 3).
+message ListProofReviewsRequest {
+  // page_size is the most proofs one page returns. Zero means 100. The
+  // daemon caps it at 1000 (internal/platform/pagetoken).
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first proof.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
+// ProofEvidenceView is one item of evidence as the agent typed it. The
+// content is redacted by the flight recorder policy of the tenant.
+message ProofEvidenceView {
+  string type = 1;
+  string title = 2;
+  string content = 3;
+}
+
+// ProofReview is one proof that waits for a human review. hypothesis_id is
+// the bet that SettleBetByHITL settles.
+message ProofReview {
+  string hypothesis_id = 1;
+  string mission_id = 2;
+  string scope_id = 3;
+  string technique = 4;
+  repeated ProofEvidenceView evidence = 5;
+  // submitted_at_unix_nano is the time the daemon received the proof.
+  int64 submitted_at_unix_nano = 6;
+}
+
+message ListProofReviewsResponse {
+  repeated ProofReview reviews = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
+}
+
 // SettleBetByHITLRequest names the bet and the reviewer's verdict.
 // The reviewing user is resolved server-side from the caller's identity
 // (ADR-0106 §6 provenance rule), never taken from the request — the same
@@ -535,4 +587,15 @@ message GetReputationResponse {
   // Removed in gibson#502: served and never read by any consumer.
   reserved 1, 2;
   reserved "prior_strength", "has_track_record";
+  // The fields below return the track record to the dashboard (gibson#619).
+  // They take new numbers and names because the old ones stay reserved.
+  //
+  // prior is the confidence a NEW hypothesis of this technique, in this
+  // scope, starts from (brain.Reputation.PriorStrength): the observed TRUE
+  // frequency once settled bets exist, or the neutral DefaultReputationPrior
+  // (0.5) when has_record is false.
+  double prior = 3;
+  // has_record is false when nothing is recorded for this key yet: "no
+  // data", never a bare zero value.
+  bool has_record = 4;
 }

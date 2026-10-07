@@ -198,18 +198,6 @@ type Filter struct {
 	Offset int
 }
 
-// Rotater is an optional extension implemented by providers that support
-// atomic check-and-set rotation. Callers should declare CanRotate=true in
-// Capabilities() when implementing it, and use a type assertion at the
-// call-site:
-//
-//	if r, ok := broker.(secrets.Rotater); ok && broker.Capabilities().CanRotate {
-//	    err = r.Rotate(ctx, tenant, name, oldValue, newValue)
-//	}
-type Rotater interface {
-	Rotate(ctx context.Context, tenant auth.TenantID, name string, oldValue, newValue []byte) error
-}
-
 // Closer is implemented by providers that hold long-lived resources
 // (e.g. token-renewal goroutines, persistent connections). Callers that
 // own the provider's lifecycle should invoke Close at shutdown.
@@ -219,8 +207,7 @@ type Closer interface {
 
 // circuitKey is the map key for per-(tenant, provider) circuit breakers.
 type circuitKey struct {
-	tenant   string
-	provider string
+	tenant string
 }
 
 // BrokerOptions configures NewBroker.
@@ -280,7 +267,7 @@ func NewBroker(opts BrokerOptions) (Broker, error) {
 
 // breaker returns the per-(tenant, provider) gobreaker, creating it lazily.
 func (b *circuitBroker) breaker(tenant string) *gobreaker.CircuitBreaker {
-	key := circuitKey{tenant: tenant, provider: b.providerName}
+	key := circuitKey{tenant: tenant}
 	if v, ok := b.breakers.Load(key); ok {
 		return v.(*gobreaker.CircuitBreaker)
 	}

@@ -26,13 +26,18 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // alertStoreIface is the narrow interface the alert handlers use for Redis operations.
 type alertStoreIface interface {
-	ListAlerts(ctx context.Context, tenantID, userID string, unreadOnly bool, limit int) ([]*storedAlert, error)
+	// ListAlerts returns one page of the alerts of a user, newest first: the
+	// alerts among limit index entries after the first offset entries.
+	// scanned is the number of index entries the page read, so the caller can
+	// tell a full page from the last one when unreadOnly drops alerts.
+	ListAlerts(ctx context.Context, tenantID, userID string, unreadOnly bool, offset, limit int) (alerts []*storedAlert, scanned int, err error)
 	// MarkAlertRead marks a single alert as read, but only when it belongs to
 	// callerUserID — alertDataKey is addressed by (tenant, alertID) alone, an
 	// id any tenant member can supply, so this ownership check (not the
@@ -62,13 +67,12 @@ type redisAlertStore struct {
 	logger *slog.Logger
 }
 
-// NewRedisAlertStore creates an alert store backed by the given Redis client.
-func NewRedisAlertStore(client goredis.UniversalClient, logger *slog.Logger) alertStoreIface {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &redisAlertStore{client: client, logger: logger}
-}
+const (
+	// alertsDefaultPageSize is the page size of ListAlerts when page_size is 0.
+	alertsDefaultPageSize = 50
+	// alertsMaxPageSize is the largest page of ListAlerts.
+	alertsMaxPageSize = 200
+)
 
 func alertIndexKey(tenantID, userID string) string {
 	return fmt.Sprintf("tenant:alerts:%s:%s", tenantID, userID)
@@ -78,21 +82,20 @@ func alertDataKey(tenantID, alertID string) string {
 	return fmt.Sprintf("tenant:alert:%s:%s", tenantID, alertID)
 }
 
-func (s *redisAlertStore) ListAlerts(ctx context.Context, tenantID, userID string, unreadOnly bool, limit int) ([]*storedAlert, error) {
+func (s *redisAlertStore) ListAlerts(ctx context.Context, tenantID, userID string, unreadOnly bool, offset, limit int) ([]*storedAlert, int, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = alertsDefaultPageSize
 	}
-	if limit > 200 {
-		limit = 200
-	}
+	limit = min(limit, alertsMaxPageSize)
+	offset = max(offset, 0)
 
 	// ZREVRANGE returns IDs sorted descending by score (created_at timestamp).
-	alertIDs, err := s.client.ZRevRange(ctx, alertIndexKey(tenantID, userID), 0, int64(limit-1)).Result()
+	alertIDs, err := s.client.ZRevRange(ctx, alertIndexKey(tenantID, userID), int64(offset), int64(offset+limit-1)).Result()
 	if err == goredis.Nil || len(alertIDs) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("alerts ZREVRANGE failed: %w", err)
+		return nil, 0, fmt.Errorf("alerts ZREVRANGE failed: %w", err)
 	}
 
 	alerts := make([]*storedAlert, 0, len(alertIDs))
@@ -117,7 +120,7 @@ func (s *redisAlertStore) ListAlerts(ctx context.Context, tenantID, userID strin
 		}
 		alerts = append(alerts, &a)
 	}
-	return alerts, nil
+	return alerts, len(alertIDs), nil
 }
 
 func (s *redisAlertStore) MarkAlertRead(ctx context.Context, tenantID, callerUserID, alertID string) error {
@@ -231,7 +234,15 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *tenantv1.ListAlertsR
 		return &tenantv1.ListAlertsResponse{Alerts: []*tenantv1.Alert{}}, nil
 	}
 
-	stored, err := s.alertStore.ListAlerts(ctx, tenantID, userID, req.GetUnreadOnly(), int(req.GetLimit()))
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
+	if req.GetPageSize() <= 0 {
+		limit = alertsDefaultPageSize
+	}
+	limit = min(limit, alertsMaxPageSize)
+	stored, scanned, err := s.alertStore.ListAlerts(ctx, tenantID, userID, req.GetUnreadOnly(), offset, limit)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "ListAlerts: store read failed",
 			slog.String("tenant_id", tenantID),
@@ -257,7 +268,10 @@ func (s *DaemonServer) ListAlerts(ctx context.Context, req *tenantv1.ListAlertsR
 		})
 	}
 
-	return &tenantv1.ListAlertsResponse{Alerts: alerts}, nil
+	return &tenantv1.ListAlertsResponse{
+		Alerts:        alerts,
+		NextPageToken: pagetoken.Next(offset, limit, scanned, -1),
+	}, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -20,8 +20,10 @@ func TestConnectionPointPeerPolicies(t *testing.T) {
 		TenantActivation:    activation,
 	})
 
-	if got := policies[completer]; len(got) != 1 || !got[connectionv1.ConnectionPointService_CompleteSignupStep_FullMethodName] {
-		t.Fatalf("completer methods = %v, want only CompleteSignupStep", got)
+	if got := policies[completer]; len(got) != 2 ||
+		!got[connectionv1.ConnectionPointService_CompleteSignupStep_FullMethodName] ||
+		!got[connectionv1.ConnectionPointService_DescribeSignupStep_FullMethodName] {
+		t.Fatalf("completer methods = %v, want CompleteSignupStep and DescribeSignupStep", got)
 	}
 	got := policies[activation]
 	if len(got) != 2 ||
@@ -38,8 +40,8 @@ func TestConnectionPointPeerPolicies(t *testing.T) {
 func TestConnectionPointPeerPolicies_OneIdentityForBoth(t *testing.T) {
 	const both = "spiffe://zeroroot.ai/component/external"
 	got := connectionPointPeerPolicies(api.ConnectionPointCallers{SignupStepCompleter: both, TenantActivation: both})
-	if len(got[both]) != 3 {
-		t.Fatalf("methods = %v, want all three", got[both])
+	if len(got[both]) != 4 {
+		t.Fatalf("methods = %v, want all four", got[both])
 	}
 	if len(connectionPointPeerPolicies(api.ConnectionPointCallers{})) != 0 {
 		t.Fatal("no configured caller must give no policy")

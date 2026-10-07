@@ -14,6 +14,7 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
@@ -258,7 +259,7 @@ func TestTenantBeliefs_AReplayReadsThePinnedVersion(t *testing.T) {
 	store := newFakeBeliefArtifacts()
 	store.makeCurrent("acme", 1)
 	b := testTenantBeliefs(t, testSchema(t), store)
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 	eng := reg.For("acme")
 

@@ -11,6 +11,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
 
 // fqdnRules returns each toFQDNs entry of a policy as "matchName=host:port"
@@ -78,8 +80,8 @@ func TestDesiredCiliumEgressPolicy(t *testing.T) {
 	}
 	for _, bad := range []string{"", "api.github.com:http", "api.github.com:0", "https://api.github.com", ":443"} {
 		ci.Spec.EgressAllow = []string{bad}
-		if _, err := desiredCiliumEgressPolicy(ci); !errors.Is(err, errBadEgressEntry) {
-			t.Errorf("entry %q: err = %v, want errBadEgressEntry", bad, err)
+		if _, err := desiredCiliumEgressPolicy(ci); !errors.Is(err, ciliumegress.ErrBadEntry) {
+			t.Errorf("entry %q: err = %v, want ciliumegress.ErrBadEntry", bad, err)
 		}
 	}
 }
@@ -106,7 +108,7 @@ func TestReconcileCiliumEgressPolicy(t *testing.T) {
 	ci := hostedInstance("gh", "tenant-acme")
 	key := types.NamespacedName{Namespace: "tenant-acme", Name: "connector-gh-egress"}
 	get := func() (*unstructured.Unstructured, error) {
-		u := newCiliumNetworkPolicy()
+		u := ciliumegress.NewPolicy()
 		return u, r.Get(ctx, key, u)
 	}
 
@@ -149,8 +151,8 @@ func TestReconcileCiliumEgressPolicy(t *testing.T) {
 	}
 
 	ci.Spec.EgressAllow = []string{"not a host"}
-	if err := r.reconcileCiliumEgressPolicy(ctx, ci); !errors.Is(err, errBadEgressEntry) {
-		t.Fatalf("bad entry: err = %v, want errBadEgressEntry", err)
+	if err := r.reconcileCiliumEgressPolicy(ctx, ci); !errors.Is(err, ciliumegress.ErrBadEntry) {
+		t.Fatalf("bad entry: err = %v, want ciliumegress.ErrBadEntry", err)
 	}
 }
 

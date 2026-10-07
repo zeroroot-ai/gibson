@@ -28,6 +28,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	daemontransport "github.com/zeroroot-ai/gibson/operators/tenant/pkg/transport/daemon"
@@ -198,6 +199,9 @@ type PendingTenant struct {
 	OwnerEmail    string
 	WorkspaceName string
 	Tier          string
+	// AuditRecordID is the daemon audit record of the human request that
+	// queued this tenant, or "" when no human request is behind it (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantProvisioning returns the daemon's queue of tenants awaiting
@@ -221,6 +225,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 			OwnerEmail:    p.GetOwnerEmail(),
 			WorkspaceName: p.GetWorkspaceName(),
 			Tier:          p.GetTier(),
+			AuditRecordID: p.GetAuditRecordId(),
 		})
 	}
 	return out, nil
@@ -310,6 +315,9 @@ type TenantAdminOp struct {
 	OwnerEmail     string
 	Tier           string
 	TierSet        bool
+	// AuditRecordID is the daemon audit record of the admin request behind
+	// this op (gibson#583).
+	AuditRecordID string
 }
 
 // ListPendingTenantOps returns the daemon's queue of admin tenant CRUD ops
@@ -336,6 +344,7 @@ func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]Te
 			OwnerEmail:     op.GetOwnerEmail(),
 			Tier:           op.GetTier(),
 			TierSet:        op.GetTierSet(),
+			AuditRecordID:  op.GetAuditRecordId(),
 		})
 	}
 	return out, nil
@@ -353,9 +362,19 @@ func (c *EntitlementsGRPCClient) AckTenantOp(ctx context.Context, opID string) e
 	return translateGRPCError("ack-tenant-op", err)
 }
 
-// EmitReconcileSummary maps the controller's strongly-typed summary onto
-// the daemon's generic AuditEventMessage. The daemon's audit emitter
-// stores the event in the platform Postgres + Redis stream.
+// EmitAuditEvent sends one audit record of an operator change to the daemon
+// (DaemonOperatorService.EmitAuditEvent, gibson#583). The daemon writes it to
+// Postgres before it answers, with the SPIFFE identity of the operator as the
+// actor. It implements audit.Sink.
+func (c *EntitlementsGRPCClient) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.EmitAuditEvent(authedCtx, audit.MessageOf(ev))
+	return translateGRPCError("emit-audit-event", err)
+}
+
 // parseAccessTuples splits "user#relation@object" into the gRPC
 // AccessTuple message. Mirrors EntitlementsHTTPClient's tuplesFromStrings
 // so the operator's caller surface is unchanged.
@@ -376,9 +395,6 @@ func parseAccessTuples(tuples []string) []*operatorv1.AccessTuple {
 	return out
 }
 
-func itoa(n int) string        { return fmt.Sprintf("%d", n) }
-func itoaInt64(n int64) string { return fmt.Sprintf("%d", n) }
-
 // SetAgentEnrollmentLimits reports the runtime cap an AgentEnrollment
 // declares (spec.maxRuntime, gibson#597) so the daemon can bound that
 // agent's sandboxed runs. Zero clears the cap.
@@ -394,6 +410,60 @@ func (c *EntitlementsGRPCClient) SetAgentEnrollmentLimits(ctx context.Context, t
 	})
 	if err != nil {
 		return fmt.Errorf("set agent enrollment limits %s/%s: %w", tenantID, agentName, err)
+	}
+	return nil
+}
+
+// DesiredCatalogPlugin is one plugin instance the daemon wants the operator to
+// run: the catalog plugin PluginID, for the tenant TenantID (gibson#815).
+type DesiredCatalogPlugin struct {
+	TenantID string
+	PluginID string
+	// Image is the image of the plugin, pinned by digest, from the catalog of
+	// the daemon.
+	Image string
+	// EgressAllow is the egress list of the catalog entry, as "host:port".
+	EgressAllow []string
+}
+
+// ListDesiredCatalogPlugins pulls every (tenant, catalog plugin) pair a tenant
+// enabled. The operator runs one instance for each pair.
+func (c *EntitlementsGRPCClient) ListDesiredCatalogPlugins(ctx context.Context) ([]DesiredCatalogPlugin, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.client.ListDesiredCatalogPlugins(authedCtx, &operatorv1.ListDesiredCatalogPluginsRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("list desired catalog plugins: %w", err)
+	}
+	out := make([]DesiredCatalogPlugin, 0, len(resp.GetPlugins()))
+	for _, p := range resp.GetPlugins() {
+		out = append(out, DesiredCatalogPlugin{
+			TenantID:    p.GetTenantId(),
+			PluginID:    p.GetPluginId(),
+			Image:       p.GetImage(),
+			EgressAllow: p.GetEgressAllow(),
+		})
+	}
+	return out, nil
+}
+
+// ReportCatalogPluginStatus reports the state of one tenant's plugin instance
+// to the daemon.
+func (c *EntitlementsGRPCClient) ReportCatalogPluginStatus(ctx context.Context, tenantID, pluginID, phase, lastError string) error {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = c.client.ReportCatalogPluginStatus(authedCtx, &operatorv1.ReportCatalogPluginStatusRequest{
+		TenantId:  tenantID,
+		PluginId:  pluginID,
+		Phase:     phase,
+		LastError: lastError,
+	})
+	if err != nil {
+		return fmt.Errorf("report catalog plugin status %s/%s: %w", tenantID, pluginID, err)
 	}
 	return nil
 }

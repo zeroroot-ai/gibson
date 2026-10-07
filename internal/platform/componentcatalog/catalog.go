@@ -645,7 +645,6 @@ type ConnectorEntry struct {
 	Endpoint           string
 	Transport          connectorv1alpha1.ConnectorTransport
 	Auth               connectorv1alpha1.ConnectorAuthKind
-	OAuthScope         string
 	DefaultInstanceURL string
 }
 
@@ -662,7 +661,6 @@ func (m Manifest) toConnectorEntry() ConnectorEntry {
 		Endpoint:           s.Endpoint,
 		Transport:          s.Transport,
 		Auth:               s.Auth,
-		OAuthScope:         s.OAuthScope,
 		DefaultInstanceURL: s.DefaultInstanceURL,
 	}
 }
@@ -684,6 +682,10 @@ type PluginEntry struct {
 	ID          string
 	DisplayName string
 	Description string
+	// Image is the image of the plugin, pinned by digest.
+	Image string
+	// EgressAllow is the egress list of the entry, as "host:port".
+	EgressAllow []string
 }
 
 // ListPlugins returns the catalog plugins, in the order of the catalog.
@@ -697,6 +699,8 @@ func ListPlugins() []PluginEntry {
 			ID:          catalog[i].ID,
 			DisplayName: catalog[i].DisplayName,
 			Description: catalog[i].Description,
+			Image:       catalog[i].plugin.Image,
+			EgressAllow: append([]string(nil), catalog[i].EgressAllow...),
 		})
 	}
 	return out
@@ -841,7 +845,6 @@ func LookupAgent(id string) (AgentEntry, bool) {
 type ToolEntry struct {
 	ID          string
 	DisplayName string
-	Description string
 	// Image is the digest-pinned tool image (usually the shared executor).
 	Image string
 	// Command is the launch command (the manifest `command`, shell-split).
@@ -850,8 +853,6 @@ type ToolEntry struct {
 	ContentTrust string
 	// DispatchMode is "sandboxed" | "agent" | "plugin".
 	DispatchMode string
-	// EgressAllow is the tool's egress ceiling (envelope-level).
-	EgressAllow []string
 	// Resources is the manifest's sandbox size; zero fields take defaults.
 	Resources AgentResources
 	// OutputProtoType is the response message this tool emits.
@@ -863,12 +864,10 @@ func (m Manifest) toToolEntry() ToolEntry {
 	return ToolEntry{
 		ID:           m.ID,
 		DisplayName:  m.DisplayName,
-		Description:  m.Description,
 		Image:        s.Image,
 		Command:      strings.Fields(s.Command),
 		ContentTrust: s.ContentTrust,
 		DispatchMode: s.DispatchMode,
-		EgressAllow:  m.EgressAllow,
 		Resources:    s.Resources,
 
 		OutputProtoType: s.OutputProtoType,

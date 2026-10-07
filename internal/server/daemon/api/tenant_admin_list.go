@@ -124,11 +124,6 @@ func (s *DaemonServer) ListAgentIdentities(ctx context.Context, req *tenantpb.Li
 			Description:      sa.Description,
 			CreatedAt:        timestamppb.New(sa.CreatedAt),
 			CreatedBySubject: createdBy,
-			// LastAuthenticatedAt is nil when IdP doesn't track it; proto null
-			// is the zero value so we leave it unset when nil.
-		}
-		if sa.LastAuthenticatedAt != nil {
-			entry.LastAuthenticatedAt = timestamppb.New(*sa.LastAuthenticatedAt)
 		}
 		identities = append(identities, entry)
 	}

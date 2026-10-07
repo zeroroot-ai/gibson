@@ -140,6 +140,21 @@ service AdminTenantService {
       allowed_identities: 1  // USER
     };
   }
+
+  // AdminGetPlatformHealth reports the state of the platform planes that a
+  // healthy-looking cluster can hide (hosted#174). Today it reports the
+  // secret plane: the daemon asks the secret source of the platform to
+  // answer now. When the source stops answering, the pods keep running on
+  // the Secrets that were written earlier, so only an active probe shows it.
+  // The Platform owner reads it in the dashboard.
+  rpc AdminGetPlatformHealth(AdminGetPlatformHealthRequest) returns (AdminGetPlatformHealthResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_owner",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 1  // USER
+    };
+  }
 }
 
 // PendingRegistration is one registration awaiting an administrator's
@@ -166,14 +181,22 @@ message PendingRegistration {
 
 // AdminListPendingRegistrationsRequest asks for the queue.
 message AdminListPendingRegistrationsRequest {
-  // limit caps the page. Zero means the server default; the server also caps
-  // it, so a large value cannot turn this into a full-table read.
-  int32 limit = 1;
+  reserved 1;
+  reserved "limit";
+  // page_size is the largest number of registrations on one page. Zero means
+  // the server default. The server also caps it, so a large value cannot turn
+  // this into a full-table read.
+  int32 page_size = 2;
+  // page_token is the next_page_token of the previous page. Empty for the
+  // first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // AdminListPendingRegistrationsResponse carries the queue, oldest first.
 message AdminListPendingRegistrationsResponse {
   repeated PendingRegistration registrations = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // AdminApproveRegistrationRequest names the registration to approve.
@@ -271,3 +294,32 @@ message AdminDeleteTenantResponse {
   string op_id = 1;
 }
 
+message AdminGetPlatformHealthRequest {}
+
+// PlatformPlaneState is the state of one plane at the time of the probe.
+enum PlatformPlaneState {
+  PLATFORM_PLANE_STATE_UNSPECIFIED = 0;
+  // PLATFORM_PLANE_STATE_HEALTHY: the probe got an answer.
+  PLATFORM_PLANE_STATE_HEALTHY = 1;
+  // PLATFORM_PLANE_STATE_UNHEALTHY: the probe got an error or no answer in
+  // time.
+  PLATFORM_PLANE_STATE_UNHEALTHY = 2;
+  // PLATFORM_PLANE_STATE_UNKNOWN: the daemon has no probe for the plane, so
+  // it does not claim that the plane is healthy.
+  PLATFORM_PLANE_STATE_UNKNOWN = 3;
+}
+
+// PlatformPlaneHealth is the result of one probe.
+message PlatformPlaneHealth {
+  // plane names the plane, for example "secret_plane".
+  string plane = 1;
+  PlatformPlaneState state = 2;
+  // detail says what failed. It is empty when the plane is healthy.
+  string detail = 3;
+  // checked_at_unix is the time of the probe.
+  int64 checked_at_unix = 4;
+}
+
+message AdminGetPlatformHealthResponse {
+  repeated PlatformPlaneHealth planes = 1;
+}

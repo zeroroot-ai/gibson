@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 )
 
 // failingTimelineStore cannot load, so the hydrate of each tenant fails and
@@ -43,8 +44,7 @@ func (failingTimelineStore) LoadSnapshot(context.Context, string) (*brain.WorldS
 func (failingTimelineStore) TrimTo(context.Context, string, string) error { return errStoreDown }
 
 func stoppedRegistry() *brain.Registry {
-	reg := brain.NewRegistry(context.Background())
-	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return failingTimelineStore{}, nil })
+	reg := brain.NewRegistry(context.Background(), func(context.Context, string) (brain.TimelineStore, error) { return failingTimelineStore{}, nil })
 	return reg
 }
 
@@ -54,7 +54,7 @@ func TestTenantEngine_AStoppedEngineIsUnavailable(t *testing.T) {
 	if _, ok := TenantEngine(reg, "acme"); ok {
 		t.Fatal("TenantEngine returned a stopped engine")
 	}
-	if _, ok := TenantEngine(brain.NewRegistry(context.Background()), "acme"); !ok {
+	if _, ok := TenantEngine(brain.NewRegistry(context.Background(), braintest.StoreFactory()), "acme"); !ok {
 		t.Fatal("TenantEngine refused a live engine")
 	}
 	if _, _, err := (&DomainPackService{registry: reg}).engine(tenantCtx("acme"), "ListDomainPacks"); status.Code(err) != codes.Unavailable {

@@ -172,7 +172,7 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// explaining why — the ingest path was imported everywhere and wired
 		// nowhere, so sandboxed discoveries were silently discarded (gibson#1266).
 		sbxDiscovery := d.newDiscoveryProcessor()
-		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, sandboxTracer, sandboxLogger, sbxDiscovery, newLiveEventPublisher(d.liveAgents))
+		execer, err := NewSetecSandboxedExecutor(d.config.Sandbox, daemonSVIDSource{d: d}, sandboxTracer, sandboxLogger, sbxDiscovery, newLiveEventPublisher(d.liveAgents))
 		if err != nil {
 			// The sandbox fleet is required (ADR-0142): a daemon that cannot
 			// build its executor does not start.
@@ -195,11 +195,12 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// (gibson#13): read once, from the chart's projection of the Envoy
 		// TLS Secret, and empty when the edge chains to public roots.
 		platformCA := platformCAPEM(d.config.Sandbox.Setec.PlatformCAFile, sandboxLogger)
-		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents), platformCA)
+		launcher, launchErr := NewSetecAgentLauncher(d.config.Sandbox, daemonSVIDSource{d: d}, sandboxTracer, sandboxLogger, newLiveEventPublisher(d.liveAgents), platformCA)
 		if wire, warn := agentLauncherWiring(launcher, launchErr); !wire {
 			d.logger.Warn(ctx, warn, "error", launchErr)
 		} else {
 			config.AgentLauncher = launcher
+			config.Forks = d.forks
 			// AgentLaunchSpecResolver reads a sandboxed agent's launch spec
 			// (image, sandbox class, egress ceiling, model) from its signed
 			// catalog manifest (gibson#1597, ADR-0136/0116). An agent with no
@@ -226,6 +227,13 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 			// The bank reconciler launches members outside any mission harness,
 			// so it needs the same three seams the harness gets (gibson#1709).
 			d.agentLauncher = launcher
+			// The bank reconciler suspends an idle member and resumes it
+			// when jobs wait (ADR-0119, gibson#809).
+			suspender, susErr := newSetecSuspender(d.config.Sandbox, daemonSVIDSource{d: d})
+			if susErr != nil {
+				return nil, fmt.Errorf("setec suspender: %w", susErr)
+			}
+			d.sandboxSuspender = suspender
 			d.agentLaunchSpecResolver = config.AgentLaunchSpecResolver
 			d.agentCallbackEndpoint = config.AgentCallbackEndpoint
 			d.logger.Info(ctx, "sandboxed agent launcher wired",
@@ -370,11 +378,10 @@ func (d *daemonImpl) taskGrantVerifier() harness.TaskGrantVerifier {
 // targetFactsLookup is what a dispatched tool's target facts are read through,
 // read at harness creation rather than captured at factory construction.
 //
-// A nil store returns a nil INTERFACE and not a typed nil: the harness checks
-// `h.targetFacts == nil` to decide whether to look a target up at all, and a
-// typed nil wrapped in a non-nil interface passes that check and then panics on
-// the call. Returning d.targetStore unconditionally would do exactly that
-// whenever the daemon runs without Redis.
+// A nil store returns a nil INTERFACE and not a typed nil: the harness factory
+// refuses a nil lookup (gibson#681), and a typed nil wrapped in a non-nil
+// interface passes that check and then panics on the call. Start sets the
+// store before any dispatch, so the refusal shows a wiring defect.
 func (d *daemonImpl) targetFactsLookup() harness.TargetFactsLookup {
 	if d.targetStore == nil {
 		return nil

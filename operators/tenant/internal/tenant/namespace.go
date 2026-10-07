@@ -66,14 +66,6 @@ func NamespaceFor(ctx context.Context, c client.Client, tenantID string) (string
 	return derived, nil
 }
 
-// NamespaceForKnownID is the no-cluster-lookup variant for callers that
-// already have a sanitised auth.TenantID and do NOT want to hit the
-// API server (tests, very-early startup, hot loops). Returns the
-// runtime-canonical derivation only.
-func NamespaceForKnownID(id auth.TenantID) string {
-	return derivedNamespace(id)
-}
-
 // derivedNamespace is the single private helper that encodes the
 // "tenant-<slug>" runtime convention. If/when the cross-repo contract
 // reconciles to the SDK's bare-slug form, this is the one place to

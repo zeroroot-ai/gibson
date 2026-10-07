@@ -46,11 +46,6 @@ func NewShutdownCoordinator(cfg config.ShutdownConfig, logger *observability.Log
 	}
 }
 
-// SetTracer sets the tracer for distributed tracing of shutdown operations.
-func (sc *ShutdownCoordinator) SetTracer(tracer trace.Tracer) {
-	sc.tracer = tracer
-}
-
 // RegisterPhase adds a shutdown phase to the execution sequence.
 // Phases are executed in the order they are registered.
 func (sc *ShutdownCoordinator) RegisterPhase(phase ShutdownPhase) {

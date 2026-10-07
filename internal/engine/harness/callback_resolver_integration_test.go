@@ -342,7 +342,7 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 
 	// Create service and registry
 	registry := NewCallbackHarnessRegistry()
-	service := NewHarnessCallbackServiceWithRegistry(logger, registry)
+	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 	missionID := "integration-mission-123"
 	agentName := "integration-agent"

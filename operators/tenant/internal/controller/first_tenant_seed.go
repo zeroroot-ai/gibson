@@ -13,7 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // defaultFirstTenantSeedInterval is how often the seed retries the enqueue
@@ -51,6 +53,10 @@ type FirstTenantSeedRunnable struct {
 	// Interval between retries until the first successful enqueue. Zero uses
 	// defaultFirstTenantSeedInterval.
 	Interval time.Duration
+	// Audit writes the record of the enqueue before the enqueue (gibson#583).
+	// Required. No human request is behind the seed, so the record names the
+	// operator as the only actor.
+	Audit *audit.SagaEmitter
 }
 
 // NeedLeaderElection ensures only the lead replica seeds, so two replicas never
@@ -96,7 +102,7 @@ func FirstTenantSeedFromEnv(getenv func(string) string, daemon TenantProvisionin
 // than living uncovered in package main. Returns an error the caller turns into
 // a fail-fast exit: a seed switched on but misconfigured, or a manager that
 // refuses the runnable, must stop boot rather than silently never seed.
-func RegisterFirstTenantSeed(mgr manager.Manager, getenv func(string) string, daemon TenantProvisioningEnqueuer, logger logr.Logger) error {
+func RegisterFirstTenantSeed(mgr manager.Manager, getenv func(string) string, daemon TenantProvisioningEnqueuer, auditEmitter *audit.SagaEmitter, logger logr.Logger) error {
 	seed, enabled, err := FirstTenantSeedFromEnv(getenv, daemon)
 	if err != nil {
 		return err
@@ -104,6 +110,10 @@ func RegisterFirstTenantSeed(mgr manager.Manager, getenv func(string) string, da
 	if !enabled {
 		return nil
 	}
+	if auditEmitter == nil {
+		return fmt.Errorf("first-tenant seed: %w", saga.ErrNoAudit)
+	}
+	seed.Audit = auditEmitter
 	if err := seed.SetupWithManager(mgr); err != nil {
 		return err
 	}
@@ -147,11 +157,26 @@ func (r *FirstTenantSeedRunnable) Start(ctx context.Context) error {
 // daemon accepted the row, whether freshly inserted or already present), false
 // to retry on the next tick.
 func (r *FirstTenantSeedRunnable) seedOnce(ctx context.Context, logger logr.Logger) bool {
-	alreadyExisted, err := r.Daemon.EnqueueTenantProvisioning(ctx, provision.PendingTenant{
-		TenantID:      r.TenantID,
-		WorkspaceName: r.DisplayName,
-		OwnerEmail:    r.OwnerEmail,
-		Tier:          r.Tier,
+	ev := audit.Event{
+		Action:     audit.ActionFirstTenantEnqueue,
+		TenantID:   r.TenantID,
+		TargetType: "tenant",
+		TargetID:   r.TenantID,
+		Fields:     map[string]string{"owner_email": r.OwnerEmail, "tier": r.Tier},
+	}
+	var alreadyExisted bool
+	err := r.Audit.Change(ctx, ev, func() error {
+		var eerr error
+		alreadyExisted, eerr = r.Daemon.EnqueueTenantProvisioning(ctx, provision.PendingTenant{
+			TenantID:      r.TenantID,
+			WorkspaceName: r.DisplayName,
+			OwnerEmail:    r.OwnerEmail,
+			Tier:          r.Tier,
+		})
+		if eerr != nil {
+			return fmt.Errorf("enqueue the first tenant %s: %w", r.TenantID, eerr)
+		}
+		return nil
 	})
 	if err != nil {
 		logger.Error(err, "first-tenant seed enqueue failed; will retry",

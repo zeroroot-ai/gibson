@@ -68,16 +68,6 @@ type EntitlementsHTTPClient struct {
 	Tokens     TokenSource
 }
 
-// NewEntitlementsHTTPClient constructs a client with sensible defaults.
-func NewEntitlementsHTTPClient(baseURL string, tokens TokenSource) *EntitlementsHTTPClient {
-	return &EntitlementsHTTPClient{
-		BaseURL:    baseURL,
-		Audience:   "gibson-dashboard",
-		HTTPClient: &http.Client{},
-		Tokens:     tokens,
-	}
-}
-
 // --- Provisioner interface implementation
 
 // SetTenantZitadelOrg seeds the daemon's tenant -> Zitadel-org mapping
@@ -90,67 +80,6 @@ func (c *EntitlementsHTTPClient) SetTenantZitadelOrg(ctx context.Context, tenant
 	}
 	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/set-tenant-zitadel-org", body)
 	return err
-}
-
-func (c *EntitlementsHTTPClient) ListFeatureTuples(ctx context.Context, tenantID string) ([]string, error) {
-	body := map[string]any{"tenant_id": tenantID}
-	raw, err := c.post(ctx, "/api/admin/provisioning/entitlements/list-feature-tuples", body)
-	if err != nil {
-		return nil, err
-	}
-	var resp struct {
-		Relations []string `json:"relations"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, fmt.Errorf("entitlements: decode list-feature-tuples: %w", err)
-	}
-	return resp.Relations, nil
-}
-
-func (c *EntitlementsHTTPClient) WriteAccessTuples(ctx context.Context, add, del []string, reason string) error {
-	body := map[string]any{
-		"add":    tuplesFromStrings(add),
-		"delete": tuplesFromStrings(del),
-		"reason": reason,
-	}
-	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/write-tuples", body)
-	return err
-}
-
-func (c *EntitlementsHTTPClient) SeedCatalogTenantEnabled(ctx context.Context, tenantID string) error {
-	body := map[string]any{"tenant_id": tenantID}
-	_, err := c.post(ctx, "/api/admin/provisioning/entitlements/seed-catalog-tenant-enabled", body)
-	return err
-}
-
-// tuplesFromStrings parses fully-qualified tuples "user#relation@object" into
-// the {user, relation, object} JSON shape the daemon's AccessTuple expects.
-func tuplesFromStrings(tuples []string) []map[string]string {
-	out := make([]map[string]string, 0, len(tuples))
-	for _, t := range tuples {
-		// Parse strictly: u#r@o. If any part is missing we skip silently
-		// to prevent a malformed tuple from aborting an entire reconcile.
-		hashIdx := indexByte(t, '#')
-		atIdx := indexByte(t, '@')
-		if hashIdx <= 0 || atIdx <= hashIdx+1 || atIdx >= len(t)-1 {
-			continue
-		}
-		out = append(out, map[string]string{
-			"user":     t[:hashIdx],
-			"relation": t[hashIdx+1 : atIdx],
-			"object":   t[atIdx+1:],
-		})
-	}
-	return out
-}
-
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
 }
 
 // post is the shared HTTP transport. Wraps the JWT-SVID mint + POST +

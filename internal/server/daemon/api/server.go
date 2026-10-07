@@ -40,7 +40,6 @@ import (
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
-	"github.com/zeroroot-ai/gibson/pkg/version"
 	agentidentityv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
@@ -169,6 +168,10 @@ type DaemonServer struct {
 	// tenant is not queued when its owner has no way in (hosted#205).
 	ownerInviter ProvisionedOwnerInviter
 
+	// auditRetention reads and sets the audit retention period of a tenant
+	// (gibson#676). The audit wiring sets it at start.
+	auditRetention *audit.RetentionSettings
+
 	// lokiQuerier is the Loki HTTP query client for audit events.
 	// May be nil; when nil, ListAuditEvents falls back to the Redis audit stream.
 	lokiQuerier audit.LokiQuerier
@@ -176,6 +179,12 @@ type DaemonServer struct {
 	// missionDraftStore persists mission YAML drafts per tenant.
 	// May be nil; when nil, SaveMissionDraft/ListMissionDrafts return codes.Unavailable.
 	missionDraftStore missionDraftStoreIface
+
+	// producedComponents records each component that an agent enrolled, and
+	// producedComponentLimit is the quota for each tenant (gibson#33). With
+	// no store, EnrollComponent is Unavailable.
+	producedComponents     producedComponentStore
+	producedComponentLimit int
 
 	// poolGetter returns the live per-tenant data-plane pool.
 	// Used by ExportFindings (Neo4j Cypher path).
@@ -283,6 +292,11 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 4.6).
 	modelGateInvalidator modelGateInvalidator
 
+	// secretPlaneProbe backs AdminGetPlatformHealth (hosted#174). Wired via
+	// WithSecretPlaneProbe. When nil the RPC reports the secret plane as
+	// UNKNOWN, never as healthy.
+	secretPlaneProbe SecretPlaneProbe
+
 	// auditQuery backs ListModelResolutionEvents. May be nil; when nil
 	// the RPC returns an empty response rather than Unimplemented.
 	// Spec: llm-user-attribution-governance (Requirement 4.9).
@@ -328,6 +342,11 @@ type DaemonServer struct {
 	// connectionCallers are the SPIFFE IDs that may call the neutral
 	// connection points (connection_points.go).
 	connectionCallers ConnectionPointCallers
+
+	// ownerWelcome sends the onboarding email to the owner of a workspace
+	// from signup, once, when the tenant is ready (owner_welcome.go,
+	// gibson#987). Nil when the install has no delivering mail transport.
+	ownerWelcome ownerWelcomeConfig
 
 	// tenantActivation caches reads of the tenant activation signal
 	// (tenant_activation.go).
@@ -1227,9 +1246,8 @@ func (s *DaemonServer) Connect(ctx context.Context, req *daemonpb.ConnectRequest
 	}
 
 	return &daemonpb.ConnectResponse{
-		DaemonVersion: version.Version,
-		SessionId:     sessionID,
-		GrpcAddress:   status.GRPCAddress,
+		SessionId:   sessionID,
+		GrpcAddress: status.GRPCAddress,
 	}, nil
 }
 
@@ -1571,9 +1589,7 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *daemonpb.GetAgen
 			Health:       agentStatus.Agent.Health,
 			LastSeen:     agentStatus.Agent.LastSeen.Unix(),
 		},
-		Active:        agentStatus.Active,
-		CurrentTask:   agentStatus.CurrentTask,
-		TaskStartTime: agentStatus.TaskStartTime.Unix(),
+		Active: agentStatus.Active,
 	}, nil
 }
 
@@ -1735,41 +1751,6 @@ func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.Ser
 						Error:     event.MissionEvent.Error,
 					},
 				}
-			} else if event.AgentEvent != nil {
-				protoEvent.Event = &daemonpb.SubscribeResponse_AgentEvent{
-					AgentEvent: &daemonpb.AgentEvent{
-						EventType: event.AgentEvent.EventType,
-						Timestamp: event.AgentEvent.Timestamp.Unix(),
-						AgentId:   event.AgentEvent.AgentID,
-						AgentName: event.AgentEvent.AgentName,
-						Message:   event.AgentEvent.Message,
-						Data:      StringToTypedMap(event.AgentEvent.Data),
-					},
-				}
-			} else if event.FindingEvent != nil {
-				protoEvent.Event = &daemonpb.SubscribeResponse_FindingEvent{
-					FindingEvent: &daemonpb.FindingEvent{
-						EventType: event.FindingEvent.EventType,
-						Timestamp: event.FindingEvent.Timestamp.Unix(),
-						Finding: &daemonpb.FindingInfo{
-							Id:          event.FindingEvent.Finding.ID,
-							Title:       event.FindingEvent.Finding.Title,
-							Severity:    event.FindingEvent.Finding.Severity,
-							Category:    event.FindingEvent.Finding.Category,
-							Description: event.FindingEvent.Finding.Description,
-							Technique:   event.FindingEvent.Finding.Technique,
-							Evidence:    event.FindingEvent.Finding.Evidence,
-							Timestamp:   event.FindingEvent.Finding.Timestamp.Unix(),
-						},
-						MissionId: event.FindingEvent.MissionID,
-					},
-				}
-			} else if event.ToolEvent != nil {
-				protoEvent.Event = convertToToolEvent(event.ToolEvent)
-			} else if event.LLMEvent != nil {
-				protoEvent.Event = convertToLLMEvent(event.LLMEvent)
-			} else if event.OrchestratorEvent != nil {
-				protoEvent.Event = convertToOrchestratorEvent(event.OrchestratorEvent)
 			}
 
 			// Send event to client
@@ -1778,84 +1759,6 @@ func (s *DaemonServer) Subscribe(req *daemonpb.SubscribeRequest, stream grpc.Ser
 				return status_grpc.Errorf(codes.Internal, "failed to send event: %v", err)
 			}
 		}
-	}
-}
-
-// convertToToolEvent converts internal ToolEventData to proto ToolEvent oneof wrapper.
-func convertToToolEvent(data *ToolEventData) *daemonpb.SubscribeResponse_ToolEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_ToolEvent{
-		ToolEvent: &daemonpb.ToolEvent{
-			EventType:       data.EventType,
-			Timestamp:       data.Timestamp.Unix(),
-			ToolName:        data.ToolName,
-			AgentId:         data.AgentID,
-			AgentName:       data.AgentName,
-			MissionId:       data.MissionID,
-			Message:         data.Message,
-			Duration:        data.Duration,
-			Progress:        data.Progress,
-			Error:           data.Error,
-			ErrorCode:       data.ErrorCode,
-			Warning:         data.Warning,
-			WarningSeverity: data.WarningSeverity,
-		},
-	}
-}
-
-// convertToLLMEvent converts internal LLMEventData to proto LLMEvent oneof wrapper.
-func convertToLLMEvent(data *LLMEventData) *daemonpb.SubscribeResponse_LlmEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_LlmEvent{
-		LlmEvent: &daemonpb.LLMEvent{
-			EventType:        data.EventType,
-			Timestamp:        data.Timestamp.Unix(),
-			AgentId:          data.AgentID,
-			AgentName:        data.AgentName,
-			Model:            data.Model,
-			Slot:             data.Slot,
-			MessageCount:     int32(data.MessageCount),
-			PromptTokens:     int32(data.PromptTokens),
-			CompletionTokens: int32(data.CompletionTokens),
-			TotalTokens:      int32(data.TotalTokens),
-			DurationMs:       data.Duration,
-			Cached:           data.Cached,
-			Error:            data.Error,
-			ErrorCode:        data.ErrorCode,
-			WillRetry:        data.WillRetry,
-		},
-	}
-}
-
-// convertToOrchestratorEvent converts internal OrchestratorEventData to proto OrchestratorEvent oneof wrapper.
-func convertToOrchestratorEvent(data *OrchestratorEventData) *daemonpb.SubscribeResponse_OrchestratorEvent {
-	if data == nil {
-		return nil
-	}
-
-	return &daemonpb.SubscribeResponse_OrchestratorEvent{
-		OrchestratorEvent: &daemonpb.OrchestratorEvent{
-			EventType:       data.EventType,
-			Timestamp:       data.Timestamp.Unix(),
-			MissionId:       data.MissionID,
-			Iteration:       int32(data.Iteration),
-			Action:          data.Action,
-			TargetNodeId:    data.TargetNodeID,
-			TargetAgentName: data.TargetAgentName,
-			Confidence:      data.Confidence,
-			Reasoning:       data.Reasoning,
-			TokensUsed:      int32(data.TokensUsed),
-			LatencyMs:       data.Latency,
-			ApprovalId:      data.ApprovalID,
-			Risk:            data.Risk,
-			TimeoutSeconds:  int32(data.Timeout),
-		},
 	}
 }
 
@@ -2000,19 +1903,14 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMiss
 // ResumeMission resumes a paused mission and streams execution events.
 //
 // A resume continues the same run. It never moves a run back to a checkpoint:
-// RewindMission does that, and it starts a new run (ADR-0170). A request that
-// names a checkpoint is refused, so a caller cannot ask for a rewind that this
-// path would ignore.
+// RewindMission does that, and it starts a new run (ADR-0170). The request has
+// no checkpoint field (D67, sdk#254).
 func (s *DaemonServer) ResumeMission(req *daemonpb.ResumeMissionRequest, stream grpc.ServerStreamingServer[daemonpb.ResumeMissionResponse]) error {
 	s.logger.Info("mission resume request received", "mission_id", req.MissionId)
 
 	// Validate mission ID
 	if req.MissionId == "" {
 		return status_grpc.Errorf(codes.InvalidArgument, "mission ID is required")
-	}
-	if req.GetCheckpointId() != "" || req.GetTargetCheckpointId() != "" {
-		return status_grpc.Error(codes.InvalidArgument,
-			"a resume continues the same run and takes no checkpoint; use RewindMission to start a run at a checkpoint")
 	}
 
 	// Subscribe BEFORE resuming so no early lifecycle event can be missed;
@@ -2132,7 +2030,6 @@ func (s *DaemonServer) GetMissionHistory(ctx context.Context, req *daemonpb.GetM
 			CreatedAt:     run.CreatedAt,
 			CompletedAt:   run.CompletedAt,
 			FindingsCount: int32(run.FindingsCount),
-			PreviousRunId: run.PreviousRunID,
 			TraceId:       run.TraceID,
 		}
 		protoRuns[i].ParentMissionId = run.ParentMissionID
@@ -2396,6 +2293,9 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 	if err := graph.Validate(def); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "invalid mission definition: %v", err)
 	}
+	if err := checkCueSourceCompilesTo(ctx, req.GetCueSource(), def); err != nil {
+		return nil, err
+	}
 
 	result, err := s.daemon.CreateMissionDefinition(ctx, CreateMissionDefinitionData{
 		Definition: def,
@@ -2569,7 +2469,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	role := pickHighestRole(isOwner, isAdmin, isWriter)
 	effectiveAdmin := isOwner || isAdmin
 
-	// Component grants and team memberships were previously sourced from the
+	// Component grants were previously sourced from the
 	// provisioner package; those features now live in the tenant-operator
 	// control plane. Returning empty slices keeps the proto response valid.
 	return &daemonpb.GetMyPermissionsResponse{
@@ -2577,7 +2477,6 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		Role:            role,
 		IsAdmin:         effectiveAdmin,
 		ComponentGrants: nil,
-		TeamMemberships: nil,
 	}, nil
 }
 

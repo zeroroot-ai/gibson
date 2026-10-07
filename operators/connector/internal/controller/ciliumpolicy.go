@@ -8,11 +8,7 @@ package controller
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net"
-	"strconv"
-	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
 
 // The egress of a connector follows its host list (ADR-0114). A Kubernetes
@@ -35,78 +32,19 @@ import (
 // connector with an empty list therefore reaches no public host. The ToolHive
 // host list of the connector stays as the second layer (egressprofile.go).
 
-const (
-	ciliumAPIVersion        = "cilium.io/v2"
-	kindCiliumNetworkPolicy = "CiliumNetworkPolicy"
-	defaultEgressPort       = 443
-)
-
 // ciliumEgressPolicyName is the name of the egress policy of a connector.
 func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
 	return "connector-" + ci.Name + "-egress"
 }
 
-// newCiliumNetworkPolicy returns an empty CiliumNetworkPolicy object.
-func newCiliumNetworkPolicy() *unstructured.Unstructured {
-	u := &unstructured.Unstructured{}
-	u.SetAPIVersion(ciliumAPIVersion)
-	u.SetKind(kindCiliumNetworkPolicy)
-	return u
-}
-
-// errBadEgressEntry reports an egressAllow entry that is not host or host:port.
-var errBadEgressEntry = errors.New("an egressAllow entry is not host or host:port")
-
-// parseEgressEntry splits an egressAllow entry ("api.github.com:443",
-// "*.slack.com:443" or "api.osv.dev") into its host and port. The port is 443
-// when the entry names none.
-func parseEgressEntry(entry string) (host string, port int, err error) {
-	entry = strings.TrimSpace(entry)
-	host, portStr, splitErr := net.SplitHostPort(entry)
-	if splitErr != nil {
-		host, portStr = entry, strconv.Itoa(defaultEgressPort)
-	}
-	port, convErr := strconv.Atoi(portStr)
-	if host == "" || strings.ContainsAny(host, ":/ ") || convErr != nil || port < 1 || port > 65535 {
-		return "", 0, fmt.Errorf("%w: %q", errBadEgressEntry, entry)
-	}
-	return host, port, nil
-}
-
 // desiredCiliumEgressPolicy is the egress policy of a connector with a
 // non-empty host list.
 func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance) (*unstructured.Unstructured, error) {
-	egress := []interface{}{map[string]interface{}{
-		"toEndpoints": []interface{}{map[string]interface{}{
-			"matchLabels": map[string]interface{}{
-				"io.kubernetes.pod.namespace": dnsNamespace,
-				"k8s-app":                     "kube-dns",
-			},
-		}},
-		"toPorts": []interface{}{map[string]interface{}{
-			"ports": []interface{}{map[string]interface{}{"port": "53", "protocol": "ANY"}},
-			"rules": map[string]interface{}{
-				"dns": []interface{}{map[string]interface{}{"matchPattern": "*"}},
-			},
-		}},
-	}}
-	for _, entry := range ci.Spec.EgressAllow {
-		host, port, err := parseEgressEntry(entry)
-		if err != nil {
-			return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
-		}
-		fqdn := map[string]interface{}{"matchName": host}
-		if strings.Contains(host, "*") {
-			fqdn = map[string]interface{}{"matchPattern": host}
-		}
-		egress = append(egress, map[string]interface{}{
-			"toFQDNs": []interface{}{fqdn},
-			"toPorts": []interface{}{map[string]interface{}{
-				"ports": []interface{}{map[string]interface{}{"port": strconv.Itoa(port), "protocol": "TCP"}},
-			}},
-		})
+	egress, err := ciliumegress.Rules(ci.Spec.EgressAllow)
+	if err != nil {
+		return nil, fmt.Errorf("connector %s: %w", ci.Name, err)
 	}
-	u := newCiliumNetworkPolicy()
+	u := ciliumegress.NewPolicy()
 	u.SetName(ciliumEgressPolicyName(ci))
 	u.SetNamespace(ci.Namespace)
 	u.SetLabels(map[string]string{
@@ -127,7 +65,7 @@ func desiredCiliumEgressPolicy(ci *connectorv1alpha1.ConnectorInstance) (*unstru
 func (r *ConnectorInstanceReconciler) reconcileCiliumEgressPolicy(
 	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance,
 ) error {
-	live := newCiliumNetworkPolicy()
+	live := ciliumegress.NewPolicy()
 	getErr := r.Get(ctx, client.ObjectKey{Namespace: ci.Namespace, Name: ciliumEgressPolicyName(ci)}, live)
 	if getErr != nil && !apierrors.IsNotFound(getErr) {
 		return fmt.Errorf("get connector egress policy: %w", getErr)

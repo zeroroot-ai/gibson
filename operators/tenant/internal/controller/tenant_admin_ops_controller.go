@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
 )
@@ -179,7 +180,7 @@ func (r *TenantAdminOpsRunnable) applyProvision(ctx context.Context, op provisio
 	}
 
 	tenant := &gibsonv1alpha1.Tenant{
-		ObjectMeta: metav1.ObjectMeta{Name: op.TenantID},
+		ObjectMeta: metav1.ObjectMeta{Name: op.TenantID, Annotations: requestAnnotations(op.AuditRecordID)},
 		Spec: gibsonv1alpha1.TenantSpec{
 			DisplayName: op.DisplayName,
 			Owner:       op.OwnerEmail,
@@ -227,6 +228,18 @@ func (r *TenantAdminOpsRunnable) applyUpdate(ctx context.Context, op provision.T
 		logger.Info("Tenant CR already matches update op; no patch needed", "tenant_id", op.TenantID)
 		return nil
 	}
+	// The spec change and the audit link of its request land in one write,
+	// so the saga pass of the new generation names the request (gibson#583).
+	annotations := tenant.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	if op.AuditRecordID == "" {
+		delete(annotations, audit.AnnotationCorrelationID)
+	} else {
+		annotations[audit.AnnotationCorrelationID] = op.AuditRecordID
+	}
+	tenant.SetAnnotations(annotations)
 	if err := r.Client.Update(ctx, &tenant); err != nil {
 		return fmt.Errorf("update Tenant CR %q: %w", op.TenantID, err)
 	}
@@ -240,8 +253,19 @@ func (r *TenantAdminOpsRunnable) applyUpdate(ctx context.Context, op provision.T
 func (r *TenantAdminOpsRunnable) applyDelete(ctx context.Context, op provision.TenantAdminOp) error {
 	logger := log.FromContext(ctx).WithName("tenant-admin-ops")
 
-	tenant := &gibsonv1alpha1.Tenant{ObjectMeta: metav1.ObjectMeta{Name: op.TenantID}}
-	if err := r.Client.Delete(ctx, tenant); err != nil {
+	var tenant gibsonv1alpha1.Tenant
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: op.TenantID}, &tenant); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Info("Tenant CR not found; delete is a no-op", "tenant_id", op.TenantID)
+			return nil
+		}
+		return fmt.Errorf("get Tenant CR %q: %w", op.TenantID, err)
+	}
+	// The teardown records name the delete request (gibson#583).
+	if err := stampCorrelationID(ctx, r.Client, &tenant, op.AuditRecordID); err != nil {
+		return fmt.Errorf("stamp the correlation id on Tenant CR %q: %w", op.TenantID, err)
+	}
+	if err := r.Client.Delete(ctx, &tenant); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Info("Tenant CR not found; delete is a no-op", "tenant_id", op.TenantID)
 			return nil

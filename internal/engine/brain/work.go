@@ -88,6 +88,19 @@ type WorkItem struct {
 	// WorkItem for the same reason Timeout does: a snapshot restore and a
 	// retry hand the same scope back to the dispatcher.
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
+	// Checkpoint marks an agent node of a mission in the sandbox checkpoint
+	// mode: its sandbox leaves a snapshot when the node ends. FromSnapshot
+	// names the snapshot that the node of a rewind starts from (ADR-0170).
+	Checkpoint   bool
+	FromSnapshot string
+
+	// Snapshot is the snapshot that the node left when it ended (ADR-0170).
+	Snapshot string
 }
 
 // WorkDispatched records that a unit of work was launched. It does not block;
@@ -112,6 +125,16 @@ type WorkDispatched struct {
 	// Network carries the network scope of the node to the dispatch
 	// effect-handler, for the same reason Timeout does (gibson#865).
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
+	// Checkpoint marks an agent node of a mission in the sandbox checkpoint
+	// mode: its sandbox leaves a snapshot when the node ends. FromSnapshot
+	// names the snapshot that the node of a rewind starts from (ADR-0170).
+	Checkpoint   bool
+	FromSnapshot string
 }
 
 func (WorkDispatched) Kind() string { return "work.dispatched" }
@@ -131,6 +154,9 @@ type WorkCompleted struct {
 	ID     string
 	Result string
 	Err    string
+	// Snapshot is the id of the sandbox snapshot that the node left in the
+	// sandbox checkpoint mode (ADR-0170). Empty when it left none.
+	Snapshot string `json:",omitempty"`
 }
 
 func (WorkCompleted) Kind() string { return "work.completed" }
@@ -169,20 +195,36 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.Network != nil {
 			wi.Network = e.Network
 		}
+		if e.StartsFrom != "" {
+			wi.StartsFrom = e.StartsFrom
+		}
+		if e.Forkable {
+			wi.Forkable = true
+		}
+		if e.Checkpoint {
+			wi.Checkpoint = true
+		}
+		if e.FromSnapshot != "" {
+			wi.FromSnapshot = e.FromSnapshot
+		}
 		return
 	}
 	w.work.NewEntity(&WorkItem{
-		ID:        e.ID,
-		MissionID: e.MissionID,
-		Kind:      e.ItemKind,
-		Target:    e.Target,
-		Input:     e.Input,
-		State:     WorkRunning,
-		Attempts:  1,
-		Timeout:   e.Timeout,
-		Group:     e.Group,
-		Limit:     e.Limit,
-		Network:   e.Network,
+		ID:           e.ID,
+		MissionID:    e.MissionID,
+		Kind:         e.ItemKind,
+		Target:       e.Target,
+		Input:        e.Input,
+		State:        WorkRunning,
+		Attempts:     1,
+		Timeout:      e.Timeout,
+		Group:        e.Group,
+		Limit:        e.Limit,
+		Network:      e.Network,
+		StartsFrom:   e.StartsFrom,
+		Forkable:     e.Forkable,
+		Checkpoint:   e.Checkpoint,
+		FromSnapshot: e.FromSnapshot,
 	})
 	// A fresh dispatch under an open Decider decision is one of that decision's
 	// chosen actions (gibson#1062). Only first dispatches link — a retry re-arms an
@@ -223,7 +265,7 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 		wi.State, wi.Err = WorkFailed, e.Err
 		return
 	}
-	wi.State, wi.Result = WorkDone, e.Result
+	wi.State, wi.Result, wi.Snapshot = WorkDone, e.Result, e.Snapshot
 }
 
 // WorkSnapshot is a stable, comparable view of a WorkItem.
@@ -251,8 +293,20 @@ type WorkSnapshot struct {
 	// Network mirrors WorkItem.Network; the scheduler hands it to the
 	// dispatch (gibson#865).
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
+	// Checkpoint marks an agent node of a mission in the sandbox checkpoint
+	// mode: its sandbox leaves a snapshot when the node ends. FromSnapshot
+	// names the snapshot that the node of a rewind starts from (ADR-0170).
+	Checkpoint   bool
+	FromSnapshot string
 	// CompletedSeq mirrors WorkItem.CompletedSeq (gibson#543).
 	CompletedSeq uint64
+	// Snapshot mirrors WorkItem.Snapshot (ADR-0170).
+	Snapshot string
 }
 
 // WorkSnapshot returns the current work items in deterministic (ID) order.
@@ -278,7 +332,12 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Group:                  wi.Group,
 			Limit:                  wi.Limit,
 			Network:                wi.Network,
+			StartsFrom:             wi.StartsFrom,
+			Forkable:               wi.Forkable,
+			Checkpoint:             wi.Checkpoint,
+			FromSnapshot:           wi.FromSnapshot,
 			CompletedSeq:           wi.CompletedSeq,
+			Snapshot:               wi.Snapshot,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

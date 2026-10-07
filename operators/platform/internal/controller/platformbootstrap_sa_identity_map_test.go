@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -59,7 +61,7 @@ func saIdentityMapBootstrap() *gibsonv1alpha1.PlatformBootstrap {
 func TestReconcileSAIdentityMap_WaitsForIAMAdminSecret(t *testing.T) {
 	s := mustScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(s).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := saIdentityMapBootstrap()
 
 	res, err := r.reconcileSAIdentityMap(context.Background(), pb, logr.Discard())
@@ -85,7 +87,7 @@ func TestReconcileSAIdentityMap_WaitsForMachineUserChild(t *testing.T) {
 	// iam-admin secret present, but the MACHINE_USER child is missing.
 	cli := fake.NewClientBuilder().WithScheme(s).
 		WithObjects(iamAdminSecret("12345")).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := saIdentityMapBootstrap()
 
 	res, err := r.reconcileSAIdentityMap(context.Background(), pb, logr.Discard())
@@ -108,7 +110,7 @@ func TestReconcileSAIdentityMap_PopulatesConfigMap(t *testing.T) {
 			iamAdminSecret("100200300"),
 			machineUserChild("gibson-tenant-operator", "400500600"),
 		).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := saIdentityMapBootstrap()
 
 	res, err := r.reconcileSAIdentityMap(context.Background(), pb, logr.Discard())
@@ -151,7 +153,7 @@ func TestReconcileSAIdentityMap_PreservesForeignKeys(t *testing.T) {
 			iamAdminSecret("100200300"),
 			machineUserChild("gibson-tenant-operator", "400500600"),
 		).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := saIdentityMapBootstrap()
 
 	if _, err := r.reconcileSAIdentityMap(context.Background(), pb, logr.Discard()); err != nil {

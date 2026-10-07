@@ -27,8 +27,6 @@ const (
 	ActionSecretDelete = "secret_delete"
 	// ActionSecretList is emitted when a tenant's secret names are listed.
 	ActionSecretList = "secret_list"
-	// ActionSecretProbe is emitted when a provider probe is executed.
-	ActionSecretProbe = "secret_probe"
 	// ActionSecretConfigSet is emitted when a tenant's broker configuration
 	// is created, updated, or deleted.
 	ActionSecretConfigSet = "secret_config_set"
@@ -183,7 +181,7 @@ func (w *AuditWriter) Record(ctx context.Context, event AuditEvent) error {
 	if w.rejectOnPlaintextGuard(ctx, event) {
 		return ErrAuditRejected
 	}
-	if err := w.logger.Record(ctx, event.Action, event.ResourceType, event.ResourceURI, w.details(event)); err != nil {
+	if _, err := w.logger.Record(ctx, event.Action, event.ResourceType, event.ResourceURI, w.details(event)); err != nil {
 		auditFailuresTotal.WithLabelValues(event.ActorTenantID).Inc()
 		return fmt.Errorf("secrets audit writer: %w", err)
 	}

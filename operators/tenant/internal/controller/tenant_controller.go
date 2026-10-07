@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/events"
@@ -18,16 +17,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
-
-// ctxKeyCorrelationID is the typed context key for storing the correlation ID
-// threaded from the dashboard annotation through to runner log fields and audit.
-type ctxKeyCorrelationID struct{}
 
 // childRequeueInterval is how soon the Tenant reconciler comes back to advance
 // dependency-ordered child creation/teardown (E8/gibson#805) when no watch event
@@ -57,8 +52,9 @@ type TenantReconciler struct {
 	// Runner executes provisioning and teardown sagas.
 	Runner *saga.Runner
 
-	// Audit emitter for structured lifecycle events.
-	Audit audit.Emitter
+	// Audit writes the audit record of each saga step before the step
+	// changes state (gibson#583). Required: SetupWithManager fails without it.
+	Audit *audit.SagaEmitter
 
 	// Provisioning steps. Foundation contributes Namespace. Other specs
 	// append additional steps via ProvisionSteps.
@@ -94,7 +90,7 @@ type TenantReconciler struct {
 	// Mail sends the workspace-ready welcome email to the founding owner at
 	// the Tenant's Ready transition (gibson#1447). Production always injects
 	// the SMTP sender (SMTP_HOST is a hard boot requirement — see
-	// cmd/require_smtp.go); may be nil in tests, where the send is a no-op
+	// cmd/main.go); may be nil in tests, where the send is a no-op
 	// like MigrationEmitter.
 	Mail mail.Sender
 
@@ -174,22 +170,13 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// --- Correlation-ID propagation (Task 20.1) ---
-	// Read the ID stamped by the dashboard on applyTenant. When absent (e.g.
-	// CRs created directly via kubectl), generate a fresh UUID and warn so
-	// operators know the ID was not dashboard-originated.
-	corrID := ""
-	if annotations := tenant.GetAnnotations(); annotations != nil {
-		corrID = annotations[saga.AnnotationCorrelationID]
-	}
-	if corrID == "" {
-		corrID = uuid.New().String()
-		log.Info("missing correlation-id annotation, generated fresh one",
-			"correlationId", corrID)
-	}
-	ctx = context.WithValue(ctx, ctxKeyCorrelationID{}, corrID)
-	// Also store in the saga package's typed key so runner's correlationIDFromCtx
-	// can read it even when called without the controller wrapper (e.g. tests).
+	// --- Correlation-ID propagation (gibson#583) ---
+	// The id is the daemon audit record of the human request that created or
+	// changed this tenant. The operator stamps it from the daemon queue entry
+	// (PendingProvisioningRunnable, TenantAdminOpsRunnable). With no stamp,
+	// no recorded human request is behind this pass, and the operator records
+	// carry no correlation id: the operator is the only actor.
+	corrID := audit.CorrelationIDOf(&tenant)
 	ctx = saga.CtxWithCorrelationID(ctx, corrID)
 	log = log.WithValues("correlationId", corrID)
 
@@ -275,7 +262,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// best-effort: a failure requeues without failing the reconcile.
 	//
 	// Production always injects the mailer (SMTP_HOST is boot-required, see
-	// cmd/require_smtp.go); the positive guard keeps unit tests that omit it
+	// cmd/main.go); the positive guard keeps unit tests that omit it
 	// from dereferencing nil, matching this reconciler's other
 	// optional-collaborator gate (r.MigrationEmitter).
 	welcomeRetry := false
@@ -501,8 +488,11 @@ func (s *deleteNamespaceStep) Provision(ctx context.Context, obj saga.Conditione
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Runner == nil {
-		r.Runner = saga.NewRunner(r.Client, mgr.GetEventRecorder("tenant-operator"), mgr.GetLogger())
+		r.Runner = saga.NewRunner(r.Client, mgr.GetEventRecorder("tenant-operator"), mgr.GetLogger(), r.Audit)
 	}
 	if r.Runner.Deps == nil {
 		r.Runner.Deps = r.Deps

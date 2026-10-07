@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -69,7 +70,7 @@ func newProposeOntologyExtensionService(
 	if engine != nil {
 		opts = append(opts, WithOntologyDiscovery(engine))
 	}
-	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
+	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, append(opts, testEventBus())...)
 }
 
 func proposeOntologyExtensionRequest(missionID, agentName string, kind harnesspb.OntologyExtensionKind, label, proposer, claim string) *harnesspb.ProposeOntologyExtensionRequest {
@@ -124,7 +125,7 @@ func TestProposeOntologyExtension_NotWired_Unavailable(t *testing.T) {
 func TestProposeOntologyExtension_MissingFields_InvalidArgument(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -160,7 +161,7 @@ func TestProposeOntologyExtension_MissingFields_InvalidArgument(t *testing.T) {
 func TestProposeOntologyExtension_InvalidIdentifier_RejectedInBand(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -170,7 +171,6 @@ func TestProposeOntologyExtension_InvalidIdentifier_RejectedInBand(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.False(t, resp.GetAccepted())
-	assert.NotEmpty(t, resp.GetRejectionReason())
 	assert.Empty(t, engine.OntologyProposals(), "an invalid identifier must never be recorded as a sighting")
 }
 
@@ -182,7 +182,7 @@ func TestProposeOntologyExtension_InvalidIdentifier_RejectedInBand(t *testing.T)
 func TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -194,7 +194,6 @@ func TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.True(t, resp.GetAccepted())
-	assert.Empty(t, resp.GetRejectionReason())
 	awaitOntologyProposalRecurrence(t, engine, "CustomHost", 1)
 
 	resp, err = svc.ProposeOntologyExtension(ctx, req)
@@ -211,7 +210,7 @@ func TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs(t *testing.T) 
 func TestProposeOntologyExtension_RelationshipType_UsesRelationshipVocabulary(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -233,7 +232,7 @@ func TestProposeOntologyExtension_RelationshipType_UsesRelationshipVocabulary(t 
 func TestProposeOntologyExtension_NilRequest_InvalidArgument(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -251,7 +250,7 @@ func TestProposeOntologyExtension_NilRequest_InvalidArgument(t *testing.T) {
 func TestProposeOntologyExtension_UnregisteredHarness_PropagatesLookupError(t *testing.T) {
 	ctx0, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	engine := brain.NewRegistry(ctx0).For("acme")
+	engine := brain.NewRegistry(ctx0, braintest.StoreFactory()).For("acme")
 	h := &proposeOntologyExtensionMockHarness{missionID: "mission-A", tenantID: "acme"}
 	svc := newProposeOntologyExtensionService(t, h, "recon-agent", engine)
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")

@@ -18,7 +18,15 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
-type recordingAuditSink struct{ got *audit.AuditLogger }
+type recordingAuditSink struct {
+	got       *audit.AuditLogger
+	retention *audit.RetentionSettings
+}
+
+func (r *recordingAuditSink) WithAuditRetention(rs *audit.RetentionSettings) *api.DaemonServer {
+	r.retention = rs
+	return nil
+}
 
 func (r *recordingAuditSink) WithAuditLogger(al *audit.AuditLogger) *api.DaemonServer {
 	r.got = al
@@ -56,6 +64,9 @@ func TestWireDaemonAudit_HandsOneLoggerToTheService(t *testing.T) {
 	}
 	if sink.got != al {
 		t.Fatalf("the service must receive the same logger that is returned")
+	}
+	if sink.retention == nil {
+		t.Fatal("the service must receive the retention settings, so a tenant admin can set a longer period")
 	}
 }
 

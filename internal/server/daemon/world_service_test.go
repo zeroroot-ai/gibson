@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
@@ -23,7 +24,7 @@ import (
 func TestWorldService_TenantScopedRead(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.5", OpenPorts: []int{22}})
@@ -56,7 +57,7 @@ func TestWorldService_TenantScopedRead(t *testing.T) {
 func TestWorldService_ListLlmCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.LlmCallObserved{
@@ -94,7 +95,7 @@ func TestWorldService_ListLlmCalls(t *testing.T) {
 func TestWorldService_GetLlmCall(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.LlmCallObserved{
@@ -135,7 +136,7 @@ func TestWorldService_GetLlmCall(t *testing.T) {
 func TestWorldService_GetFrameAt(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	// Three observations: host, then a finding, then a second host.
@@ -202,7 +203,7 @@ func TestWorldService_GetFrameAt(t *testing.T) {
 func TestWorldService_GetFrameAt_MissionScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	// Two interleaved missions plus one tenant-ambient host observation (an
@@ -331,7 +332,7 @@ func TestWorldService_GetFrameAt_MissionScoped(t *testing.T) {
 func TestWorldService_GetFrameAt_MissionScoped_FindingsAndLlmCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
@@ -421,7 +422,7 @@ func TestWorldService_GetFrameAt_MissionScoped_FindingsAndLlmCalls(t *testing.T)
 func TestWorldService_GetFrameAt_Work(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
@@ -515,7 +516,7 @@ func TestWorldService_GetFrameAt_Work(t *testing.T) {
 func TestWorldService_GetFrameAt_Decisions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
@@ -612,7 +613,7 @@ func TestWorldService_GetFrameAt_Decisions(t *testing.T) {
 func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
@@ -711,7 +712,7 @@ func TestWorldService_GetFrameAt_LlmCalls(t *testing.T) {
 func TestWorldService_GetFrameAt_HostsAndFindings(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	e := reg.For("acme")
@@ -767,7 +768,7 @@ func TestWorldService_GetFrameAt_HostsAndFindings(t *testing.T) {
 func TestWorldService_MissionViewCarriesTheBeliefModelPin(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.MissionProjected{
@@ -839,8 +840,7 @@ func (historyDownStore) LoadForReplay(context.Context, string, string) ([]brain.
 func TestWorldService_HistoryErrorIsUnavailable(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
-	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return historyDownStore{}, nil })
+	reg := brain.NewRegistry(ctx, func(context.Context, string) (brain.TimelineStore, error) { return historyDownStore{}, nil })
 	srv := NewWorldServer(reg, nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 

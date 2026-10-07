@@ -21,8 +21,10 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	gibsonmetrics "github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 // reaperAllowlist is the hardcoded set of finalizer keys the reaper is
@@ -42,6 +44,10 @@ type OrphanReaperReconciler struct {
 	Recorder           events.EventRecorder
 	GracePeriodSeconds int
 	Enabled            bool
+
+	// Audit writes the record of each finalizer removal before the removal
+	// (gibson#583). Required when Enabled.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch
@@ -151,9 +157,15 @@ func (r *OrphanReaperReconciler) stripAllowlistedFinalizers(
 		return nil
 	}
 
-	patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
-	obj.SetFinalizers(kept)
-	if err := r.Patch(ctx, obj, patch); err != nil {
+	ev := audit.ObjectEvent(audit.ActionOrphanFinalizerRemove, obj, map[string]string{
+		"kind":       kind,
+		"finalizers": strings.Join(removed, ","),
+	})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		patch := client.MergeFrom(obj.DeepCopyObject().(client.Object))
+		obj.SetFinalizers(kept)
+		return r.Patch(ctx, obj, patch)
+	}); err != nil {
 		return err
 	}
 
@@ -183,6 +195,9 @@ func terminatingTenantNamespacePredicate() predicate.Predicate {
 func (r *OrphanReaperReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if !r.Enabled {
 		return nil
+	}
+	if r.Audit == nil {
+		return fmt.Errorf("orphan reaper: %w", saga.ErrNoAudit)
 	}
 	if r.GracePeriodSeconds <= 0 {
 		r.GracePeriodSeconds = 300

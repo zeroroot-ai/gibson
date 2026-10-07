@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
@@ -28,7 +29,7 @@ func (c *tenantClient) note(call, tenant string) {
 
 func (c *tenantClient) Launch(_ context.Context, req LaunchRequest) (LaunchResponse, error) {
 	c.note("launch", req.Tenant)
-	return LaunchResponse{SandboxID: "sbx-" + req.Tenant}, nil
+	return reportedIsolation(req, LaunchResponse{SandboxID: "sbx-" + req.Tenant}), nil
 }
 
 func (c *tenantClient) StreamLogs(_ context.Context, tenant, _ string) (LogStream, error) {
@@ -126,4 +127,20 @@ func TestLaunchMember_NoTenantDoesNotLaunch(t *testing.T) {
 	if len(c.seen()) != 0 {
 		t.Fatalf("setec calls = %v; want none", c.seen())
 	}
+}
+
+func (c *tenantClient) Fork(context.Context, ForkRequest) (ForkResponse, error) {
+	return ForkResponse{}, errors.New("tenantClient: fork is not used here")
+}
+
+func (c *tenantClient) Recovery(context.Context, string, string) (SessionRecovery, bool, error) {
+	return SessionRecovery{}, false, nil
+}
+
+func (c *tenantClient) Isolation(context.Context, string, string) (LaunchResponse, error) {
+	return LaunchResponse{}, errors.New("tenantClient: isolation is not used here")
+}
+
+func (c *tenantClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("tenantClient: snapshot is not used here")
 }

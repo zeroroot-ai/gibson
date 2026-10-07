@@ -43,6 +43,8 @@ const (
 	TenantService_GetTenantQuota_FullMethodName        = "/gibson.tenant.v1.TenantService/GetTenantQuota"
 	TenantService_GetTenantQuotaUsage_FullMethodName   = "/gibson.tenant.v1.TenantService/GetTenantQuotaUsage"
 	TenantService_ListAuditEvents_FullMethodName       = "/gibson.tenant.v1.TenantService/ListAuditEvents"
+	TenantService_GetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/GetAuditRetention"
+	TenantService_SetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/SetAuditRetention"
 	TenantService_ExportFindings_FullMethodName        = "/gibson.tenant.v1.TenantService/ExportFindings"
 	TenantService_SaveMissionDraft_FullMethodName      = "/gibson.tenant.v1.TenantService/SaveMissionDraft"
 	TenantService_ListMissionDrafts_FullMethodName     = "/gibson.tenant.v1.TenantService/ListMissionDrafts"
@@ -69,6 +71,14 @@ type TenantServiceClient interface {
 	GetTenantQuotaUsage(ctx context.Context, in *GetTenantQuotaUsageRequest, opts ...grpc.CallOption) (*GetTenantQuotaUsageResponse, error)
 	// ListAuditEvents returns audit events for a tenant.
 	ListAuditEvents(ctx context.Context, in *ListAuditEventsRequest, opts ...grpc.CallOption) (*ListAuditEventsResponse, error)
+	// GetAuditRetention returns the audit retention period of the caller's
+	// tenant: the period of the install, the period that a tenant admin set,
+	// and the period that retention uses.
+	GetAuditRetention(ctx context.Context, in *GetAuditRetentionRequest, opts ...grpc.CallOption) (*GetAuditRetentionResponse, error)
+	// SetAuditRetention sets the audit retention period of the caller's tenant.
+	// The period must not be shorter than the period of the install. Zero
+	// removes the setting, and the tenant uses the period of the install.
+	SetAuditRetention(ctx context.Context, in *SetAuditRetentionRequest, opts ...grpc.CallOption) (*SetAuditRetentionResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	ExportFindings(ctx context.Context, in *ExportFindingsRequest, opts ...grpc.CallOption) (*ExportFindingsResponse, error)
 	// SaveMissionDraft persists a mission CUE draft for later use.
@@ -135,6 +145,26 @@ func (c *tenantServiceClient) ListAuditEvents(ctx context.Context, in *ListAudit
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListAuditEventsResponse)
 	err := c.cc.Invoke(ctx, TenantService_ListAuditEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) GetAuditRetention(ctx context.Context, in *GetAuditRetentionRequest, opts ...grpc.CallOption) (*GetAuditRetentionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAuditRetentionResponse)
+	err := c.cc.Invoke(ctx, TenantService_GetAuditRetention_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *tenantServiceClient) SetAuditRetention(ctx context.Context, in *SetAuditRetentionRequest, opts ...grpc.CallOption) (*SetAuditRetentionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAuditRetentionResponse)
+	err := c.cc.Invoke(ctx, TenantService_SetAuditRetention_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +240,14 @@ type TenantServiceServer interface {
 	GetTenantQuotaUsage(context.Context, *GetTenantQuotaUsageRequest) (*GetTenantQuotaUsageResponse, error)
 	// ListAuditEvents returns audit events for a tenant.
 	ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error)
+	// GetAuditRetention returns the audit retention period of the caller's
+	// tenant: the period of the install, the period that a tenant admin set,
+	// and the period that retention uses.
+	GetAuditRetention(context.Context, *GetAuditRetentionRequest) (*GetAuditRetentionResponse, error)
+	// SetAuditRetention sets the audit retention period of the caller's tenant.
+	// The period must not be shorter than the period of the install. Zero
+	// removes the setting, and the tenant uses the period of the install.
+	SetAuditRetention(context.Context, *SetAuditRetentionRequest) (*SetAuditRetentionResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error)
 	// SaveMissionDraft persists a mission CUE draft for later use.
@@ -246,6 +284,12 @@ func (UnimplementedTenantServiceServer) GetTenantQuotaUsage(context.Context, *Ge
 }
 func (UnimplementedTenantServiceServer) ListAuditEvents(context.Context, *ListAuditEventsRequest) (*ListAuditEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAuditEvents not implemented")
+}
+func (UnimplementedTenantServiceServer) GetAuditRetention(context.Context, *GetAuditRetentionRequest) (*GetAuditRetentionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAuditRetention not implemented")
+}
+func (UnimplementedTenantServiceServer) SetAuditRetention(context.Context, *SetAuditRetentionRequest) (*SetAuditRetentionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetAuditRetention not implemented")
 }
 func (UnimplementedTenantServiceServer) ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportFindings not implemented")
@@ -373,6 +417,42 @@ func _TenantService_ListAuditEvents_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantService_GetAuditRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAuditRetentionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetAuditRetention(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetAuditRetention_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetAuditRetention(ctx, req.(*GetAuditRetentionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TenantService_SetAuditRetention_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAuditRetentionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).SetAuditRetention(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_SetAuditRetention_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).SetAuditRetention(ctx, req.(*SetAuditRetentionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TenantService_ExportFindings_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ExportFindingsRequest)
 	if err := dec(in); err != nil {
@@ -489,6 +569,14 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAuditEvents",
 			Handler:    _TenantService_ListAuditEvents_Handler,
+		},
+		{
+			MethodName: "GetAuditRetention",
+			Handler:    _TenantService_GetAuditRetention_Handler,
+		},
+		{
+			MethodName: "SetAuditRetention",
+			Handler:    _TenantService_SetAuditRetention_Handler,
 		},
 		{
 			MethodName: "ExportFindings",

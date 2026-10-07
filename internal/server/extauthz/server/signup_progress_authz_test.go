@@ -88,6 +88,7 @@ func buildSignupProgressServer(t *testing.T) (*EnvoyAuthzServer, *signupTupleFGA
 	mock := &signupTupleFGA{}
 	cc := fga.NewCachedChecker(fga.NewChecker(mock, reg), 0, 0)
 	return NewEnvoyAuthzServer(Config{
+		Component:  testComponentVerifier(t),
 		Cache:      cc,
 		Logger:     newTestLogger(),
 		OrgTenants: &fakeOrgTenantResolver{},

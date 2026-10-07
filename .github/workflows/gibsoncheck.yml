@@ -164,6 +164,11 @@ jobs:
           # has zero violations as of the local_provider.go refactor that
           # introduced it.
           ./bin/gibsoncheck -cypheridentifier ./internal/...
+          # projectorcypher is a blocking gate with NO baseline (ADR-0112,
+          # gibson#993): a file of the graph projector passes only constant
+          # Cypher text to the driver, and a schema statement that holds a
+          # name comes only from its checked constructors.
+          ./bin/gibsoncheck -projectorcypher ./internal/server/daemon/...
 
       # Security-defect-class guards. BLOCKING: each exits non-zero on any
       # diagnostic and this step is under `set -e`, in a job that is an

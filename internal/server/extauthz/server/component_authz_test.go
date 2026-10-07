@@ -153,6 +153,25 @@ func componentTestReplayStore(t *testing.T) cgjwt.ReplayStore {
 	return componentReplayStoreOn(t, miniredis.RunT(t))
 }
 
+// testComponentVerifier returns a component verifier for a test that does
+// not present a component token. NewEnvoyAuthzServer requires one
+// (gibson#681). Its key endpoint does not exist, so a test that presents a
+// component token builds its own verifier instead.
+func testComponentVerifier(t *testing.T) *cgjwt.ComponentVerifier {
+	t.Helper()
+	cv, err := cgjwt.NewComponentVerifier(cgjwt.ComponentConfig{
+		KeysBaseURL:       "https://daemon.invalid/capabilitygrant/v1/keys",
+		TTL:               time.Minute,
+		ExpectedAudiences: []string{componentTestAudience},
+		ReplayStore:       componentTestReplayStore(t),
+		HTTPClient:        &http.Client{Timeout: time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cv
+}
+
 func buildComponentServer(t *testing.T, mock fga.FGAClient, descBase string) *EnvoyAuthzServer {
 	t.Helper()
 	return buildComponentServerOn(t, mock, descBase, componentTestReplayStore(t))

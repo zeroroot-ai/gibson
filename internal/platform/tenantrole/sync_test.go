@@ -411,3 +411,39 @@ func TestSync_WithCallerLabelsTheMetricWithoutChangingBehavior(t *testing.T) {
 		t.Fatalf("Written = %+v, want one tuple written", res.Written)
 	}
 }
+
+// SyncTenantRecorded calls before only when there is a change, before the
+// write, and an error from before stops the write (gibson#583).
+func TestSyncTenantRecorded_BeforeRunsOnlyForAChange(t *testing.T) {
+	ghost := tenantrole.Tuple{User: "user:888888888888888888", Relation: "member", Object: "tenant:acme"}
+
+	f := newFixture(t, ghost)
+	refused := errors.New("no record")
+	if _, err := f.syncer.SyncTenantRecorded(context.Background(), tenant("acme", f.orgID),
+		func(_, _ []tenantrole.Tuple) error { return refused }); !errors.Is(err, refused) {
+		t.Fatalf("SyncTenantRecorded = %v, want the before error", err)
+	}
+	if len(f.tuples.all()) != 1 {
+		t.Fatalf("tuples = %+v, want no write after a refused before", f.tuples.all())
+	}
+
+	calls := 0
+	storedAtCall := -1
+	before := func(_, deletes []tenantrole.Tuple) error {
+		calls++
+		storedAtCall = len(f.tuples.all())
+		if len(deletes) != 1 {
+			t.Errorf("deletes = %+v, want the ghost tuple", deletes)
+		}
+		return nil
+	}
+	if _, err := f.syncer.SyncTenantRecorded(context.Background(), tenant("acme", f.orgID), before); err != nil {
+		t.Fatalf("SyncTenantRecorded: %v", err)
+	}
+	if calls != 1 || storedAtCall != 1 || len(f.tuples.all()) != 0 {
+		t.Fatalf("calls = %d, stored at call = %d, after = %+v", calls, storedAtCall, f.tuples.all())
+	}
+	if _, err := f.syncer.SyncTenantRecorded(context.Background(), tenant("acme", f.orgID), before); err != nil || calls != 1 {
+		t.Fatalf("a sync with nothing to change called before: calls = %d, err = %v", calls, err)
+	}
+}

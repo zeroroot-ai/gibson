@@ -52,6 +52,21 @@ service GrantsService {
       allowed_identities: 1  // USER
     };
   }
+  // WriteSecretGrants grants a plugin principal can_resolve on named secrets
+  // of the caller's tenant (ADR-0097, dashboard#174). Secret access is
+  // assigned by a tenant admin, never declared by the component
+  // (gibson#554). Only a plugin_principal can hold can_resolve (model.fga),
+  // so an agent or tool target is refused. Each secret must exist in the
+  // caller's tenant. Idempotent, and each new grant emits a
+  // `secret_grant_added` audit event before it takes effect.
+  rpc WriteSecretGrants(WriteSecretGrantsRequest) returns (WriteSecretGrantsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "admin"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 1  // USER
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -68,13 +83,22 @@ message ListActiveGrantsRequest {
   // include_near_expiry_only, when true, returns only grants that expire
   // within 5 minutes.
   bool include_near_expiry_only = 3;
-  int32 limit = 4;
-  int32 offset = 5;
+  reserved 4, 5;
+  reserved "limit", "offset";
+  // page_size is the largest number of items on one page. Zero means the
+  // server default.
+  int32 page_size = 6;
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 7 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListActiveGrantsResponse {
   repeated gibson.capability.v1.CapabilityGrantInfo grants = 1;
+  // total is the number of grants that match the filters, on all pages.
   int32 total = 2;
+  // next_page_token is empty on the last page.
+  string next_page_token = 3;
 }
 
 // GrantTuple is a single (object, relation) pair to write or delete.
@@ -110,4 +134,21 @@ message DeleteAgentGrantsRequest {
 message DeleteAgentGrantsResponse {
   int32 deleted = 1;
   int32 not_present = 2;
+}
+
+// WriteSecretGrantsRequest names a plugin principal and the secrets it may
+// resolve. An empty secret_names is valid and writes nothing.
+message WriteSecretGrantsRequest {
+  // target_principal_id is "plugin_principal:<id>" in the caller's tenant.
+  string target_principal_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // secret_names are names of secrets that the caller's tenant owns.
+  repeated string secret_names = 2 [(buf.validate.field).repeated = {
+    max_items: 64
+    items: { string: { min_len: 1, max_len: 1024 } }
+  }];
+}
+
+message WriteSecretGrantsResponse {
+  int32 written = 1;
+  int32 already_present = 2;
 }

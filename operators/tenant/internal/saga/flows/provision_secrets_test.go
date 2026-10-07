@@ -131,7 +131,7 @@ func TestProvisionStepsOrdering(t *testing.T) {
 	deps := ProvisionDeps{Vault: stub}
 	steps := ProvisionSteps(deps)
 
-	want := []string{"InitRedisKeyspace", "PublishTenantName"}
+	want := []string{"InitRedisKeyspace", "PublishTenantName", "EnsureBeliefTrainer"}
 	got := make([]string, 0, len(steps))
 	for _, s := range steps {
 		got = append(got, s.Name())

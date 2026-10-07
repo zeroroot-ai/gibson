@@ -2,7 +2,7 @@
 # ADR-0119 banks of always-on agents — the exit test (epic gibson#1706,
 # slice gibson#1718).
 #
-# In plain words: on a real gvisor cluster, a bank of two Claude Code members
+# In plain words: on a real launcher cluster, a bank of two Claude Code members
 # comes up on a real key, both report idle, one job opens and reaches the
 # member, the job closes with a verdict, a stranger tenant cannot read it,
 # and the bank scales to zero with no sandbox left behind.
@@ -46,7 +46,7 @@ on:
       - '.github/workflows/exit-test-bank.yml'
   schedule:
     # Daily. A dispatch path that isolates today and not tomorrow is the failure
-    # this catches; nothing else exercises it on a real gvisor cluster.
+    # this catches; nothing else exercises it on a real launcher cluster.
     - cron: '30 5 * * *'
   workflow_dispatch: {}
 
@@ -94,9 +94,8 @@ jobs:
         with:
           path: gibson
 
-      # The kind bring-up (make substrate / make recreate ENV=kind), the
-      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
-      # hosted repo since the 2026-09-04 split (ADR-0086; deploy and gitops
+      # The kind bring-up (make substrate / make recreate ENV=kind) and the
+      # sanctioned setec profile live in the hosted repo since the 2026-09-04 split (ADR-0086; deploy and gitops
       # were deleted). Reuse them rather than re-implementing the cluster in
       # this file (ONE bring-up path). hosted is private, so the checkout
       # needs the org read PAT; the default GITHUB_TOKEN cannot read it.
@@ -159,39 +158,30 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
-      # --fresh-kind does the gvisor node-prep (runsc install + the containerd
-      # runsc handler) and installs the umbrella with values-baseline.yaml, which
-      # now carries setec+gvisor+dispatch. The 2-core overlay shrinks REQUESTS so
-      # the whole platform packs onto the runner. deploy's
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
+      - name: Open /dev/kvm for the launcher
+        uses: ./gibson/.github/actions/open-kvm
+
+      # Stand up kind with the sanctioned setec profile. The 2-core overlay
+      # shrinks REQUESTS so the whole platform packs onto the runner.
       # The bank opens TWO always-on members on top of the CI rung, and each
       # reserves the `agent` SandboxClass request, which is why this test runs
       # on a 4-vCPU runner and can never fit a 2-vCPU one. The budget guard
       # that used to measure this exact command was lost in the 2026-09-04
       # split (ADR-0086) and has not been rebuilt, so nothing checks it today.
-      - name: Stand up the setec+gvisor cluster
+      - name: Stand up the setec cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
             RUNG=ci make recreate ENV=kind
 
-      # The node must actually advertise gvisor, or every sandbox stays Pending.
-      # This is the gvisor node-prep assertion, kept explicit so a node-prep
-      # regression fails HERE with a clear message, not as a mystery timeout.
-      - name: Node advertises gvisor
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 30); do
-            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
-            sleep 5
-          done
-          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-          if [ "$v" != "true" ]; then
-            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
-            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
-            exit 1
-          fi
+      # With no KVM on the node every sandbox stays Pending. Fail here with a
+      # clear message, not as a timeout later.
+      - name: Node offers KVM to the launcher
+        uses: ./gibson/.github/actions/node-offers-kvm
+        with:
+          node: ${{ env.NODE }}
 
       # The overlay below builds FROM the private daemon image on ghcr.io.
       # The cluster pulls it with the keyring's pull token, but the runner's
@@ -206,7 +196,7 @@ jobs:
       # authz disabled (no Envoy/ext-authz in the test), test fixtures on, and
       # built with setec_integration so DelegateToAgent reaches the real setec
       # launcher. This is the same test-mode contract the sandboxed-dispatch suite
-      # relies on; it changes ONLY how the client authenticates, never the setec+gvisor
+      # relies on; it changes ONLY how the client authenticates, never the setec
       # runtime under test.
       - name: Build + load the test-mode daemon
         working-directory: gibson
@@ -332,6 +322,15 @@ jobs:
             sleep 10
           done
 
+      # Cilium enforces each network policy of the chart on this cluster
+      # (hosted#436). Prove it for the daemon before the tests run, so a
+      # missing policy rule fails here and not on staging (gibson#220).
+      - name: The daemon refuses a pod that no policy admits
+        uses: ./gibson/.github/actions/policy-refuses-an-unadmitted-pod
+        with:
+          namespace: ${{ env.NS }}
+          release: ${{ env.RELEASE }}
+
       # The suite runs INSIDE the cluster, not over a port-forward.
       #
       # The daemon's gRPC listener speaks SPIFFE mTLS and refuses a non-loopback
@@ -393,6 +392,11 @@ jobs:
                   app.kubernetes.io/name: gibson-workloads
                   app.kubernetes.io/instance: ${RELEASE}
                   app.kubernetes.io/component: e2e-runner
+                  # The Cilium policy of the chart (D76, charts#394) admits a
+                  # pod by its network labels. The runner dials the daemon
+                  # (net-role platform) and Redis (client-redis), nothing else.
+                  gibson.zeroroot.ai/net-role: platform
+                  gibson.zeroroot.ai/client-redis: "true"
               spec:
                 restartPolicy: Never
                 serviceAccountName: ${RELEASE}-e2e-runner

@@ -21,13 +21,6 @@ type MistralProvider struct {
 	config llm.ProviderConfig
 }
 
-// NewMistralProvider constructs a Mistral provider.
-// Credentials come from cfg.APIKey (populated by the provider resolver from
-// the secrets broker), then the dev-only env-var. See resolveCredential.
-func NewMistralProvider(cfg llm.ProviderConfig) (*MistralProvider, error) {
-	return newMistralProviderWithContext(context.Background(), cfg)
-}
-
 // newMistralProviderWithContext constructs a Mistral provider, resolving the credential from cfg (see resolveCredential).
 func newMistralProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*MistralProvider, error) {
 	apiKey, err := resolveCredential(cfg, "mistral", "", true)

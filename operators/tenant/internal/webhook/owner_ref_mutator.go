@@ -28,8 +28,7 @@ import (
 // CRs in tenant-* namespaces. Failure-open: any error returns Allowed with
 // a warning so a webhook outage cannot block tenant creation flows.
 type OwnerRefMutator struct {
-	Client  client.Client
-	decoder admission.Decoder
+	Client client.Client
 }
 
 // NewOwnerRefMutator constructs a ready-to-register webhook handler.
@@ -107,7 +106,6 @@ func (m *OwnerRefMutator) Handle(ctx context.Context, req admission.Request) adm
 // InjectDecoder satisfies admission.DecoderInjector for controller-runtime
 // versions that use injection; harmless on newer versions.
 func (m *OwnerRefMutator) InjectDecoder(d admission.Decoder) error {
-	m.decoder = d
 	return nil
 }
 

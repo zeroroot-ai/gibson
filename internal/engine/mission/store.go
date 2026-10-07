@@ -90,9 +90,6 @@ type MissionFilter struct {
 	// Status filters by mission status (include only this status)
 	Status *MissionStatus
 
-	// ExcludeStatus filters out missions with these statuses
-	ExcludeStatus []MissionStatus
-
 	// TargetID filters by target
 	TargetID *types.ID
 
@@ -110,9 +107,6 @@ type MissionFilter struct {
 
 	// Offset skips the first N results
 	Offset int
-
-	// SearchText performs full-text search on name and description
-	SearchText *string
 }
 
 // NewMissionFilter creates a new empty filter with default pagination.

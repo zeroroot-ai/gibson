@@ -68,14 +68,6 @@ type compositeProbe struct {
 	pg     platformPGQuerier
 }
 
-// NewCompositeProbe constructs a production DataPlaneProbe. broker is the
-// configstore handle for tenant_secrets_broker_config row lookups. pg is
-// the platform admin connection pool used to query pg_database for the
-// per-tenant database's existence.
-func NewCompositeProbe(broker brokerConfigReader, pg platformPGQuerier) DataPlaneProbe {
-	return &compositeProbe{broker: broker, pg: pg}
-}
-
 func (p *compositeProbe) BrokerConfigExists(ctx context.Context, tenant auth.TenantID) (bool, error) {
 	_, _, err := p.broker.GetRaw(ctx, tenant)
 	if err == nil {

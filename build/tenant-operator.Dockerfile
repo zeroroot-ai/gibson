@@ -13,7 +13,7 @@ RUN apk add --no-cache git ca-certificates
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
 # Every github.com/zeroroot-ai/* module this build needs (sdk, ast-checks,
-# setec, testfixtures) is public and served by proxy.golang.org, which also
+# setec) is public and served by proxy.golang.org, which also
 # holds every version go.sum pins. No GOPRIVATE, no git credential: the build
 # runs the same for a stranger as for CI (scripts/check-airgap-build.sh).
 # The builder image carries exactly the Go that go.mod names, and the org
@@ -44,28 +44,12 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./operators/tenant/cmd
-# backfill-rbac is the pre-upgrade Helm hook for spec
-# secrets-blast-radius-reduction — ensures every existing tenant's
-# namespace has the per-tenant Role+RoleBinding before the chart
-# narrows the operator's ClusterRole.
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o backfill-rbac ./operators/tenant/cmd/backfill-rbac
-# migrate-tenant-tiers is the pre-upgrade Helm hook for spec
-# plans-and-quotas-simplification — rewrites every Tenant CR's
-# spec.tier from a legacy id to the canonical three before the chart's
-# new validating webhook (which rejects legacy ids) takes effect.
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o migrate-tenant-tiers ./operators/tenant/cmd/migrate-tenant-tiers
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 WORKDIR /
 COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/backfill-rbac .
-COPY --from=builder /workspace/migrate-tenant-tiers .
 USER 65532:65532
 
 # Elastic License 2.0, "Notices": anyone who gets a copy of the software

@@ -61,7 +61,6 @@ import (
 type Candidate struct {
 	Provider string
 	Model    string
-	Rank     int
 }
 
 // Filter returns the subset of candidates the calling user is permitted

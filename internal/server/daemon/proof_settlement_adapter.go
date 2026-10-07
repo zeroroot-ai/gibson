@@ -65,6 +65,12 @@ func (s *tenantRoutedProofSettlement) DomainPackPredicate(ctx context.Context, p
 	}
 	for _, pack := range e.DomainPacks() {
 		if expr, ok := pack.Predicates[predicateName]; ok {
+			// The technique of a proof is the name of its predicate. A
+			// technique that the hierarchy of the pack does not hold settles
+			// nothing (ADR-0135), so the predicate counts as not bound.
+			if !pack.HoldsTechnique(predicateName) {
+				return "", true, false, nil
+			}
 			return expr, pack.PredicateIsDestructive(predicateName), true, nil
 		}
 	}

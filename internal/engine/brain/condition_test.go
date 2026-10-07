@@ -10,7 +10,7 @@ import (
 
 // engineWithCondition wires scheduler + condition + fake dispatcher + completion.
 func engineWithCondition(fails map[string]bool) *Engine {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(ConditionSystem)
 	e.AddSystem(fakeDispatcher(fails))

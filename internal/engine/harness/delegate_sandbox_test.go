@@ -6,6 +6,8 @@ package harness
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -32,6 +34,88 @@ type recordingLauncher struct {
 	gotDispatch sandboxed.AgentDispatch
 	outcome     sandboxed.AgentRunResult
 	err         error
+
+	forkCalls int
+	gotSource string
+	gotFork   sandboxed.AgentForkSpec
+	forkRun   sandboxed.ForkRun
+	forkErr   error
+	forkIDs   []string
+
+	followCalls int
+	gotFollow   string
+	followClass string
+
+	snapshot    string
+	snapshotErr error
+	snapshotted []string
+	stopped     []string
+	restoreSnap string
+	restoreSpec sandboxed.AgentForkSpec
+	restoreID   string
+	restoreErr  error
+	restored    sandboxed.AgentRunResult
+}
+
+func (r *recordingLauncher) SnapshotSandbox(_ context.Context, _, sandboxID string, _ time.Duration) (string, error) {
+	r.snapshotted = append(r.snapshotted, sandboxID)
+	return r.snapshot, r.snapshotErr
+}
+
+func (r *recordingLauncher) StopSandbox(_ context.Context, _, sandboxID string) error {
+	r.stopped = append(r.stopped, sandboxID)
+	return nil
+}
+
+func (r *recordingLauncher) LaunchFromSnapshot(_ context.Context, snap string, spec sandboxed.AgentForkSpec, d sandboxed.AgentDispatch, onStarted func(string) error) (sandboxed.AgentRunResult, error) {
+	r.restoreSnap, r.restoreSpec, r.gotDispatch = snap, spec, d
+	if r.restoreErr != nil {
+		return sandboxed.AgentRunResult{}, r.restoreErr
+	}
+	if err := onStarted(r.restoreID); err != nil {
+		return sandboxed.AgentRunResult{}, fmt.Errorf("on started: %w", err)
+	}
+	return r.restored, nil
+}
+
+// ForkSandbox forks once with the first of forkIDs, and runs OnForked.
+func (r *recordingLauncher) ForkSandbox(_ context.Context, _, source string, spec sandboxed.AgentForkSpec) (string, error) {
+	r.forkCalls++
+	r.gotSource, r.gotFork = source, spec
+	if r.forkErr != nil {
+		return "", r.forkErr
+	}
+	if len(r.forkIDs) == 0 {
+		return "", errors.New("no fork id")
+	}
+	if spec.OnForked != nil {
+		if err := spec.OnForked(sandboxed.ForkResponse{Snapshot: r.forkRun.Snapshot, SandboxIDs: r.forkIDs[:1]}); err != nil {
+			return "", fmt.Errorf("on forked: %w", err)
+		}
+	}
+	return r.forkIDs[0], nil
+}
+
+// FollowAgent returns the canned outcome for the followed fork.
+func (r *recordingLauncher) FollowAgent(_ context.Context, sandboxID, class string, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error) {
+	r.followCalls++
+	r.gotFollow, r.followClass, r.gotDispatch = sandboxID, class, dispatch
+	return r.outcome, r.err
+}
+
+func (r *recordingLauncher) ForkAgent(_ context.Context, source string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error) {
+	r.forkCalls++
+	r.gotSource, r.gotFork = source, spec
+	r.gotDispatch = dispatches[0]
+	if r.forkErr != nil {
+		return sandboxed.ForkRun{}, r.forkErr
+	}
+	if spec.OnForked != nil {
+		if err := spec.OnForked(sandboxed.ForkResponse{Snapshot: r.forkRun.Snapshot, SandboxIDs: r.forkIDs}); err != nil {
+			return sandboxed.ForkRun{}, fmt.Errorf("on forked: %w", err)
+		}
+	}
+	return r.forkRun, nil
 }
 
 func (r *recordingLauncher) LaunchAgent(_ context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error) {

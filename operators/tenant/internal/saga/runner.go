@@ -17,7 +17,7 @@ import (
 
 	psaga "github.com/zeroroot-ai/gibson/pkg/platform/saga"
 
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 )
@@ -128,13 +128,6 @@ func wrapBestEffort(steps []Step) []Step {
 // conditions on operator restart so a fresh retry is attempted.
 const blockedClearWindow = time.Hour
 
-// AnnotationCorrelationID is the annotation key on Tenant objects used to
-// propagate a request correlation ID into saga audit events. The propagation
-// task (task 17.3) stamps this annotation; Runner reads it here so the audit
-// trail links back to the originating API call. If absent, correlationId is
-// emitted as an empty string — the field is always present for Loki parsing.
-const AnnotationCorrelationID = "gibson.zeroroot.ai/correlation-id"
-
 // ReasonSagaFailed is the Reason on a Blocked status condition that the
 // platform runner sets when a saga step exhausts its retry budget. Only
 // conditions carrying this reason are auto-cleared by ClearStaleBlocked
@@ -167,7 +160,7 @@ const AnnotationSagaRetryFrom = "gibson.zeroroot.ai/saga-retry-from"
 // translates RunResult → (ctrl.Result, error) for controller-runtime.
 //
 // It also installs operator-specific glue:
-//   - Audit hook → audit.SagaEmitter
+//   - Audit record before each step that changes state → audit.SagaEmitter
 //   - Metrics hook → internal/metrics
 //   - Error classifier → clients.IsPermanent + metrics.ClassifyError
 //   - Deps bag passed to every step
@@ -180,8 +173,9 @@ type Runner struct {
 	Recorder events.EventRecorder
 	Log      logr.Logger
 
-	// Audit is the operator's saga audit emitter. May be nil — when nil,
-	// audit emission is suppressed (test-mode default).
+	// Audit writes the audit record of each step before the step changes
+	// state (gibson#583). Required: Run and RunForDeletion refuse to run any
+	// step without it.
 	Audit *audit.SagaEmitter
 
 	// Deps is the unified client bag passed to every Step's
@@ -205,13 +199,14 @@ type Runner struct {
 	Clock func() time.Time
 }
 
-// NewRunner returns a Runner with sensible defaults. Recorder + log are
-// required; Audit + Deps + Clock are optional.
-func NewRunner(c client.Client, recorder events.EventRecorder, log logr.Logger) *Runner {
+// NewRunner returns a Runner with sensible defaults. Recorder, log and the
+// audit emitter are required; Deps + Clock are optional.
+func NewRunner(c client.Client, recorder events.EventRecorder, log logr.Logger, auditEmitter *audit.SagaEmitter) *Runner {
 	return &Runner{
 		Client:          c,
 		Recorder:        recorder,
 		Log:             log,
+		Audit:           auditEmitter,
 		MaxBackoff:      5 * time.Minute,
 		InitialBackoff:  time.Second,
 		RequeueInterval: 5 * time.Second,
@@ -378,6 +373,9 @@ func (r *Runner) RunForDeletion(ctx context.Context, obj ConditionedObject, step
 	}
 	kind := kindOf(obj)
 
+	if r.Audit == nil {
+		return TeardownOutcome{Err: ErrNoAudit}
+	}
 	if _, err := r.HonorRetryAnnotation(ctx, obj); err != nil {
 		return TeardownOutcome{Err: err}
 	}
@@ -385,7 +383,6 @@ func (r *Runner) RunForDeletion(ctx context.Context, obj ConditionedObject, step
 	pr := &psaga.Runner{
 		Deps:            r.Deps,
 		EventRecorder:   r.Recorder,
-		AuditHook:       &auditHookAdapter{emitter: r.Audit, corrID: corrID},
 		MetricsHook:     metricsHookAdapter{},
 		ErrorClassifier: classifyForPSaga,
 		MaxBackoff:      r.MaxBackoff,
@@ -402,7 +399,7 @@ func (r *Runner) RunForDeletion(ctx context.Context, obj ConditionedObject, step
 	// The upstream psaga.Runner.ContinueOnBlocked flag (gibson#255) is
 	// the cleaner long-term home for this behavior; this wrapper is the
 	// in-repo bridge until that flag lands across all consumers.
-	result := pr.Run(ctx, obj, wrapBestEffort(wrapWithTimeouts(steps)), finalPhase)
+	result := pr.Run(ctx, obj, wrapBestEffort(r.wrapWithAudit(wrapWithTimeouts(steps), finalPhase)), finalPhase)
 
 	log := r.Log.WithValues(
 		"object", objName,
@@ -457,6 +454,10 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 	}
 	kind := kindOf(obj)
 
+	if r.Audit == nil {
+		return ctrl.Result{}, ErrNoAudit
+	}
+
 	// Honor the operator-driven retry annotation before delegating to the
 	// platform runner. The annotation clears the Blocked condition + removes
 	// itself so the saga runs with a fresh slate. If the underlying cause
@@ -469,7 +470,6 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 	pr := &psaga.Runner{
 		Deps:            r.Deps,
 		EventRecorder:   r.Recorder,
-		AuditHook:       &auditHookAdapter{emitter: r.Audit, corrID: corrID},
 		MetricsHook:     metricsHookAdapter{},
 		ErrorClassifier: classifyForPSaga,
 		MaxBackoff:      r.MaxBackoff,
@@ -479,7 +479,7 @@ func (r *Runner) Run(ctx context.Context, obj ConditionedObject, steps []Step, f
 		Clock:           r.Clock,
 	}
 
-	result := pr.Run(ctx, obj, wrapWithTimeouts(steps), finalPhase)
+	result := pr.Run(ctx, obj, r.wrapWithAudit(wrapWithTimeouts(steps), finalPhase), finalPhase)
 
 	log := r.Log.WithValues(
 		"object", objName,
@@ -565,73 +565,6 @@ func classifyForPSaga(err error) psaga.ErrorClassification {
 	return psaga.ErrorTransient
 }
 
-// auditHookAdapter wires psaga.Runner step transitions onto the operator's
-// audit.SagaEmitter (Loki-formatted line emitter consumed by the dashboard
-// activity feed). When emitter is nil all calls become no-ops.
-type auditHookAdapter struct {
-	emitter *audit.SagaEmitter
-	corrID  string
-}
-
-func (a *auditHookAdapter) emit(obj ConditionedObject, evt audit.SagaAuditEvent) {
-	if a == nil || a.emitter == nil {
-		return
-	}
-	evt.TenantId = obj.GetName()
-	evt.UserId = "operator"
-	evt.CorrelationId = a.corrID
-	a.emitter.Emit(evt)
-}
-
-func (a *auditHookAdapter) OnStepStarted(_ context.Context, obj ConditionedObject, step Step) {
-	a.emit(obj, audit.SagaAuditEvent{
-		Action:   audit.ActionSagaStepStarted,
-		Outcome:  audit.OutcomeOk,
-		StepName: step.Name(),
-	})
-}
-
-func (a *auditHookAdapter) OnStepCompleted(_ context.Context, obj ConditionedObject, step Step, _ time.Duration) {
-	a.emit(obj, audit.SagaAuditEvent{
-		Action:   audit.ActionSagaStepCompleted,
-		Outcome:  audit.OutcomeOk,
-		StepName: step.Name(),
-	})
-}
-
-func (a *auditHookAdapter) OnStepFailed(_ context.Context, obj ConditionedObject, step Step, err error, _ time.Duration, blocked bool) {
-	outcome := audit.OutcomeFailed
-	errCode := ReasonStepFailed
-	if blocked {
-		outcome = audit.OutcomeLocked
-		errCode = ReasonSagaFailed
-		if clients.IsPermanent(err) {
-			switch metrics.ClassifyError(err) {
-			case "conflict":
-				errCode = "SlugCollision"
-			case "validation":
-				errCode = "InvalidSpec"
-			}
-		}
-	}
-	a.emit(obj, audit.SagaAuditEvent{
-		Action:       audit.ActionSagaStepFailed,
-		Outcome:      outcome,
-		StepName:     step.Name(),
-		ErrorCode:    errCode,
-		ErrorMessage: audit.TruncateErrorMessage(err.Error()),
-	})
-}
-
-func (a *auditHookAdapter) OnStepSkipped(_ context.Context, obj ConditionedObject, step Step) {
-	a.emit(obj, audit.SagaAuditEvent{
-		Action:   audit.ActionSagaStepSkipped,
-		Outcome:  audit.OutcomeOk,
-		StepName: step.Name(),
-		Reason:   "skip predicate matched",
-	})
-}
-
 // metricsHookAdapter wires psaga.Runner step + reconcile observations onto
 // the operator's existing Prometheus collectors.
 type metricsHookAdapter struct{}
@@ -647,7 +580,7 @@ func (metricsHookAdapter) ObserveReconcile(kind, outcome string, duration time.D
 // ctxKeyCorrelationID is the typed context key used to pass the correlation
 // ID from the controller through to the runner's log fields and audit
 // events. Unexported so callers either use CtxWithCorrelationID or rely on
-// the AnnotationCorrelationID fallback in correlationIDFromCtx.
+// the audit.AnnotationCorrelationID fallback in correlationIDFromCtx.
 type ctxKeyCorrelationID struct{}
 
 // CtxWithCorrelationID stores the correlation ID in ctx using the saga
@@ -664,7 +597,7 @@ func correlationIDFromCtx(ctx context.Context, obj ConditionedObject) string {
 		return id
 	}
 	if annotations := obj.GetAnnotations(); annotations != nil {
-		return annotations[AnnotationCorrelationID]
+		return annotations[audit.AnnotationCorrelationID]
 	}
 	return ""
 }

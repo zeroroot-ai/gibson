@@ -35,8 +35,8 @@ var _ sandboxed.SessionClient = (*setecClient)(nil)
 // (nil, nil) when the sandbox subsystem is disabled — the same
 // unconditionally-callable shape as NewSetecSandboxClient, so the daemon needs
 // no build-tag branch.
-func NewSetecSessionClient(cfg config.SandboxConfig) (sandboxed.SessionClient, error) {
-	c, err := NewSetecSandboxClient(cfg)
+func NewSetecSessionClient(cfg config.SandboxConfig, src setecSVIDSource) (sandboxed.SessionClient, error) {
+	c, err := NewSetecSandboxClient(cfg, src)
 	if err != nil || c == nil {
 		return nil, err
 	}
@@ -104,7 +104,11 @@ func (c *setecClient) LaunchSession(ctx context.Context, req sandboxed.SessionLa
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
 	}
-	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+	return sandboxed.LaunchResponse{
+		SandboxID:    resp.GetSandboxId(),
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
 }
 
 // Exec opens a command stream inside an existing session sandbox.

@@ -466,35 +466,6 @@ func (m *CallbackManager) SetCredentialStore(store CredentialStore) {
 	}
 }
 
-// SetEventBus sets the event bus on the callback service.
-// This enables the callback service to publish tool and LLM events
-// for consumption by the execution graph engine.
-//
-// This method should be called after NewCallbackManager but before Start().
-//
-// Parameters:
-//   - eventBus: EventBusPublisher interface for publishing events
-//
-// Thread-safe: Can be called from multiple goroutines.
-func (m *CallbackManager) SetEventBus(eventBus interface{}) {
-	if m.server != nil && m.server.service != nil {
-		// Type assert to the EventBusPublisher interface
-		// The interface{} parameter is used to avoid circular dependencies
-		type eventBusPublisher interface {
-			Publish(ctx context.Context, event interface{}) error
-		}
-
-		if bus, ok := eventBus.(eventBusPublisher); ok {
-			m.server.service.mu.Lock()
-			defer m.server.service.mu.Unlock()
-			m.server.service.eventBus = bus
-			m.logger.Debug("set event bus on callback service")
-		} else {
-			m.logger.Warn("provided event bus does not implement EventBusPublisher interface")
-		}
-	}
-}
-
 // SetObservationSink sets the observation sink on the callback service, wiring
 // the Observe RPC to the brain (ADR-0107). Call after NewCallbackManager, before
 // Start(). Thread-safe.

@@ -63,7 +63,7 @@ func TestProofReview_MissionScope(t *testing.T) {
 func TestEngine_SubmitProofForReview_Refusals(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e := NewRegistry(ctx).For("t")
+	e := NewRegistry(ctx, memStoreFactory()).For("t")
 
 	item := ProofReviewEvidence{Content: "x"}
 	many := make([]ProofReviewEvidence, MaxProofReviewEvidenceItems+1)
@@ -95,7 +95,7 @@ func TestEngine_SubmitProofForReview_Refusals(t *testing.T) {
 func TestEngine_RecordedToolCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	e := NewRegistry(ctx).For("t")
+	e := NewRegistry(ctx, memStoreFactory()).For("t")
 	e.Submit(AgentToolCallObserved{ToolCallID: "a", MissionID: "m1", Result: "ra"})
 	e.Submit(AgentToolCallObserved{ToolCallID: "b", MissionID: "m1", Result: "rb"})
 	e.Submit(AgentToolCallObserved{ToolCallID: "c", MissionID: "m2", Result: "rc"})

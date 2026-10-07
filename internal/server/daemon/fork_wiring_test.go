@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
+package daemon
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
+)
+
+// With no state client no fork can begin, and no grant counts as forked.
+func TestLazyForkLedger_NoStateClient(t *testing.T) {
+	z := &lazyForkLedger{daemon: &daemonImpl{}}
+	ctx := context.Background()
+	if err := z.BeginFork(ctx, "j", "s", time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Errorf("BeginFork: err = %v", err)
+	}
+	if err := z.RecordForks(ctx, "j", "s", nil, time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Errorf("RecordForks: err = %v", err)
+	}
+	if err := z.RecordStart(ctx, harness.ForkDispatch{}, time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Errorf("RecordStart: err = %v", err)
+	}
+	if _, err := z.ClaimTarget(ctx, "f"); !errors.Is(err, errNoForkStore) {
+		t.Errorf("ClaimTarget: err = %v", err)
+	}
+	if _, err := z.Claim(ctx, "f"); !errors.Is(err, errNoForkStore) {
+		t.Errorf("Claim: err = %v", err)
+	}
+	if _, forked, err := z.ForkedSource(ctx, "j"); forked || err != nil {
+		t.Errorf("ForkedSource = %v, %v", forked, err)
+	}
+}
+
+// With a state client the ledger works end to end.
+func TestLazyForkLedger_UsesTheStateClient(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	z := &lazyForkLedger{daemon: &daemonImpl{stateClient: sc}}
+	ctx := context.Background()
+	if err := z.BeginFork(ctx, "j", "ns/src/u", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := z.RecordForks(ctx, "j", "ns/src/u", []harness.ForkDispatch{{SandboxID: "ns/f/u", Tenant: "acme", NodeID: "n"}}, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if src, forked, err := z.ForkedSource(ctx, "j"); !forked || err != nil || src != "ns/src/u" {
+		t.Fatalf("ForkedSource = %q %v %v", src, forked, err)
+	}
+	if tg, err := z.ClaimTarget(ctx, "f"); err != nil || tg.SandboxID != "ns/f/u" {
+		t.Fatalf("ClaimTarget = %+v %v", tg, err)
+	}
+	if d, err := z.Claim(ctx, "f"); err != nil || d.NodeID != "n" {
+		t.Fatalf("Claim = %+v %v", d, err)
+	}
+}
+
+// The fork seats go through the ledger too: none without the state client,
+// and a round trip with it.
+func TestLazyForkLedger_ForkSeats(t *testing.T) {
+	ctx := context.Background()
+	none := &lazyForkLedger{daemon: &daemonImpl{}}
+	seat := harness.ForkSeat{MissionID: "m", NodeID: "n", Tenant: "acme", AgentName: "claude", SandboxID: "ns/f/u", SandboxClass: "agent", SourceSandboxID: "ns/src/u", SourceJTI: "j"}
+	if err := none.ReserveForkSeat(ctx, seat, time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Fatalf("ReserveForkSeat with no store: %v", err)
+	}
+	if _, ok, err := none.TakeForkSeat(ctx, "m", "n"); ok || err != nil {
+		t.Fatalf("TakeForkSeat with no store = %v, %v; want none", ok, err)
+	}
+
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	z := &lazyForkLedger{daemon: &daemonImpl{stateClient: sc}}
+	if err := z.ReserveForkSeat(ctx, seat, time.Hour); err != nil {
+		t.Fatalf("ReserveForkSeat: %v", err)
+	}
+	got, ok, err := z.TakeForkSeat(ctx, "m", "n")
+	if err != nil || !ok || got.SandboxID != "ns/f/u" {
+		t.Fatalf("TakeForkSeat = %+v, %v, %v; want the seat", got, ok, err)
+	}
+	if _, ok, err := z.TakeForkSeat(ctx, "m", "n"); ok || err != nil {
+		t.Fatalf("a seat is taken once: %v, %v", ok, err)
+	}
+}

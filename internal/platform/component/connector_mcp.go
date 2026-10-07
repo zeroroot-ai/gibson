@@ -214,11 +214,6 @@ func contentValue(content []mcp.Content) (any, error) {
 	return out, nil
 }
 
-// ConnectorProxyAudience is the audience of the JWT-SVID that the daemon
-// presents to the ToolHive proxy of a connector. The daemon calls the proxy
-// with its SPIFFE identity (ADR-0065), and the proxy validates the token.
-const ConnectorProxyAudience = "gibson-connector-proxy"
-
 // TokenFunc returns a bearer token for one request. An empty token sends no
 // Authorization header.
 type TokenFunc func(ctx context.Context) (string, error)

@@ -372,7 +372,6 @@ func (p *pipelineProvisioner) emitEvent(ctx context.Context, tenant *gibsonv1alp
 
 // DataPlane phase constants used in TenantDataPlaneStatus.Phase.
 const (
-	DataPlanePhasePending        = "Pending"
 	DataPlanePhaseProvisioning   = "Provisioning"
 	DataPlanePhaseActive         = "Active"
 	DataPlanePhaseFailed         = "Failed"

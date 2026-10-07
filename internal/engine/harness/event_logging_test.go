@@ -42,6 +42,7 @@ func TestEventLogging_FindingSubmission(t *testing.T) {
 	// Create harness with event logger
 	cfg := HarnessConfig{
 		SlotManager:  llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts:  testTargetFacts,
 		FindingStore: NewInMemoryFindingStore(),
 		EventLogger:  mockLogger,
 	}
@@ -92,6 +93,7 @@ func TestEventLogging_NoEventLogger(t *testing.T) {
 	// Create harness without event logger
 	cfg := HarnessConfig{
 		SlotManager:  llm.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts:  testTargetFacts,
 		FindingStore: NewInMemoryFindingStore(),
 		EventLogger:  nil, // No event logger
 	}

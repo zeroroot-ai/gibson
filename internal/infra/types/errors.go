@@ -69,7 +69,6 @@ const (
 	SANDBOX_NON_ZERO_EXIT       ErrorCode = "SANDBOX_NON_ZERO_EXIT"
 	SANDBOX_OUTPUT_MALFORMED    ErrorCode = "SANDBOX_OUTPUT_MALFORMED"
 	SANDBOX_INPUT_TOO_LARGE     ErrorCode = "SANDBOX_INPUT_TOO_LARGE"
-	SANDBOX_STREAM_LOGS_FAILED  ErrorCode = "SANDBOX_STREAM_LOGS_FAILED"
 	// SANDBOX_POLICY_DENIED — the dispatch-policy gate refused execution: an
 	// untrusted component with no sandboxed dispatch under the setec-only
 	// deployment shape. See ADR-0110 / gibson#994.

@@ -113,7 +113,7 @@ concurrency:
 permissions:
   contents: read
 
-# Module fetch. Every first-party module (sdk, ast-checks, setec, testfixtures)
+# Module fetch. Every first-party module (sdk, ast-checks, setec)
 # is public, so `go` resolves them through the public proxy and checksum
 # database like any other dependency. No GOPRIVATE, no git credential.
 env:
@@ -172,7 +172,7 @@ jobs:
     # in the queue. Running both lanes would run the same vet/build/test twice
     # in the queue for no added signal.
     if: github.event_name == 'pull_request' && needs.changes.outputs.go == 'true'
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@87e85db6be9e1b5031523d6a96774bf5495344f8 # v0.8.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
     with:
       tier: fast
       skip-lint: true # gibson runs its own pinned golangci-lint below (make lint)
@@ -192,7 +192,7 @@ jobs:
       fail-fast: false
       matrix:
         build_tags: ["", "setec_integration"]
-    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@87e85db6be9e1b5031523d6a96774bf5495344f8 # v0.8.1
+    uses: zeroroot-ai/.github/.github/workflows/reusable-go-ci.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
     with:
       tier: heavy
       build-tags: ${{ matrix.build_tags }}
@@ -482,7 +482,7 @@ jobs:
       # on all attempts still fails the job. Suspected flakes get tracked
       # issues (e.g. gibson#1392) instead of blind reruns.
       - name: Run integration lane (flake-quarantined)
-        uses: zeroroot-ai/.github/actions/flake-quarantine@40c67fd77152f2c4924abccbd992dbca065f325b # v0.8.2
+        uses: zeroroot-ai/.github/actions/flake-quarantine@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
         with:
           cmd: make test-integration
 

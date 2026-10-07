@@ -77,7 +77,7 @@ func (deterministicBelief) Version() string { return "test-belief-v0" }
 // the belief worker subscribed as a live tap — the wiring WireBelief performs,
 // with the drain driven by the test instead of a ticker.
 func beliefEngine(p BeliefProvider) (*Engine, *BeliefWorker) {
-	e := NewEngine("t")
+	e := NewEngine("t", &memTimelineStore{})
 	e.AddSystem(BeliefSystem)
 	bw := NewBeliefWorker(e, p)
 	e.Subscribe(bw.Tap)

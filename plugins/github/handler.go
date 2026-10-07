@@ -11,11 +11,13 @@ import (
 
 	"github.com/google/go-github/v90/github"
 	"github.com/zeroroot-ai/sdk/plugin"
+	"github.com/zeroroot-ai/sdk/plugin/lifecycle"
 )
 
 // credName is the broker-qualified secret this plugin resolves for every call.
-// It is declared in declaration() under Spec.Secrets; the SDK rejects any name
-// that is not declared there before it ever reaches the broker.
+// A tenant admin grants the plugin can_resolve on it when the plugin is
+// deployed. The plugin declares no secret: the daemon checks the grant on
+// each resolve (ADR-0097, sdk#129).
 const credName = "cred:github_token"
 
 // --- Typed method contracts (ADR-0065 R4) --------------------------------
@@ -202,15 +204,37 @@ func handleCreateIssue(ctx context.Context, req CreateIssueRequest) (CreateIssue
 	return createIssue(ctx, gh, req)
 }
 
+// pluginName and pluginVersion are the declaration this plugin reports at
+// check-in (ADR-0097). No manifest file exists.
+const (
+	pluginName    = "github"
+	pluginVersion = "0.1.0"
+)
+
+// requireToken fails the start when the plugin cannot read its token, so a
+// missing grant shows at boot with the secret named, and not at the first call.
+func requireToken(ctx context.Context) error {
+	if _, err := plugin.ResolveSecret(ctx, credName); err != nil {
+		return fmt.Errorf("resolve startup secret %s: %w", credName, err)
+	}
+	return nil
+}
+
+// serveOptions is the plugin declaration in code: its name, its version, one
+// handler per method, and the start check of its one secret.
+func serveOptions() []plugin.Option {
+	return []plugin.Option{
+		plugin.WithName(pluginName),
+		plugin.WithVersion(pluginVersion),
+		plugin.WithHandler("GetRepository", "Fetch a repository by owner and name.", handleGetRepository),
+		plugin.WithHandler("ListIssues", "List issues for a repository, optionally filtered by state.", handleListIssues),
+		plugin.WithHandler("CreateIssue", "Open a new issue in a repository (write).", handleCreateIssue),
+		plugin.WithLifecycle(lifecycle.LifecycleHooks{OnStart: requireToken}),
+	}
+}
+
 func main() {
-	err := plugin.Serve(
-		context.Background(),
-		plugin.WithParsedManifest(declaration()),
-		plugin.WithHandler("GetRepository", handleGetRepository),
-		plugin.WithHandler("ListIssues", handleListIssues),
-		plugin.WithHandler("CreateIssue", handleCreateIssue),
-	)
-	if err != nil {
+	if err := plugin.Serve(context.Background(), serveOptions()...); err != nil {
 		slog.Error("plugin exited with error", "err", err)
 		os.Exit(1)
 	}

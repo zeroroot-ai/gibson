@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,7 +33,7 @@ func mustScheme(t *testing.T) *runtime.Scheme {
 func TestReconcileMasterKey_MissingSecretGenerated(t *testing.T) {
 	s := mustScheme(t)
 	cli := fake.NewClientBuilder().WithScheme(s).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
@@ -72,7 +74,7 @@ func TestReconcileMasterKey_ExistingSecretPreserved(t *testing.T) {
 		Data:       map[string][]byte{"master-key": []byte("DO-NOT-OVERWRITE")},
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(existing).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{
@@ -107,7 +109,7 @@ func TestReconcileMasterKey_ExistingSecretMissingKeyMaterialised(t *testing.T) {
 		Data:       map[string][]byte{"some-other-key": []byte("irrelevant")},
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(existing).Build()
-	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
+	r := &PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cli, Scheme: s, Recorder: record.NewFakeRecorder(8)}
 	pb := &gibsonv1alpha1.PlatformBootstrap{
 		ObjectMeta: metav1.ObjectMeta{Name: "test"},
 		Spec: gibsonv1alpha1.PlatformBootstrapSpec{

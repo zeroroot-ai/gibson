@@ -26,7 +26,6 @@ type PluginStatus string
 
 const (
 	PluginStatusUninitialized PluginStatus = "uninitialized"
-	PluginStatusRunning       PluginStatus = "running"
 )
 
 // ToolDescriptor provides lightweight metadata about a tool without requiring
@@ -95,19 +94,6 @@ type AgentDescriptor struct {
 	Capabilities []string               `json:"capabilities"`
 	Slots        []agent.SlotDefinition `json:"slots"`
 	IsExternal   bool                   `json:"is_external"`
-}
-
-// FromAgent creates an AgentDescriptor from an Agent interface.
-// This extracts metadata about the agent's capabilities and requirements.
-func FromAgent(a agent.Agent) AgentDescriptor {
-	return AgentDescriptor{
-		Name:         a.Name(),
-		Version:      a.Version(),
-		Description:  a.Description(),
-		Capabilities: a.Capabilities(),
-		Slots:        a.LLMSlots(),
-		IsExternal:   false,
-	}
 }
 
 // HasMethod checks if a plugin descriptor supports a specific method

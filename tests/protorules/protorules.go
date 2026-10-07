@@ -139,3 +139,64 @@ func hasIdempotencyKey(msg protoreflect.MessageDescriptor) bool {
 	field := msg.Fields().ByName(IdempotencyKeyField)
 	return field != nil && field.Kind() == protoreflect.StringKind && !field.IsList() && !field.IsMap()
 }
+
+// listVerb matches the name of an RPC that lists: List, or a prefix such as
+// Admin, then List as a full word. ListenX is not a match.
+var listVerb = regexp.MustCompile(`(^|[a-z0-9])List([A-Z0-9]|$)`)
+
+// forbiddenPageFields are the request fields of the old pagination shapes.
+// Rule 3 of ADR-0028 allows one shape: page_size and page_token.
+var forbiddenPageFields = []protoreflect.Name{"limit", "offset", "cursor"}
+
+// PaginationViolations returns one line for each list RPC of the file that
+// breaks rule 3 of ADR-0028 (gibson#995). A list request must not have a
+// field limit, offset or cursor. A list request with page_token must have
+// page_size, and its response must have next_page_token. The lines are
+// sorted. No allowlist exists.
+func PaginationViolations(file protoreflect.FileDescriptor) []string {
+	var out []string
+	services := file.Services()
+	for i := range services.Len() {
+		methods := services.Get(i).Methods()
+		for j := range methods.Len() {
+			method := methods.Get(j)
+			if !listVerb.MatchString(string(method.Name())) {
+				continue
+			}
+			req, resp := method.Input(), method.Output()
+			for _, name := range forbiddenPageFields {
+				if req.Fields().ByName(name) != nil {
+					out = append(out, fmt.Sprintf("%s: %s (the request of %s) has a field %s",
+						file.Path(), req.FullName(), method.FullName(), name))
+				}
+			}
+			if req.Fields().ByName("page_token") == nil {
+				continue
+			}
+			if req.Fields().ByName("page_size") == nil {
+				out = append(out, fmt.Sprintf("%s: %s (the request of %s) has page_token and no page_size",
+					file.Path(), req.FullName(), method.FullName()))
+			}
+			if resp.Fields().ByName("next_page_token") == nil {
+				out = append(out, fmt.Sprintf("%s: %s (the response of %s) has no next_page_token",
+					file.Path(), resp.FullName(), method.FullName()))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ImportPath returns the import path of a proto file of the module. repoRel
+// is the path of the file from the repo root, with forward slashes. The
+// import path is the path from the proto root that holds the file. ok is
+// false when no root holds the file.
+func ImportPath(roots []string, repoRel string) (importPath string, ok bool) {
+	for _, root := range roots {
+		prefix := strings.TrimSuffix(root, "/") + "/"
+		if strings.HasPrefix(repoRel, prefix) {
+			return strings.TrimPrefix(repoRel, prefix), true
+		}
+	}
+	return "", false
+}

@@ -20,12 +20,22 @@ import (
 //
 //	component:<kind>/<name>   — a component in the registry; the kind is one
 //	                            of the Kind constants below (ADR-0136).
-//	                            Tenant-LESS: tenant isolation comes
-//	                            from the model's in_tenant_catalog gate
-//	                            (tenant_enabled tuples) plus the tenant-scoped
-//	                            membership of the checking subject, and from
-//	                            the data plane keying every registry lookup and
-//	                            dispatch by (tenant, name).
+//	                            Tenant-LESS: two tenants that publish the
+//	                            same kind and name share one object. The
+//	                            rule that keeps them apart: each tuple on
+//	                            the object names a tenant or a subject of a
+//	                            tenant, and each computed relation joins the
+//	                            membership of the checking subject
+//	                            (in_tenant_catalog, owner, the denies). So a
+//	                            grant, an enable, a deny or an owner tuple of
+//	                            one tenant gives a subject of another tenant
+//	                            nothing and takes nothing from it, proven by
+//	                            TestModel_AComponentGrantStaysInItsTenant.
+//	                            The data plane keys every registry lookup and
+//	                            dispatch by (tenant, name), proven by
+//	                            TestRedisRegistry_TenantIsolation. A writer
+//	                            of a direct grant binds the subject to the
+//	                            tenant of the caller (WriteAgentGrants).
 //	plugin:<tenant>/<name>    — the plugin-invocation object checked by the
 //	                            PluginInvoke can_invoke annotation
 //	                            (object_deriver: tenant_and_field('PluginName'))
@@ -66,10 +76,6 @@ const (
 func ComponentObject(kind, name string) string {
 	return "component:" + kind + "/" + name
 }
-
-// ConnectorKindPrefix is the "connector/" object-id prefix, kept for callers
-// that build the connector segment by hand.
-const ConnectorKindPrefix = KindConnector + "/"
 
 // ConnectorComponentObject returns the canonical FGA object reference for a
 // connector component: "component:connector/<catalog-id>". One object per

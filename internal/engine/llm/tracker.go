@@ -37,11 +37,10 @@ func (s UsageScope) Key() string {
 
 // UsageRecord tracks token usage and associated costs for a specific scope
 type UsageRecord struct {
-	Scope        UsageScope // The scope of this usage record
-	InputTokens  int        // Total input tokens used
-	OutputTokens int        // Total output tokens used
-	TotalCost    float64    // Total cost in USD
-	CallCount    int        // Number of API calls made
+	InputTokens  int     // Total input tokens used
+	OutputTokens int     // Total output tokens used
+	TotalCost    float64 // Total cost in USD
+	CallCount    int     // Number of API calls made
 }
 
 // Budget defines spending limits for token usage
@@ -140,9 +139,7 @@ func (t *DefaultTokenTracker) RecordUsage(scope UsageScope, provider string, mod
 	key := scope.Key()
 	record, exists := t.usage[key]
 	if !exists {
-		record = &UsageRecord{
-			Scope: scope,
-		}
+		record = &UsageRecord{}
 		t.usage[key] = record
 	}
 
@@ -182,9 +179,7 @@ func (t *DefaultTokenTracker) aggregateToScope(scope UsageScope, usage TokenUsag
 	key := scope.Key()
 	record, exists := t.usage[key]
 	if !exists {
-		record = &UsageRecord{
-			Scope: scope,
-		}
+		record = &UsageRecord{}
 		t.usage[key] = record
 	}
 

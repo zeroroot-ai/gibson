@@ -52,7 +52,7 @@ func dispatchToolCall(t *testing.T, toolName, pkg, fds string, fill func(proto.M
 	}
 
 	registry := NewCallbackHarnessRegistry()
-	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	const missionID, agentName = "mission-625", "agent-625"
 	registry.Register(missionID, agentName, mockHarness)
 

@@ -52,10 +52,6 @@ type Config struct {
 	// PostgresHost is the host:port for the Postgres cluster.
 	PostgresHost string
 
-	// PostgresUser is the template for the per-tenant Postgres role.
-	// The actual role name is "tenant_<sanitized>_app".
-	PostgresUser string
-
 	// RedisAddr is the host:port of the Redis instance.
 	RedisAddr string
 

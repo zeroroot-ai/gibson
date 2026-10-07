@@ -94,7 +94,7 @@ func TestSubmitOntologyExtensionUpstream_RejectedProposalIsRefused(t *testing.T)
 // rendered pack carries exactly the promoted label, attributed to this
 // tenant, and passes ontology.DomainPack's own Validate.
 func TestSubmitOntologyExtensionUpstream_RendersNodeLabelFragment(t *testing.T) {
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	promoteLabel(t, e, taxonomy.ProposedNodeLabel, "Container")
 
 	pack, err := e.SubmitOntologyExtensionUpstream(context.Background(), taxonomy.ProposedNodeLabel, "Container")
@@ -125,7 +125,7 @@ func TestSubmitOntologyExtensionUpstream_RendersNodeLabelFragment(t *testing.T) 
 // TestSubmitOntologyExtensionUpstream_RendersRelationshipTypeFragment mirrors
 // the node-label case for the other half of taxonomy's proposal vocabulary.
 func TestSubmitOntologyExtensionUpstream_RendersRelationshipTypeFragment(t *testing.T) {
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	promoteLabel(t, e, taxonomy.ProposedRelationshipType, "RUNS_ON")
 
 	pack, err := e.SubmitOntologyExtensionUpstream(context.Background(), taxonomy.ProposedRelationshipType, "RUNS_ON")
@@ -143,7 +143,7 @@ func TestSubmitOntologyExtensionUpstream_RendersRelationshipTypeFragment(t *test
 // second call renders byte-identical content and the proposal snapshot is
 // unchanged.
 func TestSubmitOntologyExtensionUpstream_DoesNotMutateWorld(t *testing.T) {
-	e := NewEngine("acme")
+	e := NewEngine("acme", &memTimelineStore{})
 	promoteLabel(t, e, taxonomy.ProposedNodeLabel, "Container")
 
 	before := e.OntologyProposals()

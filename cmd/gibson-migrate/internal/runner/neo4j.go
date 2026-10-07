@@ -37,9 +37,6 @@ type Neo4jRunner struct {
 
 // Neo4jStatus holds the current migration state for a tenant Neo4j database.
 type Neo4jStatus struct {
-	// CurrentName is the filename of the last applied migration, as stored in
-	// the :_SchemaVersion node. Empty when no migrations have been applied.
-	CurrentName string
 
 	// CurrentVersion is the numeric version prefix of CurrentName.
 	CurrentVersion uint
@@ -156,7 +153,6 @@ func (r *Neo4jRunner) Status(ctx context.Context) (*Neo4jStatus, error) {
 	}
 
 	status := &Neo4jStatus{
-		CurrentName:    currentName,
 		CurrentVersion: currentVer,
 		Target:         target,
 	}

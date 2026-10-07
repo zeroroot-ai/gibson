@@ -23,7 +23,7 @@
 #     kubectl, port-forward to a NodePort, or read files the browser driver
 #     writes. They run as plain `go test -tags=e2e`.
 #
-# The bring-up (stage 0, recreate, gvisor check, test-mode daemon) is the
+# The bring-up (stage 0, recreate, KVM check, test-mode daemon) is the
 # tool-dispatch one, copied. ONE bring-up path.
 #
 # ADR-0080: NEVER on pull_request. It needs a live cluster, so it cannot gate
@@ -89,9 +89,8 @@ jobs:
       - name: The verdict parser passes its own fixtures
         run: bash gibson/.github/scripts/e2e-suite-verdict.sh --selftest
 
-      # The kind bring-up (make substrate / make recreate ENV=kind), the
-      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
-      # hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
+      # The kind bring-up (make substrate / make recreate ENV=kind) and the
+      # sanctioned setec profile live in the hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
       # so the checkout needs the org read PAT.
       - name: Checkout hosted
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -145,31 +144,25 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
-      # --fresh-kind does the gvisor node-prep and installs the umbrella with
-      # values-baseline.yaml. The 2-core overlay shrinks REQUESTS so the whole
-      # platform packs onto the runner.
-      - name: Stand up the setec+gvisor cluster
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
+      - name: Open /dev/kvm for the launcher
+        uses: ./gibson/.github/actions/open-kvm
+
+      # Stand up kind with the sanctioned setec profile. The 2-core overlay
+      # shrinks REQUESTS so the whole platform packs onto the runner.
+      - name: Stand up the setec cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
             RUNG=ci make recreate ENV=kind
 
-      # The node must actually advertise gvisor, or every sandbox stays Pending.
-      - name: Node advertises gvisor
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 30); do
-            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
-            sleep 5
-          done
-          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-          if [ "$v" != "true" ]; then
-            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
-            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
-            exit 1
-          fi
+      # With no KVM on the node every sandbox stays Pending. Fail here with a
+      # clear message, not as a timeout later.
+      - name: Node offers KVM to the launcher
+        uses: ./gibson/.github/actions/node-offers-kvm
+        with:
+          node: ${{ env.NODE }}
 
       # The overlay below builds FROM the private daemon image on ghcr.io.
       # The runner's own docker needs the same read-only token the cluster
@@ -226,6 +219,15 @@ jobs:
           done
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
 
+      # Cilium enforces each network policy of the chart on this cluster
+      # (hosted#436). Prove it for the daemon before the tests run, so a
+      # missing policy rule fails here and not on staging (gibson#220).
+      - name: The daemon refuses a pod that no policy admits
+        uses: ./gibson/.github/actions/policy-refuses-an-unadmitted-pod
+        with:
+          namespace: ${{ env.NS }}
+          release: ${{ env.RELEASE }}
+
       # One image, two test binaries: tests/e2e (e2e.test, the ENTRYPOINT) and
       # tests/e2e/secrets (secrets.test), each compiled with `go test -c` so
       # -test.run / -test.v select and report as usual.
@@ -255,12 +257,12 @@ jobs:
       # fails the job.
       # ------------------------------------------------------------------
 
-      # tests/e2e/secrets/* (five files, four tests): in-cluster, SVID peer.
-      # The suites name their tenant with GIBSON_TEST_TENANT_ID and expect a
-      # tenant admin JWT in GIBSON_TEST_TENANT_ADMIN_TOKEN. No such token is
-      # minted in this venue (the SVID is the identity), so the token is not
-      # set and the suites report their own skip reason. gibson#213 moves
-      # them to the SVID path; until then this row reads SKIP.
+      # tests/e2e/secrets/* (two tests): in-cluster, SVID peer for the admin
+      # calls, and the Envoy edge for the component calls (gibson#213). A
+      # component checks in at the public api origin and its capability grant
+      # is verified by ext-authz, which makes the can_resolve decision. The
+      # Job reaches Envoy by its Service and names the api host in SNI and
+      # :authority, so no pod needs the public name in DNS.
       - name: "Suite: secrets (in-cluster)"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         env:
@@ -268,10 +270,22 @@ jobs:
           E2E_RUNNER_ENV_FILE: ${{ runner.temp }}/secrets.env
         run: |
           set +e
-          printf 'GIBSON_TEST_TENANT_ID=%s\nGIBSON_PLATFORM_URL=http://%s-gibson-workloads.%s.svc.cluster.local:8085\n' \
-            "$TENANT" "$RELEASE" "$NS" > "$E2E_RUNNER_ENV_FILE"
+          api_origin=$(kubectl -n "$NS" get configmap gibson-domains -o jsonpath='{.data.apiOrigin}')
+          edge_ca=$(kubectl -n "$NS" get secret gibson-envoy-tls -o jsonpath='{.data.ca\.crt}')
+          if [ -z "$api_origin" ] || [ -z "$edge_ca" ]; then
+            echo "::error::the secrets suite needs gibson-domains apiOrigin and the ca.crt of gibson-envoy-tls; one is missing"
+            gibson/.github/scripts/e2e-suite-verdict.sh secrets /dev/null 1 "$RESULTS"
+            exit 0
+          fi
+          api_port=$(printf '%s' "$api_origin" | sed -n 's#^https://[^:/]*:\([0-9]*\).*#\1#p')
+          {
+            printf 'GIBSON_TEST_TENANT_ID=%s\n' "$TENANT"
+            printf 'GIBSON_URL=%s\n' "$api_origin"
+            printf 'GIBSON_EDGE_ADDR=gibson-envoy.%s.svc.cluster.local:%s\n' "$NS" "${api_port:-443}"
+            printf 'GIBSON_EDGE_CA_PEM_B64=%s\n' "$edge_ca"
+          } > "$E2E_RUNNER_ENV_FILE"
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-secrets \
-            'TestFGAEnforcement_Secrets|TestNonPluginDeny_HarnessAndComponent|TestForgedCGJWT_AgentDeniedByFGA|TestAgentLLMPreserved' 15m \
+            'TestNonPluginDeny|TestForgedCGJWT' 15m \
             2>&1 | tee "$E2E_OUT/secrets.log"
           rc=${PIPESTATUS[0]}
           gibson/.github/scripts/e2e-suite-verdict.sh secrets "$E2E_OUT/secrets.log" "$rc" "$RESULTS"
@@ -341,21 +355,6 @@ jobs:
           kill $pf_pids 2>/dev/null || true
           .github/scripts/e2e-suite-verdict.sh audit_v4 "$E2E_OUT/audit_v4.log" "$rc" "$RESULTS"
 
-      # signup_full_chain and login_full_chain are the Go half of a two-part
-      # test. The other half is a Playwright spec in the
-      # dashboard repository that signs up, logs in and writes the files the
-      # Go half reads (/tmp/login-redirect-chain-<slug>.json and the like).
-      # No browser runs here, so the Go half alone can never pass (run
-      # 35660778012). gibson#215 wires the browser half; hosted's
-      # exit-test-signup.yml already proves the signup chain (blocker 2).
-      - name: "Suite: signup_full_chain, login_full_chain (browser half missing)"
-        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        run: |
-          gibson/.github/scripts/e2e-suite-verdict.sh --skip signup_full_chain \
-            "superseded by hosted exit-test-signup.yml; the Go half reads browser artifacts no step here writes (gibson#215)" "$RESULTS"
-          gibson/.github/scripts/e2e-suite-verdict.sh --skip login_full_chain \
-            "reads the dashboard Playwright spec's files; no browser runs on this venue yet (gibson#215)" "$RESULTS"
-
       # operators/tenant/test/e2e (Ginkgo), through its own entrypoint,
       # `make test-e2e`: it creates a kind cluster of its own
       # (tenant-operator-test-e2e), builds the operator image from
@@ -393,7 +392,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$E2E_OUT"
           touch "$RESULTS"
-          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 signup_full_chain login_full_chain tenant_operator"
+          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 tenant_operator"
           {
             echo "## Cluster-bound e2e suites (run ${{ github.run_id }})"
             echo

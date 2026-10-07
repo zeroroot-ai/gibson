@@ -368,7 +368,8 @@ func ExportDomainPack(name string, version int, taxonomyBase, taxonomyNow *taxon
 //   - no bundled ontology extension carries RawTriples — the one
 //     OntologyExtension field that is never subject to prefix/cycle
 //     validation, so a Pack never ships that unvalidated a payload;
-//   - every Predicates key is a plain ValidIdentifier technique name, and
+//   - every Predicates key is a plain ValidIdentifier technique name that the
+//     hierarchy the pack extends holds (ADR-0135), and
 //     every value is well-formed CEL-expression TEXT (ADR-0131)
 //     — non-empty, valid UTF-8, within MaxPredicateExpressionBytes; this
 //     never parses or type-checks the expression as CEL (gibson#388's job);
@@ -414,7 +415,11 @@ func (p *DomainPack) Validate() error {
 			return fmt.Errorf("domain pack %q: predicate for technique %q: %w", p.Name, technique, err)
 		}
 	}
-	if _, err := p.ExtendTechniques(taxonomy.GlobalTechniques); err != nil {
+	hierarchy, err := p.ExtendTechniques(taxonomy.GlobalTechniques)
+	if err != nil {
+		return err
+	}
+	if err := p.validatePredicateTechniques(hierarchy); err != nil {
 		return err
 	}
 	if err := p.validateBeliefSchema(); err != nil {
@@ -449,6 +454,32 @@ func (p *DomainPack) Validate() error {
 // pack is registered. One name for each pack, so two packs do not collide.
 func (p *DomainPack) beliefSchemaExtensionName() string {
 	return "pack/" + p.Name + "/belief-schema"
+}
+
+// validatePredicateTechniques refuses a predicate whose technique the
+// hierarchy does not hold. The hierarchy is the authority for technique
+// names (ADR-0135), and a settled proof is recorded under its technique, so
+// a predicate cannot settle a technique that does not exist.
+func (p *DomainPack) validatePredicateTechniques(hierarchy *taxonomy.TechniqueHierarchy) error {
+	techniques := make([]string, 0, len(p.Predicates))
+	for technique := range p.Predicates {
+		techniques = append(techniques, technique)
+	}
+	slices.Sort(techniques)
+	for _, technique := range techniques {
+		if !hierarchy.HasTechnique(taxonomy.TechniqueID(technique)) {
+			return fmt.Errorf("domain pack %q: predicate technique %q is not a technique of the hierarchy the pack extends",
+				p.Name, technique)
+		}
+	}
+	return nil
+}
+
+// HoldsTechnique reports whether the hierarchy that this pack extends holds
+// technique: the core hierarchy with the techniques of this pack.
+func (p *DomainPack) HoldsTechnique(technique string) bool {
+	hierarchy, err := p.ExtendTechniques(taxonomy.GlobalTechniques)
+	return err == nil && hierarchy.HasTechnique(taxonomy.TechniqueID(technique))
 }
 
 // ExtendTechniques returns base with each technique of this pack added,

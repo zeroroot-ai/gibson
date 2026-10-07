@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/crypto/argon2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
@@ -82,7 +83,7 @@ func (r *PlatformBootstrapReconciler) reconcileZitadelSMTP(ctx context.Context, 
 	}
 
 	cfg := desiredSMTPProviderConfig(spec, user, password)
-	hashHex := smtpSettingsHash(cfg)
+	hashHex := smtpSettingsHash(spec, user, password)
 	zc := r.ZitadelFactory(r.ZitadelURL, pat)
 
 	lookup, resolveOK, result, err := r.resolveSMTPProvider(ctx, zc, pb)
@@ -159,31 +160,58 @@ func (r *PlatformBootstrapReconciler) resolveSMTPCredentials(ctx context.Context
 // webhook path, never guaranteed for a CR built directly in a test or by an
 // older client, so the zero-value (nil) case is handled explicitly here too.
 func desiredSMTPProviderConfig(spec *gibsonv1alpha1.ZitadelSMTPSpec, user, password string) zitadel.SMTPProviderConfig {
-	tls := true
-	if spec.TLS != nil {
-		tls = *spec.TLS
-	}
 	return zitadel.SMTPProviderConfig{
 		SenderAddress: spec.FromAddress,
 		SenderName:    spec.FromName,
-		TLS:           tls,
-		Host:          fmt.Sprintf("%s:%d", spec.Host, spec.Port),
+		TLS:           smtpTLS(spec),
+		Host:          smtpHostPort(spec),
 		User:          user,
 		Password:      password,
 		Description:   smtpProviderDescription,
 	}
 }
 
-// smtpSettingsHash hashes every field of cfg, including the password.
-// Zitadel never returns a stored password on read, so this hash — not a
-// live comparison — is the only way the reconciler can tell a password
-// changed and needs re-applying.
-func smtpSettingsHash(cfg zitadel.SMTPProviderConfig) string {
-	sum := sha256.Sum256([]byte(strings.Join([]string{
-		cfg.SenderAddress, cfg.SenderName, strconv.FormatBool(cfg.TLS), cfg.Host, cfg.User, cfg.Password,
-	}, "\x00")))
-	return hex.EncodeToString(sum[:])
+// smtpTLS is spec.tls, true when unset.
+func smtpTLS(spec *gibsonv1alpha1.ZitadelSMTPSpec) bool {
+	return spec.TLS == nil || *spec.TLS
 }
+
+// smtpHostPort is the host:port of the SMTP server.
+func smtpHostPort(spec *gibsonv1alpha1.ZitadelSMTPSpec) string {
+	return fmt.Sprintf("%s:%d", spec.Host, spec.Port)
+}
+
+// smtpSettingsHash is the fingerprint of every SMTP setting of spec, the
+// user and the password. Zitadel never returns a stored password on read, so this
+// fingerprint, not a live comparison, is the only way the reconciler can
+// tell a password changed and needs re-applying.
+//
+// The fingerprint lives in the status of the PlatformBootstrap, where each
+// reader of the object sees it. A fast hash of the password would let such a
+// reader test password guesses offline at full speed. So the password goes
+// through Argon2id, a slow key derivation function, together with the user,
+// which comes from the same credentials Secret. The salt is a SHA-256 of the
+// spec fields only, which are not secret, so the fingerprint is stable for
+// one set of settings and changes when any field changes. Nothing read from
+// a Secret goes through the fast hash.
+func smtpSettingsHash(spec *gibsonv1alpha1.ZitadelSMTPSpec, user, password string) string {
+	salt := sha256.Sum256([]byte(strings.Join([]string{
+		spec.FromAddress, spec.FromName, strconv.FormatBool(smtpTLS(spec)), smtpHostPort(spec),
+	}, "\x00")))
+	key := argon2.IDKey([]byte(user+"\x00"+password), salt[:],
+		smtpFingerprintTime, smtpFingerprintMemoryKiB, smtpFingerprintThreads, smtpFingerprintKeyLen)
+	return hex.EncodeToString(salt[:]) + hex.EncodeToString(key)
+}
+
+// The Argon2id parameters of the SMTP fingerprint: the OWASP minimum for
+// Argon2id (19 MiB, two passes, one lane). One derivation runs per
+// reconcile of the SMTP step.
+const (
+	smtpFingerprintTime      = 2
+	smtpFingerprintMemoryKiB = 19 * 1024
+	smtpFingerprintThreads   = 1
+	smtpFingerprintKeyLen    = 32
+)
 
 // smtpProviderLookup is resolveSMTPProvider's result: found reports whether
 // an existing provider was located, in which case id and state are

@@ -23,13 +23,6 @@ type HuggingFaceProvider struct {
 	config llm.ProviderConfig
 }
 
-// NewHuggingFaceProvider constructs a HuggingFace Inference API provider.
-// Credentials come from cfg.APIKey (populated by the provider resolver from
-// the secrets broker), then the dev-only env-var. See resolveCredential.
-func NewHuggingFaceProvider(cfg llm.ProviderConfig) (*HuggingFaceProvider, error) {
-	return newHuggingFaceProviderWithContext(context.Background(), cfg)
-}
-
 // newHuggingFaceProviderWithContext constructs a HuggingFace provider, resolving the credential from cfg (see resolveCredential).
 func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*HuggingFaceProvider, error) {
 	token, err := resolveCredential(cfg, "huggingface", "", true)

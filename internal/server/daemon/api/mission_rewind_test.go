@@ -25,29 +25,6 @@ func missionViewerCtx() context.Context {
 	})
 }
 
-// A resume continues the same run. A request that names a checkpoint asks for
-// a rewind, and the resume path refuses it rather than ignore the field.
-func TestResumeMission_RefusesACheckpoint(t *testing.T) {
-	resumed := false
-	srv := NewDaemonServer(&mockDaemon{
-		resumeMissionFn: func(context.Context, string) error { resumed = true; return nil },
-	}, nil, nil)
-
-	for _, req := range []*daemonpb.ResumeMissionRequest{
-		{MissionId: "m-1", CheckpointId: "scan"},
-		{MissionId: "m-1", TargetCheckpointId: "scan"},
-	} {
-		stream := &fakeStream[daemonpb.ResumeMissionResponse]{ctx: missionViewerCtx()}
-		err := srv.ResumeMission(req, stream)
-		if status.Code(err) != codes.InvalidArgument {
-			t.Fatalf("resume with a checkpoint: code = %v (%v), want InvalidArgument", status.Code(err), err)
-		}
-	}
-	if resumed {
-		t.Fatal("the daemon resumed a run for a request that named a checkpoint")
-	}
-}
-
 func TestGetMissionCheckpoints_MapsTheNodeEnds(t *testing.T) {
 	srv := NewDaemonServer(&mockDaemon{
 		getMissionCheckpointsFn: func(_ context.Context, id string) ([]MissionCheckpoint, error) {

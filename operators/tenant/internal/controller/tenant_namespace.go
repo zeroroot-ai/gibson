@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -20,6 +21,7 @@ import (
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga/flows"
 )
 
 // Operator ServiceAccount identity. The Helm chart creates this SA in
@@ -291,7 +293,10 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 		Spec: networkingv1.NetworkPolicySpec{
 			// Every pod in the tenant namespace EXCEPT the per-tenant
 			// Neo4j pod, which is governed solely by its own
-			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0112).
+			// tenant-<slug>-neo4j-bolt policy (gibson#1255, ADR-0112),
+			// and the belief trainer pod, which is governed solely by its
+			// belief-trainer policy: egress to the daemon gRPC port and DNS,
+			// and no ingress (gibson#616).
 			//
 			// This exclusion is load-bearing, not cosmetic. Kubernetes
 			// unions the effect of every policy that selects a pod, so
@@ -308,7 +313,7 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 				MatchExpressions: []metav1.LabelSelectorRequirement{{
 					Key:      "app.kubernetes.io/component",
 					Operator: metav1.LabelSelectorOpNotIn,
-					Values:   []string{dataplane.ComponentTenantNeo4j},
+					Values:   []string{dataplane.ComponentTenantNeo4j, flows.ComponentBeliefTrainer},
 				}},
 			},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress, networkingv1.PolicyTypeEgress},
@@ -385,6 +390,37 @@ func mergeMap(dst, src map[string]string) bool {
 // Add new verbs here only after confirming a code path uses them; do
 // not pre-emptively grant list/watch/patch/update.
 func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, nsName string) error {
+	for _, rb := range p.tenantNamespaceRoleBindings(nsName) {
+		if err := p.upsertRoleBinding(ctx, rb); err != nil {
+			return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, rb.Name, err)
+		}
+	}
+	return nil
+}
+
+// TenantNamespaceRBACCurrent reports whether the RoleBindings of a tenant
+// namespace already hold their desired subjects and role. The RBAC backfill
+// changes, and records, only a namespace where this is false (gibson#583).
+func (p *NamespaceProvisioner) TenantNamespaceRBACCurrent(ctx context.Context, nsName string) (bool, error) {
+	for _, want := range p.tenantNamespaceRoleBindings(nsName) {
+		var got rbacv1.RoleBinding
+		err := p.Client.Get(ctx, types.NamespacedName{Namespace: want.Namespace, Name: want.Name}, &got)
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("get RoleBinding %s/%s: %w", want.Namespace, want.Name, err)
+		}
+		if got.RoleRef != want.RoleRef || !equality.Semantic.DeepEqual(got.Subjects, want.Subjects) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// tenantNamespaceRoleBindings returns the RoleBindings a tenant namespace
+// must hold.
+func (p *NamespaceProvisioner) tenantNamespaceRoleBindings(nsName string) []*rbacv1.RoleBinding {
 	saName := os.Getenv(envOperatorSAName)
 	if saName == "" {
 		saName = defaultOperatorSAName
@@ -425,9 +461,6 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 			Name:     tenantOperatorNamespaceClusterRole,
 		},
 	}
-	if err := p.upsertRoleBinding(ctx, rb); err != nil {
-		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, tenantOperatorRoleBindingName, err)
-	}
 	// The connector operator's Secret write, bounded to this namespace by
 	// the same shape: a RoleBinding to a chart-owned ClusterRole. The
 	// operator can bind only that one name (clusterroles/bind,
@@ -456,15 +489,11 @@ func (p *NamespaceProvisioner) ensureTenantNamespaceRBAC(ctx context.Context, ns
 			Name:     connectorCredsClusterRole,
 		},
 	}
-	if err := p.upsertRoleBinding(ctx, crb); err != nil {
-		return fmt.Errorf("upsert RoleBinding %s/%s: %w", nsName, connectorCredsRoleBindingName, err)
-	}
-
-	return nil
+	return []*rbacv1.RoleBinding{rb, crb}
 }
 
 // TenantNamespaceForBackfill returns the per-tenant namespace name used by
-// the operator. Exposed so the cmd/backfill-rbac binary can compute the
+// the operator. Exposed so the RBAC backfill can compute the
 // same name without duplicating the logic. Stays in sync with the inline
 // `tenant-<name>` convention in Provision().
 func TenantNamespaceForBackfill(t *gibsonv1alpha1.Tenant) string {

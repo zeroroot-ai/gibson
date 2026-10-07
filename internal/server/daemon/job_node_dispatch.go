@@ -54,7 +54,7 @@ func (b *brainExecutor) dispatchJob(bind *missionBinding, req brain.DispatchRequ
 		// may close it (ADR-0119).
 		Opener:   job.Principal{Kind: job.PrincipalService, ID: "mission:" + req.MissionID},
 		Ops:      store,
-		Verifier: &harnessVerifier{harness: bind.harness, timeout: req.Timeout, network: req.Network},
+		Verifier: &harnessVerifier{harness: bind.harness, timeout: req.Timeout, network: req.Network, nodeID: nodeIDOf(req.WorkID, req.MissionID)},
 		Closed:   b.jobClosed,
 		Findings: b.jobFindings,
 	})
@@ -87,6 +87,9 @@ type harnessVerifier struct {
 	// network is the network scope of the job node. An agent verifier runs
 	// inside that node, so its sandbox gets this scope (gibson#865).
 	network *agent.NodeNetwork
+	// nodeID is the id of the job node. The verifier judges the node and is
+	// not a node of its own, so it never parks and never forks (ADR-0169).
+	nodeID string
 }
 
 func (v *harnessVerifier) Verify(ctx context.Context, component string, payload jobnode.VerifyPayload) (jobnode.Report, error) {
@@ -111,6 +114,7 @@ func (v *harnessVerifier) Verify(ctx context.Context, component string, payload 
 			Context: map[string]any{"job_id": payload.JobID, "pass": payload.Pass},
 			Timeout: v.timeout,
 			Network: v.network,
+			NodeID:  v.nodeID,
 		})
 		if err != nil {
 			return jobnode.Report{}, fmt.Errorf("agent %q: %w", name, err)

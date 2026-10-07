@@ -17,7 +17,7 @@ import (
 // The validation in Start runs before the listener opens and never reads the
 // source, so a zero source stands in for a wired one.
 func wiredCallbackServer(td spiffeid.TrustDomain, peers ...spiffeid.ID) *CallbackServer {
-	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry())
+	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry(), testEventBus())
 	s.SetSPIFFE(&workloadapi.X509Source{}, td, peers)
 	return s
 }
@@ -44,10 +44,11 @@ func TestCallbackServer_StartRefusesAPeerOfAnotherTrustDomain(t *testing.T) {
 func TestCallbackManager_CarriesTheTrustDomain(t *testing.T) {
 	envoy := spiffeid.RequireFromString(callbackEnvoySVID(callbackTestTD))
 	m := NewCallbackManager(CallbackConfig{
-		ListenAddress: "127.0.0.1:0",
-		X509Source:    &workloadapi.X509Source{},
-		TrustDomain:   callbackTestTD,
-		PeerSVIDs:     []spiffeid.ID{envoy},
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+		ListenAddress:  "127.0.0.1:0",
+		X509Source:     &workloadapi.X509Source{},
+		TrustDomain:    callbackTestTD,
+		PeerSVIDs:      []spiffeid.ID{envoy},
 	}, slog.Default())
 	assert.Equal(t, callbackTestTD, m.server.trustDomain)
 
@@ -56,4 +57,12 @@ func TestCallbackManager_CarriesTheTrustDomain(t *testing.T) {
 	assert.Equal(t, other, m.config.TrustDomain)
 	assert.Equal(t, other, m.server.trustDomain)
 	assert.True(t, m.config.SPIFFEEnabled)
+}
+
+// The callback server refuses to start with no fork ledger (D74).
+func TestCallbackServer_StartRefusesNoForkLedger(t *testing.T) {
+	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry(), testEventBus())
+	err := s.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fork ledger")
 }

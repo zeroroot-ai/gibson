@@ -331,3 +331,40 @@ func TestSendInvitationConflict_WrapsTransportError(t *testing.T) {
 		t.Errorf("error does not wrap the transport failure: %v", err)
 	}
 }
+
+// The owner of a self-serve workspace gets the invitation runbook with no
+// accept link: the first step signs in, and both parts name the tenant and
+// both origins (gibson#987).
+func TestSendOwnerWelcome(t *testing.T) {
+	rec := &captureMailer{}
+	s := NewInvitationSender(rec)
+	err := s.SendOwnerWelcome(context.Background(), OwnerWelcomeEmail{
+		To: "owner@acme.example", TenantID: "acme",
+		AppURL: "https://app.example.test/", APIURL: "https://api.example.test",
+	})
+	if err != nil {
+		t.Fatalf("SendOwnerWelcome: %v", err)
+	}
+	m := rec.last
+	if m.To != "owner@acme.example" || m.Subject != "Welcome to ZeroRoot AI" {
+		t.Fatalf("message = %+v", m)
+	}
+	for name, part := range map[string]string{"text": m.Text, "html": m.HTML} {
+		for _, want := range []string{
+			"gibson login --tenant acme",
+			"gibson init --gibson-url https://api.example.test",
+			"https://app.example.test/dashboard",
+			"Sign in to your workspace",
+			"You created a Gibson workspace",
+		} {
+			if !strings.Contains(part, want) {
+				t.Errorf("%s part does not contain %q", name, want)
+			}
+		}
+		for _, banned := range []string{"/invite/", "The link expires", "Accept, and set your password"} {
+			if strings.Contains(part, banned) {
+				t.Errorf("%s part contains %q, but the owner has nothing to accept", name, banned)
+			}
+		}
+	}
+}

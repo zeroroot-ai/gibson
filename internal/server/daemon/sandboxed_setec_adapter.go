@@ -17,8 +17,8 @@
 //
 // # Wiring
 //
-// `NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer, logger)` dials
-// the Setec frontend with mTLS using `component.TLSConfig.BuildTLSConfig()`,
+// `NewSetecSandboxedExecutor(cfg config.SandboxConfig, src, tracer, logger)`
+// dials the Setec frontend with the SVID of the daemon (SPIFFE mTLS),
 // builds the client, wires a `sandboxed.Executor`, and returns it. The
 // sandbox fleet is required (ADR-0142), so a TLS build failure stops the
 // daemon start. The dial itself is lazy: an unreachable frontend surfaces at
@@ -33,11 +33,17 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
+
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
 
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 
 	setecv1 "github.com/zeroroot-ai/setec/api/grpc/v1"
 
@@ -62,11 +68,14 @@ const maxSetecRecvMsgBytes = 4 * 1024 * 1024 // 4 MiB
 // interactive session client. The catalog refresher that once used it to
 // launch `gibson-runner --list-tools` on a schedule is gone: tools are
 // manifest-seeded now (ADR-0117).
-func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, error) {
-	tlsCfg, err := cfg.Setec.MTLS.BuildTLSConfig()
+func NewSetecSandboxClient(cfg config.SandboxConfig, src setecSVIDSource) (sandboxed.SandboxClient, error) {
+	// The daemon presents its SVID and accepts only the SPIFFE ID of the
+	// fleet (ADR-0142). No certificate file is read.
+	fleet, err := spiffeid.FromString(cfg.Setec.SpiffeID)
 	if err != nil {
-		return nil, fmt.Errorf("build setec mTLS config: %w", err)
+		return nil, fmt.Errorf("sandbox.setec.spiffe_id: %w", err)
 	}
+	tlsCfg := tlsconfig.MTLSClientConfig(src, src, tlsconfig.AuthorizeID(fleet))
 	conn, err := grpc.NewClient(
 		cfg.Setec.Address,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
@@ -86,17 +95,6 @@ func NewSetecSandboxClient(cfg config.SandboxConfig) (sandboxed.SandboxClient, e
 	}, nil
 }
 
-// NewSetecPinger constructs a health.Pinger from the Setec gRPC connection.
-// Returns the same setecClient cast to the health.Pinger interface so the
-// startup health check and periodic probe can reuse the mTLS connection.
-func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) error }, error) {
-	sc, err := NewSetecSandboxClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return sc.(*setecClient), nil
-}
-
 // NewSetecSandboxedExecutor constructs a sandboxed.Executor backed by a real
 // Setec gRPC client.
 //
@@ -104,8 +102,8 @@ func NewSetecPinger(cfg config.SandboxConfig) (interface{ Ping(context.Context) 
 // field-100 DiscoveryResult from successful tool responses and folds them into
 // the tenant's World asynchronously, matching what the live-callback path does
 // with the same payload.
-func NewSetecSandboxedExecutor(cfg config.SandboxConfig, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor, events sandboxed.EventPublisher) (*sandboxed.Executor, error) {
-	client, err := NewSetecSandboxClient(cfg)
+func NewSetecSandboxedExecutor(cfg config.SandboxConfig, src setecSVIDSource, tracer trace.Tracer, logger *slog.Logger, discoveryProc ingest.DiscoveryProcessor, events sandboxed.EventPublisher) (*sandboxed.Executor, error) {
+	client, err := NewSetecSandboxClient(cfg, src)
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +192,9 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	if req.Tenant == "" {
 		return sandboxed.LaunchResponse{}, errNoTenant
 	}
+	if req.FromSnapshot != "" {
+		return c.launchFromSnapshot(ctx, req)
+	}
 	env, err := c.wrapEnv(req.Tenant, req.Env)
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
@@ -231,14 +232,14 @@ func (c *setecClient) Launch(ctx context.Context, req sandboxed.LaunchRequest) (
 	if err != nil {
 		return sandboxed.LaunchResponse{}, err
 	}
-	// SandboxClass / Runtime are left unset: the setec.v1 LaunchResponse
-	// carries only sandbox_id/name/namespace, so this transport cannot report
-	// the class setec bound or the runtime backend it resolved to. The Sandbox
-	// CR records both (spec.sandboxClassName, status.runtime.chosen) and
-	// gibson holds no Kubernetes client (ADR-0023) to read them. Fill these in
-	// here as soon as setec puts them on the wire — sandboxed.VerifyIsolation
-	// already denies on a mismatch or a non-isolating runtime.
-	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+	// setec reports the class it bound and the runtime backend of that class.
+	// sandboxed.VerifyIsolation refuses the sandbox when either one is empty,
+	// differs from the request, or is not the launcher backend (ADR-0052).
+	return sandboxed.LaunchResponse{
+		SandboxID:    resp.GetSandboxId(),
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
 }
 
 // wrapSecretEnvVars envelope-wraps values whose key starts with secretEnvPrefix.
@@ -353,12 +354,12 @@ func (s *setecLogStream) Close() error {
 	return nil
 }
 
-// setecNetwork maps the network of a launch onto the wire. A set mode wins,
-// with the egress rules for the allow-list mode. With no mode, egress rules
-// select the allow-list mode, and no rules keep the default of the class
-// (nil). Each rule keeps its CIDR and its port ranges (zeroroot-ai/setec#200),
-// so the network scope of a mission node reaches setec as the node states it
-// (gibson#865).
+// setecNetwork maps the network of a launch or a fork onto the wire. A set
+// mode wins, with the egress rules for the allow-list mode. With no mode,
+// egress rules select the allow-list mode, and no rules keep the default of
+// the class (nil). Each rule keeps its CIDR and its port ranges
+// (zeroroot-ai/setec#200), so the network scope of a mission node reaches
+// setec as the node states it (gibson#865).
 func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 	if mode == "" {
 		if len(egress) == 0 {
@@ -381,4 +382,141 @@ func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 		n.Allow = append(n.Allow, allow)
 	}
 	return n
+}
+
+// Fork forks a running sandbox of the tenant (setec#195). The forks get
+// the network of the request, never the network of the source.
+func (c *setecClient) Fork(ctx context.Context, req sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	if req.Tenant == "" {
+		return sandboxed.ForkResponse{}, errNoTenant
+	}
+	if req.Count < 1 || req.Count > sandboxed.MaxForks {
+		return sandboxed.ForkResponse{}, fmt.Errorf("setec: fork count %d, want 1 to %d", req.Count, sandboxed.MaxForks)
+	}
+	resp, err := c.inner.Fork(ctx, &setecv1.ForkRequest{
+		SandboxId:          req.SandboxID,
+		Tenant:             req.Tenant,
+		Count:              uint32(req.Count), //nolint:gosec // G115: bounded to 1..MaxForks above
+		Network:            setecNetwork(req.NetworkMode, req.Egress),
+		SnapshotTtlSeconds: int64(req.SnapshotTTL / time.Second),
+	})
+	if err != nil {
+		return sandboxed.ForkResponse{}, fmt.Errorf("setec: fork %s: %w", req.SandboxID, err)
+	}
+	return sandboxed.ForkResponse{Snapshot: resp.GetSnapshot(), SandboxIDs: resp.GetSandboxIds()}, nil
+}
+
+// Suspend asks setec to checkpoint a session sandbox and release its microVM
+// (setec#193). The daemon suspends an idle bank member (ADR-0119, gibson#809).
+func (c *setecClient) Suspend(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errNoTenant
+	}
+	if _, err := c.inner.Suspend(ctx, &setecv1.SuspendRequest{Tenant: tenant, SandboxId: sandboxID}); err != nil {
+		return fmt.Errorf("setec suspend %s: %w", sandboxID, err)
+	}
+	return nil
+}
+
+// Resume asks setec to bring a suspended session sandbox back.
+func (c *setecClient) Resume(ctx context.Context, tenant, sandboxID string) error {
+	if tenant == "" {
+		return errNoTenant
+	}
+	if _, err := c.inner.Resume(ctx, &setecv1.ResumeRequest{Tenant: tenant, SandboxId: sandboxID}); err != nil {
+		return fmt.Errorf("setec resume %s: %w", sandboxID, err)
+	}
+	return nil
+}
+
+// newSetecSuspender builds the setec client that suspends and resumes bank
+// members (gibson#809).
+func newSetecSuspender(cfg config.SandboxConfig, src setecSVIDSource) (sandboxSuspender, error) {
+	c, err := NewSetecSandboxClient(cfg, src)
+	if err != nil {
+		return nil, err
+	}
+	return c.(*setecClient), nil
+}
+
+// Recovery reads the last recovery of a sandbox of the tenant through Attach
+// (setec#237). recovered is false when the sandbox never recovered.
+func (c *setecClient) Recovery(ctx context.Context, tenant, sandboxID string) (sandboxed.SessionRecovery, bool, error) {
+	if tenant == "" {
+		return sandboxed.SessionRecovery{}, false, errNoTenant
+	}
+	resp, err := c.inner.Attach(ctx, &setecv1.AttachRequest{Tenant: tenant, SandboxId: sandboxID})
+	if err != nil {
+		return sandboxed.SessionRecovery{}, false, fmt.Errorf("setec: attach %s: %w", sandboxID, err)
+	}
+	r := resp.GetLastRecovery()
+	if r.GetCount() == 0 {
+		return sandboxed.SessionRecovery{}, false, nil
+	}
+	out := sandboxed.SessionRecovery{
+		Kind:      r.GetKind(),
+		Recovered: time.Unix(0, r.GetRecoveredUnixNano()).UTC(),
+		Count:     r.GetCount(),
+	}
+	if ns := r.GetStateTakenUnixNano(); ns != 0 {
+		out.StateTaken = time.Unix(0, ns).UTC()
+	}
+	return out, true, nil
+}
+
+// Isolation reads the class and the runtime that setec bound for a sandbox
+// of the tenant through Attach. A fork and a restore get no Launch response,
+// so this is the report that their isolation check reads.
+func (c *setecClient) Isolation(ctx context.Context, tenant, sandboxID string) (sandboxed.LaunchResponse, error) {
+	if tenant == "" {
+		return sandboxed.LaunchResponse{}, errNoTenant
+	}
+	resp, err := c.inner.Attach(ctx, &setecv1.AttachRequest{Tenant: tenant, SandboxId: sandboxID})
+	if err != nil {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: attach %s: %w", sandboxID, err)
+	}
+	return sandboxed.LaunchResponse{
+		SandboxID:    sandboxID,
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
+}
+
+// launchFromSnapshot starts a sandbox from a snapshot of the tenant
+// (setec#242). The class, the image and the size come from the snapshot, so
+// the request sends none of them. The sandbox gets the network of the
+// request, never the network of the source. A snapshot that setec no longer
+// has is sandboxed.ErrSnapshotGone.
+func (c *setecClient) launchFromSnapshot(ctx context.Context, req sandboxed.LaunchRequest) (sandboxed.LaunchResponse, error) {
+	pbReq := &setecv1.LaunchRequest{
+		Tenant:       req.Tenant,
+		FromSnapshot: req.FromSnapshot,
+		Network:      setecNetwork(req.NetworkMode, req.Egress),
+	}
+	if req.Timeout > 0 {
+		pbReq.Lifecycle = &setecv1.Lifecycle{Timeout: req.Timeout.String()}
+	}
+	resp, err := c.inner.Launch(ctx, pbReq)
+	if status.Code(err) == codes.NotFound {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: launch from %s: %w", req.FromSnapshot, sandboxed.ErrSnapshotGone)
+	}
+	if err != nil {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: launch from %s: %w", req.FromSnapshot, err)
+	}
+	return sandboxed.LaunchResponse{SandboxID: resp.GetSandboxId()}, nil
+}
+
+// Snapshot takes a snapshot of a running sandbox of the tenant that lives
+// for ttl (setec#242). Zero takes the setec default of 7 days.
+func (c *setecClient) Snapshot(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error) {
+	if tenant == "" {
+		return "", errNoTenant
+	}
+	resp, err := c.inner.Snapshot(ctx, &setecv1.SnapshotRequest{
+		Tenant: tenant, SandboxId: sandboxID, TtlSeconds: int64(ttl / time.Second),
+	})
+	if err != nil {
+		return "", fmt.Errorf("setec: snapshot %s: %w", sandboxID, err)
+	}
+	return resp.GetSnapshot(), nil
 }

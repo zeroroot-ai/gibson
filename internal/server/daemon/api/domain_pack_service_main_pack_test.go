@@ -52,6 +52,7 @@ func TestEnableDomainPack_MainCatalogPack_BindingsGoLive(t *testing.T) {
 		Name:       snap[0].Name,
 		Version:    snap[0].Version,
 		Predicates: snap[0].Predicates,
+		Techniques: snap[0].Techniques,
 	})
 	require.NoError(t, err)
 	assert.Len(t, compiled, len(snap[0].Predicates))

@@ -85,7 +85,45 @@ type SandboxClient interface {
 	StreamLogs(ctx context.Context, tenant, sandboxID string) (LogStream, error)
 	Wait(ctx context.Context, tenant, sandboxID string) (WaitResponse, error)
 	Kill(ctx context.Context, tenant, sandboxID string) error
+
+	// Fork takes a snapshot of a running sandbox of the tenant and starts
+	// the forks from it (ADR-0169, setec#195). Each fork gets the network
+	// of the request, never the network of the source.
+	Fork(ctx context.Context, req ForkRequest) (ForkResponse, error)
+
+	// Recovery returns the most recent recovery of a sandbox of the tenant
+	// (setec#237). recovered is false for a sandbox that never recovered.
+	Recovery(ctx context.Context, tenant, sandboxID string) (r SessionRecovery, recovered bool, err error)
+
+	// Isolation returns the class and the runtime that setec bound for a
+	// running sandbox of the tenant. A fork and a restore get no Launch
+	// response, so the launcher checks their isolation with this report.
+	Isolation(ctx context.Context, tenant, sandboxID string) (LaunchResponse, error)
+
+	// Snapshot takes a snapshot of a running sandbox of the tenant that
+	// outlives the sandbox for ttl (setec#242).
+	Snapshot(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error)
 }
+
+// SessionRecovery is one recovery of a sandbox (setec#237).
+type SessionRecovery struct {
+	// Kind is RecoveryResumed or RecoveryRestarted.
+	Kind string
+	// StateTaken is the time of the state that the sandbox resumed from.
+	// It is zero for a restart from the workspace.
+	StateTaken time.Time
+	// Recovered is the time of the recovery.
+	Recovered time.Time
+	// Count counts the recoveries of the sandbox. A higher count is a new
+	// recovery.
+	Count int64
+}
+
+// The recovery kinds of setec.
+const (
+	RecoveryResumed   = "ResumedFromCheckpoint"
+	RecoveryRestarted = "RestartedFromWorkspace"
+)
 
 // LaunchRequest is the data the executor passes to Setec's Launch RPC.
 // Adapters map it onto Setec's generated proto.
@@ -117,7 +155,16 @@ type LaunchRequest struct {
 	// wins over the rule above: NetworkModeExternalOnly, NetworkModeAllowList
 	// with the Egress rules, or NetworkModeNone. Empty keeps the rule above.
 	NetworkMode string
+
+	// FromSnapshot names a snapshot that Snapshot took. The sandbox loads it
+	// with a new identity and the network of this request (setec#242). The
+	// class, the image and the size come from the snapshot.
+	FromSnapshot string
 }
+
+// ErrSnapshotGone answers a launch from a snapshot that no longer exists.
+// The caller starts a fresh sandbox instead (ADR-0170).
+var ErrSnapshotGone = errors.New("sandboxed: the snapshot no longer exists")
 
 // The setec network modes that a launch can name (zeroroot-ai/setec#200).
 const (
@@ -153,8 +200,8 @@ type LaunchResponse struct {
 	SandboxID string
 
 	// SandboxClass is the class setec actually bound the sandbox to, and
-	// Runtime is the isolation backend that class resolved to (one of
-	// kata-fc, kata-qemu, gvisor, runc). Both are checked by VerifyIsolation
+	// Runtime is the isolation backend that class resolved to (launcher, the
+	// one backend of setec). Both are checked by VerifyIsolation
 	// before the sandbox is used. An adapter leaves a field empty when its
 	// transport does not report it; see isolation.go for why the setec.v1 ABI
 	// currently reports neither.

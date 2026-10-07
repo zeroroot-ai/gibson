@@ -89,27 +89,6 @@ func TestResolveCredential_ErrorMessage_MentionsHint(t *testing.T) {
 	assert.NotContains(t, msg, "env ")
 }
 
-func TestRedactCredentialKeys_IncludesEveryProviderSecret(t *testing.T) {
-	keys := redactCredentialKeys()
-	set := make(map[string]bool, len(keys))
-	for _, k := range keys {
-		set[k] = true
-	}
-	// Spot-check the keys every provider relies on. If a new provider is
-	// added without updating this list, the observability redaction
-	// allowlist will leak credentials.
-	required := []string{
-		"api_key",
-		"aws_access_key_id", "aws_secret_access_key", "aws_session_token",
-		"cloudflare_account_id", "cloudflare_api_token",
-		"huggingface_api_token",
-		"mistral_api_key", "cohere_api_key",
-	}
-	for _, k := range required {
-		assert.True(t, set[k], "redactCredentialKeys() missing %q", k)
-	}
-}
-
 // keylessProviderCase builds a provider from a config that carries no
 // credential of its own.
 type keylessProviderCase struct {

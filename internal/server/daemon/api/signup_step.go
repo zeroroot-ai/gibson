@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -131,6 +132,25 @@ func completeSignupStep(ctx context.Context, db *sql.DB, token string, done bool
 		return errSignupStepNotFound
 	}
 	return nil
+}
+
+// describeSignupStep reads the tenant, the plan and the owner address of the
+// signup that the token names. An unknown or expired token is
+// errSignupStepNotFound.
+func describeSignupStep(ctx context.Context, db *sql.DB, token string, now time.Time) (*connectionv1.DescribeSignupStepResponse, error) {
+	var d connectionv1.DescribeSignupStepResponse
+	err := db.QueryRowContext(ctx, `
+		SELECT tenant_id, tier, owner_email FROM pending_tenant_provisioning
+		WHERE step_token_hash = $1 AND step_expires_at > $2`,
+		hashSignupStepToken(token), now,
+	).Scan(&d.TenantId, &d.PlanId, &d.OwnerEmail)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, errSignupStepNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("signup step: describe: %w", err)
+	}
+	return &d, nil
 }
 
 // signupStepState reads the state of the step of one signup attempt. An

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -69,7 +70,7 @@ func destructiveMarkerRegistry(t *testing.T) *settlement.Registry {
 func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_NoTenant_PermissionDenied(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 
 	_, err := s.RequestDestructiveAuthorization(context.Background(), brain.DestructiveAuthorizationRequest{HypothesisID: "hyp-1"})
@@ -86,7 +87,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_NoTenant_Pe
 func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnTenantEngine(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -118,7 +119,7 @@ func TestTenantRoutedProofSettlement_RequestDestructiveAuthorization_EnqueuesOnT
 func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructive(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 	reg := destructiveMarkerRegistry(t)
@@ -174,19 +175,22 @@ func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructi
 
 // TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement
 // proves the adapter reports a predicate as destructive unless the tenant's
-// enabled pack names it as non-destructive (ADR-0132).
+// enabled pack names it as non-destructive (ADR-0132), and that a predicate
+// whose technique is outside the hierarchy of the tenant is not bound
+// (ADR-0135).
 func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	registry.For("acme").Submit(brain.DomainPackEnabled{
 		Name:                     "main",
 		Version:                  1,
-		Predicates:               map[string]string{"read_only": "true", "writes": "true"},
+		Predicates:               map[string]string{"read_only": "true", "writes": "true", "outside": "true"},
 		NonDestructivePredicates: []string{"read_only"},
+		Techniques:               map[string]string{"read_only": "reconnaissance", "writes": "extraction"},
 	})
 	deadline := time.Now().Add(2 * time.Second)
 	for len(registry.For("acme").DomainPacks()) == 0 {
@@ -208,6 +212,11 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 	if _, destructive, ok, _ := s.DomainPackPredicate(acmeCtx, "unknown"); ok || !destructive {
 		t.Fatalf("an unknown predicate: ok=%v destructive=%v, want false and true", ok, destructive)
 	}
+	// ADR-0135: a predicate whose technique the hierarchy of the tenant does
+	// not hold settles nothing.
+	if _, _, ok, err := s.DomainPackPredicate(acmeCtx, "outside"); ok || err != nil {
+		t.Fatalf("a technique outside the hierarchy: ok=%v err=%v, want false and nil", ok, err)
+	}
 }
 
 // TestTenantRoutedProofSettlement_ReviewAndRecordsStayInTheTenant proves the
@@ -217,7 +226,7 @@ func TestTenantRoutedProofSettlement_DomainPackPredicate_ReadsThePackStatement(t
 func TestTenantRoutedProofSettlement_ReviewAndRecordsStayInTheTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	s := newTenantRoutedProofSettlement(registry)
 	acme := auth.ContextWithTenantString(context.Background(), "acme")
 	globex := auth.ContextWithTenantString(context.Background(), "globex")

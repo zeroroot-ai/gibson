@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/protoresolver"
@@ -60,9 +59,6 @@ type CallbackManager interface {
 //
 // Thread-safe: All methods can be called concurrently.
 type ComponentDiscovery interface {
-	// DiscoverAgent finds an agent by name and returns a gRPC client implementing agent.Agent.
-	DiscoverAgent(ctx context.Context, name string) (agent.Agent, error)
-
 	// DiscoverTool finds a tool by name and returns a gRPC client implementing tool.Tool.
 	DiscoverTool(ctx context.Context, name string) (tool.Tool, error)
 
@@ -132,12 +128,6 @@ type RegistryAdapter struct {
 	// pool manages gRPC connections with automatic health checking
 	pool *GRPCPool
 
-	// callbackManager provides callback server for external agents (optional)
-	callbackManager CallbackManager
-
-	// authConfig provides authentication configuration for callback connections (optional)
-	authConfig *AuthConfig
-
 	// resolver provides proto type resolution for dynamically typed tool responses
 	resolver protoresolver.ProtoResolver
 }
@@ -162,12 +152,10 @@ func NewRegistryAdapter(reg ComponentRegistry) *RegistryAdapter {
 
 // SetCallbackManager configures the callback manager for this adapter.
 func (a *RegistryAdapter) SetCallbackManager(cm CallbackManager) {
-	a.callbackManager = cm
 }
 
 // SetAuthConfig configures authentication for callback connections.
 func (a *RegistryAdapter) SetAuthConfig(cfg *AuthConfig) {
-	a.authConfig = cfg
 }
 
 // SetResolver configures a custom ProtoResolver for this adapter.
@@ -209,41 +197,6 @@ func (a *RegistryAdapter) resolveTenant(ctx context.Context) (string, error) {
 		return "", ErrNoTenantInContext
 	}
 	return tenant, nil
-}
-
-// DiscoverAgent discovers and connects to an agent by name.
-func (a *RegistryAdapter) DiscoverAgent(ctx context.Context, name string) (agent.Agent, error) {
-	tenant, err := a.resolveTenant(ctx)
-	if err != nil {
-		return nil, err
-	}
-	instances, err := a.registry.Discover(ctx, tenant, "agent", name)
-	if err != nil {
-		return nil, &RegistryUnavailableError{Cause: err}
-	}
-
-	if len(instances) == 0 {
-		available, _ := a.getAvailableAgentNames(ctx)
-		return nil, &AgentNotFoundError{Name: name, Available: available}
-	}
-
-	selected, err := a.loadBalancer.Select(ctx, tenant, "agent", name)
-	if err != nil {
-		return nil, fmt.Errorf("failed to select agent instance: %w", err)
-	}
-
-	endpoint := selected.Metadata["grpc_endpoint"]
-	if endpoint == "" {
-		return nil, fmt.Errorf("agent %s has no grpc_endpoint in metadata", name)
-	}
-
-	conn, err := a.pool.Get(ctx, endpoint)
-	if err != nil {
-		_ = a.pool.Remove(endpoint)
-		return nil, fmt.Errorf("failed to connect to agent %s at %s: %w", name, endpoint, err)
-	}
-
-	return NewGRPCAgentClient(conn, *selected), nil
 }
 
 // DiscoverTool discovers and connects to a tool by name.
@@ -493,26 +446,6 @@ func (a *RegistryAdapter) Close() error {
 	return nil
 }
 
-func (a *RegistryAdapter) getAvailableAgentNames(ctx context.Context) ([]string, error) {
-	tenant, err := a.resolveTenant(ctx)
-	if err != nil {
-		return nil, err
-	}
-	instances, err := a.registry.DiscoverAll(ctx, tenant, "agent")
-	if err != nil {
-		return []string{}, err
-	}
-	nameSet := make(map[string]struct{})
-	for _, inst := range instances {
-		nameSet[inst.Name] = struct{}{}
-	}
-	names := make([]string, 0, len(nameSet))
-	for name := range nameSet {
-		names = append(names, name)
-	}
-	return names, nil
-}
-
 func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, error) {
 	tenant, err := a.resolveTenant(ctx)
 	if err != nil {
@@ -531,19 +464,6 @@ func (a *RegistryAdapter) getAvailableToolNames(ctx context.Context) ([]string, 
 		names = append(names, name)
 	}
 	return names, nil
-}
-
-// AgentNotFoundError is returned when an agent is requested but no instances are registered.
-type AgentNotFoundError struct {
-	Name      string
-	Available []string
-}
-
-func (e *AgentNotFoundError) Error() string {
-	if len(e.Available) == 0 {
-		return fmt.Sprintf("agent '%s' not found (no agents registered)", e.Name)
-	}
-	return fmt.Sprintf("agent '%s' not found (available: %s)", e.Name, strings.Join(e.Available, ", "))
 }
 
 // ToolNotFoundError is returned when a tool is requested but no instances are registered.

@@ -229,22 +229,6 @@ func TestToolCall_Validate(t *testing.T) {
 	}
 }
 
-func TestNewToolResult(t *testing.T) {
-	result := NewToolResult("call-123", "Weather is sunny")
-
-	assert.Equal(t, "call-123", result.ToolCallID)
-	assert.Equal(t, "Weather is sunny", result.Content)
-	assert.False(t, result.IsError)
-}
-
-func TestNewToolError(t *testing.T) {
-	result := NewToolError("call-123", "API error")
-
-	assert.Equal(t, "call-123", result.ToolCallID)
-	assert.Equal(t, "API error", result.Content)
-	assert.True(t, result.IsError)
-}
-
 func TestToolResult_Validate(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -292,35 +276,4 @@ func TestToolResult_Validate(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestNewToolDef(t *testing.T) {
-	params := schema.JSON{
-		Type: "object",
-		Properties: map[string]schema.JSON{
-			"location": {Type: "string", Description: "The location"},
-		},
-		Required: []string{"location"},
-	}
-
-	tool := NewToolDef("get_weather", "Get weather information", params)
-
-	assert.Equal(t, "get_weather", tool.Name)
-	assert.Equal(t, "Get weather information", tool.Description)
-	assert.Equal(t, "object", tool.Parameters.Type)
-	assert.NotNil(t, tool.Parameters.Properties)
-}
-
-func TestNewToolDef_EnsuresObjectType(t *testing.T) {
-	// Create a schema without Type set
-	params := schema.JSON{
-		Properties: map[string]schema.JSON{
-			"location": {Type: "string", Description: "The location"},
-		},
-	}
-
-	tool := NewToolDef("get_weather", "Get weather information", params)
-
-	// Should automatically set Type to "object"
-	assert.Equal(t, "object", tool.Parameters.Type)
 }

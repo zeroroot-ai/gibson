@@ -63,31 +63,6 @@ func Example_targetJSON() {
 	fmt.Printf("JSON representation:\n%s\n", string(data))
 }
 
-// Example_targetFilter demonstrates using filters
-func Example_targetFilter() {
-	// Create a filter for active OpenAI targets
-	filter := types.NewTargetFilter().
-		WithProvider(types.ProviderOpenAI).
-		WithStatus(types.TargetStatusActive).
-		WithType(string(types.TargetTypeLLMAPI)).
-		WithTags([]string{"production"}).
-		WithLimit(50).
-		WithOffset(0)
-
-	fmt.Printf("Provider filter: %s\n", *filter.Provider)
-	fmt.Printf("Status filter: %s\n", *filter.Status)
-	fmt.Printf("Type filter: %s\n", *filter.Type)
-	fmt.Printf("Tags: %v\n", filter.Tags)
-	fmt.Printf("Limit: %d, Offset: %d\n", filter.Limit, filter.Offset)
-
-	// Output:
-	// Provider filter: openai
-	// Status filter: active
-	// Type filter: llm_api
-	// Tags: [production]
-	// Limit: 50, Offset: 0
-}
-
 // Example_targetTypes demonstrates all target types
 func Example_targetTypes() {
 	types := []types.TargetType{

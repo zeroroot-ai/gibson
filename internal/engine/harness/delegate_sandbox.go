@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,7 +28,19 @@ import (
 // Nil means no sandboxed agent dispatch: DelegateToAgent denies an untrusted
 // agent fail-closed.
 type AgentSandboxLauncher interface {
+	// SnapshotSandbox, StopSandbox and LaunchFromSnapshot serve the sandbox
+	// checkpoint mode and the rewind from a snapshot (ADR-0170).
+	SnapshotSandbox(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error)
+	StopSandbox(ctx context.Context, tenant, sandboxID string) error
+	LaunchFromSnapshot(ctx context.Context, snapshot string, spec sandboxed.AgentForkSpec, dispatch sandboxed.AgentDispatch, onStarted func(sandboxID string) error) (sandboxed.AgentRunResult, error)
 	LaunchAgent(ctx context.Context, spec sandboxed.AgentLaunchSpec, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
+	// ForkAgent starts the dispatches in forks of a running source sandbox
+	// (ADR-0169).
+	ForkAgent(ctx context.Context, sourceSandboxID string, spec sandboxed.AgentForkSpec, dispatches []sandboxed.AgentDispatch) (sandboxed.ForkRun, error)
+	// ForkSandbox forks a running sandbox once and does not follow the
+	// fork. FollowAgent follows it later (gibson#803).
+	ForkSandbox(ctx context.Context, tenant, sourceSandboxID string, spec sandboxed.AgentForkSpec) (string, error)
+	FollowAgent(ctx context.Context, sandboxID, class string, dispatch sandboxed.AgentDispatch) (sandboxed.AgentRunResult, error)
 }
 
 // AgentLaunchSpecResolver resolves the per-agent launch spec — image, sandbox
@@ -131,6 +144,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		childMissionCtx.DelegationDepth = h.missionCtx.DelegationDepth + 1
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
+		childMissionCtx.NodeID = task.NodeID
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -171,6 +185,34 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		RunTimeout: capRunTimeout(task.Timeout, spec.MaxRuntime),
 	}
 
+	// The first node of a child mission that its caller originated from its
+	// own state runs in the fork of the caller that waits for it (gibson#803).
+	if seat, ok, err := h.takeForkSeat(ctx, task); err != nil {
+		return agent.Result{}, err
+	} else if ok {
+		return h.delegateToAgentViaSeat(ctx, name, task, spec, dispatch, seat)
+	}
+	if task.FromSnapshot != "" {
+		res, err := h.delegateToAgentViaRestore(ctx, name, task, spec, dispatch)
+		if !errors.Is(err, sandboxed.ErrSnapshotGone) {
+			return res, err
+		}
+		// The snapshot of the checkpoint is gone: the node starts in a
+		// fresh sandbox, as for a checkpoint with no snapshot (ADR-0170).
+		h.logger.Warn("rewind snapshot is gone; the node starts in a fresh sandbox",
+			"agent", name, "node", task.NodeID, "snapshot", task.FromSnapshot)
+	}
+	if task.StartsFrom != "" {
+		return h.delegateToAgentViaFork(ctx, name, task, spec, dispatch)
+	}
+	// A node that a later node forks, and a node of the sandbox checkpoint
+	// mode, park at the result line, so the sandbox still runs when the node
+	// ends (D74, ADR-0170).
+	forkable := task.Forkable && h.forks != nil
+	if forkable || task.Checkpoint {
+		dispatch.Forkable = true
+	}
+
 	h.logger.Info("dispatching agent to ephemeral sandbox",
 		"agent", name,
 		"tenant", tenant,
@@ -186,6 +228,28 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 			"agent sandbox launch failed: "+name, launchErr)
 	}
+	var extra map[string]any
+	if outcome.Parked {
+		if task.Checkpoint {
+			extra = h.checkpointSnapshot(ctx, tenant, task, outcome.SandboxID)
+		}
+		if forkable {
+			h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{
+				Tenant:    tenant,
+				SandboxID: outcome.SandboxID,
+				GrantJTI:  grantJTI(grant),
+			})
+		} else if err := h.agentLauncher.StopSandbox(ctx, tenant, outcome.SandboxID); err != nil {
+			h.logger.Warn("parked sandbox of a checkpoint node not stopped; setec reaps it at its timeout",
+				"agent", name, "sandbox_id", outcome.SandboxID, "error", err)
+		}
+	}
+	return h.sandboxOutcome(name, tenant, task, outcome, extra)
+}
+
+// sandboxOutcome turns the outcome of a sandboxed agent run into the result
+// of the node. extra adds keys to the metadata of the result.
+func (h *DefaultAgentHarness) sandboxOutcome(name, tenant string, task agent.Task, outcome sandboxed.AgentRunResult, extra map[string]any) (agent.Result, error) {
 	if outcome.ExitCode != 0 {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "sandbox",
@@ -216,8 +280,19 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	h.logger.Info("agent sandbox delegation completed",
 		"agent", name, "tenant", tenant, "sandbox_id", outcome.SandboxID)
 
+	out := sandboxResultOutput(outcome.Result)
+	if len(extra) > 0 {
+		meta, _ := out["metadata"].(map[string]any)
+		if meta == nil {
+			meta = make(map[string]any, len(extra))
+		}
+		for k, v := range extra {
+			meta[k] = v
+		}
+		out["metadata"] = meta
+	}
 	result := agent.NewResult(task.ID)
-	result.Complete(sandboxResultOutput(outcome.Result))
+	result.Complete(out)
 	return result, nil
 }
 

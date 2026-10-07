@@ -70,8 +70,6 @@ func DefaultCircuitBreakerConfig() CircuitBreakerConfig {
 
 // endpointCircuit tracks the circuit breaker state for a single endpoint.
 type endpointCircuit struct {
-	// endpoint is the network address this circuit protects
-	endpoint string
 
 	// state is the current circuit state
 	state CircuitState
@@ -332,10 +330,7 @@ func (cb *CircuitBreaker) Stats() CircuitBreakerStats {
 		}
 
 		stats.Endpoints[endpoint] = EndpointStats{
-			State:       state,
-			Failures:    circuit.failures,
-			OpenedAt:    circuit.openedAt,
-			LastFailure: circuit.lastFailure,
+			State: state,
 		}
 	}
 
@@ -348,7 +343,6 @@ func (cb *CircuitBreaker) getOrCreateCircuit(endpoint string) *endpointCircuit {
 	circuit, exists := cb.circuits[endpoint]
 	if !exists {
 		circuit = &endpointCircuit{
-			endpoint: endpoint,
 			state:    StateClosed,
 			failures: 0,
 		}
@@ -379,15 +373,6 @@ type CircuitBreakerStats struct {
 type EndpointStats struct {
 	// State is the current circuit state
 	State CircuitState
-
-	// Failures is the consecutive failure count
-	Failures int
-
-	// OpenedAt is when the circuit was opened (zero if never opened)
-	OpenedAt time.Time
-
-	// LastFailure is when the most recent failure occurred (zero if never failed)
-	LastFailure time.Time
 }
 
 // CircuitOpenError is returned when a circuit is open and requests are blocked.

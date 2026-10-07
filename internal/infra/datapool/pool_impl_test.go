@@ -41,25 +41,6 @@ func TestPool_GetOrCreateEntry_DifferentTenants(t *testing.T) {
 	assert.NotSame(t, eA, eB)
 }
 
-// TestPool_ActiveConnCount verifies the active conn counter increments and
-// decrements correctly.
-func TestPool_ActiveConnCount(t *testing.T) {
-	p := &pool{}
-	tenant := auth.MustNewTenantID("counter")
-
-	assert.Equal(t, int64(0), p.activeConnCount(tenant))
-
-	entry := p.getOrCreateEntry(tenant)
-	entry.activeConns.Add(1)
-	assert.Equal(t, int64(1), p.activeConnCount(tenant))
-
-	entry.activeConns.Add(1)
-	assert.Equal(t, int64(2), p.activeConnCount(tenant))
-
-	entry.activeConns.Add(-1)
-	assert.Equal(t, int64(1), p.activeConnCount(tenant))
-}
-
 // TestPool_EvictTenant verifies that evicting a tenant removes its entry.
 func TestPool_EvictTenant(t *testing.T) {
 	p := &pool{

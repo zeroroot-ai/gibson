@@ -27,11 +27,12 @@ func (s *worldServer) GetReputation(ctx context.Context, req *worldpb.GetReputat
 		return nil, err
 	}
 	substrate := brain.NewWorldBeliefSubstrate(e)
-	// The response carries no measures (gibson#502): no consumer read them.
-	// The read stays so a broken substrate is still reported.
-	_, _, err = brain.ReadReputation(ctx, e.World.Tenant, req.GetTechnique(), req.GetScopeId(), substrate)
+	prior, ok, err := brain.ReadReputation(ctx, e.World.Tenant, req.GetTechnique(), req.GetScopeId(), substrate)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "read reputation: %v", err)
 	}
-	return &worldpb.GetReputationResponse{}, nil
+	return &worldpb.GetReputationResponse{
+		Prior:     prior,
+		HasRecord: ok,
+	}, nil
 }

@@ -38,9 +38,11 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/controller"
+	"github.com/zeroroot-ai/gibson/operators/platform/internal/daemonaudit"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/probes"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/vaulttoken"
 	// +kubebuilder:scaffold:imports
@@ -178,10 +180,29 @@ func run(cfg runConfig) error {
 		return fmt.Errorf("unable to start manager: %w", err)
 	}
 
+	// Each change of this operator keeps an audit record for the daemon
+	// (gibson#583). The operator starts before the daemon, so the sink dials
+	// on first use and the records wait in the resource status until the
+	// daemon answers. No emitter, no start.
+	daemonAddr, daemonSVID, err := daemonaudit.Settings(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("daemon audit settings: %w", err)
+	}
+	sink, err := daemonaudit.New(daemonaudit.Dial(daemonAddr, daemonSVID))
+	if err != nil {
+		return fmt.Errorf("daemon audit sink: %w", err)
+	}
+	defer func() { _ = sink.Close() }()
+	auditEmitter, err := audit.NewSagaEmitter(sink)
+	if err != nil {
+		return fmt.Errorf("audit emitter: %w", err)
+	}
+
 	if err := (&controller.OIDCClientReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
 		Recorder: mgr.GetEventRecorderFor("oidcclient-controller"),
+		Audit:    auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create OIDCClient controller: %w", err)
 	}
@@ -208,6 +229,7 @@ func run(cfg runConfig) error {
 		Scheme:     mgr.GetScheme(),
 		Recorder:   mgr.GetEventRecorderFor("platformbootstrap-controller"),
 		VaultToken: vaultRenewer,
+		Audit:      auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create PlatformBootstrap controller: %w", err)
 	}

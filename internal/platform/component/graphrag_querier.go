@@ -231,12 +231,10 @@ func storeResultToProto(r graphrag.GraphRAGResult) *graphragpb.QueryResult {
 		path = append(path, id.String())
 	}
 	return &graphragpb.QueryResult{
-		Node:        storeNodeToProto(r.Node),
-		Score:       r.Score,
-		VectorScore: r.VectorScore,
-		GraphScore:  r.GraphScore,
-		Path:        path,
-		Distance:    int32(min(r.Distance, math.MaxInt32)), //nolint:gosec // clamped
+		Node:     storeNodeToProto(r.Node),
+		Score:    r.Score,
+		Path:     path,
+		Distance: int32(min(r.Distance, math.MaxInt32)), //nolint:gosec // clamped
 	}
 }
 

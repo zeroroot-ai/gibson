@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package rbac implements the per-tenant RBAC backfill that previously
-// ran as a standalone CLI (cmd/backfill-rbac/) under a Helm pre-upgrade
-// hook. It is now callable both as a startup Runnable inside the operator
-// (internal/startup/backfills.go) and as the same standalone CLI.
+// Package rbac implements the per-tenant RBAC backfill. It runs as a startup
+// Runnable inside the operator (internal/startup/backfills.go).
 //
 // Spec: .spec-workflow/specs/deploy-architecture-refactor (Phase 5.1).
 package rbac
@@ -18,6 +16,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/controller"
 )
@@ -31,13 +30,16 @@ type Options struct {
 	// OperatorNamespace is read from OPERATOR_SERVICE_ACCOUNT_NAMESPACE
 	// env when empty.
 	OperatorNamespace string
+	// Audit writes the record of each RoleBinding change before the change
+	// (gibson#583). Required. A namespace whose RoleBindings are current
+	// is not changed and gets no record.
+	Audit *audit.SagaEmitter
 }
 
 // Run walks every Tenant CR and ensures the per-tenant Role +
 // RoleBinding exist. Idempotent: re-running is a no-op.
 //
-// Uses the passed client.Client (so the operator can pass its own
-// cached client; the standalone CLI builds a direct REST client).
+// Uses the operator's client.Client.
 func Run(ctx context.Context, cl client.Client, opts Options) error {
 	var tenants gibsonv1alpha1.TenantList
 	if err := cl.List(ctx, &tenants); err != nil {
@@ -45,6 +47,9 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 	}
 	slog.Info("rbac-backfill: tenants discovered", "count", len(tenants.Items))
 
+	if opts.Audit == nil && !opts.DryRun {
+		return fmt.Errorf("rbac-backfill: %w", audit.ErrNoSink)
+	}
 	if opts.DryRun {
 		for _, t := range tenants.Items {
 			slog.Info("rbac-backfill: would backfill", "tenant", t.Name, "phase", t.Status.Phase)
@@ -73,8 +78,7 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 	for i := 0; i < workers; i++ {
 		wg.Go(func() {
 			for t := range jobs {
-				err := provisioner.EnsureTenantNamespaceRBACPublic(ctx, controller.TenantNamespaceForBackfill(&t))
-				results <- result{tenant: t.Name, err: err}
+				results <- result{tenant: t.Name, err: backfillOne(ctx, provisioner, opts.Audit, &t)}
 			}
 		})
 	}
@@ -98,6 +102,30 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 	slog.Info("rbac-backfill: summary", "ok", ok, "fail", fail)
 	if fail > 0 {
 		return fmt.Errorf("%d tenant(s) failed", fail)
+	}
+	return nil
+}
+
+// backfillOne changes the RoleBindings of one tenant namespace when they are
+// not current, after it writes the record of the change.
+func backfillOne(ctx context.Context, p *controller.NamespaceProvisioner, em *audit.SagaEmitter, t *gibsonv1alpha1.Tenant) error {
+	ns := controller.TenantNamespaceForBackfill(t)
+	current, err := p.TenantNamespaceRBACCurrent(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("read the RBAC of namespace %s: %w", ns, err)
+	}
+	if current {
+		return nil
+	}
+	ev := audit.Event{
+		Action:     audit.ActionBackfill,
+		TenantID:   t.Name,
+		TargetType: "namespace",
+		TargetID:   ns,
+		Fields:     map[string]string{"backfill": "rbac"},
+	}
+	if err := em.Change(ctx, ev, func() error { return p.EnsureTenantNamespaceRBACPublic(ctx, ns) }); err != nil {
+		return fmt.Errorf("backfill the RBAC of namespace %s: %w", ns, err)
 	}
 	return nil
 }

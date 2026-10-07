@@ -8,6 +8,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,7 +34,7 @@ func failingLoop(t *testing.T, d *fakeDesiredDaemon, funcs interceptor.Funcs, ob
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).
 		WithStatusSubresource(&connectorv1alpha1.ConnectorInstance{}).WithInterceptorFuncs(funcs).Build()
-	return &DesiredConnectorsRunnable{Client: c, Daemon: d}
+	return &DesiredConnectorsRunnable{Audit: (&audittest.Sink{}).Emitter(t), Client: c, Daemon: d}
 }
 
 func TestDesiredConnectors_LoopBasics(t *testing.T) {

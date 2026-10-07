@@ -5,6 +5,7 @@ package state
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,6 +375,9 @@ func TestIndexManager_IndexInfo(t *testing.T) {
 	})
 }
 
+// The shared Gibson indexes (gibson:idx:*) belong to every test package of
+// the module that runs against the one Redis Stack of the CI job, so no test
+// here drops one. Creation is proved on a test-named copy of each definition.
 func TestIndexManager_EnsureAllIndexes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -384,44 +388,44 @@ func TestIndexManager_EnsureAllIndexes(t *testing.T) {
 	defer client.Close()
 
 	manager := NewIndexManager(client)
-
-	// Clean up all Gibson indexes before test
 	indexes := AllIndexDefinitions()
-	for _, idx := range indexes {
-		_ = manager.DropIndex(ctx, idx.Name)
-	}
 
-	t.Run("creates all Gibson indexes", func(t *testing.T) {
+	t.Run("creates each Gibson index definition", func(t *testing.T) {
+		for _, idx := range indexes {
+			def := testCopyOfIndex(idx)
+			_ = manager.DropIndex(ctx, def.Name)
+			t.Cleanup(func() { _ = manager.DropIndex(ctx, def.Name) })
+
+			require.NoError(t, manager.EnsureIndex(ctx, def), "failed to create %s", def.Name)
+			exists, err := manager.IndexExists(ctx, def.Name)
+			require.NoError(t, err, "failed to check existence of %s", def.Name)
+			assert.True(t, exists, "index %s should exist", def.Name)
+		}
+	})
+
+	t.Run("idempotent - no error when indexes exist", func(t *testing.T) {
 		err := manager.EnsureAllIndexes(ctx)
 		require.NoError(t, err)
 
-		// Verify all indexes were created
+		// Ensure again - should not error, and every index still exists.
+		err = manager.EnsureAllIndexes(ctx)
+		require.NoError(t, err)
 		for _, idx := range indexes {
 			exists, err := manager.IndexExists(ctx, idx.Name)
 			require.NoError(t, err, "failed to check existence of %s", idx.Name)
 			assert.True(t, exists, "index %s should exist", idx.Name)
 		}
-
-		// Clean up
-		for _, idx := range indexes {
-			_ = manager.DropIndex(ctx, idx.Name)
-		}
 	})
+}
 
-	t.Run("idempotent - no error when indexes exist", func(t *testing.T) {
-		// Create first time
-		err := manager.EnsureAllIndexes(ctx)
-		require.NoError(t, err)
-
-		// Create again - should not error
-		err = manager.EnsureAllIndexes(ctx)
-		require.NoError(t, err)
-
-		// Clean up
-		for _, idx := range indexes {
-			_ = manager.DropIndex(ctx, idx.Name)
-		}
-	})
+// testCopyOfIndex is idx under a test-owned name and key prefix, so a test
+// can drop and create it without a touch on the shared index of that name.
+func testCopyOfIndex(idx *IndexDefinition) *IndexDefinition {
+	def := *idx
+	short := strings.TrimPrefix(idx.Name, "gibson:idx:")
+	def.Name = "test:idx:all:" + short
+	def.Prefix = "test:all:" + short + ":"
+	return &def
 }
 
 func TestAllIndexDefinitions(t *testing.T) {

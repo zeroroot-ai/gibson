@@ -34,15 +34,6 @@ const (
 	ErrShutdownTimeout ObservabilityErrorCode = "OBSERVABILITY_SHUTDOWN_TIMEOUT"
 )
 
-// ObservabilityError represents a structured error for observability operations.
-// It follows the GibsonError pattern with code, message, retryability, and optional cause.
-type ObservabilityError struct {
-	Code      ObservabilityErrorCode
-	Message   string
-	Retryable bool
-	Cause     error
-}
-
 // Helper constructors for common observability errors.
 
 // ErrorStrategy defines how observability errors should be handled when they occur.

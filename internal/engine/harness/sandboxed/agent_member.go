@@ -69,6 +69,9 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 		mode = "oneshot"
 	}
 	env[envInstanceMode] = mode
+	if dispatch.Forkable {
+		env[EnvForkable] = "1"
+	}
 	// Injected after the manifest and the dispatch so neither can claim a
 	// different sandbox than the one the launcher verifies.
 	env[envSandbox] = envSandboxValue
@@ -106,6 +109,10 @@ func (l *AgentLauncher) LaunchMember(ctx context.Context, spec AgentLaunchSpec, 
 	if dispatch.Tenant == "" {
 		return MemberRun{}, types.NewError(types.SANDBOX_POLICY_DENIED,
 			"LaunchMember needs the tenant of the dispatch")
+	}
+	if dispatch.OnResumed == nil {
+		return MemberRun{}, types.NewError(types.SANDBOX_POLICY_DENIED,
+			"LaunchMember needs a receiver of the resume event (ADR-0119)")
 	}
 	class := spec.SandboxClass
 	if class == "" {
@@ -180,7 +187,7 @@ func (l *AgentLauncher) followMember(ctx context.Context, cancel context.CancelF
 
 	ringBuf := newRing(logBufferLimit)
 	terminal := make(chan struct{})
-	logsDone := l.streamAgentLogsAsync(ctx, dispatch.Tenant, sandboxID, ringBuf, publish, terminal)
+	logsDone := l.followMemberLogs(ctx, sandboxID, dispatch, ringBuf, publish, terminal)
 
 	waitResp, waitErr := l.client.Wait(ctx, dispatch.Tenant, sandboxID)
 	close(terminal)
@@ -222,4 +229,61 @@ func (l *AgentLauncher) kill(ctx context.Context, tenant, sandboxID string) {
 	killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer killCancel()
 	_ = l.client.Kill(killCtx, tenant, sandboxID)
+}
+
+// followMemberLogs tees the log of a member for its whole life. A member
+// sandbox can move to another node after a node loss, and its log stream
+// then breaks. Each time the stream ends while the member still runs, the
+// follower asks setec for the last recovery of the sandbox, sends each new
+// one to dispatch.OnResumed, and attaches again (ADR-0119, setec#237).
+func (l *AgentLauncher) followMemberLogs(ctx context.Context, sandboxID string, dispatch AgentDispatch, rb *ring, publish func([]byte), terminal <-chan struct{}) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		var seen int64
+		backoff := logAttachBackoffStart
+		for {
+			if _, err := l.teeAgentLogs(ctx, dispatch.Tenant, sandboxID, rb, publish); err != nil {
+				l.logger.Warn("member log stream broke; checking for a recovery",
+					"sandbox_id", sandboxID, "error", err)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-terminal:
+				return
+			default:
+			}
+			seen = l.reportRecovery(ctx, sandboxID, dispatch, seen)
+			select {
+			case <-ctx.Done():
+				return
+			case <-terminal:
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > logAttachBackoffCap {
+				backoff = logAttachBackoffCap
+			}
+		}
+	}()
+	return done
+}
+
+// reportRecovery sends a recovery with a count above seen to the member, and
+// returns the highest count it saw.
+func (l *AgentLauncher) reportRecovery(ctx context.Context, sandboxID string, dispatch AgentDispatch, seen int64) int64 {
+	r, recovered, err := l.client.Recovery(ctx, dispatch.Tenant, sandboxID)
+	if err != nil {
+		l.logger.Warn("member recovery unreadable", "sandbox_id", sandboxID, "error", err)
+		return seen
+	}
+	if !recovered || r.Count <= seen {
+		return seen
+	}
+	l.logger.Info("bank member sandbox recovered",
+		"sandbox_id", sandboxID, "kind", r.Kind, "count", r.Count, "state_taken", r.StateTaken)
+	dispatch.OnResumed(r)
+	return r.Count
 }

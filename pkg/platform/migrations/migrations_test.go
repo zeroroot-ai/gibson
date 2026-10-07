@@ -4,26 +4,29 @@
 package migrations
 
 import (
+	"errors"
 	"io/fs"
-	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestEmbed_TenantHasExpectedFiles(t *testing.T) {
 	t.Parallel()
-	// 13: 009 is session_context (component session-context store,
+	// 15: 009 is session_context (component session-context store,
 	// gibson#1184), 010 is banks (banks of always-on coding agents, ADR-0119,
 	// gibson#1708), 011 is jobs (the job queue, gibson#1710), 012 drops
 	// provider_config_meta, the default-provider pointer that shadowed
 	// provider_configs.is_default (gibson#505), 013 is timeline_events (the
-	// full history of the Timeline, ADR-0163, gibson#786).
+	// full history of the Timeline, ADR-0163, gibson#786), 014 is the idle
+	// time of a bank member (ADR-0119, gibson#809), 015 is timeline_export
+	// (the export and retention of that history, gibson#992).
 	upCount, downCount := countSQL(t, Tenant, tenantDir)
-	if upCount != 13 {
-		t.Errorf("tenant: expected 13 up.sql files, got %d", upCount)
+	if upCount != 15 {
+		t.Errorf("tenant: expected 15 up.sql files, got %d", upCount)
 	}
-	if downCount != 13 {
-		t.Errorf("tenant: expected 13 down.sql files, got %d", downCount)
+	if downCount != 15 {
+		t.Errorf("tenant: expected 15 down.sql files, got %d", downCount)
 	}
 }
 
@@ -40,15 +43,16 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// address (gibson#154), 027 makes tenant_zitadel_orgs.zitadel_org_id
 	// unique so ext-authz's org->tenant lookup is unambiguous (ADR-0093
 	// decision 4, hosted#195), 028 drops connector_sandbox and
-	// webhook_idempotency, which no Go code read (gibson#506).
+	// webhook_idempotency, which no Go code read (gibson#506), and 041 drops
+	// the three component_install columns the plugin manifest fed (sdk#129).
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 40 {
-		t.Errorf("platform: expected 40 up.sql files, got %d", upCount)
+	if upCount != 45 {
+		t.Errorf("platform: expected 45 up.sql files, got %d", upCount)
 	}
-	if downCount != 40 {
-		t.Errorf("platform: expected 40 down.sql files, got %d", downCount)
+	if downCount != 45 {
+		t.Errorf("platform: expected 45 down.sql files, got %d", downCount)
 	}
 }
 
@@ -103,8 +107,8 @@ func TestTenantMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TenantMaxVersion: %v", err)
 	}
-	if v != 13 {
-		t.Errorf("TenantMaxVersion: got %d, want 13", v)
+	if v != 15 {
+		t.Errorf("TenantMaxVersion: got %d, want 15", v)
 	}
 }
 
@@ -153,36 +157,67 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 40 {
-		t.Errorf("PlatformMaxVersion: got %d, want 40", v)
+	if v != 45 {
+		t.Errorf("PlatformMaxVersion: got %d, want 45", v)
 	}
 }
 
-// TestPlatformVersionsAreContiguous guards the hazard described above: a gap in
-// the platform sequence means some migration is unreachable on a database that
-// has passed it.
-func TestPlatformVersionsAreContiguous(t *testing.T) {
+// TestVersionsAreContiguousAndUnique guards the hazard described above: a gap
+// or two up files with one version leave a migration that golang-migrate
+// never applies. It reads the real platform and tenant sets.
+func TestVersionsAreContiguousAndUnique(t *testing.T) {
 	t.Parallel()
-	entries, err := fs.ReadDir(Platform, platformDir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+	for name, set := range map[string]struct {
+		fsys fs.FS
+		dir  string
+	}{
+		"platform": {Platform, platformDir},
+		"tenant":   {Tenant, tenantDir},
+	} {
+		if err := CheckVersions(set.fsys, set.dir); err != nil {
+			t.Errorf("%s migrations: %v", name, err)
+		}
 	}
-	seen := map[int]bool{}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".up.sql") {
-			continue
-		}
-		n, convErr := strconv.Atoi(strings.SplitN(e.Name(), "_", 2)[0])
-		if convErr != nil {
-			t.Fatalf("migration %q does not start with a version number", e.Name())
-		}
-		seen[n] = true
+}
+
+// TestCheckVersions_Fixture is the failing fixture of the guard: a duplicate
+// version names both files and the next free number, and a gap names the
+// missing version.
+func TestCheckVersions_Fixture(t *testing.T) {
+	t.Parallel()
+	file := &fstest.MapFile{Data: []byte("SELECT 1;")}
+	dup := fstest.MapFS{
+		"m/001_a.up.sql":   file,
+		"m/002_b.up.sql":   file,
+		"m/002_c.up.sql":   file,
+		"m/002_c.down.sql": file,
+		"m/README.md":      file,
+		"m/003_d.up.sql":   file,
+		"m/003_d.down.sql": file,
+		"m/001_a.down.sql": file,
+		"m/002_b.down.sql": file,
 	}
-	for v := 1; v <= len(seen); v++ {
-		if !seen[v] {
-			t.Errorf("platform migration %03d is missing: the sequence must be contiguous, "+
-				"or golang-migrate will silently skip whatever later fills the gap", v)
+	err := CheckVersions(dup, "m")
+	if !errors.Is(err, ErrDuplicateVersion) {
+		t.Fatalf("duplicate version: got %v, want ErrDuplicateVersion", err)
+	}
+	for _, want := range []string{"002_b.up.sql", "002_c.up.sql", "next free number, 004"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("duplicate error %q does not name %q", err, want)
 		}
+	}
+
+	gap := fstest.MapFS{"m/001_a.up.sql": file, "m/003_c.up.sql": file}
+	err = CheckVersions(gap, "m")
+	if !errors.Is(err, ErrVersionGap) || !strings.Contains(err.Error(), "002") {
+		t.Fatalf("gap: got %v, want ErrVersionGap naming 002", err)
+	}
+
+	if _, err := scanMaxVersion(dup, "m"); !errors.Is(err, ErrDuplicateVersion) {
+		t.Fatalf("scanMaxVersion must refuse a duplicate version, got %v", err)
+	}
+	if err := CheckVersions(fstest.MapFS{"m/001_a.up.sql": file, "m/002_b.up.sql": file}, "m"); err != nil {
+		t.Fatalf("a clean set: %v", err)
 	}
 }
 

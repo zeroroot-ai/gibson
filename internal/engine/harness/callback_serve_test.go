@@ -16,6 +16,7 @@ func TestCallbackManager_ServeReturnsOnCancel(t *testing.T) {
 	t.Parallel()
 
 	cfg := CallbackConfig{
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
 		// Use an ephemeral port so the test does not collide with a live daemon.
 		ListenAddress: "127.0.0.1:0",
 		Enabled:       true,
@@ -53,8 +54,9 @@ func TestCallbackManager_ServeNotStartedUntilCalled(t *testing.T) {
 	t.Parallel()
 
 	cfg := CallbackConfig{
-		ListenAddress: "127.0.0.1:0",
-		Enabled:       false,
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+		ListenAddress:  "127.0.0.1:0",
+		Enabled:        false,
 	}
 	mgr := NewCallbackManager(cfg, slog.Default())
 
@@ -86,8 +88,9 @@ func TestCallbackManager_ServeIdempotentStop(t *testing.T) {
 	t.Parallel()
 
 	cfg := CallbackConfig{
-		ListenAddress: "127.0.0.1:0",
-		Enabled:       true,
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+		ListenAddress:  "127.0.0.1:0",
+		Enabled:        true,
 	}
 	mgr := NewCallbackManager(cfg, slog.Default())
 

@@ -215,7 +215,11 @@ func main() {
 	// FGA client + cached checker. The internal/infra/authz FGAClient
 	// applies a per-call timeout floor under the Envoy ext_authz
 	// budget (audit fix).
-	checker, fgaClient := buildChecker(log, reg)
+	checker, fgaClient, err := buildChecker(ctx, log, reg)
+	if err != nil {
+		log.Error("init FGA checker", "err", err)
+		os.Exit(1)
+	}
 	cacheTTL, cacheMax := fgaCacheSettings()
 	cachedChecker := fga.NewCachedChecker(checker, cacheTTL, cacheMax)
 
@@ -406,25 +410,23 @@ func intOr(key string, fallback int) int {
 // derivation, header emission, and the daemon-side HMAC validation.
 //
 // Returns the Checker plus the underlying fga.FGAClient so the
-// readiness probe can share the same dialled client.
-func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGAClient) {
+// readiness probe can share the same dialled client. A missing setting or a
+// failed self-check returns an error, and main refuses to start.
+func buildChecker(ctx context.Context, log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGAClient, error) {
 	fgaAddr := os.Getenv("EXT_AUTHZ_FGA_ADDR")
 	if fgaAddr == "" {
-		// Fail fast: a missing FGA address means every authenticated RPC
-		// would silently deny all callers. This is a mis-configured start,
-		// not a graceful degradation. Req 11.1 — refuse to start.
-		log.Error("EXT_AUTHZ_FGA_ADDR is required — refusing to start without FGA endpoint (zero-trust-hardening Req 11.1)")
-		os.Exit(1)
+		// A missing FGA address means every authenticated RPC would deny all
+		// callers. This is a mis-configured start, not a graceful
+		// degradation. Req 11.1: refuse to start.
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_ADDR is required: ext-authz refuses to start without an FGA endpoint")
 	}
 	storeID := os.Getenv("EXT_AUTHZ_FGA_STORE_ID")
 	if storeID == "" {
-		log.Error("EXT_AUTHZ_FGA_STORE_ID required when EXT_AUTHZ_FGA_ADDR is set")
-		os.Exit(1)
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_STORE_ID is required when EXT_AUTHZ_FGA_ADDR is set")
 	}
 	modelID := os.Getenv("EXT_AUTHZ_FGA_MODEL_ID")
 	if modelID == "" {
-		log.Error("EXT_AUTHZ_FGA_MODEL_ID required (platform-clients FGAClient requires an authorization model ID)")
-		os.Exit(1)
+		return nil, nil, errors.New("EXT_AUTHZ_FGA_MODEL_ID is required: the internal/infra/authz FGA client needs an authorization model ID")
 	}
 
 	perCallTimeout := durationOr("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", 1500*time.Millisecond)
@@ -437,25 +439,21 @@ func buildChecker(log *slog.Logger, reg *fga.Registry) (*fga.Checker, fga.FGACli
 		Logger:         log,
 	})
 	if err != nil {
-		log.Error("create platform-clients FGA client", "addr", fgaAddr, "err", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("create the internal/infra/authz FGA client for %q: %w", fgaAddr, err)
 	}
 
 	// Startup self-check (ext-authz#24). The internal/infra/authz constructor
-	// does NOT dial; an explicit round-trip catches port/protocol
-	// mismatches the way deploy#140 did. Fail-fast on transport-class
-	// errors so kubelet's CrashLoopBackoff + container log surface the
-	// misconfiguration immediately instead of having the dashboard 500
-	// silently for hours.
-	if err := fga.SelfCheck(context.Background(), client, fgaAddr); err != nil {
-		log.Error("FGA startup self-check failed — refusing to start",
-			"addr", fgaAddr, "err", err)
-		os.Exit(1)
+	// does NOT dial. An explicit round-trip catches port/protocol mismatches
+	// the way deploy#140 did. A transport-class error stops the start, so
+	// kubelet's CrashLoopBackoff and the container log show the
+	// misconfiguration at once.
+	if err := fga.SelfCheck(ctx, client, fgaAddr); err != nil {
+		return nil, nil, fmt.Errorf("FGA startup self-check failed: %w", err)
 	}
-	log.Info("OpenFGA client (platform-clients/authz) connected and self-check passed",
+	log.Info("OpenFGA client (internal/infra/authz) connected and self-check passed",
 		"addr", fgaAddr, "store_id", storeID, "model_id", modelID,
 		"per_call_timeout", perCallTimeout.String())
-	return fga.NewChecker(client, reg), client
+	return fga.NewChecker(client, reg), client, nil
 }
 
 // buildCGVerifiers wires both capability-grant verifiers onto ONE transport to
@@ -480,7 +478,7 @@ func buildCGVerifiers(
 	if err != nil {
 		return nil, nil, err
 	}
-	dispatch, err := buildCGVerifier(log, keysClient)
+	dispatch, err := buildCGVerifier(keysClient)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dispatch capability-grant verifier: %w", err)
 	}
@@ -492,9 +490,9 @@ func buildCGVerifiers(
 }
 
 // buildCGKeysClient builds the HTTP client both CG-JWT verifiers use to fetch
-// per-kid key documents from the daemon (EXT_AUTHZ_CGJWT_KEYS_URL). It returns
-// (nil, nil) when the keys URL is unset — both verifiers are then disabled and
-// there is nothing to fetch.
+// per-kid key documents from the daemon (EXT_AUTHZ_CGJWT_KEYS_URL). The keys
+// URL is required: the component verifier is a required dependency of the
+// server (gibson#681), and the chart sets the URL on every install.
 //
 // The transport is SPIFFE mTLS pinned to EXT_AUTHZ_DAEMON_SVID, identical to
 // the authz-registry fetch in loadRegistryBytes, and for the identical reason:
@@ -513,7 +511,8 @@ func buildCGVerifiers(
 func buildCGKeysClient(log *slog.Logger, svid x509svid.Source, bundle x509bundle.Source) (*http.Client, error) {
 	keysURL := strings.TrimSpace(os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL"))
 	if keysURL == "" {
-		return nil, nil
+		return nil, errors.New("EXT_AUTHZ_CGJWT_KEYS_URL required (the daemon's per-kid key endpoint, " +
+			"https://<daemon>:8086/capabilitygrant/v1/keys)")
 	}
 	parsed, err := url.Parse(keysURL)
 	if err != nil {
@@ -604,20 +603,13 @@ func daemonMTLSClient(svid x509svid.Source, bundle x509bundle.Source, timeout ti
 // same endpoint the component verifier uses, because ADR-0045 collapses key
 // resolution to one fetch-by-kid path. There is no JWKS-wide document.
 //
-// keysClient is the SVID-pinned transport from buildCGKeysClient; it is nil
-// exactly when the keys URL is unset, which is the same condition that
-// disables this verifier.
-func buildCGVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.Verifier, error) {
+// keysClient is the SVID-pinned transport from buildCGKeysClient, which
+// refuses an unset keys URL.
+func buildCGVerifier(keysClient *http.Client) (*cgjwt.Verifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
-	if keysURL == "" {
-		log.Warn("EXT_AUTHZ_CGJWT_KEYS_URL not set — capability-grant short-circuit disabled")
-		// Return a no-op verifier; the server treats nil as "no
-		// short-circuit possible" and falls through to FGA.
-		return nil, nil
-	}
 	issuer := os.Getenv("EXT_AUTHZ_CGJWT_ISSUER")
 	if issuer == "" {
-		return nil, errors.New("EXT_AUTHZ_CGJWT_ISSUER required when the CG keys URL is set")
+		return nil, errors.New("EXT_AUTHZ_CGJWT_ISSUER required")
 	}
 	audience := envOr("EXT_AUTHZ_CGJWT_AUDIENCE", "gibson-daemon")
 	ttl := durationOr("EXT_AUTHZ_CGJWT_TTL", time.Hour)
@@ -633,8 +625,8 @@ func buildCGVerifier(log *slog.Logger, keysClient *http.Client) (*cgjwt.Verifier
 // buildComponentVerifier wires the verifier for components' self-signed per-RPC
 // CG-JWTs (ADR-0045). EXT_AUTHZ_CGJWT_KEYS_URL is the daemon per-kid key
 // endpoint base on the daemon's SPIFFE-mTLS listener, e.g.
-// "https://gibson:8086/capabilitygrant/v1/keys". When unset, the component
-// path is disabled (a component token alone is unauthenticated).
+// "https://gibson:8086/capabilitygrant/v1/keys". buildCGKeysClient refuses an
+// unset URL, so the component path is always on.
 //
 // keysClient is the SVID-pinned transport from buildCGKeysClient. The
 // descriptor it fetches is what binds a component kid to an FGA principal, so
@@ -659,10 +651,6 @@ func buildComponentVerifier(
 	replay cgjwt.ReplayStore,
 ) (*cgjwt.ComponentVerifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
-	if keysURL == "" {
-		log.Warn("EXT_AUTHZ_CGJWT_KEYS_URL not set — component CG-JWT auth disabled")
-		return nil, nil
-	}
 	audiences := []string{capabilitygrant.AudienceGibsonDaemon}
 	ttl := durationOr("EXT_AUTHZ_CGJWT_DESCRIPTOR_TTL", 5*time.Minute)
 	log.Info("component CG-JWT auth enabled",

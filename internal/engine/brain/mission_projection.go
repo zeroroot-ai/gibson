@@ -62,6 +62,16 @@ type WorkNode struct {
 	// sets it for each node it projects. Nil keeps the egress of the catalog
 	// manifest.
 	Network *agent.NodeNetwork
+	// StartsFrom names the earlier node whose parked sandbox this node forks,
+	// and Forkable marks a node that a later node names (ADR-0169,
+	// gibson#802). They travel with Network to the dispatch.
+	StartsFrom string
+	Forkable   bool
+	// Checkpoint marks an agent node of a mission in the sandbox checkpoint
+	// mode: its sandbox leaves a snapshot when the node ends. FromSnapshot
+	// names the snapshot that the node of a rewind starts from (ADR-0170).
+	Checkpoint   bool
+	FromSnapshot string
 }
 
 // MissionProjected is the launch event for a scripted CUE mission (ADR-0101): the
@@ -108,8 +118,14 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
 	})
+	// The node of a rewound checkpoint starts from the snapshot of that
+	// checkpoint (ADR-0170). The rewind event comes before the projection.
+	rewind, rewound := w.missionRewinds[e.ID]
 	for _, n := range e.Nodes {
 		id := WorkID(e.ID, n.ID)
+		if rewound && rewind.StartSnapshot != "" && n.ID == rewind.ParentCheckpointID {
+			n.FromSnapshot = rewind.StartSnapshot
+		}
 		if _, ok := findWork(w, id); ok {
 			continue // idempotent
 		}
@@ -131,6 +147,10 @@ func applyMissionProjected(w *World, e MissionProjected) {
 			Group:                  n.Group,
 			Limit:                  n.Limit,
 			Network:                n.Network,
+			StartsFrom:             n.StartsFrom,
+			Forkable:               n.Forkable,
+			Checkpoint:             n.Checkpoint,
+			FromSnapshot:           n.FromSnapshot,
 		})
 	}
 }

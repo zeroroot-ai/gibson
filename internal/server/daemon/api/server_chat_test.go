@@ -77,11 +77,11 @@ func (m *mockConversationStore) Save(
 	return nil
 }
 
-func (m *mockConversationStore) List(_ context.Context, _, _ string, _ int) ([]storedConversation, error) {
+func (m *mockConversationStore) List(_ context.Context, _, _ string, _, _ int) ([]storedConversation, int, error) {
 	if m.listErr != nil {
-		return nil, m.listErr
+		return nil, 0, m.listErr
 	}
-	return m.conversations, nil
+	return m.conversations, len(m.conversations), nil
 }
 
 func (m *mockConversationStore) Get(_ context.Context, _, callerUserID, _ string) (*storedConversation, []storedMessage, error) {
@@ -429,7 +429,7 @@ func TestConversationStore_SaveAndList(t *testing.T) {
 	err := store.Save(ctx, "tenant-A", "user-1", "conv-1", "My Chat", "agent-x", msgs)
 	require.NoError(t, err)
 
-	convs, err := store.List(ctx, "tenant-A", "user-1", 10)
+	convs, _, err := store.List(ctx, "tenant-A", "user-1", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convs, 1)
 
@@ -487,7 +487,7 @@ func TestConversationStore_RoundTrip_SaveListGet(t *testing.T) {
 	require.NoError(t, err)
 
 	// List returns it.
-	convs, err := store.List(ctx, "tenant-RT", "user-RT", 10)
+	convs, _, err := store.List(ctx, "tenant-RT", "user-RT", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convs, 1)
 	assert.Equal(t, "conv-RT", convs[0].ID)
@@ -539,7 +539,7 @@ func TestConversationStore_NewestFirst(t *testing.T) {
 		}
 	}
 
-	convs, err := store.List(ctx, "tenant-Order", "user-Order", 10)
+	convs, _, err := store.List(ctx, "tenant-Order", "user-Order", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convs, 3)
 
@@ -569,12 +569,12 @@ func TestConversationStore_PaginationLimit(t *testing.T) {
 	}
 
 	// Limit=2 must return exactly 2.
-	convs, err := store.List(ctx, "tenant-Pag", "user-Pag", 2)
+	convs, _, err := store.List(ctx, "tenant-Pag", "user-Pag", 0, 2)
 	require.NoError(t, err)
 	assert.Len(t, convs, 2, "limit=2 must return exactly 2 conversations")
 
 	// Limit=0 uses default (20 > 5), so all 5 are returned.
-	convs, err = store.List(ctx, "tenant-Pag", "user-Pag", 0)
+	convs, _, err = store.List(ctx, "tenant-Pag", "user-Pag", 0, 0)
 	require.NoError(t, err)
 	assert.Len(t, convs, 5, "limit=0 uses default, returning all 5")
 }
@@ -590,7 +590,7 @@ func TestConversationStore_CrossTenantIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// List for tenant-B / user-1 must return nothing.
-	convs, err := store.List(ctx, "tenant-B", "user-1", 10)
+	convs, _, err := store.List(ctx, "tenant-B", "user-1", 0, 10)
 	require.NoError(t, err)
 	assert.Empty(t, convs, "tenant-B should not see tenant-A conversations")
 
@@ -600,7 +600,7 @@ func TestConversationStore_CrossTenantIsolation(t *testing.T) {
 	assert.Error(t, err, "tenant-B should not access tenant-A conversations")
 
 	// Confirm tenant-A can still access its own conversation.
-	convs, err = store.List(ctx, "tenant-A", "user-1", 10)
+	convs, _, err = store.List(ctx, "tenant-A", "user-1", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convs, 1)
 	assert.Equal(t, "conv-tenant-a", convs[0].ID)
@@ -619,13 +619,13 @@ func TestConversationStore_CrossUserIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// user-A's list must not include user-B's conversations.
-	convsA, err := store.List(ctx, "shared-tenant", "user-A", 10)
+	convsA, _, err := store.List(ctx, "shared-tenant", "user-A", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convsA, 1)
 	assert.Equal(t, "conv-user-a", convsA[0].ID)
 
 	// user-B's list must not include user-A's conversations.
-	convsB, err := store.List(ctx, "shared-tenant", "user-B", 10)
+	convsB, _, err := store.List(ctx, "shared-tenant", "user-B", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convsB, 1)
 	assert.Equal(t, "conv-user-b", convsB[0].ID)
@@ -745,7 +745,7 @@ func (s *inMemConvStore) Save(
 	return nil
 }
 
-func (s *inMemConvStore) List(_ context.Context, tenantID, userID string, limit int) ([]storedConversation, error) {
+func (s *inMemConvStore) List(_ context.Context, tenantID, userID string, offset, limit int) ([]storedConversation, int, error) {
 	if limit <= 0 {
 		limit = conversationDefaultLimit
 	}
@@ -763,11 +763,12 @@ func (s *inMemConvStore) List(_ context.Context, tenantID, userID string, limit 
 		}
 	}
 
+	if offset >= len(sorted) {
+		return nil, 0, nil
+	}
+	sorted = sorted[offset:min(offset+limit, len(sorted))]
 	out := make([]storedConversation, 0, limit)
 	for _, e := range sorted {
-		if len(out) >= limit {
-			break
-		}
 		hashKey := convHashKey(tenantID, e.member)
 		h := s.hashes[hashKey]
 		if h == nil {
@@ -795,7 +796,7 @@ func (s *inMemConvStore) List(_ context.Context, tenantID, userID string, limit 
 			MessageCount:  msgCount,
 		})
 	}
-	return out, nil
+	return out, len(sorted), nil
 }
 
 func (s *inMemConvStore) Get(_ context.Context, tenantID, callerUserID, conversationID string) (*storedConversation, []storedMessage, error) {
@@ -1244,7 +1245,7 @@ func TestConversationStore_Rename_UpdatesTitleDurably(t *testing.T) {
 	assert.Equal(t, "Renamed Title", conv.Title)
 
 	// List also reflects the rename.
-	convs, err := store.List(ctx, "tenant-R", "user-R", 10)
+	convs, _, err := store.List(ctx, "tenant-R", "user-R", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convs, 1)
 	assert.Equal(t, "Renamed Title", convs[0].Title)
@@ -1274,7 +1275,7 @@ func TestConversationStore_Delete_RemovesFromListAndGet(t *testing.T) {
 	require.NoError(t, err)
 
 	// List returns empty.
-	convs, err := store.List(ctx, "tenant-D", "user-D", 10)
+	convs, _, err := store.List(ctx, "tenant-D", "user-D", 0, 10)
 	require.NoError(t, err)
 	assert.Empty(t, convs, "deleted conversation must not appear in List")
 
@@ -1318,12 +1319,12 @@ func TestConversationStore_Delete_TenantUserIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// u-A's list in "shared" is now empty.
-	convsA, err := store.List(ctx, "shared", "u-A", 10)
+	convsA, _, err := store.List(ctx, "shared", "u-A", 0, 10)
 	require.NoError(t, err)
 	assert.Empty(t, convsA, "u-A's conversation must be gone")
 
 	// u-B's list in "shared" is unaffected.
-	convsB, err := store.List(ctx, "shared", "u-B", 10)
+	convsB, _, err := store.List(ctx, "shared", "u-B", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, convsB, 1)
 	assert.Equal(t, "conv-B", convsB[0].ID, "u-B's conversation must be intact")

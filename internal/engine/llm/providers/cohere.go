@@ -21,13 +21,6 @@ type CohereProvider struct {
 	config llm.ProviderConfig
 }
 
-// NewCohereProvider constructs a Cohere provider.
-// Credentials come from cfg.APIKey (populated by the provider resolver from
-// the secrets broker), then the dev-only env-var. See resolveCredential.
-func NewCohereProvider(cfg llm.ProviderConfig) (*CohereProvider, error) {
-	return newCohereProviderWithContext(context.Background(), cfg)
-}
-
 // newCohereProviderWithContext constructs a Cohere provider, resolving the credential from cfg (see resolveCredential).
 func newCohereProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*CohereProvider, error) {
 	token, err := resolveCredential(cfg, "cohere", "", true)

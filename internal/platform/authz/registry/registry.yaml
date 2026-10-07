@@ -175,6 +175,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.component.v1.ComponentService/EnrollComponent":
+    relation: "can_execute"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.component.v1.ComponentService/FindSimilarAttacks":
     relation: "can_execute"
     object_type: "component"
@@ -387,6 +393,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - SERVICE
+  "/gibson.daemon.connection.v1.ConnectionPointService/DescribeSignupStep":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - SERVICE
   "/gibson.daemon.connection.v1.ConnectionPointService/ListTenantUsage":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -575,6 +587,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredCatalogPlugins":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListDesiredConnectors":
     relation: "platform_operator"
     object_type: "system_tenant"
@@ -597,6 +616,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.daemon.operator.v1.DaemonOperatorService/ListPendingTenantProvisioning":
+    relation: "platform_operator"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.daemon.operator.v1.DaemonOperatorService/ReportCatalogPluginStatus":
     relation: "platform_operator"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -1047,6 +1073,12 @@ entries:
     object_deriver: "system_tenant"
     allowed_identities:
       - COMPONENT
+  "/gibson.harness.v1.HarnessCallbackService/ClaimFork":
+    relation: "can_use"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.harness.v1.HarnessCallbackService/CloseJob":
     relation: "can_use"
     object_type: "component"
@@ -1487,12 +1519,6 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
-  "/gibson.pluginadmin.v1.PluginAdminService/RegisterPlugin":
-    relation: "admin"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - USER
   "/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding":
     relation: "admin"
     object_type: "tenant"
@@ -1578,6 +1604,12 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.AdminTenantService/AdminDeleteTenant":
+    relation: "platform_owner"
+    object_type: "system_tenant"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.AdminTenantService/AdminGetPlatformHealth":
     relation: "platform_owner"
     object_type: "system_tenant"
     object_deriver: "system_tenant"
@@ -1801,6 +1833,12 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.GrantsService/WriteSecretGrants":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
   "/gibson.tenant.v1.MembershipService/AcceptInvitation":
     unauthenticated: true
   "/gibson.tenant.v1.MembershipService/AddTeamMember":
@@ -1854,6 +1892,12 @@ entries:
     allowed_identities:
       - USER
   "/gibson.tenant.v1.MembershipService/ListTeams":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+  "/gibson.tenant.v1.MembershipService/ReassignAgentIdentity":
     relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
@@ -2081,6 +2125,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.TenantService/GetAuditRetention":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.TenantService/GetMissionDraft":
     relation: "writer"
     object_type: "tenant"
@@ -2125,6 +2176,13 @@ entries:
       - SERVICE
   "/gibson.tenant.v1.TenantService/SaveMissionDraft":
     relation: "writer"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.TenantService/SetAuditRetention":
+    relation: "admin"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"
     allowed_identities:
@@ -2417,6 +2475,13 @@ entries:
       - USER
       - SERVICE
   "/gibson.world.v1.WorldService/ListOpenBets":
+    relation: "member"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.world.v1.WorldService/ListProofReviews":
     relation: "member"
     object_type: "tenant"
     object_deriver: "tenant_from_identity"

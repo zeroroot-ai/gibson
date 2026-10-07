@@ -99,6 +99,9 @@ type HarnessConfig struct {
 	// nothing reading it for scope needs the rest. Deriving a tool's facts from
 	// that view would hand it the instance's id beside another target's host,
 	// and the tool would scan the wrong machine and report a clean result for it.
+	//
+	// Required (gibson#681): Validate refuses a nil provider, and Create
+	// refuses a provider that answers nil.
 	TargetFacts func() TargetFactsLookup
 
 	// MissionSecrets resolves a declared secret's VALUE at dispatch.
@@ -255,6 +258,11 @@ type HarnessConfig struct {
 	// Optional.
 	AgentLauncher AgentSandboxLauncher
 
+	// Forks holds the parked sources and the fork ledger (ADR-0169). One
+	// value serves each harness of the daemon. Nil means no fork support.
+	// Optional.
+	Forks *ForkSupport
+
 	// AgentLaunchSpecResolver resolves the per-agent launch spec (image,
 	// sandbox class, egress envelope, model) for a sandboxed agent. Typed seam
 	// for gibson#1597 (S5). Nil means a sandboxed dispatch cannot proceed and
@@ -310,6 +318,15 @@ func (c *HarnessConfig) Validate() error {
 		return types.NewError(
 			ErrHarnessInvalidConfig,
 			"SlotManager is required (cannot be nil)",
+		)
+	}
+
+	// TargetFacts is required: a dispatched tool always learns its target from
+	// the store (gibson#681).
+	if c.TargetFacts == nil {
+		return types.NewError(
+			ErrHarnessInvalidConfig,
+			"TargetFacts is required (cannot be nil)",
 		)
 	}
 

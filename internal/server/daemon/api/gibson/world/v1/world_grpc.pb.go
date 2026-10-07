@@ -19,20 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorldService_ListMissions_FullMethodName    = "/gibson.world.v1.WorldService/ListMissions"
-	WorldService_ListHosts_FullMethodName       = "/gibson.world.v1.WorldService/ListHosts"
-	WorldService_ListFindings_FullMethodName    = "/gibson.world.v1.WorldService/ListFindings"
-	WorldService_ListLlmCalls_FullMethodName    = "/gibson.world.v1.WorldService/ListLlmCalls"
-	WorldService_GetLlmCall_FullMethodName      = "/gibson.world.v1.WorldService/GetLlmCall"
-	WorldService_GetTimeline_FullMethodName     = "/gibson.world.v1.WorldService/GetTimeline"
-	WorldService_GetFrameAt_FullMethodName      = "/gibson.world.v1.WorldService/GetFrameAt"
-	WorldService_ListReviewQueue_FullMethodName = "/gibson.world.v1.WorldService/ListReviewQueue"
-	WorldService_SubmitLabel_FullMethodName     = "/gibson.world.v1.WorldService/SubmitLabel"
-	WorldService_ListLabels_FullMethodName      = "/gibson.world.v1.WorldService/ListLabels"
-	WorldService_GetCalibration_FullMethodName  = "/gibson.world.v1.WorldService/GetCalibration"
-	WorldService_GetReputation_FullMethodName   = "/gibson.world.v1.WorldService/GetReputation"
-	WorldService_ListOpenBets_FullMethodName    = "/gibson.world.v1.WorldService/ListOpenBets"
-	WorldService_SettleBetByHITL_FullMethodName = "/gibson.world.v1.WorldService/SettleBetByHITL"
+	WorldService_ListMissions_FullMethodName     = "/gibson.world.v1.WorldService/ListMissions"
+	WorldService_ListHosts_FullMethodName        = "/gibson.world.v1.WorldService/ListHosts"
+	WorldService_ListFindings_FullMethodName     = "/gibson.world.v1.WorldService/ListFindings"
+	WorldService_ListLlmCalls_FullMethodName     = "/gibson.world.v1.WorldService/ListLlmCalls"
+	WorldService_GetLlmCall_FullMethodName       = "/gibson.world.v1.WorldService/GetLlmCall"
+	WorldService_GetTimeline_FullMethodName      = "/gibson.world.v1.WorldService/GetTimeline"
+	WorldService_GetFrameAt_FullMethodName       = "/gibson.world.v1.WorldService/GetFrameAt"
+	WorldService_ListReviewQueue_FullMethodName  = "/gibson.world.v1.WorldService/ListReviewQueue"
+	WorldService_SubmitLabel_FullMethodName      = "/gibson.world.v1.WorldService/SubmitLabel"
+	WorldService_ListLabels_FullMethodName       = "/gibson.world.v1.WorldService/ListLabels"
+	WorldService_GetCalibration_FullMethodName   = "/gibson.world.v1.WorldService/GetCalibration"
+	WorldService_GetReputation_FullMethodName    = "/gibson.world.v1.WorldService/GetReputation"
+	WorldService_ListOpenBets_FullMethodName     = "/gibson.world.v1.WorldService/ListOpenBets"
+	WorldService_ListProofReviews_FullMethodName = "/gibson.world.v1.WorldService/ListProofReviews"
+	WorldService_SettleBetByHITL_FullMethodName  = "/gibson.world.v1.WorldService/SettleBetByHITL"
 )
 
 // WorldServiceClient is the client API for WorldService service.
@@ -102,6 +103,13 @@ type WorldServiceClient interface {
 	// HITL-settle review queue. Read-only, so relation is member like every
 	// other WorldService read.
 	ListOpenBets(ctx context.Context, in *ListOpenBetsRequest, opts ...grpc.CallOption) (*ListOpenBetsResponse, error)
+	// ListProofReviews returns the proofs that wait for a human review
+	// (ADR-0131, gibson#798). A proof that carries only evidence the agent
+	// typed settles nothing: the daemon records it, and a reviewer reads the
+	// evidence here and settles the bet with SettleBetByHITL. A proof leaves
+	// the list when its bet settles by any path. Read-only, so the relation is
+	// member like every other WorldService read.
+	ListProofReviews(ctx context.Context, in *ListProofReviewsRequest, opts ...grpc.CallOption) (*ListProofReviewsResponse, error)
 	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
 	// ADR-0123 decision 3): true_positive/false_positive settle the bet
 	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
@@ -251,6 +259,16 @@ func (c *worldServiceClient) ListOpenBets(ctx context.Context, in *ListOpenBetsR
 	return out, nil
 }
 
+func (c *worldServiceClient) ListProofReviews(ctx context.Context, in *ListProofReviewsRequest, opts ...grpc.CallOption) (*ListProofReviewsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListProofReviewsResponse)
+	err := c.cc.Invoke(ctx, WorldService_ListProofReviews_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *worldServiceClient) SettleBetByHITL(ctx context.Context, in *SettleBetByHITLRequest, opts ...grpc.CallOption) (*SettleBetByHITLResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SettleBetByHITLResponse)
@@ -328,6 +346,13 @@ type WorldServiceServer interface {
 	// HITL-settle review queue. Read-only, so relation is member like every
 	// other WorldService read.
 	ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error)
+	// ListProofReviews returns the proofs that wait for a human review
+	// (ADR-0131, gibson#798). A proof that carries only evidence the agent
+	// typed settles nothing: the daemon records it, and a reviewer reads the
+	// evidence here and settles the bet with SettleBetByHITL. A proof leaves
+	// the list when its bet settles by any path. Read-only, so the relation is
+	// member like every other WorldService read.
+	ListProofReviews(context.Context, *ListProofReviewsRequest) (*ListProofReviewsResponse, error)
 	// SettleBetByHITL records a human review verdict on a bet (gibson#280,
 	// ADR-0123 decision 3): true_positive/false_positive settle the bet
 	// (Engine.SettleBetByHITL); dismiss is label-only/no-settle, matching the
@@ -385,6 +410,9 @@ func (UnimplementedWorldServiceServer) GetReputation(context.Context, *GetReputa
 }
 func (UnimplementedWorldServiceServer) ListOpenBets(context.Context, *ListOpenBetsRequest) (*ListOpenBetsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListOpenBets not implemented")
+}
+func (UnimplementedWorldServiceServer) ListProofReviews(context.Context, *ListProofReviewsRequest) (*ListProofReviewsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListProofReviews not implemented")
 }
 func (UnimplementedWorldServiceServer) SettleBetByHITL(context.Context, *SettleBetByHITLRequest) (*SettleBetByHITLResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SettleBetByHITL not implemented")
@@ -644,6 +672,24 @@ func _WorldService_ListOpenBets_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorldService_ListProofReviews_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListProofReviewsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorldServiceServer).ListProofReviews(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorldService_ListProofReviews_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorldServiceServer).ListProofReviews(ctx, req.(*ListProofReviewsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorldService_SettleBetByHITL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SettleBetByHITLRequest)
 	if err := dec(in); err != nil {
@@ -720,6 +766,10 @@ var WorldService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListOpenBets",
 			Handler:    _WorldService_ListOpenBets_Handler,
+		},
+		{
+			MethodName: "ListProofReviews",
+			Handler:    _WorldService_ListProofReviews_Handler,
 		},
 		{
 			MethodName: "SettleBetByHITL",

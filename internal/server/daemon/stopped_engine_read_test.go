@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 )
 
@@ -46,8 +47,7 @@ func (downStore) TrimTo(context.Context, string, string) error { return errDownS
 
 func downRegistry(t *testing.T) *brain.Registry {
 	t.Helper()
-	reg := brain.NewRegistry(context.Background())
-	reg.WithStoreFactory(func(context.Context, string) (brain.TimelineStore, error) { return downStore{}, nil })
+	reg := brain.NewRegistry(context.Background(), func(context.Context, string) (brain.TimelineStore, error) { return downStore{}, nil })
 	return reg
 }
 
@@ -71,7 +71,7 @@ func TestListMissions_AStoppedEngineIsUnavailable(t *testing.T) {
 
 // A live engine still serves.
 func TestWorldRead_ALiveEngineServes(t *testing.T) {
-	srv := NewWorldServer(brain.NewRegistry(context.Background()), slog.New(slog.DiscardHandler))
+	srv := NewWorldServer(brain.NewRegistry(context.Background(), braintest.StoreFactory()), slog.New(slog.DiscardHandler))
 	if _, err := srv.ListMissions(tenantCtx(t, "tenant-a"), &worldpb.ListMissionsRequest{}); err != nil {
 		t.Fatalf("ListMissions: %v", err)
 	}

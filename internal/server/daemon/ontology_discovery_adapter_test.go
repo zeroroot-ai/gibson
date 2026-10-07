@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -44,7 +45,7 @@ func awaitOntologyProposal(t *testing.T, e *brain.Engine, kind taxonomy.Proposal
 func TestTenantRoutedOntologyDiscovery_RoutesEachCallByContextTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	disc := newTenantRoutedOntologyDiscovery(registry)
 
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
@@ -70,7 +71,7 @@ func TestTenantRoutedOntologyDiscovery_RoutesEachCallByContextTenant(t *testing.
 func TestTenantRoutedOntologyDiscovery_NoTenantInContext_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	disc := newTenantRoutedOntologyDiscovery(registry)
 
 	err := disc.ProposeOntologyExtension(context.Background(), taxonomy.ProposedNodeLabel, "CustomHost", "recon-agent", "claim")
@@ -86,7 +87,7 @@ func TestTenantRoutedOntologyDiscovery_NoTenantInContext_Errors(t *testing.T) {
 func TestTenantRoutedOntologyDiscovery_InvalidIdentifier_FailsClosed(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
 	disc := newTenantRoutedOntologyDiscovery(registry)
 	acmeCtx := auth.ContextWithTenantString(context.Background(), "acme")
 
@@ -105,8 +106,8 @@ func TestTenantRoutedOntologyDiscovery_InvalidIdentifier_FailsClosed(t *testing.
 func TestWireOntologyDiscovery(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := brain.NewRegistry(ctx)
-	callback := harness.NewCallbackManager(harness.CallbackConfig{ListenAddress: "127.0.0.1:0"}, slog.Default())
+	registry := brain.NewRegistry(ctx, braintest.StoreFactory())
+	callback := harness.NewCallbackManager(harness.CallbackConfig{ServiceOptions: []harness.CallbackServiceOption{harness.WithEventBus(NewEventBusAdapter(NewEventBus(slog.Default())))}, ListenAddress: "127.0.0.1:0"}, slog.Default())
 
 	wireOntologyDiscovery(callback, registry)
 

@@ -75,18 +75,6 @@ func TestCreateMission_CanonicalConstraintsReachTheMission(t *testing.T) {
 	assert.True(t, proto.Equal(want, got), "stored constraints:\n got %v\nwant %v", got, want)
 }
 
-// The deprecated four-field message is not read. A request that sets only
-// that message keeps the constraints of the definition (gibson#683).
-func TestCreateMission_TheDeprecatedMessageIsNotRead(t *testing.T) {
-	req := originRequest()
-	req.MissionDefinitionJson = []byte(`{"name":"scan","constraints":{"max_tokens":"77"}}`)
-	req.Constraints = &harnesspb.MissionConstraints{MaxTokens: 999, MaxFindings: 5} //nolint:staticcheck // SA1019: the deprecated field under test
-
-	got := storedConstraints(t, req)
-	assert.EqualValues(t, 77, got.GetMaxTokens())
-	assert.Zero(t, got.GetMaxFindings(), "the deprecated message must not be read")
-}
-
 // A request with no constraints leaves the constraints of the definition.
 func TestCreateMission_NoRequestedConstraintsKeepsTheDefinition(t *testing.T) {
 	req := originRequest()

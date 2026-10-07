@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -41,8 +42,9 @@ const serviceName = "spiffe-jwks-exporter"
 func main() {
 	var (
 		socket = flag.String("socket", envOr("SPIFFE_ENDPOINT_SOCKET", "unix:///run/spire/sockets/agent.sock"), "SPIRE agent workload API socket")
-		td     = flag.String("trust-domain", envOr("SPIFFE_TRUST_DOMAIN", "zeroroot.ai"), "expected trust domain")
-		addr   = flag.String("listen", envOr("LISTEN_ADDR", "127.0.0.1:9091"), "HTTP listen address")
+		// No default: each install has its own trust domain (ADR-0164).
+		td   = flag.String("trust-domain", envOr("SPIFFE_TRUST_DOMAIN", ""), "expected trust domain (required)")
+		addr = flag.String("listen", envOr("LISTEN_ADDR", "127.0.0.1:9091"), "HTTP listen address")
 	)
 	flag.Parse()
 
@@ -53,6 +55,11 @@ func main() {
 	}
 	log := obs.Logger.With("component", serviceName)
 
+	if strings.TrimSpace(*td) == "" {
+		log.Error("the trust domain is required: set SPIFFE_TRUST_DOMAIN or -trust-domain (ADR-0164)",
+			otelinit.TenantIDField, "")
+		os.Exit(1)
+	}
 	trustDomain, err := spiffeid.TrustDomainFromString(*td)
 	if err != nil {
 		log.Error("invalid trust domain",

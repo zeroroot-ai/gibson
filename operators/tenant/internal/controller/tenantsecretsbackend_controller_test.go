@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
@@ -65,7 +66,7 @@ func TestTenantSecretsBackend_ProvisionsAndMarksReady(t *testing.T) {
 		Build()
 
 	stub := &stubSecretsProvisioner{}
-	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// Pass 1: finalizer added, requeue.
 	if _, err := reconcileTSB(t, r, "acme-secrets"); err != nil {
@@ -123,7 +124,7 @@ func TestTenantSecretsBackend_ProvisionFailureSetsFailed(t *testing.T) {
 		Build()
 
 	stub := &stubSecretsProvisioner{provisionErr: errors.New("vault namespace create failed")}
-	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	_, err := reconcileTSB(t, r, "acme-secrets")
 	if err == nil {
@@ -159,7 +160,7 @@ func TestTenantSecretsBackend_FinalizerTeardown(t *testing.T) {
 		Build()
 
 	stub := &stubSecretsProvisioner{}
-	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTSB(t, r, "acme-secrets"); err != nil {
 		t.Fatalf("reconcile delete: %v", err)
@@ -202,7 +203,7 @@ func TestTenantSecretsBackend_SteadyStateNoPhaseFlip(t *testing.T) {
 		Build()
 
 	stub := &stubSecretsProvisioner{}
-	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	// Steady-state resync: Provision still runs (drift-correction) but phase
 	// must NOT flip to Provisioning.
@@ -252,7 +253,7 @@ func TestTenantSecretsBackend_TeardownNotFoundIsSuccess(t *testing.T) {
 		Build()
 
 	stub := &stubSecretsProvisioner{deprovisionErr: clients.ErrNotFound}
-	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Provisioner: stub}
+	r := &TenantSecretsBackendReconciler{Client: c, Scheme: scheme, Recorder: events.NewFakeRecorder(100), Audit: (&audittest.Sink{}).Emitter(t), Provisioner: stub}
 
 	if _, err := reconcileTSB(t, r, "acme-secrets"); err != nil {
 		t.Fatalf("NotFound from deprovision must not error: %v", err)

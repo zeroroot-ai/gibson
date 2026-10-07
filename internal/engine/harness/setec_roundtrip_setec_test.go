@@ -34,6 +34,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"log/slog"
 	"os"
 	"strconv"
@@ -341,3 +342,19 @@ func (s *setecRoundtripLogStream) Recv() ([]byte, error) {
 }
 
 func (s *setecRoundtripLogStream) Close() error { return nil }
+
+func (c *setecRoundtripClient) Fork(context.Context, sandboxed.ForkRequest) (sandboxed.ForkResponse, error) {
+	return sandboxed.ForkResponse{}, errors.New("setecRoundtripClient: fork is not used here")
+}
+
+func (c *setecRoundtripClient) Recovery(context.Context, string, string) (sandboxed.SessionRecovery, bool, error) {
+	return sandboxed.SessionRecovery{}, false, nil
+}
+
+func (c *setecRoundtripClient) Isolation(context.Context, string, string) (sandboxed.LaunchResponse, error) {
+	return sandboxed.LaunchResponse{}, errors.New("setecRoundtripClient: isolation is not used here")
+}
+
+func (c *setecRoundtripClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
+	return "", errors.New("setecRoundtripClient: snapshot is not used here")
+}

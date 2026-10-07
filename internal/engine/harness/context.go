@@ -76,6 +76,10 @@ type MissionContext struct {
 	// Nil keeps the egress of the catalog manifest.
 	NodeNetwork *agent.NodeNetwork `json:"-"`
 
+	// NodeID is the id of the mission node that this harness serves. A fork
+	// of the node claims it (ADR-0169).
+	NodeID string `json:"-"`
+
 	// CreatedBy is the principal that created the mission (hosted#205). When
 	// it is a person, the harness factory puts that person on the context of
 	// every slot resolution of the run as the mission initiator, so the model

@@ -26,6 +26,8 @@ package gibson.billing.entitlements.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/pkg/billing/entitlements/v1;entitlementsv1";
 
+import "buf/validate/validate.proto";
+
 // EntitlementsService answers "what are this tenant's resource limits?" for
 // the OSS daemon. The daemon calls GetLimits on each enforcement decision;
 // the billing service derives the answer from the tenant's plan + subscription
@@ -45,7 +47,8 @@ service EntitlementsService {
 message GetLimitsRequest {
   // tenant_id is the canonical tenant slug / identifier used throughout gibson
   // (matches the Tenant CR name, FGA object, and the x-gibson-tenant header).
-  string tenant_id = 1;
+  // The billing service refuses an empty value.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
 }
 
 // Limits is the plan-agnostic set of resource ceilings the OSS runtime

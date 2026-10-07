@@ -292,6 +292,58 @@ spec:
                 description: ObservedGeneration mirrors metadata.generation.
                 format: int64
                 type: integer
+              pendingAuditRecords:
+                description: |-
+                  PendingAuditRecords are the audit records of changes the daemon has not
+                  accepted yet (gibson#583). The operator sends them when the daemon
+                  answers, then removes them.
+                items:
+                  description: |-
+                    PendingAuditRecord is the audit record of a change the platform operator
+                    made, kept in the status of the changed resource until the daemon accepts
+                    it (gibson#583). The platform operator runs before the daemon exists, so a
+                    change cannot wait for its record: the operator makes the change, keeps the
+                    record here, sends it when the daemon answers, and then removes it.
+                  properties:
+                    action:
+                      description: Action is the audit action, for example "operator.platform_bootstrap".
+                      type: string
+                    count:
+                      description: |-
+                        Count is how many records an overflow record stands for. The pending
+                        list has a fixed size, and one overflow record at its end counts the
+                        records that did not fit.
+                      format: int32
+                      type: integer
+                    fields:
+                      additionalProperties:
+                        type: string
+                      description: Fields are more facts about the change.
+                      type: object
+                    firstAt:
+                      description: FirstAt is when the operator first made this record.
+                      format: date-time
+                      type: string
+                    reason:
+                      description: Reason is why the change failed.
+                      type: string
+                    result:
+                      description: Result is empty for the record of a change, or
+                        "failure".
+                      type: string
+                    targetID:
+                      description: TargetID is the id of the changed object.
+                      type: string
+                    targetType:
+                      description: TargetType is the kind of the changed object.
+                      type: string
+                  required:
+                  - action
+                  - firstAt
+                  - targetID
+                  - targetType
+                  type: object
+                type: array
             type: object
         type: object
     served: true

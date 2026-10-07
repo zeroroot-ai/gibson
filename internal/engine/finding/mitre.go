@@ -12,18 +12,3 @@ type MitreMapping struct {
 	TechniqueName string   `json:"technique_name"`           // e.g., "Phishing"
 	SubTechniques []string `json:"sub_techniques,omitempty"` // e.g., ["T1566.001", "T1566.002"]
 }
-
-// MitreTechnique represents a MITRE technique with full details
-type MitreTechnique struct {
-	ID          string   `json:"id"`   // e.g., "AML.T0015"
-	Name        string   `json:"name"` // e.g., "Jailbreak"
-	Description string   `json:"description"`
-	TacticIDs   []string `json:"tactic_ids"` // Associated tactic IDs
-	URL         string   `json:"url"`        // Reference URL
-}
-
-// MitreDatabase holds the mapping of MITRE techniques
-type MitreDatabase struct {
-	attackTechniques map[string]MitreTechnique
-	atlasTechniques  map[string]MitreTechnique
-}

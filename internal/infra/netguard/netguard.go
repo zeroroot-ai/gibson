@@ -25,7 +25,6 @@
 package netguard
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -182,14 +181,4 @@ func HTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 		Timeout:   timeout,
 		Transport: Transport(allowPrivate),
 	}
-}
-
-// DialContext dials with the guard applied, for callers that need a raw
-// connection rather than an HTTP client.
-func DialContext(ctx context.Context, network, address string, allowPrivate bool) (net.Conn, error) {
-	conn, err := Dialer(allowPrivate).DialContext(ctx, network, address)
-	if err != nil {
-		return nil, fmt.Errorf("netguard: dial %s: %w", address, err)
-	}
-	return conn, nil
 }

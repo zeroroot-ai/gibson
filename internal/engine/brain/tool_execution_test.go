@@ -41,7 +41,7 @@ func TestToolExecutions_ViewOverToolPluginWork(t *testing.T) {
 }
 
 func TestToolExecutions_EngineAccessor(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.Submit(MissionProjected{ID: "m1", Nodes: []WorkNode{{ID: "a", Kind: "tool", Target: "nmap"}}})
 	e.Tick()
 	if got := len(e.ToolExecutions()); got != 1 {

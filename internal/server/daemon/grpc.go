@@ -558,8 +558,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 		return sdkAuthStream(srv, ss, info, handler)
 	}
-	unaryInterceptors = append(unaryInterceptors, registryAwareUnary)
-	streamInterceptors = append(streamInterceptors, registryAwareStream)
+	unaryInterceptors = append(unaryInterceptors, registryAwareUnary, actingUserUnary)
+	streamInterceptors = append(streamInterceptors, registryAwareStream, actingUserStream)
 	d.logger.Info(ctx, "identity interceptor installed (header-trusting; channel security via SPIFFE mTLS)")
 
 	// 4. Idempotency-key dedup (mutating-RPC convention from
@@ -715,8 +715,23 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	// The Platform owner's health view asks the secret source to answer
+	// (hosted#174). Without a broker registry the plane reads UNKNOWN.
+	if d.secretsRegistry != nil {
+		daemonSvc.WithSecretPlaneProbe(&secretPlaneProbeAdapter{registry: d.secretsRegistry})
+	}
 	auditLogger, err := wireDaemonAudit(ctx, d.stateClient, d.platformDB, d.logger.Slog(), daemonSvc)
 	if err != nil {
+		return nil, err
+	}
+	// The record and the quota of the components that agents enroll
+	// (gibson#33). A bad quota value stops the daemon.
+	producedLimit, err := api.ProducedComponentLimitFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("produced components: %w", err)
+	}
+	daemonSvc.WithProducedComponents(d.platformDB, producedLimit)
+	if err := startTimelineArchive(ctx, d.platformDB, func() timelinePoolForer { return d.pool }, d.logger.Slog()); err != nil {
 		return nil, err
 	}
 	// SSRF egress policy for every LLM provider this server constructs from a
@@ -1360,11 +1375,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		if mErr == nil {
 			mErr = mailer.RequireDelivering(m)
 		}
+		// The same sender writes the onboarding email of a workspace owner
+		// from signup, once, when the tenant is ready (gibson#987). With no
+		// delivering transport the daemon logs each skipped send.
+		var ownerWelcome api.OwnerWelcomeSender
 		if mErr != nil {
 			d.logger.Warn(ctx, "no delivering mail transport; invitation emails disabled", slog.String("error", mErr.Error()))
 		} else {
-			adminMailer = mailer.NewInvitationSender(m)
+			sender := mailer.NewInvitationSender(m)
+			adminMailer = sender
+			ownerWelcome = sender
 		}
+		daemonSvc.WithOwnerWelcome(ownerWelcome, os.Getenv(api.EnvAppURL), os.Getenv("GIBSON_PUBLIC_URL"))
 
 		var tenantAdminSvc *admin.TenantAdminServer
 		if brokerStackOK {
@@ -1395,7 +1417,10 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// surface and serves no gRPC.
 				InviteAPIURL:  os.Getenv("GIBSON_PUBLIC_URL"),
 				ReservedNames: rnpForAdmin,
-				Logger:        d.logger.Slog(),
+				// A removal moves the enrollment owner of each identity the
+				// removed user owned (gibson#568).
+				ComponentOwners: capabilitygrant.NewCapabilityGrantStore(d.platformDB),
+				Logger:          d.logger.Slog(),
 			})
 			if taErr != nil {
 				d.logger.Warn(ctx, "broker admin stack: NewTenantAdminServer failed; MembershipService + SecretsService will use Unavailable stubs",
@@ -1439,32 +1464,24 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		}
 
 		// PluginAdminService (gibson.tenant.v1.PluginAdminService) — closes gibson#565.
+		// It lists plugin installs and edits or revokes a secret grant. A plugin
+		// declares itself in code and enrolls with a bootstrap token (ADR-0097).
 		//
 		// Dependencies:
-		//   Registry       — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
-		//   ManifestValidator — pluginManifestValidator parses the plugin YAML schema.
-		//   ZitadelClient  — idpPluginPrincipalAdapter wraps idpClient + cgMinter (CreateServiceAccount + CG bootstrap token; ADR-0045).
-		//   SecretWriter   — secretWriterAdapter wraps secretsService (tenant injected into ctx).
-		//   Authorizer     — d.authorizer (FGA; reused from the MembershipService block above).
+		//   Registry         — componentInstallRegistryReaderAdapter wraps platformDB (read-only SQL).
+		//   Authorizer       — d.authorizer (FGA; reused from the MembershipService block above).
 		//   BootstrapAuditor — d.brokerAuditWriter (*secrets.AuditWriter satisfies the interface).
 		//
-		// When the IdP client, secrets stack, or CG minter is absent we register an
-		// Unavailable stub consistent with the other tenant services above. The CG
-		// minter is required: the plugin SDK consumes a CG bootstrap token, so a
-		// missing minter means plugins cannot enroll.
-		pluginAdminStackOK := secretsStackOK && idpClient != nil && d.brokerAuditWriter != nil && d.cgMinter != nil
+		// When the secrets stack or the audit writer is absent we register an
+		// Unavailable stub consistent with the other tenant services above.
+		pluginAdminStackOK := secretsStackOK && d.brokerAuditWriter != nil
 
 		if pluginAdminStackOK {
-			principalClient := &idpPluginPrincipalAdapter{client: idpClient, cgMinter: d.cgMinter}
-
 			pluginAdminSvc, paErr := admin.NewPluginsAdminServer(admin.PluginsAdminConfig{
-				Registry:          &componentInstallRegistryReaderAdapter{db: d.platformDB, redis: d.stateClient.Client()},
-				ManifestValidator: &pluginManifestValidator{},
-				ZitadelClient:     principalClient,
-				SecretWriter:      &secretWriterAdapter{svc: d.secretsService},
-				Authorizer:        d.authorizer,
-				BootstrapAuditor:  d.brokerAuditWriter,
-				Events:            componentEventPublisher,
+				Registry:         &componentInstallRegistryReaderAdapter{db: d.platformDB, redis: d.stateClient.Client()},
+				Authorizer:       d.authorizer,
+				BootstrapAuditor: d.brokerAuditWriter,
+				Events:           componentEventPublisher,
 			})
 
 			if paErr != nil {
@@ -1478,7 +1495,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		} else {
 			d.logger.Warn(ctx, "PluginAdminService: deps unavailable; registering Unavailable stub",
 				"secrets_stack_ok", secretsStackOK,
-				"idp_client_present", idpClient != nil,
 				"broker_audit_writer_present", d.brokerAuditWriter != nil,
 			)
 			pluginadminv1.RegisterPluginAdminServiceServer(srv, admin.NewUnavailablePluginAdminServer())
@@ -1541,11 +1557,19 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		// non-nil after Start() (gibson#246).
 		grantsAuditWriter := audit.NewWriter(d.platformDB, d.logger.Slog())
 		grantsAuditWriter.Start(ctx)
+		// WriteSecretGrants (dashboard#174) needs the secrets of the tenant
+		// to refuse a name the tenant does not own. Without the secrets stack
+		// it answers Unimplemented.
+		var secretNames admin.SecretNameLister
+		if d.secretsService != nil {
+			secretNames = &secretNameListerAdapter{svc: d.secretsService}
+		}
 		grantsServer, gaErr := admin.NewGrantsAdminServer(admin.GrantsAdminConfig{
 			Reader:      noopGrantsReader{},
 			Authorizer:  d.authorizer,
 			Lookup:      lookup,
 			AuditWriter: grantsAuditWriter,
+			SecretNames: secretNames,
 			Logger:      d.logger.Slog(),
 		})
 		if gaErr != nil {
@@ -1680,7 +1704,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				return nil, err
 			}
 		}
-		d.brainRegistry = brain.NewRegistry(ctx, brain.BeliefSystem)
+		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog()))
@@ -1942,6 +1966,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// FGA client after initAuthorizer.
 			compSvc.WithAuthorizer(d.authorizer)
 			compSvc.WithEnrollmentReader(capabilitygrant.NewCapabilityGrantStore(d.platformDB))
+			// An agent enrolls a component that it produced through the
+			// identity provisioning of the tenant-admin surface (gibson#33).
+			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
 			compSvc.WithConnectorTools(d.connectorMCPClient())
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 

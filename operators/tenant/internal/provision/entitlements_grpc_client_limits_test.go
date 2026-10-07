@@ -5,16 +5,12 @@ package provision
 
 import (
 	"context"
-	"net"
 	"strings"
 	"testing"
 	"time"
 
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"google.golang.org/grpc/test/bufconn"
 
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
@@ -34,23 +30,7 @@ func (s *captureLimitsServer) SetAgentEnrollmentLimits(_ context.Context, req *o
 
 func limitsClient(t *testing.T, srv *captureLimitsServer) *EntitlementsGRPCClient {
 	t.Helper()
-	lis := bufconn.Listen(1 << 20)
-	gs := grpc.NewServer()
-	operatorv1.RegisterDaemonOperatorServiceServer(gs, srv)
-	go func() { _ = gs.Serve(lis) }()
-	t.Cleanup(gs.Stop)
-	conn, err := grpc.NewClient(
-		"passthrough:///bufnet",
-		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
-	if err != nil {
-		t.Fatalf("dial bufconn: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close() })
-	return &EntitlementsGRPCClient{client: operatorv1.NewDaemonOperatorServiceClient(conn), audience: "gibson-daemon"}
+	return bufconnClient(t, srv)
 }
 
 // TestSetAgentEnrollmentLimits_SendsTheCapInSeconds guards gibson#597: the

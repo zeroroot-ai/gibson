@@ -90,12 +90,6 @@ type ResultDiscoveryProcessor interface {
 // These match the tier strings used by the generated MemoryRequest proto type.
 // ---------------------------------------------------------------------------
 
-const (
-	memTierWorking  = "working"
-	memTierMission  = "mission"
-	memTierLongTerm = "long_term"
-)
-
 // ---------------------------------------------------------------------------
 // Connection parameter defaults
 //
@@ -234,6 +228,10 @@ type ComponentServiceServer struct {
 	// taxonomyProvider returns the taxonomy schema for remote agents.
 	// May be nil; GetTaxonomySchema returns codes.Unimplemented when nil.
 	taxonomyProvider TaxonomyProvider
+
+	// producedEnroller enrolls a component that an agent produced (gibson#33).
+	// May be nil; EnrollComponent returns codes.Unavailable when nil.
+	producedEnroller ProducedComponentEnroller
 
 	// stepHintsReporter accepts planning step hints from remote agents.
 	// May be nil; ReportStepHints returns codes.Unimplemented when nil.
@@ -617,7 +615,7 @@ func (s *ComponentServiceServer) RegisterComponent(
 	// downstream spans). Spec: llm-user-attribution-governance Req 1.5.
 	// principalRef is the FGA user this registration runs as. It is stored on
 	// the durable install so the secret-binding admin RPCs address the same
-	// user bindDeclaredSecrets grants and WatchComponentEvents keys on
+	// user a tenant admin grants and WatchComponentEvents keys on
 	// (gibson#154).
 	var principalRef string
 	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
@@ -647,21 +645,21 @@ func (s *ComponentServiceServer) RegisterComponent(
 		info.Attested = attested
 	}
 
-	// A catalog plugin name belongs to the workload the platform attests
-	// (ADR-0066). A caller that did not enroll with an attested identity
-	// cannot check in under that name: the registry would list it as the
-	// platform's plugin, and work for the platform's plugin would reach it.
-	// The rule covers plugins only. An agent or a tool with a catalog name
-	// always takes the sandbox launch of the catalog, whatever is registered.
-	if req.Kind == authz.KindPlugin && !info.Attested {
+	// A catalog name belongs to the workload the platform attests (ADR-0066,
+	// ADR-0097). A caller that did not enroll with an attested identity
+	// cannot check in under the kind and name of a catalog agent, tool or
+	// plugin: the registry would list it as the platform's component, and
+	// work for the platform's component could reach it.
+	if !info.Attested {
 		if _, listed := componentcatalog.LookupContentTrust(req.Kind, req.Name); listed {
-			s.logger.WarnContext(ctx, "component registration refused: a catalog plugin name needs an attested identity",
+			s.logger.WarnContext(ctx, "component registration refused: a catalog name needs an attested identity",
 				slog.String("tenant", tenant),
+				slog.String("kind", req.Kind),
 				slog.String("name", req.Name),
 				slog.String("principal", principalRef),
 			)
 			return nil, status.Errorf(codes.PermissionDenied,
-				"the plugin name %q belongs to a platform plugin, use another name", req.Name)
+				"the %s name %q belongs to a platform %s, use another name", req.Kind, req.Name, req.Kind)
 		}
 	}
 
@@ -683,14 +681,6 @@ func (s *ComponentServiceServer) RegisterComponent(
 		slog.String("version", req.Version),
 		slog.String("instance_id", instanceID),
 	)
-
-	// Bind can_resolve for a catalog plugin's declared secrets so it can read
-	// them at runtime (ADR-0066). For a component outside the signed catalog
-	// the declared list is advisory and writes nothing: a check-in never
-	// assigns its own trust (gibson#554, ADR-0097).
-	if req.Kind == "plugin" {
-		s.bindDeclaredSecrets(ctx, tenant, req.Kind, req.Name, req.Metadata)
-	}
 
 	// Spec plans-and-quotas-simplification: agent registration alone no
 	// longer consumes the concurrent_agents quota. Counters increment when
@@ -717,17 +707,11 @@ func (s *ComponentServiceServer) RegisterComponent(
 				Kind:               req.Kind,
 				Name:               req.Name,
 				Version:            req.Version,
-				ManifestHash:       req.Metadata["plugin:manifest_hash"],
 				DeclaredMethods:    req.Methods,
 				ProtoDescriptorSet: req.FileDescriptorSet,
 				HostID:             req.Metadata["plugin:host_id"],
-				RuntimeMode:        req.Metadata["plugin:runtime_mode"],
-				SetecRequired:      req.Metadata["plugin:setec_required"] == "true",
 				ContentTrust:       catalogContentTrust(req.Kind, req.Name),
 				PrincipalRef:       principalRef,
-			}
-			if install.RuntimeMode == "" {
-				install.RuntimeMode = "process"
 			}
 			if prErr := s.componentInstallRegistry.Register(ctx, install); prErr != nil {
 				// Fail the registration rather than logging and continuing.
@@ -942,10 +926,7 @@ func (s *ComponentServiceServer) Heartbeat(
 		}
 	}
 
-	return &componentpb.HeartbeatResponse{
-		Registered:    true,
-		ConfigUpdates: map[string]string{},
-	}, nil
+	return &componentpb.HeartbeatResponse{Registered: true}, nil
 }
 
 // MemberStatusSink records a bank member's heartbeat (ADR-0119).
@@ -981,7 +962,7 @@ func (s *ComponentServiceServer) memberHeartbeat(ctx context.Context, tenant str
 			slog.String("error", err.Error()))
 		return nil, status.Errorf(codes.NotFound, "member %s: %v", req.GetInstanceId(), err)
 	}
-	return &componentpb.HeartbeatResponse{Registered: true, ConfigUpdates: map[string]string{}}, nil
+	return &componentpb.HeartbeatResponse{Registered: true}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1930,7 +1911,6 @@ func (s *ComponentServiceServer) ListAvailablePlugins(
 			Configured:       e.Configured,
 			HealthStatus:     e.HealthStatus,
 			Source:           e.Source,
-			InstanceCount:    int32(e.InstanceCount),
 		})
 	}
 
@@ -2108,21 +2088,6 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
 
-	maskedCfg, err := s.componentAccess.GetMaskedConfig(ctx, tenant, req.PluginName)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "get plugin config: failed",
-			slog.String("tenant", tenant),
-			slog.String("plugin_name", req.PluginName),
-			slog.String("error", err.Error()),
-		)
-		return nil, componentAccessErrToStatus(err, req.PluginName)
-	}
-
-	cfgBytes, err := json.Marshal(maskedCfg)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to serialize masked config: %v", err)
-	}
-
 	// Include the schema so clients can render a config form without a second
 	// round-trip. Missing schema is not an error — it is returned as an empty
 	// string and the caller renders a generic key-value editor.
@@ -2141,10 +2106,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		slog.String("plugin_name", req.PluginName),
 	)
 
-	return &componentpb.GetPluginConfigResponse{
-		ConfigJson:       string(cfgBytes),
-		ConfigSchemaJson: schema,
-	}, nil
+	return &componentpb.GetPluginConfigResponse{ConfigSchemaJson: schema}, nil
 }
 
 // TestPluginConnection validates plugin credentials by dispatching a
@@ -2286,13 +2248,10 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	protos := make([]*componentpb.PluginAccessProto, 0, len(records))
 	for _, r := range records {
 		protos = append(protos, &componentpb.PluginAccessProto{
-			TenantId:     r.TenantID,
-			PluginName:   r.ComponentName,
-			Enabled:      r.Enabled,
-			Source:       r.Source,
-			ConfiguredAt: r.ConfiguredAt,
-			ConfiguredBy: r.ConfiguredBy,
-			HasConfig:    r.HasConfig,
+			TenantId:   r.TenantID,
+			PluginName: r.ComponentName,
+			Enabled:    r.Enabled,
+			Source:     r.Source,
 		})
 	}
 
@@ -2377,7 +2336,7 @@ func (s *ComponentServiceServer) recordPluginChange(ctx context.Context, action,
 	if s.auditLog == nil {
 		return status.Errorf(codes.FailedPrecondition, "%s %q: the audit log is not wired on this server", action, plugin)
 	}
-	if err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
+	if _, err := s.auditLog.Record(ctx, action, "plugin", plugin, nil); err != nil {
 		s.logger.ErrorContext(ctx, "plugin change refused: the audit record is not durable",
 			slog.String("action", action),
 			slog.String("plugin_name", plugin),

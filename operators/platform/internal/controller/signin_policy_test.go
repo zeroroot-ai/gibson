@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -101,6 +103,7 @@ func newSignInPolicyReconciler(t *testing.T, factory ZitadelClientFactory) *Plat
 	}
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pat).Build()
 	return &PlatformBootstrapReconciler{
+		Audit:          (&audittest.Sink{}).Emitter(t),
 		Client:         cli,
 		Scheme:         s,
 		Recorder:       record.NewFakeRecorder(16),

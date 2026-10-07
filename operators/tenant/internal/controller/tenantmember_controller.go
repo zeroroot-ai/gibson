@@ -24,11 +24,13 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
 const invitationTTL = 7 * 24 * time.Hour
@@ -69,6 +71,10 @@ type TenantMemberReconciler struct {
 	// BaseAcceptURL is the dashboard base URL for invitation accept links
 	// (e.g. "https://app.zeroroot.ai").
 	BaseAcceptURL string
+
+	// Audit writes the record of each identity, access or credential change
+	// before the change (gibson#583). Required.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=tenantmembers,verbs=get;list;watch;create;update;patch;delete
@@ -81,6 +87,9 @@ func (r *TenantMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var tm gibsonv1alpha1.TenantMember
 	if err := r.Get(ctx, req.NamespacedName, &tm); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+	if r.Audit == nil {
+		return ctrl.Result{}, fmt.Errorf("tenant member reconciler: %w", saga.ErrNoAudit)
 	}
 
 	if len(tm.OwnerReferences) == 0 {
@@ -188,8 +197,14 @@ func (r *TenantMemberReconciler) issueInvitation(ctx context.Context, tm *gibson
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{"token": []byte(token)},
 	}
-	if err := r.Create(ctx, secret); err != nil && !apierrors.IsAlreadyExists(err) {
-		return ctrl.Result{}, fmt.Errorf("create invitation secret: %w", err)
+	ev := audit.ObjectEvent(audit.ActionMemberInvitationIssue, tm, map[string]string{"secret": secretName})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		if err := r.Create(ctx, secret); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("create invitation secret: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record the invitation: %w", err)
 	}
 
 	// Send email.
@@ -254,72 +269,78 @@ func (r *TenantMemberReconciler) resendInvitation(ctx context.Context, tm *gibso
 }
 
 func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
-	if r.FGA != nil {
-		// The tenant role tuple is no longer written here: syncZitadel runs
-		// before this branch on every reconcile and, for a member with a
-		// Zitadel user id, already called Roles.Assign — which writes the
-		// Zitadel grant and copies it into FGA in one call (ADR-0093). The
-		// only writes left here are the session tuples, which are not role
-		// tuples and stay direct FGA writes.
+	ev := audit.ObjectEvent(audit.ActionMemberInvitationAccept, tm, map[string]string{"user_id": tm.Spec.AcceptedByUserID})
+	if err := r.Audit.Change(ctx, ev, func() error {
+		if r.FGA != nil {
+			// The tenant role tuple is no longer written here: syncZitadel runs
+			// before this branch on every reconcile and, for a member with a
+			// Zitadel user id, already called Roles.Assign — which writes the
+			// Zitadel grant and copies it into FGA in one call (ADR-0093). The
+			// only writes left here are the session tuples, which are not role
+			// tuples and stay direct FGA writes.
 
-		// Slice 2 of gibson#627: seed the active_session conditional tuple so
-		// that ext-authz (Slice 3) can enforce the session-validity gate.
-		// Written with revoked_at = epoch ("1970-01-01T00:00:00Z") meaning
-		// "never revoked". RevokeUserSessions stamps revoked_at = now when a
-		// session is explicitly revoked.
-		//
-		// Only human users (user: principal) receive an active_session tuple.
-		// Machine principals (agent_principal / tool_principal / plugin_principal)
-		// authenticate via mTLS + CG-JWTs and are not gated by active_session.
-		if err := r.FGA.WriteConditional(ctx, fga.ConditionalTuple{
-			User:          "user:" + tm.Spec.AcceptedByUserID,
-			Relation:      "active_session",
-			Object:        "tenant:" + tm.Spec.TenantRef.Name,
-			ConditionName: "token_not_revoked",
-			ConditionContext: map[string]any{
-				"revoked_at": "1970-01-01T00:00:00Z",
-			},
-		}); err != nil {
-			// Non-fatal: the role tuple was already written. Log loudly and
-			// continue — the backfill Job will seed the active_session tuple
-			// and enforcement (Slice 3) must not land before the backfill runs.
-			log := logf.FromContext(ctx).WithValues("tenantmember", tm.Name)
-			log.Error(err, "failed to write active_session FGA tuple (non-fatal; backfill will repair)",
-				"user", tm.Spec.AcceptedByUserID,
-				"tenant", tm.Spec.TenantRef.Name,
-			)
+			// Slice 2 of gibson#627: seed the active_session conditional tuple so
+			// that ext-authz (Slice 3) can enforce the session-validity gate.
+			// Written with revoked_at = epoch ("1970-01-01T00:00:00Z") meaning
+			// "never revoked". RevokeUserSessions stamps revoked_at = now when a
+			// session is explicitly revoked.
+			//
+			// Only human users (user: principal) receive an active_session tuple.
+			// Machine principals (agent_principal / tool_principal / plugin_principal)
+			// authenticate via mTLS + CG-JWTs and are not gated by active_session.
+			if err := r.FGA.WriteConditional(ctx, fga.ConditionalTuple{
+				User:          "user:" + tm.Spec.AcceptedByUserID,
+				Relation:      "active_session",
+				Object:        "tenant:" + tm.Spec.TenantRef.Name,
+				ConditionName: "token_not_revoked",
+				ConditionContext: map[string]any{
+					"revoked_at": "1970-01-01T00:00:00Z",
+				},
+			}); err != nil {
+				// Non-fatal: the role tuple was already written. Log loudly and
+				// continue — the backfill Job will seed the active_session tuple
+				// and enforcement (Slice 3) must not land before the backfill runs.
+				log := logf.FromContext(ctx).WithValues("tenantmember", tm.Name)
+				log.Error(err, "failed to write active_session FGA tuple (non-fatal; backfill will repair)",
+					"user", tm.Spec.AcceptedByUserID,
+					"tenant", tm.Spec.TenantRef.Name,
+				)
+			}
+
+			// gibson#1244: also seed the USER-SCOPED active_session tuple
+			// (user:<id>, active_session, user:<id>). This gates tenant-less
+			// requests — the sign-in bootstrap window — which have no `type tenant`
+			// object to check. Written alongside the per-tenant tuple by every
+			// session writer and advanced by the same RevokeUserSessions path.
+			// Idempotent: a member of several tenants resolves to one user-scoped
+			// tuple regardless of how many per-tenant tuples exist.
+			if err := r.FGA.WriteConditional(ctx, fga.ConditionalTuple{
+				User:          "user:" + tm.Spec.AcceptedByUserID,
+				Relation:      "active_session",
+				Object:        "user:" + tm.Spec.AcceptedByUserID,
+				ConditionName: "token_not_revoked",
+				ConditionContext: map[string]any{
+					"revoked_at": "1970-01-01T00:00:00Z",
+				},
+			}); err != nil {
+				// Non-fatal, same rationale as the per-tenant tuple above.
+				log := logf.FromContext(ctx).WithValues("tenantmember", tm.Name)
+				log.Error(err, "failed to write user-scoped active_session FGA tuple (non-fatal; backfill will repair)",
+					"user", tm.Spec.AcceptedByUserID,
+				)
+			}
 		}
 
-		// gibson#1244: also seed the USER-SCOPED active_session tuple
-		// (user:<id>, active_session, user:<id>). This gates tenant-less
-		// requests — the sign-in bootstrap window — which have no `type tenant`
-		// object to check. Written alongside the per-tenant tuple by every
-		// session writer and advanced by the same RevokeUserSessions path.
-		// Idempotent: a member of several tenants resolves to one user-scoped
-		// tuple regardless of how many per-tenant tuples exist.
-		if err := r.FGA.WriteConditional(ctx, fga.ConditionalTuple{
-			User:          "user:" + tm.Spec.AcceptedByUserID,
-			Relation:      "active_session",
-			Object:        "user:" + tm.Spec.AcceptedByUserID,
-			ConditionName: "token_not_revoked",
-			ConditionContext: map[string]any{
-				"revoked_at": "1970-01-01T00:00:00Z",
-			},
-		}); err != nil {
-			// Non-fatal, same rationale as the per-tenant tuple above.
-			log := logf.FromContext(ctx).WithValues("tenantmember", tm.Name)
-			log.Error(err, "failed to write user-scoped active_session FGA tuple (non-fatal; backfill will repair)",
-				"user", tm.Spec.AcceptedByUserID,
-			)
+		// Burn the invitation secret.
+		if tm.Status.InvitationSecretRef != "" {
+			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
+			if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete the invitation secret: %w", err)
+			}
 		}
-	}
-
-	// Burn the invitation secret.
-	if tm.Status.InvitationSecretRef != "" {
-		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
-		if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
+		return nil
+	}); err != nil {
+		return ctrl.Result{}, fmt.Errorf("record the invitation acceptance: %w", err)
 	}
 
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseActive
@@ -332,7 +353,15 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 func (r *TenantMemberReconciler) expireInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
 	if tm.Status.InvitationSecretRef != "" {
 		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
-		_ = r.Delete(ctx, secret)
+		ev := audit.ObjectEvent(audit.ActionMemberInvitationExpire, tm, map[string]string{"secret": secret.Name})
+		if err := r.Audit.Change(ctx, ev, func() error {
+			if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete invitation secret: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return ctrl.Result{}, fmt.Errorf("record the invitation withdrawal: %w", err)
+		}
 	}
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseExpired
 	tm.Status.InvitationSecretRef = ""
@@ -358,8 +387,14 @@ func (r *TenantMemberReconciler) cleanup(ctx context.Context, tm *gibsonv1alpha1
 		}
 		if orgID != "" {
 			t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
-			if err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID); err != nil {
-				return fmt.Errorf("cleanup: revoke tenant role: %w", err)
+			ev := audit.ObjectEvent(audit.ActionMemberRoleRevoke, tm, map[string]string{"user_id": userID, "org_id": orgID})
+			if err := r.Audit.Change(ctx, ev, func() error {
+				if err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID); err != nil {
+					return fmt.Errorf("cleanup: revoke tenant role: %w", err)
+				}
+				return nil
+			}); err != nil {
+				return fmt.Errorf("record the member cleanup: %w", err)
 			}
 		}
 	}
@@ -404,65 +439,29 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 	}
 
-	var membershipID string
-
-	if tm.Status.ZitadelUserID != "" {
-		// User already exists in Zitadel (self-signup / pre-accepted): assign
-		// the tenant role through the Syncer (ADR-0093), which writes the
-		// Zitadel grant first and copies it into FGA in the same call — the
-		// FGA role write acceptInvitation used to do is no longer needed.
-		if r.Roles == nil {
-			return ctrl.Result{}, errors.New("syncZitadel: role sync not configured")
-		}
-		role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
-		if !ok {
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
-		}
-		t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
-		if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, tm.Status.ZitadelUserID, role); err != nil {
-			if errors.Is(err, tenantrole.ErrOwnerConflict) {
-				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
-			}
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: assign role: %w", err)
-		}
-		membershipID = fmt.Sprintf("%s/%s", orgID, tm.Status.ZitadelUserID)
-	} else if tm.Spec.Email != "" {
-		// No Zitadel user yet: create one. Zitadel's own unverified-email
-		// flow emails the invitee a way to set a credential — the same
-		// mechanism EnsureHumanUser triggers everywhere else in this
-		// codebase (internal/platform/idp.AdminClient.EnsureHumanUser) — then
-		// assign the tenant role through the Syncer (ADR-0093), exactly like
-		// the pre-accepted branch above: a Zitadel grant, copied into FGA in
-		// the same call. hosted#203 deleted the org-member API write this
-		// branch used to make (SendInvitation → AddMember,
-		// `/orgs/me/members`): a tenant role IS the membership, and no
-		// separate grant of it was ever needed.
-		if r.Roles == nil {
-			return ctrl.Result{}, errors.New("syncZitadel: role sync not configured")
-		}
-		userID, uerr := r.Zitadel.EnsureHumanUser(ctx, orgID, tm.Spec.Email)
-		if uerr != nil {
-			if errors.Is(uerr, clients.ErrUnreachable) {
-				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
-			}
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: ensure human user: %w", uerr)
-		}
-		role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
-		if !ok {
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
-		}
-		t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
-		if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
-			if errors.Is(err, tenantrole.ErrOwnerConflict) {
-				return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
-			}
-			return ctrl.Result{}, fmt.Errorf("syncZitadel: assign role: %w", err)
-		}
-		tm.Status.ZitadelUserID = userID
-		membershipID = fmt.Sprintf("%s/%s", orgID, userID)
-	} else {
-		// No email and no ZitadelUserID — nothing we can do yet.
+	// A member with no email and no Zitadel user has nothing to sync yet.
+	if tm.Status.ZitadelUserID == "" && tm.Spec.Email == "" {
 		return ctrl.Result{}, nil
+	}
+
+	// The Zitadel user and the tenant role change under one audit record,
+	// written first (gibson#583).
+	var membershipID string
+	ev := audit.ObjectEvent(audit.ActionMemberRoleAssign, tm, map[string]string{"role": string(tm.Spec.Role), "org_id": orgID})
+	err = r.Audit.Change(ctx, ev, func() error {
+		var aerr error
+		membershipID, aerr = r.assignMembership(ctx, tm, orgID)
+		return aerr
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, audit.ErrNotRecorded):
+		return ctrl.Result{}, fmt.Errorf("record the Zitadel role sync: %w", err)
+	case errors.Is(err, clients.ErrUnreachable), errors.Is(err, tenantrole.ErrOwnerConflict):
+		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
+		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
+	default:
+		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
 
 	tm.Status.ZitadelMembershipID = membershipID
@@ -470,6 +469,40 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		return ctrl.Result{}, fmt.Errorf("syncZitadel: status update: %w", err)
 	}
 	return ctrl.Result{}, nil
+}
+
+// assignMembership creates the Zitadel user of a member when it has none, then
+// assigns the tenant role through the Syncer (ADR-0093), which writes the
+// Zitadel grant and copies it into FGA in the same call. It returns the
+// membership id "<org>/<user>".
+//
+// A member that already has a Zitadel user (self-signup, pre-accepted) gets
+// only the role. A member with an email and no user gets a new Zitadel user:
+// Zitadel's own unverified-email flow emails the invitee a way to set a
+// credential. hosted#203 deleted the org-member API write this path used to
+// make: a tenant role IS the membership.
+func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibsonv1alpha1.TenantMember, orgID string) (string, error) {
+	if r.Roles == nil {
+		return "", errors.New("syncZitadel: role sync not configured")
+	}
+	role, ok := tenantRoleFromMemberRole(tm.Spec.Role)
+	if !ok {
+		return "", fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
+	}
+	userID := tm.Status.ZitadelUserID
+	if userID == "" {
+		created, err := r.Zitadel.EnsureHumanUser(ctx, orgID, tm.Spec.Email)
+		if err != nil {
+			return "", fmt.Errorf("syncZitadel: ensure human user: %w", err)
+		}
+		userID = created
+		tm.Status.ZitadelUserID = userID
+	}
+	t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
+	if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
+		return "", fmt.Errorf("syncZitadel: assign role: %w", err)
+	}
+	return fmt.Sprintf("%s/%s", orgID, userID), nil
 }
 
 // zitadelOrgID looks up the parent Tenant's Zitadel organization ID from its
@@ -487,6 +520,9 @@ func (r *TenantMemberReconciler) zitadelOrgID(ctx context.Context, tm *gibsonv1a
 }
 
 func (r *TenantMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("tenant member reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("tenant-member-controller")
 	}

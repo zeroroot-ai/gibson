@@ -26,6 +26,7 @@ import (
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/controller"
 	"github.com/zeroroot-ai/gibson/operators/connector/internal/daemonclient"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 // wireReconciler registers the ConnectorInstance controller on the manager
@@ -33,12 +34,14 @@ import (
 // (ADR-0061) and the controller reads the credential state so the CR
 // reports Degraded rather than a silent Active (ADR-0061). One
 // client serves both, because both are the same SPIFFE-mTLS dial.
-func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client) error {
+func wireReconciler(mgr ctrl.Manager, daemon *daemonclient.Client, proxyAuth controller.ProxyAuth, auditEmitter *audit.SagaEmitter) error {
 	if err := (&controller.ConnectorInstanceReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
 		Revoker:    daemon,
 		AuthReader: daemon,
+		ProxyAuth:  proxyAuth,
+		Audit:      auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("connectorinstance controller: %w", err)
 	}
@@ -69,6 +72,27 @@ func daemonSettings(getenv func(string) string) (addr, svid string, err error) {
 // (ADR-0002, ADR-0061). Both failure modes — missing address, unreachable
 // SPIRE Workload API — fail the boot, so a misconfigured operator never runs
 // with grants it cannot revoke.
+// proxyAuthSettings reads the caller authentication of each connector proxy
+// (ADR-0114, D22). The daemon is the only caller: the proxy validates its
+// JWT-SVID against the SPIRE OIDC issuer and permits its SPIFFE ID only.
+// Each value is required, so no connector runs without it.
+func proxyAuthSettings(getenv func(string) string) (controller.ProxyAuth, error) {
+	auth := controller.ProxyAuth{
+		Issuer:         getenv("CONNECTOR_PROXY_OIDC_ISSUER"),
+		JWKSURL:        getenv("CONNECTOR_PROXY_JWKS_URL"),
+		DaemonSPIFFEID: getenv("GIBSON_DAEMON_SPIFFE_ID"),
+	}
+	switch {
+	case auth.Issuer == "":
+		return auth, errors.New("CONNECTOR_PROXY_OIDC_ISSUER is required: the connector proxy validates the JWT-SVID of the daemon against this issuer")
+	case auth.JWKSURL == "":
+		return auth, errors.New("CONNECTOR_PROXY_JWKS_URL is required: the connector proxy reads the keys of the issuer from it")
+	case auth.DaemonSPIFFEID == "":
+		return auth, errors.New("GIBSON_DAEMON_SPIFFE_ID is required: the connector proxy permits only this caller")
+	}
+	return auth, nil
+}
+
 func buildDaemonClient(ctx context.Context, getenv func(string) string) (*daemonclient.Client, error) {
 	addr, svid, err := daemonSettings(getenv)
 	if err != nil {
@@ -121,6 +145,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	proxyAuth, err := proxyAuthSettings(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "connector proxy authentication")
+		os.Exit(1)
+	}
+
 	// The ConnectorInstance finalizer revokes the connector's grant through
 	// the daemon on delete (ADR-0061), and the controller reads the
 	// credential state from it every pass (ADR-0061). The dial is
@@ -130,9 +160,16 @@ func main() {
 		setupLog.Error(err, "daemon client")
 		os.Exit(1)
 	}
-	defer func() { _ = daemon.Close() }()
 
-	if err := wireReconciler(mgr, daemon); err != nil {
+	// Each change of the operator is recorded through the daemon before it
+	// happens (gibson#583). No emitter, no start.
+	auditEmitter, err := audit.NewSagaEmitter(daemon)
+	if err != nil {
+		setupLog.Error(err, "audit emitter")
+		os.Exit(1)
+	}
+
+	if err := wireReconciler(mgr, daemon, proxyAuth, auditEmitter); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConnectorInstance")
 		os.Exit(1)
 	}
@@ -143,8 +180,18 @@ func main() {
 	if err := (&controller.DesiredConnectorsRunnable{
 		Client: mgr.GetClient(),
 		Daemon: daemon,
+		Audit:  auditEmitter,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to add the desired connectors loop")
+		os.Exit(1)
+	}
+
+	// The retry loop of the grants that the finalizer could not revoke.
+	if err := (&controller.UnrevokedGrantsRunnable{
+		Client:  mgr.GetClient(),
+		Revoker: daemon,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to add the unrevoked grants loop")
 		os.Exit(1)
 	}
 
@@ -156,6 +203,10 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	// The daemon client closes when the manager stops. A setup failure above
+	// exits the process, which closes the connection.
+	defer func() { _ = daemon.Close() }()
 
 	setupLog.Info("starting connector-operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

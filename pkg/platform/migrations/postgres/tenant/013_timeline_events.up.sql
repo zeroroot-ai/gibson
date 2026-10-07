@@ -11,8 +11,8 @@
 --
 -- Per-tenant database, so there is no tenant_id column (migration 010).
 --
--- Retention follows the audit log: no code deletes a row. The export to the
--- durable bucket after 13 months is the exporter of gibson#764.
+-- Retention follows the audit log. Migration 015 holds the export position
+-- (gibson#992).
 
 CREATE TABLE IF NOT EXISTS timeline_events (
     -- The two parts of the Redis stream id "<ms>-<seq>" that Redis assigned

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -20,7 +21,7 @@ import (
 func TestGetCalibration_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	reg.For("acme").Submit(brain.BetSettledTrue{HypothesisID: "h1", Technique: "sqli"})
@@ -64,7 +65,7 @@ func TestGetCalibration_TenantScoped(t *testing.T) {
 func TestGetCalibration_ReturnsWellFormedEmptyReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
@@ -89,7 +90,7 @@ func TestGetCalibration_ReturnsWellFormedEmptyReport(t *testing.T) {
 func TestGetCalibration_BinsOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	srv := NewWorldServer(reg, nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))

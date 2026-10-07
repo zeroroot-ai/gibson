@@ -119,24 +119,6 @@ type ToolResult struct {
 	IsError bool `json:"is_error,omitempty"`
 }
 
-// NewToolResult creates a successful tool result
-func NewToolResult(toolCallID string, content string) ToolResult {
-	return ToolResult{
-		ToolCallID: toolCallID,
-		Content:    content,
-		IsError:    false,
-	}
-}
-
-// NewToolError creates an error tool result
-func NewToolError(toolCallID string, errorMessage string) ToolResult {
-	return ToolResult{
-		ToolCallID: toolCallID,
-		Content:    errorMessage,
-		IsError:    true,
-	}
-}
-
 // Validate checks if the tool result is valid
 func (r ToolResult) Validate() error {
 	if r.ToolCallID == "" {
@@ -167,18 +149,4 @@ type ToolCallDelta struct {
 
 	// Arguments contains incremental JSON arguments being added
 	Arguments string `json:"arguments,omitempty"`
-}
-
-// NewToolDef creates a new tool definition with the given name, description, and parameters
-func NewToolDef(name, description string, params schema.JSON) ToolDef {
-	// Ensure parameters is an object schema
-	if params.Type == "" {
-		params.Type = "object"
-	}
-
-	return ToolDef{
-		Name:        name,
-		Description: description,
-		Parameters:  params,
-	}
 }

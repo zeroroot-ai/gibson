@@ -71,7 +71,7 @@ func TestVoiTopKCapabilities_UnionsAcrossCandidatesAndDedupes(t *testing.T) {
 // decider_test.go's goalEngine, but the catalog is a parameter so a test can
 // offer a capability that is deliberately NOT covered by the seeded top-k.
 func voiGateEngine(llm DeciderLLM, catalog func(string) []Capability) (*Engine, *DeciderWorker) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, llm, catalog)
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(DeciderGateSystem)
@@ -83,7 +83,7 @@ func voiGateEngine(llm DeciderLLM, catalog func(string) []Capability) (*Engine, 
 }
 
 func TestVoiGatedDispatch_NoPlanYetRefusesEverything(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, nil, nil)
 	// No VoIPlanned ever submitted for "m1" — VoIPlanSnapshot() is empty.
 	if dw.voiGatedDispatch("m1", DeciderDispatch{Kind: "agent", Target: "exploit"}) {
@@ -92,7 +92,7 @@ func TestVoiGatedDispatch_NoPlanYetRefusesEverything(t *testing.T) {
 }
 
 func TestVoiGatedDispatch_CoveredCapabilityAllowed(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, nil, nil)
 	e.Submit(VoIPlanned{MissionID: "m1", Candidates: []VoICandidate{
 		{Kind: VoICandidateHypothesis, RefID: "h1", CoveringCapabilities: []CapabilityRef{
@@ -107,7 +107,7 @@ func TestVoiGatedDispatch_CoveredCapabilityAllowed(t *testing.T) {
 }
 
 func TestVoiGatedDispatch_UncoveredCapabilityRefused(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, nil, nil)
 	e.Submit(VoIPlanned{MissionID: "m1", Candidates: []VoICandidate{
 		{Kind: VoICandidateHypothesis, RefID: "h1", CoveringCapabilities: []CapabilityRef{
@@ -122,7 +122,7 @@ func TestVoiGatedDispatch_UncoveredCapabilityRefused(t *testing.T) {
 }
 
 func TestVoiGatedDispatch_ScopedToItsOwnMission(t *testing.T) {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	dw := NewDeciderWorker(e, nil, nil)
 	e.Submit(VoIPlanned{MissionID: "m1", Candidates: []VoICandidate{
 		{Kind: VoICandidateHypothesis, RefID: "h1", CoveringCapabilities: []CapabilityRef{

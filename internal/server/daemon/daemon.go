@@ -41,6 +41,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/platform/catalogplugin"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
@@ -244,7 +245,13 @@ type daemonImpl struct {
 	// (ADR-0119, gibson#1709). Captured when newHarnessFactory wires them so
 	// the bank reconciler can launch a member outside any mission harness.
 	// Nil when setec dispatch is not built or not enabled.
-	agentLauncher           *sandboxed.AgentLauncher
+	agentLauncher *sandboxed.AgentLauncher
+
+	// forks holds the parked sources and the fork ledger (ADR-0169, D74).
+	forks *harness.ForkSupport
+	// sandboxSuspender suspends and resumes an idle bank member through setec
+	// (gibson#809). Nil in a build without setec.
+	sandboxSuspender        sandboxSuspender
 	agentLaunchSpecResolver harness.AgentLaunchSpecResolver
 	agentCallbackEndpoint   string
 
@@ -575,6 +582,8 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// launcher (setec_integration build) tees a run into it.
 	d.liveAgents = liveagents.NewRegistry(liveagents.WithLogger(d.logger.WithComponent("live-agents").Slog()))
 	d.memberControl = harness.NewMemberControl()
+	// One fork state for each harness and the callback service (ADR-0169).
+	d.forks = &harness.ForkSupport{Parked: harness.NewParkedSources(), Ledger: &lazyForkLedger{daemon: d}}
 
 	// Session sandboxes for DevboxExec (gibson#1183). A component's successive
 	// commands must land in ONE long-lived microVM with a durable /workspace,
@@ -587,11 +596,22 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	// build-tag branch here. A dial failure is logged and startup continues,
 	// matching the per-call executor: the failure belongs at invocation, not at
 	// boot (design Requirement 5.4).
-	var callbackOpts []harness.CallbackServiceOption
-	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox)
+	// The event bus comes first: the callback service requires it at
+	// construction (gibson#681).
+	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
+	callbackOpts := make([]harness.CallbackServiceOption, 0, 10)
+	callbackOpts = append(callbackOpts, harness.WithEventBus(NewEventBusAdapter(d.eventBus)))
+	sessionClient, sessErr := NewSetecSessionClient(cfg.Sandbox, daemonSVIDSource{d: d})
 	if sessErr != nil {
 		slogLogger.Warn("session sandboxes unavailable; DevboxExec will report Unavailable",
 			"error", sessErr)
+	}
+	// The fork checks take the sandbox of a caller from its setec identity
+	// token, never from a header that the process writes (setec#235, D74).
+	identityVerifier, idErr := NewSetecIdentityVerifier(cfg.Sandbox, daemonSVIDSource{d: d})
+	if idErr != nil {
+		slogLogger.Warn("sandbox identity check unavailable; a forked grant is refused everywhere",
+			"error", idErr)
 	}
 	if cfg.Sandbox.Devbox.Image == "" {
 		// No image means no session surface at all. Say so once at startup
@@ -617,6 +637,10 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),
 		harness.WithMemberControl(d.memberControl),
 		harness.WithTaskGrantVerifier(d.taskGrantVerifier),
+		harness.WithForkLedger(d.forks.Ledger),
+		// A claimed fork gets a new grant for its task (D80).
+		harness.WithForkGrantMinter(harness.NewForkGrantMinter(func() *capabilitygrant.Minter { return d.cgMinter })),
+		harness.WithSandboxIdentityVerifier(identityVerifier),
 		harness.WithSessionSandboxes(
 			sandboxed.NewSessionRegistry(sessionClient, sandboxed.SessionSpec{
 				Image:         cfg.Sandbox.Devbox.Image,
@@ -637,9 +661,6 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 	}, d.logger.Slog())
 
 	d.callback = callbackMgr
-
-	// Initialize event bus
-	d.eventBus = NewEventBus(d.logger.Slog(), WithEventBufferSize(100))
 
 	// Determine gRPC address from config or default.
 	// Note: environment variable override (GIBSON_DAEMON_GRPC_ADDR) is intentionally
@@ -816,26 +837,21 @@ func (d *daemonImpl) initSPIFFEX509Source(ctx context.Context) error {
 // the host+jwt and bootstrap-token paths (a nil interface, never a typed-nil,
 // so the handler's `svidEnroller != nil` guard is correct).
 //
-// SVID enrollment is enabled only when ALL of these hold: the install tenant is
-// set (GIBSON_PLATFORM_TENANT — the model has no tenant-less principal, so a
-// first-party plugin binds to a real tenant; the tenant's OWNER is resolved
-// dynamically at enrol time, not pre-configured), the CapabilityGrantService is
-// wired, and the SPIRE Workload API is reachable. Any missing piece disables the
-// path with a log line rather than failing the daemon, so a bootstrap-only
-// install is unaffected.
+// SVID enrollment is enabled when both of these hold: the
+// CapabilityGrantService is wired, and the SPIRE Workload API is reachable. A
+// missing piece disables the path with a log line rather than failing the
+// daemon. No setting binds a plugin to a tenant: the tenant comes from the
+// verified identity of each instance (gibson#815).
 func (d *daemonImpl) buildPluginSVIDEnroller(ctx context.Context) pluginEnroller {
 	var socket, trustDomain string
 	if d.config.Auth.SPIFFE != nil {
 		socket = d.config.Auth.SPIFFE.WorkloadAPISocket
 		trustDomain = d.config.Auth.SPIFFE.TrustDomain
 	}
-	binding, reason, ok := resolvePluginSVIDBinding(
-		os.Getenv("GIBSON_PLATFORM_TENANT"),
-		trustDomain, socket, d.capabilityGrantSvc != nil,
-	)
+	binding, reason, ok := resolvePluginSVIDBinding(trustDomain, socket, d.capabilityGrantSvc != nil)
 	if !ok {
-		// reason is empty for the common "nothing configured" case (bootstrap
-		// only); non-empty for a partial configuration that disables the path.
+		// reason is empty for the "no SPIFFE Workload API" case; non-empty for
+		// a partial configuration that disables the path.
 		if reason != "" {
 			d.logger.Warn(ctx, reason)
 		}
@@ -853,43 +869,36 @@ func (d *daemonImpl) buildPluginSVIDEnroller(ctx context.Context) pluginEnroller
 
 	d.logger.Info(ctx, "SPIFFE-SVID plugin enrollment enabled",
 		"trust_domain", binding.trustDomain.Name(),
-		"install_tenant", binding.tenantID,
 	)
 	return &spiffePluginEnroller{
 		bundles:     d.spiffeJWTSource,
 		trustDomain: binding.trustDomain,
 		cg:          d.capabilityGrantSvc,
-		tenantID:    binding.tenantID,
+		enabled:     catalogplugin.NewStore(d.platformDB),
 		logger:      d.logger.Slog(),
 	}
 }
 
 // pluginSVIDBinding is the resolved configuration for SPIFFE-SVID plugin
-// enrollment: the install-tenant binding and the SPIRE trust domain + socket.
+// enrollment: the SPIRE trust domain and the socket.
 type pluginSVIDBinding struct {
-	tenantID    string
 	trustDomain spiffeid.TrustDomain
 	socketAddr  string
 }
 
-// resolvePluginSVIDBinding decides, from the raw env + config inputs, whether
+// resolvePluginSVIDBinding decides, from the config inputs, whether
 // SPIFFE-SVID plugin enrollment is configured (ADR-0066). It is pure so every
 // branch is testable; the caller opens the JWT source (the only side effect).
 //
 // Returns (binding, "", true) when enabled; (_, reason, false) when a PARTIAL
 // configuration disables it (reason names the missing piece, to be logged); and
-// (_, "", false) when nothing is configured at all — the common bootstrap-only
-// case, which stays silent.
-func resolvePluginSVIDBinding(tenantID, trustDomain, workloadSocket string, cgWired bool) (pluginSVIDBinding, string, bool) {
-	tenantID = strings.TrimSpace(tenantID)
-	if tenantID == "" {
+// (_, "", false) when the daemon has no SPIFFE Workload API at all.
+func resolvePluginSVIDBinding(trustDomain, workloadSocket string, cgWired bool) (pluginSVIDBinding, string, bool) {
+	if strings.TrimSpace(workloadSocket) == "" {
 		return pluginSVIDBinding{}, "", false
 	}
 	if !cgWired {
-		return pluginSVIDBinding{}, "SPIFFE-SVID plugin enrollment configured but the CapabilityGrantService is not wired; SVID enrollment disabled", false
-	}
-	if strings.TrimSpace(workloadSocket) == "" {
-		return pluginSVIDBinding{}, "SPIFFE-SVID plugin enrollment configured (GIBSON_PLATFORM_TENANT set) but the SPIFFE workload API is not; SVID enrollment disabled", false
+		return pluginSVIDBinding{}, "the SPIFFE workload API is configured but the CapabilityGrantService is not wired; SVID plugin enrollment disabled", false
 	}
 	tdStr := strings.TrimSpace(trustDomain)
 	td, err := spiffeid.TrustDomainFromString(tdStr)
@@ -897,7 +906,6 @@ func resolvePluginSVIDBinding(tenantID, trustDomain, workloadSocket string, cgWi
 		return pluginSVIDBinding{}, fmt.Sprintf("invalid SPIFFE trust domain %q; SVID plugin enrollment disabled: %v", tdStr, err), false
 	}
 	return pluginSVIDBinding{
-		tenantID:    tenantID,
 		trustDomain: td,
 		socketAddr:  "unix://" + strings.TrimSpace(workloadSocket),
 	}, "", true
@@ -1019,11 +1027,10 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.stopServices(ctx)
 		return err
 	}
-	d.brainRegistry = brain.NewRegistry(ctx, append(
+	d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), append(
 		[]brain.System{brain.BeliefSystem},
 		brain.ExecutorSystems()..., // scheduler/condition/decider-gate/budget/retry/completion (gibson#851)
 	)...)
-	d.brainRegistry.WithStoreFactory(timelineStoreFactory(lazyTimelinePool{pool: func() timelinePoolForer { return d.pool }}, d.logger.Slog()))
 	// Belief inference runs in-process (ADR-0134) but still off the tick, since
 	// exact variable elimination is not free: BeliefSystem asks for a score when
 	// a host's evidence changes, and the worker WireBelief installs answers with
@@ -1307,7 +1314,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 					port = 5432
 				}
 				poolCfg.PostgresHost = fmt.Sprintf("%s:%d", d.config.TenantPostgres.Host, port)
-				poolCfg.PostgresUser = d.config.TenantPostgres.AdminUsername
 			} else {
 				d.logger.Warn(ctx, "tenant_postgres.host is not configured; per-tenant Postgres bootstrap will be unavailable — set dataPlane.postgres.host in helm values")
 			}
@@ -1445,12 +1451,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		}
 	} else {
 		d.logger.Info(ctx, "credential store disabled - no key provider configured (set security.key_provider in config)")
-	}
-
-	// Configure callback service with event bus for tool/LLM event publishing
-	if d.eventBus != nil {
-		d.callback.SetEventBus(NewEventBusAdapter(d.eventBus))
-		d.logger.Info(ctx, "configured callback service with event bus")
 	}
 
 	// Wire the Observe RPC to the per-tenant brain (ADR-0107): typed agent
@@ -1737,7 +1737,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// check is the sole gating condition here.
 	if d.secretsRegistry != nil {
 		brokerReg := d.secretsRegistry
-		sysTenant := auth.SystemTenant
 
 		// Background goroutine emits per-tenant health gauges periodically.
 		// It iterates only the cached registry entries (tenants that have done
@@ -1766,23 +1765,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			}
 		}()
 
-		d.healthServer.RegisterReadinessCheck("secrets_broker", func(checkCtx context.Context) sdktypes.HealthStatus {
-			// Probe system tenant health. The Postgres provider's Health() checks
-			// connectivity (nil = healthy). Any non-nil error means the daemon's
-			// own secrets backend is unreachable; flip readiness to unhealthy.
-			healthMap := brokerReg.Health(checkCtx)
-			sysTenantErr, ok := healthMap[sysTenant]
-			if !ok {
-				// System tenant not yet in the cache (no secret operation issued yet) —
-				// attempt an eager probe by forcing a For() call which will populate the
-				// cache and run Health on the next tick. For now, report healthy.
-				return sdktypes.NewHealthyStatus("broker: system tenant not yet accessed; assuming healthy")
-			}
-			if sysTenantErr != nil {
-				return sdktypes.NewUnhealthyStatus("broker: system-tenant provider unhealthy: "+sysTenantErr.Error(), nil)
-			}
-			return sdktypes.NewHealthyStatus("broker: system-tenant provider healthy")
-		})
+		// The check asks the source to answer, with the same bounded probe as
+		// AdminGetPlatformHealth. It never reads the cached health map for
+		// this answer: that map holds nothing until a secret operation ran,
+		// and a dead source then read as healthy (hosted#174). It is a start
+		// gate: not ready until a probe passes, and a later failure does not
+		// change readiness (secretSourceReadiness).
+		d.healthServer.RegisterReadinessCheck("secrets_broker",
+			secretSourceReadiness(&secretPlaneProbeAdapter{registry: brokerReg}))
 		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
 	}
 
@@ -1834,31 +1824,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 	// Wire internal/infra/readiness probe implementations into the existing
 	// /readyz handler (audit P1 finding, zeroroot-ai/.github#101).
-	//
-	// Each probe produced by newPlatformReadinessProbes() is registered with
-	// the "pc_" prefix so it appears distinctly in /readyz JSON output without
-	// conflicting with the existing "authz_fga" SDK probe.
-	//
-	// The local readinessProber interface matches pcreadiness.Probe without
-	// requiring daemon.go to import internal/infra/readiness directly.
-	type readinessProber interface {
-		Name() string
-		Check(ctx context.Context) error
-	}
-	for _, probe := range d.newPlatformReadinessProbes() {
-		var p readinessProber = probe
-		name := p.Name()
-		d.healthServer.RegisterReadinessCheck("pc_"+name, func(checkCtx context.Context) sdktypes.HealthStatus {
-			if err := p.Check(checkCtx); err != nil {
-				return sdktypes.NewDegradedStatus(
-					"platform-clients/readiness probe '"+name+"' failed: "+err.Error(),
-					nil,
-				)
-			}
-			return sdktypes.NewHealthyStatus("platform-clients/readiness probe '" + name + "' passed")
-		})
-	}
-	d.logger.Debug(ctx, "registered platform-clients readiness probes (pc_postgres, pc_authz_fga)")
+	d.registerPlatformReadinessProbes(ctx, d.healthServer, d.newPlatformReadinessProbes())
 
 	// Start health server via healthSubsystem.
 	d.healthSys = newHealthSubsystem(d.healthServer, d.logger)

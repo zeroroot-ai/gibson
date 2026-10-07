@@ -53,10 +53,6 @@ type OTelObservabilityStack struct {
 	// MetricsRecorder records operational metrics (counters, histograms).
 	// Used throughout the system to track resource usage and performance.
 	MetricsRecorder *OTelMetricsRecorder
-
-	// ContentConfig holds the content logging configuration.
-	// Used by middleware and tracers to control prompt/completion capture.
-	ContentConfig *ContentLoggingConfig
 }
 
 // OTelConfig contains configuration for initializing the OTel observability stack.
@@ -311,7 +307,6 @@ func InitOTelObservability(ctx context.Context, cfg OTelConfig) (*OTelObservabil
 		TracerProvider:  tracerProvider,
 		MeterProvider:   meterProvider,
 		MetricsRecorder: metricsRecorder,
-		ContentConfig:   cfg.ContentLogging,
 	}
 
 	slog.Info("opentelemetry observability stack initialized successfully")

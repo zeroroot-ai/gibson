@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 )
 
@@ -41,7 +42,7 @@ func TestAwaitBrainMission_ReturnsCompleted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	reg := brain.NewRegistry(ctx, brain.ExecutorSystems()...)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.ExecutorSystems()...)
 	disp := &completingDispatcher{}
 	reg.OnEngine(func(e *brain.Engine) {
 		disp.eng = e
@@ -66,7 +67,7 @@ func TestAwaitBrainMission_ReturnsCompleted(t *testing.T) {
 
 func TestAwaitBrainMission_CtxCancelledReturnsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	eng := brain.NewEngine("t1") // no systems → mission never completes
+	eng := brain.NewEngine("t1", braintest.NewMemTimelineStore()) // no systems → mission never completes
 	eng.Submit(brain.MissionProjected{ID: "m1", Goal: "x"})
 
 	go func() { time.Sleep(50 * time.Millisecond); cancel() }()

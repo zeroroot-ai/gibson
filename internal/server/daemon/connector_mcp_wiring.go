@@ -10,6 +10,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
 
 // connectorMCP returns the one MCP client of the daemon (ADR-0065, D22),
@@ -34,7 +35,7 @@ func (d *daemonImpl) connectorProxyToken(ctx context.Context) (string, error) {
 	if src == nil {
 		return "", nil
 	}
-	svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: component.ConnectorProxyAudience})
+	svid, err := src.FetchJWTSVID(ctx, jwtsvid.Params{Audience: connectorv1alpha1.ProxyAudience})
 	if err != nil {
 		return "", fmt.Errorf("fetch the JWT-SVID for the connector proxy: %w", err)
 	}

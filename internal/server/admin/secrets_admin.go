@@ -72,7 +72,6 @@ type SecretsAdminServer struct {
 	secretsv1.UnimplementedSecretsServiceServer
 
 	service        *secrets.Service
-	broker         SecretsAdminBroker
 	pluginAssocs   SecretsAdminPluginAssociations
 	auditQuery     SecretsAdminAuditQuery
 	now            func() time.Time
@@ -133,7 +132,6 @@ func NewSecretsAdminServer(cfg SecretsAdminConfig) (*SecretsAdminServer, error) 
 	}
 	return &SecretsAdminServer{
 		service:        cfg.Service,
-		broker:         cfg.Broker,
 		pluginAssocs:   cfg.PluginAssociations,
 		auditQuery:     cfg.AuditQuery,
 		rotatedAuditor: cfg.RotatedAuditor,

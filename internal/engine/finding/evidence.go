@@ -69,17 +69,6 @@ func NewEnhancedEvidence(evidenceType EvidenceType, title string, content any) E
 	}
 }
 
-// NewHTTPRequestEvidence creates HTTP request evidence
-func NewHTTPRequestEvidence(title, method, url string, headers map[string]string, body string) EnhancedEvidence {
-	content := HTTPRequestEvidence{
-		Method:  method,
-		URL:     url,
-		Headers: headers,
-		Body:    body,
-	}
-	return NewEnhancedEvidence(EvidenceHTTPRequest, title, content)
-}
-
 // NewHTTPResponseEvidence creates HTTP response evidence
 func NewHTTPResponseEvidence(title string, statusCode int, headers map[string]string, body string, duration time.Duration) EnhancedEvidence {
 	content := HTTPResponseEvidence{

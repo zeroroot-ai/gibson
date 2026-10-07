@@ -67,7 +67,7 @@ func holdingDispatcher(*World) []Event { return nil }
 // engineWithHeldDispatch wires the scheduler, a dispatcher that never completes,
 // and the completion System.
 func engineWithHeldDispatch() *Engine {
-	e := NewEngine("t1")
+	e := NewEngine("t1", &memTimelineStore{})
 	e.AddSystem(SchedulerSystem)
 	e.AddSystem(holdingDispatcher)
 	e.AddSystem(MissionCompletionSystem)

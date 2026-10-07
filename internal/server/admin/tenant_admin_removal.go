@@ -15,9 +15,13 @@
 //     instant-revocation gate RevokeUserSessions uses (gibson#622/#627), so
 //     their very next request fails rather than waiting for a token to
 //     expire.
-//  3. Revokes the target's tenant role through the tenantrole.Syncer, the
+//  3. Moves each agent, tool and plugin identity the target owns to a person
+//     who stays in the tenant: the caller for RemoveMember, the tenant's
+//     Owner for LeaveTenant (gibson#568). The identities keep working, and a
+//     person stays accountable for each one.
+//  4. Revokes the target's tenant role through the tenantrole.Syncer, the
 //     one writer of tenant-role tuples (ADR-0093 decision 3).
-//  4. Deletes the target's Zitadel account outright, which is what frees
+//  5. Deletes the target's Zitadel account outright, which is what frees
 //     their email for another tenant and what distinguishes Removal from a
 //     role change.
 //
@@ -54,10 +58,21 @@ func (s *TenantAdminServer) RemoveMember(ctx context.Context, req *tenantv1.Remo
 	if req.GetUserId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "user_id required")
 	}
-	if err := s.removeTenantUser(ctx, tenantID, req.GetUserId()); err != nil {
+	caller, identityErr := auth.IdentityFromContext(ctx)
+	if identityErr != nil || caller.Subject == "" {
+		return nil, status.Error(codes.PermissionDenied, "no identity in context")
+	}
+	if caller.Subject == req.GetUserId() {
+		return nil, status.Error(codes.InvalidArgument, "use LeaveTenant to remove yourself")
+	}
+	moved, err := s.removeTenantUser(ctx, tenantID, req.GetUserId(), caller.Subject)
+	if err != nil {
 		return nil, err
 	}
-	return &tenantv1.RemoveMemberResponse{}, nil
+	return &tenantv1.RemoveMemberResponse{
+		ReassignedPrincipalIds: moved,
+		NewOwnerUserId:         caller.Subject,
+	}, nil
 }
 
 // LeaveTenant is the self-service half of Removal (ADR-0093 §11): the caller
@@ -73,26 +88,29 @@ func (s *TenantAdminServer) LeaveTenant(ctx context.Context, req *tenantv1.Leave
 	if err != nil {
 		return nil, err
 	}
-	if err := s.removeTenantUser(ctx, tenantID, identity.Subject); err != nil {
+	if _, err := s.removeTenantUser(ctx, tenantID, identity.Subject, ""); err != nil {
 		return nil, err
 	}
 	return &tenantv1.LeaveTenantResponse{}, nil
 }
 
 // removeTenantUser is the shared core of RemoveMember and LeaveTenant. The
-// four steps run in an order chosen so a failure part-way through never
-// leaves the target with LESS cut off than before: sessions are revoked
-// (the access-denying step) before the role is revoked, and the role is
-// revoked before the irreversible account delete.
-func (s *TenantAdminServer) removeTenantUser(ctx context.Context, tenantID, userID string) error {
+// steps run in an order chosen so a failure part-way through never leaves
+// the target with LESS cut off than before: sessions are revoked (the
+// access-denying step) before the identities move and the role is revoked,
+// and the role is revoked before the irreversible account delete.
+//
+// newOwner receives the identities the target owns. Empty means the tenant's
+// Owner. It returns the identities that moved.
+func (s *TenantAdminServer) removeTenantUser(ctx context.Context, tenantID, userID, newOwner string) ([]string, error) {
 	if s.authorizer == nil {
-		return status.Error(codes.Unavailable, "authorizer not configured")
+		return nil, status.Error(codes.Unavailable, "authorizer not configured")
 	}
 	if s.roles == nil {
-		return status.Error(codes.Unavailable, "role sync not configured")
+		return nil, status.Error(codes.Unavailable, "role sync not configured")
 	}
 	if s.idpClient == nil {
-		return status.Error(codes.Unavailable, "IdP admin client not configured")
+		return nil, status.Error(codes.Unavailable, "IdP admin client not configured")
 	}
 
 	tenantRef := "tenant:" + tenantID
@@ -103,16 +121,16 @@ func (s *TenantAdminServer) removeTenantUser(ctx context.Context, tenantID, user
 	// account.
 	isOwner, err := s.authorizer.Check(ctx, userRef, "owner", tenantRef)
 	if err != nil {
-		return status.Errorf(codes.Internal, "fga Check owner: %v", err)
+		return nil, status.Errorf(codes.Internal, "fga Check owner: %v", err)
 	}
 	if isOwner {
-		return status.Error(codes.PermissionDenied,
+		return nil, status.Error(codes.PermissionDenied,
 			"the tenant's Owner cannot be removed or leave; transfer ownership first")
 	}
 
 	t, err := s.tenantOf(ctx, tenantID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Cut off access at once: terminate the IdP sessions, then stamp the
@@ -120,14 +138,28 @@ func (s *TenantAdminServer) removeTenantUser(ctx context.Context, tenantID, user
 	// RevokeUserSessions relies on takes effect for this user's very next
 	// request, tenant-scoped or not (gibson#622/#627/#1244).
 	if _, err := s.idpClient.RevokeUserSessions(ctx, userID); err != nil {
-		return status.Errorf(codes.Internal, "revoke sessions: %v", err)
+		return nil, status.Errorf(codes.Internal, "revoke sessions: %v", err)
 	}
 	s.stampSessionRevocation(ctx, userID, tenantID)
+
+	// Move the identities the target owns before the role and the account
+	// go, so no component runs with a dead owner (gibson#568). A retry after
+	// a failure here moves the rest.
+	if newOwner == "" {
+		newOwner, err = s.tenantOwnerUserID(ctx, tenantID)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "find the new owner of the identities: %v", err)
+		}
+	}
+	moved, err := s.reassignOwnedPrincipals(ctx, tenantID, userID, newOwner)
+	if err != nil {
+		return nil, err
+	}
 
 	// Revoke the tenant role (the Zitadel grant, synced into FGA) before the
 	// account disappears.
 	if err := s.roles.Revoke(tenantrole.WithCaller(ctx, "daemon"), t, userID); err != nil {
-		return status.Errorf(codes.Internal, "revoke tenant role: %v", err)
+		return nil, status.Errorf(codes.Internal, "revoke tenant role: %v", err)
 	}
 
 	// Delete the Zitadel account outright: this is what frees the user's
@@ -135,9 +167,9 @@ func (s *TenantAdminServer) removeTenantUser(ctx context.Context, tenantID, user
 	// opposed to a role change. Idempotent: deleting an absent user is
 	// success, so a retry after a partial failure above is safe.
 	if err := s.idpClient.DeleteHumanUser(ctx, idp.HumanUserStateRequest{OrgID: t.OrgID, UserID: userID}); err != nil {
-		return status.Errorf(codes.Internal, "delete zitadel account: %v", err)
+		return nil, status.Errorf(codes.Internal, "delete zitadel account: %v", err)
 	}
-	return nil
+	return moved, nil
 }
 
 // stampSessionRevocation advances the target's active_session FGA tuples to

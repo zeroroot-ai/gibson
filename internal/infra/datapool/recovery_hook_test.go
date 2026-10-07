@@ -36,33 +36,6 @@ func TestRecoveryHook_Noop_AlwaysSucceeds(t *testing.T) {
 	assert.NoError(t, h.Run(context.Background(), tenant, &Conn{}))
 }
 
-// TestRunRecoveryHook_NilConn_ErrorsLoudly is a defensive guard. The
-// production hook should never be invoked with a nil conn (pool.For
-// only calls it after the conn is constructed), but we assert the
-// behaviour so a future caller-side regression doesn't silently no-op.
-func TestRunRecoveryHook_NilConn_ErrorsLoudly(t *testing.T) {
-	h := NewRunRecoveryHook(nil)
-	tenant := auth.MustNewTenantID("acme")
-
-	err := h.Run(context.Background(), tenant, nil)
-	assert.Error(t, err)
-}
-
-// TestRunRecoveryHook_NoRedis_SilentlySkips covers the dev-environment
-// path: a Conn without a Redis sub-pool cannot enumerate running missions
-// and must return nil (silent skip) rather than failing. This mirrors the
-// behaviour the deleted recover_missions.go had — "no redis configured"
-// is a runtime configuration choice, not an error.
-func TestRunRecoveryHook_NoRedis_SilentlySkips(t *testing.T) {
-	h := NewRunRecoveryHook(nil)
-	tenant := auth.MustNewTenantID("acme")
-	// Conn with Redis nil — common in test/dev configurations.
-	conn := &Conn{Tenant: tenant}
-
-	err := h.Run(context.Background(), tenant, conn)
-	assert.NoError(t, err)
-}
-
 // TestPool_FirstDialFiresHookOnce_RepeatDoesNot is the load-bearing
 // idempotency assertion: per-process, the first For() dial for a given
 // tenant invokes the hook exactly once. Subsequent dials skip it.

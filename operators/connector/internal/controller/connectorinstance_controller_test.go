@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,6 +31,7 @@ import (
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
 
 // testScheme knows the connector types, the core/networking types, and the two
@@ -48,8 +51,8 @@ func testScheme(t *testing.T) *runtime.Scheme {
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPServer+"List"),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy),
 		schema.FromAPIVersionAndKind(toolhiveAPIVersion, kindMCPRemoteProxy+"List"),
-		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy),
-		schema.FromAPIVersionAndKind(ciliumAPIVersion, kindCiliumNetworkPolicy+"List"),
+		schema.FromAPIVersionAndKind(ciliumegress.APIVersion, ciliumegress.Kind),
+		schema.FromAPIVersionAndKind(ciliumegress.APIVersion, ciliumegress.Kind+"List"),
 	} {
 		s.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 	}
@@ -89,6 +92,13 @@ func (f *fakeAuthReader) AuthStatus(_ context.Context, tenantID, connector strin
 	return &tenantv1.GetConnectorAuthStatusResponse{State: state, LastRefreshError: f.last}, nil
 }
 
+// testProxyAuth is the caller authentication of the proxy in these tests.
+var testProxyAuth = ProxyAuth{
+	Issuer:         "https://oidc-discovery.example.org",
+	JWKSURL:        "https://oidc-discovery.example.org/keys",
+	DaemonSPIFFEID: "spiffe://example.org/platform/daemon",
+}
+
 func newReconciler(t *testing.T, seed ...client.Object) *ConnectorInstanceReconciler {
 	t.Helper()
 	return newReconcilerWithAuth(t, &fakeAuthReader{}, seed...)
@@ -102,7 +112,7 @@ func newReconcilerWithAuth(t *testing.T, reader ConnectorAuthReader, seed ...cli
 		WithStatusSubresource(&connectorv1alpha1.ConnectorInstance{}).
 		WithObjects(seed...).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader, ProxyAuth: testProxyAuth}
 }
 
 // conditionOf returns the named condition, or nil.
@@ -176,7 +186,7 @@ func remoteInstance(name, namespace string) *connectorv1alpha1.ConnectorInstance
 // TestDesiredToolHive_Hosted maps a Hosted connector to an MCPServer with the
 // builtin network profile and the connector's image.
 func TestDesiredToolHive_Hosted(t *testing.T) {
-	r := &ConnectorInstanceReconciler{}
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
 	ci := hostedInstance("hosted-fixture", "tenant-acme")
 
 	th, err := r.desiredToolHive(ci)
@@ -194,11 +204,53 @@ func TestDesiredToolHive_Hosted(t *testing.T) {
 	if profType != "builtin" {
 		t.Errorf("permissionProfile.type = %q, want builtin", profType)
 	}
+	assertProxyAcceptsOnlyTheDaemon(t, th)
+}
+
+// assertProxyAcceptsOnlyTheDaemon checks the caller authentication of a
+// proxy (ADR-0114): an inline OIDC config with the issuer, the JWKS and the
+// proxy audience, and one Cedar policy that permits the daemon SPIFFE ID.
+func assertProxyAcceptsOnlyTheDaemon(t *testing.T, th *unstructured.Unstructured) {
+	t.Helper()
+	want := map[string]string{
+		"type":     "inline",
+		"issuer":   testProxyAuth.Issuer,
+		"jwksUrl":  testProxyAuth.JWKSURL,
+		"audience": connectorv1alpha1.ProxyAudience,
+	}
+	for key, value := range want {
+		path := []string{"spec", "oidcConfig", "inline", key}
+		if key == "type" {
+			path = []string{"spec", "oidcConfig", "type"}
+		}
+		if got, _, _ := unstructured.NestedString(th.Object, path...); got != value {
+			t.Errorf("%v = %q, want %q", path, got, value)
+		}
+	}
+	policies, _, _ := unstructured.NestedStringSlice(th.Object, "spec", "authzConfig", "inline", "policies")
+	wantPolicy := `permit(principal == Client::"spiffe://example.org/platform/daemon", action, resource);`
+	if len(policies) != 1 || policies[0] != wantPolicy {
+		t.Errorf("authzConfig policies = %q, want [%q]", policies, wantPolicy)
+	}
+}
+
+// TestDesiredToolHive_NoProxyAuthMakesNoProxy: with no caller
+// authentication, the operator makes no proxy of either shape.
+func TestDesiredToolHive_NoProxyAuthMakesNoProxy(t *testing.T) {
+	r := &ConnectorInstanceReconciler{}
+	for _, ci := range []*connectorv1alpha1.ConnectorInstance{
+		hostedInstance("hosted-fixture", "tenant-acme"),
+		remoteInstance("gitlab", "tenant-acme"),
+	} {
+		if _, err := r.desiredToolHive(ci); err == nil {
+			t.Errorf("%s: a proxy with no caller authentication was made", ci.Spec.Shape)
+		}
+	}
 }
 
 // TestDesiredToolHive_HostedNeedsImage rejects a Hosted connector with no image.
 func TestDesiredToolHive_HostedNeedsImage(t *testing.T) {
-	r := &ConnectorInstanceReconciler{}
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
 	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.Image = ""
 
@@ -208,10 +260,10 @@ func TestDesiredToolHive_HostedNeedsImage(t *testing.T) {
 }
 
 // TestDesiredToolHive_Remote maps a Remote connector to an MCPRemoteProxy with
-// the vendor endpoint, kubernetes OIDC, and a forwarded credential header when
+// the vendor endpoint, the daemon-only caller authentication, and a forwarded credential header when
 // the connector authenticates.
 func TestDesiredToolHive_Remote(t *testing.T) {
-	r := &ConnectorInstanceReconciler{}
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
 	ci := &connectorv1alpha1.ConnectorInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "gitlab", Namespace: "tenant-acme"},
 		Spec: connectorv1alpha1.ConnectorInstanceSpec{
@@ -233,10 +285,7 @@ func TestDesiredToolHive_Remote(t *testing.T) {
 	if remote != "https://gitlab.com/api/v4/mcp" {
 		t.Errorf("remoteURL = %q", remote)
 	}
-	oidc, _, _ := unstructured.NestedString(th.Object, "spec", "oidcConfig", "type")
-	if oidc != "kubernetes" {
-		t.Errorf("oidcConfig.type = %q, want kubernetes", oidc)
-	}
+	assertProxyAcceptsOnlyTheDaemon(t, th)
 	if _, found, _ := unstructured.NestedSlice(th.Object, "spec", "headerForward", "addHeadersFromSecret"); !found {
 		t.Error("an authenticated Remote connector must forward a credential header")
 	}
@@ -245,7 +294,7 @@ func TestDesiredToolHive_Remote(t *testing.T) {
 // TestDesiredToolHive_RemoteNeedsEndpoint rejects a Remote connector with no
 // endpoint, and an unknown shape is rejected too.
 func TestDesiredToolHive_RemoteNeedsEndpoint(t *testing.T) {
-	r := &ConnectorInstanceReconciler{}
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
 	ci := &connectorv1alpha1.ConnectorInstance{
 		ObjectMeta: metav1.ObjectMeta{Name: "gitlab", Namespace: "tenant-acme"},
 		Spec:       connectorv1alpha1.ConnectorInstanceSpec{Shape: connectorv1alpha1.ConnectorShapeRemote},
@@ -394,8 +443,8 @@ func TestReconcile_DeletionRetriesAFailingRevoke(t *testing.T) {
 	}
 }
 
-// Past the deadline the finalizer releases with a logged warning rather than
-// wedging the delete behind a daemon that stays down.
+// Past the deadline the finalizer writes a durable record of the grant and
+// releases, rather than wedging the delete behind a daemon that stays down.
 func TestReconcile_DeletionReleasesAfterTheRevokeDeadline(t *testing.T) {
 	deletedAt := time.Unix(1_700_000_000, 0).UTC()
 	ci := deletingInstance(secretInstance("github", "tenant-primary"), deletedAt)
@@ -408,6 +457,18 @@ func TestReconcile_DeletionReleasesAfterTheRevokeDeadline(t *testing.T) {
 		t.Fatalf("past the deadline the finalizer must release: %v", err)
 	}
 	assertFinalizerReleased(t, r, key)
+
+	var rec corev1.ConfigMap
+	recKey := types.NamespacedName{Namespace: "tenant-primary", Name: unrevokedGrantName("github")}
+	if err := r.Get(context.Background(), recKey, &rec); err != nil {
+		t.Fatalf("the released grant must have a durable record: %v", err)
+	}
+	if rec.Data[unrevokedGrantKeyTenant] != "primary" || rec.Data[unrevokedGrantKeyConnector] != "github" {
+		t.Errorf("record data = %v, want tenant primary and connector github", rec.Data)
+	}
+	if rec.Labels[labelUnrevokedGrant] != "true" {
+		t.Errorf("record labels = %v, want the unrevoked grant label", rec.Labels)
+	}
 }
 
 // A ConnectorInstance outside a tenant namespace has no tenant store to
@@ -649,7 +710,7 @@ func failingReconciler(t *testing.T, seed ...client.Object) *ConnectorInstanceRe
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 var errReconcileBoom = reconcileBoom("kube write refused")
@@ -722,7 +783,7 @@ func failCreateOfKind(t *testing.T, kind string, seed ...client.Object) *Connect
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 // TestReconcile_EgressErrorIsFailed fails the egress-profile step.
@@ -777,7 +838,7 @@ func failGetReconciler(t *testing.T) *ConnectorInstanceReconciler {
 			},
 		}).
 		Build()
-	return &ConnectorInstanceReconciler{Client: cl, Scheme: s}
+	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
 }
 
 // TestReconcileHelpers_GetErrorsAreWrapped checks that a non-NotFound read
@@ -808,7 +869,7 @@ func TestSetupWithManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.New: %v", err)
 	}
-	r := &ConnectorInstanceReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
+	r := &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: mgr.GetClient(), Scheme: mgr.GetScheme()}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatalf("SetupWithManager: %v", err)
 	}
@@ -879,7 +940,7 @@ func TestReconcile_DeletionRemoveFinalizerErrorIsWrapped(t *testing.T) {
 			},
 		}).
 		Build()
-	r := &ConnectorInstanceReconciler{Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
+	r := &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, Revoker: &fakeRevoker{}}
 	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}})
 	if err == nil || !strings.Contains(err.Error(), "remove finalizer") {
 		t.Fatalf("err = %v, want a wrapped remove-finalizer error", err)
@@ -1110,7 +1171,7 @@ func TestCheckCredential_UnknownStateIsDegraded(t *testing.T) {
 // Secret key to the env var the connector reads (gibson#597). Without the
 // reader, spec.credentials steered nothing.
 func TestDesiredToolHive_HostedCredentialsReachThePodEnv(t *testing.T) {
-	r := &ConnectorInstanceReconciler{}
+	r := &ConnectorInstanceReconciler{ProxyAuth: testProxyAuth}
 	ci := hostedInstance("hosted-fixture", "tenant-acme")
 	ci.Spec.Credentials = []connectorv1alpha1.CredentialRef{
 		{Key: "osv-api-key"},

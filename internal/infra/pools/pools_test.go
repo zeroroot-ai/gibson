@@ -8,79 +8,12 @@ import (
 	"testing"
 	"time"
 
-	neo4j "github.com/neo4j/neo4j-go-driver/v5/neo4j"
-
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 )
 
 // ---------------------------------------------------------------------------
 // NewNeo4j — required-override unit tests
 // ---------------------------------------------------------------------------
-
-func TestNewNeo4j_RequiredOverrides(t *testing.T) {
-	t.Parallel()
-
-	validURI := "bolt://localhost:7687"
-	validAuth := neo4j.BasicAuth("neo4j", "password", "")
-
-	cases := []struct {
-		name    string
-		uri     string
-		opts    pools.Neo4jOptions
-		wantErr bool
-	}{
-		{
-			name:    "missing uri",
-			uri:     "",
-			opts:    pools.Neo4jOptions{MaxConnectionLifetime: time.Hour, ConnectionAcquisitionTimeout: 60 * time.Second},
-			wantErr: true,
-		},
-		{
-			name:    "missing MaxConnectionLifetime",
-			uri:     validURI,
-			opts:    pools.Neo4jOptions{ConnectionAcquisitionTimeout: 60 * time.Second},
-			wantErr: true,
-		},
-		{
-			name:    "missing ConnectionAcquisitionTimeout",
-			uri:     validURI,
-			opts:    pools.Neo4jOptions{MaxConnectionLifetime: time.Hour},
-			wantErr: true,
-		},
-		{
-			name:    "all required fields present",
-			uri:     validURI,
-			opts:    pools.Neo4jOptions{MaxConnectionLifetime: time.Hour, ConnectionAcquisitionTimeout: 60 * time.Second},
-			wantErr: false,
-		},
-		{
-			name:    "with optional MaxConnectionPoolSize",
-			uri:     validURI,
-			opts:    pools.Neo4jOptions{MaxConnectionLifetime: time.Hour, ConnectionAcquisitionTimeout: 60 * time.Second, MaxConnectionPoolSize: 50},
-			wantErr: false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			driver, err := pools.NewNeo4j(tc.uri, validAuth, tc.opts)
-			if tc.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if driver == nil {
-				t.Fatal("expected non-nil driver")
-			}
-			_ = driver.Close(context.Background())
-		})
-	}
-}
 
 // ---------------------------------------------------------------------------
 // NewRedis — required-override unit tests
@@ -299,34 +232,5 @@ func TestNewPgxPool_Integration(t *testing.T) {
 
 	if err := pool.Ping(ctx); err != nil {
 		t.Fatalf("ping failed: %v", err)
-	}
-}
-
-func TestNewNeo4j_Integration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test in -short mode")
-	}
-
-	ctx := context.Background()
-
-	container, boltURI := startNeo4jContainer(t, ctx)
-	defer container.Terminate(ctx) //nolint:errcheck
-
-	driver, err := pools.NewNeo4j(
-		boltURI,
-		neo4j.BasicAuth("neo4j", "password", ""),
-		pools.Neo4jOptions{
-			MaxConnectionLifetime:        time.Hour,
-			ConnectionAcquisitionTimeout: 60 * time.Second,
-			MaxConnectionPoolSize:        10,
-		},
-	)
-	if err != nil {
-		t.Fatalf("NewNeo4j: %v", err)
-	}
-	defer func() { _ = driver.Close(ctx) }()
-
-	if err := driver.VerifyConnectivity(ctx); err != nil {
-		t.Fatalf("VerifyConnectivity failed: %v", err)
 	}
 }

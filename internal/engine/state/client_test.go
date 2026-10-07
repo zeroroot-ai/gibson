@@ -5,7 +5,6 @@ package state
 
 import (
 	"context"
-	"math"
 	"testing"
 	"time"
 
@@ -618,62 +617,6 @@ func TestEscapeTag(t *testing.T) {
 	}
 }
 
-func TestEscapeQuery(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "simple text",
-			input:    "hello",
-			expected: "hello",
-		},
-		{
-			name:     "email address",
-			input:    "alice@example.com",
-			expected: "alice\\@example\\.com",
-		},
-		{
-			name:     "hyphenated word",
-			input:    "full-text",
-			expected: "full\\-text",
-		},
-		{
-			name:     "with parentheses",
-			input:    "(optional)",
-			expected: "\\(optional\\)",
-		},
-		{
-			name:     "with pipe",
-			input:    "option1|option2",
-			expected: "option1\\|option2",
-		},
-		{
-			name:     "quoted string",
-			input:    `"exact phrase"`,
-			expected: `\"exact phrase\"`,
-		},
-		{
-			name:     "arithmetic expression",
-			input:    "x+y=z",
-			expected: "x\\+y\\=z",
-		},
-		{
-			name:     "complex query",
-			input:    "user@host.com:8080",
-			expected: "user\\@host\\.com\\:8080",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := EscapeQuery(tt.input)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestParseInteger(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -790,6 +733,8 @@ func TestParseFloat(t *testing.T) {
 	}
 }
 
+// The shared Gibson indexes belong to every test package of the module that
+// runs against the one Redis Stack of the CI job, so this test drops none.
 func TestStateClient_EnsureIndexes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
@@ -805,24 +750,12 @@ func TestStateClient_EnsureIndexes(t *testing.T) {
 	defer client.Close()
 
 	manager := NewIndexManager(client.Client())
-
-	// Clean up all Gibson indexes before test
 	indexes := AllIndexDefinitions()
-	for _, idx := range indexes {
-		_ = manager.DropIndex(ctx, idx.Name)
-	}
-	defer func() {
-		// Clean up after test
-		for _, idx := range indexes {
-			_ = manager.DropIndex(ctx, idx.Name)
-		}
-	}()
 
-	t.Run("creates all indexes on first call", func(t *testing.T) {
+	t.Run("every index exists after a call", func(t *testing.T) {
 		err := client.EnsureIndexes(ctx)
 		require.NoError(t, err)
 
-		// Verify all indexes were created
 		for _, idx := range indexes {
 			exists, err := manager.IndexExists(ctx, idx.Name)
 			require.NoError(t, err, "failed to check existence of %s", idx.Name)
@@ -841,289 +774,5 @@ func TestStateClient_EnsureIndexes(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, exists)
 		}
-	})
-}
-
-func TestQueryBuilder_Basic(t *testing.T) {
-	t.Run("empty query returns wildcard", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Build()
-		assert.Equal(t, "*", query)
-	})
-
-	t.Run("simple text query", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Text("security vulnerability").Build()
-		assert.Equal(t, "security vulnerability", query)
-	})
-
-	t.Run("text with special characters", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Text("user@example.com").Build()
-		assert.Equal(t, "user\\@example\\.com", query)
-	})
-
-	t.Run("empty text is ignored", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Text("").Build()
-		assert.Equal(t, "*", query)
-	})
-}
-
-func TestQueryBuilder_Tag(t *testing.T) {
-	t.Run("single tag value", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("status", "open").Build()
-		assert.Equal(t, "@status:{open}", query)
-	})
-
-	t.Run("multiple tag values", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("status", "open", "in-progress").Build()
-		assert.Equal(t, "@status:{open|in\\-progress}", query)
-	})
-
-	t.Run("tag with special characters", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("email", "user@example.com").Build()
-		assert.Equal(t, "@email:{user\\@example\\.com}", query)
-	})
-
-	t.Run("empty tag values ignored", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("status").Build()
-		assert.Equal(t, "*", query)
-	})
-}
-
-func TestQueryBuilder_NumericRange(t *testing.T) {
-	t.Run("basic range", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.NumericRange("price", 10.0, 100.0).Build()
-		assert.Equal(t, "@price:[10 100]", query)
-	})
-
-	t.Run("range with decimals", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.NumericRange("rating", 4.5, 5.0).Build()
-		assert.Equal(t, "@rating:[4.5 5]", query)
-	})
-
-	t.Run("range with positive infinity", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.NumericRange("age", 18.0, math.Inf(1)).Build()
-		assert.Equal(t, "@age:[18 +inf]", query)
-	})
-
-	t.Run("range with negative infinity", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.NumericRange("temp", math.Inf(-1), 0.0).Build()
-		assert.Equal(t, "@temp:[-inf 0]", query)
-	})
-}
-
-func TestQueryBuilder_NumericEquals(t *testing.T) {
-	t.Run("exact numeric match", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.NumericEquals("count", 42.0).Build()
-		assert.Equal(t, "@count:[42 42]", query)
-	})
-}
-
-func TestQueryBuilder_Prefix(t *testing.T) {
-	t.Run("prefix search", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Prefix("name", "john").Build()
-		assert.Equal(t, "@name:john*", query)
-	})
-
-	t.Run("prefix with special chars", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Prefix("domain", "example.com").Build()
-		assert.Equal(t, "@domain:example\\.com*", query)
-	})
-
-	t.Run("empty prefix ignored", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Prefix("name", "").Build()
-		assert.Equal(t, "*", query)
-	})
-}
-
-func TestQueryBuilder_CombinedQueries(t *testing.T) {
-	t.Run("text and tag", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Text("vulnerability").Tag("severity", "critical").Build()
-		assert.Equal(t, "vulnerability @severity:{critical}", query)
-	})
-
-	t.Run("multiple tags", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("severity", "critical").
-			Tag("status", "open").
-			Build()
-		assert.Equal(t, "@severity:{critical} @status:{open}", query)
-	})
-
-	t.Run("text, tag, and numeric", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("security").
-			Tag("category", "xss").
-			NumericRange("cvss_score", 7.0, 10.0).
-			Build()
-		assert.Equal(t, "security @category:{xss} @cvss_score:[7 10]", query)
-	})
-
-	t.Run("complex query with all features", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("sql injection").
-			Tag("severity", "high", "critical").
-			Tag("status", "open").
-			NumericRange("risk_score", 8.0, 10.0).
-			Prefix("agent", "scanner").
-			Build()
-		expected := "sql injection @severity:{high|critical} @status:{open} @risk_score:[8 10] @agent:scanner*"
-		assert.Equal(t, expected, query)
-	})
-}
-
-func TestQueryBuilder_Or(t *testing.T) {
-	t.Run("or two parts", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("status", "open").
-			Tag("status", "pending").
-			Or().
-			Build()
-		assert.Equal(t, "(@status:{open} | @status:{pending})", query)
-	})
-
-	t.Run("or with insufficient parts", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("status", "open").Or().Build()
-		assert.Equal(t, "@status:{open}", query)
-	})
-}
-
-func TestQueryBuilder_Not(t *testing.T) {
-	t.Run("negate tag", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Tag("status", "closed").Not().Build()
-		assert.Equal(t, "-(@status:{closed})", query)
-	})
-
-	t.Run("negate with multiple parts", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("vulnerability").
-			Tag("status", "closed").
-			Not().
-			Build()
-		assert.Equal(t, "vulnerability -(@status:{closed})", query)
-	})
-}
-
-func TestQueryBuilder_Group(t *testing.T) {
-	t.Run("group last 2 parts", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("severity", "high").
-			Tag("status", "open").
-			Group(2).
-			Build()
-		assert.Equal(t, "(@severity:{high} @status:{open})", query)
-	})
-
-	t.Run("group with invalid count", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("status", "open").
-			Group(5).
-			Build()
-		assert.Equal(t, "@status:{open}", query)
-	})
-
-	t.Run("group zero parts", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("status", "open").
-			Group(0).
-			Build()
-		assert.Equal(t, "@status:{open}", query)
-	})
-}
-
-func TestQueryBuilder_Raw(t *testing.T) {
-	t.Run("raw query", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Raw("@title:(hello world)").Build()
-		assert.Equal(t, "@title:(hello world)", query)
-	})
-
-	t.Run("mixed raw and safe", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("status", "open").
-			Raw("@score:[8 10]").
-			Build()
-		assert.Equal(t, "@status:{open} @score:[8 10]", query)
-	})
-
-	t.Run("empty raw ignored", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.Raw("").Build()
-		assert.Equal(t, "*", query)
-	})
-}
-
-func TestQueryBuilder_ComplexScenarios(t *testing.T) {
-	t.Run("findings search query", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("SQL injection").
-			Tag("severity", "critical", "high").
-			Tag("status", "open").
-			NumericRange("cvss_score", 7.0, 10.0).
-			Build()
-		expected := "SQL injection @severity:{critical|high} @status:{open} @cvss_score:[7 10]"
-		assert.Equal(t, expected, query)
-	})
-
-	t.Run("mission search query", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("penetration test").
-			Tag("status", "running").
-			Tag("target_id", "target-123").
-			NumericRange("progress", 0.0, 50.0).
-			Build()
-		expected := "penetration test @status:{running} @target_id:{target\\-123} @progress:[0 50]"
-		assert.Equal(t, expected, query)
-	})
-
-	t.Run("credential search query", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Tag("type", "api-key").
-			Tag("provider", "aws", "azure").
-			Tag("status", "active").
-			Build()
-		expected := "@type:{api\\-key} @provider:{aws|azure} @status:{active}"
-		assert.Equal(t, expected, query)
-	})
-
-	t.Run("exclude and filter", func(t *testing.T) {
-		qb := NewQueryBuilder()
-		query := qb.
-			Text("error").
-			Tag("severity", "low").
-			Not().
-			Tag("status", "open").
-			Build()
-		expected := "error -(@severity:{low}) @status:{open}"
-		assert.Equal(t, expected, query)
 	})
 }

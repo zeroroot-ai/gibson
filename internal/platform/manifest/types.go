@@ -59,12 +59,6 @@ type ManifestSubject struct {
 	// caller's claim as an error. Optional at input time.
 	TenantID string
 
-	// OwnerUserID is the user that owns this agent_principal. Only set
-	// when Type == SubjectTypeAgentPrincipal. Used by the Builder to
-	// intersect agent_principal grants with the owner-user's grants so
-	// the manifest never surfaces a component the owner cannot reach.
-	OwnerUserID string
-
 	// ImpersonatedAgentPrincipalID is non-empty only when a tenant admin
 	// is requesting a preview of another agent_principal's manifest
 	// (scaffold-time debugging). The handler gates this on admin role.
@@ -98,17 +92,6 @@ type BuilderConfig struct {
 	// at expires_at; operators can tune this to balance staleness against
 	// daemon load. Default: 5 minutes.
 	TTL time.Duration
-
-	// CrossComponentRuleHardCap bounds the number of cross-component
-	// rules emitted per manifest. If exceeded, the Builder sets
-	// CapabilityManifest.CrossComponentRulesTruncated and logs WARN.
-	// Default: 50_000 (matches design.md error scenario 6).
-	CrossComponentRuleHardCap int
-
-	// CrossComponentBatchCheckThreshold is the component-count squared
-	// above which the Builder prefers BatchCheck over sequential Check.
-	// Default: 10_000 (i.e. ~100 components).
-	CrossComponentBatchCheckThreshold int
 }
 
 // SigningKeyJWK is the public half of a manifest signing key, shaped for

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
@@ -44,7 +45,7 @@ func waitForMissionStatus(t *testing.T, eng *brain.Engine, id string, want brain
 func TestGraphProjector_ProjectsAMissionsTerminalStatus(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	eng := reg.For("acme")
 	eng.Submit(brain.MissionStarted{
@@ -143,7 +144,7 @@ func (f *failingMissionWriter) UpsertMission(context.Context, string, MissionPro
 func TestGraphProjector_AMissionUpsertFailureDoesNotStopTheTick(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	reg := brain.NewRegistry(ctx)
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	eng := reg.For("acme")
 	eng.Submit(brain.MissionStarted{ID: "m1", Name: "one", TenantID: "acme"})

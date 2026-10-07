@@ -172,6 +172,19 @@ type HarnessCallbackService struct {
 	// WithTaskGrantVerifier.
 	taskGrantVerifier func() TaskGrantVerifier
 
+	// forkLedger records the forks of each source grant (ADR-0169, D74).
+	// The callback interceptors refuse the grant of a forked source outside
+	// the source sandbox, and ClaimFork serves each fork its dispatch.
+	forkLedger ForkLedger
+
+	// forkGrants mints the grant of a claimed fork (D80).
+	forkGrants ForkGrantMinter
+
+	// sandboxIdentity verifies the sandbox identity token of a caller with
+	// setec (setec#235). The fork checks take the sandbox of the caller from
+	// it, never from a header that the process writes.
+	sandboxIdentity SandboxIdentityVerifier
+
 	// jobs is the job store the member-facing callbacks read and write
 	// (ADR-0119, gibson#1711). Nil means this daemon serves no banks, and
 	// every member callback says so rather than failing obscurely.
@@ -327,9 +340,9 @@ func WithCredentialStore(store CredentialStore) CallbackServiceOption {
 	}
 }
 
-// WithEventBus sets the event bus for publishing tool and LLM events.
-// When set, the callback service publishes events for tool calls and LLM requests
-// that can be consumed by the execution graph engine.
+// WithEventBus sets the event bus for publishing tool and LLM events, which
+// the execution graph engine consumes. It is required: each constructor
+// panics without it (gibson#681).
 func WithEventBus(eventBus EventBusPublisher) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.eventBus = eventBus
@@ -625,6 +638,7 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
+	requireEventBus(s)
 	return s
 }
 
@@ -667,6 +681,7 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		s.resolver = protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig())
 	}
 
+	requireEventBus(s)
 	return s
 }
 
@@ -1443,10 +1458,9 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *harnesspb.L
 	protoTools := make([]*harnesspb.HarnessToolDescriptor, len(tools))
 	for i, tool := range tools {
 		protoTools[i] = &harnesspb.HarnessToolDescriptor{
-			Name:         tool.Name,
-			Description:  tool.Description,
-			InputSchema:  SchemaToCallbackProto(tool.InputSchema),  // Structured schema with taxonomy
-			OutputSchema: SchemaToCallbackProto(tool.OutputSchema), // Structured output schema with taxonomy
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: SchemaToCallbackProto(tool.InputSchema), // Structured schema with taxonomy
 		}
 	}
 
@@ -1767,7 +1781,7 @@ func (s *HarnessCallbackService) DelegateToAgent(ctx context.Context, req *harne
 	}
 
 	// Convert proto Task to internal Task
-	task := protoTaskToTask(req.Task)
+	task := inheritNodeScope(protoTaskToTask(req.Task), harness.Mission())
 
 	// Capture start time for agent execution
 	agentStartTime := time.Now()
@@ -2353,14 +2367,19 @@ func (s *HarnessCallbackService) GetCredential(ctx context.Context, req *harness
 // Helper Methods for Taxonomy Engine Integration
 // ============================================================================
 
-// publishEvent publishes an event to the event bus if configured.
-// This is a helper method that safely publishes events without blocking
-// callback responses. Events are published in a goroutine to avoid latency.
-func (s *HarnessCallbackService) publishEvent(ctx context.Context, eventType string, data map[string]interface{}) {
+// requireEventBus stops a constructor that got no event bus (gibson#681). A
+// callback service without one drops each tool and LLM event, and the
+// execution graph then shows a run that did nothing.
+func requireEventBus(s *HarnessCallbackService) {
 	if s.eventBus == nil {
-		return // Event bus not configured, skip
+		panic("harness: the callback service requires an event bus (WithEventBus)")
 	}
+}
 
+// publishEvent publishes an event to the event bus. This is a helper method
+// that publishes events without blocking callback responses. Events are
+// published in a goroutine to avoid latency.
+func (s *HarnessCallbackService) publishEvent(ctx context.Context, eventType string, data map[string]interface{}) {
 	// Extract trace context from OpenTelemetry span
 	var traceID, spanID, parentSpanID string
 	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
@@ -3254,6 +3273,20 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 		}, nil
 	}
 
+	// A child that starts from the state of the caller is a fork of the
+	// caller sandbox (ADR-0169, gibson#803). Each check that needs no child
+	// runs first, so a refused fork creates no mission.
+	var forkPlan *callerForkPlan
+	if req.GetStartsFrom() == harnesspb.OriginationStart_ORIGINATION_START_CALLER_STATE {
+		plan, perr := s.planCallerFork(ctx, parentHarness, req)
+		if perr != nil {
+			s.logger.Warn("mission origination refused: the caller cannot be forked",
+				"parent_mission_id", parentMissionID.String(), "error", perr)
+			return nil, perr
+		}
+		forkPlan = plan
+	}
+
 	// Create mission request
 	createReq := &CreateMissionRequest{
 		MissionDefinitionJSON: definitionJSON,
@@ -3280,6 +3313,20 @@ func (s *HarnessCallbackService) CreateMission(ctx context.Context, req *harness
 				Message: fmt.Sprintf("failed to create mission: %v", err),
 			},
 		}, nil
+	}
+
+	// The bounds of ADR-0063 ran in CreateMission, before the snapshot. A
+	// fork that fails cancels the child, so no child waits for a fork that
+	// does not exist.
+	if forkPlan != nil {
+		if ferr := s.forkCallerForChild(ctx, forkPlan, missionInfo.ID); ferr != nil {
+			if cerr := s.missionManager.Cancel(ctx, missionInfo.ID); cerr != nil {
+				s.logger.Error("cancel the child mission of a failed fork", "mission_id", missionInfo.ID, "error", cerr)
+			}
+			s.logger.Warn("mission origination failed: the caller was not forked",
+				"mission_id", missionInfo.ID, "parent_mission_id", parentMissionID.String(), "error", ferr)
+			return nil, ferr
+		}
 	}
 
 	s.logger.Info("mission originated from inside its parent",
@@ -3623,4 +3670,17 @@ func (s *HarnessCallbackService) GetMissionResults(ctx context.Context, req *har
 			CompletedAt: result.CompletedAt.UnixMilli(),
 		},
 	}, nil
+}
+
+// inheritNodeScope gives a delegated agent the node of its caller. A
+// delegation runs inside the node of the caller, so the sub-agent gets the
+// node id and the network scope of that node (gibson#865, ADR-0169). It is
+// not a mission node of its own: no later node names it, and it starts from
+// no other node, so StartsFrom and Forkable stay empty.
+func inheritNodeScope(task agent.Task, caller MissionContext) agent.Task {
+	task.NodeID = caller.NodeID
+	task.Network = caller.NodeNetwork
+	task.StartsFrom = ""
+	task.Forkable = false
+	return task
 }

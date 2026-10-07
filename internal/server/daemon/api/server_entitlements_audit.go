@@ -4,9 +4,7 @@
 package api
 
 // server_entitlements_audit.go — classification helpers + emission shims
-// used by the entitlements admin RPCs (WriteAccessTuples,
-// UpsertTenantQuota, EmitAuditEvent) and the tenant-operator's
-// reconciliation summary path.
+// used by the entitlements admin RPCs (WriteAccessTuples, EmitAuditEvent).
 //
 // Classification logic is intentionally pure (no I/O, no logger) so it is
 // easy to unit-test.
@@ -104,9 +102,8 @@ func formatTuple(user, relation, object string) string {
 	return user + "#" + relation + "@" + object
 }
 
-// auditEmitter is the narrow sink used by emitAccessTupleChange /
-// emitReconcileSummary. Satisfied by *audit.AuditLogger; tests inject an
-// in-memory recorder.
+// auditEmitter is the narrow sink used by emitAccessTupleChange. Satisfied
+// by *audit.AuditLogger; tests inject an in-memory recorder.
 type auditEmitter interface {
 	Log(ctx context.Context, action, resource, resourceID string, details map[string]any)
 }
@@ -138,40 +135,4 @@ func emitAccessTupleChange(
 		"timestamp":      time.Now().UTC().Format(time.RFC3339Nano),
 	}
 	em.Log(ctx, "access_tuple_change", "component", tuple.Object, details)
-}
-
-// ReconcileSummaryFields carries the trigger + deltas a tenant-operator
-// reconcile pass emits at the end of each loop.
-type ReconcileSummaryFields struct {
-	Plan                 string
-	AddedFeatureTuples   int
-	RemovedFeatureTuples int
-	QuotaDelta           int
-	DurationMs           int64
-	Trigger              string // "cr_change" | "background" | "stripe_webhook"
-}
-
-// emitReconcileSummary records one entitlements-reconcile summary audit
-// event. Intended to be called by the tenant-operator via EmitAuditEvent.
-func emitReconcileSummary(
-	ctx context.Context,
-	em auditEmitter,
-	tenantID string,
-	actorSource string,
-	f ReconcileSummaryFields,
-) {
-	if em == nil {
-		return
-	}
-	details := map[string]any{
-		"plan":                   f.Plan,
-		"added_feature_tuples":   f.AddedFeatureTuples,
-		"removed_feature_tuples": f.RemovedFeatureTuples,
-		"quota_delta":            f.QuotaDelta,
-		"duration_ms":            f.DurationMs,
-		"trigger":                f.Trigger,
-		"actor_source":           actorSource,
-		"timestamp":              time.Now().UTC().Format(time.RFC3339Nano),
-	}
-	em.Log(ctx, "entitlements_reconcile", "tenant", tenantID, details)
 }

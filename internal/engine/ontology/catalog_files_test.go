@@ -34,7 +34,8 @@ func TestLoadCatalog_ASecondPackNeedsNoGoChange(t *testing.T) {
 	require.NoError(t, err)
 	fsys := fstest.MapFS{
 		"packs/main.json": {Data: main},
-		"packs/web.json":  {Data: []byte(`{"name":"web","version":2,"predicates":{"t1":"true"}}`)},
+		"packs/web.json": {Data: []byte(
+			`{"name":"web","version":2,"predicates":{"t1":"true"},"techniques":{"t1":"reconnaissance"}}`)},
 	}
 	c, err := LoadCatalog(fsys)
 	require.NoError(t, err)
@@ -60,6 +61,10 @@ func TestLoadCatalog_Refusals(t *testing.T) {
 		"name is not file": {map[string]string{"packs/a.json": `{"name":"b"}`}, `want "a"`},
 		"invalid pack":     {map[string]string{"packs/a.json": `{"name":"a","taxonomy_node_labels":["bad label"]}`}, `catalog pack "a"`},
 		"bad technique":    {map[string]string{"packs/a.json": `{"name":"a","techniques":{"t":"no_such"}}`}, "not admitted"},
+		"predicate outside the hierarchy": {
+			map[string]string{"packs/a.json": `{"name":"a","predicates":{"no_such_technique":"true"}}`},
+			"not a technique of the hierarchy",
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

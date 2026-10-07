@@ -62,28 +62,6 @@ func TestSanitizeForNeo4j_TooLong(t *testing.T) {
 	assert.Contains(t, err.Error(), "63-character")
 }
 
-func TestIsNeo4jDBNotExist(t *testing.T) {
-	tests := []struct {
-		name     string
-		errMsg   string
-		expected bool
-	}{
-		{"database does not exist", "database does not exist", true},
-		{"DatabaseNotFound", "Neo.ClientError.Database.DatabaseNotFound", true},
-		{"other error", "connection refused", false},
-		{"nil error", "", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var err error
-			if tc.errMsg != "" {
-				err = &testError{tc.errMsg}
-			}
-			assert.Equal(t, tc.expected, isNeo4jDBNotExist(err))
-		})
-	}
-}
-
 // TestNeo4jPerTenant_NilResolver verifies that a nil resolver panics loudly
 // rather than silently misbehaving. In production the resolver is always set
 // by the daemon bootstrap.

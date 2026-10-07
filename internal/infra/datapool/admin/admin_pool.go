@@ -92,9 +92,6 @@ type AdminPoolConfig struct {
 
 	// Neo4jPassword is the Neo4j admin password.
 	Neo4jPassword string
-
-	// VectorStoreAddr is the host:port of the vector store admin endpoint.
-	VectorStoreAddr string
 }
 
 // AdminPool is the cross-tenant connection pool. It holds a single set of
@@ -111,9 +108,6 @@ type AdminPool struct {
 	redisAdmin  *redis.Client
 	neo4jAdmin  neo4j.DriverWithContext
 	vectorAdmin vectordb.Driver
-
-	// tenantPool is used by ForEachTenant to acquire per-tenant Conns.
-	tenantPool datapool.Pool
 
 	// fgaClient checks platform_operator relation.
 	fgaClient authz.Authorizer
@@ -146,7 +140,6 @@ func New(cfg AdminPoolConfig, tenantPool datapool.Pool, fgaClient authz.Authoriz
 	initMetrics()
 
 	ap := &AdminPool{
-		tenantPool:   tenantPool,
 		fgaClient:    fgaClient,
 		auditEmitter: auditEmitter,
 		logger:       logger.With("component", "datapool.admin"),
@@ -256,12 +249,7 @@ func (ap *AdminPool) Acquire(ctx context.Context) (*datapool.AdminConn, error) {
 	)
 
 	conn := &datapool.AdminConn{
-		AdminPostgres:    ap.pgAdmin,
-		AdminRedis:       ap.redisAdmin,
-		AdminNeo4jDriver: ap.neo4jAdmin,
-		AdminVector:      ap.vectorAdmin,
-		Subject:          subject,
-		RPCMethod:        rpcMethod,
+		Subject: subject,
 	}
 
 	return conn, nil
@@ -280,11 +268,4 @@ func (ap *AdminPool) Close() error {
 		_ = ap.neo4jAdmin.Close(context.Background())
 	}
 	return nil
-}
-
-// TenantPool returns the underlying per-tenant Pool. This is exposed so that
-// admin.ForEachTenant can acquire per-tenant Conns without holding a reference
-// directly.
-func (ap *AdminPool) TenantPool() datapool.Pool {
-	return ap.tenantPool
 }

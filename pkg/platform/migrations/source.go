@@ -8,6 +8,7 @@
 package migrations
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -82,35 +83,89 @@ var (
 	}}
 )
 
-// scanMaxVersion walks dir within fsys, parses leading NNN_ prefix
-// from each *.up.sql filename, returns the largest. Returns 0 with
-// nil error when the directory contains no up files (legitimate
-// state for a not-yet-populated subset).
+// scanMaxVersion returns the largest version of the *.up.sql files in dir
+// within fsys, after CheckVersions accepts the set. It returns 0 with a nil
+// error when the directory holds no up files (legitimate for a
+// not-yet-populated subset).
 func scanMaxVersion(fsys fs.FS, dir string) (uint, error) {
+	if err := CheckVersions(fsys, dir); err != nil {
+		return 0, err
+	}
+	versions, err := upVersions(fsys, dir)
+	if err != nil {
+		return 0, err
+	}
+	return highestVersion(versions), nil
+}
+
+// highestVersion returns the highest version of the set, or 0 for an empty set.
+func highestVersion(versions map[uint][]string) uint {
+	var highest uint
+	for v := range versions {
+		highest = max(highest, v)
+	}
+	return highest
+}
+
+// ErrDuplicateVersion reports two up migrations with one version number.
+var ErrDuplicateVersion = errors.New("migrations: two up migrations have the same version")
+
+// ErrVersionGap reports a version number between 1 and the highest version
+// that no up migration has.
+var ErrVersionGap = errors.New("migrations: the version sequence has a gap")
+
+// CheckVersions refuses a set of migrations that golang-migrate would not
+// apply as written. golang-migrate records one integer version and only
+// moves forward, so:
+//
+//   - two up files with one version: one of them never runs, or the source
+//     refuses to open, depending on the order of the files;
+//   - a gap: a migration that later fills it is never applied on a database
+//     that is already past it.
+//
+// Each error names the files and says what to do. Files whose name does not
+// start with a version (README.md and the like) are ignored.
+func CheckVersions(fsys fs.FS, dir string) error {
+	versions, err := upVersions(fsys, dir)
+	if err != nil {
+		return err
+	}
+	highest := highestVersion(versions)
+	var errs []error
+	for v := uint(1); v <= highest; v++ {
+		names := versions[v]
+		switch {
+		case len(names) == 0:
+			errs = append(errs, fmt.Errorf("%w: %s has no up migration %03d; number the migrations 1 to %d with no hole",
+				ErrVersionGap, dir, v, highest))
+		case len(names) > 1:
+			errs = append(errs, fmt.Errorf("%w: %s and %s in %s both have version %03d; give the newer one the next free number, %03d",
+				ErrDuplicateVersion, names[0], names[1], dir, v, highest+1))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// upVersions maps each version to the names of its *.up.sql files in dir,
+// in name order.
+func upVersions(fsys fs.FS, dir string) (map[uint][]string, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
-		return 0, fmt.Errorf("migrations: read %s: %w", dir, err)
+		return nil, fmt.Errorf("migrations: read %s: %w", dir, err)
 	}
-	var max uint
+	versions := map[uint][]string{}
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		if !strings.HasSuffix(name, ".up.sql") {
+		if e.IsDir() || !strings.HasSuffix(name, ".up.sql") {
 			continue
 		}
-		v, err := parseVersionPrefix(name)
-		if err != nil {
-			// Skip files that don't match the NNN_ pattern; they
-			// might be README.md or similar metadata.
+		v, perr := parseVersionPrefix(name)
+		if perr != nil {
 			continue
 		}
-		if v > max {
-			max = v
-		}
+		versions[v] = append(versions[v], name)
 	}
-	return max, nil
+	return versions, nil
 }
 
 // parseVersionPrefix extracts the leading NNN_ uint from a

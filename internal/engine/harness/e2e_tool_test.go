@@ -70,7 +70,7 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 			"file_descriptor_set": fdsBase64,
 		}
 
-		inputMsg, err := resolver.ResolveInputType(ctx, inputTypeName, metadata)
+		inputMsg, err := resolver.UnmarshalProtoJSON(ctx, inputTypeName, []byte("{}"), metadata)
 		require.NoError(t, err, "should resolve input type")
 		require.NotNil(t, inputMsg, "input message should not be nil")
 
@@ -127,7 +127,7 @@ func TestE2ERemoteToolExecution(t *testing.T) {
 			"file_descriptor_set": fdsBase64,
 		}
 
-		inputMsg, err := resolver.ResolveInputType(ctx, inputTypeName, metadata)
+		inputMsg, err := resolver.UnmarshalProtoJSON(ctx, inputTypeName, []byte("{}"), metadata)
 		require.NoError(t, err)
 
 		inputRefl := inputMsg.ProtoReflect()
@@ -285,7 +285,7 @@ func (q *remoteToolQueue) Enqueue(ctx context.Context, tenant, kind, name string
 	if _, err := q.queueFake.Enqueue(ctx, tenant, kind, name, item); err != nil {
 		return "", err
 	}
-	input, err := q.resolver.ResolveInputType(ctx, q.inputTypeName, q.metadata)
+	input, err := q.resolver.UnmarshalProtoJSON(ctx, q.inputTypeName, []byte("{}"), q.metadata)
 	if err != nil {
 		return "", fmt.Errorf("resolve input type: %w", err)
 	}
@@ -408,7 +408,6 @@ func createHarnessWithResolver(t *testing.T, queue component.WorkQueue) AgentHar
 	// Create ProtoResolver with default config
 	resolver := protoresolver.NewDefaultProtoResolver(protoresolver.ProtoResolverConfig{
 		CacheMaxEntries: 100,
-		StrictMode:      false,
 		LogFallbacks:    true,
 	})
 

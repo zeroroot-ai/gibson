@@ -197,7 +197,9 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 // without an FGA round-trip. Returns a non-nil error only on FGA failure; a
 // clean "no" is (false, nil).
 func (s *IdentityServer) canRevokeSomeSessions(ctx context.Context, principalID, tenantID string) (bool, error) {
-	if s.authorizer == nil || tenantID == "" {
+	// NewServer requires the authorizer, so it is never nil here
+	// (gibson#681). A principal with no tenant administers nothing.
+	if tenantID == "" {
 		return false, nil
 	}
 	// Component principals carry a typed prefix containing ':'; a bare

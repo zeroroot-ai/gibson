@@ -8,6 +8,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +38,7 @@ func failGetNamed(c client.WithWatch, name string) client.WithWatch {
 func newSubjectsTestReconciler(t *testing.T, objs ...client.Object) *PlatformBootstrapReconciler {
 	t.Helper()
 	return &PlatformBootstrapReconciler{
+		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: fake.NewClientBuilder().WithScheme(mustScheme(t)).WithObjects(objs...).Build(),
 		Scheme: mustScheme(t),
 	}

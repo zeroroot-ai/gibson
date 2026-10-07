@@ -14,11 +14,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +32,7 @@ import (
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 )
 
 const (
@@ -41,9 +44,9 @@ const (
 	finalizer = "gibson.zeroroot.ai/connector-cleanup"
 
 	// revokeDeadline bounds the finalizer's retry on a failing revoke. Past it
-	// the finalizer releases with a logged warning rather than wedging the
-	// delete forever behind a daemon that is down: the credential Secret is
-	// already gone with the CR, and the grant is reported for manual revoke.
+	// the finalizer writes an unrevoked grant record and releases, rather
+	// than wedging the delete forever behind a daemon that is down. The
+	// retry loop (UnrevokedGrantsRunnable) revokes the recorded grant later.
 	revokeDeadline = 10 * time.Minute
 
 	// tenantNamespacePrefix is the fixed prefix of a per-tenant namespace
@@ -116,6 +119,12 @@ type ConnectorInstanceReconciler struct {
 	AuthReader ConnectorAuthReader
 	// Now is the clock the revoke deadline is measured on. Nil means time.Now.
 	Now func() time.Time
+	// ProxyAuth is the caller authentication of each connector proxy.
+	// Required: with an empty value the operator makes no proxy.
+	ProxyAuth ProxyAuth
+	// Audit writes the record of each runtime, network or grant change
+	// before the change (gibson#583). Required.
+	Audit *audit.SagaEmitter
 }
 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=connectorinstances,verbs=get;list;watch;create;update;patch;delete
@@ -137,6 +146,9 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 		return ctrl.Result{}, fmt.Errorf("get connectorinstance: %w", err)
 	}
+	if r.Audit == nil {
+		return ctrl.Result{}, fmt.Errorf("connectorinstance: %w", audit.ErrNoSink)
+	}
 
 	// Deletion: run the finalizer, then let Kubernetes remove the object. The
 	// owner references garbage-collect the ToolHive resource and the
@@ -151,15 +163,38 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		}
 	}
 
+	// The network, egress and runtime changes of a generation are recorded
+	// once, before the first of them (gibson#583). A pass at a generation
+	// that is already applied is an idempotent re-check with no new record.
+	var record *audit.Event
+	if !applySettled(&ci) {
+		ev := audit.ObjectEvent(audit.ActionConnectorApply, &ci, map[string]string{
+			"connector":  ci.Spec.Connector,
+			"generation": strconv.FormatInt(ci.Generation, 10),
+		})
+		if err := r.Audit.Record(ctx, ev); err != nil {
+			return r.fail(ctx, &ci, "AuditRecord", fmt.Errorf("%w: %w", audit.ErrNotRecorded, err))
+		}
+		record = &ev
+	}
+	failed := func(reason string, cause error) (ctrl.Result, error) {
+		if record != nil {
+			if ferr := r.Audit.RecordFailure(ctx, *record, cause); ferr != nil {
+				logger.Error(ferr, "the failure record was not written")
+			}
+		}
+		return r.fail(ctx, &ci, reason, cause)
+	}
+
 	// The tenant default-deny NetworkPolicy severs the connector; open exactly
 	// the paths it needs (ADR-0114, Slice 3).
 	if err := r.reconcileNetworkPolicy(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "NetworkPolicy", err)
+		return failed("NetworkPolicy", err)
 	}
 
 	// The egress of the connector follows its host list (ADR-0114).
 	if err := r.reconcileCiliumEgressPolicy(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "EgressPolicy", err)
+		return failed("EgressPolicy", err)
 	}
 
 	// The connector's credential is NOT reconciled here. For auth secret and
@@ -170,19 +205,19 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 
 	// Confine egress to the vendor hosts, when declared (ADR-0114).
 	if err := r.reconcileEgressProfile(ctx, &ci); err != nil {
-		return r.fail(ctx, &ci, "EgressProfile", err)
+		return failed("EgressProfile", err)
 	}
 
 	// Reconcile the ToolHive resource the ConnectorInstance owns.
 	th, err := r.desiredToolHive(&ci)
 	if err != nil {
-		return r.fail(ctx, &ci, "InvalidSpec", err)
+		return failed("InvalidSpec", err)
 	}
 	if err := controllerutil.SetControllerReference(&ci, th, r.Scheme); err != nil {
-		return r.fail(ctx, &ci, "OwnerRef", err)
+		return failed("OwnerRef", err)
 	}
 	if err := r.applyToolHive(ctx, th); err != nil {
-		return r.fail(ctx, &ci, "ApplyToolHive", err)
+		return failed("ApplyToolHive", err)
 	}
 
 	// Read the live ToolHive resource to reflect its phase.
@@ -344,7 +379,8 @@ func (r *ConnectorInstanceReconciler) checkCredential(
 // finalize revokes the connector's grant through the daemon and releases the
 // finalizer (ADR-0061). A failing revoke is retried with backoff until
 // revokeDeadline has passed since the delete, then the finalizer releases
-// with a logged warning so the delete never wedges. A connector with no
+// after it writes a durable record of the grant (recordUnrevokedGrant), so
+// the delete never wedges and the grant stays visible. A connector with no
 // vendor credential (auth none) has no grant and skips the revoke.
 func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connectorv1alpha1.ConnectorInstance) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(ci, finalizer) {
@@ -353,7 +389,12 @@ func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connecto
 	logger := log.FromContext(ctx)
 
 	if ci.Spec.Auth != connectorv1alpha1.ConnectorAuthNone {
-		if err := r.revokeGrant(ctx, ci); err != nil {
+		ev := audit.ObjectEvent(audit.ActionConnectorDelete, ci, map[string]string{"connector": ci.Spec.Connector})
+		if err := r.Audit.Change(ctx, ev, func() error { return r.revokeGrant(ctx, ci) }); errors.Is(err, audit.ErrNotRecorded) {
+			// No record, no revoke: retry, and never release the finalizer
+			// on a revoke that did not run.
+			return ctrl.Result{}, fmt.Errorf("record the revoke of ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
+		} else if err != nil {
 			if r.now().Sub(ci.DeletionTimestamp.Time) < revokeDeadline {
 				ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseDeprovisioning
 				ci.Status.LastError = fmt.Sprintf("GrantRevoke: %v", err)
@@ -362,8 +403,14 @@ func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connecto
 				// Returning the error requeues with the controller's backoff.
 				return ctrl.Result{}, fmt.Errorf("revoke connector grant: %w", err)
 			}
-			logger.Error(err, "releasing the finalizer without a confirmed grant revoke; revoke the grant by hand",
-				"connector", ci.Spec.Connector, "deadline", revokeDeadline.String())
+			// The finalizer releases, so a delete never wedges. The record
+			// keeps the grant visible, and the retry loop revokes it later.
+			tenant, connector := grantOwner(ci)
+			if recErr := recordUnrevokedGrant(ctx, r.Client, ci, tenant, connector, r.now()); recErr != nil {
+				return ctrl.Result{}, recErr
+			}
+			logger.Error(err, "releasing the finalizer without a confirmed grant revoke; the retry loop revokes the recorded grant",
+				"connector", connector, "deadline", revokeDeadline.String())
 		} else {
 			setCondition(ci, condRevoked, metav1.ConditionTrue, "Revoked", "the connector grant is revoked")
 		}
@@ -388,15 +435,31 @@ func (r *ConnectorInstanceReconciler) revokeGrant(ctx context.Context, ci *conne
 	if !strings.HasPrefix(ci.Namespace, tenantNamespacePrefix) {
 		return fmt.Errorf("namespace %q is not a tenant namespace", ci.Namespace)
 	}
-	connector := ci.Spec.Connector
-	if connector == "" {
-		connector = ci.Name
-	}
-	tenantID := strings.TrimPrefix(ci.Namespace, tenantNamespacePrefix)
+	tenantID, connector := grantOwner(ci)
 	if err := r.Revoker.Revoke(ctx, tenantID, connector); err != nil {
 		return fmt.Errorf("daemon revoke for %s/%s: %w", tenantID, connector, err)
 	}
 	return nil
+}
+
+// grantOwner returns the tenant and the connector of the grant of ci. The
+// tenant comes from the namespace (tenant-<id>).
+func grantOwner(ci *connectorv1alpha1.ConnectorInstance) (tenant, connector string) {
+	connector = ci.Spec.Connector
+	if connector == "" {
+		connector = ci.Name
+	}
+	return strings.TrimPrefix(ci.Namespace, tenantNamespacePrefix), connector
+}
+
+// applySettled reports a ConnectorInstance whose network, egress and runtime
+// are already applied at its current generation.
+func applySettled(ci *connectorv1alpha1.ConnectorInstance) bool {
+	if ci.Status.ObservedGeneration != ci.Generation {
+		return false
+	}
+	c := meta.FindStatusCondition(ci.Status.Conditions, condProvisioned)
+	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == ci.Generation
 }
 
 func (r *ConnectorInstanceReconciler) now() time.Time {
@@ -424,6 +487,9 @@ func toolHiveServingPhase(kind string) string {
 func (r *ConnectorInstanceReconciler) desiredToolHive(
 	ci *connectorv1alpha1.ConnectorInstance,
 ) (*unstructured.Unstructured, error) {
+	if err := r.ProxyAuth.validate(); err != nil {
+		return nil, err
+	}
 	transport := string(ci.Spec.Transport)
 	if transport == "" {
 		transport = string(connectorv1alpha1.ConnectorTransportStreamableHTTP)
@@ -454,6 +520,8 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
 			"podTemplateSpec":   mcpServerPodTemplate(),
+			"oidcConfig":        r.ProxyAuth.oidcConfig(),
+			"authzConfig":       r.ProxyAuth.authzConfig(),
 		}
 		// The declared vendor credentials (spec.credentials, gibson#597): the
 		// daemon publishes each one as a key of the same connector-cred
@@ -486,13 +554,10 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"remoteURL": ci.Spec.Endpoint,
 			"transport": transport,
 			"proxyPort": int64(proxyPort),
-			// oidcConfig is REQUIRED by the MCPRemoteProxy CRD. type kubernetes
-			// makes only the daemon's Kubernetes ServiceAccount token able to
-			// call the proxy — this IS the ADR-0114 decision "ToolHive OIDC
-			// gates daemon access".
-			"oidcConfig": map[string]interface{}{
-				"type": "kubernetes",
-			},
+			// The daemon is the only caller of the proxy (ADR-0114): its
+			// JWT-SVID, for the proxy audience, and its SPIFFE ID only.
+			"oidcConfig":  r.ProxyAuth.oidcConfig(),
+			"authzConfig": r.ProxyAuth.authzConfig(),
 		}
 		// A vendor connector presents a bearer token as the Authorization
 		// header. ToolHive forwards it from a Kubernetes Secret the daemon
@@ -589,6 +654,9 @@ func newToolHive(kind string) *unstructured.Unstructured {
 
 // SetupWithManager wires the controller and watches the owned ToolHive kinds.
 func (r *ConnectorInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("connectorinstance controller: %w", audit.ErrNoSink)
+	}
 	mcpServer := newToolHive(kindMCPServer)
 	if err := ctrl.NewControllerManagedBy(mgr).
 		For(&connectorv1alpha1.ConnectorInstance{}).

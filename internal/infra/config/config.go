@@ -68,7 +68,6 @@ type PlatformPostgresConfig struct {
 //	GIBSON_TENANT_POSTGRES_HOST           — server hostname
 //	GIBSON_TENANT_POSTGRES_PORT           — TCP port (default: 5432)
 //	GIBSON_TENANT_POSTGRES_ADMIN_DATABASE — admin database name (default: postgres)
-//	GIBSON_TENANT_POSTGRES_ADMIN_USERNAME — admin role (requires CREATEDB)
 //	GIBSON_TENANT_POSTGRES_ADMIN_PASSWORD — password (keep in K8s Secret)
 //	GIBSON_TENANT_POSTGRES_SSL_MODE       — sslmode value (default: disable)
 //	GIBSON_TENANT_POSTGRES_MAX_CONNS      — admin pool size (default: 5)
@@ -79,10 +78,6 @@ type TenantPostgresConfig struct {
 	// Port is the TCP port PostgreSQL listens on.
 	// Default: 5432
 	Port int `mapstructure:"port" yaml:"port"`
-
-	// AdminUsername is the PostgreSQL role used to authenticate.
-	// This role must have CREATEDB privilege for tenant provisioning.
-	AdminUsername string `mapstructure:"admin_username" yaml:"admin_username"`
 }
 
 // Config is the root configuration for the Gibson Framework.
@@ -661,7 +656,11 @@ type FgaClientConfig struct {
 
 // FgaTLSConfig holds TLS settings for the FGA client connection.
 type FgaTLSConfig struct {
-	// Enabled controls whether TLS is used when connecting to FGA.
-	// Default: false (in-cluster pod-to-pod traffic is already protected)
+	// Enabled makes the FGA client connect over TLS (https) and verify the
+	// server with CAFile only. When false, the endpoint must not be https.
 	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
+
+	// CAFile is the PEM CA bundle that signs the FGA server certificate.
+	// Required when Enabled is true: the daemon does not start without it.
+	CAFile string `mapstructure:"ca_file" yaml:"ca_file"`
 }

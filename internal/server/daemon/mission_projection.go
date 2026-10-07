@@ -158,6 +158,23 @@ func missionDefinitionToProjected(
 		nodes[i].Network = nodeNetwork(allNodes[nodes[i].ID], boundTargets(nodes[i].ID, targets, origins))
 	}
 
+	// 7. The fork fields of each node (ADR-0169, gibson#802). A node starts
+	// from the parked sandbox of the node that it names in starts_from, and a
+	// node that a later node names parks at its result line.
+	named := startsFromNames(allNodes)
+	for i := range nodes {
+		nodes[i].StartsFrom = allNodes[nodes[i].ID].GetStartsFrom()
+		nodes[i].Forkable = named[nodes[i].ID]
+	}
+
+	// 8. The sandbox checkpoint mode (ADR-0170): each agent node leaves a
+	// snapshot when it ends, so a rewind can start the node from it.
+	if def.GetCheckpoints() == missionpb.CheckpointMode_CHECKPOINT_MODE_SANDBOX {
+		for i := range nodes {
+			nodes[i].Checkpoint = nodes[i].Kind == "agent"
+		}
+	}
+
 	return brain.MissionProjected{
 		ID:          def.GetId(),
 		Goal:        goal,
@@ -802,4 +819,17 @@ func instanceIDsOf(nodeID string, all map[string]*missionpb.MissionNode) []strin
 	}
 	sort.Strings(out)
 	return out
+}
+
+// startsFromNames returns the id of each node that some node names in
+// starts_from. Such a node parks at its result line so the later node can
+// fork it (ADR-0169).
+func startsFromNames(nodes map[string]*missionpb.MissionNode) map[string]bool {
+	named := make(map[string]bool)
+	for _, n := range nodes {
+		if from := n.GetStartsFrom(); from != "" {
+			named[from] = true
+		}
+	}
+	return named
 }

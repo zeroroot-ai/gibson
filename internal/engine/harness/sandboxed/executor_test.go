@@ -33,10 +33,58 @@ type mockClient struct {
 	streamLog func(context.Context, string) (LogStream, error)
 	wait      func(context.Context, string) (WaitResponse, error)
 	kill      func(context.Context, string) error
+	fork      func(context.Context, ForkRequest) (ForkResponse, error)
+	recovery  func(context.Context, string) (SessionRecovery, bool, error)
+	snapshot  func(context.Context, string, time.Duration) (string, error)
+	isolation func(context.Context, string) (LaunchResponse, error)
+}
+
+// mockBoundClass is the class of the launcher of newAgentLauncher. With no
+// isolation stub, setec reports that each fork and restore is bound to it on
+// the launcher backend.
+const mockBoundClass = "agent"
+
+func (m *mockClient) Isolation(ctx context.Context, _, id string) (LaunchResponse, error) {
+	if m.isolation == nil {
+		return LaunchResponse{SandboxID: id, SandboxClass: mockBoundClass, Runtime: IsolatedRuntime}, nil
+	}
+	return m.isolation(ctx, id)
+}
+
+func (m *mockClient) Snapshot(ctx context.Context, _, id string, ttl time.Duration) (string, error) {
+	if m.snapshot == nil {
+		return "", errors.New("mockClient: no snapshot configured")
+	}
+	return m.snapshot(ctx, id, ttl)
+}
+
+func (m *mockClient) Recovery(ctx context.Context, _, id string) (SessionRecovery, bool, error) {
+	if m.recovery == nil {
+		return SessionRecovery{}, false, nil
+	}
+	return m.recovery(ctx, id)
 }
 
 func (m *mockClient) Launch(ctx context.Context, req LaunchRequest) (LaunchResponse, error) {
-	return m.launch(ctx, req)
+	resp, err := m.launch(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+	return reportedIsolation(req, resp), nil
+}
+
+// reportedIsolation fills the class and the runtime that setec reports on a
+// launch, as setec does: the class it bound (the requested one) and the
+// launcher backend. A stub that sets either field keeps its own value, so a
+// test can still report a mismatch or a runtime that is refused.
+func reportedIsolation(req LaunchRequest, resp LaunchResponse) LaunchResponse {
+	if resp.SandboxClass == "" {
+		resp.SandboxClass = req.SandboxClass
+	}
+	if resp.Runtime == "" {
+		resp.Runtime = IsolatedRuntime
+	}
+	return resp
 }
 func (m *mockClient) StreamLogs(ctx context.Context, _, id string) (LogStream, error) {
 	return m.streamLog(ctx, id)
@@ -45,6 +93,12 @@ func (m *mockClient) Wait(ctx context.Context, _, id string) (WaitResponse, erro
 	return m.wait(ctx, id)
 }
 func (m *mockClient) Kill(ctx context.Context, _, id string) error { return m.kill(ctx, id) }
+func (m *mockClient) Fork(ctx context.Context, req ForkRequest) (ForkResponse, error) {
+	if m.fork == nil {
+		return ForkResponse{}, errors.New("mockClient: no fork configured")
+	}
+	return m.fork(ctx, req)
+}
 
 // fixedLogs is a LogStream that emits a pre-built byte sequence once then EOF.
 type fixedLogs struct {

@@ -98,9 +98,14 @@ type AuditEntry struct {
 	// TenantID is the tenant that owns this entry.
 	TenantID string `json:"tenant_id"`
 
-	// ActorID is the authenticated subject (Subject claim from the identity token).
-	// Set to "unknown" when no identity is present in the context.
+	// ActorID is the authenticated subject (Subject claim from the identity
+	// token). The logger refuses an entry whose context has no identity.
 	ActorID string `json:"actor_id"`
+
+	// ActorSource is the class of the actor: "user", "agent" or "system". The
+	// logger derives it from the credential type of the identity, and it is
+	// the actor_type column of the durable audit_log row.
+	ActorSource string `json:"actor_source"`
 
 	// ActorEmail is the email address of the actor, if available.
 	// Set to "unknown" when no identity is present or the identity has no email.
@@ -294,22 +299,26 @@ func (a *AuditLogger) LogWithResult(
 // When the action then fails, record the failure with LogWithResult and
 // the result "failure".
 //
+// Record returns the id of the record (the entry_id of its metadata). A
+// caller that hands the request to another component passes the id with it,
+// so the records of that component name the request (gibson#583).
+//
 // Record returns ErrNoActor when the context carries no actor identity,
 // and the error of the durable write when Postgres does not accept it.
 func (a *AuditLogger) Record(
 	ctx context.Context,
 	action, resource, resourceID string,
 	details map[string]any,
-) error {
+) (string, error) {
 	rec, ok := a.build(ctx, action, resource, resourceID, resultSuccess, details)
 	if !ok {
-		return ErrNoActor
+		return "", ErrNoActor
 	}
 	if err := a.durable.WriteSync(ctx, rec.event); err != nil {
-		return fmt.Errorf("audit: record %q: %w", action, err)
+		return "", fmt.Errorf("audit: record %q: %w", action, err)
 	}
 	a.tail(rec)
-	return nil
+	return rec.entry.ID, nil
 }
 
 // ErrNoActor is returned by Record for a context with no actor identity.
@@ -351,16 +360,17 @@ func (a *AuditLogger) build(
 	}
 
 	entry := AuditEntry{
-		ID:         uuid.New().String(),
-		Timestamp:  time.Now().UTC(),
-		TenantID:   tenantID,
-		ActorID:    id.Subject,
-		ActorEmail: id.Subject,
-		Action:     action,
-		Resource:   resource,
-		ResourceID: resourceID,
-		Details:    details,
-		Result:     result,
+		ID:          uuid.New().String(),
+		Timestamp:   time.Now().UTC(),
+		TenantID:    tenantID,
+		ActorID:     id.Subject,
+		ActorSource: actorTypeFor(id.CredentialType),
+		ActorEmail:  id.Subject,
+		Action:      action,
+		Resource:    resource,
+		ResourceID:  resourceID,
+		Details:     details,
+		Result:      result,
 	}
 
 	detailsJSON, err := json.Marshal(entry.Details)
@@ -375,7 +385,7 @@ func (a *AuditLogger) build(
 	}
 	return built{
 		entry:       entry,
-		event:       durableEvent(entry, actorTypeFor(id.CredentialType), detailsJSON),
+		event:       durableEvent(entry, detailsJSON),
 		detailsJSON: detailsJSON,
 	}, true
 }
@@ -389,16 +399,17 @@ func (a *AuditLogger) tail(rec built) {
 		streamKey: a.streamKey(entry.TenantID),
 		entry:     entry,
 		values: map[string]any{
-			"id":          entry.ID,
-			"timestamp":   entry.Timestamp.Format(time.RFC3339Nano),
-			"tenant_id":   entry.TenantID,
-			"actor_id":    entry.ActorID,
-			"actor_email": entry.ActorEmail,
-			"action":      entry.Action,
-			"resource":    entry.Resource,
-			"resource_id": entry.ResourceID,
-			"details":     string(rec.detailsJSON),
-			"result":      entry.Result,
+			"id":           entry.ID,
+			"timestamp":    entry.Timestamp.Format(time.RFC3339Nano),
+			"tenant_id":    entry.TenantID,
+			"actor_id":     entry.ActorID,
+			"actor_source": entry.ActorSource,
+			"actor_email":  entry.ActorEmail,
+			"action":       entry.Action,
+			"resource":     entry.Resource,
+			"resource_id":  entry.ResourceID,
+			"details":      string(rec.detailsJSON),
+			"result":       entry.Result,
 		},
 	}
 	select {
@@ -416,7 +427,7 @@ func (a *AuditLogger) tail(rec built) {
 // durableEvent maps an entry of the logger onto a row of audit_log. The
 // metadata holds the entry id, the result and the details, so the row has
 // each field that the live tail has.
-func durableEvent(entry AuditEntry, actorType string, detailsJSON []byte) Event {
+func durableEvent(entry AuditEntry, detailsJSON []byte) Event {
 	meta, err := json.Marshal(struct {
 		EntryID string          `json:"entry_id"`
 		Result  string          `json:"result"`
@@ -430,7 +441,7 @@ func durableEvent(entry AuditEntry, actorType string, detailsJSON []byte) Event 
 	return Event{
 		TenantID:   entry.TenantID,
 		ActorID:    entry.ActorID,
-		ActorType:  actorType,
+		ActorType:  entry.ActorSource,
 		Action:     entry.Action,
 		TargetType: entry.Resource,
 		TargetID:   entry.ResourceID,
@@ -556,16 +567,17 @@ func entryFromStreamValues(values map[string]any) (AuditEntry, error) {
 	}
 
 	return AuditEntry{
-		ID:         getString("id"),
-		Timestamp:  ts,
-		TenantID:   getString("tenant_id"),
-		ActorID:    getString("actor_id"),
-		ActorEmail: getString("actor_email"),
-		Action:     getString("action"),
-		Resource:   getString("resource"),
-		ResourceID: getString("resource_id"),
-		Details:    details,
-		Result:     getString("result"),
+		ID:          getString("id"),
+		Timestamp:   ts,
+		TenantID:    getString("tenant_id"),
+		ActorID:     getString("actor_id"),
+		ActorSource: getString("actor_source"),
+		ActorEmail:  getString("actor_email"),
+		Action:      getString("action"),
+		Resource:    getString("resource"),
+		ResourceID:  getString("resource_id"),
+		Details:     details,
+		Result:      getString("result"),
 	}, nil
 }
 

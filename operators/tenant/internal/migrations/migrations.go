@@ -22,7 +22,6 @@ package migrations
 
 import (
 	"context"
-	"database/sql"
 	"embed"
 	"errors"
 	"fmt"
@@ -104,38 +103,6 @@ func Run(ctx context.Context, dsn string) error {
 	return runUp(m)
 }
 
-// RunWithDB is the constructor-injection variant of Run for tests that
-// already hold a *sql.DB they want to migrate. Production callers
-// should use Run with the DSN — RunWithDB skips the connectivity check
-// since the test fixture owns the connection lifecycle.
-func RunWithDB(_ context.Context, db *sql.DB, dbName string) error {
-	if db == nil {
-		return errors.New("migrations: nil db")
-	}
-	if dbName == "" {
-		return errors.New("migrations: dbName required")
-	}
-	src, err := iofs.New(platformFS, "files")
-	if err != nil {
-		return fmt.Errorf("migrations: open embedded source: %w", err)
-	}
-	defer func() { _ = src.Close() }()
-
-	driver, err := migratepg.WithInstance(db, &migratepg.Config{
-		DatabaseName:    dbName,
-		MigrationsTable: MigrationsTable,
-	})
-	if err != nil {
-		return fmt.Errorf("migrations: postgres driver: %w", err)
-	}
-	m, err := migrate.NewWithInstance("iofs", src, dbName, driver)
-	if err != nil {
-		return fmt.Errorf("migrations: migrate instance: %w", err)
-	}
-	defer func() { _, _ = m.Close() }()
-	return runUp(m)
-}
-
 // runUp calls m.Up() and recovers from dirty migration state. If a pod
 // is killed mid-migration, golang-migrate leaves schema_migrations with
 // dirty=true. On the next startup m.Up() returns ErrDirty rather than
@@ -167,23 +134,4 @@ func runUp(m *migrate.Migrate) error {
 		return fmt.Errorf("migrations: up: %w", err)
 	}
 	return nil
-}
-
-// EmbeddedFiles returns the names of all *.sql files bundled into the
-// binary. Test-only — used by the embedding contract test to assert
-// that adding a file under migrations/ at module-root level is also
-// reflected here (would be a foot-gun otherwise — embed.FS only sees
-// what //go:embed names).
-func EmbeddedFiles() ([]string, error) {
-	dirEntries, err := platformFS.ReadDir("files")
-	if err != nil {
-		return nil, fmt.Errorf("migrations: read embedded dir: %w", err)
-	}
-	names := make([]string, 0, len(dirEntries))
-	for _, e := range dirEntries {
-		if !e.IsDir() {
-			names = append(names, e.Name())
-		}
-	}
-	return names, nil
 }

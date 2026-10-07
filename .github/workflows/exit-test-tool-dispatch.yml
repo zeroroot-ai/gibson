@@ -18,11 +18,11 @@
 #
 # Driving the decision needs authenticated gRPC against the daemon, which in the
 # shipped profile only arrives via Envoy + ext-authz. So this brings up the SAME
-# setec+gvisor runtime but with a TEST-MODE daemon (authz disabled,
+# setec runtime but with a TEST-MODE daemon (authz disabled,
 # GIBSON_TEST_FIXTURES, built `-tags="setec_integration test_fixtures"`) so the
 # suite can dial the daemon directly — the model exit-test-sandboxed-dispatch.yml
 # already uses. Authentication itself is
-# covered by login_full_chain / auth e2e, not here.
+# covered by the dashboard staging lane, not here.
 #
 # The same cluster also hosts the PLUGIN SECRET REVOCATION exit test
 # (gibson#154): the GitHub plugin image runs beside Envoy, the suite revokes
@@ -105,9 +105,8 @@ jobs:
         with:
           path: gibson
 
-      # The kind bring-up (make substrate / make recreate ENV=kind), the
-      # sanctioned setec+gvisor profile and the gvisor node-prep live in the
-      # hosted repo since the 2026-09-04 split (ADR-0086; deploy and gitops
+      # The kind bring-up (make substrate / make recreate ENV=kind) and the
+      # sanctioned setec profile live in the hosted repo since the 2026-09-04 split (ADR-0086; deploy and gitops
       # were deleted). Reuse them rather than re-implementing the cluster in
       # this file (ONE bring-up path). hosted is private, so the checkout
       # needs the org read PAT; the default GITHUB_TOKEN cannot read it.
@@ -168,39 +167,31 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
-      # Stand up kind with the sanctioned setec+gvisor profile. baseline-up.sh
-      # --fresh-kind does the gvisor node-prep (runsc install + the containerd
-      # runsc handler) and installs the umbrella with values-baseline.yaml. The
-      # 2-core overlay shrinks REQUESTS so the whole platform packs onto the runner.
-      - name: Stand up the setec+gvisor cluster
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
+      - name: Open /dev/kvm for the launcher
+        uses: ./gibson/.github/actions/open-kvm
+
+      # Stand up kind with the sanctioned setec profile. The 2-core overlay
+      # shrinks REQUESTS so the whole platform packs onto the runner.
+      - name: Stand up the setec cluster
         working-directory: hosted
         run: |
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
             RUNG=ci make recreate ENV=kind
 
-      # The node must actually advertise gvisor, or every sandbox stays Pending.
-      # Kept explicit so a node-prep regression fails HERE with a clear message,
-      # not as a mystery timeout later.
-      - name: Node advertises gvisor
-        run: |
-          set -euo pipefail
-          for _ in $(seq 1 30); do
-            v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-            [ "$v" = "true" ] && { echo "node advertises runtime.gvisor=true"; break; }
-            sleep 5
-          done
-          v=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.setec\.zeroroot\.ai/runtime\.gvisor}' 2>/dev/null || true)
-          if [ "$v" != "true" ]; then
-            echo "::error::node does not advertise runtime.gvisor=true — gvisor node-prep failed (runsc binary or the containerd io.containerd.cri.v1.runtime handler is missing)"
-            kubectl -n setec-system logs -l app.kubernetes.io/component=runtime-agent --tail=40 || true
-            exit 1
-          fi
+      # With no KVM on the node every sandbox stays Pending. Fail here with a
+      # clear message, not as a timeout later.
+      - name: Node offers KVM to the launcher
+        uses: ./gibson/.github/actions/node-offers-kvm
+        with:
+          node: ${{ env.NODE }}
 
       # Swap in a TEST-MODE daemon so the e2e suite can dial gRPC directly:
       # authz disabled (no Envoy/ext-authz in the test), test fixtures on, and
       # built with setec_integration so tool dispatch reaches the real setec
       # executor. This changes ONLY how the client authenticates, never the
-      # setec+gvisor runtime under test.
+      # setec runtime under test.
       # The overlay below builds FROM the private daemon image on ghcr.io.
       # The cluster pulls it with the keyring's pull token, but the runner's
       # own docker has no credential and gets 401 (run 33643826807). Log it in
@@ -368,8 +359,25 @@ jobs:
           done
           status=0
           bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18080/mcp || status=$?
+          # The egress of the connector follows its host list (ADR-0114,
+          # gibson#758): the operator wrote its CiliumNetworkPolicy, the listed
+          # host opens, and a public host outside the list does not.
+          if [ "$status" -eq 0 ]; then
+            kubectl -n tenant-connector-e2e get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
+          fi
           kill "$pf" || true
           exit "$status"
+
+      # Cilium enforces each network policy of the chart on this cluster
+      # (hosted#436). Prove it for the daemon before the tests run, so a
+      # missing policy rule fails here and not on staging (gibson#220).
+      - name: The daemon refuses a pod that no policy admits
+        uses: ./gibson/.github/actions/policy-refuses-an-unadmitted-pod
+        with:
+          namespace: ${{ env.NS }}
+          release: ${{ env.RELEASE }}
 
       - name: Build the e2e suite into an image
         id: suite-image

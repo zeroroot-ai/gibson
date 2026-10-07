@@ -36,6 +36,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 )
 
 // GrantInfo is the dashboard-shaped view of one active capability grant.
@@ -86,6 +87,10 @@ type GrantsAdminServer struct {
 	// (a warning is logged so the lack-of-audit is observable).
 	auditWriter audit.DurableWriter
 
+	// secretNames lists the secrets of a tenant for WriteSecretGrants
+	// (secret_grants.go). The RPC returns Unimplemented when it is nil.
+	secretNames SecretNameLister
+
 	logger *slog.Logger
 	now    func() time.Time
 }
@@ -108,6 +113,9 @@ type GrantsAdminConfig struct {
 	// write or delete. When nil, writes proceed but audit is logged-only.
 	AuditWriter audit.DurableWriter
 
+	// SecretNames enables WriteSecretGrants. It needs Authorizer and Lookup.
+	SecretNames SecretNameLister
+
 	Logger *slog.Logger
 	Now    func() time.Time
 }
@@ -120,6 +128,9 @@ func NewGrantsAdminServer(cfg GrantsAdminConfig) (*GrantsAdminServer, error) {
 	}
 	if (cfg.Authorizer != nil) != (cfg.Lookup != nil) {
 		return nil, errors.New("grants admin: Authorizer and Lookup must be supplied together")
+	}
+	if cfg.SecretNames != nil && cfg.Authorizer == nil {
+		return nil, errors.New("grants admin: WriteSecretGrants needs an Authorizer and a Lookup")
 	}
 	now := cfg.Now
 	if now == nil {
@@ -134,6 +145,7 @@ func NewGrantsAdminServer(cfg GrantsAdminConfig) (*GrantsAdminServer, error) {
 		authorizer:  cfg.Authorizer,
 		lookup:      cfg.Lookup,
 		auditWriter: cfg.AuditWriter,
+		secretNames: cfg.SecretNames,
 		logger:      logger,
 		now:         now,
 	}, nil
@@ -198,7 +210,6 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *tenantv1.
 			AllowedRpcs:        g.AllowedRPCs,
 			MissionId:          g.MissionID,
 			TaskId:             g.TaskID,
-			IssuedAtUnix:       g.IssuedAt.Unix(),
 			ExpiresAtUnix:      g.ExpiresAt.Unix(),
 			NearExpiry:         nearExpiry,
 		})
@@ -213,29 +224,22 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *tenantv1.
 		return out[i].GetExpiresAtUnix() < out[j].GetExpiresAtUnix()
 	})
 
-	// Apply pagination.
-	limit := int(req.GetLimit())
-	if limit <= 0 {
-		limit = 100
+	// Apply pagination (ADR-0028, rule 3).
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	offset := int(req.GetOffset())
-	if offset < 0 {
-		offset = 0
-	}
-	total := int32(len(out))
-	if offset >= len(out) {
+	total := len(out)
+	if offset >= total {
 		out = out[:0]
 	} else {
-		end := offset + limit
-		if end > len(out) {
-			end = len(out)
-		}
-		out = out[offset:end]
+		out = out[offset:min(offset+limit, total)]
 	}
 
 	return &tenantv1.ListActiveGrantsResponse{
-		Grants: out,
-		Total:  total,
+		Grants:        out,
+		Total:         pagetoken.Int32(total),
+		NextPageToken: pagetoken.Next(offset, limit, len(out), total),
 	}, nil
 }
 

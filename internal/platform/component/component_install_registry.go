@@ -81,18 +81,12 @@ type ComponentInstall struct {
 	Name string
 	// Version is the semver version from the manifest.
 	Version string
-	// ManifestHash is the SHA-256 hex digest of the manifest YAML bytes.
-	ManifestHash string
 	// DeclaredMethods is the list of method names from manifest spec.methods.
 	DeclaredMethods []string
 	// ProtoDescriptorSet is the serialised FileDescriptorSet wire bytes.
 	ProtoDescriptorSet []byte
 	// HostID is the RFC 7638 JWK thumbprint of the registered host key.
 	HostID string
-	// RuntimeMode is one of: process, pod, setec.
-	RuntimeMode string
-	// SetecRequired is true when the manifest declares spec.policy.setec_required.
-	SetecRequired bool
 	// ContentTrust is the trust that the signed catalog states for this kind
 	// and name at registration (ADR-0136, S4). A value that the component
 	// reports about itself is not recorded. The dispatch gate reads the
@@ -101,7 +95,7 @@ type ComponentInstall struct {
 	ContentTrust componentpb.ContentTrust
 	// PrincipalRef is the FGA user the component registered as, the caller's
 	// signed identity in componentFGAUser shape (plugin_principal:<id> for a
-	// plugin). It is the user bindDeclaredSecrets grants can_resolve to and the
+	// plugin). It is the user a tenant admin grants can_resolve to and the
 	// key the component streams WatchComponentEvents under, so the admin RPCs
 	// that revoke or rebind a secret address it verbatim (gibson#154). Empty
 	// when the registration carried no identity.
@@ -291,19 +285,16 @@ func (r *postgresComponentInstallRegistry) Register(ctx context.Context, install
 
 	const upsertSQL = `
 INSERT INTO component_install (
-    id, tenant_id, kind, component_name, version, manifest_hash,
+    id, tenant_id, kind, component_name, version,
     declared_methods, proto_descriptor_set, host_id,
-    runtime_mode, setec_required, content_trust, principal_ref, created_at, created_by
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,now(),$14)
+    content_trust, principal_ref, created_at, created_by
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now(),$11)
 ON CONFLICT (tenant_id, kind, component_name, host_id)
 DO UPDATE SET
     id                   = EXCLUDED.id,
     version              = EXCLUDED.version,
-    manifest_hash        = EXCLUDED.manifest_hash,
     declared_methods     = EXCLUDED.declared_methods,
     proto_descriptor_set = EXCLUDED.proto_descriptor_set,
-    runtime_mode         = EXCLUDED.runtime_mode,
-    setec_required       = EXCLUDED.setec_required,
     content_trust        = EXCLUDED.content_trust,
     principal_ref        = EXCLUDED.principal_ref
 RETURNING id`
@@ -315,12 +306,9 @@ RETURNING id`
 		kind,
 		install.Name,
 		install.Version,
-		install.ManifestHash,
 		methodsJSON,
 		descriptorSet,
 		install.HostID,
-		install.RuntimeMode,
-		install.SetecRequired,
 		contentTrustToDB(install.ContentTrust),
 		install.PrincipalRef,
 		install.HostID, // created_by = host_id

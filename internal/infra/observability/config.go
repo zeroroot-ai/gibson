@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // TracingConfig contains distributed tracing configuration for observability.
@@ -209,59 +208,6 @@ func (c *ContentLoggingConfig) CompilePatterns() error {
 	}
 
 	return nil
-}
-
-// Redact applies all compiled redaction patterns to the given content.
-// Each match is replaced with [REDACTED]. CompilePatterns() must be called
-// before using this method.
-//
-// Example:
-//
-//	cfg := DefaultContentLoggingConfig()
-//	cfg.CompilePatterns()
-//	safe := cfg.Redact("My API key is: sk-EXAMPLE") // any pattern in c.compiledPatterns
-//	// safe == "My API key is: [REDACTED]"
-func (c *ContentLoggingConfig) Redact(content string) string {
-	result := content
-	for _, pattern := range c.compiledPatterns {
-		result = pattern.ReplaceAllString(result, "[REDACTED]")
-	}
-	return result
-}
-
-// Truncate truncates content to maxLen characters and appends "... [truncated]".
-// If content length is <= maxLen or maxLen <= 0, returns content unchanged.
-// Handles UTF-8 properly by not cutting in the middle of multi-byte runes.
-//
-// Example:
-//
-//	cfg := DefaultContentLoggingConfig()
-//	result := cfg.Truncate("This is a very long message", 10)
-//	// result == "This is a ... [truncated]"
-//
-//	result = cfg.Truncate("Short", 10)
-//	// result == "Short"
-//
-//	result = cfg.Truncate("Long message", 0)
-//	// result == "Long message" (no limit)
-func (c *ContentLoggingConfig) Truncate(content string, maxLen int) string {
-	// No truncation if maxLen is 0 or negative
-	if maxLen <= 0 {
-		return content
-	}
-
-	// No truncation needed if content is short enough
-	if utf8.RuneCountInString(content) <= maxLen {
-		return content
-	}
-
-	// Truncate at rune boundary to handle UTF-8 properly
-	runes := []rune(content)
-	if len(runes) <= maxLen {
-		return content
-	}
-
-	return string(runes[:maxLen]) + "... [truncated]"
 }
 
 // Validate validates the ContentLoggingConfig fields.

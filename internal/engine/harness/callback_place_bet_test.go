@@ -83,7 +83,7 @@ func newPlaceBetService(t *testing.T, h *placeBetMockHarness, agentName string, 
 	if substrate != nil {
 		opts = append(opts, WithBeliefSubstrate(substrate))
 	}
-	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
+	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, append(opts, testEventBus())...)
 }
 
 func placeBetRequest(missionID, agentName, hypothesisID, stakingAgent string, confidence float64, technique string) *harnesspb.PlaceBetRequest {

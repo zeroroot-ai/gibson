@@ -25,26 +25,17 @@ import "fmt"
 //     for, and refuses the sandbox on a mismatch or on a runtime backend that
 //     carries no isolation boundary.
 //
-// The setec.v1 gRPC ABI does not yet echo the resolved class or the chosen
-// runtime backend — LaunchResponse carries only sandbox_id/name/namespace,
-// and WaitResponse only phase/exit_code/reason. The Sandbox CR does record
-// the truth (spec.sandboxClassName and status.runtime.chosen, the latter one
-// of kata-fc, kata-qemu, gvisor, runc), it is simply not on the wire, and
-// gibson holds no Kubernetes client (ADR-0023) so it cannot read the CR.
-// LaunchResponse.SandboxClass / LaunchResponse.Runtime are the fields the
-// adapter fills once setec reports them; until then half (2) can only fire on
-// what an adapter does report. Tracked upstream — see the PR description.
+// The setec.v1 LaunchResponse reports the class that setec bound
+// (sandbox_class) and the runtime backend of that class (runtime). The
+// adapter copies both. A response that reports either one empty is refused:
+// a launch whose isolation is not reported is not proven contained.
 
-// isolatedRuntimes is the set of setec runtime backends that put a kernel or
-// user-space-kernel boundary between the sandboxed workload and the node.
-// `runc` is deliberately absent: it is setec's development backend and shares
-// the host kernel, which is exactly the posture ADR-0052 forbids for
-// untrusted code.
-var isolatedRuntimes = map[string]struct{}{
-	"kata-fc":   {},
-	"kata-qemu": {},
-	"gvisor":    {},
-}
+// IsolatedRuntime is the one setec runtime backend: a Firecracker machine in
+// a launcher pod (ADR-0116, ADR-0141, ADR-0166, setec#198). It puts a kernel
+// boundary between the sandboxed workload and the node. Each other value is
+// refused, including the backends that left setec (kata-fc, kata-qemu,
+// gvisor) and `runc`, which shares the host kernel.
+const IsolatedRuntime = "launcher"
 
 // VerifyIsolation reports whether a Launch round-trip actually produced the
 // isolation that was requested. It returns a non-nil error — meaning DENY the
@@ -52,6 +43,7 @@ var isolatedRuntimes = map[string]struct{}{
 //
 //   - no SandboxClass was requested, so the launch would inherit whatever the
 //     cluster happens to default to;
+//   - setec reported no class or no runtime, so the isolation is unproven;
 //   - setec bound the sandbox to a different class than the one requested;
 //   - setec resolved the class to a runtime backend with no isolation
 //     boundary.
@@ -63,17 +55,20 @@ func VerifyIsolation(requestedClass string, resp LaunchResponse) error {
 		return fmt.Errorf(
 			"isolation unverified: no sandbox class requested, so the launch inherits the cluster default")
 	}
-	if resp.SandboxClass != "" && resp.SandboxClass != requestedClass {
+	if resp.SandboxClass == "" || resp.Runtime == "" {
+		return fmt.Errorf(
+			"isolation unverified: setec reported class %q and runtime %q for a launch of class %q; both are required",
+			resp.SandboxClass, resp.Runtime, requestedClass)
+	}
+	if resp.SandboxClass != requestedClass {
 		return fmt.Errorf(
 			"isolation unverified: requested sandbox class %q but setec bound %q",
 			requestedClass, resp.SandboxClass)
 	}
-	if resp.Runtime != "" {
-		if _, ok := isolatedRuntimes[resp.Runtime]; !ok {
-			return fmt.Errorf(
-				"isolation unverified: sandbox class %q resolved to runtime %q, which provides no isolation boundary",
-				requestedClass, resp.Runtime)
-		}
+	if resp.Runtime != IsolatedRuntime {
+		return fmt.Errorf(
+			"isolation unverified: sandbox class %q resolved to runtime %q, not the %s backend of setec",
+			requestedClass, resp.Runtime, IsolatedRuntime)
 	}
 	return nil
 }

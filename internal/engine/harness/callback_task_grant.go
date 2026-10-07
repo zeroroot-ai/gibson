@@ -170,16 +170,28 @@ func tokenType(token string) string {
 // checkTaskGrantScope on every callback RPC. They run after the SDK auth
 // interceptor, because the tenant they compare against is the one that
 // interceptor placed on the context.
-func taskGrantScopeInterceptors(get func() TaskGrantVerifier, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+//
+// forks, when set, also refuses the grant of a forked source outside the
+// source sandbox, by the verified sandbox identity (checkForkGrant).
+func taskGrantScopeInterceptors(get func() TaskGrantVerifier, forks *forkGuard, logger *slog.Logger) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
 	unary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if err := checkSandboxIdentityCredential(ctx, info.FullMethod, logger); err != nil {
+			return nil, err
+		}
 		scoped, err := checkTaskGrantScope(ctx, req, get, info.FullMethod, logger)
 		if err != nil {
+			return nil, err
+		}
+		if err := checkForkGrant(scoped, forks, info.FullMethod, logger); err != nil {
 			return nil, err
 		}
 		return handler(scoped, req)
 	}
 	stream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		return handler(srv, &taskGrantScopedStream{ServerStream: ss, get: get, method: info.FullMethod, logger: logger})
+		if err := checkSandboxIdentityCredential(ss.Context(), info.FullMethod, logger); err != nil {
+			return err
+		}
+		return handler(srv, &taskGrantScopedStream{ServerStream: ss, get: get, forks: forks, method: info.FullMethod, logger: logger})
 	}
 	return unary, stream
 }
@@ -190,6 +202,7 @@ func taskGrantScopeInterceptors(get func() TaskGrantVerifier, logger *slog.Logge
 type taskGrantScopedStream struct {
 	grpc.ServerStream
 	get    func() TaskGrantVerifier
+	forks  *forkGuard
 	method string
 	logger *slog.Logger
 	// scoped is the request context with the verified claims, set on the
@@ -214,6 +227,28 @@ func (s *taskGrantScopedStream) RecvMsg(m any) error {
 	if err != nil {
 		return err
 	}
+	if err := checkForkGrant(scoped, s.forks, s.method, s.logger); err != nil {
+		return err
+	}
 	s.scoped = scoped
 	return nil
+}
+
+// credentialSandboxIdentity is the credential type that the edge asserts for
+// a ClaimFork call that carries only a sandbox identity token (D80).
+const credentialSandboxIdentity = "sandbox-identity"
+
+// checkSandboxIdentityCredential refuses the sandbox identity credential on
+// each method but ClaimFork. The edge asserts it for ClaimFork only, with no
+// verified subject and the system tenant, so no other handler may see it.
+func checkSandboxIdentityCredential(ctx context.Context, method string, logger *slog.Logger) error {
+	// With no identity on ctx, the auth interceptor has already refused the
+	// call, so only a present sandbox identity credential is checked here.
+	id, idErr := auth.IdentityFromContext(ctx)
+	sandboxCredential := idErr == nil && string(id.CredentialType) == credentialSandboxIdentity
+	if !sandboxCredential || method == claimForkMethod {
+		return nil
+	}
+	return deny(ctx, logger, method, "sandbox identity credential on another method than ClaimFork",
+		status.Error(codes.PermissionDenied, "a sandbox identity credential is valid for ClaimFork only"))
 }

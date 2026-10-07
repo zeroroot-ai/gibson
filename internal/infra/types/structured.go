@@ -110,21 +110,6 @@ type StructuredOutputOptions struct {
 	ReturnRawOnFail bool
 }
 
-// NewTextFormat creates a ResponseFormat for plain text output
-func NewTextFormat() ResponseFormat {
-	return ResponseFormat{
-		Type: ResponseFormatText,
-	}
-}
-
-// NewJSONObjectFormat creates a ResponseFormat for any valid JSON output
-func NewJSONObjectFormat(name string) ResponseFormat {
-	return ResponseFormat{
-		Type: ResponseFormatJSONObject,
-		Name: name,
-	}
-}
-
 // NewJSONSchemaFormat creates a ResponseFormat with a specific JSON schema
 func NewJSONSchemaFormat(name string, schema *JSONSchema, strict bool) ResponseFormat {
 	return ResponseFormat{
@@ -185,9 +170,6 @@ type StructuredOutputUnmarshalError struct {
 
 	// UnderlyingError is the original unmarshal error
 	UnderlyingError error
-
-	// Schema is the JSON schema that was expected (if available)
-	Schema *JSONSchema
 }
 
 // Error implements the error interface

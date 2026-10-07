@@ -61,8 +61,11 @@ service DaemonOperatorService {
     };
   }
 
-  // EmitAuditEvent lets an operator/platform workload forward a structured
-  // audit event onto the daemon's emitter.
+  // EmitAuditEvent writes the audit record of a change that an operator
+  // workload makes outside the daemon, for example a tenant namespace, a
+  // Velero backup or an FGA grant of the tenant-operator. The daemon writes
+  // the record to Postgres before it answers, so the caller makes the change
+  // only after the record exists (ADR-0113, gibson#583).
   rpc EmitAuditEvent(EmitAuditEventRequest) returns (EmitAuditEventResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "platform_operator",
@@ -350,6 +353,31 @@ service DaemonOperatorService {
     };
   }
 
+
+  // ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
+  // tenant enabled (gibson#815). The tenant-operator pulls it and runs one
+  // instance of the plugin for each pair. The daemon holds the desired state
+  // in Postgres and cannot write cluster resources itself (ADR-0023).
+  rpc ListDesiredCatalogPlugins(ListDesiredCatalogPluginsRequest) returns (ListDesiredCatalogPluginsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // ReportCatalogPluginStatus records the state of one tenant's instance of
+  // a catalog plugin, as the tenant-operator sees it in the cluster. A report
+  // for a pair no tenant enabled changes nothing.
+  rpc ReportCatalogPluginStatus(ReportCatalogPluginStatusRequest) returns (ReportCatalogPluginStatusResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -430,22 +458,38 @@ message SeedCatalogTenantEnabledResponse {
   reserved "tuples_written";
 }
 
-// AuditEventMessage is the wire shape for EmitAuditEvent.
+// AuditEventMessage is the wire shape for EmitAuditEvent. The actor is never
+// a field: the daemon takes it from the identity of the caller, so a caller
+// cannot write a record in the name of another subject.
 message AuditEventMessage {
+  // The action, for example "operator.saga_step".
   string type = 1;
-  string actor_subject = 2;
+  // Field 2 was actor_subject. The daemon never read it: the actor is the
+  // identity of the caller (gibson#583).
+  reserved 2;
+  reserved "actor_subject";
   // Field 3 was actor_source. The daemon derives the source from the caller's
   // identity (classifyActorSource) and never read the wire value, so a caller
   // cannot claim a source it does not have (gibson#544).
   reserved 3;
   reserved "actor_source";
-  string tuple = 4;
-  string action_class = 5;
-  string scope_type = 6;
-  string operation = 7;
+  // Fields 4 to 7 and 9 had no producer and were removed (gibson#583). The
+  // daemon stamps its own time on each record.
+  reserved 4, 5, 6, 7, 9;
+  reserved "tuple", "action_class", "scope_type", "operation", "timestamp";
+  // Why the change failed. Set only when result is "failure".
   string reason = 8;
-  string timestamp = 9;
   map<string, string> fields = 10;
+  // The tenant that owns the target. Required. A platform change names the
+  // system tenant.
+  string tenant_id = 11;
+  // The kind of the changed object, for example "tenant". Required.
+  string target_type = 12;
+  // The id of the changed object, for example the tenant name. Required.
+  string target_id = 13;
+  // Empty for the record written before the change. "failure" for the
+  // second record of a change that failed after its first record.
+  string result = 14;
 }
 
 // EmitAuditEventRequest carries the audit event to emit.
@@ -500,6 +544,11 @@ message PendingTenant {
   // Field 6 (stripe_customer_id) was removed (ADR-0060, D54).
   reserved 6;
   reserved "stripe_customer_id";
+  // audit_record_id is the id of the daemon audit record of the human request
+  // that queued this tenant. The operator stamps it on the Tenant as the
+  // gibson.zeroroot.ai/correlation-id annotation. Empty when no human request
+  // is behind the entry, for example the first-tenant seed (gibson#583).
+  string audit_record_id = 7;
 }
 
 // ListPendingTenantProvisioningRequest queries the pending queue. No filters
@@ -620,6 +669,10 @@ message TenantOp {
   // tier_set marks tier for application on an update op (always true for
   // provision).
   bool tier_set = 8;
+  // audit_record_id is the id of the daemon audit record of the admin request
+  // behind this op. The operator stamps it on the Tenant as the
+  // gibson.zeroroot.ai/correlation-id annotation (gibson#583).
+  string audit_record_id = 9;
 }
 
 // ListPendingTenantOpsRequest queries the pending admin-op queue. No filters
@@ -698,6 +751,10 @@ message GetBeliefTrainingDataResponse {
   repeated BeliefTrainingRow rows = 1;
   // edge_outcomes are in edge_type order.
   repeated EdgeOutcomeCount edge_outcomes = 2;
+  // has_current_version is true when the tenant has a current belief
+  // version. A trainer with a curated base model stores that base as the
+  // first version of a tenant that has none and no outcome yet (gibson#31).
+  bool has_current_version = 3;
 }
 
 message StoreBeliefArtifactRequest {
@@ -800,4 +857,45 @@ message GetConnectorCredentialResponse {
   // credential is declared. The operator then deletes the Secret, so a dead
   // token is never left mounted (ADR-0061).
   bool withdraw = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Catalog plugins for each tenant (gibson#815)
+// ---------------------------------------------------------------------------
+
+message ListDesiredCatalogPluginsRequest {}
+
+// DesiredCatalogPlugin is one instance the platform must run: the catalog
+// plugin plugin_id, for the tenant tenant_id.
+message DesiredCatalogPlugin {
+  // tenant_id is the tenant slug (Tenant CR name).
+  string tenant_id = 1;
+  // plugin_id is the catalog id of the plugin, for example "github".
+  string plugin_id = 2;
+  // image is the image of the plugin, pinned by digest, from the catalog
+  // entry of the daemon. The operator runs this image and no other, so the
+  // catalog of the daemon is the one source of what runs.
+  string image = 3;
+  // egress_allow is the egress list of the catalog entry, as "host:port".
+  repeated string egress_allow = 4;
+}
+
+message ListDesiredCatalogPluginsResponse {
+  repeated DesiredCatalogPlugin plugins = 1;
+}
+
+message ReportCatalogPluginStatusRequest {
+  // tenant_id is the tenant slug (Tenant CR name). Required.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // plugin_id is the catalog id of the plugin. Required.
+  string plugin_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // phase is the state of the instance, for example "Ready". Required.
+  string phase = 3 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+  // last_error is the last error of the instance, or empty.
+  string last_error = 4 [(buf.validate.field).string = { max_len: 16777216 }];
+}
+
+message ReportCatalogPluginStatusResponse {
+  // updated is true when a row for the pair exists and took the report.
+  bool updated = 1;
 }

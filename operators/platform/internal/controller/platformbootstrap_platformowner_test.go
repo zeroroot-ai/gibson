@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -143,6 +145,7 @@ func newOwnerTestReconciler(t *testing.T, zitadelURL, fgaURL string, objs ...cli
 	}
 	cli := builder.Build()
 	return &PlatformBootstrapReconciler{
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,
 		Scheme:   s,
 		Recorder: record.NewFakeRecorder(8),

@@ -15,7 +15,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	"github.com/zeroroot-ai/gibson/internal/engine/settlement/celenv"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -64,7 +67,7 @@ func newTestProofSettlementEngine(t *testing.T, tenant string, predicates map[st
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return &testProofSettlementEngine{
-		engine:     brain.NewRegistry(ctx).For(tenant),
+		engine:     brain.NewRegistry(ctx, braintest.StoreFactory()).For(tenant),
 		tenant:     tenant,
 		predicates: predicates,
 	}
@@ -157,7 +160,7 @@ func newSubmitProofService(
 	if engine != nil {
 		opts = append(opts, WithProofSettlement(engine))
 	}
-	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, opts...)
+	return NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, append(opts, testEventBus())...)
 }
 
 func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, toolCallIDs ...string) *harnesspb.SubmitProofRequest {
@@ -591,4 +594,38 @@ func TestSubmitProof_Bounds_InvalidArgument(t *testing.T) {
 	require.Nil(t, resp)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 	assert.Empty(t, engine.engine.ProofReviews())
+}
+
+// TestRecordedToolCall_SettlesTheMainPackHTTPPredicate is gibson#810. A proof
+// settles on the daemon's own record of a tool call, and the record reaches
+// the predicate as a log item that holds the tool result JSON. The main pack
+// predicate unauthenticated_endpoint_exposed must fire on a recorded 200 and
+// must not fire on a recorded 403.
+func TestRecordedToolCall_SettlesTheMainPackHTTPPredicate(t *testing.T) {
+	pack, ok := ontology.EmbeddedCatalog().Get(ontology.MainDomainPackName)
+	require.True(t, ok, "the embedded catalog must hold the main pack")
+	compiled, err := celenv.LoadDomainPack(&pack)
+	require.NoError(t, err)
+	predicate, ok := compiled["unauthenticated_endpoint_exposed"]
+	require.True(t, ok)
+
+	record := func(result string) []brain.AgentToolCallSnapshot {
+		return []brain.AgentToolCallSnapshot{{
+			ToolCallID:         "call-1",
+			ToolName:           "http-request",
+			Arguments:          `{"url":"https://target.test/admin"}`,
+			Result:             result,
+			RecordedAtUnixNano: time.Unix(1700000000, 0).UnixNano(),
+		}}
+	}
+
+	got, err := predicate.Evaluate(context.Background(),
+		recordedToolCallEvidence(record(`{"status_code":200,"body":"admin panel"}`)))
+	require.NoError(t, err)
+	assert.True(t, got, "a recorded 200 must settle the predicate")
+
+	got, err = predicate.Evaluate(context.Background(),
+		recordedToolCallEvidence(record(`{"status_code":403,"body":"forbidden"}`)))
+	require.NoError(t, err)
+	assert.False(t, got, "a recorded 403 must not settle the predicate")
 }

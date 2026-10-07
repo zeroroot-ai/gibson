@@ -211,20 +211,24 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 	// Replay work items. WorkDispatched creates them as running with Attempts=1.
 	for _, wi := range data.Work {
 		dsp := WorkDispatched{
-			ID:        wi.ID,
-			MissionID: wi.MissionID,
-			ItemKind:  wi.Kind,
-			Target:    wi.Target,
-			Input:     wi.Input,
-			Timeout:   wi.Timeout,
-			Group:     wi.Group,
-			Limit:     wi.Limit,
-			Network:   wi.Network,
+			ID:           wi.ID,
+			MissionID:    wi.MissionID,
+			ItemKind:     wi.Kind,
+			Target:       wi.Target,
+			Input:        wi.Input,
+			Timeout:      wi.Timeout,
+			Group:        wi.Group,
+			Limit:        wi.Limit,
+			Network:      wi.Network,
+			StartsFrom:   wi.StartsFrom,
+			Forkable:     wi.Forkable,
+			Checkpoint:   wi.Checkpoint,
+			FromSnapshot: wi.FromSnapshot,
 		}
 		Reduce(w, dsp)
 		switch wi.State {
 		case WorkDone:
-			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result})
+			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result, Snapshot: wi.Snapshot})
 		case WorkFailed:
 			Reduce(w, WorkCompleted{ID: wi.ID, Err: wi.Err})
 		case WorkPending:
@@ -235,7 +239,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		case WorkSkipped:
 			// No direct WorkSkipped event path; restore as done (close enough — the
 			// tail replay will correct any scheduler state that depends on this).
-			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result})
+			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result, Snapshot: wi.Snapshot})
 			// WorkRunning: already created as running by WorkDispatched — no extra event.
 		}
 		// The restore replays completions in snapshot order, which is not the
@@ -452,6 +456,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			TaxonomyRelationshipTypes: append([]string(nil), p.TaxonomyRelationshipTypes...),
 			Predicates:                clonePredicateMap(p.Predicates),
 			NonDestructivePredicates:  append([]string(nil), p.NonDestructivePredicates...),
+			Techniques:                clonePredicateMap(p.Techniques),
 		})
 	}
 

@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga/flows"
@@ -26,7 +28,10 @@ type AgentEnrollmentReconciler struct {
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
 
-	Runner          *saga.Runner
+	Runner *saga.Runner
+	// Audit writes the audit record of each saga step before the step
+	// changes state (gibson#583). Required: SetupWithManager fails without it.
+	Audit           *audit.SagaEmitter
 	Deps            flows.EnrollmentDeps
 	IssuanceSteps   []saga.Step
 	RevocationSteps []saga.Step
@@ -104,11 +109,14 @@ func (r *AgentEnrollmentReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 func (r *AgentEnrollmentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Audit == nil {
+		return fmt.Errorf("agent enrollment reconciler: %w", saga.ErrNoAudit)
+	}
 	if r.Recorder == nil {
 		r.Recorder = mgr.GetEventRecorder("agent-enrollment-controller")
 	}
 	if r.Runner == nil {
-		r.Runner = saga.NewRunner(r.Client, r.Recorder, mgr.GetLogger())
+		r.Runner = saga.NewRunner(r.Client, r.Recorder, mgr.GetLogger(), r.Audit)
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.AgentEnrollment{}).
