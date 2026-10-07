@@ -676,6 +676,20 @@ func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb 
 	// their own finalizers to revoke Zitadel-side state. We do NOT
 	// delete the FGA model or Zitadel project — destructive ops require
 	// explicit operator action.
+	// The pending audit records live in this status, and the status goes with
+	// the object. Send them first. The finalizer stays until the daemon has
+	// them, or until pendingDeleteGrace has passed since the delete started.
+	// After the grace the records go to the operator log, which is the last
+	// resort, so a teardown with no daemon does not hang for ever.
+	if _, ferr := flushPendingSent(ctx, r.Audit, &pb.Status.PendingAuditRecords); ferr != nil && len(pb.Status.PendingAuditRecords) > 0 {
+		if time.Since(pb.DeletionTimestamp.Time) < pendingDeleteGrace {
+			if serr := r.statusUpdate(ctx, pb); serr != nil {
+				return ctrl.Result{}, serr
+			}
+			return ctrl.Result{RequeueAfter: pendingRequeue}, nil
+		}
+		logPendingLost(ctx, pb.Status.PendingAuditRecords)
+	}
 	controllerutil.RemoveFinalizer(pb, platformBootstrapFinalizer)
 	if err := r.Update(ctx, pb); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)

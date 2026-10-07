@@ -374,29 +374,39 @@ func (r *CatalogPluginRunnable) desiredHash(p provision.DesiredCatalogPlugin) st
 }
 
 // instanceChanges reports whether a pass makes a change to the instance that
-// needs an audit record: the instance is new, its identity registration is
-// gone, or its desired state is not the one that the loop last applied.
+// needs an audit record: one of its objects is missing, or its desired state
+// is not the one that the loop last applied. It reads the namespace and its
+// RoleBinding first, because the operator can read the objects inside the
+// namespace only through that RoleBinding. A Forbidden answer counts as a
+// missing object.
 func (r *CatalogPluginRunnable) instanceChanges(ctx context.Context, p provision.DesiredCatalogPlugin) (bool, error) {
-	var dep appsv1.Deployment
-	key := client.ObjectKey{Namespace: pluginNamespace(p.TenantID), Name: pluginObjectName(p.PluginID)}
-	switch err := r.Client.Get(ctx, key, &dep); {
-	case apierrors.IsNotFound(err):
-		return true, nil
-	case err != nil:
-		return false, fmt.Errorf("get Deployment %s: %w", key, err)
-	}
-	if dep.Annotations[annotationDesiredHash] != r.desiredHash(p) {
-		return true, nil
-	}
+	ns, name := pluginNamespace(p.TenantID), pluginObjectName(p.PluginID)
+	cnp := ciliumegress.NewPolicy()
 	id := &unstructured.Unstructured{}
 	id.SetGroupVersionKind(clusterSPIFFEIDGVK)
-	switch err := r.Client.Get(ctx, client.ObjectKey{Name: clusterSPIFFEIDName(p.PluginID, p.TenantID)}, id); {
-	case apierrors.IsNotFound(err):
-		return true, nil
-	case err != nil:
-		return false, fmt.Errorf("get ClusterSPIFFEID: %w", err)
+	var dep appsv1.Deployment
+	objects := []struct {
+		key client.ObjectKey
+		obj client.Object
+	}{
+		{client.ObjectKey{Name: ns}, &corev1.Namespace{}},
+		{client.ObjectKey{Namespace: ns, Name: pluginNamespaceRoleBinding}, &rbacv1.RoleBinding{}},
+		{client.ObjectKey{Name: clusterSPIFFEIDName(p.PluginID, p.TenantID)}, id},
+		{client.ObjectKey{Namespace: ns, Name: "default-deny"}, &networkingv1.NetworkPolicy{}},
+		{client.ObjectKey{Namespace: ns, Name: name}, &corev1.ServiceAccount{}},
+		{client.ObjectKey{Namespace: ns, Name: name}, &networkingv1.NetworkPolicy{}},
+		{client.ObjectKey{Namespace: ns, Name: egressPolicyName(name)}, cnp},
+		{client.ObjectKey{Namespace: ns, Name: name}, &dep},
 	}
-	return false, nil
+	for _, o := range objects {
+		switch err := r.Client.Get(ctx, o.key, o.obj); {
+		case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+			return true, nil
+		case err != nil:
+			return false, fmt.Errorf("get %T %s: %w", o.obj, o.key, err)
+		}
+	}
+	return dep.Annotations[annotationDesiredHash] != r.desiredHash(p), nil
 }
 
 func instanceLabels(p provision.DesiredCatalogPlugin) map[string]string {

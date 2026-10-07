@@ -793,7 +793,10 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 	// replacements). Standard OIDC-app deletion proceeds below.
 	if oc.Spec.ApplicationType == gibsonv1alpha1.OIDCAppTypeMachineUser {
 		if err := r.parkPendingBeforeDelete(ctx, oc); err != nil {
-			return ctrl.Result{RequeueAfter: requeueShort}, err
+			if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
+				return ctrl.Result{RequeueAfter: requeueShort}, err
+			}
+			logPendingLost(ctx, oc.Status.PendingAuditRecords)
 		}
 		controllerutil.RemoveFinalizer(oc, oidcClientFinalizer)
 		if err := r.Update(ctx, oc); err != nil {
@@ -821,8 +824,15 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 					return ctrl.Result{}, nil
 				}
 				if rerr := r.recordDeletion(ctx, oc, appID); rerr != nil {
-					logger.Error(rerr, "the delete waits: its audit record is not kept")
-					return ctrl.Result{RequeueAfter: requeueShort}, nil
+					if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
+						logger.Error(rerr, "the delete waits: its audit record is not kept")
+						return ctrl.Result{RequeueAfter: requeueShort}, nil
+					}
+					// After the grace the record goes to the operator log, so a
+					// teardown with no daemon and no parent ends.
+					logPendingLost(ctx, []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
+						"client": oc.Spec.ClientName, "client_id": oc.Status.ClientID, "app_id": appID,
+					})})
 				}
 				if derr := zc.DeleteOIDCClient(ctx, projectID, appID); derr != nil {
 					// Transient errors at deletion time: cap retries at 3,
@@ -856,7 +866,10 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 	}
 
 	if err := r.parkPendingBeforeDelete(ctx, oc); err != nil {
-		return ctrl.Result{RequeueAfter: requeueShort}, err
+		if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
+			return ctrl.Result{RequeueAfter: requeueShort}, err
+		}
+		logPendingLost(ctx, oc.Status.PendingAuditRecords)
 	}
 	controllerutil.RemoveFinalizer(oc, oidcClientFinalizer)
 	if err := r.Update(ctx, oc); err != nil {

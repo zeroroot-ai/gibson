@@ -21,7 +21,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"

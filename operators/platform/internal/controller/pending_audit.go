@@ -13,6 +13,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/zeroroot-ai/sdk/auth"
 
@@ -30,6 +31,22 @@ import (
 // flushTimeout bounds one attempt to send the pending records, so a daemon
 // that does not exist yet holds a reconcile for a bounded time.
 const flushTimeout = 3 * time.Second
+
+// pendingDeleteGrace is how long a delete waits for the daemon to take the
+// pending records of the deleted object. After it the records go to the
+// operator log, so a teardown with no daemon ends.
+const pendingDeleteGrace = 10 * time.Minute
+
+// logPendingLost writes records that no daemon took to the operator log. It
+// is the last resort, after pendingDeleteGrace.
+func logPendingLost(ctx context.Context, recs []gibsonv1alpha1.PendingAuditRecord) {
+	logger := log.FromContext(ctx)
+	for _, rec := range recs {
+		logger.Error(errors.New("audit record not delivered"), "an audit record was not kept; it is in this log line",
+			"action", rec.Action, "target", rec.TargetID, "result", rec.Result, "reason", rec.Reason,
+			"fields", rec.Fields, "first_at", rec.FirstAt.UTC().Format(time.RFC3339))
+	}
+}
 
 // pendingRequeue is how soon a resource with pending records is visited again
 // to send them.
@@ -154,6 +171,14 @@ func mergePending(desired, fresh, flushed []gibsonv1alpha1.PendingAuditRecord) [
 		}
 	}
 	return merged
+}
+
+// failedChange keeps the failure record of a change whose record was kept
+// before it and whose call then failed. The status write of the pass lands it.
+// Without it the trail shows a removal that never happened.
+func failedChange(pb *gibsonv1alpha1.PlatformBootstrap, fields map[string]string, cause error) {
+	keepPending(&pb.Status.PendingAuditRecords,
+		pendingRecord(audit.ActionPlatformBootstrap, pb, audit.ResultFailure, cause.Error(), fields))
 }
 
 // recordBefore keeps the pending record of a change and writes the status

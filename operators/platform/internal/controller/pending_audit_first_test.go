@@ -191,3 +191,37 @@ func TestOIDCClientDelete_PendingRecordsMoveToTheParent(t *testing.T) {
 		t.Fatalf("parent pending = %+v, want the client record", got.Status.PendingAuditRecords)
 	}
 }
+
+// A delete of the PlatformBootstrap sends its pending records first. With no
+// daemon the finalizer stays, and after the grace it goes and the records are
+// logged.
+func TestPlatformBootstrap_DeleteKeepsPendingRecords(t *testing.T) {
+	s := mustScheme(t)
+	now := metav1.Now()
+	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{
+		Name: "platform", Finalizers: []string{platformBootstrapFinalizer}, DeletionTimestamp: &now,
+	}}
+	pb.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, pb, "", "", map[string]string{"client": "dashboard"}),
+	}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
+	down := &audittest.Sink{Err: errNoDaemon}
+	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Audit: down.Emitter(t)}
+
+	res, err := r.reconcileDeletion(context.Background(), pb)
+	if err != nil || res.RequeueAfter == 0 {
+		t.Fatalf("with no daemon: res = %+v, err = %v; want a requeue and the finalizer kept", res, err)
+	}
+	if len(pb.Status.PendingAuditRecords) != 1 || len(pb.Finalizers) != 1 {
+		t.Fatalf("pending = %d, finalizers = %v; want the record and the finalizer kept", len(pb.Status.PendingAuditRecords), pb.Finalizers)
+	}
+
+	up := &audittest.Sink{}
+	r.Audit = up.Emitter(t)
+	if _, err := r.reconcileDeletion(context.Background(), pb); err != nil {
+		t.Fatalf("with the daemon: %v", err)
+	}
+	if len(up.Events()) != 1 || len(pb.Finalizers) != 0 {
+		t.Fatalf("sent = %d, finalizers = %v; want the record sent and the finalizer gone", len(up.Events()), pb.Finalizers)
+	}
+}

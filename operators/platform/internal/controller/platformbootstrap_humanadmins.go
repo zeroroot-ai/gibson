@@ -159,12 +159,12 @@ func (r *PlatformBootstrapReconciler) removeHumanAdmin(
 	// The record waits in the status before each change, on every pass. A
 	// drift pass that removes an administrator leaves a record even when the
 	// daemon is down (gibson#676).
-	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
-		"change": "remove_human_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName,
-	})); rerr != nil {
+	rmFields := map[string]string{"change": "remove_human_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName}
+	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", rmFields)); rerr != nil {
 		return false, ctrl.Result{}, rerr
 	}
 	if rmErr := zc.RemoveIAMMember(ctx, m.UserID); rmErr != nil {
+		failedChange(pb, rmFields, rmErr)
 		if zitadel.IsPermanent(rmErr) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionHumanAdminsScoped, metav1.ConditionFalse,
 				"ZitadelPermanentError", fmt.Sprintf("RemoveIAMMember user=%s: %v", m.UserID, rmErr))
@@ -183,12 +183,12 @@ func (r *PlatformBootstrapReconciler) removeHumanAdmin(
 	if !isDefaultFirstInstanceAdmin(m, orgID) {
 		return true, ctrl.Result{}, nil
 	}
-	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
-		"change": "delete_default_admin_user", "user_id": m.UserID, "login_name": m.PreferredLoginName,
-	})); rerr != nil {
+	delFields := map[string]string{"change": "delete_default_admin_user", "user_id": m.UserID, "login_name": m.PreferredLoginName}
+	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", delFields)); rerr != nil {
 		return false, ctrl.Result{}, rerr
 	}
 	if delErr := zc.DeleteUser(ctx, m.UserID); delErr != nil {
+		failedChange(pb, delFields, delErr)
 		if zitadel.IsPermanent(delErr) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionHumanAdminsScoped, metav1.ConditionFalse,
 				"ZitadelPermanentError", fmt.Sprintf("DeleteUser user=%s: %v", m.UserID, delErr))

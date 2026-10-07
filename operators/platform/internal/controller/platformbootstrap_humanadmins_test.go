@@ -14,6 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -447,6 +448,20 @@ func TestReconcileHumanAdminsScoped_RemoveIAMMemberErrors(t *testing.T) {
 			cond := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionHumanAdminsScoped)
 			if cond == nil || cond.Reason != tc.wantReason {
 				t.Fatalf("condition = %+v, want reason %s", cond, tc.wantReason)
+			}
+			// The record was kept before the call. The failed call adds a
+			// failure record, so the trail shows no removal that did not happen.
+			var change, failure bool
+			for _, p := range pb.Status.PendingAuditRecords {
+				if p.Fields["user_id"] == "UID-ROGUE" && p.Result == "" {
+					change = true
+				}
+				if p.Fields["user_id"] == "UID-ROGUE" && p.Result == audit.ResultFailure {
+					failure = true
+				}
+			}
+			if !change || !failure {
+				t.Fatalf("pending = %+v, want the change record and its failure record", pb.Status.PendingAuditRecords)
 			}
 		})
 	}

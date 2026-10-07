@@ -11,7 +11,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
@@ -108,5 +111,27 @@ func TestCatalogPluginRunnable_SetupRefusesNoAudit(t *testing.T) {
 	r := &CatalogPluginRunnable{Daemon: &fakeCatalogPluginDaemon{}, Config: cpConfig()}
 	if err := r.SetupWithManager(nil); err == nil || !strings.Contains(err.Error(), "Audit") {
 		t.Fatalf("err = %v, want a refusal that names Audit", err)
+	}
+}
+
+// A first pass for a tenant reads no object inside a namespace that does not
+// exist. A Forbidden answer, from a RoleBinding that is not there yet, counts
+// as a missing object and does not stop the pass.
+func TestCatalogPlugins_ForbiddenReadMeansANewInstance(t *testing.T) {
+	r, c, _ := convergedInstance(t)
+	if changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin)); err != nil || changes {
+		t.Fatalf("a converged instance: changes = %v, err = %v; want none", changes, err)
+	}
+	r.Client = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*appsv1.Deployment); ok && key.Namespace == cpNamespace {
+				return apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, key.Name, errors.New("no rolebinding"))
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+	})
+	changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin))
+	if err != nil || !changes {
+		t.Fatalf("changes = %v, err = %v; want a change, no error", changes, err)
 	}
 }

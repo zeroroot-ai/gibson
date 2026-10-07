@@ -110,12 +110,12 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 			if slices.Equal(m.Roles, []string{loginClientRole}) {
 				continue
 			}
-			if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
-				"change": "reset_login_client_roles", "user_id": m.UserID,
-			})); rerr != nil {
+			resetFields := map[string]string{"change": "reset_login_client_roles", "user_id": m.UserID}
+			if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", resetFields)); rerr != nil {
 				return ctrl.Result{}, rerr
 			}
 			if aerr := zc.AddIAMMember(ctx, m.UserID, []string{loginClientRole}); aerr != nil {
+				failedChange(pb, resetFields, aerr)
 				return machineAdminsZitadelError(pb, "AddIAMMember user="+m.UserID, aerr), nil
 			}
 			r.Recorder.Eventf(pb, corev1.EventTypeWarning, "LoginClientRolesReset",
@@ -123,12 +123,12 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 			logger.Info("reset the Zitadel login client roles", "userID", m.UserID, "was", m.Roles)
 			continue
 		}
-		if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
-			"change": "remove_machine_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName,
-		})); rerr != nil {
+		rmFields := map[string]string{"change": "remove_machine_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName}
+		if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", rmFields)); rerr != nil {
 			return ctrl.Result{}, rerr
 		}
 		if rerr := zc.RemoveIAMMember(ctx, m.UserID); rerr != nil {
+			failedChange(pb, rmFields, rerr)
 			return machineAdminsZitadelError(pb, "RemoveIAMMember user="+m.UserID, rerr), nil
 		}
 		r.Recorder.Eventf(pb, corev1.EventTypeWarning, "MachineAdminRemoved",
