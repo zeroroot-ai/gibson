@@ -200,6 +200,14 @@ func capabilityGrantRegisterHandler(
 				http.Error(w, "host has no recorded agent; enroll with a bootstrap token", http.StatusForbidden)
 				return
 			}
+			// Several components that share one host key cannot share one name.
+			// A caller that names another agent than the host enrolled as gets
+			// a clear refusal, not a registration under the first name.
+			if req.AgentName != "" && req.AgentName != hc.AgentName {
+				logger.WarnContext(r.Context(), "capability-grant: host re-registration refused: the host enrolled under another agent name")
+				http.Error(w, "this host enrolled as another agent; enroll this agent with its own bootstrap token and its own host key", http.StatusConflict)
+				return
+			}
 			tenantID, ownerUserID, principalRef, signedName, bootstrapType = hc.TenantID, hc.OwnerUserID, hc.PrincipalRef, hc.AgentName, "host_jwt"
 			capabilityCeiling = hc.CapabilityCeiling
 		case svidEnroller != nil && jwtTyp(token) != capabilitygrant.BootstrapTokenType:
@@ -260,6 +268,10 @@ func capabilityGrantRegisterHandler(
 			bootstrapType, token, capabilityCeiling,
 		)
 		if err != nil {
+			if errors.Is(err, capabilitygrant.ErrHostNotRegistrable) {
+				http.Error(w, "host is not registrable", http.StatusForbidden)
+				return
+			}
 			http.Error(w, "registration failed", http.StatusInternalServerError)
 			return
 		}

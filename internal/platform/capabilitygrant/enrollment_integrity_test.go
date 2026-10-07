@@ -1363,3 +1363,20 @@ func TestRegisterCapabilityGrant_ReRegistrationNeverAddsAHost(t *testing.T) {
 	require.NoError(t, m.mock.ExpectationsWereMet())
 	assert.NotContains(t, m.rec.all(), "INSERT INTO capability_grant_hosts")
 }
+
+// GetHost returns the agent name and the capability ceiling that the
+// enrolling credential left on the host row, so a re-registration reads them
+// and never takes them from the request.
+func TestGetHost_ReadsTheEnrollmentBounds(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+			"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+			AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+				"hello-agent", []byte(`["execute:tool:nmap"]`), time.Now(), time.Now()))
+
+	h, err := m.svc.store.GetHost(context.Background(), "h1")
+	require.NoError(t, err)
+	assert.Equal(t, "hello-agent", h.AgentName)
+	assert.Equal(t, []string{"execute:tool:nmap"}, h.CapabilityCeiling)
+}

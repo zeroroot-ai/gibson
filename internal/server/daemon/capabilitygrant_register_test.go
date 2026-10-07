@@ -183,7 +183,7 @@ func reRegBody(t *testing.T, x, agentName string) (string, string) {
 }
 
 func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
-	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "body-name")
+	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "")
 	reg := &fakeRegistrar{
 		hostClaims: &capabilitygrant.HostClaims{
 			HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", PrincipalRef: "agent_principal:9",
@@ -207,10 +207,10 @@ func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
 	if reg.gotTenant != "acme" || reg.gotOwner != "user-1" || reg.gotPrincipal != "agent_principal:9" {
 		t.Errorf("re-reg identity from host: tenant=%q owner=%q principal=%q", reg.gotTenant, reg.gotOwner, reg.gotPrincipal)
 	}
-	// The name and the ceiling are those of the enrolling credential. The
-	// body name does not count.
+	// The name and the ceiling are those of the enrolling credential. A body
+	// with no name takes the stored one.
 	if reg.gotName != "hello" {
-		t.Errorf("re-reg name = %q, want the stored name hello, not the body name", reg.gotName)
+		t.Errorf("re-reg name = %q, want the stored name hello", reg.gotName)
 	}
 	if len(reg.gotCeiling) != 1 || reg.gotCeiling[0] != "execute:tool:nmap" {
 		t.Errorf("re-reg ceiling = %v, want the stored ceiling", reg.gotCeiling)
@@ -219,6 +219,18 @@ func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
 	// from the public base URL.
 	if reg.gotHostAud != "https://api.test/capabilitygrant/v1/register" {
 		t.Errorf("host+jwt expected audience = %q", reg.gotHostAud)
+	}
+}
+
+// A second component on a host that enrolled under another name is refused
+// with a clear answer. The body name does not replace the stored name.
+func TestCGRegister_HostJWT_RefusesAnotherAgentName(t *testing.T) {
+	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "other-agent")
+	reg := &fakeRegistrar{hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello"}}
+	h := capabilityGrantRegisterHandler(fakeBootstrapVerifier{}, reg, nil, "https://api.test", nil)
+	rr := postRegister(t, h, "Bearer "+hostJWTToken(), body)
+	if rr.Code != http.StatusConflict || reg.gotName != "" {
+		t.Fatalf("status = %d, name = %q; want 409 and no registration", rr.Code, reg.gotName)
 	}
 }
 
