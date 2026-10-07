@@ -41,6 +41,20 @@ type ConnectorMCP struct {
 	connectors func() []string
 	// proxyURL returns the address of one connector. Tests replace it.
 	proxyURL func(connector, namespace string) string
+	// recordTools receives the tool count of each connector that answered a
+	// list. Nil records nothing.
+	recordTools ToolCountRecorder
+}
+
+// ToolCountRecorder records how many tools one connector of a tenant served.
+type ToolCountRecorder func(ctx context.Context, tenant, connector string, n int)
+
+// WithToolCountRecorder sets the recorder of the tool count of each listed
+// connector and returns c. The daemon records the count in the
+// tenant_connectors table, which ListConnectors serves (gibson#723).
+func (c *ConnectorMCP) WithToolCountRecorder(r ToolCountRecorder) *ConnectorMCP {
+	c.recordTools = r
+	return c
 }
 
 // connectorCallTimeout bounds one MCP exchange with a connector.
@@ -109,6 +123,9 @@ func (c *ConnectorMCP) ListConnectorTools(ctx context.Context, tenant string) ([
 			c.logger.DebugContext(ctx, "connector lists no tools",
 				"connector", connector, "tenant", tenant, "error", err)
 			continue
+		}
+		if c.recordTools != nil {
+			c.recordTools(ctx, tenant, connector, len(tools))
 		}
 		out = append(out, tools...)
 	}

@@ -30,9 +30,6 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
-    - jsonPath: .status.discoveredTools
-      name: Tools
-      type: integer
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -242,12 +239,6 @@ spec:
                   - type
                   type: object
                 type: array
-              discoveredTools:
-                description: |-
-                  DiscoveredTools is the count of tools the daemon registered from this
-                  connector's tools/list.
-                format: int32
-                type: integer
               lastError:
                 description: LastError is the most recent human-readable failure,
                   with remediation.

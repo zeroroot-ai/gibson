@@ -104,9 +104,9 @@ func TestStore_ReportStatus(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)
 
-	mock.ExpectExec("UPDATE tenant_connectors").WithArgs("acme", "gitlab", "Ready", int32(7), "").
+	mock.ExpectExec("UPDATE tenant_connectors").WithArgs("acme", "gitlab", "Ready", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	ok, err := store.ReportStatus(ctx, "acme", "gitlab", Status{Phase: "Ready", DiscoveredTools: 7})
+	ok, err := store.ReportStatus(ctx, "acme", "gitlab", Status{Phase: "Ready"})
 	require.NoError(t, err)
 	assert.True(t, ok)
 
@@ -171,4 +171,21 @@ func TestStore_DatabaseFailures(t *testing.T) {
 	if _, err := s.ReportStatus(ctx, "acme", "gitlab", Status{Phase: "Ready"}); err == nil {
 		t.Error("ReportStatus: rows affected failure returned no error")
 	}
+}
+
+// The daemon records the tool count of a connector. A report of the
+// operator does not touch it (gibson#723).
+func TestStore_SetDiscoveredTools(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+
+	mock.ExpectExec("UPDATE tenant_connectors\\s+SET\\s+discovered_tools = \\$3").
+		WithArgs("acme", "gitlab", int32(7)).WillReturnResult(sqlmock.NewResult(0, 1))
+	require.NoError(t, store.SetDiscoveredTools(ctx, "acme", "gitlab", 7))
+
+	mock.ExpectExec("UPDATE tenant_connectors").WillReturnError(errDB)
+	require.ErrorIs(t, store.SetDiscoveredTools(ctx, "acme", "gitlab", 7), errDB)
+
+	require.Error(t, store.SetDiscoveredTools(ctx, "", "gitlab", 7))
+	require.NoError(t, mock.ExpectationsWereMet())
 }

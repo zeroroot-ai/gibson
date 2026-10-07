@@ -811,8 +811,10 @@ message ReportConnectorStatusRequest {
   string connector_id = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // phase is the phase of the ConnectorInstance. Required.
   string phase = 3 [(buf.validate.field).string = { max_len: 1024 }];
-  // discovered_tools is the number of tools the connector serves.
-  int32 discovered_tools = 4 [(buf.validate.field).int32 = { gte: 0 }];
+  // Removed in gibson#723: the daemon, the one MCP client, counts the tools
+  // of a connector itself when it lists them.
+  reserved 4;
+  reserved "discovered_tools";
   // last_error is the last error of the connector, or empty.
   string last_error = 5 [(buf.validate.field).string = { max_len: 65536 }];
 }

@@ -77,10 +77,10 @@ func TestTenantConnectorRPCs_FailClosed(t *testing.T) {
 func TestReportConnectorStatus(t *testing.T) {
 	srv, mock := connectorServer(t)
 	ctx := context.Background()
-	mock.ExpectExec("UPDATE tenant_connectors").WithArgs("acme", "gitlab", "Ready", int32(4), "").
+	mock.ExpectExec("UPDATE tenant_connectors").WithArgs("acme", "gitlab", "Ready", "").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	resp, err := srv.ReportConnectorStatus(ctx, &daemonoperatorv1.ReportConnectorStatusRequest{
-		TenantId: "acme", ConnectorId: "gitlab", Phase: "Ready", DiscoveredTools: 4,
+		TenantId: "acme", ConnectorId: "gitlab", Phase: "Ready",
 	})
 	if err != nil || !resp.GetUpdated() {
 		t.Fatalf("report: %v %v", resp, err)

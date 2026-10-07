@@ -36,11 +36,12 @@ type Connector struct {
 	LastError       string
 }
 
-// Status is a report of the connector operator about one connector.
+// Status is a report of the connector operator about one connector. The
+// tool count is not part of it: the daemon counts the tools when it lists
+// them (SetDiscoveredTools).
 type Status struct {
-	Phase           string
-	DiscoveredTools int32
-	LastError       string
+	Phase     string
+	LastError string
 }
 
 // Store reads and writes tenant_connectors.
@@ -176,9 +177,9 @@ func (s *Store) ReportStatus(ctx context.Context, tenantID, connectorID string, 
 	}
 	res, err := s.db.ExecContext(ctx, `
 UPDATE tenant_connectors
-SET    phase = $3, discovered_tools = $4, last_error = $5, reported_at = NOW()
+SET    phase = $3, last_error = $4, reported_at = NOW()
 WHERE  tenant_id = $1 AND connector_id = $2`,
-		tenantID, connectorID, st.Phase, st.DiscoveredTools, st.LastError)
+		tenantID, connectorID, st.Phase, st.LastError)
 	if err != nil {
 		return false, fmt.Errorf("tenantconnector: ReportStatus %s/%s: %w", tenantID, connectorID, err)
 	}
@@ -187,4 +188,24 @@ WHERE  tenant_id = $1 AND connector_id = $2`,
 		return false, fmt.Errorf("tenantconnector: ReportStatus %s/%s: rows affected: %w", tenantID, connectorID, err)
 	}
 	return n > 0, nil
+}
+
+// SetDiscoveredTools records the number of tools that one connector of the
+// tenant served when the daemon listed them (gibson#723). The stored value is
+// the count of the last list that the connector answered: a connector that
+// stops answering keeps its last count. The daemon is the
+// one MCP client, so it is the one writer of the count. Like ReportStatus, it
+// never creates a row: a connector that the tenant did not enable has none.
+func (s *Store) SetDiscoveredTools(ctx context.Context, tenantID, connectorID string, n int32) error {
+	if err := required("SetDiscoveredTools", tenantID, connectorID); err != nil {
+		return err
+	}
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE tenant_connectors
+SET    discovered_tools = $3
+WHERE  tenant_id = $1 AND connector_id = $2`,
+		tenantID, connectorID, n); err != nil {
+		return fmt.Errorf("tenantconnector: SetDiscoveredTools %s/%s: %w", tenantID, connectorID, err)
+	}
+	return nil
 }

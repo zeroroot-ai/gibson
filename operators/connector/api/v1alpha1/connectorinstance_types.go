@@ -246,11 +246,6 @@ type ConnectorInstanceStatus struct {
 	// +optional
 	ProxyURL string `json:"proxyURL,omitempty"`
 
-	// DiscoveredTools is the count of tools the daemon registered from this
-	// connector's tools/list.
-	// +optional
-	DiscoveredTools int32 `json:"discoveredTools,omitempty"`
-
 	// LastError is the most recent human-readable failure, with remediation.
 	// +optional
 	LastError string `json:"lastError,omitempty"`
@@ -267,7 +262,6 @@ type ConnectorInstanceStatus struct {
 // +kubebuilder:printcolumn:name="Shape",type=string,JSONPath=`.spec.shape`
 // +kubebuilder:printcolumn:name="Runtime",type=string,JSONPath=`.spec.runtime`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-// +kubebuilder:printcolumn:name="Tools",type=integer,JSONPath=`.status.discoveredTools`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // +kubebuilder:printcolumn:name="ToolHive",type=string,JSONPath=`.status.toolHiveKind`,priority=1
 // +kubebuilder:printcolumn:name="ToolHiveName",type=string,JSONPath=`.status.toolHiveName`,priority=1
