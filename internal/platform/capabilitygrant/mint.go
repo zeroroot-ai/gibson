@@ -391,9 +391,12 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 		"jti":          jti,
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	tok.Header["kid"] = m.keyID()
+	// One read of the set, so the kid and the key that signs come from the
+	// same set even when a reload swaps it in between.
+	signer := m.keySet().Current
+	tok.Header["kid"] = signer.keyID
 	tok.Header["typ"] = "JWT"
-	signed, err := tok.SignedString(m.keySet().Current.priv)
+	signed, err := tok.SignedString(signer.priv)
 	if err != nil {
 		return "", fmt.Errorf("capabilitygrant: sign: %w", err)
 	}

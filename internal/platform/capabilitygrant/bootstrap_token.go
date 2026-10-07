@@ -139,9 +139,12 @@ func (m *Minter) MintBootstrapToken(c BootstrapClaims, ttl time.Duration) (strin
 		"jti":    uuid.NewString(),
 	}
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
-	tok.Header["kid"] = m.keyID()
+	// One read of the set, so the kid and the key that signs come from the
+	// same set even when a reload swaps it in between.
+	signer := m.keySet().Current
+	tok.Header["kid"] = signer.keyID
 	tok.Header["typ"] = bootstrapTokenType
-	signed, err := tok.SignedString(m.keySet().Current.priv)
+	signed, err := tok.SignedString(signer.priv)
 	if err != nil {
 		return "", fmt.Errorf("capabilitygrant: MintBootstrapToken: sign: %w", err)
 	}
