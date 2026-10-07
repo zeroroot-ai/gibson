@@ -249,13 +249,10 @@ func TestEmitAuditEvent_RefusesUsersAndIncompleteEvents(t *testing.T) {
 // and a rejection with no record fails the call.
 func TestRegistrationDecisions_NoRecord(t *testing.T) {
 	h, aw := newApprovalHarness(t)
-	reg, err := h.srv.Register(context.Background(), registerRequest())
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	regID := registerPending(t, h)
 	aw.syncErr = errAuditDown
-	_, err = h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("approve code = %v, want Unavailable", status.Code(err))
 	}
@@ -263,7 +260,7 @@ func TestRegistrationDecisions_NoRecord(t *testing.T) {
 		t.Fatalf("release calls %v, reactivated %v: want the claim back and no owner", h.store.releaseCalls, h.idp.reactivated)
 	}
 	_, err = h.srv.AdminRejectRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: reg.GetRegistrationId(), Reason: "x"})
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID, Reason: "x"})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("reject code = %v, want Unavailable", status.Code(err))
 	}
@@ -272,10 +269,10 @@ func TestRegistrationDecisions_NoRecord(t *testing.T) {
 // A failed approval after its record gets a second record with deny.
 func TestAdminApproveRegistration_FailureIsRecorded(t *testing.T) {
 	h, aw := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 	h.idp.reactivateErr = errAuditDown
 	_, _ = h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
 	var deny bool
 	for _, ev := range aw.events {
 		if ev.Action == "signup_registration.approved" && ev.Decision == "deny" {

@@ -107,14 +107,11 @@ func TestSignup_NoRecordNoQueue(t *testing.T) {
 // operator records name the approving administrator (gibson#583).
 func TestAdminApproveRegistration_QueueEntryNamesTheApproval(t *testing.T) {
 	h, writer := newApprovalHarness(t)
-	reg, err := h.srv.Register(context.Background(), registerRequest())
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	regID := registerPending(t, h)
 	recordID, mock := expectPendingInsert(t, h.srv)
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); err != nil {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); err != nil {
 		t.Fatalf("AdminApproveRegistration: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

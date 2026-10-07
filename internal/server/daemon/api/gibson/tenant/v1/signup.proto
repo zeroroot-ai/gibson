@@ -209,10 +209,10 @@ message RegisterRequest {
 // registration that has not been approved is not entitled to learn what it
 // would be called.
 message RegisterResponse {
-  // registration_id identifies the pending registration to an administrator.
-  // It is the id an approval or a rejection names. Held under gibson#620: no
-  // consumer reads it yet.
-  string registration_id = 1;
+  // Removed in gibson#620: the registrant never names the registration. The
+  // administrator reads its id from AdminListPendingRegistrations.
+  reserved 1;
+  reserved "registration_id";
 }
 
 // RequestEmailVerificationRequest carries the signup form's non-secret fields.

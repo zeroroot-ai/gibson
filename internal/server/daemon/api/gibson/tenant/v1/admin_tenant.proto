@@ -35,6 +35,7 @@ package gibson.tenant.v1;
 
 option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1;tenantv1";
 
+import "google/protobuf/timestamp.proto";
 import "gibson/auth/v1/options.proto";
 import "buf/validate/validate.proto";
 
@@ -160,12 +161,11 @@ service AdminTenantService {
 // PendingRegistration is one registration awaiting an administrator's
 // decision. It carries what a person needs to decide and nothing more.
 message PendingRegistration {
-  // Removed in gibson#502: served and never read by any consumer.
+  // Removed in gibson#502: a string that no consumer read. received_at
+  // replaces it with a typed timestamp (gibson#620).
   reserved 7;
   reserved "registered_at";
   // registration_id names this registration in an approve or reject call.
-  // Held under gibson#620: no consumer reads it yet, and AdminApproveRegistration
-  // requires it.
   string registration_id = 1;
   // owner_email is the address that registered.
   string owner_email = 2;
@@ -177,6 +177,9 @@ message PendingRegistration {
   // owner_first_name / owner_last_name are the profile fields they supplied.
   string owner_first_name = 5;
   string owner_last_name = 6;
+  // received_at is when the registration arrived. An administrator who decides
+  // the queue reads it to see how long each person has waited.
+  google.protobuf.Timestamp received_at = 8;
 }
 
 // AdminListPendingRegistrationsRequest asks for the queue.

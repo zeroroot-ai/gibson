@@ -67,8 +67,8 @@ func TestRegister_SucceedsWithNoMailTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register with no mail transport must succeed: %v", err)
 	}
-	if resp.GetRegistrationId() == "" {
-		t.Fatal("Register must return the id an administrator decides on")
+	if resp == nil {
+		t.Fatal("Register must answer the registrant")
 	}
 	if len(h.mail.verifications) != 0 || len(h.mail.collisions) != 0 {
 		t.Errorf("the approval rung must send nothing; verifications=%d notices=%d",
@@ -115,6 +115,33 @@ func TestRegister_CreatesADeactivatedAccountAndNoTenant(t *testing.T) {
 	if got.GetOwnerEmail() != "owner@example.com" || got.GetWorkspaceName() != "Acme Research" {
 		t.Errorf("queue entry = %+v, want the registered address and workspace", got)
 	}
+	row := h.store.rows[got.GetRegistrationId()]
+	if row == nil {
+		t.Fatalf("queue entry id %q names no stored registration", got.GetRegistrationId())
+	}
+	if !got.GetReceivedAt().AsTime().Equal(row.CreatedAt) {
+		t.Errorf("received_at = %v, want the time the registration arrived (%v)",
+			got.GetReceivedAt().AsTime(), row.CreatedAt)
+	}
+}
+
+// registerPending registers one person and returns the id that an
+// administrator reads from the queue. The registrant never learns this id.
+func registerPending(t *testing.T, h *signupHarness) string {
+	t.Helper()
+	if _, err := h.srv.Register(context.Background(), registerRequest()); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	pending, err := h.srv.AdminListPendingRegistrations(adminCtx("admin-1"),
+		&tenantv1.AdminListPendingRegistrationsRequest{})
+	if err != nil {
+		t.Fatalf("AdminListPendingRegistrations: %v", err)
+	}
+	regs := pending.GetRegistrations()
+	if len(regs) == 0 {
+		t.Fatal("the registration is not in the queue")
+	}
+	return regs[len(regs)-1].GetRegistrationId()
 }
 
 // If the account cannot be put beyond use it is DELETED. An account nobody
@@ -213,13 +240,10 @@ func TestRegister_RefusesAPlanThatIsNotSelfServe(t *testing.T) {
 // tenant, and it is attributable to the administrator who made it.
 func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	h, auditWriter := newApprovalHarness(t)
-	reg, err := h.srv.Register(context.Background(), registerRequest())
-	if err != nil {
-		t.Fatalf("Register: %v", err)
-	}
+	regID := registerPending(t, h)
 
 	resp, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
 	if err != nil {
 		t.Fatalf("AdminApproveRegistration: %v", err)
 	}
@@ -247,8 +271,8 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	if decision == nil {
 		t.Fatal("an approval must be recorded in the audit trail")
 	}
-	if decision.actor != "admin-1" || decision.target != reg.GetRegistrationId() {
-		t.Errorf("audit event = %+v, want admin-1 deciding %s", decision, reg.GetRegistrationId())
+	if decision.actor != "admin-1" || decision.target != regID {
+		t.Errorf("audit event = %+v, want admin-1 deciding %s", decision, regID)
 	}
 
 	// The queue is empty: a decided registration is not pending.
@@ -270,8 +294,8 @@ type auditDecision struct {
 // registration.
 func TestAdminApproveRegistration_DecidesOnlyOnce(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
-	id := &tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}
+	regID := registerPending(t, h)
+	id := &tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"), id); err != nil {
 		t.Fatalf("first approval: %v", err)
@@ -287,11 +311,11 @@ func TestAdminApproveRegistration_DecidesOnlyOnce(t *testing.T) {
 // nobody can make again.
 func TestAdminApproveRegistration_ReleasesTheClaimWhenTheWorkFails(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 	h.idp.reactivateErr = errors.New("identity provider unreachable")
 
 	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
 	if err == nil {
 		t.Fatal("an approval whose work failed must fail")
 	}
@@ -309,11 +333,11 @@ func TestAdminApproveRegistration_ReleasesTheClaimWhenTheWorkFails(t *testing.T)
 // and no tenant is enqueued.
 func TestAdminRejectRegistration_LeavesTheAccountUnusable(t *testing.T) {
 	h, auditWriter := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 
 	if _, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
 		&tenantv1.AdminRejectRegistrationRequest{
-			RegistrationId: reg.GetRegistrationId(),
+			RegistrationId: regID,
 			Reason:         "not a colleague",
 		}); err != nil {
 		t.Fatalf("AdminRejectRegistration: %v", err)
@@ -345,14 +369,14 @@ func TestAdminRejectRegistration_LeavesTheAccountUnusable(t *testing.T) {
 // requires it to be.
 func TestAdminRegistrationDecisions_RequireAnIdentity(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 
 	if _, err := h.srv.AdminApproveRegistration(context.Background(),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.PermissionDenied {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("approve without an identity: code = %v, want PermissionDenied", status.Code(err))
 	}
 	if _, err := h.srv.AdminRejectRegistration(context.Background(),
-		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.PermissionDenied {
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.PermissionDenied {
 		t.Errorf("reject without an identity: code = %v, want PermissionDenied", status.Code(err))
 	}
 }
@@ -565,11 +589,11 @@ func TestAdminRegistrationRPCs_MissingDependenciesRefuse(t *testing.T) {
 // made when the database simply could not answer.
 func TestAdminRegistrationDecisions_StoreFailureIsInternal(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 	h.store.claimApprovalErr = errors.New("postgres down")
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.Internal {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.Internal {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
 	}
 }
@@ -578,11 +602,11 @@ func TestAdminRegistrationDecisions_StoreFailureIsInternal(t *testing.T) {
 // and the registration returns to the queue.
 func TestAdminApproveRegistration_UnreachableIdentityProviderReleasesTheClaim(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 	h.idp.reactivateErr = idp.ErrUnreachable
 
 	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()})
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v, want Unavailable", status.Code(err))
 	}
@@ -595,11 +619,11 @@ func TestAdminApproveRegistration_UnreachableIdentityProviderReleasesTheClaim(t 
 // that the administrator is wrong.
 func TestAdminApproveRegistration_CorruptRowIsInternal(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
-	h.store.rows[reg.GetRegistrationId()].WorkspaceName = "///"
+	regID := registerPending(t, h)
+	h.store.rows[regID].WorkspaceName = "///"
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.Internal {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.Internal {
 		t.Fatalf("code = %v, want Internal", status.Code(err))
 	}
 }
@@ -609,11 +633,11 @@ func TestAdminApproveRegistration_CorruptRowIsInternal(t *testing.T) {
 // decision is refused rather than provisioned.
 func TestAdminApproveRegistration_PlanGateRunsOnTheRow(t *testing.T) {
 	h, _ := newApprovalHarness(t)
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
-	h.store.rows[reg.GetRegistrationId()].Tier = "enterprise-deploy"
+	regID := registerPending(t, h)
+	h.store.rows[regID].Tier = "enterprise-deploy"
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); status.Code(err) != codes.PermissionDenied {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
 	if len(h.idp.reactivated) != 0 {
@@ -626,10 +650,10 @@ func TestAdminApproveRegistration_PlanGateRunsOnTheRow(t *testing.T) {
 func TestAdminRegistrationDecisions_SurviveAMissingAuditWriter(t *testing.T) {
 	h, _ := newApprovalHarness(t)
 	h.srv.tenantAdminAuditWriter = nil
-	reg, _ := h.srv.Register(context.Background(), registerRequest())
+	regID := registerPending(t, h)
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
-		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: reg.GetRegistrationId()}); err != nil {
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); err != nil {
 		t.Fatalf("AdminApproveRegistration: %v", err)
 	}
 }
