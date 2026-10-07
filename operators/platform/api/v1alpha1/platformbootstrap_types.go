@@ -49,6 +49,12 @@ const (
 	// token is missing or no longer valid.
 	ConditionAdminTokenReady = "AdminTokenReady"
 
+	// ConditionLoginClientTokenReady reports whether OpenBao holds a valid
+	// token of the login-client machine user, which zitadel-login reads, and
+	// whether its rotation runs (ADR-0171). The step never stops the
+	// reconcile.
+	ConditionLoginClientTokenReady = "LoginClientTokenReady"
+
 	// ConditionUnsealKeyEscrowed reports whether the OpenBao unseal key has
 	// been copied to a destination declared in spec.unsealEscrow.
 	//

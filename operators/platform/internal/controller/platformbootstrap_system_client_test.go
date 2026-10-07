@@ -96,19 +96,29 @@ type fakeSystemClient struct {
 	minted      int
 	mintErr     error
 	validErr    error
+	retired     []string // "<user>:<kept id>" of each RemoveOtherTokens call
+	retireErr   error
 }
 
-func (f *fakeSystemClient) MintAdminToken(_ context.Context, userName string, _ time.Time) (userID, pat string, err error) {
+func (f *fakeSystemClient) mintFor(userName string) (userID string, tok zitadel.PAT, err error) {
 	if f.mintErr != nil {
-		return "", "", f.mintErr
+		return "", zitadel.PAT{}, f.mintErr
 	}
 	f.minted++
-	pat = fmt.Sprintf("pat-%d", f.minted)
+	pat := zitadel.PAT{ID: fmt.Sprintf("pat-id-%d", f.minted), Token: fmt.Sprintf("pat-%d", f.minted)}
 	if f.validTokens == nil {
 		f.validTokens = map[string]bool{}
 	}
-	f.validTokens[pat] = true
+	f.validTokens[pat.Token] = true
 	return "user-" + userName, pat, nil
+}
+
+func (f *fakeSystemClient) MintAdminToken(_ context.Context, userName string, _ time.Time) (userID string, tok zitadel.PAT, err error) {
+	return f.mintFor(userName)
+}
+
+func (f *fakeSystemClient) MintUserToken(_ context.Context, userName string, _ time.Time) (userID string, tok zitadel.PAT, err error) {
+	return f.mintFor(userName)
 }
 
 func (f *fakeSystemClient) AdminTokenValid(_ context.Context, pat string) (bool, error) {
@@ -116,6 +126,18 @@ func (f *fakeSystemClient) AdminTokenValid(_ context.Context, pat string) (bool,
 		return false, f.validErr
 	}
 	return f.validTokens[pat], nil
+}
+
+func (f *fakeSystemClient) TokenValid(ctx context.Context, pat string) (bool, error) {
+	return f.AdminTokenValid(ctx, pat)
+}
+
+func (f *fakeSystemClient) RemoveOtherTokens(_ context.Context, userID, keepID string) (int, error) {
+	if f.retireErr != nil {
+		return 0, f.retireErr
+	}
+	f.retired = append(f.retired, userID+":"+keepID)
+	return 1, nil
 }
 
 // capturedFactoryArgs records what the reconciler handed the client factory.

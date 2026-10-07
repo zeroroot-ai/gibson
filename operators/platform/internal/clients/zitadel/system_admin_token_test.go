@@ -56,10 +56,10 @@ func fakeAdminZitadel(t *testing.T, existingUser bool, created *int, orgHeaders 
 		},
 		"POST /management/v1/users/user-new/pats": func(w http.ResponseWriter, r *http.Request) {
 			*orgHeaders = append(*orgHeaders, r.Header.Get("x-zitadel-orgid"))
-			jsonOK(w, `{"token":"new-pat"}`)
+			jsonOK(w, `{"tokenId":"pat-id-new","token":"new-pat"}`)
 		},
 		"POST /management/v1/users/user-old/pats": func(w http.ResponseWriter, _ *http.Request) {
-			jsonOK(w, `{"token":"another-pat"}`)
+			jsonOK(w, `{"tokenId":"pat-id-another","token":"another-pat"}`)
 		},
 	}
 }
@@ -85,7 +85,7 @@ func TestMintAdminToken_FreshInstance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MintAdminToken: %v", err)
 	}
-	if userID != "user-new" || pat != "new-pat" || created != 1 {
+	if userID != "user-new" || pat.Token != "new-pat" || pat.ID != "pat-id-new" || created != 1 {
 		t.Fatalf("user=%q pat=%q created=%d", userID, pat, created)
 	}
 	for _, o := range orgs {
@@ -105,7 +105,7 @@ func TestMintAdminToken_ExistingUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MintAdminToken: %v", err)
 	}
-	if userID != "user-old" || pat != "another-pat" || created != 0 {
+	if userID != "user-old" || pat.Token != "another-pat" || created != 0 {
 		t.Fatalf("user=%q pat=%q created=%d", userID, pat, created)
 	}
 }
@@ -155,7 +155,7 @@ func TestMintAdminToken_EachStepCanFail(t *testing.T) {
 			}
 			c := adminSystemClient(t, routes)
 			userID, pat, err := c.MintAdminToken(context.Background(), "iam-admin", time.Now().Add(time.Hour))
-			if err == nil || userID != "" || pat != "" {
+			if err == nil || userID != "" || pat != (PAT{}) {
 				t.Fatalf("got user=%q pat=%q err=%v, want an error and no result", userID, pat, err)
 			}
 		})
