@@ -204,3 +204,20 @@ func TestCatalogPlugins_ServerDefaultsAreNotAChange(t *testing.T) {
 		t.Fatalf("with a changed image: changes = %v, err = %v; want a change", changes, err)
 	}
 }
+
+// The probe client counts every kind of write as a write and writes nothing.
+func TestDryRunClient_EveryWriteIsNoted(t *testing.T) {
+	cm := &corev1.ConfigMap{}
+	for name, call := range map[string]func(d *dryRunClient) error{
+		"patch":                      func(d *dryRunClient) error { return d.Patch(context.Background(), cm, client.MergeFrom(cm)) },
+		"delete":                     func(d *dryRunClient) error { return d.Delete(context.Background(), cm) },
+		"delete all of":              func(d *dryRunClient) error { return d.DeleteAllOf(context.Background(), cm) },
+		"update of an unseen object": func(d *dryRunClient) error { return d.Update(context.Background(), cm) },
+		"create":                     func(d *dryRunClient) error { return d.Create(context.Background(), cm) },
+	} {
+		d := &dryRunClient{}
+		if err := call(d); err != nil || !d.wrote {
+			t.Errorf("%s: err = %v, wrote = %v; want a noted write", name, err, d.wrote)
+		}
+	}
+}

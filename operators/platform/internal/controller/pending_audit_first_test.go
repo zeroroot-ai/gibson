@@ -623,3 +623,79 @@ func (s *toggleSink) EmitAuditEvent(context.Context, audit.Event) error {
 	s.sent.Add(1)
 	return nil
 }
+
+// The flusher reports a ConfigMap it cannot decode, a list that fails, a delete
+// that fails and an update that fails. A client with no PlatformBootstrap
+// owner is not in a teardown.
+func TestPendingAuditFlusher_ErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	s := mustScheme(t)
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	one := []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"})}
+	two := append(append([]gibsonv1alpha1.PendingAuditRecord{}, one...),
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "b"}))
+
+	// A ConfigMap with JSON that does not decode.
+	bad := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: "bad", Namespace: defaultChildNamespace, Labels: map[string]string{pendingAuditLabel: "true"},
+	}, Data: map[string]string{pendingAuditKey: "{not json"}}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(bad).Build()
+	f := &PendingAuditFlusher{Client: cli, Audit: (&audittest.Sink{}).Emitter(t)}
+	if err := f.FlushOnce(ctx); err == nil {
+		t.Error("a ConfigMap that does not decode must be an error")
+	}
+
+	// The list fails.
+	failList := interceptor.NewClient(cli, interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			return errors.New("api server down")
+		},
+	})
+	if err := (&PendingAuditFlusher{Client: failList, Audit: f.Audit}).FlushOnce(ctx); err == nil {
+		t.Error("a failed list must be an error")
+	}
+
+	// The delete after a full send fails.
+	base := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(ctx, base, one); err != nil {
+		t.Fatal(err)
+	}
+	failDelete := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error {
+			return errors.New("delete refused")
+		},
+	})
+	if err := (&PendingAuditFlusher{Client: failDelete, Audit: (&audittest.Sink{}).Emitter(t)}).FlushOnce(ctx); err == nil {
+		t.Error("a failed delete must be an error")
+	}
+
+	// The update after a partial send fails.
+	base2 := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(ctx, base2, two); err != nil {
+		t.Fatal(err)
+	}
+	failUpdate := interceptor.NewClient(base2, interceptor.Funcs{
+		Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
+			return errors.New("update refused")
+		},
+	})
+	em, err := audit.NewSagaEmitter(&flakySink{inner: &audittest.Sink{}, failAfter: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&PendingAuditFlusher{Client: failUpdate, Audit: em}).FlushOnce(ctx); err == nil {
+		t.Error("a failed update must be an error")
+	}
+
+	// A client that no PlatformBootstrap owns is not in a teardown. The loop
+	// takes the default interval when none is set.
+	orphan := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "gibson"}}
+	if parentInTeardown(ctx, base, orphan) {
+		t.Error("an OIDC client with no owner is not in a teardown")
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := (&PendingAuditFlusher{Client: base, Audit: f.Audit}).Start(cctx); err != nil {
+		t.Errorf("Start with the default interval: %v", err)
+	}
+}
