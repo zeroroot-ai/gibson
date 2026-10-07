@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -65,13 +66,20 @@ func TestCheckpointMode_TheStateModeLeavesNone(t *testing.T) {
 	}
 }
 
+// markFailsLedger is a fork ledger that cannot mark a grant as forked.
+type markFailsLedger struct{ *memForkLedger }
+
+func (markFailsLedger) BeginFork(context.Context, string, string, time.Duration) error {
+	return errors.New("ledger down")
+}
+
 // When the grant of a checkpoint node cannot be marked, the snapshot is
 // dropped: a rewind then starts a fresh sandbox and never a restore that could
 // use the grant.
 func TestCheckpointMode_NoMarkMeansNoSnapshot(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
 	h, ledger := forkHarness(t, launcher)
-	ledger.Close()
+	h.forks.Ledger = markFailsLedger{memForkLedger: ledger}
 	task := agent.NewTask("recon", "x", nil)
 	task.NodeID, task.Checkpoint = "recon", true
 
