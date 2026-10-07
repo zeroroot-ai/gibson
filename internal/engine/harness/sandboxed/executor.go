@@ -95,6 +95,11 @@ type SandboxClient interface {
 	// (setec#237). recovered is false for a sandbox that never recovered.
 	Recovery(ctx context.Context, tenant, sandboxID string) (r SessionRecovery, recovered bool, err error)
 
+	// Isolation returns the class and the runtime that setec bound for a
+	// running sandbox of the tenant. A fork and a restore get no Launch
+	// response, so the launcher checks their isolation with this report.
+	Isolation(ctx context.Context, tenant, sandboxID string) (LaunchResponse, error)
+
 	// Snapshot takes a snapshot of a running sandbox of the tenant that
 	// outlives the sandbox for ttl (setec#242).
 	Snapshot(ctx context.Context, tenant, sandboxID string, ttl time.Duration) (string, error)

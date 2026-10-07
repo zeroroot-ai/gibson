@@ -213,7 +213,13 @@ func (l *AgentLauncher) FollowAgent(ctx context.Context, sandboxID, class string
 
 // followFork checks the isolation of one fork, and follows it to its end.
 func (l *AgentLauncher) followFork(ctx context.Context, tenant, sandboxID, class string, d AgentDispatch) (AgentRunResult, error) {
-	if isoErr := VerifyIsolation(class, LaunchResponse{SandboxID: sandboxID}); isoErr != nil {
+	iso, err := l.client.Isolation(ctx, tenant, sandboxID)
+	if err != nil {
+		l.kill(ctx, tenant, sandboxID)
+		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
+			fmt.Sprintf("agent fork %s refused: read its isolation", sandboxID), err)
+	}
+	if isoErr := VerifyIsolation(class, iso); isoErr != nil {
 		l.kill(ctx, tenant, sandboxID)
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_POLICY_DENIED,
 			fmt.Sprintf("agent fork %s refused", sandboxID), isoErr)

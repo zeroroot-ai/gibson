@@ -242,3 +242,36 @@ func TestForkSandbox_Refusals(t *testing.T) {
 		t.Fatalf("record failure: err = %v, killed = %v", err, *killed)
 	}
 }
+
+// A fork runs only when setec reports that it is bound to the class of the
+// launcher on the launcher backend. A fork with another report, or with no
+// report, is refused and killed.
+func TestForkAgent_RefusesAForkWithoutProvenIsolation(t *testing.T) {
+	cases := map[string]func(context.Context, string) (LaunchResponse, error){
+		"another runtime": func(_ context.Context, id string) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: id, SandboxClass: mockBoundClass, Runtime: "runc"}, nil
+		},
+		"no report": func(_ context.Context, id string) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: id}, nil
+		},
+		"attach fails": func(context.Context, string) (LaunchResponse, error) {
+			return LaunchResponse{}, errors.New("setec: attach refused")
+		},
+	}
+	for name, isolation := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, _, killed := forkClient([]string{"ns/f1/u1"}, nil)
+			c.isolation = isolation
+			run, err := newAgentLauncher(t, c).ForkAgent(context.Background(), "ns/src/u0", AgentForkSpec{}, []AgentDispatch{{Tenant: "acme"}})
+			if err != nil {
+				t.Fatalf("ForkAgent: %v", err)
+			}
+			if run.Errs[0] == nil || !strings.Contains(run.Errs[0].Error(), "refused") {
+				t.Fatalf("fork error = %v; want the fork refused", run.Errs[0])
+			}
+			if len(*killed) != 1 || (*killed)[0] != "ns/f1/u1" {
+				t.Fatalf("killed = %v; want the refused fork", *killed)
+			}
+		})
+	}
+}

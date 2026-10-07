@@ -36,6 +36,19 @@ type mockClient struct {
 	fork      func(context.Context, ForkRequest) (ForkResponse, error)
 	recovery  func(context.Context, string) (SessionRecovery, bool, error)
 	snapshot  func(context.Context, string, time.Duration) (string, error)
+	isolation func(context.Context, string) (LaunchResponse, error)
+}
+
+// mockBoundClass is the class of the launcher of newAgentLauncher. With no
+// isolation stub, setec reports that each fork and restore is bound to it on
+// the launcher backend.
+const mockBoundClass = "agent"
+
+func (m *mockClient) Isolation(ctx context.Context, _, id string) (LaunchResponse, error) {
+	if m.isolation == nil {
+		return LaunchResponse{SandboxID: id, SandboxClass: mockBoundClass, Runtime: IsolatedRuntime}, nil
+	}
+	return m.isolation(ctx, id)
 }
 
 func (m *mockClient) Snapshot(ctx context.Context, _, id string, ttl time.Duration) (string, error) {

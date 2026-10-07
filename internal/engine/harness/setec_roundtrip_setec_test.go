@@ -351,6 +351,10 @@ func (c *setecRoundtripClient) Recovery(context.Context, string, string) (sandbo
 	return sandboxed.SessionRecovery{}, false, nil
 }
 
+func (c *setecRoundtripClient) Isolation(context.Context, string, string) (sandboxed.LaunchResponse, error) {
+	return sandboxed.LaunchResponse{}, errors.New("setecRoundtripClient: isolation is not used here")
+}
+
 func (c *setecRoundtripClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
 	return "", errors.New("setecRoundtripClient: snapshot is not used here")
 }

@@ -137,6 +137,10 @@ func (c *tenantClient) Recovery(context.Context, string, string) (SessionRecover
 	return SessionRecovery{}, false, nil
 }
 
+func (c *tenantClient) Isolation(context.Context, string, string) (LaunchResponse, error) {
+	return LaunchResponse{}, errors.New("tenantClient: isolation is not used here")
+}
+
 func (c *tenantClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
 	return "", errors.New("tenantClient: snapshot is not used here")
 }

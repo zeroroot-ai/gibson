@@ -281,6 +281,10 @@ func (c *memberSandboxClient) Recovery(context.Context, string, string) (sandbox
 	return sandboxed.SessionRecovery{}, false, nil
 }
 
+func (c *memberSandboxClient) Isolation(context.Context, string, string) (sandboxed.LaunchResponse, error) {
+	return sandboxed.LaunchResponse{}, errors.New("memberSandboxClient: isolation is not used here")
+}
+
 func (c *memberSandboxClient) Snapshot(context.Context, string, string, time.Duration) (string, error) {
 	return "", errors.New("memberSandboxClient: snapshot is not used here")
 }

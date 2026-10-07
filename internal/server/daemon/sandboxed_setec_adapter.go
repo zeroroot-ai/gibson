@@ -464,6 +464,24 @@ func (c *setecClient) Recovery(ctx context.Context, tenant, sandboxID string) (s
 	return out, true, nil
 }
 
+// Isolation reads the class and the runtime that setec bound for a sandbox
+// of the tenant through Attach. A fork and a restore get no Launch response,
+// so this is the report that their isolation check reads.
+func (c *setecClient) Isolation(ctx context.Context, tenant, sandboxID string) (sandboxed.LaunchResponse, error) {
+	if tenant == "" {
+		return sandboxed.LaunchResponse{}, errNoTenant
+	}
+	resp, err := c.inner.Attach(ctx, &setecv1.AttachRequest{Tenant: tenant, SandboxId: sandboxID})
+	if err != nil {
+		return sandboxed.LaunchResponse{}, fmt.Errorf("setec: attach %s: %w", sandboxID, err)
+	}
+	return sandboxed.LaunchResponse{
+		SandboxID:    sandboxID,
+		SandboxClass: resp.GetSandboxClass(),
+		Runtime:      resp.GetRuntime(),
+	}, nil
+}
+
 // launchFromSnapshot starts a sandbox from a snapshot of the tenant
 // (setec#242). The class, the image and the size come from the snapshot, so
 // the request sends none of them. The sandbox gets the network of the

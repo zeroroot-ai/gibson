@@ -112,6 +112,20 @@ func TestSetecClient_Recovery(t *testing.T) {
 	}
 }
 
+// Isolation copies the class and the runtime that setec reports on Attach,
+// so the check of a fork reads what setec bound.
+func TestSetecClient_IsolationReadsAttach(t *testing.T) {
+	ctx := context.Background()
+	c := &setecClient{inner: &attachingSetec{resp: &setecv1.AttachResponse{SandboxClass: "agent", Runtime: "launcher"}}}
+	got, err := c.Isolation(ctx, "acme", "sbx-1")
+	if err != nil || got.SandboxID != "sbx-1" || got.SandboxClass != "agent" || got.Runtime != "launcher" {
+		t.Fatalf("Isolation = %+v, %v", got, err)
+	}
+	if _, err := c.Isolation(ctx, "", "sbx-1"); !errors.Is(err, errNoTenant) {
+		t.Fatalf("no tenant: err = %v", err)
+	}
+}
+
 // snapshottingSetec records the Snapshot and Launch requests.
 type snapshottingSetec struct {
 	setecv1.SandboxServiceClient
