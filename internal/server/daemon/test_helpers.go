@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -51,8 +52,8 @@ func (m *mockComponentDiscovery) ListPlugins(ctx context.Context) ([]component.P
 	return []component.PluginInfo{}, nil
 }
 
-func (m *mockComponentDiscovery) DescribeTool(ctx context.Context, name string) (component.ComponentInfo, error) {
-	return component.ComponentInfo{}, fmt.Errorf("not implemented in mock")
+func (m *mockComponentDiscovery) DescribeTool(_ context.Context, _ string) (component.ComponentInfo, error) {
+	return component.ComponentInfo{}, errors.New("not implemented in mock")
 }
 
 // DiscoverPlugin was removed from component.ComponentDiscovery in plugin-runtime
