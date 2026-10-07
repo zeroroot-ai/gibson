@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package vaulttool is in an allowlisted path (/cmd/). The OpenFGA and
 // Zitadel rule does not apply here, but the Vault client rule applies to
 // every package (gibson#686).

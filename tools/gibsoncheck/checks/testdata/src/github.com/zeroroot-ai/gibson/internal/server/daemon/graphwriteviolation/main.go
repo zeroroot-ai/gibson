@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package graphwriteviolation is a synthetic re-introduction of the write path
 // ADR-0112 removed: an RPC-layer file in the daemon package tree that opens its
 // own Neo4j write transaction. This is the mutation case — if the graphwrite

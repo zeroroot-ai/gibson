@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package openfga is an analyzer-fixture stub of the real
 // github.com/openfga/go-sdk package. It carries only the tuple-key shapes
 // the tenantrolewrite guard's type-identity match needs.

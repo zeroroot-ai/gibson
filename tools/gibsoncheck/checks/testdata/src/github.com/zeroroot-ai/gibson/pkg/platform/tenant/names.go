@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenant is an analyzer-fixture stub of the real
 // pkg/platform/tenant package: just the one method the tenantrolewrite
 // guard recognizes as a tenant-object constructor.

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package neo4j is a stub of the Neo4j Go driver for analysistest fixtures.
 // It carries only the surface the graphwrite analyzer reasons about: a session
 // with read and write transaction entry points.

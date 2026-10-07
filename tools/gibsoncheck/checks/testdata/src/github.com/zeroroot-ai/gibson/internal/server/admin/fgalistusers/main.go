@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package fgalistusers exercises the fgalistusers guard against the
 // fixture model in testdata/fga/model.fga.
 //

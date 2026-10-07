@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package auth is an analyzer-fixture stub of the OSS SDK auth
 // package. It carries the privileged sentinels and the fallible
 // security accessors that the privilegedfallback guard derives its

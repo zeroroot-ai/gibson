@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package graphwritemigrate is the analysistest fixture for the gibson-migrate
 // exemption: schema DDL runs as its own Job outside the data plane, so it may
 // open a write transaction. No `want` comments — this file must produce zero

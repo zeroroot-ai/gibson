@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenantfromctxadmin is a synthetic fixture proving the analyzer
 // covers internal/server/admin. That tree holds the MembershipService and
 // TenantAdminService handlers and used to sit outside the analyzer's

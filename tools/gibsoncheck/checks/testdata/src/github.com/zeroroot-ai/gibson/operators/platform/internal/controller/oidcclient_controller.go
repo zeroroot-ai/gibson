@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package controller is a testdata stand-in for the real
 // operators/platform/internal/controller package. This file's path
 // (.../controller/oidcclient_controller.go) is the orgmemberwrite guard's

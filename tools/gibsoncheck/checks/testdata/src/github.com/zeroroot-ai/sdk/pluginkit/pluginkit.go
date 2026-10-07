@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package pluginkit is a stub for analysistest fixtures used by the
 // pluginlegacy analyzer test. The real pluginkit package was deleted by the
 // plugin-runtime spec (Spec 2, Phase 1).

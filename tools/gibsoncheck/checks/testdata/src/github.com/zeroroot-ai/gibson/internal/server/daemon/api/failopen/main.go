@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package failopen exercises the failopenauthorizer guard.
 //
 // The NEGATIVE cases are as load-bearing as the positive ones: they are

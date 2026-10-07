@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package privfallbacksuppress proves the privilegedfallback
 // suppression is not `# nolint` with extra steps: a bare marker and a
 // marker naming a symbol that does not resolve are each their OWN

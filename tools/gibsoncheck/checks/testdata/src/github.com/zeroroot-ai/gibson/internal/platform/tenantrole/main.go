@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenantrole is a testdata stand-in for the real
 // internal/platform/tenantrole package: it shadows the real package's
 // import path so the guard's package-level exemption can be exercised in

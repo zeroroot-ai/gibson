@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package client is an analyzer-fixture stub of the real
 // github.com/openfga/go-sdk/client package: just the two tuple-key type
 // aliases the tenantrolewrite guard matches by their underlying names.

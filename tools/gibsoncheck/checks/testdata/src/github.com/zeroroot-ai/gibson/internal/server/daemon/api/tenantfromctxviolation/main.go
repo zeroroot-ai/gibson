@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenantfromctxviolation is a synthetic fixture for the
 // tenantfromcontext analyzer. Each function reads a tenant off the request
 // without the gibsoncheck:allow tenant-from-request directive and must

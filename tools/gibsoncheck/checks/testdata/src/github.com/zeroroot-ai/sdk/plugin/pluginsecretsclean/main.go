@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package pluginsecretsclean is an analysistest fixture for the
 // agentsecretsimport analyzer (non-plugin-secret-isolation Requirement 2).
 //

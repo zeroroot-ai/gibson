@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package failopensuppress exercises the suppression mechanism of the
 // failopenauthorizer guard.
 //
