@@ -1262,6 +1262,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 							d.logger.Info(ctx, "CG signing key set changed", "key_ids", keyIDs)
 						},
 						func(err error) {
+							cgSigningKeyReloadFailuresTotal.Inc()
 							d.logger.Warn(ctx, "CG signing key reload failed; the key set in force stays", "error", err)
 						})
 				}

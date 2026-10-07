@@ -14,6 +14,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 )
 
@@ -45,6 +48,21 @@ func cgJWTKeyID() string {
 	return "cg-v1"
 }
 
+// cgSigningKeyReloadInterval is how often the daemon reads the signing-key
+// mount again. A new value reaches the mount after the ESO refresh (60s) and
+// the kubelet sync (60 to 90s). The chart waits longer than the sum of these
+// and this interval before it moves a key between slots (ADR-0171).
+const cgSigningKeyReloadInterval = 30 * time.Second
+
+// cgSigningKeyReloadFailuresTotal counts each failed reload of the
+// signing-key mount. A failed reload keeps the key set in force, so a mount
+// that stays broken keeps a retired kid valid. An alert on this counter
+// shows that.
+var cgSigningKeyReloadFailuresTotal = promauto.NewCounter(prometheus.CounterOpts{
+	Name: "gibson_cg_signing_key_reload_failures_total",
+	Help: "Failed reloads of the Capability-Grant signing-key mount. The key set in force stays after a failure.",
+})
+
 // cgSigningKeyDir names the projected Secret volume holding the daemon's
 // dedicated CG signing key (and, during a rotation, the outgoing one).
 //
@@ -52,11 +70,6 @@ func cgJWTKeyID() string {
 // the Minter falls back to the legacy master-KEK derivation and says so at
 // startup, so an upgrade that predates the chart change does not take
 // capability grants down.
-// cgSigningKeyReloadInterval is how often the daemon reads the signing-key
-// mount again. The kubelet syncs a projected Secret in about a minute, and the
-// chart waits longer than both before it moves a key between slots.
-const cgSigningKeyReloadInterval = 30 * time.Second
-
 func cgSigningKeyDir() string {
 	if v := os.Getenv("GIBSON_CGJWT_SIGNING_KEY_DIR"); v != "" {
 		return v

@@ -28,11 +28,17 @@ package capabilitygrant
 //
 //  1. It writes `next`. Each daemon replica publishes the new kid before any
 //     replica signs with it.
-//  2. It moves `current` to `previous` and `next` to `current`. The new key
-//     signs, and tokens already in flight (a CG-JWT lives up to 30 minutes, a
-//     bootstrap token up to 24 hours) keep verifying against `previous`.
-//  3. It clears `previous` after the longest token life. That kid is retired,
-//     and a token it signed is refused.
+//  2. It moves `current` to `previous` and `next` to `current`, in this
+//     order of writes: `previous` = old, then `current` = new, then `next`
+//     cleared. Each slot is its own OpenBao key and an ESO refresh can read
+//     between two writes, and with this order each state in between holds
+//     both kids. The new key signs, and tokens already in flight (a CG-JWT
+//     lives up to 30 minutes, a bootstrap token up to 24 hours) keep
+//     verifying against `previous`.
+//  3. It clears `previous` after the longest token life. The daemon then
+//     refuses a token of that kid. ext-authz caches a daemon key by kid for
+//     EXT_AUTHZ_CGJWT_TTL (1 hour by default), so ext-authz refuses it at
+//     most that long after step 3.
 //
 // The daemon reads the mount again when it changes (Minter.WatchSigningKeys),
 // so a rotation needs no restart. The published key documents carry each kid
