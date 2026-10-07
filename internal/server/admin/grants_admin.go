@@ -210,7 +210,6 @@ func (s *GrantsAdminServer) ListActiveGrants(ctx context.Context, req *tenantv1.
 			AllowedRpcs:        g.AllowedRPCs,
 			MissionId:          g.MissionID,
 			TaskId:             g.TaskID,
-			IssuedAtUnix:       g.IssuedAt.Unix(),
 			ExpiresAtUnix:      g.ExpiresAt.Unix(),
 			NearExpiry:         nearExpiry,
 		})

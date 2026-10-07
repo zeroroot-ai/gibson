@@ -29,8 +29,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/sdk/codegen/editor"
-	"github.com/zeroroot-ai/sdk/codegen/git"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
 )
 
@@ -38,8 +36,6 @@ import (
 // via the callback service handlers themselves (covered by the e2e
 // suite under tests/e2e — this unit test focuses on the helper-layer).
 var _ = workspace.Workspace(nil)
-var _ = editor.Edit{}
-var _ = git.GitOps(nil)
 
 // ---------------------------------------------------------------------------
 // Fake workspace + harness
@@ -65,11 +61,9 @@ type fakeWorkspace struct {
 	readContent   []byte
 }
 
-func (w *fakeWorkspace) Name() string          { return w.name }
-func (w *fakeWorkspace) Path() string          { return w.path }
-func (w *fakeWorkspace) Editor() editor.Editor { return nil }
-func (w *fakeWorkspace) Git() git.GitOps       { return nil }
-func (w *fakeWorkspace) Close() error          { return nil }
+func (w *fakeWorkspace) Name() string { return w.name }
+func (w *fakeWorkspace) Path() string { return w.path }
+func (w *fakeWorkspace) Close() error { return nil }
 
 func (w *fakeWorkspace) ReadFile(_ context.Context, p string) ([]byte, error) {
 	w.lastReadPath = p

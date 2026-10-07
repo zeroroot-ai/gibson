@@ -926,10 +926,7 @@ func (s *ComponentServiceServer) Heartbeat(
 		}
 	}
 
-	return &componentpb.HeartbeatResponse{
-		Registered:    true,
-		ConfigUpdates: map[string]string{},
-	}, nil
+	return &componentpb.HeartbeatResponse{Registered: true}, nil
 }
 
 // MemberStatusSink records a bank member's heartbeat (ADR-0119).
@@ -965,7 +962,7 @@ func (s *ComponentServiceServer) memberHeartbeat(ctx context.Context, tenant str
 			slog.String("error", err.Error()))
 		return nil, status.Errorf(codes.NotFound, "member %s: %v", req.GetInstanceId(), err)
 	}
-	return &componentpb.HeartbeatResponse{Registered: true, ConfigUpdates: map[string]string{}}, nil
+	return &componentpb.HeartbeatResponse{Registered: true}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1914,7 +1911,6 @@ func (s *ComponentServiceServer) ListAvailablePlugins(
 			Configured:       e.Configured,
 			HealthStatus:     e.HealthStatus,
 			Source:           e.Source,
-			InstanceCount:    int32(e.InstanceCount),
 		})
 	}
 
@@ -2092,21 +2088,6 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		return nil, status.Error(codes.InvalidArgument, "plugin_name is required")
 	}
 
-	maskedCfg, err := s.componentAccess.GetMaskedConfig(ctx, tenant, req.PluginName)
-	if err != nil {
-		s.logger.ErrorContext(ctx, "get plugin config: failed",
-			slog.String("tenant", tenant),
-			slog.String("plugin_name", req.PluginName),
-			slog.String("error", err.Error()),
-		)
-		return nil, componentAccessErrToStatus(err, req.PluginName)
-	}
-
-	cfgBytes, err := json.Marshal(maskedCfg)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to serialize masked config: %v", err)
-	}
-
 	// Include the schema so clients can render a config form without a second
 	// round-trip. Missing schema is not an error — it is returned as an empty
 	// string and the caller renders a generic key-value editor.
@@ -2125,10 +2106,7 @@ func (s *ComponentServiceServer) GetPluginConfig(
 		slog.String("plugin_name", req.PluginName),
 	)
 
-	return &componentpb.GetPluginConfigResponse{
-		ConfigJson:       string(cfgBytes),
-		ConfigSchemaJson: schema,
-	}, nil
+	return &componentpb.GetPluginConfigResponse{ConfigSchemaJson: schema}, nil
 }
 
 // TestPluginConnection validates plugin credentials by dispatching a
@@ -2270,13 +2248,10 @@ func (s *ComponentServiceServer) ListTenantPlugins(
 	protos := make([]*componentpb.PluginAccessProto, 0, len(records))
 	for _, r := range records {
 		protos = append(protos, &componentpb.PluginAccessProto{
-			TenantId:     r.TenantID,
-			PluginName:   r.ComponentName,
-			Enabled:      r.Enabled,
-			Source:       r.Source,
-			ConfiguredAt: r.ConfiguredAt,
-			ConfiguredBy: r.ConfiguredBy,
-			HasConfig:    r.HasConfig,
+			TenantId:   r.TenantID,
+			PluginName: r.ComponentName,
+			Enabled:    r.Enabled,
+			Source:     r.Source,
 		})
 	}
 

@@ -74,7 +74,7 @@ func (s *HarnessCallbackService) RequestDestructiveAuthorization(
 	mission := h.Mission()
 	target := h.Target()
 
-	id, err := s.proofSettlement.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{
+	_, err = s.proofSettlement.RequestDestructiveAuthorization(ctx, brain.DestructiveAuthorizationRequest{
 		HypothesisID:  hypothesisID,
 		ScopeID:       target.ID.String(),
 		MissionID:     mission.ID.String(),
@@ -87,7 +87,5 @@ func (s *HarnessCallbackService) RequestDestructiveAuthorization(
 		return nil, status.Errorf(codes.Internal, "RequestDestructiveAuthorization: enqueue hypothesis %q: %v", hypothesisID, err)
 	}
 
-	return &harnesspb.RequestDestructiveAuthorizationResponse{
-		AuthorizationRequestId: id,
-	}, nil
+	return &harnesspb.RequestDestructiveAuthorizationResponse{}, nil
 }

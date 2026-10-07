@@ -222,10 +222,8 @@ func (s *ComponentServiceServer) GetMissionRunHistory(ctx context.Context, req *
 		return nil, status.Errorf(codes.NotFound, "no mission is associated with work item %q", req.GetWorkId())
 	}
 
-	runsJSON, err := s.missionMgr.GetMissionRunHistory(ctx, tenant, missionID)
-	if err != nil {
-		s.logger.Error("GetMissionRunHistory failed", "tenant", tenant, "error", err)
-		return nil, missionError(err, "history query failed")
-	}
-	return &componentpb.GetMissionRunHistoryResponse{RunsJson: runsJSON}, nil
+	// The response carries no field since the sdk deleted runs_json, which no
+	// caller read (D77). The work id still resolves, so a foreign work id is
+	// NotFound as before.
+	return &componentpb.GetMissionRunHistoryResponse{}, nil
 }

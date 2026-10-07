@@ -171,7 +171,6 @@ func TestProposeOntologyExtension_InvalidIdentifier_RejectedInBand(t *testing.T)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.False(t, resp.GetAccepted())
-	assert.NotEmpty(t, resp.GetRejectionReason())
 	assert.Empty(t, engine.OntologyProposals(), "an invalid identifier must never be recorded as a sighting")
 }
 
@@ -195,7 +194,6 @@ func TestProposeOntologyExtension_ValidProposal_AcceptedAndRecurs(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	assert.True(t, resp.GetAccepted())
-	assert.Empty(t, resp.GetRejectionReason())
 	awaitOntologyProposalRecurrence(t, engine, "CustomHost", 1)
 
 	resp, err = svc.ProposeOntologyExtension(ctx, req)

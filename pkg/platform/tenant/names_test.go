@@ -14,7 +14,7 @@ import (
 func TestNames_TenantIDRoundTrip(t *testing.T) {
 	id := auth.MustNewTenantID("zeroroot-ai")
 	n := tenant.FromTenantID(id)
-	if !n.TenantID().Equal(id) {
+	if n.TenantID().String() != id.String() {
 		t.Errorf("TenantID() round-trip failed: got %v, want %v", n.TenantID(), id)
 	}
 }

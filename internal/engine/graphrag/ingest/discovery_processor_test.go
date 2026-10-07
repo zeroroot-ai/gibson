@@ -60,11 +60,11 @@ func fullDiscovery() *graphragpb.DiscoveryResult {
 			{Id: strp("e1"), ServiceId: "s1", Url: "/admin", StatusCode: i32p(401)},
 		},
 		Technologies: []*graphragpb.Technology{
-			{Id: strp("t1"), Name: "React", Version: strp("18"), ParentId: strp("s1"), ParentType: strp("service")},
+			{Id: strp("t1"), Name: "React", Version: strp("18"), ParentId: strp("s1")},
 		},
 		Certificates: []*graphragpb.Certificate{
 			{
-				Id: strp("c1"), ParentId: strp("p1"), ParentType: strp("port"),
+				Id: strp("c1"), ParentId: strp("p1"),
 				Subject: strp("CN=example.com"), Issuer: strp("CN=Let's Encrypt"),
 				FingerprintSha256: strp("ab12"), NotAfter: i64p(1800000000),
 			},
@@ -78,7 +78,7 @@ func fullDiscovery() *graphragpb.DiscoveryResult {
 		Findings: []*graphragpb.Finding{
 			{
 				Id: strp("f1"), Title: "Exposed admin panel", Severity: "high",
-				Description: strp("no auth"), ParentId: strp("h1"), ParentType: strp("host"),
+				Description: strp("no auth"), ParentId: strp("h1"),
 			},
 		},
 	}

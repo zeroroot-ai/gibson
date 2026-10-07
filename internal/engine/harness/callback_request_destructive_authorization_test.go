@@ -95,7 +95,6 @@ func TestRequestDestructiveAuthorization_Success_EnqueuesAndReturnsImmediately(t
 	resp, err := svc.RequestDestructiveAuthorization(ctx, req)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	assert.Equal(t, "hyp-1", resp.GetAuthorizationRequestId())
 	assert.Nil(t, resp.GetError())
 
 	awaitDestructivePending(t, engine.engine, "hyp-1")

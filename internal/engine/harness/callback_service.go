@@ -1458,10 +1458,9 @@ func (s *HarnessCallbackService) ListTools(ctx context.Context, req *harnesspb.L
 	protoTools := make([]*harnesspb.HarnessToolDescriptor, len(tools))
 	for i, tool := range tools {
 		protoTools[i] = &harnesspb.HarnessToolDescriptor{
-			Name:         tool.Name,
-			Description:  tool.Description,
-			InputSchema:  SchemaToCallbackProto(tool.InputSchema),  // Structured schema with taxonomy
-			OutputSchema: SchemaToCallbackProto(tool.OutputSchema), // Structured output schema with taxonomy
+			Name:        tool.Name,
+			Description: tool.Description,
+			InputSchema: SchemaToCallbackProto(tool.InputSchema), // Structured schema with taxonomy
 		}
 	}
 
