@@ -232,7 +232,7 @@ func runRetire(t *testing.T, vc *fakeVaultClient, sys *fakeSystemClient, adminHe
 	t.Helper()
 	r := adminTokenReconciler(t, vc, sys)
 	for _, o := range consumerSecrets(adminHeld, "") {
-		if err := r.Client.Create(context.Background(), o); err != nil {
+		if err := r.Create(context.Background(), o); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -393,7 +393,7 @@ func TestReconcileLoginClientToken(t *testing.T) {
 		sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
 		r := adminTokenReconciler(t, vc, sys)
 		for _, o := range consumerSecrets("", "new") {
-			if err := r.Client.Create(context.Background(), o); err != nil {
+			if err := r.Create(context.Background(), o); err != nil {
 				t.Fatal(err)
 			}
 		}
