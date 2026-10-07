@@ -91,6 +91,10 @@ type HostClaims struct {
 	// enrolled the host. Sourced from the store: a re-registration keeps them.
 	AgentName         string
 	CapabilityCeiling []string
+	// CeilingRecorded is false when the host's ceiling is unknown. A caller
+	// refuses a re-registration then, because an empty list would allow every
+	// capability.
+	CeilingRecorded bool
 
 	// IssuedAt is when the token was created (JWT iat).
 	IssuedAt time.Time
@@ -251,6 +255,7 @@ func (v *JWTVerifier) VerifyHostJWT(ctx context.Context, tokenStr, expectedAud s
 		PrincipalRef:      host.PrincipalRef,
 		AgentName:         host.AgentName,
 		CapabilityCeiling: host.CapabilityCeiling,
+		CeilingRecorded:   host.CeilingRecorded,
 		IssuedAt:          issuedAt,
 		ExpiresAt:         expiresAt,
 	}, nil

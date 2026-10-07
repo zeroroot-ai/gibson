@@ -104,8 +104,12 @@ type Host struct {
 	// so the daemon reads them from here and never from the request.
 	AgentName         string
 	CapabilityCeiling []string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// CeilingRecorded is false for a host whose ceiling is unknown (it
+	// enrolled before the ceiling was stored). An unknown ceiling is not an
+	// empty one: it must never read as "no ceiling".
+	CeilingRecorded bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // Agent represents an LLM-driven worker registered under a Host.
@@ -528,8 +532,13 @@ WHERE  id = $1`
 	if err != nil {
 		return nil, fmt.Errorf("capabilitygrant: GetHost %q: %w", hostID, err)
 	}
-	if err := json.Unmarshal(ceiling, &h.CapabilityCeiling); err != nil {
-		return nil, fmt.Errorf("capabilitygrant: GetHost %q: capability ceiling: %w", hostID, err)
+	if len(ceiling) > 0 {
+		if err := json.Unmarshal(ceiling, &h.CapabilityCeiling); err != nil {
+			return nil, fmt.Errorf("capabilitygrant: GetHost %q: capability ceiling: %w", hostID, err)
+		}
+		// A jsonb null decodes to a nil list. Only a list, empty or not, is a
+		// recorded ceiling.
+		h.CeilingRecorded = h.CapabilityCeiling != nil
 	}
 	h.PublicKeyJWK = json.RawMessage(jwk)
 	return &h, nil
