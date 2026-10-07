@@ -3,7 +3,7 @@ module github.com/zeroroot-ai/gibson/plugins/gitlab
 go 1.27.1
 
 require (
-	github.com/zeroroot-ai/sdk v0.201.1-0.20261006210534-606cd9a0d475
+	github.com/zeroroot-ai/sdk v0.202.0
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 )
 
@@ -17,7 +17,6 @@ require (
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.8.2 // indirect
-	go.opentelemetry.io/otel/sdk/metric v1.47.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect

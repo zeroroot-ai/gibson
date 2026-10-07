@@ -292,8 +292,7 @@ func TestReconcileZitadelSMTP_SteadyState_NoOp(t *testing.T) {
 	// The hash of the exact settings the mux + creds Secret above resolve
 	// to; a real reconcile computes this from the live spec, so a matching
 	// stored hash represents "nothing has changed since the last reconcile."
-	cfg := desiredSMTPProviderConfig(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass")
-	pb.Status.SMTPSettingsHash = smtpSettingsHash(cfg)
+	pb.Status.SMTPSettingsHash = smtpSettingsHash(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass")
 
 	res, err := r.reconcileZitadelSMTP(context.Background(), pb, logr.Discard())
 	if err != nil {
@@ -368,8 +367,7 @@ func TestReconcileZitadelSMTP_PasswordOnlyChange_UpdatesWithoutReactivating(t *t
 	if m.counters.activate != 0 {
 		t.Fatalf("activate calls = %d, want 0 (provider was already active)", m.counters.activate)
 	}
-	cfg := desiredSMTPProviderConfig(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass")
-	if pb.Status.SMTPSettingsHash != smtpSettingsHash(cfg) {
+	if pb.Status.SMTPSettingsHash != smtpSettingsHash(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass") {
 		t.Fatal("SMTPSettingsHash was not refreshed after the update")
 	}
 }
@@ -390,8 +388,7 @@ func TestReconcileZitadelSMTP_StaleIDRecoversByDescription(t *testing.T) {
 	r := newSMTPReconciler(t, srv.URL, adminPATSecret(), smtpCredsSecret())
 	pb := baseSMTPCR(srv.URL)
 	pb.Status.SMTPProviderID = "STALE-ID"
-	cfg := desiredSMTPProviderConfig(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass")
-	pb.Status.SMTPSettingsHash = smtpSettingsHash(cfg)
+	pb.Status.SMTPSettingsHash = smtpSettingsHash(pb.Spec.Zitadel.SMTP, "smtp-user", "smtp-pass")
 
 	res, err := r.reconcileZitadelSMTP(context.Background(), pb, logr.Discard())
 	if err != nil {
@@ -550,28 +547,35 @@ func TestReconcileZitadelSMTP_NoAuth(t *testing.T) {
 // same for the same settings, changes when the password or any other field
 // changes, and never holds the password or a fast hash of it.
 func TestSMTPSettingsHash_IsStableAndChangesWithEachField(t *testing.T) {
-	base := zitadel.SMTPProviderConfig{
-		SenderAddress: "noreply@example.com", SenderName: "Gibson", TLS: true,
-		Host: "smtp.example.com:587", User: "smtp-user", Password: "smtp-pass",
+	type settings struct {
+		spec           gibsonv1alpha1.ZitadelSMTPSpec
+		user, password string
 	}
-	got := smtpSettingsHash(base)
-	if got != smtpSettingsHash(base) {
+	tlsOn, tlsOff := true, false
+	base := settings{
+		spec:     gibsonv1alpha1.ZitadelSMTPSpec{FromAddress: "noreply@example.com", FromName: "Gibson", TLS: &tlsOn, Host: "smtp.example.com", Port: 587},
+		user:     "smtp-user",
+		password: "smtp-pass",
+	}
+	hash := func(s settings) string { return smtpSettingsHash(&s.spec, s.user, s.password) }
+	got := hash(base)
+	if got != hash(base) {
 		t.Fatal("the fingerprint of one set of settings must be stable")
 	}
-	for name, change := range map[string]func(*zitadel.SMTPProviderConfig){
-		"password": func(c *zitadel.SMTPProviderConfig) { c.Password = "other-pass" },
-		"host":     func(c *zitadel.SMTPProviderConfig) { c.Host = "smtp.other.com:587" },
-		"user":     func(c *zitadel.SMTPProviderConfig) { c.User = "other-user" },
-		"tls":      func(c *zitadel.SMTPProviderConfig) { c.TLS = false },
+	for name, change := range map[string]func(*settings){
+		"password": func(s *settings) { s.password = "other-pass" },
+		"host":     func(s *settings) { s.spec.Host = "smtp.other.com" },
+		"user":     func(s *settings) { s.user = "other-user" },
+		"tls":      func(s *settings) { s.spec.TLS = &tlsOff },
 	} {
 		c := base
 		change(&c)
-		if smtpSettingsHash(c) == got {
+		if hash(c) == got {
 			t.Errorf("a change of the %s must change the fingerprint", name)
 		}
 	}
-	fast := sha256.Sum256([]byte(base.Password))
-	if strings.Contains(got, base.Password) || strings.Contains(got, hex.EncodeToString(fast[:])) {
+	fast := sha256.Sum256([]byte(base.password))
+	if strings.Contains(got, base.password) || strings.Contains(got, hex.EncodeToString(fast[:])) {
 		t.Fatal("the fingerprint must hold neither the password nor a fast hash of it")
 	}
 }
