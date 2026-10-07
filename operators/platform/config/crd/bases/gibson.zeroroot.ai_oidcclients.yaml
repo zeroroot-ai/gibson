@@ -310,9 +310,9 @@ spec:
                       type: string
                     count:
                       description: |-
-                        Count is how many passes in a row made this same record. One pending
-                        record stands for all of them, so the status stays small while the
-                        daemon does not exist.
+                        Count is how many records an overflow record stands for. The pending
+                        list has a fixed size, and one overflow record at its end counts the
+                        records that did not fit.
                       format: int32
                       type: integer
                     fields:
