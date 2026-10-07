@@ -1202,38 +1202,55 @@ func (r *OIDCClientReconciler) parkOnParent(ctx context.Context, oc *gibsonv1alp
 }
 
 // recordDeletionOrLog keeps the delete record of an OIDC client. It reports
-// that the delete must wait while the record is not kept and the grace has not
-// passed. After pendingDeleteGrace the record goes to the operator log, so a
-// teardown with no daemon and no parent ends.
+// that the delete must wait while the record is not kept. After
+// pendingDeleteGrace the record goes to a ConfigMap in the operator namespace
+// (lastResort).
 func (r *OIDCClientReconciler) recordDeletionOrLog(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, appID string) (wait bool) {
 	rerr := r.recordDeletion(ctx, oc, appID)
 	if rerr == nil {
 		return false
 	}
-	if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
-		log.FromContext(ctx).Error(rerr, "the delete waits: its audit record is not kept")
-		return true
-	}
-	logPendingLost(ctx, []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
+	rec := pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
 		"client": oc.Spec.ClientName, "client_id": oc.Status.ClientID, "app_id": appID,
-	})})
-	return false
+	})
+	return r.lastResort(ctx, oc, []gibsonv1alpha1.PendingAuditRecord{rec}, rerr)
 }
 
 // parkPendingOrLog moves the pending records of a deleted OIDC client to its
-// parent. It reports that the delete must wait while they are not moved and
-// the grace has not passed. After the grace the records go to the operator
-// log.
+// parent. It reports that the delete must wait while they are not moved. After
+// pendingDeleteGrace the records go to a ConfigMap in the operator namespace
+// (lastResort).
 func (r *OIDCClientReconciler) parkPendingOrLog(ctx context.Context, oc *gibsonv1alpha1.OIDCClient) (wait bool, err error) {
 	err = r.parkPendingBeforeDelete(ctx, oc)
 	if err == nil {
 		return false, nil
 	}
+	return r.lastResort(ctx, oc, oc.Status.PendingAuditRecords, err), err
+}
+
+// lastResort decides what a delete does when neither the daemon nor the parent
+// holds its records. Within the grace it waits. After the grace the records go
+// to a ConfigMap, which the flusher sends when the daemon returns. When even
+// that fails, the delete goes on only in a teardown of the whole platform (the
+// parent PlatformBootstrap is deleting or gone), where no daemon will return.
+// The operator log is then the last copy, and it says so. In any other case the
+// delete keeps waiting, because a change must not happen with its record lost.
+func (r *OIDCClientReconciler) lastResort(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, recs []gibsonv1alpha1.PendingAuditRecord, cause error) (wait bool) {
+	logger := log.FromContext(ctx)
 	if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
-		return true, err
+		logger.Error(cause, "the delete waits: its audit record is not kept")
+		return true
 	}
-	logPendingLost(ctx, oc.Status.PendingAuditRecords)
-	return false, nil
+	kerr := saveDurable(ctx, r.Client, recs)
+	if kerr == nil {
+		return false
+	}
+	if parentInTeardown(ctx, r.Client, oc) {
+		logTeardown(ctx, recs)
+		return false
+	}
+	logger.Error(kerr, "the delete waits: no ConfigMap holds its audit record")
+	return true
 }
 
 // parkPendingBeforeDelete moves the pending records of a deleted OIDCClient

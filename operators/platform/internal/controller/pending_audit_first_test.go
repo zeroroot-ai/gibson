@@ -5,12 +5,15 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -248,6 +251,13 @@ func TestPlatformBootstrap_DeleteEndsAfterTheGrace(t *testing.T) {
 	if len(pb.Finalizers) != 0 {
 		t.Fatalf("finalizers = %v, want none after the grace", pb.Finalizers)
 	}
+	var cms corev1.ConfigMapList
+	if err := cli.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace), client.MatchingLabels{pendingAuditLabel: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(cms.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, want one that holds the pending records", len(cms.Items))
+	}
 }
 
 // When the status that holds the record cannot be written, no step runs.
@@ -313,5 +323,379 @@ func TestOIDCClientDelete_PendingRecordsWaitThenEnd(t *testing.T) {
 	oc.Status.ClientID = ""
 	if _, err := r.reconcileDeletion(context.Background(), oc); err != nil || len(oc.Finalizers) != 0 {
 		t.Fatalf("app client after the grace: err = %v, finalizers = %v", err, oc.Finalizers)
+	}
+}
+
+// Past the grace a delete moves its records to a ConfigMap, and the flusher
+// sends them when the daemon returns and then deletes the ConfigMap.
+func TestPendingAuditFlusher_SendsWhenTheDaemonReturns(t *testing.T) {
+	s := mustScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(s).Build()
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	recs := []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"}),
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "b"}),
+	}
+	if err := saveDurable(context.Background(), cli, recs); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveDurable(context.Background(), cli, recs); err != nil {
+		t.Fatalf("the same records twice: %v", err)
+	}
+	if err := saveDurable(context.Background(), cli, nil); err != nil {
+		t.Fatalf("no records: %v", err)
+	}
+	count := func() int {
+		var cms corev1.ConfigMapList
+		if err := cli.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace)); err != nil {
+			t.Fatal(err)
+		}
+		return len(cms.Items)
+	}
+	if count() != 1 {
+		t.Fatalf("ConfigMaps = %d, want one for the same records", count())
+	}
+
+	f := &PendingAuditFlusher{Client: cli, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}
+	if err := f.FlushOnce(context.Background()); err == nil || count() != 1 {
+		t.Fatalf("daemon down: err = %v, ConfigMaps = %d; want the ConfigMap kept", err, count())
+	}
+	up := &audittest.Sink{}
+	f.Audit = up.Emitter(t)
+	if err := f.FlushOnce(context.Background()); err != nil || count() != 0 || len(up.Events()) != 2 {
+		t.Fatalf("daemon up: err = %v, ConfigMaps = %d, sent = %d; want both sent and the ConfigMap gone", err, count(), len(up.Events()))
+	}
+}
+
+// A client delete past the grace keeps its records in a ConfigMap. When that
+// fails too, it goes on only in a teardown of the whole platform. In any other
+// case it keeps waiting.
+func TestOIDCClientDelete_LastResort(t *testing.T) {
+	s := mustScheme(t)
+	old := metav1.NewTime(metav1.Now().Add(-2 * pendingDeleteGrace))
+	mk := func(parent *gibsonv1alpha1.PlatformBootstrap, failCreate bool) (*OIDCClientReconciler, *gibsonv1alpha1.OIDCClient) {
+		oc := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{
+			Name: "dashboard", Namespace: "gibson", Finalizers: []string{oidcClientFinalizer}, DeletionTimestamp: &old,
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: gibsonv1alpha1.GroupVersion.String(), Kind: "PlatformBootstrap", Name: "platform", UID: "pb-uid"}},
+		}}
+		oc.Spec.ApplicationType = gibsonv1alpha1.OIDCAppTypeMachineUser
+		oc.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+			pendingRecord(audit.ActionOIDCClientApply, oc, "", "", map[string]string{"client": "dashboard"}),
+		}
+		b := fake.NewClientBuilder().WithScheme(s).WithObjects(oc).WithStatusSubresource(oc)
+		if parent != nil {
+			b = b.WithObjects(parent).WithStatusSubresource(parent)
+		}
+		var c client.Client = b.Build()
+		if failCreate {
+			c = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+				Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+					return errors.New("namespace is going away")
+				},
+			})
+		}
+		return &OIDCClientReconciler{Client: c, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}, oc
+	}
+	live := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform", UID: "pb-uid"}}
+
+	// The parent exists and is live: the records go to the parent.
+	r, oc := mk(live, false)
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("live parent: the delete must not wait")
+	}
+	// No parent, the ConfigMap works: the records go to the ConfigMap.
+	r, oc = mk(nil, false)
+	// A missing parent is a teardown, but the ConfigMap is written first.
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("no parent, ConfigMap works: the delete must not wait")
+	}
+	var cms corev1.ConfigMapList
+	if err := r.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace)); err != nil || len(cms.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, err = %v; want one", len(cms.Items), err)
+	}
+	// The ConfigMap fails and the platform is in teardown (no parent): the log is the last copy.
+	r, oc = mk(nil, true)
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("teardown: the delete must go on")
+	}
+	// The ConfigMap fails, the parent is live and cannot hold the record: wait.
+	r, oc = mk(live, true)
+	r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{
+		SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+			return errors.New("status write refused")
+		},
+	})
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); !wait {
+		t.Error("live platform, no copy possible: the delete must wait")
+	}
+	// The same through recordDeletionOrLog.
+	if wait := r.recordDeletionOrLog(context.Background(), oc, "app-1"); !wait {
+		t.Error("recordDeletionOrLog: the delete must wait")
+	}
+}
+
+// A retry of the same delete stamps a new first-seen time and still writes the
+// same ConfigMap. The flusher refuses a record that this operator does not
+// write for a delete, and keeps the unsent rest of a ConfigMap.
+func TestPendingDurable_NameFlusherAndTeardown(t *testing.T) {
+	ctx := context.Background()
+	s := mustScheme(t)
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	cli := fake.NewClientBuilder().WithScheme(s).Build()
+	mk := func() []gibsonv1alpha1.PendingAuditRecord {
+		return []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"})}
+	}
+	if err := saveDurable(ctx, cli, mk()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(1100 * time.Millisecond) // a new second for FirstAt
+	if err := saveDurable(ctx, cli, mk()); err != nil {
+		t.Fatal(err)
+	}
+	var cms corev1.ConfigMapList
+	if err := cli.List(ctx, &cms, client.InNamespace(defaultChildNamespace)); err != nil || len(cms.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, err = %v; want one for a retried delete", len(cms.Items), err)
+	}
+
+	// A ConfigMap with a foreign action is not sent.
+	foreign := []gibsonv1alpha1.PendingAuditRecord{pendingRecord("tenant.delete", obj, "", "", nil)}
+	if err := saveDurable(ctx, cli, foreign); err != nil {
+		t.Fatal(err)
+	}
+	up := &audittest.Sink{}
+	f := &PendingAuditFlusher{Client: cli, Audit: up.Emitter(t)}
+	if err := f.FlushOnce(ctx); err == nil {
+		t.Fatal("want an error for the foreign record")
+	}
+	if got := up.Events(); len(got) != 1 || got[0].Action != audit.ActionOIDCClientDelete {
+		t.Fatalf("sent = %+v, want only the delete record", got)
+	}
+
+	// A ConfigMap with records the daemon takes in part keeps the rest.
+	two := []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "x"}),
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "y"}),
+	}
+	cli2 := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(ctx, cli2, two); err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	partial := &audittest.Sink{}
+	partial.OnEmit = func(audit.Event) { n++ }
+	flaky := &flakySink{inner: partial, failAfter: 1}
+	em, err := audit.NewSagaEmitter(flaky)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2 := &PendingAuditFlusher{Client: cli2, Audit: em}
+	if err := f2.FlushOnce(ctx); err == nil {
+		t.Fatal("want an error: the daemon refused the second record")
+	}
+	var left corev1.ConfigMapList
+	if err := cli2.List(ctx, &left, client.InNamespace(defaultChildNamespace)); err != nil || len(left.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, err = %v", len(left.Items), err)
+	}
+	var kept []gibsonv1alpha1.PendingAuditRecord
+	if err := json.Unmarshal([]byte(left.Items[0].Data[pendingAuditKey]), &kept); err != nil || len(kept) != 1 || kept[0].Fields["client"] != "y" {
+		t.Fatalf("kept = %+v, err = %v; want only the second record", kept, err)
+	}
+
+	// A parent that is deleting is a teardown. A live parent is not.
+	now := metav1.Now()
+	dying := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform", Finalizers: []string{platformBootstrapFinalizer}, DeletionTimestamp: &now}}
+	oc := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{
+		Name: "dashboard", Namespace: "gibson",
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: gibsonv1alpha1.GroupVersion.String(), Kind: "PlatformBootstrap", Name: "platform"}},
+	}}
+	cd := fake.NewClientBuilder().WithScheme(s).WithObjects(dying).Build()
+	if !parentInTeardown(ctx, cd, oc) {
+		t.Error("a deleting parent is a teardown")
+	}
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(&gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}).Build()
+	if parentInTeardown(ctx, cl, oc) {
+		t.Error("a live parent is not a teardown")
+	}
+	failing := interceptor.NewClient(cl, interceptor.Funcs{
+		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
+			return errors.New("api server down")
+		},
+	})
+	if parentInTeardown(ctx, failing, oc) {
+		t.Error("an unreadable parent is not a teardown")
+	}
+}
+
+// flakySink accepts failAfter records and refuses the rest.
+type flakySink struct {
+	inner     *audittest.Sink
+	failAfter int
+	n         int
+}
+
+func (f *flakySink) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
+	if f.n >= f.failAfter {
+		return errNoDaemon
+	}
+	f.n++
+	if err := f.inner.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("inner sink: %w", err)
+	}
+	return nil
+}
+
+// A PlatformBootstrap delete that cannot write its ConfigMap goes on and logs
+// the records as a teardown.
+func TestPlatformBootstrap_DeleteLogsATeardownWhenNoConfigMapCanBeWritten(t *testing.T) {
+	s := mustScheme(t)
+	old := metav1.NewTime(metav1.Now().Add(-2 * pendingDeleteGrace))
+	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{
+		Name: "platform", Finalizers: []string{platformBootstrapFinalizer}, DeletionTimestamp: &old,
+	}}
+	pb.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, pb, "", "", map[string]string{"client": "dashboard"}),
+	}
+	base := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
+	cli := interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+			return errors.New("namespace is going away")
+		},
+	})
+	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}
+	if _, err := r.reconcileDeletion(context.Background(), pb); err != nil || len(pb.Finalizers) != 0 {
+		t.Fatalf("err = %v, finalizers = %v; want the delete to go on", err, pb.Finalizers)
+	}
+}
+
+// The flusher refuses to start with no audit emitter, asks for leader
+// election, and its loop sends a ConfigMap on a tick and then stops with the
+// context.
+func TestPendingAuditFlusher_SetupAndLoop(t *testing.T) {
+	if err := (&PendingAuditFlusher{}).SetupWithManager(nil); !errors.Is(err, errNoAuditEmitter) {
+		t.Fatalf("setup with no emitter: %v", err)
+	}
+	if !(&PendingAuditFlusher{}).NeedLeaderElection() {
+		t.Fatal("the flusher must run on the leader only")
+	}
+	s := mustScheme(t)
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	cli := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(context.Background(), cli, []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// One tick with the daemon down keeps the ConfigMap. The next with it up sends it.
+	sink := &toggleSink{}
+	em, err := audit.NewSagaEmitter(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &PendingAuditFlusher{Client: cli, Audit: em, Interval: 5 * time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- f.Start(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+	sink.up.Store(true) // the daemon returns
+	deadline := time.Now().Add(5 * time.Second)
+	for sink.sent.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if sink.sent.Load() != 1 {
+		t.Fatalf("sent = %d, want the record sent once the daemon returned", sink.sent.Load())
+	}
+}
+
+// toggleSink refuses each record until up is set.
+type toggleSink struct {
+	up   atomic.Bool
+	sent atomic.Int32
+}
+
+func (s *toggleSink) EmitAuditEvent(context.Context, audit.Event) error {
+	if !s.up.Load() {
+		return errNoDaemon
+	}
+	s.sent.Add(1)
+	return nil
+}
+
+// The flusher reports a ConfigMap it cannot decode, a list that fails, a delete
+// that fails and an update that fails. A client with no PlatformBootstrap
+// owner is not in a teardown.
+func TestPendingAuditFlusher_ErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	s := mustScheme(t)
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	one := []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"})}
+	two := append(append([]gibsonv1alpha1.PendingAuditRecord{}, one...),
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "b"}))
+
+	// A ConfigMap with JSON that does not decode.
+	bad := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: "bad", Namespace: defaultChildNamespace, Labels: map[string]string{pendingAuditLabel: "true"},
+	}, Data: map[string]string{pendingAuditKey: "{not json"}}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(bad).Build()
+	f := &PendingAuditFlusher{Client: cli, Audit: (&audittest.Sink{}).Emitter(t)}
+	if err := f.FlushOnce(ctx); err == nil {
+		t.Error("a ConfigMap that does not decode must be an error")
+	}
+
+	// The list fails.
+	failList := interceptor.NewClient(cli, interceptor.Funcs{
+		List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+			return errors.New("api server down")
+		},
+	})
+	if err := (&PendingAuditFlusher{Client: failList, Audit: f.Audit}).FlushOnce(ctx); err == nil {
+		t.Error("a failed list must be an error")
+	}
+
+	// The delete after a full send fails.
+	base := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(ctx, base, one); err != nil {
+		t.Fatal(err)
+	}
+	failDelete := interceptor.NewClient(base, interceptor.Funcs{
+		Delete: func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error {
+			return errors.New("delete refused")
+		},
+	})
+	if err := (&PendingAuditFlusher{Client: failDelete, Audit: (&audittest.Sink{}).Emitter(t)}).FlushOnce(ctx); err == nil {
+		t.Error("a failed delete must be an error")
+	}
+
+	// The update after a partial send fails.
+	base2 := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(ctx, base2, two); err != nil {
+		t.Fatal(err)
+	}
+	failUpdate := interceptor.NewClient(base2, interceptor.Funcs{
+		Update: func(context.Context, client.WithWatch, client.Object, ...client.UpdateOption) error {
+			return errors.New("update refused")
+		},
+	})
+	em, err := audit.NewSagaEmitter(&flakySink{inner: &audittest.Sink{}, failAfter: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&PendingAuditFlusher{Client: failUpdate, Audit: em}).FlushOnce(ctx); err == nil {
+		t.Error("a failed update must be an error")
+	}
+
+	// A client that no PlatformBootstrap owns is not in a teardown. The loop
+	// takes the default interval when none is set.
+	orphan := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{Name: "x", Namespace: "gibson"}}
+	if parentInTeardown(ctx, base, orphan) {
+		t.Error("an OIDC client with no owner is not in a teardown")
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := (&PendingAuditFlusher{Client: base, Audit: f.Audit}).Start(cctx); err != nil {
+		t.Errorf("Start with the default interval: %v", err)
 	}
 }

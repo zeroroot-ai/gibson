@@ -11,7 +11,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -57,6 +59,41 @@ func TestCatalogPlugins_AuditRecordComesFirstAndOnlyOnAChange(t *testing.T) {
 	}
 	if got := len(sink.Events()); got != 2 {
 		t.Fatalf("records after a change of the egress list = %d, want 2", got)
+	}
+}
+
+// A repair of drift in place is a change: it gets a record too. An object that
+// someone changed, and an object that someone deleted, are both repaired with a
+// record before the repair.
+func TestCatalogPlugins_DriftRepairWritesARecord(t *testing.T) {
+	sink := &audittest.Sink{}
+	r, c, _ := convergedInstance(t)
+	r.Audit = sink.Emitter(t)
+
+	// Someone widens the default-deny policy in place.
+	var np networkingv1.NetworkPolicy
+	key := client.ObjectKey{Namespace: cpNamespace, Name: "default-deny"}
+	cpGet(t, c, key, &np)
+	np.Spec.PolicyTypes = nil
+	if err := c.Update(context.Background(), &np); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if len(sink.Events()) != 1 {
+		t.Fatalf("records after a repair in place = %d, want 1", len(sink.Events()))
+	}
+	if err := r.converge(context.Background()); err != nil || len(sink.Events()) != 1 {
+		t.Fatalf("a settled pass: err = %v, records = %d; want no new record", err, len(sink.Events()))
+	}
+
+	// Someone deletes the service account.
+	if err := c.Delete(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: cpNamespace, Name: "gibson-plugin-" + cpPlugin}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.converge(context.Background()); err != nil || len(sink.Events()) != 2 {
+		t.Fatalf("after a delete: err = %v, records = %d; want 2", err, len(sink.Events()))
 	}
 }
 
@@ -135,5 +172,52 @@ func TestCatalogPlugins_ForbiddenReadMeansANewInstance(t *testing.T) {
 	changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin))
 	if err != nil || !changes {
 		t.Fatalf("changes = %v, err = %v; want a change, no error", changes, err)
+	}
+}
+
+// The API server fills defaults into a stored object. A pass over an instance
+// whose objects hold such defaults is not a change, or the loop would write a
+// record on every pass. A changed field and a changed list still are.
+func TestCatalogPlugins_ServerDefaultsAreNotAChange(t *testing.T) {
+	r, c, _ := convergedInstance(t)
+	key := client.ObjectKey{Namespace: cpNamespace, Name: "gibson-plugin-" + cpPlugin}
+	var dep appsv1.Deployment
+	cpGet(t, c, key, &dep)
+	dep.Spec.Template.Spec.RestartPolicy = corev1.RestartPolicyAlways
+	dep.Spec.Template.Spec.DNSPolicy = corev1.DNSClusterFirst
+	dep.Spec.Template.Spec.SchedulerName = "default-scheduler"
+	dep.Spec.Template.Spec.Containers[0].TerminationMessagePath = "/dev/termination-log"
+	if err := c.Update(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin)); err != nil || changes {
+		t.Fatalf("with server defaults: changes = %v, err = %v; want none", changes, err)
+	}
+
+	// A changed image is a change.
+	cpGet(t, c, key, &dep)
+	dep.Spec.Template.Spec.Containers[0].Image = "attacker/image"
+	if err := c.Update(context.Background(), &dep); err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := r.instanceChanges(context.Background(), cpWish(cpTenant, cpPlugin)); err != nil || !changes {
+		t.Fatalf("with a changed image: changes = %v, err = %v; want a change", changes, err)
+	}
+}
+
+// The probe client counts every kind of write as a write and writes nothing.
+func TestDryRunClient_EveryWriteIsNoted(t *testing.T) {
+	cm := &corev1.ConfigMap{}
+	for name, call := range map[string]func(d *dryRunClient) error{
+		"patch":                      func(d *dryRunClient) error { return d.Patch(context.Background(), cm, client.MergeFrom(cm)) },
+		"delete":                     func(d *dryRunClient) error { return d.Delete(context.Background(), cm) },
+		"delete all of":              func(d *dryRunClient) error { return d.DeleteAllOf(context.Background(), cm) },
+		"update of an unseen object": func(d *dryRunClient) error { return d.Update(context.Background(), cm) },
+		"create":                     func(d *dryRunClient) error { return d.Create(context.Background(), cm) },
+	} {
+		d := &dryRunClient{}
+		if err := call(d); err != nil || !d.wrote {
+			t.Errorf("%s: err = %v, wrote = %v; want a noted write", name, err, d.wrote)
+		}
 	}
 }
