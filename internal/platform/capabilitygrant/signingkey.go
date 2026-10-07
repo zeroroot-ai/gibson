@@ -302,7 +302,7 @@ func loadOptionalSlot(dir, kidFile, seedFile string, seen []SigningKey) (*Signin
 
 // readOptionalFile reads a file of an optional slot. A missing file and a file
 // that holds only white space are both absent. Any other read error is an error.
-func readOptionalFile(path string) (string, bool, error) {
+func readOptionalFile(path string) (text string, present bool, err error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied mount path
 	if errors.Is(err, os.ErrNotExist) {
 		return "", false, nil
@@ -310,7 +310,7 @@ func readOptionalFile(path string) (string, bool, error) {
 	if err != nil {
 		return "", false, fmt.Errorf("capabilitygrant: read %s: %w", filepath.Base(path), err)
 	}
-	text := strings.TrimSpace(string(raw))
+	text = strings.TrimSpace(string(raw))
 	return text, text != "", nil
 }
 
