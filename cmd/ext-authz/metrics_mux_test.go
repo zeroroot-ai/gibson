@@ -75,7 +75,7 @@ func TestStartMetricsListener(t *testing.T) {
 	writeMetricsMaterial(t, dir)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	errC, err := startMetricsListener(ctx, log, "127.0.0.1:0", dir)
 	if err != nil {
