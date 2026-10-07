@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.157.0](https://github.com/zeroroot-ai/gibson/compare/v0.156.0...v0.157.0) (2026-10-07)
+
+
+### Features
+
+* **platform-operator:** rotate the Zitadel admin and login-client tokens, and retire the old ones ([#1042](https://github.com/zeroroot-ai/gibson/issues/1042)) ([de1c62f](https://github.com/zeroroot-ai/gibson/commit/de1c62fd7893f08f1f3404da668cddfd384c3ed1))
+
+
+### Bug Fixes
+
+* **audit:** a delete keeps its pending records in a ConfigMap, and a drift repair gets a record ([#1044](https://github.com/zeroroot-ai/gibson/issues/1044)) ([777495d](https://github.com/zeroroot-ai/gibson/commit/777495d3e8bfb4e576a4a861548bd574b93b7753))
+* **capabilitygrant:** a host with an unknown capability ceiling is refused ([#1040](https://github.com/zeroroot-ai/gibson/issues/1040)) ([4a55897](https://github.com/zeroroot-ai/gibson/commit/4a55897d6d7fbc2721b199eff0e376690e97bd9b))
+* **diff-coverage:** a trailing comment counts only where the scanner sees one ([#1022](https://github.com/zeroroot-ai/gibson/issues/1022)) ([981dec9](https://github.com/zeroroot-ai/gibson/commit/981dec91b1cf94770cdc45fb8d7111418c8c0d56)), closes [#1017](https://github.com/zeroroot-ai/gibson/issues/1017)
+* **harness:** a tool or plugin grant names the agent that dispatched it ([#1043](https://github.com/zeroroot-ai/gibson/issues/1043)) ([16273e8](https://github.com/zeroroot-ai/gibson/commit/16273e8e08af453ea95b9388ac3cf41b3bed5461))
+* **members:** one role resolution for the member list and the caller ([#1012](https://github.com/zeroroot-ai/gibson/issues/1012)) ([017c97a](https://github.com/zeroroot-ai/gibson/commit/017c97a1a91e501505a88cfd080131a8741a386c))
+
 ## [0.156.0](https://github.com/zeroroot-ai/gibson/compare/v0.155.0...v0.156.0) (2026-10-07)
 
 
