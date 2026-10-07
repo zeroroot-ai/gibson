@@ -1421,7 +1421,7 @@ func TestEnroll_StoresTheCeilingAndTouchFailsLoudly(t *testing.T) {
 		"host_jwt", "host-jwt-token", nil,
 	)
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrHostNotRegistrable)
+	require.NotErrorIs(t, err, ErrHostNotRegistrable)
 
 	m = newMockedService(t)
 	m.expectAuditRecord()
