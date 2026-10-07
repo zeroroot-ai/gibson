@@ -279,7 +279,9 @@ var (
 // Formatting-only churn is excluded (gibson#1157): within a hunk, an added
 // line whose whitespace-normalized content also appears on a removed line is
 // a realignment (gofmt struct-literal alignment, indentation), not a changed
-// statement, and must not demand fresh coverage.
+// statement, and must not demand fresh coverage. A changed trailing comment
+// is the same case (gibson#830): the statement is the text before the
+// comment, and that text did not change.
 func parseAddedLines(diff []byte) map[string][]int {
 	out := map[string][]int{}
 	var curFile string
@@ -318,13 +320,13 @@ func parseAddedLines(diff []byte) map[string][]int {
 			}
 		case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++"):
 			if curFile != "" {
-				hunkAdded = append(hunkAdded, pendingAdd{file: curFile, line: newLine, norm: normalizeWS(line[1:])})
+				hunkAdded = append(hunkAdded, pendingAdd{file: curFile, line: newLine, norm: normalizeStatement(line[1:])})
 				newLine++
 			}
 		case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---"):
 			// deleted line — does not advance the new-side counter
 			if curFile != "" {
-				hunkRemoved[normalizeWS(line[1:])]++
+				hunkRemoved[normalizeStatement(line[1:])]++
 			}
 		default:
 			// context line — with --unified=0 there are none, but be safe
@@ -345,10 +347,37 @@ type pendingAdd struct {
 	norm string
 }
 
-// normalizeWS collapses all runs of whitespace to single spaces and trims,
-// so two lines that differ only in indentation/alignment compare equal.
-func normalizeWS(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+// normalizeStatement returns the statement text of one source line: the
+// text before a trailing line comment, with each run of whitespace collapsed
+// to one space and trimmed. Two lines that differ only in indentation,
+// alignment or a trailing comment compare equal. A line that is only a
+// comment normalizes to the empty string, which never matches.
+func normalizeStatement(s string) string {
+	return strings.Join(strings.Fields(stripLineComment(s)), " ")
+}
+
+// stripLineComment returns s up to the first `//` that is outside a string
+// or rune literal. A `//` inside quotes, such as "https://", stays.
+func stripLineComment(s string) string {
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == '\\' && quote != '`' {
+				i++ // the next byte is escaped
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '`' || c == '\'':
+			quote = c
+		case c == '/' && i+1 < len(s) && s[i+1] == '/':
+			return s[:i]
+		}
+	}
+	return s
 }
 
 // isExcludedFile drops files that should not be held to diff coverage: tests,
