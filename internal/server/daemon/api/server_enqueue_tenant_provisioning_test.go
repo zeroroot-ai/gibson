@@ -144,7 +144,7 @@ func TestEnqueueTenantProvisioning_PendingRowTakesTheNewTier(t *testing.T) {
 
 	expectEnsureTable(mock)
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
-		WithArgs("acme", "", "owner@acme.test", "Acme", "enterprise-deploy", "pending", "", "", sql.NullTime{}).
+		WithArgs("acme", "", "owner@acme.test", "Acme", "enterprise-deploy", "pending", "", "", sql.NullTime{}, false, "").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery(`UPDATE pending_tenant_provisioning p\s+SET owner_email = \$2, workspace_name = \$3, tier = \$4`).
 		WithArgs("acme", "owner@acme.test", "Acme", "enterprise-deploy").

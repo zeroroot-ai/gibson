@@ -109,7 +109,7 @@ func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T
 	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "my-own-plugin")); err != nil {
 		t.Fatalf("a name the catalog does not list: %v", err)
 	}
-	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("agent", "claude")); err != nil {
-		t.Fatalf("the rule covers plugins only: %v", err)
+	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("agent", "claude")); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("a catalog agent name needs an attested identity too: err = %v", err)
 	}
 }

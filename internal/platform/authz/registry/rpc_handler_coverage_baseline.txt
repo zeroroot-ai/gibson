@@ -78,7 +78,6 @@
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
 /gibson.tenant.v1.TenantService/GetMissionDraft
 /gibson.tenant.v1.TenantService/GetOnboardingState
-/gibson.tenant.v1.TenantService/ListAuditEvents
 /gibson.tenant.v1.TenantService/ListMissionDrafts
 /gibson.tenant.v1.TenantService/SaveMissionDraft
 /gibson.tenant.v1.TenantService/UpdateOnboardingState

@@ -31,7 +31,7 @@ func expectPendingInsert(t *testing.T, srv *DaemonServer) (*captureArg, sqlmock.
 	recordID := &captureArg{}
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(),
-			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), recordID).
+			sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), recordID).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	return recordID, mock
 }
