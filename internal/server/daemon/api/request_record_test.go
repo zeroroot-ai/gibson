@@ -89,7 +89,7 @@ func TestSignup_NoRecordNoQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	h.srv.platformDB = db
 
 	_, err = h.srv.Signup(context.Background(), &tenantv1.SignupRequest{

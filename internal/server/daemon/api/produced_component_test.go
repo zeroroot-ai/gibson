@@ -16,6 +16,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 const (
@@ -96,6 +98,23 @@ func tool(name string) ProducedComponent {
 	return ProducedComponent{Kind: "tool", Name: name, Version: "0.1.0", Image: testImage}
 }
 
+// enrollmentTuples reports which of the three tuples of an enrollment of
+// port-sniffer in acme the writes hold: the owner, the tenant, and the
+// tenant enablement.
+func enrollmentTuples(tuples []authz.Tuple, principal string) (owner, belongs, enabled bool) {
+	for _, tu := range tuples {
+		switch {
+		case tu.Relation == "owner" && tu.Object == principal && tu.User == "user:"+testOwner:
+			owner = true
+		case tu.Relation == "belongs_to" && tu.Object == principal && tu.User == "tenant:acme":
+			belongs = true
+		case tu.Relation == "tenant_enabled" && tu.User == "tenant:acme" && strings.Contains(tu.Object, "port-sniffer"):
+			enabled = true
+		}
+	}
+	return owner, belongs, enabled
+}
+
 func TestEnrollProducedComponent_EnrollsAnUntrustedComponentOwnedByTheProducerOwner(t *testing.T) {
 	srv, az, store, aud, _ := producedServer(t, 5)
 
@@ -109,17 +128,7 @@ func TestEnrollProducedComponent_EnrollsAnUntrustedComponentOwnedByTheProducerOw
 	if got.ExpiresAt.IsZero() {
 		t.Error("the token must state its end")
 	}
-	var owner, belongs, enabled bool
-	for _, tu := range az.writtenTuples() {
-		switch {
-		case tu.Relation == "owner" && tu.Object == got.PrincipalID && tu.User == "user:"+testOwner:
-			owner = true
-		case tu.Relation == "belongs_to" && tu.Object == got.PrincipalID && tu.User == "tenant:acme":
-			belongs = true
-		case tu.Relation == "tenant_enabled" && tu.User == "tenant:acme" && strings.Contains(tu.Object, "port-sniffer"):
-			enabled = true
-		}
-	}
+	owner, belongs, enabled := enrollmentTuples(az.writtenTuples(), got.PrincipalID)
 	if !owner || !belongs || !enabled {
 		t.Errorf("tuples: owner=%v belongs_to=%v tenant_enabled=%v, want all", owner, belongs, enabled)
 	}

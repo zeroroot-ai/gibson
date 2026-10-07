@@ -115,8 +115,9 @@ func httpStatusImpl(v ref.Val) ref.Val {
 		return notApplicable
 	}
 	typ, _ := item["type"].(string)
-	switch finding.EvidenceType(typ) {
-	case finding.EvidenceHTTPResponse:
+	// Two evidence types carry a status. Each other type is not applicable.
+	evidence := finding.EvidenceType(typ)
+	if evidence == finding.EvidenceHTTPResponse {
 		content, ok := item["content"].(map[string]any)
 		if !ok {
 			return notApplicable
@@ -127,8 +128,8 @@ func httpStatusImpl(v ref.Val) ref.Val {
 			return notApplicable
 		}
 		return types.Int(int64(code))
-
-	case finding.EvidenceLog:
+	}
+	if evidence == finding.EvidenceLog {
 		// The daemon's record of a tool call (gibson#810): content is the
 		// JSON the tool returned, with proto field names. An HTTP tool
 		// reports the response status in its top-level status_code field.
@@ -137,10 +138,8 @@ func httpStatusImpl(v ref.Val) ref.Val {
 			return notApplicable
 		}
 		return types.Int(code)
-
-	default:
-		return notApplicable
 	}
+	return notApplicable
 }
 
 // recordedStatusCode reads the top-level status_code of a recorded tool

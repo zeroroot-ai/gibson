@@ -28,8 +28,8 @@ func TestClaimFork_EdgeAdmitsAnIdentityToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if codes.Code(resp.GetStatus().GetCode()) != codes.OK {
-		t.Fatalf("code = %v, want OK", codes.Code(resp.GetStatus().GetCode()))
+	if resp.GetStatus().GetCode() != int32(codes.OK) {
+		t.Fatalf("code = %d, want OK", resp.GetStatus().GetCode())
 	}
 	var credential string
 	for _, h := range resp.GetOkResponse().GetHeaders() {
@@ -47,18 +47,18 @@ func TestClaimFork_EdgeRefusals(t *testing.T) {
 	srv := buildServerForTenantTests(t, true)
 	cases := map[string]struct {
 		hdrs map[string]string
-		want codes.Code
+		want int32
 	}{
-		"grant":    {map[string]string{fork.MetadataSandboxIdentity: "tok", headerCapabilityGrant: "a.b.c"}, codes.PermissionDenied},
-		"no token": {map[string]string{}, codes.Unauthenticated},
+		"grant":    {map[string]string{fork.MetadataSandboxIdentity: "tok", headerCapabilityGrant: "a.b.c"}, int32(codes.PermissionDenied)},
+		"no token": {map[string]string{}, int32(codes.Unauthenticated)},
 	}
 	for name, tc := range cases {
 		resp, err := srv.Check(context.Background(), claimRequest(tc.hdrs))
 		if err != nil {
 			t.Fatalf("%s: Check: %v", name, err)
 		}
-		if got := codes.Code(resp.GetStatus().GetCode()); got != tc.want {
-			t.Errorf("%s: code = %v, want %v", name, got, tc.want)
+		if got := resp.GetStatus().GetCode(); got != tc.want {
+			t.Errorf("%s: code = %d, want %d", name, got, tc.want)
 		}
 	}
 }

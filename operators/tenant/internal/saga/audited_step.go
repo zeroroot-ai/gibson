@@ -36,7 +36,7 @@ func (s *auditedStep) Provision(ctx context.Context, obj ConditionedObject, deps
 		// The step already holds at this generation. Its Provision is an
 		// idempotent re-check, or the wait for a change that already has
 		// its record.
-		return s.Step.Provision(ctx, obj, deps)
+		return s.Step.Provision(ctx, obj, deps) //nolint:wrapcheck // the decorator passes the step error through
 	}
 	ev := audit.ObjectEvent(audit.ActionSagaStep, obj, map[string]string{
 		"step":        s.Name(),
@@ -48,9 +48,9 @@ func (s *auditedStep) Provision(ctx context.Context, obj ConditionedObject, deps
 	err := s.emitter.Change(ctx, ev, func() error {
 		var perr error
 		done, perr = s.Step.Provision(ctx, obj, deps)
-		return perr
+		return perr //nolint:wrapcheck // the decorator passes the step error through; the saga classifies it
 	})
-	return done, err
+	return done, err //nolint:wrapcheck // the decorator passes the step error through; the saga classifies it
 }
 
 // wrapWithAudit wraps each step in an auditedStep.

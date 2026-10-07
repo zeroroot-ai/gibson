@@ -19,7 +19,11 @@ type SystemClientFactory func(apiURL, systemUserName, externalDomain, keyPath st
 
 // DefaultSystemClientFactory is the production wiring.
 func DefaultSystemClientFactory(apiURL, systemUserName, externalDomain, keyPath string) (zitadel.SystemClient, error) {
-	return zitadel.NewSystemClient(apiURL, systemUserName, externalDomain, keyPath)
+	c, err := zitadel.NewSystemClient(apiURL, systemUserName, externalDomain, keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("zitadel system client: %w", err)
+	}
+	return c, nil
 }
 
 // defaultSystemAPIPort is the Zitadel Service port the chart exposes

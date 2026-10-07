@@ -225,7 +225,7 @@ func grantsFixture(t *testing.T, tg *gibsonv1alpha1.TenantGrants, sink *audittes
 
 // The data-plane controller records the change first with the request stamp,
 // writes the failure record, and changes nothing when the record fails.
-func TestTenantDataPlane_AuditsEachChange(t *testing.T) {
+func TestTenantDataPlane_AuditsEachChange(t *testing.T) { //nolint:dupl // the same audit contract for a distinct controller and its own stub
 	stamped := func(deleting bool) *gibsonv1alpha1.TenantDataPlane {
 		tdp := withFinalizer(newTenantDataPlane("acme-dataplane", "acme"), gibsonv1alpha1.TenantDataPlaneFinalizer, deleting)
 		tdp.Annotations = map[string]string{audit.AnnotationCorrelationID: "rec-1"}
@@ -280,7 +280,7 @@ func TestTenantDataPlane_AuditsEachChange(t *testing.T) {
 
 // The grants controller records each FGA change first with the request
 // stamp, writes the failure record, and changes nothing when the record fails.
-func TestTenantGrants_AuditsEachChange(t *testing.T) {
+func TestTenantGrants_AuditsEachChange(t *testing.T) { //nolint:dupl // the same audit contract for a distinct controller and its own stub
 	stamped := func(deleting bool) *gibsonv1alpha1.TenantGrants {
 		tg := withFinalizer(newTenantGrants("acme-grants", "acme"), gibsonv1alpha1.TenantGrantsFinalizer, deleting)
 		tg.Annotations = map[string]string{audit.AnnotationCorrelationID: "rec-1"}

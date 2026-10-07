@@ -273,8 +273,11 @@ func (s *HarnessCallbackService) awaitClaimTarget(ctx context.Context, hostname 
 	defer deadline.Stop()
 	for {
 		t, err := s.forkLedger.ClaimTarget(ctx, hostname)
+		if err == nil {
+			return t, nil
+		}
 		if !errors.Is(err, ErrNotAFork) {
-			return t, err
+			return ClaimTarget{}, fmt.Errorf("claim target %s: %w", hostname, err)
 		}
 		select {
 		case <-ctx.Done():

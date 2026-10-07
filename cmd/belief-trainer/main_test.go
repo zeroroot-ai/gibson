@@ -316,7 +316,7 @@ func TestRun_RefusesABadBaseModel(t *testing.T) {
 
 func mustRead(t *testing.T, path string) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // a path that the test names under t.TempDir()
 	require.NoError(t, err)
 	return raw
 }

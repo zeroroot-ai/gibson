@@ -15,6 +15,7 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
@@ -88,8 +89,8 @@ func (s *GrantsAdminServer) WriteSecretGrants(ctx context.Context, req *tenantv1
 		}
 	}
 	return &tenantv1.WriteSecretGrantsResponse{
-		Written:        int32(len(toWrite)),
-		AlreadyPresent: int32(len(tuples) - len(toWrite)),
+		Written:        pagetoken.Int32(len(toWrite)),
+		AlreadyPresent: pagetoken.Int32(len(tuples) - len(toWrite)),
 	}, nil
 }
 
@@ -141,7 +142,7 @@ func (s *GrantsAdminServer) requireOwnedSecrets(ctx context.Context, tenant auth
 func (s *GrantsAdminServer) presentTuples(ctx context.Context, tuples []authz.Tuple) ([]bool, error) {
 	checks := make([]authz.CheckRequest, len(tuples))
 	for i, t := range tuples {
-		checks[i] = authz.CheckRequest{User: t.User, Relation: t.Relation, Object: t.Object}
+		checks[i] = authz.CheckRequest(t)
 	}
 	present, err := s.authorizer.BatchCheck(ctx, checks)
 	if err != nil {

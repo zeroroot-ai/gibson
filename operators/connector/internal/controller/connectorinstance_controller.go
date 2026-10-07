@@ -393,7 +393,7 @@ func (r *ConnectorInstanceReconciler) finalize(ctx context.Context, ci *connecto
 		if err := r.Audit.Change(ctx, ev, func() error { return r.revokeGrant(ctx, ci) }); errors.Is(err, audit.ErrNotRecorded) {
 			// No record, no revoke: retry, and never release the finalizer
 			// on a revoke that did not run.
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("record the revoke of ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
 		} else if err != nil {
 			if r.now().Sub(ci.DeletionTimestamp.Time) < revokeDeadline {
 				ci.Status.Phase = connectorv1alpha1.ConnectorInstancePhaseDeprovisioning

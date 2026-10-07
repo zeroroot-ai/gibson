@@ -194,7 +194,7 @@ func (r *DesiredConnectorsRunnable) adopt(ctx context.Context, ci *connectorv1al
 	// A connector that left the catalog is not adopted. The loop still puts
 	// its label on the object, so the prune of this pass deletes it.
 	ev := audit.ObjectEvent(audit.ActionConnectorAdopt, ci, map[string]string{"connector": ci.Name})
-	return r.Audit.Change(ctx, ev, func() error {
+	if err := r.Audit.Change(ctx, ev, func() error {
 		if err := r.Daemon.AdoptConnector(ctx, tenant, ci.Name); err != nil && status.Code(err) != codes.NotFound {
 			return fmt.Errorf("adopt ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
 		}
@@ -203,7 +203,10 @@ func (r *DesiredConnectorsRunnable) adopt(ctx context.Context, ci *connectorv1al
 			return fmt.Errorf("label adopted ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("the audited adoption of ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
+	}
+	return nil
 }
 
 // desiredSpec is the ConnectorInstance spec of a desired connector. It is the
@@ -290,7 +293,7 @@ func (r *DesiredConnectorsRunnable) prune(
 		ev := audit.ObjectEvent(audit.ActionConnectorDelete, ci, map[string]string{"connector": ci.Name, "op": "prune"})
 		if err := r.Audit.Change(ctx, ev, func() error {
 			if err := r.Client.Delete(ctx, ci); err != nil && !apierrors.IsNotFound(err) {
-				return err
+				return fmt.Errorf("prune ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
 			}
 			return nil
 		}); err != nil {
@@ -343,12 +346,15 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 			return nil
 		}
 		ev := audit.ObjectEvent(audit.ActionConnectorCredentialWithdraw, ci, fields)
-		return r.Audit.Change(ctx, ev, func() error {
+		if err := r.Audit.Change(ctx, ev, func() error {
 			if derr := r.Client.Delete(ctx, &live); derr != nil && !apierrors.IsNotFound(derr) {
 				return fmt.Errorf("withdraw Secret %s/%s: %w", ci.Namespace, name, derr)
 			}
 			return nil
-		})
+		}); err != nil {
+			return fmt.Errorf("the audited withdrawal of Secret %s/%s: %w", ci.Namespace, name, err)
+		}
+		return nil
 	}
 	if len(resp.GetData()) == 0 {
 		return nil // nothing minted and nothing declared
@@ -370,7 +376,7 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 	sort.Strings(keys)
 	fields["keys"] = strings.Join(keys, ",")
 	ev := audit.ObjectEvent(audit.ActionConnectorCredentialWrite, ci, fields)
-	return r.Audit.Change(ctx, ev, func() error {
+	if err := r.Audit.Change(ctx, ev, func() error {
 		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ci.Namespace}}
 		if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, sec, func() error {
 			sec.Type = corev1.SecretTypeOpaque
@@ -381,5 +387,8 @@ func (r *DesiredConnectorsRunnable) syncCredential(
 			return fmt.Errorf("apply Secret %s/%s: %w", ci.Namespace, name, err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("the audited write of Secret %s/%s: %w", ci.Namespace, name, err)
+	}
+	return nil
 }

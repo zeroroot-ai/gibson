@@ -111,8 +111,11 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 func backfillOne(ctx context.Context, p *controller.NamespaceProvisioner, em *audit.SagaEmitter, t *gibsonv1alpha1.Tenant) error {
 	ns := controller.TenantNamespaceForBackfill(t)
 	current, err := p.TenantNamespaceRBACCurrent(ctx, ns)
-	if err != nil || current {
-		return err
+	if err != nil {
+		return fmt.Errorf("read the RBAC of namespace %s: %w", ns, err)
+	}
+	if current {
+		return nil
 	}
 	ev := audit.Event{
 		Action:     audit.ActionBackfill,
@@ -121,5 +124,8 @@ func backfillOne(ctx context.Context, p *controller.NamespaceProvisioner, em *au
 		TargetID:   ns,
 		Fields:     map[string]string{"backfill": "rbac"},
 	}
-	return em.Change(ctx, ev, func() error { return p.EnsureTenantNamespaceRBACPublic(ctx, ns) })
+	if err := em.Change(ctx, ev, func() error { return p.EnsureTenantNamespaceRBACPublic(ctx, ns) }); err != nil {
+		return fmt.Errorf("backfill the RBAC of namespace %s: %w", ns, err)
+	}
+	return nil
 }

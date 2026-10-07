@@ -120,7 +120,10 @@ func (r *OIDCClientReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *OIDCClientReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var oc gibsonv1alpha1.OIDCClient
 	if err := r.Get(ctx, req.NamespacedName, &oc); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, fmt.Errorf("get OIDCClient %s: %w", req.NamespacedName, err)
 	}
 	if r.Audit == nil {
 		return ctrl.Result{}, errNoAuditEmitter
@@ -180,6 +183,83 @@ func oidcClientSettled(oc *gibsonv1alpha1.OIDCClient) bool {
 	}
 	c := findCondition(oc.Status.Conditions, gibsonv1alpha1.ConditionReady)
 	return c != nil && c.Status == metav1.ConditionTrue
+}
+
+// createOIDCClient mints the Zitadel client of oc, persists its ids, and
+// writes the K8s Secret. It runs when status.ClientID is empty.
+func (r *OIDCClientReconciler) createOIDCClient(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, zc zitadel.Client, projectID string, logger logr.Logger) (ctrl.Result, error) {
+	appID, clientID, clientSecret, err := zc.CreateOIDCClient(ctx, zitadel.CreateOIDCClientRequest{
+		ProjectID:              projectID,
+		Name:                   oc.Spec.ClientName,
+		ApplicationType:        string(oc.Spec.ApplicationType),
+		RedirectURIs:           oc.Spec.RedirectURIs,
+		PostLogoutRedirectURIs: oc.Spec.PostLogoutRedirectURIs,
+		GrantTypes:             toStringSlice(oc.Spec.GrantTypes),
+		ResponseTypes:          toStringSliceResp(oc.Spec.ResponseTypes),
+		AccessTokenLifetime:    accessTokenLifetimeString(oc.Spec.AccessTokenLifetimeSeconds),
+	})
+	if err != nil {
+		return r.handleTransientOrPermanent(ctx, oc, "CreateOIDCClient", err, logger)
+	}
+	// Persist BOTH ids to status BEFORE writing the K8s Secret.
+	// AppID drives management-API URL paths (RotateClientSecret,
+	// DeleteOIDCClient). ClientID is the OAuth client_id every
+	// downstream consumer needs. They are NOT the same Zitadel
+	// value — losing the distinction caused the
+	// invalid_request/Errors.App.NotFound regression on browser
+	// login that motivated this refactor.
+	oc.Status.ClientID = clientID
+	oc.Status.AppID = appID
+	r.setCondition(oc, gibsonv1alpha1.ConditionOIDCClientExists, metav1.ConditionTrue,
+		"Created", "Zitadel client minted")
+	if err := r.statusUpdate(ctx, oc); err != nil {
+		return ctrl.Result{}, fmt.Errorf("persist clientID to status: %w", err)
+	}
+	// Continue with the secret we just received. If clientSecret is
+	// empty (idempotent 409 path returned existing app), we'll
+	// rotate below to mint a fresh secret. Note: rotate takes appID.
+	if clientSecret == "" {
+		rotated, rerr := zc.RotateClientSecret(ctx, projectID, appID)
+		if rerr != nil {
+			return r.handleTransientOrPermanent(ctx, oc, "RotateClientSecret", rerr, logger)
+		}
+		clientSecret = rotated
+	}
+	if err := r.writeSecret(ctx, oc, clientID, clientSecret); err != nil {
+		return ctrl.Result{}, err
+	}
+	r.setCondition(oc, gibsonv1alpha1.ConditionOIDCSecretMaterialised, metav1.ConditionTrue,
+		"SecretWritten",
+		fmt.Sprintf("K8s Secret %s populated", oc.Spec.SecretRef.Name))
+	r.setCondition(oc, gibsonv1alpha1.ConditionReady, metav1.ConditionTrue,
+		"AllStepsComplete", "OIDCClient is reconciled")
+	oc.Status.ObservedGeneration = oc.Generation
+	if err := r.statusUpdate(ctx, oc); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// resolveAppID returns the app id of oc. A CR from before the AppID and
+// ClientID split holds only ClientID, so the app is found by its name once,
+// and status takes both ids.
+func (r *OIDCClientReconciler) resolveAppID(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, zc zitadel.Client, projectID string) string {
+	if oc.Status.AppID != "" {
+		return oc.Status.AppID
+	}
+	found, lerr := zc.GetOIDCClientByName(ctx, projectID, oc.Spec.ClientName)
+	if lerr != nil || found == nil {
+		return ""
+	}
+	oc.Status.AppID = found.AppID
+	// Also resync ClientID — if the old status held the WRONG value
+	// (the App ID instead of the OAuth client_id, a regression
+	// possible before the fix), correct it now.
+	if found.ClientID != "" {
+		oc.Status.ClientID = found.ClientID
+	}
+	_ = r.statusUpdate(ctx, oc)
+	return found.AppID
 }
 
 // reconcileOnce is one pass of the OIDCClient reconcile.
@@ -256,56 +336,7 @@ func (r *OIDCClientReconciler) reconcileOnce(ctx context.Context, req ctrl.Reque
 	// status.ClientID — if set, skip creation and proceed to secret
 	// materialisation.
 	if oc.Status.ClientID == "" {
-		appID, clientID, clientSecret, err := zc.CreateOIDCClient(ctx, zitadel.CreateOIDCClientRequest{
-			ProjectID:              projectID,
-			Name:                   oc.Spec.ClientName,
-			ApplicationType:        string(oc.Spec.ApplicationType),
-			RedirectURIs:           oc.Spec.RedirectURIs,
-			PostLogoutRedirectURIs: oc.Spec.PostLogoutRedirectURIs,
-			GrantTypes:             toStringSlice(oc.Spec.GrantTypes),
-			ResponseTypes:          toStringSliceResp(oc.Spec.ResponseTypes),
-			AccessTokenLifetime:    accessTokenLifetimeString(oc.Spec.AccessTokenLifetimeSeconds),
-		})
-		if err != nil {
-			return r.handleTransientOrPermanent(ctx, &oc, "CreateOIDCClient", err, logger)
-		}
-		// Persist BOTH ids to status BEFORE writing the K8s Secret.
-		// AppID drives management-API URL paths (RotateClientSecret,
-		// DeleteOIDCClient). ClientID is the OAuth client_id every
-		// downstream consumer needs. They are NOT the same Zitadel
-		// value — losing the distinction caused the
-		// invalid_request/Errors.App.NotFound regression on browser
-		// login that motivated this refactor.
-		oc.Status.ClientID = clientID
-		oc.Status.AppID = appID
-		r.setCondition(&oc, gibsonv1alpha1.ConditionOIDCClientExists, metav1.ConditionTrue,
-			"Created", "Zitadel client minted")
-		if err := r.statusUpdate(ctx, &oc); err != nil {
-			return ctrl.Result{}, fmt.Errorf("persist clientID to status: %w", err)
-		}
-		// Continue with the secret we just received. If clientSecret is
-		// empty (idempotent 409 path returned existing app), we'll
-		// rotate below to mint a fresh secret. Note: rotate takes appID.
-		if clientSecret == "" {
-			rotated, rerr := zc.RotateClientSecret(ctx, projectID, appID)
-			if rerr != nil {
-				return r.handleTransientOrPermanent(ctx, &oc, "RotateClientSecret", rerr, logger)
-			}
-			clientSecret = rotated
-		}
-		if err := r.writeSecret(ctx, &oc, clientID, clientSecret); err != nil {
-			return ctrl.Result{}, err
-		}
-		r.setCondition(&oc, gibsonv1alpha1.ConditionOIDCSecretMaterialised, metav1.ConditionTrue,
-			"SecretWritten",
-			fmt.Sprintf("K8s Secret %s populated", oc.Spec.SecretRef.Name))
-		r.setCondition(&oc, gibsonv1alpha1.ConditionReady, metav1.ConditionTrue,
-			"AllStepsComplete", "OIDCClient is reconciled")
-		oc.Status.ObservedGeneration = oc.Generation
-		if err := r.statusUpdate(ctx, &oc); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
+		return r.createOIDCClient(ctx, &oc, zc, projectID, logger)
 	}
 
 	// Crash-recovery: status.ClientID is set. Verify Zitadel still has
@@ -315,21 +346,7 @@ func (r *OIDCClientReconciler) reconcileOnce(ctx context.Context, req ctrl.Reque
 	// (clientName is in the spec) which returns both fields. Once
 	// status.AppID is known the app is always found by that ID, never by
 	// name, so spec.clientName is free to change (see the rename below).
-	appID := oc.Status.AppID
-	if appID == "" {
-		found, lerr := zc.GetOIDCClientByName(ctx, projectID, oc.Spec.ClientName)
-		if lerr == nil && found != nil {
-			appID = found.AppID
-			oc.Status.AppID = appID
-			// Also resync ClientID — if the old status held the WRONG value
-			// (the App ID instead of the OAuth client_id, a regression
-			// possible before the fix), correct it now.
-			if found.ClientID != "" {
-				oc.Status.ClientID = found.ClientID
-			}
-			_ = r.statusUpdate(ctx, &oc)
-		}
-	}
+	appID := r.resolveAppID(ctx, &oc, zc, projectID)
 	existing, err := zc.GetOIDCClient(ctx, projectID, appID)
 	if err != nil {
 		if zitadel.IsNotFound(err) {

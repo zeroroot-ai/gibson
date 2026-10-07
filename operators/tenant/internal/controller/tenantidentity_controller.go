@@ -171,7 +171,7 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		})
 		if perr != nil {
 			failedStage = "provision"
-			return perr
+			return perr //nolint:wrapcheck // the audit failure record keeps the provider error as its reason
 		}
 		// Seed the daemon's tenant -> Zitadel org mapping (ADR-0093 decision
 		// 4). TenantIdentity is Ready only once this write succeeds. It runs
@@ -179,7 +179,7 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// without a spec change.
 		if perr = r.OrgMapping.SetTenantZitadelOrg(ctx, ti.Spec.TenantID, res.OrgID); perr != nil {
 			failedStage = "org_mapping"
-			return perr
+			return perr //nolint:wrapcheck // the audit failure record keeps the provider error as its reason
 		}
 		return nil
 	}
@@ -209,7 +209,7 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		// The raw error drives controller-runtime's backoff, and is already
 		// logged and recorded on status, so it is returned unwrapped.
-		return ctrl.Result{}, err
+		return ctrl.Result{}, err //nolint:wrapcheck // logged and recorded on status; the raw error drives the backoff
 	default:
 		// The audit record was not written, so nothing changed.
 		log.Error(err, "identity audit record failed; nothing changed", "tenant", ti.Spec.TenantID)
@@ -217,7 +217,7 @@ func (r *TenantIdentityReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if _, ferr := r.failIdentity(ctx, &ti, "audit record: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("identity audit record: %w", err)
 	}
 
 	// The declared OIDC clients (spec.oidcClients, gibson#597) are minted
@@ -265,7 +265,7 @@ func (r *TenantIdentityReconciler) reconcileIdentityDelete(ctx context.Context, 
 		ev := audit.ObjectEvent(audit.ActionIdentityDeprovision, ti, map[string]string{"zitadel_org_id": ti.Status.ZitadelOrgID})
 		if err := r.Audit.Change(ctx, ev, func() error {
 			if err := r.Provisioner.Deprovision(ctx, ti.Status.ZitadelOrgID); err != nil && !errors.Is(err, clients.ErrNotFound) {
-				return err
+				return fmt.Errorf("deprovision the Zitadel org %s: %w", ti.Status.ZitadelOrgID, err)
 			}
 			return nil
 		}); err != nil {

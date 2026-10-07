@@ -26,7 +26,7 @@ func (p producedEnroller) EnrollProduced(ctx context.Context, tenantID, producer
 		Description: c.Description,
 	})
 	if err != nil {
-		return component.EnrolledProducedComponent{}, err
+		return component.EnrolledProducedComponent{}, err //nolint:wrapcheck // a gRPC status; a wrap hides its code from the caller
 	}
 	return component.EnrolledProducedComponent{
 		PrincipalID:    got.PrincipalID,

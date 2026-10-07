@@ -263,7 +263,7 @@ func (r *TenantAdminOpsRunnable) applyDelete(ctx context.Context, op provision.T
 	}
 	// The teardown records name the delete request (gibson#583).
 	if err := stampCorrelationID(ctx, r.Client, &tenant, op.AuditRecordID); err != nil {
-		return fmt.Errorf("Tenant CR %q: %w", op.TenantID, err)
+		return fmt.Errorf("stamp the correlation id on Tenant CR %q: %w", op.TenantID, err)
 	}
 	if err := r.Client.Delete(ctx, &tenant); err != nil {
 		if apierrors.IsNotFound(err) {

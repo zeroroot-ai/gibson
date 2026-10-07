@@ -71,7 +71,7 @@ func (s *ComponentServiceServer) EnrollComponent(ctx context.Context, req *compo
 		Description: req.GetDescription(),
 	})
 	if err != nil {
-		return nil, err
+		return nil, err //nolint:wrapcheck // the enroller returns a gRPC status; a wrap hides its code from the caller
 	}
 	return &componentpb.EnrollComponentResponse{
 		PrincipalId:    got.PrincipalID,

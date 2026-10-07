@@ -6,7 +6,6 @@ package sandboxed
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -72,7 +71,7 @@ func (l *AgentLauncher) LaunchFromSnapshot(ctx context.Context, snapshot string,
 	if err := onStarted(resp.SandboxID); err != nil {
 		l.kill(ctx, tenant, resp.SandboxID)
 		return AgentRunResult{}, types.WrapError(types.SANDBOX_LAUNCH_FAILED,
-			fmt.Sprintf("record the start of %s", resp.SandboxID), err)
+			"record the start of "+resp.SandboxID, err)
 	}
 	return l.followFork(ctx, tenant, resp.SandboxID, class, dispatch)
 }

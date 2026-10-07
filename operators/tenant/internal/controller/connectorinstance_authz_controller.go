@@ -127,7 +127,7 @@ func (r *ConnectorInstanceAuthzReconciler) Reconcile(ctx context.Context, req ct
 	}
 	ev := audit.ObjectEvent(audit.ActionConnectorGrantsWrite, &ci, map[string]string{"connector": catalogID, "generation": generation})
 	if err := r.Audit.Change(ctx, ev, write); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("write the grants of ConnectorInstance %s/%s: %w", ci.Namespace, ci.Name, err)
 	}
 	if ci.Annotations == nil {
 		ci.Annotations = map[string]string{}

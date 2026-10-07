@@ -95,18 +95,16 @@ func scanMaxVersion(fsys fs.FS, dir string) (uint, error) {
 	if err != nil {
 		return 0, err
 	}
-	var max uint
-	for v := range versions {
-		max = maxUint(max, v)
-	}
-	return max, nil
+	return highestVersion(versions), nil
 }
 
-func maxUint(a, b uint) uint {
-	if a > b {
-		return a
+// highestVersion returns the highest version of the set, or 0 for an empty set.
+func highestVersion(versions map[uint][]string) uint {
+	var highest uint
+	for v := range versions {
+		highest = max(highest, v)
 	}
-	return b
+	return highest
 }
 
 // ErrDuplicateVersion reports two up migrations with one version number.
@@ -132,20 +130,17 @@ func CheckVersions(fsys fs.FS, dir string) error {
 	if err != nil {
 		return err
 	}
-	var max uint
-	for v := range versions {
-		max = maxUint(max, v)
-	}
+	highest := highestVersion(versions)
 	var errs []error
-	for v := uint(1); v <= max; v++ {
+	for v := uint(1); v <= highest; v++ {
 		names := versions[v]
 		switch {
 		case len(names) == 0:
 			errs = append(errs, fmt.Errorf("%w: %s has no up migration %03d; number the migrations 1 to %d with no hole",
-				ErrVersionGap, dir, v, max))
+				ErrVersionGap, dir, v, highest))
 		case len(names) > 1:
 			errs = append(errs, fmt.Errorf("%w: %s and %s in %s both have version %03d; give the newer one the next free number, %03d",
-				ErrDuplicateVersion, names[0], names[1], dir, v, max+1))
+				ErrDuplicateVersion, names[0], names[1], dir, v, highest+1))
 		}
 	}
 	return errors.Join(errs...)

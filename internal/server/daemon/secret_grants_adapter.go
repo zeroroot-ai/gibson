@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
@@ -22,5 +23,9 @@ type secretNameListerAdapter struct {
 var _ admin.SecretNameLister = (*secretNameListerAdapter)(nil)
 
 func (a *secretNameListerAdapter) List(ctx context.Context, tenant auth.TenantID) ([]string, error) {
-	return a.svc.List(auth.WithTenant(ctx, tenant), sdksecrets.Filter{})
+	names, err := a.svc.List(auth.WithTenant(ctx, tenant), sdksecrets.Filter{})
+	if err != nil {
+		return nil, fmt.Errorf("list the secrets of tenant %s: %w", tenant.String(), err)
+	}
+	return names, nil
 }

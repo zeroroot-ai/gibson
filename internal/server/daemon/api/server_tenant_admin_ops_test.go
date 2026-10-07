@@ -74,7 +74,7 @@ func TestAdminProvisionTenant_MissingFields_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -93,7 +93,7 @@ func TestAdminProvisionTenant_RecordsOp_DefaultsTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -226,7 +226,7 @@ func TestAdminProvisionTenant_IdempotentDedup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -257,7 +257,7 @@ func TestAdminUpdateTenant_NoFieldsSet_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	_, err = srv.AdminUpdateTenant(adminOpsCtx(), &tenantv1.AdminUpdateTenantRequest{TenantId: "acme"})
@@ -269,7 +269,7 @@ func TestAdminUpdateTenant_RecordsOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -300,7 +300,7 @@ func TestAdminDeleteTenant_MissingTenantID_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	_, err = srv.AdminDeleteTenant(adminOpsCtx(), &tenantv1.AdminDeleteTenantRequest{TenantId: ""})
@@ -312,7 +312,7 @@ func TestAdminDeleteTenant_RecordsOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -347,7 +347,7 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -385,7 +385,7 @@ func TestAckTenantOp_MissingOpID_InvalidArgument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	_, err = srv.AckTenantOp(context.Background(), &daemonoperatorv1.AckTenantOpRequest{OpId: ""})
@@ -397,7 +397,7 @@ func TestAckTenantOp_MarksDone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -419,7 +419,7 @@ func TestAckTenantOp_UnknownOrAlreadyDone_NoOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 
@@ -453,7 +453,7 @@ func TestAdminDeleteTenant_RecordsTheAdminFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	rec := &audittest.Recorder{}
 	srv.auditLogger = auditLoggerOver(t, rec)
@@ -484,7 +484,7 @@ func TestAdminTenantRequests_NoRecordNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	srv := newAdminOpsServer(t)
 	srv.auditLogger = auditLoggerOver(t, failingDurable{})
 	srv.platformDB = db

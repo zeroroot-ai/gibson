@@ -146,7 +146,7 @@ func (r *TenantSecretsBackendReconciler) Reconcile(ctx context.Context, req ctrl
 		if _, ferr := r.fail(ctx, &tsb, "audit record: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("secrets-backend audit record: %w", err)
 	}
 	if err != nil {
 		log.Error(err, "secrets-backend provision failed", "tenant", tsb.Spec.TenantID)
@@ -185,7 +185,7 @@ func (r *TenantSecretsBackendReconciler) reconcileDelete(ctx context.Context, ts
 		ev := audit.ObjectEvent(audit.ActionSecretsBackendDeprovision, tsb, nil)
 		if err := r.Audit.Change(ctx, ev, func() error {
 			if err := r.Provisioner.Deprovision(ctx, tsb.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
-				return err
+				return fmt.Errorf("deprovision the secrets backend of tenant %s: %w", tsb.Spec.TenantID, err)
 			}
 			return nil
 		}); err != nil {

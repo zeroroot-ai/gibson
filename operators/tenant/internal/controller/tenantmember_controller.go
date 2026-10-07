@@ -204,7 +204,7 @@ func (r *TenantMemberReconciler) issueInvitation(ctx context.Context, tm *gibson
 		}
 		return nil
 	}); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("record the invitation: %w", err)
 	}
 
 	// Send email.
@@ -335,12 +335,12 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 		if tm.Status.InvitationSecretRef != "" {
 			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
 			if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-				return err
+				return fmt.Errorf("delete the invitation secret: %w", err)
 			}
 		}
 		return nil
 	}); err != nil {
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("record the invitation acceptance: %w", err)
 	}
 
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseActive
@@ -360,7 +360,7 @@ func (r *TenantMemberReconciler) expireInvitation(ctx context.Context, tm *gibso
 			}
 			return nil
 		}); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("record the invitation withdrawal: %w", err)
 		}
 	}
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseExpired
@@ -394,7 +394,7 @@ func (r *TenantMemberReconciler) cleanup(ctx context.Context, tm *gibsonv1alpha1
 				}
 				return nil
 			}); err != nil {
-				return err
+				return fmt.Errorf("record the member cleanup: %w", err)
 			}
 		}
 	}
@@ -456,12 +456,12 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	switch {
 	case err == nil:
 	case errors.Is(err, audit.ErrNotRecorded):
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("record the Zitadel role sync: %w", err)
 	case errors.Is(err, clients.ErrUnreachable), errors.Is(err, tenantrole.ErrOwnerConflict):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 	default:
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
 
 	tm.Status.ZitadelMembershipID = membershipID

@@ -173,7 +173,10 @@ func (r *FirstTenantSeedRunnable) seedOnce(ctx context.Context, logger logr.Logg
 			OwnerEmail:    r.OwnerEmail,
 			Tier:          r.Tier,
 		})
-		return eerr
+		if eerr != nil {
+			return fmt.Errorf("enqueue the first tenant %s: %w", r.TenantID, eerr)
+		}
+		return nil
 	})
 	if err != nil {
 		logger.Error(err, "first-tenant seed enqueue failed; will retry",

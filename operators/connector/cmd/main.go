@@ -145,6 +145,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	proxyAuth, err := proxyAuthSettings(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "connector proxy authentication")
+		os.Exit(1)
+	}
+
 	// The ConnectorInstance finalizer revokes the connector's grant through
 	// the daemon on delete (ADR-0061), and the controller reads the
 	// credential state from it every pass (ADR-0061). The dial is
@@ -152,13 +158,6 @@ func main() {
 	daemon, err := buildDaemonClient(context.Background(), os.Getenv)
 	if err != nil {
 		setupLog.Error(err, "daemon client")
-		os.Exit(1)
-	}
-	defer func() { _ = daemon.Close() }()
-
-	proxyAuth, err := proxyAuthSettings(os.Getenv)
-	if err != nil {
-		setupLog.Error(err, "connector proxy authentication")
 		os.Exit(1)
 	}
 
@@ -204,6 +203,10 @@ func main() {
 		setupLog.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}
+
+	// The daemon client closes when the manager stops. A setup failure above
+	// exits the process, which closes the connection.
+	defer func() { _ = daemon.Close() }()
 
 	setupLog.Info("starting connector-operator")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

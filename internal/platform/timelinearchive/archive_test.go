@@ -6,7 +6,6 @@ package timelinearchive
 import (
 	"context"
 	"database/sql"
-	"io"
 	"log/slog"
 	"strings"
 	"testing"
@@ -27,7 +26,7 @@ func TestObjectKey_IsUnderTheAuditPrefixAndSortsInStreamOrder(t *testing.T) {
 }
 
 func TestNew_RefusesAMissingDependencyAndABadLock(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger := slog.New(slog.DiscardHandler)
 	db := &sql.DB{}
 	var p fakePool
 	periods := fixedPeriod{months: 13}

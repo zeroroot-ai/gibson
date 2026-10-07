@@ -144,7 +144,7 @@ func (r *TenantDataPlaneReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		if _, ferr := r.fail(ctx, &tdp, "audit record: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("data-plane audit record: %w", err)
 	}
 	if err != nil {
 		log.Error(err, "data-plane provision failed", "tenant", tdp.Spec.TenantID)
@@ -183,7 +183,7 @@ func (r *TenantDataPlaneReconciler) reconcileDelete(ctx context.Context, tdp *gi
 		ev := audit.ObjectEvent(audit.ActionDataPlaneDeprovision, tdp, nil)
 		if err := r.Audit.Change(ctx, ev, func() error {
 			if err := r.Provisioner.Deprovision(ctx, tdp.Spec.TenantID); err != nil && !errors.Is(err, clients.ErrNotFound) {
-				return err
+				return fmt.Errorf("deprovision the data plane of tenant %s: %w", tdp.Spec.TenantID, err)
 			}
 			return nil
 		}); err != nil {

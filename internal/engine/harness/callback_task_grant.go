@@ -242,8 +242,11 @@ const credentialSandboxIdentity = "sandbox-identity"
 // each method but ClaimFork. The edge asserts it for ClaimFork only, with no
 // verified subject and the system tenant, so no other handler may see it.
 func checkSandboxIdentityCredential(ctx context.Context, method string, logger *slog.Logger) error {
-	id, err := auth.IdentityFromContext(ctx)
-	if err != nil || string(id.CredentialType) != credentialSandboxIdentity || method == claimForkMethod {
+	// With no identity on ctx, the auth interceptor has already refused the
+	// call, so only a present sandbox identity credential is checked here.
+	id, idErr := auth.IdentityFromContext(ctx)
+	sandboxCredential := idErr == nil && string(id.CredentialType) == credentialSandboxIdentity
+	if !sandboxCredential || method == claimForkMethod {
 		return nil
 	}
 	return deny(ctx, logger, method, "sandbox identity credential on another method than ClaimFork",

@@ -192,6 +192,34 @@ func producedKind(kind string) (idp.Role, string, error) {
 	}
 }
 
+// validateProducedComponent checks the spec of a produced component and
+// returns the role and the FGA type of its kind. It returns gRPC status
+// errors.
+func validateProducedComponent(c ProducedComponent) (role idp.Role, fgaType string, err error) {
+	role, fgaType, err = producedKind(c.Kind)
+	if err != nil {
+		return "", "", status_grpc.Error(codes.InvalidArgument, err.Error())
+	}
+	if !nameRegex.MatchString(c.Name) {
+		return "", "", status_grpc.Errorf(codes.InvalidArgument,
+			"name %q is invalid: must match ^[a-z][a-z0-9-]{2,40}$", c.Name)
+	}
+	if c.Version == "" {
+		return "", "", status_grpc.Error(codes.InvalidArgument, "version is required")
+	}
+	if !strings.Contains(c.Image, "@sha256:") {
+		return "", "", status_grpc.Error(codes.InvalidArgument, "image must be pinned by digest")
+	}
+	// The platform assigns the trust: a catalog name is the platform's. A
+	// produced component under that name would take the trust of the
+	// catalog entry (gibson#554).
+	if _, listed := componentcatalog.LookupContentTrust(c.Kind, c.Name); listed {
+		return "", "", status_grpc.Errorf(codes.PermissionDenied,
+			"the name %q belongs to a platform component, use another name", c.Name)
+	}
+	return role, fgaType, nil
+}
+
 // EnrollProducedComponent enrolls a component that the agent producer
 // produced, in the tenant tenantID. tenantID and producer come from the
 // verified identity of the caller. It returns gRPC status errors.
@@ -202,26 +230,9 @@ func (s *DaemonServer) EnrollProducedComponent(ctx context.Context, tenantID, pr
 	if !strings.HasPrefix(producer, "agent_principal:") {
 		return EnrolledComponent{}, status_grpc.Error(codes.PermissionDenied, "only an agent enrolls a component that it produced")
 	}
-	role, fgaType, err := producedKind(c.Kind)
+	role, fgaType, err := validateProducedComponent(c)
 	if err != nil {
-		return EnrolledComponent{}, status_grpc.Error(codes.InvalidArgument, err.Error())
-	}
-	if !nameRegex.MatchString(c.Name) {
-		return EnrolledComponent{}, status_grpc.Errorf(codes.InvalidArgument,
-			"name %q is invalid: must match ^[a-z][a-z0-9-]{2,40}$", c.Name)
-	}
-	if c.Version == "" {
-		return EnrolledComponent{}, status_grpc.Error(codes.InvalidArgument, "version is required")
-	}
-	if !strings.Contains(c.Image, "@sha256:") {
-		return EnrolledComponent{}, status_grpc.Error(codes.InvalidArgument, "image must be pinned by digest")
-	}
-	// The platform assigns the trust: a catalog name is the platform's. A
-	// produced component under that name would take the trust of the
-	// catalog entry (gibson#554).
-	if _, listed := componentcatalog.LookupContentTrust(c.Kind, c.Name); listed {
-		return EnrolledComponent{}, status_grpc.Errorf(codes.PermissionDenied,
-			"the name %q belongs to a platform component, use another name", c.Name)
+		return EnrolledComponent{}, err
 	}
 	if s.authorizer == nil {
 		return EnrolledComponent{}, status_grpc.Error(codes.Unavailable, "authorization not configured")

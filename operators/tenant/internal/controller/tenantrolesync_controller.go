@@ -108,7 +108,7 @@ func (r *TenantRoleSyncReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 	if errors.Is(err, audit.ErrNotRecorded) {
 		log.Error(err, "tenant role sync: no audit record; nothing repaired", "tenant", tenant.Name)
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("tenant role sync audit record: %w", err)
 	}
 	if err != nil {
 		if errors.Is(err, tenantrole.ErrOwnerConflict) {

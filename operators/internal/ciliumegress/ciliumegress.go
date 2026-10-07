@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	// APIVersion and Kind name the CiliumNetworkPolicy resource.
+	// APIVersion is the API version of the CiliumNetworkPolicy resource.
 	APIVersion = "cilium.io/v2"
-	Kind       = "CiliumNetworkPolicy"
+	// Kind is the kind of the CiliumNetworkPolicy resource.
+	Kind = "CiliumNetworkPolicy"
 	// DNSNamespace is the namespace of kube-dns.
 	DNSNamespace = "kube-system"
 

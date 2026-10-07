@@ -14,7 +14,7 @@ import (
 
 // runActingUser runs the unary interceptor and returns the acting user the
 // handler saw.
-func runActingUser(t *testing.T, ctx context.Context) (string, bool) {
+func runActingUser(ctx context.Context, t *testing.T) (string, bool) {
 	t.Helper()
 	var got string
 	var ok bool
@@ -32,7 +32,7 @@ func TestActingUser_AHumanCallSetsTheVerifiedSubject(t *testing.T) {
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{
 		Subject: "312345678901234567", Issuer: auth.IssuerOIDC, CredentialType: auth.CredentialOIDCUser,
 	})
-	got, ok := runActingUser(t, ctx)
+	got, ok := runActingUser(ctx, t)
 	if !ok || got != "312345678901234567" {
 		t.Fatalf("acting user = %q, %v; want the verified subject", got, ok)
 	}
@@ -45,7 +45,7 @@ func TestActingUser_AServiceOrComponentCallSetsNone(t *testing.T) {
 		"spiffe":    {Subject: "spiffe://zeroroot.ai/ns/gibson/sa/e2e-runner", Issuer: auth.Issuer("spiffe"), CredentialType: auth.CredentialType("spiffe")},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if got, ok := runActingUser(t, auth.WithIdentity(context.Background(), id)); ok {
+			if got, ok := runActingUser(auth.WithIdentity(context.Background(), id), t); ok {
 				t.Fatalf("a %s identity set acting user %q", name, got)
 			}
 		})
@@ -56,19 +56,19 @@ func TestActingUser_AClientHeaderIsIgnored(t *testing.T) {
 	md := grpcmetadata.Pairs("x-gibson-acting-user", "victim", "x-acting-user", "victim")
 	ctx := grpcmetadata.NewIncomingContext(context.Background(), md)
 	ctx = auth.WithIdentity(ctx, auth.Identity{Subject: "agent_principal:abc", CredentialType: auth.CredentialCapabilityGrant})
-	if got, ok := runActingUser(t, ctx); ok {
+	if got, ok := runActingUser(ctx, t); ok {
 		t.Fatalf("a client header set acting user %q", got)
 	}
 	// A human call still gets its own subject, not the header value.
 	ctx = auth.WithIdentity(grpcmetadata.NewIncomingContext(context.Background(), md),
 		auth.Identity{Subject: "alice", Issuer: auth.IssuerOIDC, CredentialType: auth.CredentialOIDCUser})
-	if got, _ := runActingUser(t, ctx); got != "alice" {
+	if got, _ := runActingUser(ctx, t); got != "alice" {
 		t.Fatalf("acting user = %q, want the verified subject alice", got)
 	}
 }
 
 func TestActingUser_NoIdentitySetsNone(t *testing.T) {
-	if got, ok := runActingUser(t, context.Background()); ok {
+	if got, ok := runActingUser(context.Background(), t); ok {
 		t.Fatalf("no identity set acting user %q", got)
 	}
 }

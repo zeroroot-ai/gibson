@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strconv"
 	"time"
@@ -110,7 +111,10 @@ func flushPending(ctx context.Context, em *audit.SagaEmitter, list *[]gibsonv1al
 	if len(*list) == 0 {
 		*list = nil
 	}
-	return err
+	if err != nil {
+		return fmt.Errorf("send the pending audit records: %w", err)
+	}
+	return nil
 }
 
 // eventOf is the audit record of a pending record. The record carries when

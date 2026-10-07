@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -49,7 +50,7 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 			"set authz.fga.tls.enabled and authz.fga.tls.ca_file", cfg.Fga.Endpoint)
 	}
 	if cfg.Fga.TLS.Enabled && cfg.Fga.TLS.CAFile == "" {
-		return fmt.Errorf("authorization service: authz.fga.tls.enabled is true, but authz.fga.tls.ca_file is empty")
+		return errors.New("authorization service: authz.fga.tls.enabled is true, but authz.fga.tls.ca_file is empty")
 	}
 
 	// Resolve store/model IDs from config → env vars (chart projects the

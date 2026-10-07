@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -50,7 +51,7 @@ const probeTimeout = 5 * time.Second
 var dialer = func(ctx context.Context, address string) error {
 	conn, err := (&net.Dialer{Timeout: probeTimeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
-		return err
+		return fmt.Errorf("dial %s: %w", address, err)
 	}
 	return conn.Close()
 }

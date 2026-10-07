@@ -186,16 +186,16 @@ func run(cfg runConfig) error {
 	// daemon answers. No emitter, no start.
 	daemonAddr, daemonSVID, err := daemonaudit.Settings(os.Getenv)
 	if err != nil {
-		return err
+		return fmt.Errorf("daemon audit settings: %w", err)
 	}
 	sink, err := daemonaudit.New(daemonaudit.Dial(daemonAddr, daemonSVID))
 	if err != nil {
-		return err
+		return fmt.Errorf("daemon audit sink: %w", err)
 	}
 	defer func() { _ = sink.Close() }()
 	auditEmitter, err := audit.NewSagaEmitter(sink)
 	if err != nil {
-		return err
+		return fmt.Errorf("audit emitter: %w", err)
 	}
 
 	if err := (&controller.OIDCClientReconciler{

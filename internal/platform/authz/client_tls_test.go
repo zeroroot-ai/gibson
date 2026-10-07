@@ -84,7 +84,7 @@ func checkOnce(t *testing.T, cfg FgaConfig) error {
 		t.Fatalf("NewFgaAuthorizer: %v", err)
 	}
 	_, err = a.Check(context.Background(), "user:_system", "platform_operator", "system_tenant:_system")
-	return err
+	return err //nolint:wrapcheck // the check error is the assertion subject
 }
 
 func TestFgaTransport_TLSOnUsesConfiguredCA(t *testing.T) {

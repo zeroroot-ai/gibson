@@ -28,7 +28,7 @@ func restoreClient(launchErr error) (*mockClient, *LaunchRequest, *[]string) {
 		},
 		wait: func(context.Context, string) (WaitResponse, error) { return WaitResponse{}, nil },
 		kill: func(_ context.Context, id string) error { killed = append(killed, id); return nil },
-		snapshot: func(_ context.Context, id string, ttl time.Duration) (string, error) {
+		snapshot: func(_ context.Context, id string, _ time.Duration) (string, error) {
 			return "snap-of-" + id, nil
 		},
 	}

@@ -149,7 +149,7 @@ func (r *TenantGrantsReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if _, ferr := r.failGrants(ctx, &tg, "audit record: "+err.Error()); ferr != nil {
 			return ctrl.Result{}, ferr
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("tenant grants audit record: %w", err)
 	}
 	if err != nil {
 		log.Error(err, "tenant grants provision failed", "tenant", tg.Spec.TenantID)
@@ -188,7 +188,7 @@ func (r *TenantGrantsReconciler) reconcileGrantsDelete(ctx context.Context, tg *
 		ev := audit.ObjectEvent(audit.ActionGrantsDeprovision, tg, nil)
 		if err := r.Audit.Change(ctx, ev, func() error {
 			if err := r.Provisioner.Deprovision(ctx, desiredTuples(tg)); err != nil && !errors.Is(err, clients.ErrNotFound) {
-				return err
+				return fmt.Errorf("deprovision the grants of tenant %s: %w", tg.Spec.TenantID, err)
 			}
 			return nil
 		}); err != nil {

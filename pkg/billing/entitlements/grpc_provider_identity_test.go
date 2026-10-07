@@ -80,7 +80,7 @@ func handshake(t *testing.T, client *tls.Config, server *identitySource, clientI
 	err := cli.Handshake()
 	_ = cli.Close()
 	<-done
-	return err
+	return err //nolint:wrapcheck // the handshake error is the assertion subject
 }
 
 // identityTestCA issues X509-SVIDs for the handshake test.

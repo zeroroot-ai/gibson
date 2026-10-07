@@ -179,7 +179,7 @@ func TestSystemClient_Unauthorized(t *testing.T) {
 	keyPath := writeKeyFile(t, key)
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"unauthorized","error_description":"invalid key or user"}`))
 		},
@@ -207,7 +207,7 @@ func TestSystemClient_ServerError_5xx(t *testing.T) {
 	keyPath := writeKeyFile(t, key)
 
 	srv := newFakeServer(t, map[string]http.HandlerFunc{
-		systemAPIRoute: func(w http.ResponseWriter, r *http.Request) {
+		systemAPIRoute: func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write([]byte(`{"error":"internal server error"}`))
 		},
