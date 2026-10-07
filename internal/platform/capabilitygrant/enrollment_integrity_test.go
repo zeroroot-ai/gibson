@@ -245,7 +245,10 @@ func TestRegisterCapabilityGrant_HostKeyReRegistrationSpendsNothing(t *testing.T
 
 	m.expectAuditRecord()
 	m.mock.ExpectBegin()
-	m.expectEnrollmentWrites()
+	// A re-registration only touches the row. It never inserts a host.
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.mock.ExpectExec("INSERT INTO capability_grant_agents").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.mock.ExpectExec("DELETE FROM capability_grant_grants").WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectCommit()
 
 	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
@@ -1338,4 +1341,97 @@ func TestRevokeCapabilityGrant_FailureRecordErrorKeepsTheActionError(t *testing.
 	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
 	require.ErrorIs(t, err, ErrAgentNotInTenant)
 	require.NoError(t, m.mock.ExpectationsWereMet())
+}
+
+// A re-registration for a host that has no row (a fresh key) is refused. The
+// store never inserts a host on this path (the daemon refuses a new host with
+// no bootstrap credential).
+func TestRegisterCapabilityGrant_ReRegistrationNeverAddsAHost(t *testing.T) {
+	m := newMockedService(t)
+
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.mock.ExpectRollback()
+
+	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.ErrorIs(t, err, ErrHostNotRegistrable)
+	require.NoError(t, m.mock.ExpectationsWereMet())
+	assert.NotContains(t, m.rec.all(), "INSERT INTO capability_grant_hosts")
+}
+
+// GetHost returns the agent name and the capability ceiling that the
+// enrolling credential left on the host row, so a re-registration reads them
+// and never takes them from the request.
+func TestGetHost_ReadsTheEnrollmentBounds(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+			"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+			AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+				"hello-agent", []byte(`["execute:tool:nmap"]`), time.Now(), time.Now()))
+
+	h, err := m.svc.store.GetHost(context.Background(), "h1")
+	require.NoError(t, err)
+	assert.Equal(t, "hello-agent", h.AgentName)
+	assert.Equal(t, []string{"execute:tool:nmap"}, h.CapabilityCeiling)
+}
+
+// A stored ceiling that is not a list is an error, not an empty ceiling.
+func TestGetHost_RefusesACorruptCeiling(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+			"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+			AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+				"hello-agent", []byte(`{"not":"a list"}`), time.Now(), time.Now()))
+	_, err := m.svc.store.GetHost(context.Background(), "h1")
+	require.Error(t, err)
+}
+
+// HostKeyID is the id that a host stores itself under.
+func TestHostKeyID_IsTheStoredHostID(t *testing.T) {
+	got, err := HostKeyID(json.RawMessage(hostJWK))
+	require.NoError(t, err)
+	want, err := jwkThumbprint(json.RawMessage(hostJWK))
+	require.NoError(t, err)
+	assert.Equal(t, want, got)
+	_, err = HostKeyID(nil)
+	require.Error(t, err)
+}
+
+// A failing UPDATE of a re-registration is an error, and the ceiling of a
+// first enrollment is stored as a list.
+func TestEnroll_StoresTheCeilingAndTouchFailsLoudly(t *testing.T) {
+	assert.Equal(t, "[]", ceilingJSON(nil))
+	assert.Equal(t, `["a","b"]`, ceilingJSON([]string{"a", "b"}))
+
+	m := newMockedService(t)
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnError(errors.New("db down"))
+	m.mock.ExpectRollback()
+	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrHostNotRegistrable)
+
+	m = newMockedService(t)
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewErrorResult(errors.New("no rows info")))
+	m.mock.ExpectRollback()
+	_, err = m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.Error(t, err)
 }

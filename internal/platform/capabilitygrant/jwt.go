@@ -87,6 +87,11 @@ type HostClaims struct {
 	// existing identity (gibson#648). Sourced from the store, not the JWT.
 	PrincipalRef string
 
+	// AgentName and CapabilityCeiling are the bounds of the credential that
+	// enrolled the host. Sourced from the store: a re-registration keeps them.
+	AgentName         string
+	CapabilityCeiling []string
+
 	// IssuedAt is when the token was created (JWT iat).
 	IssuedAt time.Time
 
@@ -240,12 +245,14 @@ func (v *JWTVerifier) VerifyHostJWT(ctx context.Context, tokenStr, expectedAud s
 	}
 
 	return &HostClaims{
-		HostID:       hostID,
-		TenantID:     host.TenantID,
-		OwnerUserID:  host.UserID,
-		PrincipalRef: host.PrincipalRef,
-		IssuedAt:     issuedAt,
-		ExpiresAt:    expiresAt,
+		HostID:            hostID,
+		TenantID:          host.TenantID,
+		OwnerUserID:       host.UserID,
+		PrincipalRef:      host.PrincipalRef,
+		AgentName:         host.AgentName,
+		CapabilityCeiling: host.CapabilityCeiling,
+		IssuedAt:          issuedAt,
+		ExpiresAt:         expiresAt,
 	}, nil
 }
 

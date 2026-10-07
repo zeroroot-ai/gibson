@@ -48,11 +48,11 @@ func TestEmbed_PlatformHasExpectedFiles(t *testing.T) {
 	// golang-migrate tracks a single integer and only moves forward, so
 	// leaving a gap would let a later-landing migration be skipped forever.
 	upCount, downCount := countSQL(t, Platform, platformDir)
-	if upCount != 45 {
-		t.Errorf("platform: expected 45 up.sql files, got %d", upCount)
+	if upCount != 46 {
+		t.Errorf("platform: expected 46 up.sql files, got %d", upCount)
 	}
-	if downCount != 45 {
-		t.Errorf("platform: expected 45 down.sql files, got %d", downCount)
+	if downCount != 46 {
+		t.Errorf("platform: expected 46 down.sql files, got %d", downCount)
 	}
 }
 
@@ -157,8 +157,8 @@ func TestPlatformMaxVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PlatformMaxVersion: %v", err)
 	}
-	if v != 45 {
-		t.Errorf("PlatformMaxVersion: got %d, want 45", v)
+	if v != 46 {
+		t.Errorf("PlatformMaxVersion: got %d, want 46", v)
 	}
 }
 
