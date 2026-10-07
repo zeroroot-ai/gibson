@@ -68,8 +68,7 @@ func (r *recordingVaultAdmin) Ping(_ context.Context) error                     
 func (r *recordingVaultAdmin) VerifyJWTAuthMounted(_ context.Context) error             { return nil }
 func (r *recordingVaultAdmin) ConfigureTenantJWTAuth(_ context.Context, _ string) error { return nil }
 
-func (r *recordingVaultAdmin) WriteInfraNeo4j(_ context.Context, _, _, _ string) error { return nil }
-func (r *recordingVaultAdmin) DeleteInfraNeo4j(_ context.Context, _ string) error      { return nil }
+func (r *recordingVaultAdmin) DeleteInfraNeo4j(_ context.Context, _ string) error { return nil }
 func (r *recordingVaultAdmin) WriteInfraNeo4jCredentials(_ context.Context, _ string, _ pdataplane.Neo4jCredentials) error {
 	return nil
 }

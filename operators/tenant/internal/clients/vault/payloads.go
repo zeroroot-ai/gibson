@@ -2,7 +2,7 @@
 // Copyright 2026 Zero Root AI
 
 // payloads.go: typed per-store credential writers + deletes peering the
-// existing WriteInfraNeo4j/DeleteInfraNeo4j pattern in namespace.go.
+// existing WriteInfraNeo4jCredentials/DeleteInfraNeo4j pattern in namespace.go.
 //
 // Each writer marshals a typed payload struct from
 // gibson/pkg/platform/dataplane and POSTs to the canonical Vault path

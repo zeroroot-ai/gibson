@@ -11,10 +11,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Package-level API (backward-compat shims)
-// ---------------------------------------------------------------------------
-
 func TestLoad_Canonical(t *testing.T) {
 	l := NewLoader("")
 	c := l.catalogue
@@ -33,16 +29,8 @@ func TestLoad_Canonical(t *testing.T) {
 	}
 }
 
-func TestLoad_Idempotent(t *testing.T) {
-	c1 := Load()
-	c2 := Load()
-	if c1 != c2 {
-		t.Fatal("Load() must return the same singleton pointer")
-	}
-}
-
 func TestModelsFor_KnownProvider(t *testing.T) {
-	models := ModelsFor("anthropic")
+	models := NewLoader("").ModelsFor("anthropic")
 	if len(models) == 0 {
 		t.Fatal("expected at least one anthropic model")
 	}
@@ -57,20 +45,18 @@ func TestModelsFor_KnownProvider(t *testing.T) {
 }
 
 func TestModelsFor_UnknownProvider(t *testing.T) {
-	models := ModelsFor("nonexistent-provider-xyz")
+	models := NewLoader("").ModelsFor("nonexistent-provider-xyz")
 	if models != nil {
 		t.Fatalf("expected nil for unknown provider, got %v", models)
 	}
 }
 
 func TestModelsFor_DynamicProviders(t *testing.T) {
-	// ollama and llamafile have update_strategy: dynamic and an empty model list.
-	// ModelsFor should return an empty (non-nil? nil? — catalogue returns the slice
-	// from the YAML, which yaml.v3 decodes as nil for "models: []"). Either nil or
-	// empty is fine; what must NOT happen is a panic.
+	// ollama and llamafile have update_strategy: dynamic and an empty model
+	// list. Either nil or an empty slice is fine. A panic is not.
+	l := NewLoader("")
 	for _, provider := range []string{"ollama", "llamafile"} {
-		models := ModelsFor(provider)
-		_ = models // nil or empty slice, both valid
+		_ = l.ModelsFor(provider)
 	}
 }
 

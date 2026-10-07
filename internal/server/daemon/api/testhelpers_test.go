@@ -4,6 +4,7 @@
 package api
 
 import (
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"log/slog"
 	"os"
 
@@ -21,8 +22,9 @@ var testSlogLogger = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOption
 // s.reembedTrigger.Trigger unconditionally ([[0003]]: no request-path nil-guard).
 func blankServer() *DaemonServer {
 	return &DaemonServer{
-		logger:         testSlogLogger,
-		reembedTrigger: noopReembedTrigger{},
+		logger:            testSlogLogger,
+		reembedTrigger:    noopReembedTrigger{},
+		providerCatalogue: catalogue.NewLoader(""),
 	}
 }
 
