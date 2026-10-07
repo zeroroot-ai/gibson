@@ -416,8 +416,10 @@ func TestSchemaStatement_RefusesANameThatIsNotAnIdentifier(t *testing.T) {
 // duplicateHostError is the error Neo4j returns when two Host nodes share one
 // brain_id and the uniqueness constraint cannot be created.
 func duplicateHostError() error {
+	// The code is the literal that neo4j 5.26 returns, not the constant under
+	// test, so a wrong constant fails here.
 	return fmt.Errorf("apply schema statement: %w", &neo4j.Neo4jError{
-		Code: constraintDataViolationCode,
+		Code: "Neo.DatabaseError.Schema.ConstraintCreationFailed",
 		Msg:  "Both Node(0) and Node(1) have the label `Host` and property `brain_id` = 'h-1'",
 	})
 }

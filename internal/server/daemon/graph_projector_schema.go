@@ -226,8 +226,10 @@ type cypherExec func(ctx context.Context, stmt schemaStatement, params map[strin
 
 // constraintDataViolationCode is the Neo4j code of a constraint that cannot be
 // created because the data already violates it, for example two nodes with one
-// identity.
-const constraintDataViolationCode = "Neo.ClientError.Schema.ConstraintCreationFailed"
+// identity. Neo4j 5 classifies it as a database error.
+// TestApplySchema_RealNeo4jDuplicateBlocks (integration) proves the code
+// against the neo4j 5.26 image that tenants run.
+const constraintDataViolationCode = "Neo.DatabaseError.Schema.ConstraintCreationFailed"
 
 // isConstraintDataViolation reports whether err is a constraint creation that
 // failed for a data reason. The same statement fails again until a person
