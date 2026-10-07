@@ -18,6 +18,8 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
@@ -418,5 +420,94 @@ func TestSandboxIdentityCredential_ClaimForkOnly(t *testing.T) {
 	}
 	if err := checkSandboxIdentityCredential(context.Background(), scopeMethod, nil); err != nil {
 		t.Errorf("no identity: %v", err)
+	}
+}
+
+// callerGrantVerifier answers with fixed claims and a fixed calling agent, as
+// the daemon verifier does for a tool or a plugin grant.
+type callerGrantVerifier struct {
+	claims sdkcg.Claims
+	caller string
+}
+
+func (c callerGrantVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
+	return c.claims, nil
+}
+
+func (c callerGrantVerifier) VerifyCaller(context.Context, string) (sdkcg.Claims, string, error) {
+	return c.claims, c.caller, nil
+}
+
+// The agent name of a request that carries a tool or plugin grant must be the
+// calling agent that the grant names in its signed claim. A name in the
+// request never counts for itself.
+func TestCheckTaskGrantScope_ToolGrantNamesItsCallingAgent(t *testing.T) {
+	claims := grantClaims(t, "acme", "m-1")
+	claims.Subject = "component:tool:nmap"
+	for name, tc := range map[string]struct {
+		caller, requested string
+		want              codes.Code
+	}{
+		"the calling agent":           {"alpha", "alpha", codes.OK},
+		"another agent":               {"alpha", "beta", codes.PermissionDenied},
+		"no claim, a named agent":     {"", "beta", codes.PermissionDenied},
+		"no claim, no name":           {"", "", codes.OK},
+		"a claim, no name in request": {"alpha", "", codes.OK},
+	} {
+		req := observeReq("m-1")
+		req.Context.AgentName = tc.requested
+		v := callerGrantVerifier{claims: claims, caller: tc.caller}
+		_, err := checkTaskGrantScope(grantCtx("acme", compactJWT("JWT")), req, getter(v), scopeMethod, slog.Default())
+		if status.Code(err) != tc.want {
+			t.Errorf("%s: code = %v, want %v", name, status.Code(err), tc.want)
+		}
+	}
+	// A verifier that cannot read the claim refuses a named agent on a tool grant.
+	req := observeReq("m-1")
+	req.Context.AgentName = "alpha"
+	if _, err := checkTaskGrantScope(grantCtx("acme", compactJWT("JWT")), req, getter(&fakeGrantVerifier{claims: claims}), scopeMethod, slog.Default()); status.Code(err) != codes.PermissionDenied {
+		t.Errorf("verifier with no claim: code = %v, want PermissionDenied", status.Code(err))
+	}
+}
+
+// verifyGrant maps a verifier error, with and without the calling-agent claim.
+func TestVerifyGrant_Errors(t *testing.T) {
+	boom := errors.New("bad signature")
+	if _, _, err := verifyGrant(context.Background(), &fakeGrantVerifier{err: boom}, "t"); !errors.Is(err, boom) {
+		t.Errorf("plain verifier: %v", err)
+	}
+	if _, _, err := verifyGrant(context.Background(), failingCallerVerifier{err: boom}, "t"); !errors.Is(err, boom) {
+		t.Errorf("caller verifier: %v", err)
+	}
+}
+
+type failingCallerVerifier struct{ err error }
+
+func (f failingCallerVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
+	return sdkcg.Claims{}, f.err
+}
+
+func (f failingCallerVerifier) VerifyCaller(context.Context, string) (sdkcg.Claims, string, error) {
+	return sdkcg.Claims{}, "", f.err
+}
+
+// A tool grant that the harness mints carries the dispatching agent, and the
+// daemon verifier reads it back. The grant of an agent carries none.
+func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
+	m := testMinter(t)
+	h := &DefaultAgentHarness{cgMinter: m, logger: slog.Default()}
+	h.missionCtx.ID = types.NewID()
+	h.missionCtx.TenantID = "acme"
+	h.missionCtx.MissionRunID = "run-1"
+	h.missionCtx.CurrentAgent = "alpha"
+	v := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m })
+
+	_, caller, err := v.VerifyCaller(context.Background(), h.mintCGForWork("nmap", "tool"))
+	if err != nil || caller != "alpha" {
+		t.Fatalf("tool grant: caller = %q, err = %v; want alpha", caller, err)
+	}
+	_, caller, err = v.VerifyCaller(context.Background(), h.mintCGForWork("zerocool", "agent"))
+	if err != nil || caller != "" {
+		t.Fatalf("agent grant: caller = %q, err = %v; want none", caller, err)
 	}
 }
