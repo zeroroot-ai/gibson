@@ -254,11 +254,6 @@ internal/server/daemon/interceptor_correlation.go	CorrelationIDFromContext
 internal/server/daemon/liveagents/registry.go	WithSubscriberBuffer
 internal/server/daemon/options.go	WithMetricsRegisterer
 internal/server/daemon/shutdown.go	ShutdownCoordinator.Metrics
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.DelegateToAgent
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.DiscoverTool
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListAgents
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListPlugins
-internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListTools
 operators/internal/audit/audittest/sink.go	Sink.EmitAuditEvent
 operators/internal/audit/audittest/sink.go	Sink.Emitter
 operators/internal/audit/audittest/sink.go	Sink.Events
