@@ -432,6 +432,10 @@ jobs:
           make check-comment-paths
           make check-operator-rbac-scope
           make check-rules-enforced
+      - name: Guard against a Deprecated marker in hand-written Go
+        # gibson#691, ADR-0131: a deprecated symbol that still ships is a
+        # parallel code path. The guard runs its own fixtures first.
+        run: make check-no-deprecated
       - name: Install buf
         uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1
         with:

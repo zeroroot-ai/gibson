@@ -5,7 +5,7 @@
 .PHONY: check-no-payment-vendor
 .PHONY: check-no-trust-domain-literal
 .PHONY: check-plugin-modules
-.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-rules-enforced check-service-names check-proto-rules check-proto-breaking check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
+.PHONY: all build bin gibson-migrate sandbox-eviction-handler test test-coverage test-race lint lint-all lint-deadcode lint-deadcode-baseline clean install help proto proto-deps proto-clean check-authz check-coverage test-daemon-identity-roundtrip check-no-tenant-id check-fga-headers check-oss-boundary check-airgap-build check-rpc-test-walker coverage-profile check-coverage-floor check-diff-coverage check-coverage-gates check-critical-paths check-ci-lane-parity check-build-tags check-first-party-tags check-crd-field-consumers check-config-field-readers check-proto-field-consumers check-proto-field-consumers-fixture check-bringup-diagnostics check-comment-paths check-adr-index check-no-deprecated check-operator-rbac-scope check-rules-enforced check-service-names check-proto-rules check-proto-breaking check-queue-gate vet-e2e vet-tags test-integration test-openbao test-merge-queue test-setec-roundtrip authz-registry tool-manifests tool-catalog-capture
 
 # Go parameters
 GOCMD=go
@@ -717,6 +717,14 @@ check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no
 check-comment-paths:
 	@python3 scripts/check-comment-paths.py --selftest
 	@python3 scripts/check-comment-paths.py
+
+# check-no-deprecated asserts that no hand-written Go file holds a
+# `// Deprecated:` marker. A deprecated symbol that still ships is a parallel
+# code path (ADR-0131, gibson#691). Generated files are not scanned. Runs its
+# fixtures first.
+check-no-deprecated:
+	@python3 scripts/check-no-deprecated.py --selftest
+	@python3 scripts/check-no-deprecated.py
 
 # check-adr-index asserts that docs/adr-index.md, the public index of ADR
 # numbers, is well formed: each row parses, no number appears two times, and

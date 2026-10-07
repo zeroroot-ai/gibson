@@ -110,7 +110,6 @@ internal/engine/llm/options.go	WithStream
 internal/engine/llm/options.go	WithSystemPrompt
 internal/engine/llm/options.go	WithTemperature
 internal/engine/llm/options.go	WithTopP
-internal/engine/llm/providers/catalogue/loader.go	Load
 internal/engine/llm/slot.go	DefaultSlotManager.ResolveSlot
 internal/engine/llm/slot.go	DefaultSlotManager.ValidateSlot
 internal/engine/llm/slot.go	DefaultSlotManager.validateConstraints

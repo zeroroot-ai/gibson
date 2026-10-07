@@ -42,10 +42,10 @@ type ProviderDescriptor struct {
 
 // catalogueModels converts the catalogue's Model entries for a given provider
 // type into the llm.ModelInfo slice used by ProviderDescriptor.DefaultModels.
-// It sources data from the embedded provider-catalogue.yaml via catalogue.Load()
-// rather than constructing a runtime provider instance.
-func catalogueModels(providerType string) []llm.ModelInfo {
-	entries := catalogue.ModelsFor(providerType)
+// It reads the daemon's catalogue loader rather than constructing a runtime
+// provider instance.
+func catalogueModels(cat *catalogue.Loader, providerType string) []llm.ModelInfo {
+	entries := cat.ModelsFor(providerType)
 	if len(entries) == 0 {
 		return nil
 	}
@@ -63,10 +63,10 @@ func catalogueModels(providerType string) []llm.ModelInfo {
 // SupportedProviderDescriptors returns the full list of provider descriptors
 // in the same deterministic order as llm.SupportedProviderTypes(). This is
 // the function the future admin RPC handler will call.
-func SupportedProviderDescriptors() []ProviderDescriptor {
+func SupportedProviderDescriptors(cat *catalogue.Loader) []ProviderDescriptor {
 	out := make([]ProviderDescriptor, 0, len(llm.SupportedProviderTypes()))
 	for _, t := range llm.SupportedProviderTypes() {
-		if d, ok := providerDescriptor(t); ok {
+		if d, ok := providerDescriptor(cat, t); ok {
 			out = append(out, d)
 		}
 	}
@@ -76,7 +76,7 @@ func SupportedProviderDescriptors() []ProviderDescriptor {
 // providerDescriptor returns the static descriptor for a given ProviderType,
 // or (zero, false) when the type has no descriptor registered — ProviderCustom
 // is intentionally excluded because its shape is operator-defined.
-func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
+func providerDescriptor(cat *catalogue.Loader, t llm.ProviderType) (ProviderDescriptor, bool) {
 	switch t {
 	case llm.ProviderAnthropic:
 		return ProviderDescriptor{
@@ -86,7 +86,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "api_key", Label: "Anthropic API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
-			DefaultModels: catalogueModels("anthropic"),
+			DefaultModels: catalogueModels(cat, "anthropic"),
 		}, true
 	case llm.ProviderOpenAI:
 		return ProviderDescriptor{
@@ -97,7 +97,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 				{Key: "api_key", Label: "OpenAI API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 				{Key: "base_url", Label: "Base URL (optional)", Placeholder: "https://api.openai.com/v1", Type: llm.FieldURL},
 			},
-			DefaultModels: catalogueModels("openai"),
+			DefaultModels: catalogueModels(cat, "openai"),
 		}, true
 	case llm.ProviderGoogle:
 		return ProviderDescriptor{
@@ -107,7 +107,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "api_key", Label: "Google API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
-			DefaultModels: catalogueModels("google"),
+			DefaultModels: catalogueModels(cat, "google"),
 		}, true
 	case llm.ProviderOllama:
 		return ProviderDescriptor{
@@ -118,7 +118,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "base_url", Label: "Server URL", Placeholder: "http://localhost:11434", Help: "Where your Ollama server is reachable.", Type: llm.FieldURL},
 			},
-			DefaultModels: catalogueModels("ollama"),
+			DefaultModels: catalogueModels(cat, "ollama"),
 		}, true
 	case llm.ProviderBedrock:
 		return ProviderDescriptor{
@@ -126,7 +126,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "AWS Bedrock",
 			DocsURL:       "https://docs.aws.amazon.com/bedrock/",
 			Credentials:   BedrockCredentialSchema(),
-			DefaultModels: catalogueModels("bedrock"),
+			DefaultModels: catalogueModels(cat, "bedrock"),
 		}, true
 	case llm.ProviderVertex:
 		return ProviderDescriptor{
@@ -134,7 +134,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Google Vertex (Claude)",
 			DocsURL:       "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude",
 			Credentials:   VertexCredentialSchema(),
-			DefaultModels: catalogueModels("vertex"),
+			DefaultModels: catalogueModels(cat, "vertex"),
 		}, true
 	case llm.ProviderFoundry:
 		return ProviderDescriptor{
@@ -142,7 +142,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Microsoft Foundry (Claude)",
 			DocsURL:       "https://learn.microsoft.com/azure/ai-foundry/",
 			Credentials:   FoundryCredentialSchema(),
-			DefaultModels: catalogueModels("foundry"),
+			DefaultModels: catalogueModels(cat, "foundry"),
 		}, true
 	case llm.ProviderCloudflare:
 		return ProviderDescriptor{
@@ -150,7 +150,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Cloudflare Workers AI",
 			DocsURL:       "https://developers.cloudflare.com/workers-ai/",
 			Credentials:   CloudflareCredentialSchema(),
-			DefaultModels: catalogueModels("cloudflare"),
+			DefaultModels: catalogueModels(cat, "cloudflare"),
 		}, true
 	case llm.ProviderCohere:
 		return ProviderDescriptor{
@@ -158,7 +158,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Cohere",
 			DocsURL:       "https://docs.cohere.com/",
 			Credentials:   CohereCredentialSchema(),
-			DefaultModels: catalogueModels("cohere"),
+			DefaultModels: catalogueModels(cat, "cohere"),
 		}, true
 	case llm.ProviderHuggingFace:
 		return ProviderDescriptor{
@@ -166,7 +166,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "HuggingFace Inference",
 			DocsURL:       "https://huggingface.co/docs/api-inference/",
 			Credentials:   HuggingFaceCredentialSchema(),
-			DefaultModels: catalogueModels("huggingface"),
+			DefaultModels: catalogueModels(cat, "huggingface"),
 		}, true
 	case llm.ProviderLlamafile:
 		return ProviderDescriptor{
@@ -175,7 +175,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DocsURL:       "https://github.com/Mozilla-Ocho/llamafile",
 			SelfHosted:    true,
 			Credentials:   LlamafileCredentialSchema(),
-			DefaultModels: catalogueModels("llamafile"),
+			DefaultModels: catalogueModels(cat, "llamafile"),
 		}, true
 	case llm.ProviderMistral:
 		return ProviderDescriptor{
@@ -183,7 +183,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			DisplayName:   "Mistral",
 			DocsURL:       "https://docs.mistral.ai/",
 			Credentials:   MistralCredentialSchema(),
-			DefaultModels: catalogueModels("mistral"),
+			DefaultModels: catalogueModels(cat, "mistral"),
 		}, true
 	case llm.ProviderVoyage:
 		return ProviderDescriptor{
@@ -193,7 +193,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "api_key", Label: "Voyage API Key", Required: true, Secret: true, Type: llm.FieldPassword},
 			},
-			DefaultModels: catalogueModels("voyage"),
+			DefaultModels: catalogueModels(cat, "voyage"),
 		}, true
 	case llm.ProviderOpenAICompatible:
 		return ProviderDescriptor{
@@ -205,7 +205,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 				{Key: "base_url", Label: "Endpoint URL", Required: true, Placeholder: "http://embedder:8080", Help: "URL of the OpenAI-compatible /v1/embeddings endpoint.", Type: llm.FieldURL},
 				{Key: "api_key", Label: "API Key (optional)", Secret: true, Help: "Leave empty if the endpoint does not require authentication.", Type: llm.FieldPassword},
 			},
-			DefaultModels: catalogueModels("openai-compatible"),
+			DefaultModels: catalogueModels(cat, "openai-compatible"),
 		}, true
 	case llm.ProviderTEI:
 		return ProviderDescriptor{
@@ -216,7 +216,7 @@ func providerDescriptor(t llm.ProviderType) (ProviderDescriptor, bool) {
 			Credentials: []llm.CredentialField{
 				{Key: "base_url", Label: "TEI URL", Required: true, Placeholder: "http://tei:8080", Help: "Base URL of the HuggingFace Text-Embeddings-Inference server.", Type: llm.FieldURL},
 			},
-			DefaultModels: catalogueModels("tei"),
+			DefaultModels: catalogueModels(cat, "tei"),
 		}, true
 	case llm.ProviderCustom:
 		// Custom is intentionally excluded — the descriptor surface is for

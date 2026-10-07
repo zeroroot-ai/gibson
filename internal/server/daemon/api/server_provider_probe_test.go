@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -423,4 +424,23 @@ func TestProbeProvider_UnauthenticatedContext_Unauthenticated(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.Unauthenticated, grpcCode(err))
+}
+
+// TestGetSupportedProviders_NoCatalogue: a server with no catalogue reports
+// Internal rather than an empty model list (gibson#691).
+func TestGetSupportedProviders_NoCatalogue(t *testing.T) {
+	s := auditedServer(t)
+	s.providerCatalogue = nil
+	_, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
+	require.Equal(t, codes.Internal, grpcCode(err))
+}
+
+// TestWithProviderCatalogue_SetsTheCatalogue: the builder gives the server
+// the catalogue that GetSupportedProviders reads.
+func TestWithProviderCatalogue_SetsTheCatalogue(t *testing.T) {
+	s := auditedServer(t)
+	s.providerCatalogue = nil
+	cat := catalogue.NewLoader("")
+	require.Same(t, s, s.WithProviderCatalogue(cat))
+	require.Same(t, cat, s.providerCatalogue)
 }

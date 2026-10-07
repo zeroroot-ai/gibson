@@ -148,7 +148,6 @@ type missionManager struct {
 	callbackManager *harness.CallbackManager
 	harnessFactory  harness.HarnessFactoryInterface
 	targetStore     targetStoreLookup
-	runLinker       mission.MissionRunLinker
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
 	eventBus        eventPublisher                        // emits orchestration events to the brain + Redis stream
@@ -213,7 +212,6 @@ func newMissionManager(
 	callbackMgr *harness.CallbackManager,
 	harnessFactory harness.HarnessFactoryInterface,
 	targetStore targetStoreLookup,
-	runLinker mission.MissionRunLinker,
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
 	eventBus eventPublisher,
@@ -232,7 +230,6 @@ func newMissionManager(
 		callbackManager: callbackMgr,
 		harnessFactory:  harnessFactory,
 		targetStore:     targetStore,
-		runLinker:       runLinker,
 		infrastructure:  infrastructure,
 		otelStack:       otelStack,
 		eventBus:        eventBus,

@@ -24,6 +24,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -806,7 +807,10 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 	if auth.TenantStringFromContext(ctx) == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
-	descriptors := providers.SupportedProviderDescriptors()
+	if s.providerCatalogue == nil {
+		return nil, status_grpc.Error(codes.Internal, "provider catalogue is not wired")
+	}
+	descriptors := providers.SupportedProviderDescriptors(s.providerCatalogue)
 	out := make([]*tenantv1.SupportedProvider, 0, len(descriptors))
 	for _, d := range descriptors {
 		out = append(out, descriptorToProto(d))
@@ -1237,4 +1241,11 @@ func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig) llm.ProviderConfi
 		cfg.Extra = extra
 	}
 	return cfg
+}
+
+// WithProviderCatalogue gives the server the daemon's model catalogue.
+// GetSupportedProviders reads the default model list of each provider from it.
+func (s *DaemonServer) WithProviderCatalogue(cat *catalogue.Loader) *DaemonServer {
+	s.providerCatalogue = cat
+	return s
 }

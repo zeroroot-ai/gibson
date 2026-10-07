@@ -13,7 +13,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
-	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
@@ -40,8 +39,9 @@ type Infrastructure struct {
 	// harnessFactory creates configured AgentHarness instances
 	harnessFactory harness.HarnessFactoryInterface
 
-	// runLinker manages relationships between mission runs with the same name
-	runLinker mission.MissionRunLinker
+	// catalogue is the model catalogue of the daemon. It hot-reloads the
+	// operator-supplied file, or holds the embedded one.
+	catalogue *catalogue.Loader
 
 	// otelStack holds the unified OTel observability stack (nil when disabled)
 	otelStack *observability.OTelObservabilityStack
@@ -80,7 +80,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// fail-fast behaviour: the process should not start with a bad catalogue.
 	cataloguePath := os.Getenv("GIBSON_PROVIDERS_CATALOGUE_PATH")
 	catalogueLoader := catalogue.NewLoader(cataloguePath)
-	catalogue.SetLoader(catalogueLoader)
 	catalogueLoader.Start(ctx, 5*time.Minute)
 	d.logger.Info(ctx, "provider catalogue loaded",
 		"path", func() string {
@@ -166,6 +165,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	// findingStore is nil: findings are persisted via per-tenant Pool at handler time.
 	infra := &Infrastructure{
 		findingStore:     nil, // migrated to pool-backed per-tenant path
+		catalogue:        catalogueLoader,
 		llmRegistry:      llmRegistry,
 		slotManager:      slotManager,
 		otelStack:        otelStack,
@@ -184,12 +184,6 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 
 	// Update infrastructure with harness factory
 	infra.harnessFactory = harnessFactory
-
-	// Mission run linker: per-tenant migration complete, no global store.
-	// Pass nil store — the linker is not actively called post-cutover.
-	runLinker := mission.NewMissionRunLinker(nil)
-	infra.runLinker = runLinker
-	d.logger.Info(ctx, "initialized mission run linker (no-op store — per-tenant via pool)")
 
 	return infra, nil
 }

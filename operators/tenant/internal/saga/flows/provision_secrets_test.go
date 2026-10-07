@@ -68,12 +68,6 @@ func (s *stubVaultAdmin) ConfigureTenantJWTAuth(_ context.Context, tenantID stri
 	return s.jwtAuthConfigErr
 }
 
-// WriteInfraNeo4j satisfies the updated vaultadmin.AdminClient interface
-// (added by spec per-tenant-data-plane-completion Task 19a).
-func (s *stubVaultAdmin) WriteInfraNeo4j(_ context.Context, _, _, _ string) error {
-	return nil
-}
-
 // DeleteInfraNeo4j satisfies the updated vaultadmin.AdminClient interface
 // (added by spec per-tenant-data-plane-completion Task 19a).
 func (s *stubVaultAdmin) DeleteInfraNeo4j(_ context.Context, _ string) error {

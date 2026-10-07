@@ -105,18 +105,6 @@ type AdminClient interface {
 	// is a no-op. tenant-operator#189.
 	ConfigureTenantJWTAuth(ctx context.Context, tenantID string) error
 
-	// WriteInfraNeo4j writes the Neo4j username and password for tenantID
-	// into the per-tenant Vault secrets path at "infra/neo4j" inside the
-	// tenant-<id> namespace. Idempotent: re-running overwrites the same
-	// path with the same values.
-	//
-	// Deprecated: prefer WriteInfraNeo4jCredentials, which carries the bolt
-	// URI in the typed payload so the daemon's broker.Get returns a complete
-	// pdataplane.Neo4jCredentials in one call (no registry-table lookup).
-	// This signature stays for backward compat with existing callers; new
-	// code should use the typed form.
-	WriteInfraNeo4j(ctx context.Context, tenantID, username, password string) error
-
 	// WriteInfraNeo4jCredentials writes the full typed Neo4jCredentials
 	// (BoltURI + Username + Password) to tenant/<id>/infra/neo4j.
 	// Spec tenant-provisioning-unification-phase2 Requirement 1.7.

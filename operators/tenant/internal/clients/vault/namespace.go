@@ -11,8 +11,6 @@ import (
 	"net/http"
 	"strings"
 
-	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
-
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -235,21 +233,6 @@ func (c *httpClient) writeJWTRole(ctx context.Context, namespace, tenantID, poli
 }
 
 // ----- Neo4j infra credentials -----------------------------------------------
-
-// WriteInfraNeo4j implements AdminClient. KV v2 write inside the
-// tenant-<id> namespace at secret/data/infra/neo4j. Idempotent: Vault
-// KV v2 write is an upsert.
-//
-// Future cleanup: replace this signature with WriteInfraNeo4jCredentials
-// taking the full pdataplane.Neo4jCredentials struct, mirroring the
-// other typed writers added in Phase 2.4.
-func (c *httpClient) WriteInfraNeo4j(ctx context.Context, tenantID, username, password string) error {
-	creds := pdataplane.Neo4jCredentials{
-		Username: username,
-		Password: password,
-	}
-	return c.writeInfraSecret(ctx, tenantID, pdataplane.VaultPathInfraNeo4j, creds)
-}
 
 // DeleteInfraNeo4j implements AdminClient. Deletes all versions of the
 // Neo4j credentials at "infra/neo4j" for tenantID inside the
