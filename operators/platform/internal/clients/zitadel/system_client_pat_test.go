@@ -5,8 +5,10 @@ package zitadel
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,14 +45,16 @@ func (p *patServer) routes(t *testing.T) map[string]http.HandlerFunc {
 				ids = append(ids, id)
 			}
 			sort.Strings(ids)
-			body := `{"result":[`
+			var b strings.Builder
+			b.WriteString(`{"result":[`)
 			for i, id := range ids {
 				if i > 0 {
-					body += ","
+					b.WriteString(",")
 				}
-				body += `{"id":"` + id + `"}`
+				b.WriteString(`{"id":"` + id + `"}`)
 			}
-			_, _ = w.Write([]byte(body + `]}`))
+			b.WriteString(`]}`)
+			_, _ = w.Write([]byte(b.String()))
 		},
 		"DELETE /management/v1/users/user-1/pats/pat-old-1": p.del("pat-old-1"),
 		"DELETE /management/v1/users/user-1/pats/pat-old-2": p.del("pat-old-2"),
@@ -132,4 +136,95 @@ func TestTokenValidAcceptsAWorkingTokenAndRefusesAnother(t *testing.T) {
 	if ok, err := sc.TokenValid(context.Background(), "secret-old"); err != nil || ok {
 		t.Fatalf("refused token: ok=%v err=%v", ok, err)
 	}
+}
+
+func TestMintUserTokenRefusesAMissingUser(t *testing.T) {
+	routes := (&patServer{pats: map[string]bool{}}).routes(t)
+	routes["POST /management/v1/users/_search"] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result":[]}`))
+	}
+	srv := newFakeServer(t, routes)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sc.MintUserToken(context.Background(), "login-client", time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound: MintUserToken creates no user", err)
+	}
+	if _, _, err := sc.MintUserToken(context.Background(), "", time.Now()); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("err = %v, want ErrInvalidInput for an empty user name", err)
+	}
+}
+
+func TestMintRefusesAResponseWithNoTokenID(t *testing.T) {
+	routes := (&patServer{pats: map[string]bool{}}).routes(t)
+	routes["POST /management/v1/users/user-1/pats"] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"token":"secret-without-id"}`))
+	}
+	srv := newFakeServer(t, routes)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sc.MintUserToken(context.Background(), "login-client", time.Now()); err == nil {
+		t.Fatal("a token with no id cannot be retired later; the mint must fail")
+	}
+}
+
+func TestTokenValidReportsATransportFault(t *testing.T) {
+	routes := (&patServer{pats: map[string]bool{}}).routes(t)
+	routes["GET /auth/v1/users/me"] = func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	srv := newFakeServer(t, routes)
+	sc, err := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := sc.TokenValid(context.Background(), "x"); err == nil || ok {
+		t.Fatalf("ok=%v err=%v, want an error, not a refusal", ok, err)
+	}
+	if ok, err := sc.TokenValid(context.Background(), ""); err != nil || ok {
+		t.Fatalf("empty token: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestRemoveOtherTokensFailures(t *testing.T) {
+	t.Run("the list fails", func(t *testing.T) {
+		routes := (&patServer{pats: map[string]bool{}}).routes(t)
+		routes["POST /management/v1/users/user-1/pats/_search"] = func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		srv := newFakeServer(t, routes)
+		sc, _ := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+		if _, err := sc.RemoveOtherTokens(context.Background(), "user-1", "pat-new"); err == nil {
+			t.Fatal("want an error when the list fails")
+		}
+	})
+	t.Run("a delete fails", func(t *testing.T) {
+		p := &patServer{pats: map[string]bool{"pat-old-1": true, "pat-new": true}}
+		routes := p.routes(t)
+		routes["DELETE /management/v1/users/user-1/pats/pat-old-1"] = func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		srv := newFakeServer(t, routes)
+		sc, _ := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+		if _, err := sc.RemoveOtherTokens(context.Background(), "user-1", "pat-new"); err == nil {
+			t.Fatal("want an error when a delete fails")
+		}
+	})
+	t.Run("a token gone already is not counted", func(t *testing.T) {
+		p := &patServer{pats: map[string]bool{"pat-old-1": true, "pat-new": true}}
+		routes := p.routes(t)
+		routes["DELETE /management/v1/users/user-1/pats/pat-old-1"] = func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":5}`))
+		}
+		srv := newFakeServer(t, routes)
+		sc, _ := NewSystemClient(srv.URL, "gibson-system-bot", testDomain, writeKeyFile(t, generateTestRSAKey(t)))
+		n, err := sc.RemoveOtherTokens(context.Background(), "user-1", "pat-new")
+		if err != nil || n != 0 {
+			t.Fatalf("n=%d err=%v, want 0 and no error", n, err)
+		}
+	})
 }

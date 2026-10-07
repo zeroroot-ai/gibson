@@ -249,7 +249,7 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		// operator mints it with its System API key, so it needs no token
 		// to exist before. Step 1 reads it through the ExternalSecret.
 		r.reconcileAdminToken,
-		// Step 0b: the token of the login-client machine user, which
+		// Step 0c: the token of the login-client machine user, which
 		// zitadel-login reads (ADR-0171). It never stops the reconcile; see
 		// reconcileLoginClientToken.
 		func(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, logger logr.Logger) (ctrl.Result, error) {

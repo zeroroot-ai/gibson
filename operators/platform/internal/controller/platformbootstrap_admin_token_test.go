@@ -14,6 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
@@ -194,58 +195,153 @@ func TestReconcileAdminToken_KeepsAYoungToken(t *testing.T) {
 	}
 }
 
-// After the grace, the step removes each other token of the user and clears
-// the retire time. Before it, the step removes nothing.
-func TestReconcileAdminToken_RetiresTheOldTokensAfterTheGrace(t *testing.T) {
-	entry := func(after string) map[string]map[string]string {
-		return map[string]map[string]string{adminTokenKVKey: {
-			adminTokenProperty: "new", adminUserProperty: "user-iam-admin", tokenIDProperty: "pat-id-new",
-			mintedAtProperty: "2026-10-04T23:55:00Z", retireAfterProperty: after,
-		}}
+// consumerSecrets returns the two consumer Secrets with the tokens given.
+func consumerSecrets(adminPAT, loginPAT string) []client.Object {
+	return []client.Object{
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: defaultChildNamespace, Name: "iam-admin-pat"},
+			Data:       map[string][]byte{"pat": []byte(adminPAT)},
+		},
+		&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Namespace: defaultChildNamespace, Name: loginClientSecret},
+			Data:       map[string][]byte{"pat": []byte(loginPAT)},
+		},
 	}
-	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+}
 
-	early := &fakeVaultClient{kv: entry("2026-10-05T00:05:00Z")}
-	if _, err := adminTokenReconciler(t, early, sys).reconcileAdminToken(context.Background(), adminTokenBootstrap(), logr.Discard()); err != nil {
+// retireBootstrap is adminTokenBootstrap with the admin token ref the chart
+// renders.
+func retireBootstrap() *gibsonv1alpha1.PlatformBootstrap {
+	pb := adminTokenBootstrap()
+	pb.Spec.Zitadel.AdminTokenRef = gibsonv1alpha1.SecretKeyRef{Name: "iam-admin-pat", Key: "pat"}
+	return pb
+}
+
+func retireEntry(after, since string) map[string]map[string]string {
+	e := map[string]string{
+		adminTokenProperty: "new", adminUserProperty: "user-iam-admin", tokenIDProperty: "pat-id-new",
+		mintedAtProperty: "2026-10-04T23:00:00Z", retireAfterProperty: after,
+	}
+	if since != "" {
+		e[consumerSinceProperty] = since
+	}
+	return map[string]map[string]string{adminTokenKVKey: e}
+}
+
+func runRetire(t *testing.T, vc *fakeVaultClient, sys *fakeSystemClient, adminHeld string) (*gibsonv1alpha1.PlatformBootstrap, error) {
+	t.Helper()
+	r := adminTokenReconciler(t, vc, sys)
+	for _, o := range consumerSecrets(adminHeld, "") {
+		if err := r.Client.Create(context.Background(), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pb := retireBootstrap()
+	_, err := r.reconcileAdminToken(context.Background(), pb, logr.Discard())
+	return pb, err
+}
+
+// Before the grace of the mint ends, the step removes nothing.
+func TestReconcileAdminToken_NoRetireBeforeTheGrace(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-05T00:05:00Z", "")}
+	if _, err := runRetire(t, vc, sys, "new"); err != nil {
 		t.Fatal(err)
 	}
 	if len(sys.retired) != 0 {
 		t.Fatalf("retired %v before the grace ended", sys.retired)
 	}
+}
 
-	due := &fakeVaultClient{kv: entry("2026-10-04T23:59:00Z")}
-	if _, err := adminTokenReconciler(t, due, sys).reconcileAdminToken(context.Background(), adminTokenBootstrap(), logr.Discard()); err != nil {
+// FAILING FIXTURE: a consumer Secret that still holds the old token blocks
+// the retire, however long ago the mint was.
+func TestReconcileAdminToken_NoRetireWhileTheConsumerHoldsTheOldToken(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "")}
+	if _, err := runRetire(t, vc, sys, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sys.retired) != 0 {
+		t.Fatalf("retired %v while the consumer holds the old token", sys.retired)
+	}
+	if _, set := vc.kv[adminTokenKVKey][consumerSinceProperty]; set {
+		t.Fatal("recorded a consumer time for a consumer that holds the old token")
+	}
+}
+
+// The first pass that sees the consumer hold the new token records the time,
+// and removes nothing yet.
+func TestReconcileAdminToken_RecordsWhenTheConsumerHoldsTheNewToken(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "")}
+	if _, err := runRetire(t, vc, sys, "new"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sys.retired) != 0 {
+		t.Fatalf("retired %v on the first pass that saw the consumer", sys.retired)
+	}
+	if got := vc.kv[adminTokenKVKey][consumerSinceProperty]; got != "2026-10-05T00:00:00Z" {
+		t.Fatalf("consumerSince = %q", got)
+	}
+}
+
+// A grace after the consumer holds the new token, the step removes each other
+// token of the user and clears the record.
+func TestReconcileAdminToken_RetiresTheOldTokensAfterTheGrace(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "2026-10-04T23:45:00Z")}
+	if _, err := runRetire(t, vc, sys, "new"); err != nil {
 		t.Fatal(err)
 	}
 	if len(sys.retired) != 1 || sys.retired[0] != "user-iam-admin:pat-id-new" {
 		t.Fatalf("retired %v, want the other tokens of user-iam-admin, keeping pat-id-new", sys.retired)
 	}
-	if _, still := due.kv[adminTokenKVKey][retireAfterProperty]; still {
-		t.Errorf("the retire time is still stored after the retire: %v", due.kv[adminTokenKVKey])
+	got := vc.kv[adminTokenKVKey]
+	if _, still := got[retireAfterProperty]; still {
+		t.Errorf("the retire time is still stored after the retire: %v", got)
 	}
-	if due.kv[adminTokenKVKey][adminTokenProperty] != "new" {
-		t.Errorf("the retire changed the token: %v", due.kv[adminTokenKVKey])
+	if _, still := got[consumerSinceProperty]; still {
+		t.Errorf("the consumer time is still stored after the retire: %v", got)
+	}
+	if got[adminTokenProperty] != "new" {
+		t.Errorf("the retire changed the token: %v", got)
 	}
 }
 
-// FAILING FIXTURE: a failed retire keeps the retire time, so the next pass
-// tries again, and the token is not Ready.
+// FAILING FIXTURE: a failed retire keeps the record, so the next pass tries
+// again, and the token is not Ready.
 func TestReconcileAdminToken_FailedRetireKeepsTheRecord(t *testing.T) {
-	vc := &fakeVaultClient{kv: map[string]map[string]string{adminTokenKVKey: {
-		adminTokenProperty: "new", adminUserProperty: "u", tokenIDProperty: "id",
-		mintedAtProperty: "2026-10-04T23:00:00Z", retireAfterProperty: "2026-10-04T23:10:00Z",
-	}}}
 	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}, retireErr: errors.New("503")}
-	pb := adminTokenBootstrap()
-	res, err := adminTokenReconciler(t, vc, sys).reconcileAdminToken(context.Background(), pb, logr.Discard())
-	if err != nil || res.IsZero() {
-		t.Fatalf("res=%+v err=%v, want a requeue", res, err)
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "2026-10-04T23:45:00Z")}
+	pb, err := runRetire(t, vc, sys, "new")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if vc.kv[adminTokenKVKey][retireAfterProperty] == "" {
 		t.Fatal("the retire time was cleared after a failed retire")
 	}
 	if c := adminTokenCond(t, pb); c.Status == metav1.ConditionTrue {
 		t.Errorf("condition = %+v, want not Ready", c)
+	}
+}
+
+// A token this operator minted minutes ago that Zitadel refuses is not
+// minted again on each pass.
+func TestReconcileAdminToken_DoesNotMintAgainForAFreshRefusedToken(t *testing.T) {
+	vc := &fakeVaultClient{kv: map[string]map[string]string{adminTokenKVKey: {
+		adminTokenProperty: "fresh", mintedAtProperty: "2026-10-04T23:58:00Z",
+	}}}
+	sys := &fakeSystemClient{}
+	pb := adminTokenBootstrap()
+	res, err := adminTokenReconciler(t, vc, sys).reconcileAdminToken(context.Background(), pb, logr.Discard())
+	if err != nil || res.IsZero() {
+		t.Fatalf("res=%+v err=%v, want a requeue", res, err)
+	}
+	if sys.minted != 0 {
+		t.Fatalf("minted %d for a token minted two minutes ago", sys.minted)
+	}
+	if c := adminTokenCond(t, pb); c.Reason != "MintedTokenRefused" {
+		t.Errorf("condition = %+v", c)
 	}
 }
 
@@ -261,6 +357,50 @@ func TestReconcileLoginClientToken(t *testing.T) {
 		}
 		if c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionLoginClientTokenReady); c == nil || c.Reason != "WaitingForEscrow" {
 			t.Fatalf("condition = %+v", c)
+		}
+	})
+	t.Run("a vault outage sets the condition and stops nothing", func(t *testing.T) {
+		vc := &fakeVaultClient{readErr: errors.New("sealed")}
+		pb := adminTokenBootstrap()
+		adminTokenReconciler(t, vc, &fakeSystemClient{}).reconcileLoginClientToken(context.Background(), pb, logr.Discard())
+		if c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionLoginClientTokenReady); c == nil || c.Status == metav1.ConditionTrue {
+			t.Fatalf("condition = %+v", c)
+		}
+	})
+	t.Run("no system client", func(t *testing.T) {
+		pb := adminTokenBootstrap()
+		pb.Spec.Zitadel.SystemClient = nil
+		adminTokenReconciler(t, &fakeVaultClient{}, &fakeSystemClient{}).reconcileLoginClientToken(context.Background(), pb, logr.Discard())
+		if c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionLoginClientTokenReady); c == nil || c.Reason != "SystemClientMissing" {
+			t.Fatalf("condition = %+v", c)
+		}
+	})
+	t.Run("a failed mint sets the condition", func(t *testing.T) {
+		vc := &fakeVaultClient{kv: map[string]map[string]string{loginClientTokenKVKey: {adminTokenProperty: "from-setup"}}}
+		sys := &fakeSystemClient{mintErr: errors.New("503")}
+		pb := adminTokenBootstrap()
+		adminTokenReconciler(t, vc, sys).reconcileLoginClientToken(context.Background(), pb, logr.Discard())
+		if c := findCondition(pb.Status.Conditions, gibsonv1alpha1.ConditionLoginClientTokenReady); c == nil || c.Reason != "MintFailed" {
+			t.Fatalf("condition = %+v", c)
+		}
+	})
+	t.Run("the retire reads the login-client Secret", func(t *testing.T) {
+		vc := &fakeVaultClient{kv: map[string]map[string]string{loginClientTokenKVKey: {
+			adminTokenProperty: "new", adminUserProperty: "user-login-client", tokenIDProperty: "pat-id-new",
+			mintedAtProperty: "2026-10-04T23:00:00Z", retireAfterProperty: "2026-10-04T23:10:00Z",
+			consumerSinceProperty: "2026-10-04T23:45:00Z",
+		}}}
+		sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+		r := adminTokenReconciler(t, vc, sys)
+		for _, o := range consumerSecrets("", "new") {
+			if err := r.Client.Create(context.Background(), o); err != nil {
+				t.Fatal(err)
+			}
+		}
+		pb := adminTokenBootstrap()
+		r.reconcileLoginClientToken(context.Background(), pb, logr.Discard())
+		if len(sys.retired) != 1 || sys.retired[0] != "user-login-client:pat-id-new" {
+			t.Fatalf("retired %v", sys.retired)
 		}
 	})
 	t.Run("rotates the escrowed token", func(t *testing.T) {

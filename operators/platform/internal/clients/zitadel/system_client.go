@@ -400,10 +400,14 @@ func (c *systemHTTPClient) RemoveOtherTokens(ctx context.Context, userID, keepID
 			continue
 		}
 		err := c.doJSONOrg(ctx, tok, orgID, http.MethodDelete, userPath+"/"+url.PathEscape(p.ID), nil, nil)
-		if err != nil && !errors.Is(err, ErrNotFound) {
+		switch {
+		case errors.Is(err, ErrNotFound):
+			// Gone already, which is the goal. Not counted.
+		case err != nil:
 			return removed, fmt.Errorf("zitadel system: remove personal access token %s of %s: %w", p.ID, userID, err)
+		default:
+			removed++
 		}
-		removed++
 	}
 	return removed, nil
 }

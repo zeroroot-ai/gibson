@@ -38,9 +38,10 @@ const (
 	// id Zitadel lists the token under, mintedAtProperty the RFC 3339 time of
 	// the mint, and retireAfterProperty the time after which each other token
 	// of the user is removed.
-	tokenIDProperty     = "patId"
-	mintedAtProperty    = "mintedAt"
-	retireAfterProperty = "retireOthersAfter"
+	tokenIDProperty       = "patId"
+	mintedAtProperty      = "mintedAt"
+	retireAfterProperty   = "retireOthersAfter"
+	consumerSinceProperty = "consumerSince"
 
 	// adminMachineUser is the name of the IAM_OWNER machine user. It is the
 	// name the Zitadel setup job used, so an install from before this step
@@ -52,11 +53,16 @@ const (
 	tokenRotateAfter = 30 * 24 * time.Hour
 	tokenLifetime    = 90 * 24 * time.Hour
 
-	// tokenRetireGrace is the time between the mint of a successor and the
-	// removal of the old token. Each consumer reads the new token through
-	// ESO (60s refresh) within it: this operator on its next pass, and
-	// zitadel-login after its Reloader restart.
+	// tokenRetireGrace is the least time between the mint of a successor and
+	// the removal of the old token, and again between the time the consumer
+	// Secret first holds the new token and the removal. The second wait
+	// covers the Reloader restart of zitadel-login. A consumer Secret that
+	// still holds the old token (ESO not refreshed) blocks the removal.
 	tokenRetireGrace = 10 * time.Minute
+
+	// loginClientSecret is the Secret that the ExternalSecret login-client
+	// writes and zitadel-login mounts.
+	loginClientSecret = "login-client"
 )
 
 // reconcileAdminToken makes sure OpenBao holds a valid Zitadel admin token,
@@ -103,11 +109,15 @@ func (r *PlatformBootstrapReconciler) reconcileAdminToken(
 			return sys.MintAdminToken(ctx, adminMachineUser, expires)
 		},
 		retire: sys.RemoveOtherTokens,
+		consumer: func(ctx context.Context) (string, error) {
+			v, _, err := r.readSecretKey(ctx, defaultChildNamespace, pb.Spec.Zitadel.AdminTokenRef)
+			return v, err
+		},
 	}, logger.WithValues("token", adminTokenKVKey))
 	if res.err != "" {
 		if res.permanent {
 			return fail(metav1.ConditionFalse, res.reason,
-				fmt.Sprintf("Zitadel refused the mint; the system user needs the System roles SYSTEM_OWNER and IAM_OWNER: %s", res.err))
+				"Zitadel refused the mint; the system user needs the System roles SYSTEM_OWNER and IAM_OWNER: "+res.err)
 		}
 		return fail(metav1.ConditionUnknown, res.reason, res.err)
 	}
@@ -122,6 +132,9 @@ type tokenRotation struct {
 	valid  func(ctx context.Context, pat string) (bool, error)
 	mint   func(ctx context.Context, expires time.Time) (userID string, tok zitadel.PAT, err error)
 	retire func(ctx context.Context, userID, keepID string) (int, error)
+	// consumer returns the token that the consumer Secret holds now. The
+	// old tokens are retired only after it holds the stored token.
+	consumer func(ctx context.Context) (string, error)
 }
 
 // rotationResult is the outcome of one pass of rotateToken. err is empty on
@@ -156,6 +169,12 @@ func (r *PlatformBootstrapReconciler) rotateToken(
 		}
 		minted, perr := time.Parse(time.RFC3339, stored[mintedAtProperty])
 		switch {
+		case !valid && perr == nil && now.Sub(minted) < tokenRetireGrace:
+			// This operator minted the token minutes ago, and Zitadel
+			// refuses it. Another mint would get the same answer, and each
+			// one leaves a token behind.
+			return rotationResult{reason: "MintedTokenRefused",
+				err: "Zitadel refuses the token this operator minted at " + stored[mintedAtProperty]}
 		case !valid:
 			logger.Info("the stored Zitadel token is not valid; minting a new one")
 		case perr != nil || now.Sub(minted) >= tokenRotateAfter:
@@ -200,21 +219,51 @@ func (r *PlatformBootstrapReconciler) retireOldTokens(
 	if userID == "" || keepID == "" {
 		return ok
 	}
+	// The consumer must hold the stored token, for a full grace, before the
+	// old tokens go. A consumer Secret that ESO has not refreshed still holds
+	// the old token, and removing it then would cut the consumer off.
+	held, err := rot.consumer(ctx)
+	if err != nil {
+		return rotationResult{reason: "ConsumerReadFailed", err: err.Error()}
+	}
+	if held != stored[adminTokenProperty] {
+		logger.Info("the consumer Secret does not hold the new Zitadel token yet; the old tokens stay")
+		return ok
+	}
+	since, err := time.Parse(time.RFC3339, stored[consumerSinceProperty])
+	if err != nil {
+		next := copyWithout(stored, "")
+		next[consumerSinceProperty] = now.UTC().Format(time.RFC3339)
+		if err := vc.WriteKV(ctx, rot.kvKey, next); err != nil {
+			return rotationResult{reason: "VaultWriteFailed", err: err.Error()}
+		}
+		return ok
+	}
+	if now.Sub(since) < tokenRetireGrace {
+		return ok
+	}
 	n, err := rot.retire(ctx, userID, keepID)
 	if err != nil {
 		return rotationResult{reason: "RetireFailed", err: err.Error()}
 	}
-	next := make(map[string]string, len(stored))
-	for k, v := range stored {
-		if k != retireAfterProperty {
-			next[k] = v
-		}
-	}
+	next := copyWithout(stored, retireAfterProperty)
+	delete(next, consumerSinceProperty)
 	if err := vc.WriteKV(ctx, rot.kvKey, next); err != nil {
 		return rotationResult{reason: "VaultWriteFailed", err: err.Error()}
 	}
 	logger.Info("removed the old Zitadel tokens of the user", "user_id", userID, "removed", n)
 	return ok
+}
+
+// copyWithout returns a copy of m without the key drop ("" drops nothing).
+func copyWithout(m map[string]string, drop string) map[string]string {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		if k != drop {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // reconcileLoginClientToken rotates the personal access token of the
@@ -259,6 +308,11 @@ func (r *PlatformBootstrapReconciler) reconcileLoginClientToken(
 			return sys.MintUserToken(ctx, loginClientUser, expires)
 		},
 		retire: sys.RemoveOtherTokens,
+		consumer: func(ctx context.Context) (string, error) {
+			v, _, err := r.readSecretKey(ctx, defaultChildNamespace,
+				gibsonv1alpha1.SecretKeyRef{Name: loginClientSecret, Key: adminTokenProperty})
+			return v, err
+		},
 	}, logger.WithValues("token", loginClientTokenKVKey))
 	if res.err != "" {
 		set(metav1.ConditionUnknown, res.reason, res.err)
