@@ -240,7 +240,8 @@ const credentialSandboxIdentity = "sandbox-identity"
 
 // checkSandboxIdentityCredential refuses the sandbox identity credential on
 // each method but ClaimFork. The edge asserts it for ClaimFork only, with no
-// verified subject and the system tenant, so no other handler may see it.
+// verified subject and with a tenant that the daemon sets from its own start
+// record, so no other handler may see it.
 func checkSandboxIdentityCredential(ctx context.Context, method string, logger *slog.Logger) error {
 	// With no identity on ctx, the auth interceptor has already refused the
 	// call, so only a present sandbox identity credential is checked here.

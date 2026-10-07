@@ -114,3 +114,24 @@ func Emit(id Identity) http.Header {
 	h.Set(HeaderIssuedAt, strconv.FormatInt(id.IssuedAt.Unix(), 10))
 	return h
 }
+
+// SandboxClaimSubject is the subject that the edge asserts for a ClaimFork
+// call. The edge cannot verify the sandbox identity token (only the daemon,
+// the owner of the sandbox, can ask setec), so the subject names no sandbox.
+const SandboxClaimSubject = "sandbox-identity-claim"
+
+// SandboxClaimIdentity is the identity that the edge asserts for a ClaimFork
+// call that carries a sandbox identity token and no grant (D80). It has no
+// tenant: the edge does not know it, and the reserved system tenant is
+// refused by the daemon auth interceptor. Emit still sends the tenant header,
+// with an empty value, so a tenant header from the client never reaches the
+// daemon. The daemon sets the tenant from its own start record of the
+// sandbox before that interceptor runs.
+func SandboxClaimIdentity(now time.Time) Identity {
+	return Identity{
+		Subject:        SandboxClaimSubject,
+		Issuer:         IssuerCapabilityGrant,
+		CredentialType: CredentialSandboxIdentity,
+		IssuedAt:       now,
+	}
+}
