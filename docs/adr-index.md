@@ -135,6 +135,7 @@ Do not edit the tables by hand.
 | ADR-0168 | CI is the gate, and no review and no signed commit is required |
 | ADR-0169 | A fork starts a node from the state of an earlier node |
 | ADR-0170 | A rewind starts a new run from a checkpoint |
+| ADR-0171 | Every credential rotates, and the drill proves it |
 
 ## Retired
 
