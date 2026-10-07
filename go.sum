@@ -766,8 +766,8 @@ github.com/zeroroot-ai/ast-checks v0.8.0 h1:j/0lIVAOoRAE52fFokIEx4vlWMZqT9M/F102
 github.com/zeroroot-ai/ast-checks v0.8.0/go.mod h1:u/PEu5uYl9jW9mtvfScxuo05GXqxFKx2dNsjOMUtoD8=
 github.com/zeroroot-ai/sdk v0.202.0 h1:zwC2q7OWCGnxJjjZONoMhl3iSNhnwopkHhqejUbgSU8=
 github.com/zeroroot-ai/sdk v0.202.0/go.mod h1:RGKgTNatLIAhrtDzi1OeRIKdi3YwfmsGv1dcicrkJHQ=
-github.com/zeroroot-ai/setec v0.125.0 h1:6l3aEipwd512YLUzfC+7LDQxK9J37M+qVAW55DD0swE=
-github.com/zeroroot-ai/setec v0.125.0/go.mod h1:ynfxKiuNc8VN75a4yX/sAF/j3thHuRRdP5mKR86bJ50=
+github.com/zeroroot-ai/setec v0.126.0 h1:Cn0ChiMTAEZaf5j7Rj7geffaj37/sanTchypLIlQqFc=
+github.com/zeroroot-ai/setec v0.126.0/go.mod h1:M5q+8ZC58MjbTD/2OhYPPCKjs8DAWcvbNZxIsShoR6Y=
 go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ64=
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0 h1:B2h3uqicet1CT2N5TOFhS+Gq++9i0/CLmaxvhmhtP5s=
