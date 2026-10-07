@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/onboarding"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	sessionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/session/v1"
@@ -2377,9 +2378,8 @@ func (s *DaemonServer) CreateMissionDefinition(ctx context.Context, req *daemonp
 // if "owner" is not returned when the caller is an owner, the dashboard cannot
 // grant the owner the additional owner-only actions (e.g. transfer ownership).
 //
-// Fix: use BatchCheck for both "owner" and "admin" relations (the same
-// 2-check pattern used by ListMyMemberships / pickHighestRole) so the returned
-// role correctly reflects the caller's highest held relation.
+// Fix: tenantrole.RoleChecks and tenantrole.HighestRelation, the one role
+// resolution that ListMyMemberships and ListMembers use too (gibson#482).
 //
 // Spec: gibson#289 — gibson.owner RBAC permission closure parity.
 //
@@ -2418,28 +2418,13 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		return nil, status_grpc.Errorf(codes.FailedPrecondition, "authorization service unavailable")
 	}
 
-	// Check "owner", "admin", AND "member" relations via a single BatchCheck
-	// call. The owner/admin pair mirrors the ListMyMemberships /
-	// pickHighestRole pattern and ensures "owner" is returned for users who
-	// hold the owner tuple, not "admin" (which the FGA computed union would
-	// also grant them via admin = [user] or owner). The member check is
-	// required so a caller who holds NO relation at all on tenantID cannot
-	// receive a fabricated role:"member" — unlike ListMyMemberships, whose
-	// tenant set already comes from ListObjects(..., "member", ...) and so
-	// never needs this extra check, GetMyPermissions takes an
-	// attacker-influenceable tenant_id (or the context tenant) directly, so
-	// membership itself must be verified, not assumed.
-	//
-	// checks[0] = owner check, checks[1] = admin check, checks[2] = member check.
-	objStr := fmt.Sprintf("tenant:%s", tenantID)
-	userStr := fmt.Sprintf("user:%s", userID)
-	checks := []authz.CheckRequest{
-		{User: userStr, Relation: "owner", Object: objStr},
-		{User: userStr, Relation: "admin", Object: objStr},
-		{User: userStr, Relation: "writer", Object: objStr},
-		{User: userStr, Relation: "member", Object: objStr},
-	}
-	results, err := s.authorizer.BatchCheck(ctx, checks)
+	// tenantrole.RoleChecks asks owner, admin, writer and member in one
+	// BatchCheck, the same checks ListMembers and ListMyMemberships send. The
+	// member check is required: GetMyPermissions takes an attacker-influenceable
+	// tenant_id, so membership itself must be verified, not assumed.
+	objStr := "tenant:" + tenantID
+	userStr := "user:" + userID
+	results, err := s.authorizer.BatchCheck(ctx, tenantrole.RoleChecks(userStr, objStr))
 	if err != nil {
 		// Fail closed: an authz-check failure must never be reported to the
 		// caller (or rendered by the dashboard) as a "member" role — that
@@ -2452,27 +2437,16 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 		return nil, status_grpc.Errorf(codes.Internal, "failed to resolve permissions")
 	}
 
-	isOwner := len(results) > 0 && results[0]
-	isAdmin := len(results) > 1 && results[1]
-	isWriter := len(results) > 2 && results[2]
-	isMember := len(results) > 3 && results[3]
-
-	if !isOwner && !isAdmin && !isWriter && !isMember {
+	role, ok := tenantrole.HighestRelation(results)
+	if !ok {
 		// The caller holds no relation on tenantID at all. Returning
 		// role:"member" here would be an untrue assertion the dashboard
 		// renders as real access to a tenant the caller cannot reach.
 		// Spec: identity-assertion-gaps finding 3.
 		return nil, status_grpc.Errorf(codes.PermissionDenied, "caller has no relation on tenant")
 	}
-
-	// pickHighestRole: owner > admin > writer > member. Safe to call here
-	// because we have just established the caller holds at least one of the
-	// four relations; the "member" answer is only reached when isMember is
-	// true, so it is an accurate answer, not a default.
-	// IsAdmin is true whenever the caller holds admin-or-above privilege
-	// (owners satisfy FGA "admin" checks via the computed union).
-	role := pickHighestRole(isOwner, isAdmin, isWriter)
-	effectiveAdmin := isOwner || isAdmin
+	// IsAdmin is true whenever the caller holds admin-or-above privilege.
+	effectiveAdmin := role == "owner" || role == "admin"
 
 	// Component grants were previously sourced from the
 	// provisioner package; those features now live in the tenant-operator
@@ -2527,13 +2501,7 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 	}
 
 	objStr := "tenant:" + bareTID
-	checks := []authz.CheckRequest{
-		{User: "user:" + userID, Relation: "owner", Object: objStr},
-		{User: "user:" + userID, Relation: "admin", Object: objStr},
-		{User: "user:" + userID, Relation: "writer", Object: objStr},
-		{User: "user:" + userID, Relation: "member", Object: objStr},
-	}
-	results, err := s.authorizer.BatchCheck(ctx, checks)
+	results, err := s.authorizer.BatchCheck(ctx, tenantrole.RoleChecks("user:"+userID, objStr))
 	if err != nil {
 		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck failed",
 			slog.String("user_id", userID),
@@ -2543,11 +2511,8 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		return nil, status_grpc.Error(codes.Internal, "failed to list memberships")
 	}
 
-	isOwner := len(results) > 0 && results[0]
-	isAdmin := len(results) > 1 && results[1]
-	isWriter := len(results) > 2 && results[2]
-	isMember := len(results) > 3 && results[3]
-	if !isOwner && !isAdmin && !isWriter && !isMember {
+	role, ok := tenantrole.HighestRelation(results)
+	if !ok {
 		// The caller holds no relation on their resolved tenant at all —
 		// the role copy has not synced yet, or the person was removed.
 		// Fail closed to no memberships rather than assert a role the
@@ -2558,7 +2523,6 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		)
 		return &daemonpb.ListMyMembershipsResponse{Memberships: nil}, nil
 	}
-	role := pickHighestRole(isOwner, isAdmin, isWriter)
 
 	// Friendly name lookup is best-effort; on miss/timeout fall back to ID.
 	name := bareTID
@@ -2580,30 +2544,6 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 		Role:       role,
 	}}
 	return &daemonpb.ListMyMembershipsResponse{Memberships: memberships}, nil
-}
-
-// pickHighestRole returns the highest role the user holds for a tenant, given
-// the results of owner and admin BatchCheck calls.
-//
-// Role precedence (highest to lowest): owner > admin > writer > member, the
-// four tenant roles of ADR-0093 decision 2 (Owner, Admin, Editor, Viewer).
-// The FGA model computes each relation from the one above it, so an Owner
-// answers true to every check; the highest explicit signal wins. "writer"
-// was missing until 2026-09-29, so an Editor reached the dashboard as a
-// Viewer and its client-side authorization refused every Editor RPC.
-//
-// Spec: tenant-role-taxonomy Req 2.1, 2.2, 2.3.
-func pickHighestRole(isOwner, isAdmin, isWriter bool) string {
-	if isOwner {
-		return "owner"
-	}
-	if isAdmin {
-		return "admin"
-	}
-	if isWriter {
-		return "writer"
-	}
-	return "member"
 }
 
 // callerPrincipal is the principal a record stores for the caller of an RPC.

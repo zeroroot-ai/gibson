@@ -24,6 +24,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -91,30 +92,41 @@ func newServerForMembershipTest() *DaemonServer {
 }
 
 // ---------------------------------------------------------------------------
-// pickHighestRole table test (spec: tenant-role-taxonomy Req 2.1–2.3)
+// One role resolution (gibson#482)
 // ---------------------------------------------------------------------------
 
-func TestPickHighestRole(t *testing.T) {
-	tests := []struct {
-		name     string
-		isOwner  bool
-		isAdmin  bool
-		isWriter bool
-		want     string
-	}{
-		{name: "owner_only", isOwner: true, want: "owner"},
-		{name: "admin_only", isAdmin: true, want: "admin"},
-		{name: "writer_only", isWriter: true, want: "writer"},
-		{name: "member_only", want: "member"},
-		// The FGA model computes admin from owner and writer from admin, so a
-		// BatchCheck answers true down the chain. The highest wins.
-		{name: "owner_implies_all", isOwner: true, isAdmin: true, isWriter: true, want: "owner"},
-		{name: "admin_implies_writer", isAdmin: true, isWriter: true, want: "admin"},
+// TestListMyMemberships_RoleIsTheSharedResolution checks that the caller's
+// role is tenantrole.HighestRelation of the answers to tenantrole.RoleChecks.
+// ListMembers has the same test in package admin, so the two RPCs agree for
+// one user.
+func TestListMyMemberships_RoleIsTheSharedResolution(t *testing.T) {
+	states := map[string]map[string]bool{
+		"owner":  {"owner": true, "admin": true, "writer": true, "member": true},
+		"admin":  {"admin": true, "writer": true, "member": true},
+		"writer": {"writer": true, "member": true},
+		"member": {"member": true},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := pickHighestRole(tt.isOwner, tt.isAdmin, tt.isWriter)
-			assert.Equal(t, tt.want, got)
+	for name, relations := range states {
+		t.Run(name, func(t *testing.T) {
+			az := &stubAuthorizer{batchCheck: func(_ context.Context, checks []authz.CheckRequest) ([]bool, error) {
+				out := make([]bool, len(checks))
+				for i, c := range checks {
+					out[i] = relations[c.Relation]
+				}
+				return out, nil
+			}}
+			srv := newServerForMembershipTest()
+			srv.authorizer = az
+			resp, err := srv.ListMyMemberships(ctxWithSubjectAndTenant(t, "u-1", "acme"), &daemonpb.ListMyMembershipsRequest{})
+			require.NoError(t, err)
+			require.Len(t, resp.GetMemberships(), 1)
+
+			held, err := az.BatchCheck(context.Background(), tenantrole.RoleChecks("user:u-1", "tenant:acme"))
+			require.NoError(t, err)
+			want, ok := tenantrole.HighestRelation(held)
+			require.True(t, ok)
+			assert.Equal(t, want, resp.GetMemberships()[0].GetRole())
+			assert.Equal(t, name, want)
 		})
 	}
 }

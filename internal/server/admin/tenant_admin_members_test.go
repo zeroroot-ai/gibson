@@ -13,6 +13,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -351,21 +352,53 @@ func TestListMembers_FourRoles(t *testing.T) {
 	}
 }
 
-// TestRosterRole covers the precedence table on its own.
-func TestRosterRole(t *testing.T) {
-	cases := []struct {
-		held []bool
-		want string
-	}{
-		{[]bool{true, true, true}, "owner"},
-		{[]bool{false, true, true}, "admin"},
-		{[]bool{false, false, true}, "writer"},
-		{[]bool{false, false, false}, "member"},
-		{nil, "member"},
+// TestListMembers_BootstrappedOwnerIsNamedAndOwner is the owner row that the
+// first-admin bootstrap creates: an owner tuple and a directory profile. The
+// roster names the owner and reports the role owner, not admin (gibson#482).
+func TestListMembers_BootstrappedOwnerIsNamedAndOwner(t *testing.T) {
+	az := &membersAuthorizer{
+		members: []string{"user:392629408583647281"},
+		owners:  map[string]bool{"392629408583647281": true},
 	}
-	for _, c := range cases {
-		if got := rosterRole(c.held); got != c.want {
-			t.Errorf("rosterRole(%v) = %q, want %q", c.held, got, c.want)
+	idpC := &membersIdPClient{profiles: map[string]*idp.UserProfile{
+		"392629408583647281": {AccountID: "392629408583647281", DisplayName: "First Admin", Email: "admin@example.com"},
+	}}
+	resp, err := newMembersTestServer(t, az, idpC).ListMembers(ctxWithTenant(t, "acme"), &tenantv1.ListMembersRequest{})
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	if len(resp.GetMembers()) != 1 {
+		t.Fatalf("members = %v, want the owner", resp.GetMembers())
+	}
+	m := resp.GetMembers()[0]
+	if m.GetRole() != "owner" || m.GetDisplayName() != "First Admin" || m.GetEmail() != "admin@example.com" {
+		t.Errorf("owner row = %+v, want role owner with a name and an email", m)
+	}
+}
+
+// TestListMembers_RoleIsTheSharedResolution checks that the roster role of
+// each person is tenantrole.HighestRelation of the answers to
+// tenantrole.RoleChecks. ListMyMemberships has the same test in package api,
+// so the two RPCs agree for one user (gibson#482).
+func TestListMembers_RoleIsTheSharedResolution(t *testing.T) {
+	az := &membersAuthorizer{
+		members: []string{"user:o", "user:a", "user:w", "user:m"},
+		owners:  map[string]bool{"o": true},
+		admins:  map[string]bool{"a": true},
+		writers: map[string]bool{"w": true},
+	}
+	resp, err := newMembersTestServer(t, az, nil).ListMembers(ctxWithTenant(t, "acme"), &tenantv1.ListMembersRequest{})
+	if err != nil {
+		t.Fatalf("ListMembers: %v", err)
+	}
+	for _, m := range resp.GetMembers() {
+		held, err := az.BatchCheck(context.Background(), tenantrole.RoleChecks("user:"+m.GetUserId(), "tenant:acme"))
+		if err != nil {
+			t.Fatalf("BatchCheck: %v", err)
+		}
+		want, _ := tenantrole.HighestRelation(held)
+		if m.GetRole() != want {
+			t.Errorf("%s: roster role %q, shared resolution %q", m.GetUserId(), m.GetRole(), want)
 		}
 	}
 }

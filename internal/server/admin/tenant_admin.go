@@ -402,28 +402,12 @@ func (s *TenantAdminServer) CountSecrets(ctx context.Context, _ *secretsv1.Count
 	return &secretsv1.CountSecretsResponse{Count: int64(len(names))}, nil
 }
 
-// rosterRoleRelations are the FGA relations ListMembers checks for each
-// tenant user, highest first. "member" is implied by every tenant role and
-// is what ListUsers enumerated, so it needs no check.
-var rosterRoleRelations = []string{"owner", "admin", "writer"}
-
-// rosterRole maps one user's BatchCheck results, in rosterRoleRelations
-// order, to the tenant role the roster reports. The FGA model computes
-// admin from owner and writer from admin, so an Owner answers true to all
-// three; the highest relation wins.
-func rosterRole(held []bool) string {
-	for i, rel := range rosterRoleRelations {
-		if i < len(held) && held[i] {
-			return rel
-		}
-	}
-	return "member"
-}
-
 // ListMembers enumerates the members of the caller's tenant. It:
 //  1. Queries OpenFGA for all user references with the "member" relation on
 //     the tenant object.
-//  2. Batch-checks owner, admin and writer for each, and reports the highest.
+//  2. Batch-checks tenantrole.RoleChecks for each and reports
+//     tenantrole.HighestRelation, the one role resolution that
+//     ListMyMemberships uses too (gibson#482).
 //  3. Enriches each entry with display_name and email from the IdP.
 //  4. Applies name_filter (case-insensitive prefix on display_name or email).
 //  5. Sorts by display_name, applies offset-based pagination via a
@@ -455,21 +439,14 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		return &tenantv1.ListMembersResponse{}, nil
 	}
 
-	// 2. Batch-check the three relations above "member" for every user, so
-	//    the roster reports the one tenant role each person holds (ADR-0093
-	//    decision 2: Owner, Admin, Editor, Viewer; FGA relations owner, admin,
-	//    writer, member). Until 2026-09-29 only "admin" was checked, so an
-	//    Owner showed as admin and an Editor as member, and the dashboard's
-	//    Owner rules and Editor role could not work from the roster.
-	roleChecks := make([]authz.CheckRequest, 0, len(userRefs)*len(rosterRoleRelations))
+	// 2. Resolve the one tenant role each person holds (ADR-0093 decision 2:
+	//    Owner, Admin, Editor, Viewer; FGA relations owner, admin, writer,
+	//    member) with the same checks and the same reading as
+	//    ListMyMemberships, so the two answers cannot disagree (gibson#482).
+	perUser := len(tenantrole.Relations)
+	roleChecks := make([]authz.CheckRequest, 0, len(userRefs)*perUser)
 	for _, ref := range userRefs {
-		for _, rel := range rosterRoleRelations {
-			roleChecks = append(roleChecks, authz.CheckRequest{
-				User:     ref,
-				Relation: rel,
-				Object:   tenantObject,
-			})
-		}
+		roleChecks = append(roleChecks, tenantrole.RoleChecks(ref, tenantObject)...)
 	}
 	held, err := s.authorizer.BatchCheck(ctx, roleChecks)
 	if err != nil {
@@ -485,7 +462,15 @@ func (s *TenantAdminServer) ListMembers(ctx context.Context, req *tenantv1.ListM
 		// FGA user refs have the form "user:<id>".
 		userID := strings.TrimPrefix(ref, "user:")
 
-		role := rosterRole(held[i*len(rosterRoleRelations) : (i+1)*len(rosterRoleRelations)])
+		role, ok := tenantrole.HighestRelation(held[i*perUser : (i+1)*perUser])
+		if !ok {
+			// ListUsers named the user, but no relation checks true now. The
+			// role copy changed between the two calls. Report no role that
+			// the person does not hold.
+			s.logger.WarnContext(ctx, "ListMembers: a listed user holds no tenant relation; row omitted",
+				slog.String("user_id", userID))
+			continue
+		}
 
 		m := &tenantv1.TenantMember{
 			UserId: userID,
