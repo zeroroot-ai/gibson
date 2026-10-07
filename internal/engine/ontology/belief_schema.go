@@ -206,6 +206,22 @@ func NewBeliefSchemaRegistry() *BeliefSchemaRegistry {
 	}
 }
 
+// Clone returns a registry with the same extensions as r. A change to the
+// clone does not change r. The VoI planner clones its base registry for each
+// plan, then registers the belief schemas of the packs that the tenant
+// enabled (gibson#699).
+func (r *BeliefSchemaRegistry) Clone() *BeliefSchemaRegistry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := NewBeliefSchemaRegistry()
+	maps.Copy(out.extensions, r.extensions)
+	for nodeType, vars := range r.nodes {
+		out.nodes[nodeType] = maps.Clone(vars)
+	}
+	maps.Copy(out.enablementEdges, r.enablementEdges)
+	return out
+}
+
 // RegisterExtension adds the belief schema declarations from ext under the
 // given name. If an extension with that name is already registered, the old
 // one is replaced.

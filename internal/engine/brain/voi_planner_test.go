@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
@@ -486,4 +489,45 @@ func TestSnapshotRestore_RoundTripsVoIPlanState_Completed(t *testing.T) {
 	if restored.VoIPlanSnapshot()[0].InFlight {
 		t.Fatal("want the restored plan NOT in flight (it completed)")
 	}
+}
+
+// TestVoIWorker_PlansWithTheTenantPacks is the proof of gibson#699 for the
+// planner: an enabled pack adds its technique to the hierarchy and its belief
+// schema to the registry of the plan, and the base registry stays unchanged.
+func TestVoIWorker_PlansWithTheTenantPacks(t *testing.T) {
+	substrate := newFakeBeliefSubstrate()
+	registry := liveBeliefRegistry(t)
+	e, w := voiEngine(substrate, registry, ExactVoIScorer(), DefaultVoITopK)
+	category := taxonomy.GlobalTechniques.Categories()[0]
+	e.Submit(MissionProjected{ID: "m1", Goal: "find a path"})
+	e.Submit(DomainPackEnabled{
+		Name:       "pack-a",
+		Version:    1,
+		Techniques: map[string]string{"pack_a_probe": string(category)},
+		BeliefSchema: ontology.BeliefSchemaExtension{Nodes: []ontology.NodeBeliefSchema{{
+			NodeType:  "PackAThing",
+			Variables: []ontology.BeliefVariable{{Name: "exposed"}},
+		}}},
+	})
+	e.Tick()
+
+	packs := e.DomainPacks()
+	reg := tenantBeliefRegistry(registry, packs)
+	in := w.buildInput("m1", packs, reg)
+
+	got, ok := in.Hierarchy.CategoryOf("pack_a_probe")
+	require.True(t, ok, "the technique of the enabled pack is not in the plan hierarchy")
+	assert.Equal(t, category, got)
+	assert.False(t, taxonomy.GlobalTechniques.HasTechnique("pack_a_probe"), "the core hierarchy changed")
+
+	assert.True(t, reg.IsBeliefBearing("PackAThing"), "the belief schema of the pack is not in the plan registry")
+	assert.False(t, registry.IsBeliefBearing("PackAThing"), "the base registry changed, so the pack reaches other tenants")
+}
+
+// With no enabled pack, the plan uses the base registry and hierarchy as they
+// are.
+func TestVoIWorker_NoPackKeepsTheBase(t *testing.T) {
+	registry := liveBeliefRegistry(t)
+	assert.Same(t, registry, tenantBeliefRegistry(registry, nil))
+	assert.Same(t, taxonomy.GlobalTechniques, tenantTechniques(taxonomy.GlobalTechniques, nil))
 }

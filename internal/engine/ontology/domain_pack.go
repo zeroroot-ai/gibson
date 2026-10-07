@@ -450,10 +450,11 @@ func (p *DomainPack) Validate() error {
 	return p.validateControls()
 }
 
-// beliefSchemaExtensionName is the name under which the belief schema of a
-// pack is registered. One name for each pack, so two packs do not collide.
-func (p *DomainPack) beliefSchemaExtensionName() string {
-	return "pack/" + p.Name + "/belief-schema"
+// PackBeliefSchemaExtensionName is the name under which the belief schema of
+// the named pack is registered. One name for each pack, so two packs do not
+// collide. The VoI planner registers an enabled pack under the same name.
+func PackBeliefSchemaExtensionName(packName string) string {
+	return "pack/" + packName + "/belief-schema"
 }
 
 // validatePredicateTechniques refuses a predicate whose technique the
@@ -517,7 +518,7 @@ func (p *DomainPack) RegisterBeliefSchema(reg *BeliefSchemaRegistry) error {
 	if p.BeliefSchema.empty() {
 		return nil
 	}
-	if err := reg.RegisterExtension(p.beliefSchemaExtensionName(), p.BeliefSchema); err != nil {
+	if err := reg.RegisterExtension(PackBeliefSchemaExtensionName(p.Name), p.BeliefSchema); err != nil {
 		return fmt.Errorf("domain pack %q: belief schema: %w", p.Name, err)
 	}
 	return nil

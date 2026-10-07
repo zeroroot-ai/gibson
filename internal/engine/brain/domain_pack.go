@@ -27,6 +27,7 @@ package brain
 import (
 	"sort"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
@@ -58,6 +59,10 @@ type DomainPackState struct {
 	// (ADR-0135). With the core hierarchy it is the hierarchy that the
 	// predicates of the pack must name.
 	Techniques map[string]string
+	// BeliefSchema is the belief schema extension of the pack (ADR-0129).
+	// The VoI planner registers it on top of its base registry for each
+	// plan of the tenant (gibson#699).
+	BeliefSchema ontology.BeliefSchemaExtension
 }
 
 // DomainPackEnabled records that a tenant enabled the named catalog Domain
@@ -81,6 +86,10 @@ type DomainPackEnabled struct {
 	// proof under a technique of the pack is refused until the tenant
 	// enables the pack again.
 	Techniques map[string]string
+	// BeliefSchema is empty on an event recorded before the event carried
+	// it. Replay then plans that tenant with the base registry only, until
+	// the tenant enables the pack again.
+	BeliefSchema ontology.BeliefSchemaExtension
 }
 
 // Kind identifies this event on the Timeline.
@@ -103,6 +112,16 @@ func applyDomainPackEnabled(w *World, e DomainPackEnabled) {
 		Predicates:                clonePredicateMap(e.Predicates),
 		NonDestructivePredicates:  append([]string(nil), e.NonDestructivePredicates...),
 		Techniques:                clonePredicateMap(e.Techniques),
+		BeliefSchema:              cloneBeliefSchema(e.BeliefSchema),
+	}
+}
+
+// cloneBeliefSchema copies the top-level slices of ext. The elements are
+// never changed after a pack is enabled, so they are shared.
+func cloneBeliefSchema(ext ontology.BeliefSchemaExtension) ontology.BeliefSchemaExtension {
+	return ontology.BeliefSchemaExtension{
+		Nodes:           append([]ontology.NodeBeliefSchema(nil), ext.Nodes...),
+		EnablementEdges: append([]ontology.EnablementEdgeSpec(nil), ext.EnablementEdges...),
 	}
 }
 
@@ -131,6 +150,7 @@ type DomainPackSnapshot struct {
 	Predicates                map[string]string
 	NonDestructivePredicates  []string
 	Techniques                map[string]string
+	BeliefSchema              ontology.BeliefSchemaExtension
 }
 
 // PredicateIsDestructive reports whether the pack treats the named predicate
@@ -181,6 +201,7 @@ func (w *World) DomainPackSnapshot() []DomainPackSnapshot {
 			Predicates:                clonePredicateMap(s.Predicates),
 			NonDestructivePredicates:  append([]string(nil), s.NonDestructivePredicates...),
 			Techniques:                clonePredicateMap(s.Techniques),
+			BeliefSchema:              cloneBeliefSchema(s.BeliefSchema),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })

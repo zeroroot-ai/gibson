@@ -457,6 +457,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Predicates:                clonePredicateMap(p.Predicates),
 			NonDestructivePredicates:  append([]string(nil), p.NonDestructivePredicates...),
 			Techniques:                clonePredicateMap(p.Techniques),
+			BeliefSchema:              cloneBeliefSchema(p.BeliefSchema),
 		})
 	}
 

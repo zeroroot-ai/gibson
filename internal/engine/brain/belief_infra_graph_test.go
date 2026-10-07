@@ -214,7 +214,7 @@ func TestVoIWorker_BuildInputCarriesTheEdgesOfTheWorld(t *testing.T) {
 	linkHosts(e, a, b)
 	e.Tick()
 
-	in := w.buildInput("m1")
+	in := w.buildInput("m1", e.DomainPacks(), registry)
 	require.Equal(t, []InfraEdge{{Type: "RESOLVES_TO", From: HostNodeID(a), To: HostNodeID(b)}}, in.Graph.Edges)
 
 	candidates, err := PlanVoI(context.Background(), in, substrate, ExactVoIScorer(), 0)

@@ -189,6 +189,7 @@ func (s *DomainPackService) EnableDomainPack(
 		Predicates:                clonePredicates(pack.Predicates),
 		NonDestructivePredicates:  append([]string(nil), pack.NonDestructivePredicates...),
 		Techniques:                clonePredicates(pack.Techniques),
+		BeliefSchema:              pack.BeliefSchema,
 	})
 	return &tenantv1.EnableDomainPackResponse{Name: pack.Name, Version: int32Count(pack.Version)}, nil
 }
