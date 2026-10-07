@@ -53,9 +53,6 @@ type CreateMissionByReferenceRequest struct {
 	// Constraints optionally overrides default execution constraints.
 	// Uses the canonical SDK proto type per ADR 0004.
 	Constraints *missionv1.MissionConstraints
-
-	// Metadata is free-form key/value metadata for the mission instance.
-	Metadata map[string]string
 }
 
 // MissionSummary provides a high-level overview of a mission.

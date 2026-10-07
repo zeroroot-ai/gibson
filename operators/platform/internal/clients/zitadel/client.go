@@ -293,9 +293,6 @@ type IAMMember struct {
 	UserID             string
 	Roles              []string
 	PreferredLoginName string
-	Email              string
-	FirstName          string
-	LastName           string
 	DisplayName        string
 	// UserType is Zitadel's protojson enum name for the member's user
 	// record — compare against ZitadelUserTypeHuman / ZitadelUserTypeMachine,
@@ -361,7 +358,6 @@ type OIDCClient struct {
 	AppID           string
 	ClientID        string
 	Name            string
-	ProjectID       string
 	ApplicationType string
 }
 
@@ -525,9 +521,8 @@ func (c *httpClient) GetOIDCClient(ctx context.Context, projectID, appID string)
 		return nil, fmt.Errorf("GetOIDCClient project=%s app=%s: %w", projectID, appID, err)
 	}
 	out := &OIDCClient{
-		AppID:     resp.App.ID,
-		Name:      resp.App.Name,
-		ProjectID: projectID,
+		AppID: resp.App.ID,
+		Name:  resp.App.Name,
 	}
 	if resp.App.OIDC != nil {
 		out.ApplicationType = zitadelAppTypeToApplicationType(resp.App.OIDC.AppType)
@@ -704,7 +699,7 @@ func (c *httpClient) findOIDCClientByName(ctx context.Context, projectID, name s
 		if a.Name != name {
 			continue
 		}
-		oc := &OIDCClient{AppID: a.ID, Name: a.Name, ProjectID: projectID}
+		oc := &OIDCClient{AppID: a.ID, Name: a.Name}
 		if a.OIDCConfig != nil {
 			oc.ClientID = a.OIDCConfig.ClientID
 		}
@@ -1171,9 +1166,6 @@ func (c *httpClient) SearchIAMMembers(ctx context.Context) ([]IAMMember, error) 
 			UserID:             m.UserID,
 			Roles:              m.Roles,
 			PreferredLoginName: m.PreferredLoginName,
-			Email:              m.Email,
-			FirstName:          m.FirstName,
-			LastName:           m.LastName,
 			DisplayName:        m.DisplayName,
 			UserType:           m.UserType,
 			UserResourceOwner:  m.UserResourceOwner,

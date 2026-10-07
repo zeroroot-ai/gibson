@@ -79,9 +79,6 @@ type MissionExecutionContext struct {
 	// IsResumed indicates if this run was resumed from a checkpoint.
 	IsResumed bool
 
-	// ResumedFromNode is the mission node ID where execution resumed (empty if not resumed).
-	ResumedFromNode string
-
 	// PreviousRunID links to the prior run (nil if this is the first run).
 	PreviousRunID *types.ID
 
@@ -128,27 +125,6 @@ type DefaultMissionContextProvider struct {
 	cachedContext *MissionExecutionContext
 }
 
-// NewMissionContextProvider creates a new DefaultMissionContextProvider.
-//
-// Parameters:
-//   - missionStore: Store for querying mission data and history
-//   - currentMission: The currently executing mission
-//   - logger: Structured logger for debugging and tracing
-//
-// Returns:
-//   - *DefaultMissionContextProvider: Ready-to-use context provider
-func NewMissionContextProvider(
-	missionStore MissionStore,
-	currentMission MissionData,
-	logger *slog.Logger,
-) *DefaultMissionContextProvider {
-	return &DefaultMissionContextProvider{
-		missionStore:   missionStore,
-		currentMission: currentMission,
-		logger:         logger,
-	}
-}
-
 // GetContext returns the full mission execution context.
 // This method builds a comprehensive view of the current mission including:
 //   - Basic mission metadata (ID, name, run number)
@@ -174,7 +150,6 @@ func (p *DefaultMissionContextProvider) GetContext(ctx context.Context) (*Missio
 
 	// Set resumed node if applicable
 	if execCtx.IsResumed && p.currentMission.Checkpoint != nil {
-		execCtx.ResumedFromNode = p.currentMission.Checkpoint.LastNodeID
 	}
 
 	// Get previous run information if available

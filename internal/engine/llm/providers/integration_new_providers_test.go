@@ -72,7 +72,7 @@ func TestIntegrationCloudflare(t *testing.T) {
 	if os.Getenv("CLOUDFLARE_INTEGRATION") != "1" {
 		t.Skip("CLOUDFLARE_INTEGRATION not set")
 	}
-	p, err := NewCloudflareProvider(llm.ProviderConfig{
+	p, err := newCloudflareProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCloudflare,
 		DefaultModel: "@cf/meta/llama-3.1-8b-instruct",
 	})
@@ -90,7 +90,7 @@ func TestIntegrationCohere(t *testing.T) {
 	if os.Getenv("COHERE_INTEGRATION") != "1" {
 		t.Skip("COHERE_INTEGRATION not set")
 	}
-	p, err := NewCohereProvider(llm.ProviderConfig{
+	p, err := newCohereProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCohere,
 		DefaultModel: "command-r",
 	})
@@ -108,7 +108,7 @@ func TestIntegrationMistral(t *testing.T) {
 	if os.Getenv("MISTRAL_INTEGRATION") != "1" {
 		t.Skip("MISTRAL_INTEGRATION not set")
 	}
-	p, err := NewMistralProvider(llm.ProviderConfig{
+	p, err := newMistralProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderMistral,
 		DefaultModel: "mistral-small-latest",
 	})
@@ -126,7 +126,7 @@ func TestIntegrationHuggingFace(t *testing.T) {
 	if os.Getenv("HUGGINGFACE_INTEGRATION") != "1" {
 		t.Skip("HUGGINGFACE_INTEGRATION not set")
 	}
-	p, err := NewHuggingFaceProvider(llm.ProviderConfig{
+	p, err := newHuggingFaceProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderHuggingFace,
 		DefaultModel: "meta-llama/Llama-3.1-8B-Instruct",
 	})

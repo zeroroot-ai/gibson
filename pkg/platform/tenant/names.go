@@ -4,7 +4,6 @@
 package tenant
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/zeroroot-ai/sdk/auth"
@@ -52,45 +51,11 @@ func (n Names) Underscore() string {
 	return strings.ReplaceAll(n.id.String(), "-", "_")
 }
 
-// Namespace returns the K8s namespace name for this tenant.
-//
-// Format: tenant-<slug>. Every per-tenant K8s namespace in the platform
-// carries the "tenant-" prefix — the tenant-operator's ProvisionNamespace
-// path and the chart-shipped RoleBinding templates both produce / target
-// this form, and every live cluster has tenant-<slug> namespaces (e.g.
-// tenant-acme, tenant-zeroroot-ai). The prefix is part of the contract,
-// not a transformation, because it cleanly avoids collision with K8s
-// reserved names ("default", "kube-system", "kube-public", etc.) — a
-// "tenant-" prefix can never collide with a K8s-managed namespace by
-// construction. The operator's admission webhook is a second line of
-// defense against pathological tenant IDs (e.g. an ID that itself
-// starts with "tenant-", which the platform-side tenant-ID validator
-// already rejects).
-//
-// History: this function previously returned bare <slug> per a draft
-// spec rule. The operator + chart never matched that contract and the
-// production cluster shape diverged silently; tenant-operator#87 flipped
-// this function to match the cluster reality.
-func (n Names) Namespace() string {
-	return "tenant-" + n.id.String()
-}
-
 // PostgresDB returns the per-tenant Postgres database name.
 //
 // Format: tenant_<underscore>.
 func (n Names) PostgresDB() string {
 	return "tenant_" + n.Underscore()
-}
-
-// PostgresAppRole returns the per-tenant Postgres login role name. This is
-// the role the daemon connects as for runtime data-plane access — NOT the
-// admin role used by the operator for DDL.
-//
-// Format: tenant_<underscore>_app. The "_app" suffix distinguishes the
-// runtime role from any admin/owner roles that may be added in the future
-// and is the canonical form the daemon's pgxpool reads from Vault.
-func (n Names) PostgresAppRole() string {
-	return n.PostgresDB() + "_app"
 }
 
 // Neo4jStatefulSet returns the K8s StatefulSet name for the per-tenant
@@ -117,14 +82,6 @@ func (n Names) Neo4jSecret() string {
 	return n.Neo4jStatefulSet() + "-auth"
 }
 
-// Neo4jPVCRoot returns the PVC name root for the per-tenant Neo4j
-// StatefulSet. The actual PVC for the first replica is "<root>-0".
-//
-// Format: data-tenant-<slug>-neo4j.
-func (n Names) Neo4jPVCRoot() string {
-	return "data-" + n.Neo4jStatefulSet()
-}
-
 // Neo4jNetworkPolicy returns the K8s NetworkPolicy name restricting bolt
 // ingress to the per-tenant Neo4j pod. See ADR-0112 (single-writer graph
 // ingress) and gibson#1255.
@@ -134,17 +91,6 @@ func (n Names) Neo4jNetworkPolicy() string {
 	return n.Neo4jStatefulSet() + "-bolt"
 }
 
-// Neo4jBoltURI returns the Bolt URI the daemon dials to reach the
-// per-tenant Neo4j instance. operatorNamespace is the namespace where the
-// per-tenant StatefulSet is deployed (typically the gibson release
-// namespace, NOT the tenant's own namespace).
-//
-// Format: bolt://<service>.<operator-ns>.svc.cluster.local:7687.
-func (n Names) Neo4jBoltURI(operatorNamespace string) string {
-	return fmt.Sprintf("bolt://%s.%s.svc.cluster.local:7687",
-		n.Neo4jService(), operatorNamespace)
-}
-
 // RedisIndexField returns the field name used in the platform-wide Redis
 // master-index hash to look up this tenant's logical-DB index. The hash
 // key itself is dataplane.RedisIndexHashKey, which is shared across all
@@ -152,56 +98,5 @@ func (n Names) Neo4jBoltURI(operatorNamespace string) string {
 //
 // Format: <slug>.
 func (n Names) RedisIndexField() string {
-	return n.Slug()
-}
-
-// QdrantCollection returns the per-tenant Qdrant collection name.
-//
-// Format: tenant_<underscore>.
-func (n Names) QdrantCollection() string {
-	return "tenant_" + n.Underscore()
-}
-
-// VaultPathPrefix returns the path prefix under which all per-tenant
-// secrets live in the Community-edition path-prefix Vault model. The full
-// path for a given infrastructure secret is
-// secret/data/<VaultPathPrefix>/<dataplane.VaultPathInfra*>.
-//
-// Format: tenant/<slug>.
-func (n Names) VaultPathPrefix() string {
-	return "tenant/" + n.Slug()
-}
-
-// VaultPolicyName returns the Vault ACL policy name granting read/write
-// access to this tenant's path prefix. Bound to the per-tenant JWT auth
-// role.
-//
-// Format: tenant-<slug>-app.
-func (n Names) VaultPolicyName() string {
-	return "tenant-" + n.Slug() + "-app"
-}
-
-// VaultJWTRoleName returns the Vault JWT auth role name used by per-tenant
-// plugin workloads (gibson-tool-runner pods) to authenticate to Vault.
-//
-// Format: gibson-plugin-<slug>.
-func (n Names) VaultJWTRoleName() string {
-	return "gibson-plugin-" + n.Slug()
-}
-
-// FGAObject returns the OpenFGA object identifier for this tenant. Used
-// in tuple writes and authorization checks throughout the control plane.
-//
-// Format: tenant:<slug>.
-func (n Names) FGAObject() string {
-	return "tenant:" + n.Slug()
-}
-
-// ZitadelOrgSlug returns the Zitadel organization "primary domain" slug
-// for this tenant. The display name (free-form, customer-chosen) is
-// stored separately on Tenant.spec.displayName.
-//
-// Format: <slug>.
-func (n Names) ZitadelOrgSlug() string {
 	return n.Slug()
 }

@@ -81,14 +81,6 @@ type DefaultConstraintChecker struct {
 	DefaultSeverityAction ConstraintAction
 }
 
-// NewDefaultConstraintChecker creates a new DefaultConstraintChecker with pause
-// as the default severity action.
-func NewDefaultConstraintChecker() *DefaultConstraintChecker {
-	return &DefaultConstraintChecker{
-		DefaultSeverityAction: ConstraintActionPause,
-	}
-}
-
 // Check evaluates all constraints and returns the first violation found.
 // Constraints are checked in order of severity (cost, duration, findings, severity).
 func (c *DefaultConstraintChecker) Check(ctx context.Context, constraints *missionv1.MissionConstraints, metrics *MissionMetrics) (*ConstraintViolation, error) {
@@ -244,20 +236,6 @@ func ValidateConstraints(c *missionv1.MissionConstraints) error {
 	}
 
 	return nil
-}
-
-// DefaultConstraintsProto returns a proto MissionConstraints with reasonable defaults.
-// Per ADR 0004, zero-value proto fields mean "unlimited"; this function exists only
-// when an explicit default baseline is required by callers.
-func DefaultConstraintsProto() *missionv1.MissionConstraints {
-	return &missionv1.MissionConstraints{
-		MaxTokens:         10000000, // 10M tokens (generous default)
-		MaxCost:           100.0,    // $100 max cost
-		MaxFindings:       1000,
-		SeverityThreshold: string(agent.SeverityCritical),
-		// MaxDuration uses durationpb.New(24 * time.Hour) if callers need it;
-		// omitting here keeps the proto zero-safe.
-	}
 }
 
 // Ensure DefaultConstraintChecker implements ConstraintChecker at compile time

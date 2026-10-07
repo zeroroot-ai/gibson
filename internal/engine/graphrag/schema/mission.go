@@ -13,14 +13,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-// Node label constants for Cypher queries
-const (
-	// LabelMission is the Neo4j label for Mission nodes
-	LabelMission = "Mission"
-	// LabelMissionNode is the Neo4j label for MissionNode nodes
-	LabelMissionNode = "MissionNode"
-)
-
 // MissionStatus represents the execution status of a mission
 type MissionStatus string
 

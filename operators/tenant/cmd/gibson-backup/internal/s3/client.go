@@ -157,13 +157,3 @@ func (c *Client) ListObjects(ctx context.Context, prefix string) ([]minio.Object
 	}
 	return infos, nil
 }
-
-// StatObject returns metadata for the object at key, or an error if it does
-// not exist.
-func (c *Client) StatObject(ctx context.Context, key string) (minio.ObjectInfo, error) {
-	info, err := c.mc.StatObject(ctx, c.bucket, key, minio.StatObjectOptions{})
-	if err != nil {
-		return minio.ObjectInfo{}, fmt.Errorf("s3: stat %q: %w", key, err)
-	}
-	return info, nil
-}

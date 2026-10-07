@@ -12,7 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
-	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -50,21 +49,6 @@ type LLMConfigHandler struct {
 func (h *LLMConfigHandler) WithAllowPrivateLLMEndpoints(allow bool) *LLMConfigHandler {
 	h.allowPrivateEndpoints = allow
 	return h
-}
-
-// NewLLMConfigHandler creates a new LLM config handler.
-func NewLLMConfigHandler(stateClient *state.StateClient, credentialHandler *CredentialHandler) (*LLMConfigHandler, error) {
-	if stateClient == nil {
-		return nil, fmt.Errorf("state client cannot be nil")
-	}
-	if credentialHandler == nil {
-		return nil, fmt.Errorf("credential handler cannot be nil")
-	}
-
-	return &LLMConfigHandler{
-		jsonStore:         stateClient,
-		credentialHandler: credentialHandler,
-	}, nil
 }
 
 // NewLLMConfigHandlerWithStore creates a new LLM config handler with a custom JSON store.

@@ -24,9 +24,6 @@ const (
 
 	// MetadataKeyHealth is the metadata key for health status.
 	MetadataKeyHealth = "health_status"
-
-	// MetadataKeyLastHealthCheck is the metadata key for last health check timestamp.
-	MetadataKeyLastHealthCheck = "last_health_check"
 )
 
 // GetHealthStatus extracts health status from ComponentInfo metadata.

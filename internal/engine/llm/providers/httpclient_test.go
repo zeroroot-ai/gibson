@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,9 +72,18 @@ func TestProviderConstructors_RejectBlockedBaseURL(t *testing.T) {
 		{"openai", func(c llm.ProviderConfig) error { _, err := NewOpenAIProvider(c); return err }},
 		{"ollama", func(c llm.ProviderConfig) error { _, err := NewOllamaProvider(c); return err }},
 		{"llamafile", func(c llm.ProviderConfig) error { _, err := NewLlamafileProvider(c); return err }},
-		{"mistral", func(c llm.ProviderConfig) error { _, err := NewMistralProvider(c); return err }},
-		{"cohere", func(c llm.ProviderConfig) error { _, err := NewCohereProvider(c); return err }},
-		{"huggingface", func(c llm.ProviderConfig) error { _, err := NewHuggingFaceProvider(c); return err }},
+		{"mistral", func(c llm.ProviderConfig) error {
+			_, err := newMistralProviderWithContext(context.Background(), c)
+			return err
+		}},
+		{"cohere", func(c llm.ProviderConfig) error {
+			_, err := newCohereProviderWithContext(context.Background(), c)
+			return err
+		}},
+		{"huggingface", func(c llm.ProviderConfig) error {
+			_, err := newHuggingFaceProviderWithContext(context.Background(), c)
+			return err
+		}},
 	}
 
 	for _, tc := range cases {

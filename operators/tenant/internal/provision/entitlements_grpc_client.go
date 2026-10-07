@@ -395,9 +395,6 @@ func parseAccessTuples(tuples []string) []*operatorv1.AccessTuple {
 	return out
 }
 
-func itoa(n int) string        { return fmt.Sprintf("%d", n) }
-func itoaInt64(n int64) string { return fmt.Sprintf("%d", n) }
-
 // SetAgentEnrollmentLimits reports the runtime cap an AgentEnrollment
 // declares (spec.maxRuntime, gibson#597) so the daemon can bound that
 // agent's sandboxed runs. Zero clears the cap.

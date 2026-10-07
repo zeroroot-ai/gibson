@@ -531,8 +531,7 @@ check-critical-paths:
 # All packages that previously failed to compile under -tags integration are now
 # fixed (gibson#953/#963); the rotted set is empty. The default is NOT yet ./...
 # because other integration-tagged packages need live cloud/infra that does not
-# run-or-skip cleanly in the lane yet (e.g. internal/infra/reconciler,
-# internal/platform/secrets/providers/postgres).
+# run-or-skip cleanly in the lane yet (e.g. internal/infra/reconciler).
 # Confirm those skip-or-pass before flipping the default to ./....
 INTEGRATION_PKG ?= ./tests/integration/... ./internal/platform/authz/... ./internal/server/extauthz/... ./operators/... ./internal/platform/audit/... ./internal/engine/graphrag/ingest/... ./internal/engine/mission/... ./internal/server/daemon/ ./internal/server/daemon/api/ ./internal/engine/harness/...
 INTEGRATION_TIMEOUT ?= 30m

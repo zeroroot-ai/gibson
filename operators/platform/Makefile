@@ -116,10 +116,6 @@ check: fmt vet lint ## Run the static-check gate (fmt + vet + lint). Makefile co
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
-.PHONY: gibson-backup
-gibson-backup: ## Build the gibson-backup CLI into bin/gibson-backup.
-	CGO_ENABLED=0 go build -o bin/gibson-backup ./cmd/gibson-backup/
-
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go

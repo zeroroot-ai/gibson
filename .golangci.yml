@@ -67,14 +67,13 @@ linters:
     #   - internal/platform/capabilitygrant — capability-grant JWT minting.
     #   - internal/server/extauthz/** — the folded-in ext-authz server; it IS
     #     ext-authz, so it legitimately calls OpenFGA (ADR-0056, gibson#913).
-    #   - cmd/** — standalone binaries (incl. cmd/ext-authz, cmd/gen-fga-model-json)
-    #     may need OIDC/FGA.
+    #   - cmd/** — standalone binaries (incl. cmd/ext-authz) may need OIDC/FGA.
     #   - operators/** — the operators are a distinct binary chain, not the daemon.
     #   - tools/gibsoncheck/** — the build-time analyzer binary, not runtime.
     #     Its `fgalistusers` guard PARSES model.fga with the OpenFGA
     #     transformer to check call sites against the model; it never dials
-    #     FGA. Same use as the already-allowlisted cmd/gen-fga-model-json,
-    #     which reads the same file with the same library. The rule's subject
+    #     FGA. Same use as `gibson dump-fga-model` (internal/platform/authz
+    #     ModelJSON), which reads the same file with the same library. The rule's subject
     #     is the daemon's runtime import chain, and gibsoncheck is not linked
     #     into any shipped binary. Scoped to this one tool rather than all of
     #     tools/, so a future tool does not inherit the exemption silently.

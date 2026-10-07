@@ -82,56 +82,6 @@ func TestWithMetadataOption(t *testing.T) {
 	assert.Equal(t, 123, req.Metadata["key2"])
 }
 
-func TestApplyOptions(t *testing.T) {
-	req := CompletionRequest{
-		Model:    "gpt-4",
-		Messages: []Message{NewUserMessage("test")},
-	}
-
-	ApplyOptions(&req,
-		WithTemperature(0.8),
-		WithMaxTokens(500),
-		WithTopP(0.95),
-		WithStopSequences("STOP"),
-		WithSystemPrompt("You are helpful"),
-		WithStream(true),
-		WithMetadataOption("source", "api"),
-	)
-
-	assert.Equal(t, 0.8, req.Temperature)
-	assert.Equal(t, 500, req.MaxTokens)
-	assert.Equal(t, 0.95, req.TopP)
-	assert.Equal(t, []string{"STOP"}, req.StopSequences)
-	assert.Equal(t, "You are helpful", req.SystemPrompt)
-	assert.True(t, req.Stream)
-	assert.Equal(t, "api", req.Metadata["source"])
-}
-
-func TestNewCompletionRequest(t *testing.T) {
-	messages := []Message{NewUserMessage("Hello")}
-
-	req := NewCompletionRequest("gpt-4", messages,
-		WithTemperature(0.7),
-		WithMaxTokens(1000),
-	)
-
-	assert.Equal(t, "gpt-4", req.Model)
-	assert.Equal(t, messages, req.Messages)
-	assert.Equal(t, 0.7, req.Temperature)
-	assert.Equal(t, 1000, req.MaxTokens)
-}
-
-func TestNewCompletionRequest_NoOptions(t *testing.T) {
-	messages := []Message{NewUserMessage("Hello")}
-
-	req := NewCompletionRequest("gpt-4", messages)
-
-	assert.Equal(t, "gpt-4", req.Model)
-	assert.Equal(t, messages, req.Messages)
-	assert.Equal(t, 0.0, req.Temperature) // default value
-	assert.Equal(t, 0, req.MaxTokens)     // default value
-}
-
 func TestMultipleOptions(t *testing.T) {
 	req := CompletionRequest{}
 

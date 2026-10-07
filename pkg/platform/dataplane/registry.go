@@ -21,23 +21,4 @@ const (
 	// and daemon's "tenant:index" which produced silent provisioning
 	// failures. See spec tenant-provisioning-unification Requirement 1.4.
 	RedisIndexHashKey = "gibson:tenant:index"
-
-	// PlatformDB is the Postgres database name that hosts platform-internal
-	// rows (tenant_quotas, audit events, capability grants, plugin install
-	// state). Renamed from the historical "gibson_dashboard" to reflect
-	// what it actually is — the daemon writes most of these rows; the
-	// dashboard chart simply owns the StatefulSet. See spec
-	// tenant-provisioning-unification Requirement 6.3.
-	PlatformDB = "gibson_platform"
-
-	// LegacyPlatformDB is the previous name of PlatformDB. Used by the
-	// chart's pre-upgrade rename Job to detect a pre-rename cluster.
-	// Remove this constant once all production clusters have completed
-	// the rename (likely two release cycles).
-	LegacyPlatformDB = "gibson_dashboard"
-
-	// VaultMasterKEKKey is the Vault transit key name used by the operator
-	// to derive per-tenant KEKs in production. The chart's Vault bootstrap
-	// Job creates this key. See spec Requirement 5.1.
-	VaultMasterKEKKey = "master-kek"
 )

@@ -31,12 +31,4 @@ const (
 	// VaultPathInfraVector is the per-tenant RediSearch index path.
 	// Payload (JSON): {index_name}.
 	VaultPathInfraVector = "infra/vector"
-
-	// VaultPathInfraKEK is the per-tenant KEK path written by the
-	// DeriveTenantKEK saga step. The KEK itself is short-lived material
-	// the operator uses inside one reconcile to derive credentials for
-	// the data-plane stores; production deployments may choose not to
-	// persist it at all (Vault transit derive is on-demand). See spec
-	// Requirement 5.6 for rotation semantics.
-	VaultPathInfraKEK = "infra/kek"
 )

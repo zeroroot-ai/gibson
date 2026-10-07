@@ -30,15 +30,6 @@ type ToolAccess struct {
 	ConfiguredBy   string `json:"configured_by,omitempty"`
 }
 
-// ToolAccessStore manages tenant opt-in for tools.
-type ToolAccessStore interface {
-	Enable(ctx context.Context, tenant, toolName, configuredBy string) error
-	Disable(ctx context.Context, tenant, toolName string) error
-	CheckAccess(ctx context.Context, tenant, toolName string) error
-	GetAccess(ctx context.Context, tenant, toolName string) (*ToolAccess, error)
-	ListTenantTools(ctx context.Context, tenant string) ([]ToolAccess, error)
-}
-
 // RedisToolAccessStore implements ToolAccessStore using Redis for storage.
 type RedisToolAccessStore struct {
 	client *redis.Client

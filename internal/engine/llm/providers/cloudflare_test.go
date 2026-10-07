@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -21,7 +22,7 @@ func TestCloudflareProvider_Name(t *testing.T) {
 func TestNewCloudflareProvider_MissingAccountID(t *testing.T) {
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
 	t.Setenv("CLOUDFLARE_API_TOKEN", "")
-	_, err := NewCloudflareProvider(llm.ProviderConfig{
+	_, err := newCloudflareProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCloudflare,
 		APIKey:       "token-only",
 		DefaultModel: "@cf/meta/llama-3.1-8b-instruct",
@@ -33,7 +34,7 @@ func TestNewCloudflareProvider_MissingAccountID(t *testing.T) {
 func TestNewCloudflareProvider_MissingToken(t *testing.T) {
 	t.Setenv("CLOUDFLARE_ACCOUNT_ID", "")
 	t.Setenv("CLOUDFLARE_API_TOKEN", "")
-	_, err := NewCloudflareProvider(llm.ProviderConfig{
+	_, err := newCloudflareProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCloudflare,
 		DefaultModel: "@cf/meta/llama-3.1-8b-instruct",
 		Extra:        map[string]string{"cloudflare_account_id": "acct-123"},
@@ -42,7 +43,7 @@ func TestNewCloudflareProvider_MissingToken(t *testing.T) {
 }
 
 func TestNewCloudflareProvider_HappyPath(t *testing.T) {
-	p, err := NewCloudflareProvider(llm.ProviderConfig{
+	p, err := newCloudflareProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderCloudflare,
 		APIKey:       "cf-token",
 		DefaultModel: "@cf/meta/llama-3.1-8b-instruct",

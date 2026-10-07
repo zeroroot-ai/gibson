@@ -45,22 +45,6 @@ type provisioningChecker struct {
 	probe    DataPlaneProbe
 }
 
-// newProvisioningChecker creates a provisioningChecker backed by the given
-// DataPlaneProbe. cacheTTL controls how long a cached status is trusted
-// before a re-fetch is performed. A nil probe behaves as fail-closed
-// (every isProvisioned call returns NotProvisionedError) — that matches
-// the previous "nil Kubernetes client" semantics in dev environments.
-func newProvisioningChecker(probe DataPlaneProbe, cacheTTL time.Duration) *provisioningChecker {
-	if cacheTTL <= 0 {
-		cacheTTL = 30 * time.Second
-	}
-	return &provisioningChecker{
-		cache:    make(map[auth.TenantID]provisioningState),
-		cacheTTL: cacheTTL,
-		probe:    probe,
-	}
-}
-
 // isProvisioned returns true if the tenant's data-plane is ready. It
 // checks the in-process cache first; on a miss (or stale entry) it
 // invokes the probe.

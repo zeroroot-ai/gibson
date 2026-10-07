@@ -118,22 +118,6 @@ func (lb *LoadBalancer) Select(ctx context.Context, tenant, kind, name string) (
 	return selected, nil
 }
 
-// SelectEndpoint returns the gRPC endpoint string from a component's metadata.
-//
-// The endpoint is stored under the "grpc_endpoint" key in Metadata. Returns an
-// error if no instances are found or if the selected instance has no endpoint.
-func (lb *LoadBalancer) SelectEndpoint(ctx context.Context, tenant, kind, name string) (string, error) {
-	info, err := lb.Select(ctx, tenant, kind, name)
-	if err != nil {
-		return "", err
-	}
-	endpoint := info.Metadata["grpc_endpoint"]
-	if endpoint == "" {
-		return "", fmt.Errorf("component %s/%s/%s has no grpc_endpoint in metadata", tenant, kind, name)
-	}
-	return endpoint, nil
-}
-
 // selectRoundRobin implements round-robin selection.
 func (lb *LoadBalancer) selectRoundRobin(tenant, kind, name string, instances []ComponentInfo) *ComponentInfo {
 	key := fmt.Sprintf("%s:%s:%s", tenant, kind, name)

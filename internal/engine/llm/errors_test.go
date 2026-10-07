@@ -11,102 +11,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
-func TestIsRetryable(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{
-			name:     "nil error",
-			err:      nil,
-			expected: false,
-		},
-		{
-			name:     "non-GibsonError",
-			err:      errors.New("regular error"),
-			expected: false,
-		},
-		{
-			name:     "network error (retryable)",
-			err:      NewNetworkError("connection failed", nil),
-			expected: true,
-		},
-		{
-			name:     "network timeout (retryable)",
-			err:      &types.GibsonError{Code: ErrNetworkTimeout, Retryable: true},
-			expected: true,
-		},
-		{
-			name:     "rate limit (retryable)",
-			err:      NewRateLimitError("test-provider"),
-			expected: true,
-		},
-		{
-			name:     "quota exceeded (retryable)",
-			err:      &types.GibsonError{Code: ErrProviderQuotaExceeded, Retryable: true},
-			expected: true,
-		},
-		{
-			name:     "provider unavailable (retryable)",
-			err:      NewProviderUnavailableError("test-provider", nil),
-			expected: true,
-		},
-		{
-			name:     "timeout (retryable)",
-			err:      NewTimeoutError("request timeout"),
-			expected: true,
-		},
-		{
-			name:     "unauthorized (not retryable)",
-			err:      &types.GibsonError{Code: ErrProviderUnauthorized},
-			expected: false,
-		},
-		{
-			name:     "invalid request (not retryable)",
-			err:      NewInvalidRequestError("bad request"),
-			expected: false,
-		},
-		{
-			name:     "model not found (not retryable)",
-			err:      NewModelNotFoundError("gpt-5"),
-			expected: false,
-		},
-		{
-			name:     "content filtered (not retryable)",
-			err:      &types.GibsonError{Code: ErrContentFiltered},
-			expected: false,
-		},
-		{
-			name:     "context exceeded (not retryable)",
-			err:      NewContextExceededError(10000, 8192),
-			expected: false,
-		},
-		{
-			name:     "context canceled (not retryable)",
-			err:      &types.GibsonError{Code: ErrContextCanceled},
-			expected: false,
-		},
-		{
-			name:     "explicitly marked retryable",
-			err:      &types.GibsonError{Code: ErrCompletionFailed, Retryable: true},
-			expected: true,
-		},
-		{
-			name:     "unknown error code (default not retryable)",
-			err:      &types.GibsonError{Code: "UNKNOWN_CODE"},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsRetryable(tt.err)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
 func TestNewProviderNotFoundError(t *testing.T) {
 	err := NewProviderNotFoundError("anthropic")
 
@@ -133,38 +37,11 @@ func TestNewRateLimitError(t *testing.T) {
 	assert.True(t, err.Retryable)
 }
 
-func TestNewModelNotFoundError(t *testing.T) {
-	err := NewModelNotFoundError("gpt-5-ultra")
-
-	assert.Equal(t, ErrModelNotFound, err.Code)
-	assert.Contains(t, err.Message, "gpt-5-ultra")
-	assert.False(t, err.Retryable)
-}
-
-func TestNewContextExceededError(t *testing.T) {
-	err := NewContextExceededError(10000, 8192)
-
-	assert.Equal(t, ErrModelContextExceeded, err.Code)
-	assert.Contains(t, err.Message, "10000")
-	assert.Contains(t, err.Message, "8192")
-	assert.False(t, err.Retryable)
-}
-
 func TestNewInvalidRequestError(t *testing.T) {
 	err := NewInvalidRequestError("missing required field")
 
 	assert.Equal(t, ErrInvalidRequest, err.Code)
 	assert.Contains(t, err.Message, "missing required field")
-	assert.False(t, err.Retryable)
-}
-
-func TestNewToolCallError(t *testing.T) {
-	cause := errors.New("tool execution failed")
-	err := NewToolCallError("get_weather", cause)
-
-	assert.Equal(t, ErrToolCallFailed, err.Code)
-	assert.Contains(t, err.Message, "get_weather")
-	assert.Equal(t, cause, err.Cause)
 	assert.False(t, err.Retryable)
 }
 
@@ -250,37 +127,4 @@ func TestErrorWrapping(t *testing.T) {
 
 	// Test error message includes cause
 	assert.Contains(t, err.Error(), "underlying error")
-}
-
-func TestRetryableErrors(t *testing.T) {
-	retryableErrors := []error{
-		NewNetworkError("network error", nil),
-		NewTimeoutError("timeout"),
-		NewRateLimitError("test"),
-		NewProviderUnavailableError("test", nil),
-		&types.GibsonError{Code: ErrNetworkTimeout, Retryable: true},
-		&types.GibsonError{Code: ErrProviderQuotaExceeded, Retryable: true},
-	}
-
-	for _, err := range retryableErrors {
-		assert.True(t, IsRetryable(err), "expected %v to be retryable", err)
-	}
-}
-
-func TestNonRetryableErrors(t *testing.T) {
-	nonRetryableErrors := []error{
-		NewProviderNotFoundError("test"),
-		NewModelNotFoundError("test"),
-		NewInvalidRequestError("test"),
-		NewContextExceededError(100, 50),
-		&types.GibsonError{Code: ErrProviderUnauthorized},
-		&types.GibsonError{Code: ErrContentFiltered},
-		&types.GibsonError{Code: ErrContextCanceled},
-		&types.GibsonError{Code: ErrInvalidMessage},
-		&types.GibsonError{Code: ErrInvalidTool},
-	}
-
-	for _, err := range nonRetryableErrors {
-		assert.False(t, IsRetryable(err), "expected %v to not be retryable", err)
-	}
 }

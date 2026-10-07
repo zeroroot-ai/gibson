@@ -179,18 +179,6 @@ func TestLoadBalancer_NoInstances(t *testing.T) {
 	assert.Contains(t, err.Error(), "no instances")
 }
 
-func TestLoadBalancer_SelectEndpoint(t *testing.T) {
-	reg := newMockComponentRegistry()
-	reg.addInstance("acme", "plugin", "cvedb", "instance-1", "localhost:50051")
-
-	lb := NewLoadBalancer(reg, StrategyRoundRobin)
-	ctx := context.Background()
-
-	endpoint, err := lb.SelectEndpoint(ctx, "acme", "plugin", "cvedb")
-	require.NoError(t, err)
-	assert.Equal(t, "localhost:50051", endpoint)
-}
-
 func TestLoadBalancer_StrategyChange(t *testing.T) {
 	reg := newMockComponentRegistry()
 	for i := 1; i <= 3; i++ {

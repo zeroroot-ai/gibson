@@ -15,7 +15,6 @@ import (
 
 // MockCall represents a recorded call to the mock provider
 type MockCall struct {
-	Request llm.CompletionRequest
 }
 
 // MockProvider implements LLMProvider for testing
@@ -57,7 +56,7 @@ func (p *MockProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 // Complete generates a completion
 func (p *MockProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	p.mu.Lock()
-	p.calls = append(p.calls, MockCall{Request: req})
+	p.calls = append(p.calls, MockCall{})
 
 	if len(p.responses) == 0 {
 		p.mu.Unlock()
@@ -97,7 +96,7 @@ func (p *MockProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<
 		return nil, llm.NewProviderError("mock", fmt.Errorf("streaming not supported"))
 	}
 
-	p.calls = append(p.calls, MockCall{Request: req})
+	p.calls = append(p.calls, MockCall{})
 
 	if len(p.responses) == 0 {
 		p.mu.RUnlock()

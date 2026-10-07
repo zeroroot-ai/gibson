@@ -20,27 +20,9 @@ import (
 
 // Standard condition reasons. Values delegated to platform/saga.
 const (
-	ReasonPending          = psaga.ReasonPending
-	ReasonInProgress       = psaga.ReasonInProgress
-	ReasonReady            = psaga.ReasonReady
-	ReasonSkipped          = psaga.ReasonSkipped
-	ReasonUnreachable      = psaga.ReasonUnreachable
-	ReasonRateLimited      = psaga.ReasonRateLimited
-	ReasonConflict         = psaga.ReasonConflict
-	ReasonInvalidSpec      = psaga.ReasonInvalidSpec
-	ReasonAllStepsComplete = psaga.ReasonAllStepsComplete
-	ReasonStepFailed       = psaga.ReasonStepFailed
+	ReasonSkipped    = psaga.ReasonSkipped
+	ReasonStepFailed = psaga.ReasonStepFailed
 )
-
-// SetCondition delegates to platform/saga.SetCondition.
-func SetCondition(conditions *[]metav1.Condition, newCond metav1.Condition) {
-	psaga.SetCondition(conditions, newCond)
-}
-
-// FindCondition delegates to platform/saga.FindCondition.
-func FindCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
-	return psaga.FindCondition(conditions, condType)
-}
 
 // IsConditionTrue delegates to platform/saga.IsConditionTrue.
 func IsConditionTrue(conditions []metav1.Condition, condType string) bool {

@@ -5,9 +5,10 @@ package harness
 
 import (
 	"context"
+	"log/slog"
+
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -36,7 +37,6 @@ type EventLogger interface {
 const (
 	EventLLMRequest  = "llm_request"
 	EventLLMResponse = "llm_response"
-	EventToolCall    = "tool_call"
 	EventToolResult  = "tool_result"
 	EventFinding     = "finding"
 )
@@ -55,11 +55,6 @@ type LLMResponseEventData struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	TotalTokens      int    `json:"total_tokens"`
 	Slot             string `json:"slot"`
-}
-
-// ToolCallEventData captures tool invocation information
-type ToolCallEventData struct {
-	ToolName string `json:"tool_name"`
 }
 
 // ToolResultEventData captures tool execution results

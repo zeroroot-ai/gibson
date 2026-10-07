@@ -129,7 +129,6 @@ type Result struct {
 
 	// Model / Dim are the target the index is now consistent at.
 	Model string
-	Dim   int
 
 	// Reembedded is the number of documents whose embeddings were recomputed and
 	// re-stored. On a successful pass this equals Total.
@@ -176,7 +175,7 @@ func (j *Job) Run(ctx context.Context) (Result, error) {
 
 	if !drifted(marker, targetModel, targetDim) {
 		log.Debug("re-embed: no embedding model change detected, nothing to do")
-		return Result{Changed: false, Model: targetModel, Dim: targetDim}, nil
+		return Result{Changed: false, Model: targetModel}, nil
 	}
 
 	if marker == nil {
@@ -193,7 +192,7 @@ func (j *Job) Run(ctx context.Context) (Result, error) {
 	}
 	log.Info("re-embed: recreated vector index at target dimension")
 
-	res := Result{Changed: true, Model: targetModel, Dim: targetDim}
+	res := Result{Changed: true, Model: targetModel}
 
 	records, err := j.index.ListRecords(ctx)
 	if err != nil {

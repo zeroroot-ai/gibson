@@ -11,17 +11,11 @@ import (
 // implementations may add their own reasons; these are the ones the
 // runner itself emits.
 const (
-	ReasonPending          = "Pending"
 	ReasonInProgress       = "InProgress"
 	ReasonReady            = "Ready"
 	ReasonSkipped          = "Skipped"
-	ReasonUnreachable      = "Unreachable"
-	ReasonRateLimited      = "RateLimited"
-	ReasonConflict         = "Conflict"
-	ReasonInvalidSpec      = "InvalidSpec"
 	ReasonAllStepsComplete = "AllStepsComplete"
 	ReasonStepFailed       = "StepFailed"
-	ReasonStartupGate      = "StartupGate"
 )
 
 // SetCondition updates or inserts a condition in the given slice. Preserves

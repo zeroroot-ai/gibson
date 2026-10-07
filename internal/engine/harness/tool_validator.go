@@ -36,10 +36,6 @@ var (
 	)
 )
 
-// DiscoveryCategory is the tool category for discovery tools.
-// Tools in this category are expected to populate field 100 DiscoveryResult.
-const DiscoveryCategory = "discovery"
-
 // Which tools are expected to populate field 100 DiscoveryResult is a CATALOG
 // question, answered by componentcatalog.IsDiscoveryTool.
 //

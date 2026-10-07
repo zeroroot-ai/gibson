@@ -63,7 +63,6 @@ type MissionClientCreateRequest struct {
 	TargetID              types.ID
 	ParentMissionID       *types.ID
 	ParentDepth           int
-	Tags                  []string
 	Metadata              map[string]any
 }
 
@@ -149,7 +148,6 @@ func (a *MissionOperatorAdapter) CreateMission(ctx context.Context, req *CreateM
 		TargetID:              req.TargetID,
 		ParentMissionID:       req.ParentMissionID,
 		ParentDepth:           req.ParentDepth,
-		Tags:                  req.Tags,
 		Metadata:              req.Metadata,
 	}
 

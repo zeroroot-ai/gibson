@@ -4,6 +4,7 @@
 package providers
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -20,7 +21,7 @@ func TestMistralProvider_Name(t *testing.T) {
 
 func TestNewMistralProvider_MissingAPIKey(t *testing.T) {
 	t.Setenv("MISTRAL_API_KEY", "")
-	_, err := NewMistralProvider(llm.ProviderConfig{
+	_, err := newMistralProviderWithContext(context.Background(), llm.ProviderConfig{
 		Type:         llm.ProviderMistral,
 		DefaultModel: "mistral-large-latest",
 	})

@@ -114,24 +114,6 @@ func TestResponseFormat_Validate(t *testing.T) {
 	}
 }
 
-func TestNewTextFormat(t *testing.T) {
-	format := NewTextFormat()
-	if format.Type != ResponseFormatText {
-		t.Errorf("NewTextFormat() type = %v, want %v", format.Type, ResponseFormatText)
-	}
-}
-
-func TestNewJSONObjectFormat(t *testing.T) {
-	name := "test_object"
-	format := NewJSONObjectFormat(name)
-	if format.Type != ResponseFormatJSONObject {
-		t.Errorf("NewJSONObjectFormat() type = %v, want %v", format.Type, ResponseFormatJSONObject)
-	}
-	if format.Name != name {
-		t.Errorf("NewJSONObjectFormat() name = %v, want %v", format.Name, name)
-	}
-}
-
 func TestNewJSONSchemaFormat(t *testing.T) {
 	name := "test_schema"
 	schema := &JSONSchema{Type: "object"}

@@ -23,13 +23,6 @@ type CloudflareProvider struct {
 	config llm.ProviderConfig
 }
 
-// NewCloudflareProvider constructs a Cloudflare Workers AI provider.
-// Credentials come from cfg.Extra (populated by the provider resolver from
-// the secrets broker), then the dev-only env-var. See resolveCredential.
-func NewCloudflareProvider(cfg llm.ProviderConfig) (*CloudflareProvider, error) {
-	return newCloudflareProviderWithContext(context.Background(), cfg)
-}
-
 // newCloudflareProviderWithContext constructs a Cloudflare provider, resolving the credential from cfg (see resolveCredential).
 func newCloudflareProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (*CloudflareProvider, error) {
 	accountID, err := resolveCredential(cfg, "cloudflare", "cloudflare_account_id", true)

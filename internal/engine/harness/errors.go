@@ -11,8 +11,6 @@ import (
 // These errors are returned when agents interact with the harness
 // for tool execution, plugin queries, and agent delegation.
 const (
-	// ErrHarnessSlotNotFound indicates a requested LLM slot does not exist or is not configured
-	ErrHarnessSlotNotFound types.ErrorCode = "HARNESS_SLOT_NOT_FOUND"
 
 	// ErrHarnessToolNotFound indicates the requested tool is not registered or available
 	ErrHarnessToolNotFound types.ErrorCode = "HARNESS_TOOL_NOT_FOUND"

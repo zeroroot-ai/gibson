@@ -49,39 +49,6 @@ func verifierWithAgent(t *testing.T, expiresAt *time.Time) (*JWTVerifier, string
 
 func timePtr(t time.Time) *time.Time { return &t }
 
-func TestVerifyAgentJWT_RefusesALapsedAgent(t *testing.T) {
-	v, token, store := verifierWithAgent(t, timePtr(time.Now().Add(-time.Hour)))
-
-	_, err := v.VerifyAgentJWT(context.Background(), token, "gibson-daemon")
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "lapsed")
-	// A lapsed agent must not be stamped as active either — the refusal happens
-	// before any side effect.
-	assert.NotContains(t, store.lastActiveUpdated, "agent-001")
-}
-
-// The expiry check must not swallow agents that are still inside their window;
-// a guard that refuses everything proves nothing.
-func TestVerifyAgentJWT_AcceptsAnAgentInsideItsLifetime(t *testing.T) {
-	v, token, _ := verifierWithAgent(t, timePtr(time.Now().Add(time.Hour)))
-
-	claims, err := v.VerifyAgentJWT(context.Background(), token, "gibson-daemon")
-
-	require.NoError(t, err)
-	assert.Equal(t, "agent-001", claims.AgentID)
-}
-
-// No expiry recorded is not the same as an expiry that has passed.
-func TestVerifyAgentJWT_AcceptsAnAgentWithNoRecordedExpiry(t *testing.T) {
-	v, token, _ := verifierWithAgent(t, nil)
-
-	claims, err := v.VerifyAgentJWT(context.Background(), token, "gibson-daemon")
-
-	require.NoError(t, err)
-	assert.Equal(t, "tenant-acme", claims.TenantID)
-}
-
 // ---------------------------------------------------------------------------
 // AgentKeyDescriptor
 // ---------------------------------------------------------------------------

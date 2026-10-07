@@ -60,68 +60,6 @@ const (
 	ErrNetworkTimeout types.ErrorCode = "LLM_NETWORK_TIMEOUT"
 )
 
-// IsRetryable determines if an error is transient and may succeed on retry.
-// This helps implement intelligent retry logic for LLM operations.
-func IsRetryable(err error) bool {
-	var gibsonErr *types.GibsonError
-	if !errors.As(err, &gibsonErr) {
-		return false
-	}
-
-	// Check if error is already marked as retryable
-	if gibsonErr.Retryable {
-		return true
-	}
-
-	// Determine retryability based on error code
-	switch gibsonErr.Code {
-	// Network errors are typically retryable
-	case ErrNetworkFailed, ErrNetworkTimeout:
-		return true
-
-	// Rate limiting and quota errors may succeed after waiting
-	case ErrProviderRateLimited, ErrProviderQuotaExceeded:
-		return true
-
-	// Provider unavailable may be temporary
-	case ErrProviderUnavailable:
-		return true
-
-	// Timeout errors may succeed with more time
-	case ErrTimeoutExceeded:
-		return true
-
-	// Context cancellation is not retryable (user-initiated)
-	case ErrContextCanceled:
-		return false
-
-	// Auth errors are not retryable
-	case ErrProviderUnauthorized:
-		return false
-
-	// Invalid requests won't succeed on retry
-	case ErrInvalidRequest, ErrInvalidMessage, ErrInvalidTemperature,
-		ErrInvalidMaxTokens, ErrInvalidTopP, ErrInvalidTool, ErrInvalidToolArgs:
-		return false
-
-	// Model not found or not supported won't change
-	case ErrModelNotFound, ErrModelNotSupported:
-		return false
-
-	// Content filtering won't change
-	case ErrContentFiltered:
-		return false
-
-	// Context exceeded won't change
-	case ErrModelContextExceeded:
-		return false
-
-	// Default to not retryable for safety
-	default:
-		return false
-	}
-}
-
 // Helper functions for creating common LLM errors
 
 // NewProviderNotFoundError creates an error for when a provider is not found
@@ -149,25 +87,9 @@ func NewRateLimitError(providerName string) *types.GibsonError {
 	}
 }
 
-// NewModelNotFoundError creates an error for when a model is not found
-func NewModelNotFoundError(modelName string) *types.GibsonError {
-	return types.NewError(ErrModelNotFound, "model not found: "+modelName)
-}
-
-// NewContextExceededError creates an error for when context window is exceeded
-func NewContextExceededError(tokenCount, maxTokens int) *types.GibsonError {
-	return types.NewError(ErrModelContextExceeded,
-		fmt.Sprintf("context window exceeded: %d tokens exceeds maximum of %d", tokenCount, maxTokens))
-}
-
 // NewInvalidRequestError creates an error for invalid requests
 func NewInvalidRequestError(message string) *types.GibsonError {
 	return types.NewError(ErrInvalidRequest, message)
-}
-
-// NewToolCallError creates an error for tool call failures
-func NewToolCallError(toolName string, cause error) *types.GibsonError {
-	return types.WrapError(ErrToolCallFailed, "tool call failed: "+toolName, cause)
 }
 
 // NewCompletionError creates an error for completion failures
@@ -201,11 +123,6 @@ const (
 	ErrBudgetExceeded types.ErrorCode = "LLM_BUDGET_EXCEEDED"
 )
 
-// Embedding error codes
-const (
-	ErrEmbeddingsNotSupportedCode types.ErrorCode = "LLM_EMBEDDINGS_NOT_SUPPORTED"
-)
-
 // ErrEmbeddingsNotSupported is returned by GetEmbeddingProvider when no registered
 // LLM provider implements the EmbeddingProvider interface with SupportsEmbeddings
 // returning true.
@@ -213,18 +130,13 @@ var ErrEmbeddingsNotSupported = errors.New("no registered LLM provider supports 
 
 // Structured output error codes
 const (
-	ErrStructuredOutputNotSupported types.ErrorCode = "LLM_STRUCTURED_OUTPUT_NOT_SUPPORTED"
-	ErrSchemaRequired               types.ErrorCode = "LLM_SCHEMA_REQUIRED"
-	ErrValidationFailed             types.ErrorCode = "LLM_VALIDATION_FAILED"
-	ErrStructuredOutputParseFailed  types.ErrorCode = "LLM_STRUCTURED_OUTPUT_PARSE_FAILED"
-	ErrStructuredOutputUnmarshal    types.ErrorCode = "LLM_STRUCTURED_OUTPUT_UNMARSHAL_FAILED"
+	ErrValidationFailed types.ErrorCode = "LLM_VALIDATION_FAILED"
 )
 
 // Sentinel errors for structured output operations
 var (
 	ErrStructuredOutputNotSupportedSentinel = errors.New("provider does not support structured output")
 	ErrSchemaRequiredSentinel               = errors.New("schema required for json_schema format")
-	ErrValidationFailedSentinel             = errors.New("response failed schema validation")
 )
 
 // Provider-specific error creation helpers
@@ -294,7 +206,6 @@ func NewProviderUnauthorizedError(providerName string, cause error) *types.Gibso
 type StructuredOutputError struct {
 	Op       string // Operation that failed (e.g., "parse", "validate", "unmarshal")
 	Provider string // Provider name
-	Raw      string // Raw response if available for debugging
 	Err      error  // Underlying error
 }
 
@@ -353,7 +264,6 @@ func NewParseError(provider, raw string, position int, err error) *ParseError {
 		StructuredOutputError: StructuredOutputError{
 			Op:       "parse",
 			Provider: provider,
-			Raw:      raw,
 			Err:      err,
 		},
 		Position: position,
@@ -368,7 +278,6 @@ func NewUnmarshalError(provider, raw, targetType string, err error) *UnmarshalEr
 		StructuredOutputError: StructuredOutputError{
 			Op:       "unmarshal",
 			Provider: provider,
-			Raw:      raw,
 			Err:      err,
 		},
 		TargetType: targetType,
@@ -381,19 +290,6 @@ func NewStructuredOutputError(op, provider, raw string, err error) *StructuredOu
 	return &StructuredOutputError{
 		Op:       op,
 		Provider: provider,
-		Raw:      raw,
 		Err:      err,
-	}
-}
-
-// NewValidationError creates an error for schema validation failures.
-// This satisfies requirement 1.4: SDK SHALL return an error with details
-// about the validation failure.
-func NewValidationError(provider, raw string, err error) *StructuredOutputError {
-	return &StructuredOutputError{
-		Op:       "validate",
-		Provider: provider,
-		Raw:      raw,
-		Err:      errors.Join(ErrValidationFailedSentinel, err),
 	}
 }

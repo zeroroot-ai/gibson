@@ -32,19 +32,6 @@ type ComponentConfig struct {
 	AutoStart bool `yaml:"auto_start,omitempty" json:"auto_start,omitempty"`
 }
 
-// ComponentsConfig represents the full components configuration.
-// It organizes components by their kind (agents, tools, plugins).
-type ComponentsConfig struct {
-	// Agents contains the list of agent component configurations.
-	Agents []ComponentConfig `yaml:"agents,omitempty" json:"agents,omitempty"`
-
-	// Tools contains the list of tool component configurations.
-	Tools []ComponentConfig `yaml:"tools,omitempty" json:"tools,omitempty"`
-
-	// Plugins contains the list of plugin component configurations.
-	Plugins []ComponentConfig `yaml:"plugins,omitempty" json:"plugins,omitempty"`
-}
-
 // Logger is an interface for logging warnings during component loading.
 // This allows the caller to provide their own logger implementation.
 type Logger interface {

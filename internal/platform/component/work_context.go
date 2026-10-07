@@ -25,7 +25,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
 const (
@@ -61,10 +60,6 @@ func workContextKey(workID string) string { return workContextKeyPrefix + workID
 
 // workOwnerKey returns the Redis key holding a work item's owning tenant.
 func workOwnerKey(workID string) string { return workOwnerKeyPrefix + workID }
-
-// ErrCodeWorkContextNotFound is returned when a work-item context mapping has
-// expired or was never written.
-const ErrCodeWorkContextNotFound types.ErrorCode = "WORK_CONTEXT_NOT_FOUND"
 
 // ErrWorkOwnerUnknown reports that no owning tenant is on record for a work id:
 // the id was never enqueued, or its binding has aged out. Callers must treat it

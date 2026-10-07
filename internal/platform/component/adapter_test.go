@@ -160,11 +160,6 @@ func TestDiscoveryRefusesEveryQueryWithNoTenant(t *testing.T) {
 		require.ErrorIs(t, err, ErrNoTenantInContext)
 		assert.Empty(t, got)
 	})
-	t.Run("DiscoverAgent", func(t *testing.T) {
-		got, err := adapter.DiscoverAgent(ctx, "shared-agent")
-		require.ErrorIs(t, err, ErrNoTenantInContext)
-		assert.Nil(t, got)
-	})
 	t.Run("DiscoverTool", func(t *testing.T) {
 		got, err := adapter.DiscoverTool(ctx, "shared-tool")
 		require.ErrorIs(t, err, ErrNoTenantInContext)

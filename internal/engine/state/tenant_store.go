@@ -39,7 +39,6 @@ import (
 //	data, err := tenantStore.Get(ctx, "mission:123")
 type TenantScopedStore struct {
 	client        *StateClient
-	authMode      string // "dev", "enterprise", "saas"
 	defaultTenant string // Fallback tenant for single-tenant deployments
 	requireTenant bool   // If true, fail operations when no tenant in context
 }
@@ -102,7 +101,6 @@ func NewTenantScopedStore(client *StateClient, config *TenantStoreConfig) *Tenan
 
 	return &TenantScopedStore{
 		client:        client,
-		authMode:      config.AuthMode,
 		defaultTenant: config.DefaultTenant,
 		requireTenant: config.RequireTenant,
 	}

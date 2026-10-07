@@ -2,8 +2,8 @@
 #
 # This file is the authoritative, hand-maintained OpenFGA authorization model.
 # It is applied to the FGA server by the gibson-fga-init Kubernetes Job on every
-# helm install/upgrade (the chart embeds files/fga-model.json, regenerated from
-# this file via `make sync-fga-model` -> cmd/gen-fga-model-json).
+# helm install/upgrade. The Job runs `gibson dump-fga-model`, which renders
+# this file, embedded in the daemon image, as the OpenFGA JSON.
 #
 # Gibson Authorization Model
 #

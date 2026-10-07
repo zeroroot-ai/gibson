@@ -206,30 +206,6 @@ func TestShutdown_Idempotent(t *testing.T) {
 	}
 }
 
-// TestWithOTLPEndpoint_Option verifies that WithOTLPEndpoint is accepted
-// without error when no collector is reachable (the provider is initialised
-// lazily / no-op-fallback for unreachable endpoints).
-func TestWithOTLPEndpoint_Option(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping endpoint option test in short mode")
-	}
-
-	ctx := context.Background()
-	const svc = "test-service-endpoint-option"
-
-	// Point at an unreachable address — Init should not block or error
-	// because OTLP exporters connect lazily.
-	o, err := otelinit.Init(ctx, svc,
-		otelinit.WithOTLPEndpoint("localhost:19999"),
-	)
-	if err != nil {
-		t.Fatalf("Init with unreachable endpoint: %v", err)
-	}
-	if o == nil {
-		t.Fatal("expected non-nil Observability")
-	}
-}
-
 // TestSetGlobal_DoesNotPanic verifies that SetGlobal can be called without
 // panicking (the global providers are set to the instance's providers).
 func TestSetGlobal_DoesNotPanic(t *testing.T) {

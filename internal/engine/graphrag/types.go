@@ -286,16 +286,3 @@ func (fn *FindingNode) ToGraphNode() *GraphNode {
 	node.UpdatedAt = fn.UpdatedAt
 	return node
 }
-
-// TechniqueNode represents a MITRE technique/tactic node.
-type TechniqueNode struct {
-	ID          types.ID  `json:"id"`
-	TechniqueID string    `json:"technique_id"` // e.g., "T1566.001" (with sub-technique)
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Tactic      string    `json:"tactic"` // Primary tactic
-	Platform    string    `json:"platform,omitempty"`
-	Embedding   []float64 `json:"embedding,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}

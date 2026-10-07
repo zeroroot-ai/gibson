@@ -6,8 +6,6 @@ package manifest
 import (
 	"context"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
-	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 )
 
@@ -16,14 +14,6 @@ import (
 // implementation; dependencies are injected via BuilderDeps.
 type Builder interface {
 	Build(ctx context.Context, subject ManifestSubject) (*manifestpb.CapabilityManifest, error)
-}
-
-// Signer is the Ed25519 signing facade used by the Builder and by tests.
-// Implementations must never expose private key material.
-type Signer interface {
-	Sign(m *manifestpb.CapabilityManifest) error
-	Verify(m *manifestpb.CapabilityManifest) error
-	PublishedKeys() []SigningKeyJWK
 }
 
 // VersionStore maintains the atomic per-tenant manifest version counter
@@ -40,46 +30,10 @@ type Invalidator interface {
 	Publish(ctx context.Context, tenantID string, reason string)
 }
 
-// ManifestNotifier is the small combined facade used by write-path call
-// sites (FGA, registry, tier limits). A single Notify covers both Bump
-// and Publish so cross-cutting wiring remains trivial.
-type ManifestNotifier interface {
-	Notify(ctx context.Context, tenantID string, reason string)
-}
-
-// FGAResolver is the narrow Builder-facing view of the capabilitygrant.FGABridge.
-// *capabilitygrant.FGABridge satisfies it natively. Declared here so unit
-// tests mock one small surface rather than the full bridge.
-type FGAResolver interface {
-	ResolveCapabilities(ctx context.Context, userID, tenantID string) ([]capabilitygrant.Capability, error)
-	ResolveCrossComponentRules(ctx context.Context, subjectFGA string, components []capabilitygrant.ComponentRef) ([]capabilitygrant.CrossRule, error)
-	ResolveAgentPrincipalIntersection(ctx context.Context, agentPrincipalID, ownerUserID, tenantID string) ([]capabilitygrant.ComponentRef, error)
-}
-
-// RegistrySource is the narrow Builder-facing view of the component
-// registry. *component.RedisComponentRegistry satisfies this via
-// DiscoverAll (tenant-scoped + _system merged).
-type RegistrySource interface {
-	DiscoverAll(ctx context.Context, tenantID string, kind string) ([]component.ComponentInfo, error)
-}
-
-// TierLimitsSource supplies per-tenant resource limits (tokens, rate,
-// spend) that the Builder projects into CapabilityManifest.limits.
-// Nil pointer from Limits is acceptable and renders empty limits.
-type TierLimitsSource interface {
-	LimitsFor(ctx context.Context, tenantID string) (*manifestpb.LimitsAndQuotas, error)
-}
-
 // MemoryPolicySource returns the per-subject memory-tier access policy.
 // Nil pointer from MemoryPolicy is acceptable and renders empty memory.
 type MemoryPolicySource interface {
 	MemoryPolicy(ctx context.Context, tenantID string, subject ManifestSubject) (*manifestpb.MemoryPermissions, error)
-}
-
-// LLMSlotSource returns the LLM slot names the subject is permitted to
-// request. Empty slice indicates no LLM access.
-type LLMSlotSource interface {
-	AvailableSlots(ctx context.Context, tenantID string, subject ManifestSubject) ([]string, error)
 }
 
 // Issuance is the attributable record of one manifest being handed out: who
@@ -91,9 +45,6 @@ type LLMSlotSource interface {
 // manifest is about, which under impersonation is the impersonated
 // principal, not the admin who requested it.
 type Issuance struct {
-	// Actor is the authenticated caller that requested the manifest. Never
-	// empty — Build attributes self-issuance to the subject.
-	Actor Actor
 
 	// Subject is the principal the manifest resolves capabilities for, as
 	// the FGA "<type>:<id>" reference.
@@ -101,12 +52,6 @@ type Issuance struct {
 
 	// TenantID is the tenant the manifest was issued in.
 	TenantID string
-
-	// ImpersonatedAgentPrincipalID is the agent_principal an admin was
-	// previewing, or empty for ordinary self-issuance. A non-empty value is
-	// the audit-relevant signal: someone obtained a manifest that is not
-	// their own.
-	ImpersonatedAgentPrincipalID string
 }
 
 // AuditWriter records manifest issuances for the 7-day audit retention

@@ -169,10 +169,8 @@ func (c *Credential) Validate() error {
 
 // CredentialFilter provides filtering options for credential queries
 type CredentialFilter struct {
-	Provider *string           // Filter by provider (e.g., "openai")
-	Type     *CredentialType   // Filter by credential type
-	Status   *CredentialStatus // Filter by status
-	Tags     []string          // Filter by tags (AND logic - credential must have all tags)
-	Limit    int               // Maximum number of results (0 = no limit)
-	Offset   int               // Number of results to skip for pagination
+	Type   *CredentialType   // Filter by credential type
+	Status *CredentialStatus // Filter by status
+	Limit  int               // Maximum number of results (0 = no limit)
+	Offset int               // Number of results to skip for pagination
 }
