@@ -879,3 +879,32 @@ func TestInviteProvisionedOwner_Refusals(t *testing.T) {
 		t.Fatalf("Issue failure: expected Internal, got %v", err)
 	}
 }
+
+// When the send fails and the withdrawal fails too, the call still reports
+// the send failure: the administrator must not read a success (gibson#480).
+func TestInviteMember_SendAndWithdrawalFailureSurfaces(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations SET status = $2")).
+		WillReturnError(errors.New("postgres down"))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{err: errors.New("smtp down")}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.InviteMember(ctxWithTenant(t, "acme"), &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"})
+	if status_grpc.Code(err) != codes.Internal || !strings.Contains(err.Error(), "smtp down") {
+		t.Fatalf("err = %v, want the send failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the withdrawal was not tried: %v", err)
+	}
+}

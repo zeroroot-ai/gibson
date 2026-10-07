@@ -53,11 +53,9 @@ func (s *TenantAdminServer) requireInviteMail(ctx context.Context, tenantID stri
 
 // sendInvitationEmail builds the accept link and sends the invitation email.
 // The raw token rides the link only; it is never stored or returned over the
-// RPC. Each caller runs requireInviteMail before it writes the row.
+// RPC. Each caller checks the mail configuration before it writes the row
+// (requireInviteMail, or the Unavailable check of InviteProvisionedOwner).
 func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, to, role, rawToken string, expiresAt time.Time) error {
-	if err := s.requireInviteMail(ctx, tenantID); err != nil {
-		return err
-	}
 	appURL := strings.TrimRight(s.inviteBaseURL, "/")
 	acceptURL := appURL + "/invite/" + rawToken
 	if err := s.inviteMailer.SendInvitation(ctx, mailer.InvitationEmail{
