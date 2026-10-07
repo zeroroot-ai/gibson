@@ -1,5 +1,8 @@
 //go:build test_fixtures
 
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package mockllm implements a deterministic LLM provider for e2e testing.
 //
 // PRODUCTION SAFETY CONTRACT:

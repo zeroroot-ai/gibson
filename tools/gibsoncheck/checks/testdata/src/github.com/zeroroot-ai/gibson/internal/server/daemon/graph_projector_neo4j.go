@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package daemon is the analysistest fixture for the graphwrite analyzer's
 // allowance. This file stands in for the real graph projector: it is in the
 // daemon package AND its base name starts with graph_projector, so it may open

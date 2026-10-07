@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package secretslogclean is a synthetic test fixture for the secretsnolog
 // gibsoncheck rule (internal/infra/secrets surface). It calls secrets Get/Resolve
 // but uses the returned bytes only for legitimate purposes — never passing

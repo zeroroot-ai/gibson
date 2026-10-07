@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 package k8sexempt
 
 // Exempt fixture for NoK8sAPIInDaemonAnalyzer. Paths containing

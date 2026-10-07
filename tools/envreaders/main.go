@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Command envreaders writes and checks configs/env-readers.txt, the set of
 // environment variable names the gibson source can read.
 //

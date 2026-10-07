@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package graphrag is a synthetic mirror of internal/engine/graphrag for
 // gibsoncheck's cypheridentifier analyzer tests. Its import path must be
 // EXACTLY github.com/zeroroot-ai/gibson/internal/engine/graphrag — the

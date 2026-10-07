@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package plugin is a stub for analysistest fixtures used by the
 // pluginlegacy analyzer test. This models both the new production plugin
 // package (Serve, Descriptor) and the deleted pre-release symbols that the

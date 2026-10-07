@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package privfallbackcaller proves G2 — the analysis.Fact propagation.
 //
 // Nothing in this package matches G1 by shape. The diagnostic below

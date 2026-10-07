@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package kubernetes is a stub for the K8s typed clientset, used by
 // analysistest fixtures that need to import the forbidden path.
 package kubernetes

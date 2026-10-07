@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenantroleviolation exercises the tenantrolewrite guard: every
 // R-numbered case constructs a tenant-role tuple outside
 // internal/platform/tenantrole and must be flagged; every N-numbered case

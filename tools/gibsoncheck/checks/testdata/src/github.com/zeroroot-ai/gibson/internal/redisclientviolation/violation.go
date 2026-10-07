@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package redisclientviolation contains a synthetic violation of the
 // redis.NewClient construction rule. This fixture is used by the
 // forbidredisclientconstruction analyzer's test suite.

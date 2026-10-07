@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package secretslogviolation is a synthetic test fixture for the
 // secretsnolog gibsoncheck rule (internal/infra/secrets surface). It deliberately
 // passes the return value of a secrets Get/Resolve call to several logging

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Command protofieldreads lists every read of a generated proto message
 // field in a Go module, resolved by the type checker.
 //

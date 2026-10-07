@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package privfallback exercises the privilegedfallback guard.
 //
 // M4 (the fail-closed canary) is the fixture that matters most: it

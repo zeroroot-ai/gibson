@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package redisclientallowed contains a _test.go file that constructs a
 // redis.Client (against miniredis) — this should NOT trigger the analyzer
 // because test files are exempt.

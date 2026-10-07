@@ -231,13 +231,13 @@ attributable to a mission a user launched**.
 _Avoid_: caller-supplied tenant, work_id lookup, "authed user" (agents are not users)
 
 **Entitlements provider**:
-The pluggable seam that decouples commercial gating from the OSS brain. The budget enforcer
+The pluggable seam that decouples commercial gating from the source-available brain. The budget enforcer
 and rate limiter consume "what are this tenant's limits / what's enabled?" from this interface
-— they never read plans or Stripe directly. OSS ships a permissive/config-driven provider
+— they never read plans or Stripe directly. Gibson ships a permissive/config-driven provider
 (admins set per-team quotas; no payment); the **commercial** layer ships the plan +
 subscription (Stripe) provider. `BillingService`, Stripe, and `plans.yaml` live **entirely**
-in the commercial layer — never in OSS gibson.
-_Avoid_: plan check, billing (billing is not in the OSS brain)
+in the commercial layer — never in gibson.
+_Avoid_: plan check, billing (billing is not in gibson)
 
 **Scope (vantage)**:
 The network/addressing context an observation was made *within*, carried by the agent's
@@ -745,10 +745,10 @@ _Avoid_: account recovery, password reset (a different, self-service flow)
 - A tenant has exactly one **Owner**; it changes only by **Ownership transfer**.
 - The **Platform owner** belongs to no tenant.
 
-- **OSS boundary:** gibson is **OSS and multi-tenant** (a self-hoster's teams get real
+- **License boundary:** gibson is **source-available (Elastic License 2.0) and multi-tenant** (a self-hoster's teams get real
   tenancy with the per-tenant isolation above). The *only* commercial coupling is the payment
   gate, decoupled behind the **Entitlements provider**; `BillingService` + Stripe + `plans.yaml`
-  live in the closed layer, not OSS gibson.
+  live in the closed layer, not gibson.
 - **No cross-tenant anything** (see invariant above). Everything below is *within one tenant*.
 - An **Application** has one **Repository**, many **Images** (each built from one
   Repository commit by one **Pipeline**), and many **Deployments** (each running one Image).

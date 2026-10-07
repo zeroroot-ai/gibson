@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package tenantfromctxclean is a synthetic fixture for the
 // tenantfromcontext analyzer. Both functions read req.TenantId but each
 // carries the gibsoncheck:allow tenant-from-request directive in its

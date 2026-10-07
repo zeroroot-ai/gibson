@@ -31,7 +31,7 @@ anywhere in this seam.
   tests read it from this path. `internal/engine/brain/beliefvi` embeds a
   guarded byte-identical copy (`beliefvi/models/base-v1.json`,
   `TestDefaultArtifact_MatchesTheCanonicalPythonSource`) so the daemon binary
-  needs no external model file for the OSS default.
+  needs no external model file for the default.
 - **pgmpy** is a dev-only, CI-only dependency (`requirements-dev.txt`) — the
   offline parity oracle, never a deployed dependency, exactly as ADR-0134
   originally intended before the sidecar existed.
@@ -85,7 +85,7 @@ CPT per variable. The three query variables MUST be present: `juicy`,
 `exploitable`, `reachable`. See `models/base-v1.json` for the shipped minimal
 base model and `model.py` for the schema.
 
-OSS ships the minimal `base-v1`. The curated commercial base model (public
+Gibson ships the minimal `base-v1`. The curated commercial base model (public
 CVE, CISA KEV, EPSS and MITRE ATT&CK data, never tenant data — ADR-0089/0129)
 lives in the closed `billing` repo. Its trainer image sets
 `BELIEF_BASE_MODEL` to the model file (gibson#31). `cmd/belief-trainer` then

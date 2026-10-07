@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package graph is the analysistest fixture for the graphwrite analyzer's rule
 // on the driver-adapter package (gibson#673). The package has no allowance: its
 // Query is a read entry point, and a write transaction in it must be flagged,

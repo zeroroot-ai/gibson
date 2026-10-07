@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Licensed under the Apache License, Version 2.0 (the "License").
-//
 // platform.go — `gibson-migrate platform {up|down|status}` subcommand.
 // Applies the embedded Platform migration set (pkg/platform/migrations)
 // against the dashboard / control-plane Postgres database identified by

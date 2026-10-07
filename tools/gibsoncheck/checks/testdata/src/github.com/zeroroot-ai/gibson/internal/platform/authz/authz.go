@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package authz is an analyzer-fixture stub of the real
 // internal/platform/authz package. It carries only what the guards
 // resolve types against: the Authorizer contract and CheckRequest.

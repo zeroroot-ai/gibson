@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package orgmemberviolation exercises the orgmemberwrite guard: a call to
 // AddOrgMember/RemoveOrgMember from a file outside the allowlisted
 // machine-user administrator-role reconciler must be flagged.

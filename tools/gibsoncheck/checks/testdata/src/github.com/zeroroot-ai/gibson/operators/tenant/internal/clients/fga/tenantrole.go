@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Elastic-2.0
+// Copyright 2026 Zero Root AI
+
 // Package fga is a testdata stand-in for the real
 // operators/tenant/internal/clients/fga package. This file's path
 // (.../clients/fga/tenantrole.go) is the guard's one file-level exemption
