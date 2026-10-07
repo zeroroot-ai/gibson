@@ -363,18 +363,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		return nil, fmt.Errorf("failed to listen on %s: %w", d.grpcAddr, err)
 	}
 
-	// Build interceptor chains. The error detail is first (outermost), so it
-	// sees the status that leaves the daemon. Recovery is second.
+	// Build interceptor chains. Recovery is always first (outermost).
 	var unaryInterceptors []grpc.UnaryServerInterceptor
 	var streamInterceptors []grpc.StreamServerInterceptor
 
-	// 0. Error detail — each error status carries one ErrorDetail with a
-	// code and a reason (ADR-0028 rule 4, gibson#847). It changes no message.
-	unaryErrorDetail, streamErrorDetail := errorDetailInterceptors()
-	unaryInterceptors = append(unaryInterceptors, unaryErrorDetail)
-	streamInterceptors = append(streamInterceptors, streamErrorDetail)
-
-	// 1. Panic recovery (catches panics from all inner interceptors)
+	// 1. Panic recovery (outermost — catches panics from all inner interceptors)
 	var recoveryMeter metric.Meter
 	if d.infrastructure != nil && d.infrastructure.otelStack != nil &&
 		d.infrastructure.otelStack.MeterProvider != nil {

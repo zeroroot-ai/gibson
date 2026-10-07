@@ -13,27 +13,26 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// errorDetailInterceptors returns the unary and stream interceptors that
-// attach one gibson.common.v1.ErrorDetail to each error status that has none
-// (ADR-0028, rule 4, gibson#847).
+// withErrorDetailInterceptors wraps the outermost interceptors so that each
+// error status that they return carries one gibson.common.v1.ErrorDetail
+// (ADR-0028, rule 4, gibson#847). panicRecoveryInterceptors applies it, so
+// the detail also covers a status that the scrub interceptor rewrote and a
+// status that the recovery made from a panic.
 //
-// Position in chain: outermost. The scrub interceptor rewrites the message of
-// a status, and the recovery interceptor turns a panic into a status. This
-// interceptor runs after both on the way out, so each status that leaves the
-// daemon carries a code and a reason.
-//
-// The interceptor changes no message. It adds the detail only. A status that
-// already carries an ErrorDetail, for example from the protovalidate
-// interceptor with its field errors, passes unchanged.
-func errorDetailInterceptors() (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
-	unary := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		resp, err := handler(ctx, req)
+// It changes no message. It adds the detail only. A status that already
+// carries an ErrorDetail, for example from the protovalidate interceptor with
+// its field errors, passes unchanged.
+func withErrorDetailInterceptors(
+	unary grpc.UnaryServerInterceptor, stream grpc.StreamServerInterceptor,
+) (grpc.UnaryServerInterceptor, grpc.StreamServerInterceptor) {
+	wrappedUnary := func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		resp, err := unary(ctx, req, info, handler)
 		return resp, withErrorDetail(err)
 	}
-	stream := func(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		return withErrorDetail(handler(srv, ss))
+	wrappedStream := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		return withErrorDetail(stream(srv, ss, info, handler))
 	}
-	return unary, stream
+	return wrappedUnary, wrappedStream
 }
 
 // withErrorDetail returns err with one ErrorDetail in its status details. A
@@ -51,10 +50,16 @@ func withErrorDetail(err error) error {
 		Code:   errorCodeFor(st.Code()),
 		Reason: reasonFor(st.Code()),
 	}
+	return attachDetail(err, st, detail)
+}
+
+// attachDetail returns st with detail in its details. When the detail cannot
+// be attached (st has the code OK, or the detail does not marshal), it
+// returns err as it was: the status is still correct without the detail.
+func attachDetail(err error, st *status.Status, detail *commonpb.ErrorDetail) error {
 	withDetail, derr := st.WithDetails(detail)
 	if derr != nil {
-		// The detail did not marshal. The status is still correct without it.
-		return status.ErrorProto(st.Proto())
+		return err
 	}
 	return status.ErrorProto(withDetail.Proto())
 }

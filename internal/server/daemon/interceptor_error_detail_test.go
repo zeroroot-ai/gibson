@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
@@ -13,7 +14,17 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
+
+// passUnary and passStream are inner interceptors that only call the handler.
+func passUnary(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+	return handler(ctx, req)
+}
+
+func passStream(srv any, ss grpc.ServerStream, _ *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	return handler(srv, ss)
+}
 
 // errorDetailOf returns the one ErrorDetail in the status of err.
 func errorDetailOf(t *testing.T, err error) *commonpb.ErrorDetail {
@@ -41,7 +52,7 @@ func TestErrorDetail_InvalidRequestNamesTheField(t *testing.T) {
 		t.Fatalf("buildProtovalidateValidator: %v", err)
 	}
 	validate := newProtovalidateUnaryInterceptor(v)
-	unary, _ := errorDetailInterceptors()
+	unary, _ := withErrorDetailInterceptors(passUnary, passStream)
 	req := &missionv1.AgentNodeConfig{AgentName: "test", MaxTokensPerCall: ptrInt32(-1)}
 
 	_, err = unary(context.Background(), req, &grpc.UnaryServerInfo{FullMethod: "/test.Method"},
@@ -145,5 +156,91 @@ func TestScrubError_KeepsTheDetails(t *testing.T) {
 	}
 	if errorDetailOf(t, got).GetReason() != "INTERNAL" {
 		t.Errorf("detail lost: %v", got)
+	}
+}
+
+// Each gRPC code maps to one API code. A code that gRPC does not define is a
+// fault of the daemon.
+func TestErrorCodeFor_EachCode(t *testing.T) {
+	cases := map[codes.Code]commonpb.ErrorCode{
+		codes.OK:                commonpb.ErrorCode_ERROR_CODE_UNSPECIFIED,
+		codes.OutOfRange:        commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+		codes.NotFound:          commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+		codes.AlreadyExists:     commonpb.ErrorCode_ERROR_CODE_ALREADY_EXISTS,
+		codes.ResourceExhausted: commonpb.ErrorCode_ERROR_CODE_RESOURCE_EXHAUSTED,
+		codes.Canceled:          commonpb.ErrorCode_ERROR_CODE_CANCELLED,
+		codes.Aborted:           commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+		codes.Unimplemented:     commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+		codes.DataLoss:          commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+		codes.PermissionDenied:  commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,
+		codes.Code(99):          commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+	}
+	for code, want := range cases {
+		if got := errorCodeFor(code); got != want {
+			t.Errorf("errorCodeFor(%v) = %v, want %v", code, got, want)
+		}
+	}
+}
+
+// A status that cannot take a detail passes as it was.
+func TestAttachDetail_KeepsTheErrorWhenTheDetailCannotAttach(t *testing.T) {
+	err := errors.New("boom")
+	got := attachDetail(err, status.New(codes.OK, ""), &commonpb.ErrorDetail{})
+	if !errors.Is(got, err) {
+		t.Fatalf("attachDetail = %v, want the error unchanged", got)
+	}
+}
+
+// The stream wrapper attaches the detail too.
+func TestErrorDetail_StreamStatusCarriesTheDetail(t *testing.T) {
+	_, stream := withErrorDetailInterceptors(passUnary, passStream)
+	err := stream(nil, nil, &grpc.StreamServerInfo{FullMethod: "/test.Stream"},
+		func(any, grpc.ServerStream) error { return status.Error(codes.NotFound, "gone") })
+	if errorDetailOf(t, err).GetReason() != "NOT_FOUND" {
+		t.Fatalf("stream status %v has no NOT_FOUND detail", err)
+	}
+}
+
+// fakeRecvStream receives one message.
+type fakeRecvStream struct {
+	grpc.ServerStream
+	msg proto.Message
+}
+
+func (s *fakeRecvStream) Context() context.Context { return context.Background() }
+
+func (s *fakeRecvStream) RecvMsg(m any) error {
+	proto.Merge(m.(proto.Message), s.msg)
+	return nil
+}
+
+// An invalid message on a stream gets the field errors as well.
+func TestErrorDetail_InvalidStreamMessageNamesTheField(t *testing.T) {
+	v, err := buildProtovalidateValidator()
+	if err != nil {
+		t.Fatalf("buildProtovalidateValidator: %v", err)
+	}
+	intercept := newProtovalidateStreamInterceptor(v)
+	inner := &fakeRecvStream{msg: &missionv1.AgentNodeConfig{AgentName: "test", MaxTokensPerCall: ptrInt32(-1)}}
+	err = intercept(nil, inner, &grpc.StreamServerInfo{FullMethod: "/test.Stream"},
+		func(_ any, ss grpc.ServerStream) error { return ss.RecvMsg(&missionv1.AgentNodeConfig{}) })
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
+	}
+	if fe := errorDetailOf(t, err).GetFieldErrors(); len(fe) != 1 || fe[0].GetField() != "max_tokens_per_call" {
+		t.Fatalf("field errors = %v, want max_tokens_per_call", fe)
+	}
+}
+
+// The outermost interceptors attach the detail to a recovered panic.
+func TestPanicRecovery_RecoveredPanicCarriesTheDetail(t *testing.T) {
+	unary, _, err := panicRecoveryInterceptors(slog.Default(), nil)
+	if err != nil {
+		t.Fatalf("panicRecoveryInterceptors: %v", err)
+	}
+	_, err = unary(context.Background(), nil, &grpc.UnaryServerInfo{FullMethod: "/test.Panic"},
+		func(context.Context, any) (any, error) { panic("boom") })
+	if status.Code(err) != codes.Internal || errorDetailOf(t, err).GetReason() != "INTERNAL" {
+		t.Fatalf("recovered panic = %v, want Internal with an INTERNAL detail", err)
 	}
 }

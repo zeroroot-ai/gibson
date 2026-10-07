@@ -21,6 +21,10 @@ import (
 // outermost interceptors in the chain so they catch panics from all inner
 // interceptors (auth, tracing, etc.).
 //
+// Because they are outermost, they also attach one ErrorDetail to each error
+// status that leaves the daemon, a recovered panic included (ADR-0028 rule 4,
+// gibson#847). See interceptor_error_detail.go.
+//
 // On recovery:
 //   - Logs the panic value and full stack trace at slog.Error level
 //   - Increments the gibson.grpc.panics_recovered_total counter
@@ -41,8 +45,8 @@ func panicRecoveryInterceptors(
 		}
 	}
 
-	unary := unaryPanicRecovery(logger, panicsTotal)
-	stream := streamPanicRecovery(logger, panicsTotal)
+	unary, stream := withErrorDetailInterceptors(
+		unaryPanicRecovery(logger, panicsTotal), streamPanicRecovery(logger, panicsTotal))
 	return unary, stream, nil
 }
 
