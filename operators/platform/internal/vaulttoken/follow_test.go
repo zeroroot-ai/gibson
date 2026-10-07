@@ -5,7 +5,6 @@ package vaulttoken
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,25 +57,24 @@ func newFakeVaultTokens(t *testing.T, tokens ...string) (*fakeVaultTokens, *http
 		f.good[tok] = true
 	}
 	answer := func(w http.ResponseWriter, r *http.Request, body string) {
-		tok := r.Header.Get("X-Vault-Token")
-		if !f.accepts(tok) {
+		if !f.accepts(r.Header.Get("X-Vault-Token")) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"errors":["permission denied"]}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, body, tok)
+		_, _ = w.Write([]byte(body))
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/auth/token/lookup-self", func(w http.ResponseWriter, r *http.Request) {
 		if !f.renewable(r.Header.Get("X-Vault-Token")) {
-			answer(w, r, `{"data":{"renewable":false,"ttl":0,"id":%q}}`)
+			answer(w, r, `{"data":{"renewable":false,"ttl":0}}`)
 			return
 		}
-		answer(w, r, `{"data":{"renewable":true,"ttl":3600,"id":%q}}`)
+		answer(w, r, `{"data":{"renewable":true,"ttl":3600}}`)
 	})
 	mux.HandleFunc("/v1/auth/token/renew-self", func(w http.ResponseWriter, r *http.Request) {
-		answer(w, r, `{"auth":{"client_token":%q,"lease_duration":3600}}`)
+		answer(w, r, `{"auth":{"lease_duration":3600}}`)
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
