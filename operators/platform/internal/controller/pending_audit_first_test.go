@@ -8,11 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -224,5 +226,92 @@ func TestPlatformBootstrap_DeleteKeepsPendingRecords(t *testing.T) {
 	}
 	if len(up.Events()) != 1 || len(pb.Finalizers) != 0 {
 		t.Fatalf("sent = %d, finalizers = %v; want the record sent and the finalizer gone", len(up.Events()), pb.Finalizers)
+	}
+}
+
+// After the grace, a delete with no daemon ends: the finalizer goes and the
+// records go to the operator log.
+func TestPlatformBootstrap_DeleteEndsAfterTheGrace(t *testing.T) {
+	s := mustScheme(t)
+	old := metav1.NewTime(metav1.Now().Add(-2 * pendingDeleteGrace))
+	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{
+		Name: "platform", Finalizers: []string{platformBootstrapFinalizer}, DeletionTimestamp: &old,
+	}}
+	pb.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, pb, "", "", map[string]string{"client": "dashboard"}),
+	}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
+	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}
+	if _, err := r.reconcileDeletion(context.Background(), pb); err != nil {
+		t.Fatalf("reconcileDeletion: %v", err)
+	}
+	if len(pb.Finalizers) != 0 {
+		t.Fatalf("finalizers = %v, want none after the grace", pb.Finalizers)
+	}
+}
+
+// When the status that holds the record cannot be written, no step runs.
+func TestPlatformBootstrap_NoStatusWriteMeansNoStep(t *testing.T) {
+	s := mustScheme(t)
+	pb := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{
+		Name: "platform", Generation: 1, Finalizers: []string{platformBootstrapFinalizer},
+	}}
+	base := fake.NewClientBuilder().WithScheme(s).WithObjects(pb).WithStatusSubresource(pb).Build()
+	cli := interceptor.NewClient(base, interceptor.Funcs{
+		SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+			return errors.New("api server down")
+		},
+	})
+	r := &PlatformBootstrapReconciler{Client: cli, Scheme: s, Audit: (&audittest.Sink{}).Emitter(t)}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(pb)}); err == nil {
+		t.Fatal("want an error when the record cannot be kept")
+	}
+	var got gibsonv1alpha1.PlatformBootstrap
+	if err := base.Get(context.Background(), client.ObjectKeyFromObject(pb), &got); err != nil {
+		t.Fatal(err)
+	}
+	if findCondition(got.Status.Conditions, gibsonv1alpha1.ConditionUnsealKeyEscrowed) != nil {
+		t.Fatal("a step ran with no record kept")
+	}
+}
+
+// The delete of an OIDC client waits while its pending records cannot move to
+// a parent, and ends after the grace.
+func TestOIDCClientDelete_PendingRecordsWaitThenEnd(t *testing.T) {
+	s := mustScheme(t)
+	mk := func(age time.Duration) (*OIDCClientReconciler, *gibsonv1alpha1.OIDCClient) {
+		ts := metav1.NewTime(metav1.Now().Add(-age))
+		oc := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{
+			Name: "dashboard", Namespace: "gibson", Finalizers: []string{oidcClientFinalizer}, DeletionTimestamp: &ts,
+		}}
+		oc.Spec.ApplicationType = gibsonv1alpha1.OIDCAppTypeMachineUser
+		oc.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+			pendingRecord(audit.ActionOIDCClientApply, oc, "", "", map[string]string{"client": "dashboard"}),
+		}
+		cli := fake.NewClientBuilder().WithScheme(s).WithObjects(oc).WithStatusSubresource(oc).Build()
+		return &OIDCClientReconciler{Client: cli, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}, oc
+	}
+
+	r, oc := mk(time.Minute)
+	res, err := r.reconcileDeletion(context.Background(), oc)
+	if err == nil || res.RequeueAfter == 0 || len(oc.Finalizers) != 1 {
+		t.Fatalf("within the grace: res = %+v, err = %v, finalizers = %v; want a wait", res, err, oc.Finalizers)
+	}
+	r, oc = mk(2 * pendingDeleteGrace)
+	if _, err := r.reconcileDeletion(context.Background(), oc); err != nil || len(oc.Finalizers) != 0 {
+		t.Fatalf("after the grace: err = %v, finalizers = %v; want the finalizer gone", err, oc.Finalizers)
+	}
+	// An app client with no Zitadel client id takes the same path.
+	r, oc = mk(time.Minute)
+	oc.Spec.ApplicationType = ""
+	oc.Status.ClientID = ""
+	if res, err := r.reconcileDeletion(context.Background(), oc); err == nil || res.RequeueAfter == 0 {
+		t.Fatalf("app client within the grace: res = %+v, err = %v; want a wait", res, err)
+	}
+	r, oc = mk(2 * pendingDeleteGrace)
+	oc.Spec.ApplicationType = ""
+	oc.Status.ClientID = ""
+	if _, err := r.reconcileDeletion(context.Background(), oc); err != nil || len(oc.Finalizers) != 0 {
+		t.Fatalf("app client after the grace: err = %v, finalizers = %v", err, oc.Finalizers)
 	}
 }

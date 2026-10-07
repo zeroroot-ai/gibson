@@ -263,7 +263,10 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetDeclaredName()),
 	}
-	identity, _ := auth.IdentityFromContext(ctx)
+	identity, identityErr := auth.IdentityFromContext(ctx)
+	if identityErr != nil {
+		return nil, status.Error(codes.PermissionDenied, "no identity in context")
+	}
 	event := secrets.AuditEvent{
 		ActorID:       identity.Subject,
 		ActorTenantID: tenant.String(),
