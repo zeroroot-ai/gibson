@@ -417,3 +417,60 @@ func TestReconcileLoginClientToken(t *testing.T) {
 		}
 	})
 }
+
+// FAILING FIXTURE: inside the second wait (the consumer holds the new token,
+// but for less than one grace), nothing is removed.
+func TestReconcileAdminToken_NoRetireInsideTheSecondWait(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "2026-10-04T23:55:00Z")}
+	if _, err := runRetire(t, vc, sys, "new"); err != nil {
+		t.Fatal(err)
+	}
+	if len(sys.retired) != 0 {
+		t.Fatalf("retired %v five minutes after the consumer got the new token", sys.retired)
+	}
+}
+
+// A retire that waits for the consumer shows it in the condition.
+func TestReconcileAdminToken_WaitingForTheConsumerIsVisible(t *testing.T) {
+	sys := &fakeSystemClient{validTokens: map[string]bool{"new": true}}
+	vc := &fakeVaultClient{kv: retireEntry("2026-10-04T23:10:00Z", "")}
+	pb, err := runRetire(t, vc, sys, "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := adminTokenCond(t, pb); c.Status != metav1.ConditionTrue || c.Reason != "RetireWaitingForConsumer" {
+		t.Fatalf("condition = %+v", c)
+	}
+}
+
+// After maxRefusedMints tokens in a row that Zitadel refused, the step stops
+// minting.
+func TestReconcileAdminToken_StopsMintingAfterRepeatedRefusals(t *testing.T) {
+	vc := &fakeVaultClient{kv: map[string]map[string]string{adminTokenKVKey: {
+		adminTokenProperty: "refused", mintedAtProperty: "2026-10-04T20:00:00Z", refusedMintsProperty: "2",
+	}}}
+	sys := &fakeSystemClient{}
+	pb := adminTokenBootstrap()
+	if _, err := adminTokenReconciler(t, vc, sys).reconcileAdminToken(context.Background(), pb, logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	if sys.minted != 0 {
+		t.Fatalf("minted %d after %d refused tokens", sys.minted, maxRefusedMints)
+	}
+	if c := adminTokenCond(t, pb); c.Reason != "MintedTokensRefused" {
+		t.Fatalf("condition = %+v", c)
+	}
+
+	// One refusal below the limit mints, and counts it.
+	vc = &fakeVaultClient{kv: map[string]map[string]string{adminTokenKVKey: {
+		adminTokenProperty: "refused", mintedAtProperty: "2026-10-04T20:00:00Z",
+	}}}
+	sys = &fakeSystemClient{}
+	if _, err := adminTokenReconciler(t, vc, sys).reconcileAdminToken(context.Background(), adminTokenBootstrap(), logr.Discard()); err != nil {
+		t.Fatal(err)
+	}
+	if sys.minted != 1 || vc.kv[adminTokenKVKey][refusedMintsProperty] != "1" {
+		t.Fatalf("minted %d, stored %v; want one mint and a count of 1", sys.minted, vc.kv[adminTokenKVKey])
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -42,6 +43,10 @@ const (
 	mintedAtProperty      = "mintedAt"
 	retireAfterProperty   = "retireOthersAfter"
 	consumerSinceProperty = "consumerSince"
+	// refusedMintsProperty counts the tokens in a row that this operator
+	// minted and Zitadel then refused. After maxRefusedMints the step stops
+	// minting, so a refused user does not collect a token every pass.
+	refusedMintsProperty = "refusedMints"
 
 	// adminMachineUser is the name of the IAM_OWNER machine user. It is the
 	// name the Zitadel setup job used, so an install from before this step
@@ -60,6 +65,8 @@ const (
 	// still holds the old token (ESO not refreshed) blocks the removal.
 	tokenRetireGrace = 10 * time.Minute
 
+	maxRefusedMints = 3
+
 	// loginClientSecret is the Secret that the ExternalSecret login-client
 	// writes and zitadel-login mounts.
 	loginClientSecret = "login-client"
@@ -76,8 +83,10 @@ const (
 //     new token and writes it as a new version of the entry.
 //   - Rotate: the token is older than tokenRotateAfter, or the entry has no
 //     mint time. The step mints a successor while the old token still works.
-//   - Retire: tokenRetireGrace after a mint, the step removes each other
-//     token of the user, so the old token is refused.
+//   - Retire: tokenRetireGrace after a mint, and a full tokenRetireGrace
+//     after the consumer Secret first holds the new token, the step removes
+//     each other token of the user, so the old token is refused. While the
+//     consumer Secret holds the old token, nothing is removed.
 //
 // The step writes no Kubernetes Secret.
 func (r *PlatformBootstrapReconciler) reconcileAdminToken(
@@ -162,6 +171,7 @@ func (r *PlatformBootstrapReconciler) rotateToken(
 	}
 
 	reason := "TokenMinted"
+	refused := 0
 	if pat := stored[adminTokenProperty]; pat != "" {
 		valid, verr := rot.valid(ctx, pat)
 		if verr != nil {
@@ -176,6 +186,15 @@ func (r *PlatformBootstrapReconciler) rotateToken(
 			return rotationResult{reason: "MintedTokenRefused",
 				err: "Zitadel refuses the token this operator minted at " + stored[mintedAtProperty]}
 		case !valid:
+			if perr == nil {
+				// A token this operator minted, and Zitadel refuses it.
+				refused, _ = strconv.Atoi(stored[refusedMintsProperty])
+				refused++
+				if refused >= maxRefusedMints {
+					return rotationResult{reason: "MintedTokensRefused",
+						err: fmt.Sprintf("Zitadel refused the last %d tokens this operator minted; it mints no more until the user is fixed", refused)}
+				}
+			}
 			logger.Info("the stored Zitadel token is not valid; minting a new one")
 		case perr != nil || now.Sub(minted) >= tokenRotateAfter:
 			logger.Info("the stored Zitadel token is due for rotation; minting its successor")
@@ -192,13 +211,17 @@ func (r *PlatformBootstrapReconciler) rotateToken(
 		}
 		return rotationResult{reason: "MintFailed", err: err.Error()}
 	}
-	if err := vc.WriteKV(ctx, rot.kvKey, map[string]string{
+	entry := map[string]string{
 		adminTokenProperty:  tok.Token,
 		adminUserProperty:   userID,
 		tokenIDProperty:     tok.ID,
 		mintedAtProperty:    now.UTC().Format(time.RFC3339),
 		retireAfterProperty: now.Add(tokenRetireGrace).UTC().Format(time.RFC3339),
-	}); err != nil {
+	}
+	if refused > 0 {
+		entry[refusedMintsProperty] = strconv.Itoa(refused)
+	}
+	if err := vc.WriteKV(ctx, rot.kvKey, entry); err != nil {
 		return rotationResult{reason: "VaultWriteFailed", err: err.Error()}
 	}
 	logger.Info("minted a Zitadel token and stored it in OpenBao", "user_id", userID, "token_id", tok.ID)
@@ -228,7 +251,9 @@ func (r *PlatformBootstrapReconciler) retireOldTokens(
 	}
 	if held != stored[adminTokenProperty] {
 		logger.Info("the consumer Secret does not hold the new Zitadel token yet; the old tokens stay")
-		return ok
+		return rotationResult{reason: "RetireWaitingForConsumer",
+			message: "OpenBao holds a valid Zitadel token; the consumer Secret does not hold it yet, so the old tokens stay (retire due since " +
+				stored[retireAfterProperty] + ")"}
 	}
 	since, err := time.Parse(time.RFC3339, stored[consumerSinceProperty])
 	if err != nil {
