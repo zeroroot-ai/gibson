@@ -5,6 +5,9 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -28,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
@@ -172,6 +176,9 @@ type CatalogPluginRunnable struct {
 	Daemon   CatalogPluginDaemon
 	Config   CatalogPluginConfig
 	Interval time.Duration
+	// Audit writes the record of each create, change and delete before it
+	// happens (gibson#676). Required.
+	Audit *audit.SagaEmitter
 
 	// readFile reads the edge CA file. Tests replace it.
 	readFile func(string) ([]byte, error)
@@ -187,6 +194,9 @@ func (r *CatalogPluginRunnable) SetupWithManager(mgr manager.Manager) error {
 	}
 	if err := r.Config.Validate(); err != nil {
 		return err
+	}
+	if r.Audit == nil {
+		return errors.New("catalog plugins: Audit emitter is nil; the loop does not change state without an audit record")
 	}
 	if r.Client == nil {
 		r.Client = mgr.GetClient()
@@ -312,10 +322,32 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 		r.ensureNamespace, r.ensureNamespaceRBAC, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
 		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensurePluginEgressPolicy, r.ensureDeployment,
 	}
-	for _, step := range steps {
-		if err := step(ctx, p); err != nil {
-			return false, err
+	apply := func() error {
+		for _, step := range steps {
+			if err := step(ctx, p); err != nil {
+				return err
+			}
 		}
+		return nil
+	}
+	changes, err := r.instanceChanges(ctx, p)
+	if err != nil {
+		return false, err
+	}
+	if changes {
+		// The record is written before the first object of a new or changed
+		// instance. A pass that finds the instance as desired writes none.
+		ev := audit.Event{
+			Action: audit.ActionCatalogPluginApply, TenantID: p.TenantID,
+			TargetType: "catalog_plugin", TargetID: p.TenantID + "/" + p.PluginID,
+			Fields: map[string]string{"plugin": p.PluginID, "image": p.Image},
+		}
+		err = r.Audit.Change(ctx, ev, apply)
+	} else {
+		err = apply()
+	}
+	if err != nil {
+		return false, err
 	}
 	var dep appsv1.Deployment
 	key := client.ObjectKey{Namespace: pluginNamespace(p.TenantID), Name: pluginObjectName(p.PluginID)}
@@ -323,6 +355,58 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 		return false, fmt.Errorf("get Deployment %s: %w", key, err)
 	}
 	return dep.Status.AvailableReplicas >= 1, nil
+}
+
+// annotationDesiredHash holds, on the Deployment of an instance, the hash of
+// the state that the loop last applied. A pass that finds the same hash makes
+// no change that needs a record.
+const annotationDesiredHash = "gibson.zeroroot.ai/catalog-plugin-desired"
+
+// desiredHash is the hash of everything that the loop applies for one
+// instance: the wish and the pod that follows from it.
+func (r *CatalogPluginRunnable) desiredHash(p provision.DesiredCatalogPlugin) string {
+	raw, _ := json.Marshal(struct {
+		Wish provision.DesiredCatalogPlugin
+		Pod  corev1.PodSpec
+	}{p, r.podSpec(p)})
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// instanceChanges reports whether a pass makes a change to the instance that
+// needs an audit record: one of its objects is missing, or its desired state
+// is not the one that the loop last applied. It reads the namespace and its
+// RoleBinding first, because the operator can read the objects inside the
+// namespace only through that RoleBinding. A Forbidden answer counts as a
+// missing object.
+func (r *CatalogPluginRunnable) instanceChanges(ctx context.Context, p provision.DesiredCatalogPlugin) (bool, error) {
+	ns, name := pluginNamespace(p.TenantID), pluginObjectName(p.PluginID)
+	cnp := ciliumegress.NewPolicy()
+	id := &unstructured.Unstructured{}
+	id.SetGroupVersionKind(clusterSPIFFEIDGVK)
+	var dep appsv1.Deployment
+	objects := []struct {
+		key client.ObjectKey
+		obj client.Object
+	}{
+		{client.ObjectKey{Name: ns}, &corev1.Namespace{}},
+		{client.ObjectKey{Namespace: ns, Name: pluginNamespaceRoleBinding}, &rbacv1.RoleBinding{}},
+		{client.ObjectKey{Name: clusterSPIFFEIDName(p.PluginID, p.TenantID)}, id},
+		{client.ObjectKey{Namespace: ns, Name: "default-deny"}, &networkingv1.NetworkPolicy{}},
+		{client.ObjectKey{Namespace: ns, Name: name}, &corev1.ServiceAccount{}},
+		{client.ObjectKey{Namespace: ns, Name: name}, &networkingv1.NetworkPolicy{}},
+		{client.ObjectKey{Namespace: ns, Name: egressPolicyName(name)}, cnp},
+		{client.ObjectKey{Namespace: ns, Name: name}, &dep},
+	}
+	for _, o := range objects {
+		switch err := r.Client.Get(ctx, o.key, o.obj); {
+		case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
+			return true, nil
+		case err != nil:
+			return false, fmt.Errorf("get %T %s: %w", o.obj, o.key, err)
+		}
+	}
+	return dep.Annotations[annotationDesiredHash] != r.desiredHash(p), nil
 }
 
 func instanceLabels(p provision.DesiredCatalogPlugin) map[string]string {
@@ -575,6 +659,10 @@ func (r *CatalogPluginRunnable) ensureDeployment(ctx context.Context, p provisio
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginObjectName(p.PluginID), Namespace: pluginNamespace(p.TenantID)}}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Labels = instanceLabels(p)
+		if dep.Annotations == nil {
+			dep.Annotations = map[string]string{}
+		}
+		dep.Annotations[annotationDesiredHash] = r.desiredHash(p)
 		replicas := int32(1)
 		dep.Spec.Replicas = &replicas
 		dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{
@@ -716,8 +804,11 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 		if isWanted(ids.Items[i].GetLabels()) {
 			continue
 		}
-		if err := r.Client.Delete(ctx, &ids.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("delete ClusterSPIFFEID %s: %w", ids.Items[i].GetName(), err)
+		id := &ids.Items[i]
+		if err := r.deleteWithRecord(ctx, id.GetLabels()[labelPluginTenant], id.GetLabels()[labelPlugin], "ClusterSPIFFEID", id.GetName(), func() error {
+			return r.Client.Delete(ctx, id)
+		}); err != nil {
+			return fmt.Errorf("delete ClusterSPIFFEID %s: %w", id.GetName(), err)
 		}
 	}
 
@@ -735,7 +826,9 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 			continue
 		}
 		if len(wanted[tenant]) == 0 {
-			if err := r.Client.Delete(ctx, ns); err != nil && !apierrors.IsNotFound(err) {
+			if err := r.deleteWithRecord(ctx, tenant, "", "Namespace", ns.Name, func() error {
+				return r.Client.Delete(ctx, ns)
+			}); err != nil {
 				return fmt.Errorf("delete Namespace %s: %w", ns.Name, err)
 			}
 			continue
@@ -748,10 +841,36 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 			if isWanted(deps.Items[d].Labels) {
 				continue
 			}
-			if err := r.deleteInstanceObjects(ctx, deps.Items[d].Namespace, deps.Items[d].Name); err != nil {
+			dep := &deps.Items[d]
+			if err := r.deleteWithRecord(ctx, tenant, dep.Labels[labelPlugin], "Deployment", dep.Namespace+"/"+dep.Name, func() error {
+				return r.deleteInstanceObjects(ctx, dep.Namespace, dep.Name)
+			}); err != nil {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+// deleteWithRecord writes the audit record of a delete, then runs it. A
+// NotFound answer is not a failure. The record is written even when the object
+// is already gone, which is rare: the list that found it is a moment old.
+func (r *CatalogPluginRunnable) deleteWithRecord(ctx context.Context, tenant, plugin, kind, name string, del func() error) error {
+	ev := audit.Event{
+		Action: audit.ActionCatalogPluginDelete, TenantID: tenant,
+		TargetType: "catalog_plugin", TargetID: tenant + "/" + plugin,
+		Fields: map[string]string{"kind": kind, "name": name},
+	}
+	if plugin == "" {
+		ev.TargetID = tenant
+	}
+	if err := r.Audit.Change(ctx, ev, func() error {
+		if err := del(); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("audited delete of %s %s: %w", kind, name, err)
 	}
 	return nil
 }

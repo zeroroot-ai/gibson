@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -155,7 +156,15 @@ func (r *PlatformBootstrapReconciler) removeHumanAdmin(
 	orgID string,
 	logger logr.Logger,
 ) (keepGoing bool, result ctrl.Result, err error) {
+	// The record waits in the status before each change, on every pass. A
+	// drift pass that removes an administrator leaves a record even when the
+	// daemon is down (gibson#676).
+	rmFields := map[string]string{"change": "remove_human_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName}
+	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", rmFields)); rerr != nil {
+		return false, ctrl.Result{}, rerr
+	}
 	if rmErr := zc.RemoveIAMMember(ctx, m.UserID); rmErr != nil {
+		failedChange(pb, rmFields, rmErr)
 		if zitadel.IsPermanent(rmErr) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionHumanAdminsScoped, metav1.ConditionFalse,
 				"ZitadelPermanentError", fmt.Sprintf("RemoveIAMMember user=%s: %v", m.UserID, rmErr))
@@ -174,7 +183,12 @@ func (r *PlatformBootstrapReconciler) removeHumanAdmin(
 	if !isDefaultFirstInstanceAdmin(m, orgID) {
 		return true, ctrl.Result{}, nil
 	}
+	delFields := map[string]string{"change": "delete_default_admin_user", "user_id": m.UserID, "login_name": m.PreferredLoginName}
+	if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", delFields)); rerr != nil {
+		return false, ctrl.Result{}, rerr
+	}
 	if delErr := zc.DeleteUser(ctx, m.UserID); delErr != nil {
+		failedChange(pb, delFields, delErr)
 		if zitadel.IsPermanent(delErr) {
 			setBootstrapCond(pb, gibsonv1alpha1.ConditionHumanAdminsScoped, metav1.ConditionFalse,
 				"ZitadelPermanentError", fmt.Sprintf("DeleteUser user=%s: %v", m.UserID, delErr))

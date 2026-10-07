@@ -137,7 +137,9 @@ func TestOIDCClientDelete_RecordWaitsOnTheParent(t *testing.T) {
 	oc.Status.ClientID = "client-1"
 	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(pb, oc).WithStatusSubresource(pb, oc).Build()
 	r := &OIDCClientReconciler{Client: cli, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}
-	r.recordDeletion(context.Background(), oc, "app-1")
+	if err := r.recordDeletion(context.Background(), oc, "app-1"); err != nil {
+		t.Fatalf("recordDeletion: %v", err)
+	}
 	var got gibsonv1alpha1.PlatformBootstrap
 	if err := cli.Get(context.Background(), client.ObjectKey{Name: "platform"}, &got); err != nil {
 		t.Fatal(err)
@@ -148,7 +150,9 @@ func TestOIDCClientDelete_RecordWaitsOnTheParent(t *testing.T) {
 
 	sink := &audittest.Sink{}
 	r.Audit = sink.Emitter(t)
-	r.recordDeletion(context.Background(), oc, "app-1")
+	if err := r.recordDeletion(context.Background(), oc, "app-1"); err != nil {
+		t.Fatalf("recordDeletion: %v", err)
+	}
 	if len(sink.Events()) != 1 {
 		t.Fatalf("with the daemon up the delete record goes straight to it: %+v", sink.Events())
 	}

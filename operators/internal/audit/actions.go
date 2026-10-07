@@ -104,4 +104,15 @@ const (
 	// Zitadel project, roles and policies, the OpenBao transit key or the FGA
 	// store and model.
 	ActionPlatformBootstrap = "operator.platform_bootstrap"
+
+	// Catalog plugins.
+
+	// ActionCatalogPluginApply is the record of the first creation of a
+	// catalog plugin instance of a tenant, or of a change to its desired
+	// state: the namespace, the RBAC, the workload identity, the egress
+	// policies and the Deployment.
+	ActionCatalogPluginApply = "operator.catalog_plugin_apply"
+	// ActionCatalogPluginDelete is the record of the delete of a catalog
+	// plugin instance, or of the plugin namespace of a tenant.
+	ActionCatalogPluginDelete = "operator.catalog_plugin_delete"
 )

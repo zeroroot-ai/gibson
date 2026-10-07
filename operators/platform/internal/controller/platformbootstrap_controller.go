@@ -226,7 +226,11 @@ func (r *PlatformBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	recording := pb.Status.ObservedGeneration != pb.Generation
 	recordFields := map[string]string{"generation": strconv.FormatInt(pb.Generation, 10)}
 	if recording {
-		keepPending(&pb.Status.PendingAuditRecords, pendingRecord(audit.ActionPlatformBootstrap, &pb, "", "", recordFields))
+		// The record is in the status before the first step changes anything.
+		// When the status is not written, no step runs.
+		if err := r.recordBefore(ctx, &pb, pendingRecord(audit.ActionPlatformBootstrap, &pb, "", "", recordFields)); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	steps := []reconcileStep{
 		// Step 0: escrow the OpenBao unseal key.
@@ -672,6 +676,20 @@ func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb 
 	// their own finalizers to revoke Zitadel-side state. We do NOT
 	// delete the FGA model or Zitadel project — destructive ops require
 	// explicit operator action.
+	// The pending audit records live in this status, and the status goes with
+	// the object. Send them first. The finalizer stays until the daemon has
+	// them, or until pendingDeleteGrace has passed since the delete started.
+	// After the grace the records go to the operator log, which is the last
+	// resort, so a teardown with no daemon does not hang for ever.
+	if _, ferr := flushPendingSent(ctx, r.Audit, &pb.Status.PendingAuditRecords); ferr != nil && len(pb.Status.PendingAuditRecords) > 0 {
+		if time.Since(pb.DeletionTimestamp.Time) < pendingDeleteGrace {
+			if serr := r.statusUpdate(ctx, pb); serr != nil {
+				return ctrl.Result{}, serr
+			}
+			return ctrl.Result{RequeueAfter: pendingRequeue}, nil
+		}
+		logPendingLost(ctx, pb.Status.PendingAuditRecords)
+	}
 	controllerutil.RemoveFinalizer(pb, platformBootstrapFinalizer)
 	if err := r.Update(ctx, pb); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
@@ -781,6 +799,13 @@ func (r *PlatformBootstrapReconciler) writeFGAStoreID(ctx context.Context, ref g
 // and the platform never became ready (hosted#309). Zitadel side effects
 // are not repeatable, so the status that records them must land.
 func (r *PlatformBootstrapReconciler) statusUpdate(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) error {
+	return r.statusUpdateFlushed(ctx, pb, nil)
+}
+
+// statusUpdateFlushed is statusUpdate for a pass that sent the records in
+// flushed. A conflict keeps the pending records that another writer added in
+// the meantime and does not bring back the ones in flushed.
+func (r *PlatformBootstrapReconciler) statusUpdateFlushed(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, flushed []gibsonv1alpha1.PendingAuditRecord) error {
 	desired := pb.Status.DeepCopy()
 	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		uerr := r.Status().Update(ctx, pb)
@@ -794,7 +819,13 @@ func (r *PlatformBootstrapReconciler) statusUpdate(ctx context.Context, pb *gibs
 		if gerr := r.Get(ctx, client.ObjectKeyFromObject(pb), fresh); gerr != nil {
 			return fmt.Errorf("re-read PlatformBootstrap after a conflict: %w", gerr)
 		}
+		freshPending := fresh.Status.PendingAuditRecords
 		fresh.Status = *desired
+		fresh.Status.PendingAuditRecords = mergePending(desired.PendingAuditRecords, freshPending, flushed)
+		if len(fresh.Status.PendingAuditRecords) == 0 {
+			fresh.Status.PendingAuditRecords = nil
+		}
+		*desired = fresh.Status
 		*pb = *fresh
 		// Wrapped, and still a conflict for RetryOnConflict (errors.As).
 		return fmt.Errorf("status update conflict, retrying: %w", uerr)
@@ -829,13 +860,14 @@ func (r *PlatformBootstrapReconciler) finish(ctx context.Context, pb *gibsonv1al
 	// Send the pending audit records when the daemon answers. A daemon that
 	// does not answer yet only delays them: they stay in the status, and the
 	// resource comes back soon to try again (gibson#583).
-	if ferr := flushPending(ctx, r.Audit, &pb.Status.PendingAuditRecords); ferr != nil {
+	flushed, ferr := flushPendingSent(ctx, r.Audit, &pb.Status.PendingAuditRecords)
+	if ferr != nil {
 		log.FromContext(ctx).V(1).Info("audit records stay pending; the daemon did not accept them", "pending", len(pb.Status.PendingAuditRecords), "err", ferr.Error())
 	}
 	if len(pb.Status.PendingAuditRecords) > 0 && err == nil && (result.RequeueAfter == 0 || result.RequeueAfter > pendingRequeue) {
 		result.RequeueAfter = pendingRequeue
 	}
-	if serr := r.statusUpdate(ctx, pb); serr != nil {
+	if serr := r.statusUpdateFlushed(ctx, pb, flushed); serr != nil {
 		if err != nil {
 			return result, fmt.Errorf("%w (and the status write failed: %w)", err, serr)
 		}

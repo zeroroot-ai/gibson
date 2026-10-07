@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -790,6 +792,9 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 	// OIDCClient CR (operators may want to keep the user across CR
 	// replacements). Standard OIDC-app deletion proceeds below.
 	if oc.Spec.ApplicationType == gibsonv1alpha1.OIDCAppTypeMachineUser {
+		if wait, err := r.parkPendingOrLog(ctx, oc); wait {
+			return ctrl.Result{RequeueAfter: requeueShort}, err
+		}
 		controllerutil.RemoveFinalizer(oc, oidcClientFinalizer)
 		if err := r.Update(ctx, oc); err != nil {
 			return ctrl.Result{}, fmt.Errorf("remove finalizer (machine user): %w", err)
@@ -815,7 +820,9 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 					// Nothing to delete (drift cleanup path).
 					return ctrl.Result{}, nil
 				}
-				r.recordDeletion(ctx, oc, appID)
+				if wait := r.recordDeletionOrLog(ctx, oc, appID); wait {
+					return ctrl.Result{RequeueAfter: requeueShort}, nil
+				}
 				if derr := zc.DeleteOIDCClient(ctx, projectID, appID); derr != nil {
 					// Transient errors at deletion time: cap retries at 3,
 					// then proceed (don't block deletion indefinitely).
@@ -847,6 +854,9 @@ func (r *OIDCClientReconciler) reconcileDeletion(ctx context.Context, oc *gibson
 		}
 	}
 
+	if wait, err := r.parkPendingOrLog(ctx, oc); wait {
+		return ctrl.Result{RequeueAfter: requeueShort}, err
+	}
 	controllerutil.RemoveFinalizer(oc, oidcClientFinalizer)
 	if err := r.Update(ctx, oc); err != nil {
 		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
@@ -1143,8 +1153,10 @@ func setTransientRetryAnnotation(oc *gibsonv1alpha1.OIDCClient, retries int) {
 // cannot hold a pending record. The record goes to the daemon when it
 // answers in time, else it waits in the status of the parent
 // PlatformBootstrap, which sends it later. The delete never waits for the
-// daemon.
-func (r *OIDCClientReconciler) recordDeletion(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, appID string) {
+// daemon, but it does wait for the record: when no daemon and no parent keeps
+// the record, recordDeletion returns an error and the caller does not delete
+// (gibson#676).
+func (r *OIDCClientReconciler) recordDeletion(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, appID string) error {
 	rec := pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
 		"client": oc.Spec.ClientName, "client_id": oc.Status.ClientID, "app_id": appID,
 	})
@@ -1152,24 +1164,84 @@ func (r *OIDCClientReconciler) recordDeletion(ctx context.Context, oc *gibsonv1a
 	err := r.Audit.Record(fctx, eventOf(rec))
 	cancel()
 	if err == nil {
-		return
+		return nil
 	}
-	logger := log.FromContext(ctx)
+	if perr := r.parkOnParent(ctx, oc, rec); perr != nil {
+		return fmt.Errorf("the audit record of the delete was not kept (daemon: %w; parent: %w)", err, perr)
+	}
+	return nil
+}
+
+// parkOnParent adds records to the pending list of the parent
+// PlatformBootstrap of oc. A conflict is retried onto a fresh read of the
+// parent, so a record that another writer added is not lost.
+func (r *OIDCClientReconciler) parkOnParent(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, recs ...gibsonv1alpha1.PendingAuditRecord) error {
 	for _, ref := range oc.GetOwnerReferences() {
 		if ref.Kind != "PlatformBootstrap" {
 			continue
 		}
-		var pb gibsonv1alpha1.PlatformBootstrap
-		if gerr := r.Get(ctx, client.ObjectKey{Name: ref.Name}, &pb); gerr != nil {
-			break
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			var pb gibsonv1alpha1.PlatformBootstrap
+			if gerr := r.Get(ctx, client.ObjectKey{Name: ref.Name}, &pb); gerr != nil {
+				return fmt.Errorf("get the parent PlatformBootstrap %s: %w", ref.Name, gerr)
+			}
+			for _, rec := range recs {
+				keepPending(&pb.Status.PendingAuditRecords, rec)
+			}
+			if uerr := r.Status().Update(ctx, &pb); uerr != nil {
+				return fmt.Errorf("update the status of the parent PlatformBootstrap %s: %w", ref.Name, uerr)
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("park the audit records on the parent: %w", err)
 		}
-		keepPending(&pb.Status.PendingAuditRecords, rec)
-		if uerr := r.Status().Update(ctx, &pb); uerr == nil {
-			return
-		}
-		break
+		return nil
 	}
-	// No daemon and no parent to hold the record: the operator log keeps it.
-	logger.Error(err, "audit record of an OIDC client delete was not kept; it is in this log line",
-		"action", rec.Action, "target", rec.TargetID, "client_id", oc.Status.ClientID, "app_id", appID)
+	return errors.New("the OIDCClient has no PlatformBootstrap parent to hold the record")
+}
+
+// recordDeletionOrLog keeps the delete record of an OIDC client. It reports
+// that the delete must wait while the record is not kept and the grace has not
+// passed. After pendingDeleteGrace the record goes to the operator log, so a
+// teardown with no daemon and no parent ends.
+func (r *OIDCClientReconciler) recordDeletionOrLog(ctx context.Context, oc *gibsonv1alpha1.OIDCClient, appID string) (wait bool) {
+	rerr := r.recordDeletion(ctx, oc, appID)
+	if rerr == nil {
+		return false
+	}
+	if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
+		log.FromContext(ctx).Error(rerr, "the delete waits: its audit record is not kept")
+		return true
+	}
+	logPendingLost(ctx, []gibsonv1alpha1.PendingAuditRecord{pendingRecord(audit.ActionOIDCClientDelete, oc, "", "", map[string]string{
+		"client": oc.Spec.ClientName, "client_id": oc.Status.ClientID, "app_id": appID,
+	})})
+	return false
+}
+
+// parkPendingOrLog moves the pending records of a deleted OIDC client to its
+// parent. It reports that the delete must wait while they are not moved and
+// the grace has not passed. After the grace the records go to the operator
+// log.
+func (r *OIDCClientReconciler) parkPendingOrLog(ctx context.Context, oc *gibsonv1alpha1.OIDCClient) (wait bool, err error) {
+	err = r.parkPendingBeforeDelete(ctx, oc)
+	if err == nil {
+		return false, nil
+	}
+	if time.Since(oc.DeletionTimestamp.Time) < pendingDeleteGrace {
+		return true, err
+	}
+	logPendingLost(ctx, oc.Status.PendingAuditRecords)
+	return false, nil
+}
+
+// parkPendingBeforeDelete moves the pending records of a deleted OIDCClient
+// to its parent before the finalizer goes. After that the status is gone, and
+// so would be the records.
+func (r *OIDCClientReconciler) parkPendingBeforeDelete(ctx context.Context, oc *gibsonv1alpha1.OIDCClient) error {
+	if len(oc.Status.PendingAuditRecords) == 0 {
+		return nil
+	}
+	return r.parkOnParent(ctx, oc, oc.Status.PendingAuditRecords...)
 }

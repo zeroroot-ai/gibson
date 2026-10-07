@@ -190,6 +190,20 @@ func TestEmitAuditEvent_NoRecordIsUnavailable(t *testing.T) {
 	}
 }
 
+// A failure record that cannot be written durably is Unavailable too, so the
+// operator keeps its pending record and sends it again.
+func TestEmitAuditEvent_NoFailureRecordIsUnavailable(t *testing.T) {
+	srv := blankServer()
+	srv.auditLogger = auditLoggerOver(t, failingDurable{})
+	failed := stepEvent()
+	failed.Result = "failure"
+	failed.Reason = "redis down"
+	_, err := srv.EmitAuditEvent(operatorCtx(), &daemonoperatorv1.EmitAuditEventRequest{Event: failed})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v (%v), want Unavailable", status.Code(err), err)
+	}
+}
+
 // The record of an operator change belongs to the tenant of the target, and
 // its actor is the identity of the caller (gibson#583).
 func TestEmitAuditEvent_RecordsTheCallerForTheTenant(t *testing.T) {

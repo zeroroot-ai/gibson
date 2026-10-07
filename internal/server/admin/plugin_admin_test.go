@@ -175,6 +175,23 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 	}
 }
 
+// With no durable audit record, the binding stays (gibson#676).
+func TestRevokePluginSecretBinding_NoRecordMeansNoRevoke(t *testing.T) {
+	srv, reg, az, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	au.recordErr = errors.New("audit store down")
+
+	_, err := srv.RevokePluginSecretBinding(ctxWithTenant(t, "acme"), &tenantv1.RevokePluginSecretBindingRequest{
+		InstallId: "abc", DeclaredName: "cred:db",
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+	if len(az.deletes) != 0 {
+		t.Fatalf("the tuple was deleted with no audit record: %+v", az.deletes)
+	}
+}
+
 // TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress: an install
 // with no recorded principal predates gibson#154. Deleting a guessed tuple
 // and publishing to a guessed channel would report a revocation that never
@@ -312,8 +329,10 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("publish failure must be Unavailable, got %v", err)
 	}
-	if len(au.events) != 1 {
-		t.Fatalf("the audit line must not claim a revocation the plugin did not hear: %d audit events", len(au.events))
+	// The record came first (gibson#676). The failed publish adds a failure
+	// record, so the trail does not claim a revocation the plugin did not hear.
+	if len(au.events) != 3 || au.events[2].Success || au.events[2].Decision != "deny" {
+		t.Fatalf("audit events = %+v, want the first revocation and then a record and a failure record", au.events)
 	}
 }
 
