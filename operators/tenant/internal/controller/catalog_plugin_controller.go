@@ -864,12 +864,15 @@ func (r *CatalogPluginRunnable) deleteWithRecord(ctx context.Context, tenant, pl
 	if plugin == "" {
 		ev.TargetID = tenant
 	}
-	return r.Audit.Change(ctx, ev, func() error {
+	if err := r.Audit.Change(ctx, ev, func() error {
 		if err := del(); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("audited delete of %s %s: %w", kind, name, err)
+	}
+	return nil
 }
 
 // deleteInstanceObjects removes the Deployment, the NetworkPolicy, the

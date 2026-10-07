@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -88,11 +89,11 @@ func TestStatusUpdate_ConflictKeepsAConcurrentPendingRecord(t *testing.T) {
 				// The other writer adds its record, then this write loses.
 				var cur gibsonv1alpha1.PlatformBootstrap
 				if err := c.Get(ctx, client.ObjectKey{Name: "platform"}, &cur); err != nil {
-					return err
+					return fmt.Errorf("get: %w", err)
 				}
 				cur.Status.PendingAuditRecords = append(cur.Status.PendingAuditRecords, other)
 				if err := c.Status().Update(ctx, &cur); err != nil {
-					return err
+					return fmt.Errorf("update: %w", err)
 				}
 				return apierrors.NewConflict(schema.GroupResource{Group: "gibson.zeroroot.ai", Resource: "platformbootstraps"}, o.GetName(), nil)
 			}
