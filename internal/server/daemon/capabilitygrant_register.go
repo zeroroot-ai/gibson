@@ -165,9 +165,9 @@ func capabilityGrantRegisterHandler(
 		//   - otherwise → FIRST registration: a daemon-signed bootstrap token
 		//     carries the signed identity (the authoritative name/mode/principal).
 		var tenantID, ownerUserID, principalRef, signedName, bootstrapType string
-		// capabilityCeiling comes ONLY from the verified bootstrap scope. A
-		// re-registration presents no bootstrap credential and so states no
-		// ceiling; the request body never contributes one.
+		// capabilityCeiling comes ONLY from the verified bootstrap scope, or
+		// from the ceiling that the enrolling credential left on the host row
+		// for a re-registration. The request body never contributes one.
 		var capabilityCeiling []string
 		switch {
 		case jwtTyp(token) == capabilitygrant.HostTokenType:
@@ -185,7 +185,23 @@ func capabilityGrantRegisterHandler(
 				http.Error(w, "invalid host credential", http.StatusUnauthorized)
 				return
 			}
-			tenantID, ownerUserID, principalRef, bootstrapType = hc.TenantID, hc.OwnerUserID, hc.PrincipalRef, "host_jwt"
+			// The host key in the body must be the key that signed the token.
+			// Else a holder of one host key would add a new host of its tenant.
+			presented, kerr := capabilitygrant.HostKeyID(req.HostKeyJWK)
+			if kerr != nil || presented != hc.HostID {
+				logger.WarnContext(r.Context(), "capability-grant: host re-registration refused: the host key is not the host that signed")
+				http.Error(w, "host key does not match the host credential", http.StatusForbidden)
+				return
+			}
+			// The name and the ceiling are those of the credential that enrolled
+			// the host. The request body supplies neither.
+			if hc.AgentName == "" {
+				logger.WarnContext(r.Context(), "capability-grant: host re-registration refused: the host has no recorded agent name")
+				http.Error(w, "host has no recorded agent; enroll with a bootstrap token", http.StatusForbidden)
+				return
+			}
+			tenantID, ownerUserID, principalRef, signedName, bootstrapType = hc.TenantID, hc.OwnerUserID, hc.PrincipalRef, hc.AgentName, "host_jwt"
+			capabilityCeiling = hc.CapabilityCeiling
 		case svidEnroller != nil && jwtTyp(token) != capabilitygrant.BootstrapTokenType:
 			// SPIFFE-SVID first-party plugin enrollment (ADR-0066). The credential
 			// is neither a host+jwt nor a daemon-minted bootstrap token, so it is a

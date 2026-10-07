@@ -245,7 +245,10 @@ func TestRegisterCapabilityGrant_HostKeyReRegistrationSpendsNothing(t *testing.T
 
 	m.expectAuditRecord()
 	m.mock.ExpectBegin()
-	m.expectEnrollmentWrites()
+	// A re-registration only touches the row. It never inserts a host.
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.mock.ExpectExec("INSERT INTO capability_grant_agents").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.mock.ExpectExec("DELETE FROM capability_grant_grants").WillReturnResult(sqlmock.NewResult(0, 0))
 	m.mock.ExpectCommit()
 
 	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
@@ -1338,4 +1341,25 @@ func TestRevokeCapabilityGrant_FailureRecordErrorKeepsTheActionError(t *testing.
 	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
 	require.ErrorIs(t, err, ErrAgentNotInTenant)
 	require.NoError(t, m.mock.ExpectationsWereMet())
+}
+
+// A re-registration for a host that has no row (a fresh key) is refused. The
+// store never inserts a host on this path (the daemon refuses a new host with
+// no bootstrap credential).
+func TestRegisterCapabilityGrant_ReRegistrationNeverAddsAHost(t *testing.T) {
+	m := newMockedService(t)
+
+	m.expectAuditRecord()
+	m.mock.ExpectBegin()
+	m.mock.ExpectExec("UPDATE capability_grant_hosts").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.mock.ExpectRollback()
+
+	_, err := m.svc.RegisterCapabilityGrant(context.Background(),
+		"acme", "owner-1", "hello-agent", "autonomous", "agent_principal:acct-1",
+		json.RawMessage(hostJWK), json.RawMessage(agentJWK),
+		"host_jwt", "host-jwt-token", nil,
+	)
+	require.ErrorIs(t, err, ErrHostNotRegistrable)
+	require.NoError(t, m.mock.ExpectationsWereMet())
+	assert.NotContains(t, m.rec.all(), "INSERT INTO capability_grant_hosts")
 }

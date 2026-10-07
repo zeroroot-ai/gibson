@@ -368,6 +368,9 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 			Status:       "active",
 			PrincipalRef: principalRef,
 			Attested:     bootstrapType == BootstrapTypeSPIFFESVID,
+			// A re-registration keeps what the row has (touchHostTx).
+			AgentName:         agentName,
+			CapabilityCeiling: capabilityCeiling,
 		},
 		KeepHostAttestation: reRegistration,
 		Agent: Agent{
@@ -1018,4 +1021,11 @@ func failedAction(ev audit.Event, cause error) audit.Event {
 	ev.Decision = "deny"
 	ev.Metadata = json.RawMessage(meta)
 	return ev
+}
+
+// HostKeyID returns the host id of a host public key: the id that a host
+// stores and signs a host+jwt under. The register endpoint compares it with
+// the id of the host that signed the credential.
+func HostKeyID(jwk json.RawMessage) (string, error) {
+	return jwkThumbprint(jwk)
 }

@@ -98,9 +98,14 @@ type Host struct {
 	// means the platform attests the workload (ADR-0066). It is false for a
 	// host that enrolled with a bootstrap token. Enroll writes it, and every
 	// agent row copies it from its host.
-	Attested  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Attested bool
+	// AgentName and CapabilityCeiling are the bounds of the credential that
+	// enrolled the host. A re-registration with the host key states neither,
+	// so the daemon reads them from here and never from the request.
+	AgentName         string
+	CapabilityCeiling []string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Agent represents an LLM-driven worker registered under a Host.
@@ -297,13 +302,23 @@ ON CONFLICT (token_hash) DO NOTHING`
 // that does not exist yet cannot re-register into an attested one: the insert
 // arm writes false when keepAttestation is set.
 func upsertHostTx(ctx context.Context, tx *sql.Tx, host Host, keepAttestation bool) error {
+	if keepAttestation {
+		return touchHostTx(ctx, tx, host)
+	}
+	ceiling, err := json.Marshal(host.CapabilityCeiling)
+	if err != nil {
+		return fmt.Errorf("capabilitygrant: UpsertHost %q: capability ceiling: %w", host.ID, err)
+	}
+	if host.CapabilityCeiling == nil {
+		ceiling = []byte("[]")
+	}
 	const query = `
 INSERT INTO capability_grant_hosts (
     id, tenant_id, user_id, display_name, public_key_jwk, status,
-    principal_ref, attested, created_at, updated_at
+    principal_ref, attested, agent_name, capability_ceiling, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8::boolean AND NOT $9::boolean, now(), now()
+    $7, $8::boolean AND NOT $9::boolean, $10, $11::jsonb, now(), now()
 )
 ON CONFLICT (id) DO UPDATE SET
     user_id        = EXCLUDED.user_id,
@@ -316,6 +331,8 @@ ON CONFLICT (id) DO UPDATE SET
                           ELSE capability_grant_hosts.principal_ref END,
     attested       = CASE WHEN $9::boolean THEN capability_grant_hosts.attested
                           ELSE $8::boolean END,
+    agent_name         = EXCLUDED.agent_name,
+    capability_ceiling = EXCLUDED.capability_ceiling,
     updated_at     = now()
 WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
   AND  capability_grant_hosts.status <> 'revoked'`
@@ -330,6 +347,8 @@ WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
 		host.PrincipalRef,
 		host.Attested,
 		keepAttestation,
+		host.AgentName,
+		string(ceiling),
 	)
 	if err != nil {
 		return fmt.Errorf("capabilitygrant: UpsertHost %q: %w", host.ID, err)
@@ -340,6 +359,32 @@ WHERE  capability_grant_hosts.tenant_id = EXCLUDED.tenant_id
 	}
 	if n == 0 {
 		// The insert conflicted and the guard refused the update.
+		return ErrHostNotRegistrable
+	}
+	return nil
+}
+
+// touchHostTx marks a host that re-registers with its own key. It never
+// inserts: a re-registration proves a key that is already on a host row of the
+// same tenant, and a host that does not exist (or is revoked, or belongs to
+// another tenant) is not registrable this way. It also leaves the name, the
+// ceiling, the principal and the attestation of the row as the enrolling
+// credential set them.
+func touchHostTx(ctx context.Context, tx *sql.Tx, host Host) error {
+	const query = `
+UPDATE capability_grant_hosts
+SET    updated_at = now()
+WHERE  id = $1 AND tenant_id = $2 AND status <> 'revoked'`
+
+	res, err := tx.ExecContext(ctx, query, host.ID, host.TenantID)
+	if err != nil {
+		return fmt.Errorf("capabilitygrant: TouchHost %q: %w", host.ID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("capabilitygrant: TouchHost %q: rows affected: %w", host.ID, err)
+	}
+	if n == 0 {
 		return ErrHostNotRegistrable
 	}
 	return nil
@@ -451,12 +496,13 @@ WHERE EXISTS (SELECT 1 FROM capability_grant_agents a
 func (s *CapabilityGrantStore) GetHost(ctx context.Context, hostID string) (*Host, error) {
 	const query = `
 SELECT id, tenant_id, COALESCE(user_id, ''), display_name,
-       public_key_jwk, status, COALESCE(principal_ref, ''), created_at, updated_at
+       public_key_jwk, status, COALESCE(principal_ref, ''), agent_name,
+       capability_ceiling, created_at, updated_at
 FROM   capability_grant_hosts
 WHERE  id = $1`
 
 	var h Host
-	var jwk []byte
+	var jwk, ceiling []byte
 	err := s.db.QueryRowContext(ctx, query, hostID).Scan(
 		&h.ID,
 		&h.TenantID,
@@ -465,6 +511,8 @@ WHERE  id = $1`
 		&jwk,
 		&h.Status,
 		&h.PrincipalRef,
+		&h.AgentName,
+		&ceiling,
 		&h.CreatedAt,
 		&h.UpdatedAt,
 	)
@@ -473,6 +521,9 @@ WHERE  id = $1`
 	}
 	if err != nil {
 		return nil, fmt.Errorf("capabilitygrant: GetHost %q: %w", hostID, err)
+	}
+	if err := json.Unmarshal(ceiling, &h.CapabilityCeiling); err != nil {
+		return nil, fmt.Errorf("capabilitygrant: GetHost %q: capability ceiling: %w", hostID, err)
 	}
 	h.PublicKeyJWK = json.RawMessage(jwk)
 	return &h, nil
