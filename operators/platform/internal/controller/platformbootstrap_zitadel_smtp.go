@@ -189,15 +189,16 @@ func smtpHostPort(spec *gibsonv1alpha1.ZitadelSMTPSpec) string {
 // The fingerprint lives in the status of the PlatformBootstrap, where each
 // reader of the object sees it. A fast hash of the password would let such a
 // reader test password guesses offline at full speed. So the password goes
-// through Argon2id, a slow key derivation function. The salt is a SHA-256 of
-// the fields that are not secret, so the fingerprint is stable for one set of
-// settings and changes when any field changes. The salt reads the spec and
-// the user, never the provider config that holds the password.
+// through Argon2id, a slow key derivation function, together with the user,
+// which comes from the same credentials Secret. The salt is a SHA-256 of the
+// spec fields only, which are not secret, so the fingerprint is stable for
+// one set of settings and changes when any field changes. Nothing read from
+// a Secret goes through the fast hash.
 func smtpSettingsHash(spec *gibsonv1alpha1.ZitadelSMTPSpec, user, password string) string {
 	salt := sha256.Sum256([]byte(strings.Join([]string{
-		spec.FromAddress, spec.FromName, strconv.FormatBool(smtpTLS(spec)), smtpHostPort(spec), user,
+		spec.FromAddress, spec.FromName, strconv.FormatBool(smtpTLS(spec)), smtpHostPort(spec),
 	}, "\x00")))
-	key := argon2.IDKey([]byte(password), salt[:],
+	key := argon2.IDKey([]byte(user+"\x00"+password), salt[:],
 		smtpFingerprintTime, smtpFingerprintMemoryKiB, smtpFingerprintThreads, smtpFingerprintKeyLen)
 	return hex.EncodeToString(salt[:]) + hex.EncodeToString(key)
 }

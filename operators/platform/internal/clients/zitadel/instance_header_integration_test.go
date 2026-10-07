@@ -23,7 +23,7 @@ import (
 
 // pinnedZitadelImage is the Zitadel release that the chart pins
 // (charts: helm/gibson/values.yaml, zitadel.image.tag). Move it with the pin.
-const pinnedZitadelImage = "ghcr.io/zitadel/zitadel:v4.19.4"
+const pinnedZitadelImage = "ghcr.io/zeroroot-ai/mirror/zitadel:v4.19.4"
 
 // publicHost is the claimed public host of the test instance. It has no port,
 // as in production (zitadelconn refuses a ported host).
@@ -97,7 +97,7 @@ func startZitadel(ctx context.Context, t *testing.T) string {
 
 	pg, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:          "postgres:17-alpine",
+			Image:          "ghcr.io/zeroroot-ai/mirror/postgres:17-alpine",
 			Env:            map[string]string{"POSTGRES_PASSWORD": "postgres"},
 			Networks:       []string{nw.Name},
 			NetworkAliases: map[string][]string{nw.Name: {"db"}},

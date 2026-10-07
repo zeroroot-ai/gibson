@@ -105,8 +105,8 @@ func (a *removalAuthorizer) ListObjects(_ context.Context, user, relation, objec
 	return out, nil
 }
 
-func (a *removalAuthorizer) ListUsers(_ context.Context, _, object, relation string) ([]string, error) {
-	if relation != "owner" {
+func (a *removalAuthorizer) ListUsers(_ context.Context, objectType, object, relation string) ([]string, error) {
+	if objectType != "tenant" || relation != "owner" || !strings.HasPrefix(object, "tenant:") {
 		return nil, nil
 	}
 	if ft, ok := a.tenants[object]; ok && ft.owner != "" {
@@ -115,8 +115,8 @@ func (a *removalAuthorizer) ListUsers(_ context.Context, _, object, relation str
 	return nil, nil
 }
 
-func (a *removalAuthorizer) ListUsersOfType(_ context.Context, _, object, relation, _ string) ([]string, error) {
-	if relation != "owner" {
+func (a *removalAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, userType string) ([]string, error) {
+	if relation != "owner" || userType != "user" || objectType != principalTypeOf(object) {
 		return nil, nil
 	}
 	if owner, ok := a.principalOwner[object]; ok {
