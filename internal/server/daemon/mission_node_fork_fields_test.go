@@ -21,7 +21,8 @@ import (
 // starts from "build", so "build" is forkable. "report" names no node and no
 // node names it.
 func forkDef() *missionpb.MissionDefinition {
-	probe := agentNode("prober", "build")
+	// A fork continues the process of "build", so "probe" runs the same agent.
+	probe := agentNode("builder", "build")
 	probe.StartsFrom = "build"
 	return &missionpb.MissionDefinition{
 		Id: "m1",

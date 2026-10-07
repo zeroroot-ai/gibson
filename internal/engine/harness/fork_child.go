@@ -206,9 +206,15 @@ func (s *HarnessCallbackService) planCallerFork(ctx context.Context, parent Agen
 	if err != nil {
 		return nil, err
 	}
+	// The agent is the one the verified grant names, never the one the
+	// request names: the fork seat and the grant of the fork follow it.
+	agentName, isAgent := grantAgentName(claims)
+	if !isAgent {
+		return nil, status.Error(codes.PermissionDenied, "only an agent grant can fork the caller")
+	}
 	return &callerForkPlan{
 		forker: forker, nodes: nodes, sandboxID: sandboxID, jti: claims.JTI,
-		agentName: req.GetContext().GetAgentName(),
+		agentName: agentName,
 	}, nil
 }
 

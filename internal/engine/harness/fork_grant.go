@@ -14,8 +14,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/fork"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
@@ -340,4 +342,46 @@ func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (str
 		return "", fmt.Errorf("mint the grant of the fork: %w", err)
 	}
 	return tok, nil
+}
+
+// identityUnaryChain is the part of the unary interceptor chain of the
+// callback listener that builds the identity and binds the request to its
+// grant. CallbackServer.Start and the tests share it, so the order cannot
+// differ. The fork claim sets its tenant first: the sdk auth interceptor
+// refuses a call with no valid tenant.
+func (s *HarnessCallbackService) identityUnaryChain(grant grpc.UnaryServerInterceptor) []grpc.UnaryServerInterceptor {
+	return []grpc.UnaryServerInterceptor{s.claimForkTenantInterceptor(), auth.UnaryServerInterceptor(), grant}
+}
+
+// claimForkTenantInterceptor gives a ClaimFork call the tenant of its sandbox.
+// The edge asserts the sandbox identity credential with no tenant, because
+// only the daemon can know it: the start record that the daemon wrote when it
+// asked setec for the sandbox names the tenant. This interceptor runs before
+// the sdk auth interceptor. It reads that record by the sandbox id of the
+// request, and it sets the tenant header from it, replacing any value that
+// came with the call. The sdk interceptor then builds the identity from a
+// tenant that the daemon itself recorded. Any other method, and any other
+// credential, passes unchanged.
+func (s *HarnessCallbackService) claimForkTenantInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if info.FullMethod != claimForkMethod || firstMetadata(ctx, auth.HeaderCredentialType) != credentialSandboxIdentity {
+			return handler(ctx, req)
+		}
+		claim, ok := req.(*harnesspb.ClaimForkRequest)
+		if !ok || s.forkLedger == nil {
+			return nil, status.Error(codes.FailedPrecondition, "this daemon has no fork support")
+		}
+		target, err := s.awaitClaimTarget(ctx, claim.GetSandboxId())
+		switch {
+		case errors.Is(err, ErrNotAFork):
+			return nil, status.Error(codes.PermissionDenied, "the daemon started no such sandbox")
+		case err != nil:
+			s.logger.Error("ClaimFork: fork ledger failed", "error", err)
+			return nil, status.Error(codes.Unavailable, "the fork record cannot be read")
+		}
+		md, _ := metadata.FromIncomingContext(ctx)
+		md = md.Copy()
+		md.Set(auth.HeaderTenant, target.Tenant)
+		return handler(metadata.NewIncomingContext(ctx, md), req)
+	}
 }

@@ -236,6 +236,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		if forkable {
 			h.forks.Parked.Park(h.missionCtx.MissionRunID, task.NodeID, ParkedSource{
 				Tenant:    tenant,
+				AgentName: name,
 				SandboxID: outcome.SandboxID,
 				GrantJTI:  grantJTI(grant),
 			})

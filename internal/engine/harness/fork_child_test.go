@@ -199,7 +199,7 @@ func forkOriginCtx(t *testing.T, token string) context.Context {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant})
+	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant, Subject: "component:agent:zerocool"})
 	if token != "" {
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, token))
 	}
@@ -266,6 +266,31 @@ func TestCreateMission_StartsFromCallerStateRefusals(t *testing.T) {
 	}
 	if mgr.got != nil {
 		t.Error("no fork support: a mission was created")
+	}
+}
+
+// The caller fork takes the agent from the verified grant. A request that
+// names another agent than the grant gets the agent of the grant, and a grant
+// that is not an agent grant cannot fork the caller.
+func TestPlanCallerFork_AgentComesFromTheGrant(t *testing.T) {
+	mgr := &childNodeOperator{node: brain.WorkNode{ID: "exploit", Kind: "agent", Target: "beta"}}
+	svc := forkOriginService(t, mgr, &forkingParent{})
+	req := forkOriginRequest()
+	req.Context.AgentName = "beta" // the grant is for zerocool
+
+	plan, err := svc.planCallerFork(forkOriginCtx(t, "tok-src"), &forkingParent{}, req)
+	if err != nil {
+		t.Fatalf("planCallerFork: %v", err)
+	}
+	if plan.agentName != "zerocool" {
+		t.Fatalf("plan agent = %q, want the agent of the grant (zerocool)", plan.agentName)
+	}
+
+	tenant, _ := auth.NewTenantID(originTenant)
+	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant, Subject: "component:tool:nmap"})
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, "tok-src"))
+	if _, err := svc.planCallerFork(ctx, &forkingParent{}, forkOriginRequest()); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("non-agent grant: code = %v, want PermissionDenied", status.Code(err))
 	}
 }
 

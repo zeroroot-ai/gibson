@@ -13,18 +13,12 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
-	"github.com/zeroroot-ai/sdk/auth"
 	"github.com/zeroroot-ai/sdk/fork"
 )
 
 // claimForkMethod is the one RPC that a sandbox calls with its identity
 // token and no other credential (D80).
 const claimForkMethod = harnesspb.HarnessCallbackService_ClaimFork_FullMethodName
-
-// sandboxIdentitySubject is the subject that the edge asserts for a claim.
-// The edge cannot verify the token (only the daemon, the owner of the
-// sandbox, can ask setec), so the subject names no sandbox.
-const sandboxIdentitySubject = "sandbox-identity-claim"
 
 // claimForkResponse decides a ClaimFork call (D80). A fork, or a sandbox
 // restored from a snapshot, holds only the identity token that setec gives
@@ -33,7 +27,8 @@ const sandboxIdentitySubject = "sandbox-identity-claim"
 // with a grant or with no token. The daemon verifies the token with setec
 // and serves the dispatch only to the sandbox that it started.
 //
-// The asserted identity has the system tenant and the credential type
+// The asserted identity has no tenant (the daemon takes it from its own start
+// record of the sandbox) and the credential type
 // headers.CredentialSandboxIdentity. The daemon refuses that credential on
 // every other method.
 func claimForkResponse(ctx context.Context, s *EnvoyAuthzServer, httpHeaders map[string]string) *authv3.CheckResponse {
@@ -46,13 +41,7 @@ func claimForkResponse(ctx context.Context, s *EnvoyAuthzServer, httpHeaders map
 		extauthzUnauthenticatedTotal.WithLabelValues(claimForkMethod).Inc()
 		return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated)
 	}
-	id := headers.Identity{
-		Subject:        sandboxIdentitySubject,
-		Issuer:         headers.IssuerCapabilityGrant,
-		CredentialType: headers.CredentialSandboxIdentity,
-		Tenant:         auth.SystemTenantString,
-	}
-	id.IssuedAt = nowUTC()
+	id := headers.SandboxClaimIdentity(nowUTC())
 	extauthzAllowedTotal.WithLabelValues(claimForkMethod).Inc()
 	return okResponse(headers.Emit(id))
 }

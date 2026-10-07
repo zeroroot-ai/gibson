@@ -194,7 +194,7 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		// cap could speak.
 		grpc.MaxRecvMsgSize(16 * 1024 * 1024),
 		grpc.MaxSendMsgSize(16 * 1024 * 1024),
-		grpc.ChainUnaryInterceptor(peerAuthzUnary, auth.UnaryServerInterceptor(), grantUnary),
+		grpc.ChainUnaryInterceptor(append([]grpc.UnaryServerInterceptor{peerAuthzUnary}, s.service.identityUnaryChain(grantUnary)...)...),
 		grpc.ChainStreamInterceptor(peerAuthzStream, auth.StreamServerInterceptor(), grantStream),
 		// Shared with the main daemon listener; see internal/infra/grpckeepalive.
 		grpckeepalive.Params(),

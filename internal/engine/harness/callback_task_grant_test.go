@@ -120,6 +120,28 @@ func TestTaskGrantFromMetadata(t *testing.T) {
 	}
 }
 
+// A grant of agent alpha that names agent beta in ContextInfo is refused on
+// every callback, and a request that names its own agent passes.
+func TestCheckTaskGrantScope_AgentNameMustMatchTheGrantSubject(t *testing.T) {
+	claims := grantClaims(t, "acme", "m-1") // subject component:agent:claude
+	v := &fakeGrantVerifier{claims: claims}
+	for name, tc := range map[string]struct {
+		agent string
+		want  codes.Code
+	}{
+		"own agent":     {"claude", codes.OK},
+		"no agent name": {"", codes.OK},
+		"another agent": {"beta", codes.PermissionDenied},
+	} {
+		req := observeReq("m-1")
+		req.Context.AgentName = tc.agent
+		_, err := checkTaskGrantScope(grantCtx("acme", compactJWT("JWT")), req, getter(v), scopeMethod, slog.Default())
+		if status.Code(err) != tc.want {
+			t.Errorf("%s: code = %v, want %v", name, status.Code(err), tc.want)
+		}
+	}
+}
+
 // TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches: a
 // grant that names this tenant and this mission reaches the handler untouched.
 func TestTaskGrantScopeInterceptors_UnaryRunsTheHandlerWhenTheGrantMatches(t *testing.T) {
