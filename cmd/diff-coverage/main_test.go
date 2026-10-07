@@ -457,6 +457,8 @@ github.com/zeroroot-ai/gibson/internal/x/file.go:4.12,7.3 1 0
 // statement is unchanged and whose trailing comment changed is not a changed
 // statement (gibson#830).
 func TestParseAddedLines_TrailingCommentOnlyChangeExcluded(t *testing.T) {
+	withSource(t, map[string]string{"pkg/x.go": strings.Repeat("\n", 9) +
+		"\tingest(d.registry), // findings reach the projector (new text)\n"})
 	diff := `--- a/pkg/x.go
 +++ b/pkg/x.go
 @@ -10 +10 @@
@@ -500,5 +502,38 @@ func TestStripLineComment(t *testing.T) {
 		if got := stripLineComment(in); got != want {
 			t.Errorf("stripLineComment(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestParseAddedLines_RawStringSlashesCount: a line inside a raw string that
+// spans lines can hold `//`. That text is not a comment, so a change after it
+// is a changed statement and needs coverage (gibson#1017).
+func TestParseAddedLines_RawStringSlashesCount(t *testing.T) {
+	withSource(t, map[string]string{"pkg/q.go": "package q\n\nconst q = `\nSELECT 1 // one\n`\n"})
+	diff := `--- a/pkg/q.go
++++ b/pkg/q.go
+@@ -4 +4 @@
+-SELECT 1 // two
++SELECT 1 // one
+`
+	got := parseAddedLines([]byte(diff))
+	if lines := got["pkg/q.go"]; len(lines) != 1 || lines[0] != 4 {
+		t.Fatalf("want [4], got %v", lines)
+	}
+}
+
+// TestParseAddedLines_UnreadableSourceCountsTheLine: with no source to prove
+// that the cut text is a comment, the line counts as changed.
+func TestParseAddedLines_UnreadableSourceCountsTheLine(t *testing.T) {
+	withSource(t, map[string]string{})
+	diff := `--- a/pkg/x.go
++++ b/pkg/x.go
+@@ -10 +10 @@
+-	ingest(d.registry), // old text
++	ingest(d.registry), // new text
+`
+	got := parseAddedLines([]byte(diff))
+	if lines := got["pkg/x.go"]; len(lines) != 1 || lines[0] != 10 {
+		t.Fatalf("want [10], got %v", lines)
 	}
 }
