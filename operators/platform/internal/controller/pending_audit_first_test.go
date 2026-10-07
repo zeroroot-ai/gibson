@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -248,6 +249,13 @@ func TestPlatformBootstrap_DeleteEndsAfterTheGrace(t *testing.T) {
 	if len(pb.Finalizers) != 0 {
 		t.Fatalf("finalizers = %v, want none after the grace", pb.Finalizers)
 	}
+	var cms corev1.ConfigMapList
+	if err := cli.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace), client.MatchingLabels{pendingAuditLabel: "true"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(cms.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, want one that holds the pending records", len(cms.Items))
+	}
 }
 
 // When the status that holds the record cannot be written, no step runs.
@@ -313,5 +321,113 @@ func TestOIDCClientDelete_PendingRecordsWaitThenEnd(t *testing.T) {
 	oc.Status.ClientID = ""
 	if _, err := r.reconcileDeletion(context.Background(), oc); err != nil || len(oc.Finalizers) != 0 {
 		t.Fatalf("app client after the grace: err = %v, finalizers = %v", err, oc.Finalizers)
+	}
+}
+
+// Past the grace a delete moves its records to a ConfigMap, and the flusher
+// sends them when the daemon returns and then deletes the ConfigMap.
+func TestPendingAuditFlusher_SendsWhenTheDaemonReturns(t *testing.T) {
+	s := mustScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(s).Build()
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	recs := []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"}),
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "b"}),
+	}
+	if err := saveDurable(context.Background(), cli, recs); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveDurable(context.Background(), cli, recs); err != nil {
+		t.Fatalf("the same records twice: %v", err)
+	}
+	if err := saveDurable(context.Background(), cli, nil); err != nil {
+		t.Fatalf("no records: %v", err)
+	}
+	count := func() int {
+		var cms corev1.ConfigMapList
+		if err := cli.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace)); err != nil {
+			t.Fatal(err)
+		}
+		return len(cms.Items)
+	}
+	if count() != 1 {
+		t.Fatalf("ConfigMaps = %d, want one for the same records", count())
+	}
+
+	f := &PendingAuditFlusher{Client: cli, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}
+	if err := f.FlushOnce(context.Background()); err == nil || count() != 1 {
+		t.Fatalf("daemon down: err = %v, ConfigMaps = %d; want the ConfigMap kept", err, count())
+	}
+	up := &audittest.Sink{}
+	f.Audit = up.Emitter(t)
+	if err := f.FlushOnce(context.Background()); err != nil || count() != 0 || len(up.Events()) != 2 {
+		t.Fatalf("daemon up: err = %v, ConfigMaps = %d, sent = %d; want both sent and the ConfigMap gone", err, count(), len(up.Events()))
+	}
+}
+
+// A client delete past the grace keeps its records in a ConfigMap. When that
+// fails too, it goes on only in a teardown of the whole platform. In any other
+// case it keeps waiting.
+func TestOIDCClientDelete_LastResort(t *testing.T) {
+	s := mustScheme(t)
+	old := metav1.NewTime(metav1.Now().Add(-2 * pendingDeleteGrace))
+	mk := func(parent *gibsonv1alpha1.PlatformBootstrap, failCreate bool) (*OIDCClientReconciler, *gibsonv1alpha1.OIDCClient) {
+		oc := &gibsonv1alpha1.OIDCClient{ObjectMeta: metav1.ObjectMeta{
+			Name: "dashboard", Namespace: "gibson", Finalizers: []string{oidcClientFinalizer}, DeletionTimestamp: &old,
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: gibsonv1alpha1.GroupVersion.String(), Kind: "PlatformBootstrap", Name: "platform", UID: "pb-uid"}},
+		}}
+		oc.Spec.ApplicationType = gibsonv1alpha1.OIDCAppTypeMachineUser
+		oc.Status.PendingAuditRecords = []gibsonv1alpha1.PendingAuditRecord{
+			pendingRecord(audit.ActionOIDCClientApply, oc, "", "", map[string]string{"client": "dashboard"}),
+		}
+		b := fake.NewClientBuilder().WithScheme(s).WithObjects(oc).WithStatusSubresource(oc)
+		if parent != nil {
+			b = b.WithObjects(parent).WithStatusSubresource(parent)
+		}
+		var c client.Client = b.Build()
+		if failCreate {
+			c = interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{
+				Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
+					return errors.New("namespace is going away")
+				},
+			})
+		}
+		return &OIDCClientReconciler{Client: c, Scheme: s, Audit: (&audittest.Sink{Err: errNoDaemon}).Emitter(t)}, oc
+	}
+	live := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform", UID: "pb-uid"}}
+
+	// The parent exists and is live: the records go to the parent.
+	r, oc := mk(live, false)
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("live parent: the delete must not wait")
+	}
+	// No parent, the ConfigMap works: the records go to the ConfigMap.
+	r, oc = mk(nil, false)
+	// A missing parent is a teardown, but the ConfigMap is written first.
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("no parent, ConfigMap works: the delete must not wait")
+	}
+	var cms corev1.ConfigMapList
+	if err := r.Client.List(context.Background(), &cms, client.InNamespace(defaultChildNamespace)); err != nil || len(cms.Items) != 1 {
+		t.Fatalf("ConfigMaps = %d, err = %v; want one", len(cms.Items), err)
+	}
+	// The ConfigMap fails and the platform is in teardown (no parent): the log is the last copy.
+	r, oc = mk(nil, true)
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); wait {
+		t.Error("teardown: the delete must go on")
+	}
+	// The ConfigMap fails, the parent is live and cannot hold the record: wait.
+	r, oc = mk(live, true)
+	r.Client = interceptor.NewClient(r.Client.(client.WithWatch), interceptor.Funcs{
+		SubResourceUpdate: func(context.Context, client.Client, string, client.Object, ...client.SubResourceUpdateOption) error {
+			return errors.New("status write refused")
+		},
+	})
+	if wait, _ := r.parkPendingOrLog(context.Background(), oc); !wait {
+		t.Error("live platform, no copy possible: the delete must wait")
+	}
+	// The same through recordDeletionOrLog.
+	if wait := r.recordDeletionOrLog(context.Background(), oc, "app-1"); !wait {
+		t.Error("recordDeletionOrLog: the delete must wait")
 	}
 }

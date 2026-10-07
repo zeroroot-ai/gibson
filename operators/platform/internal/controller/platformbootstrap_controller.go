@@ -184,7 +184,7 @@ func (r *PlatformBootstrapReconciler) mapChildToParent(ctx context.Context, obj 
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=platformbootstraps/finalizers,verbs=update
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=oidcclients,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch
-// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch
+// +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=create
 
@@ -679,8 +679,7 @@ func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb 
 	// The pending audit records live in this status, and the status goes with
 	// the object. Send them first. The finalizer stays until the daemon has
 	// them, or until pendingDeleteGrace has passed since the delete started.
-	// After the grace the records go to the operator log, which is the last
-	// resort, so a teardown with no daemon does not hang for ever.
+	// After the grace the records go to a ConfigMap in the operator namespace.
 	if _, ferr := flushPendingSent(ctx, r.Audit, &pb.Status.PendingAuditRecords); ferr != nil && len(pb.Status.PendingAuditRecords) > 0 {
 		if time.Since(pb.DeletionTimestamp.Time) < pendingDeleteGrace {
 			if serr := r.statusUpdate(ctx, pb); serr != nil {
@@ -688,7 +687,13 @@ func (r *PlatformBootstrapReconciler) reconcileDeletion(ctx context.Context, pb 
 			}
 			return ctrl.Result{RequeueAfter: pendingRequeue}, nil
 		}
-		logPendingLost(ctx, pb.Status.PendingAuditRecords)
+		// After the grace the records move to a ConfigMap, and the flusher sends
+		// them when the daemon returns. This delete is the teardown of the
+		// platform bootstrap. Only when the ConfigMap cannot be written is the
+		// operator log the last copy, and it says so.
+		if kerr := saveDurable(ctx, r.Client, pb.Status.PendingAuditRecords); kerr != nil {
+			logTeardown(ctx, pb.Status.PendingAuditRecords)
+		}
 	}
 	controllerutil.RemoveFinalizer(pb, platformBootstrapFinalizer)
 	if err := r.Update(ctx, pb); err != nil {

@@ -11,7 +11,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -57,6 +59,41 @@ func TestCatalogPlugins_AuditRecordComesFirstAndOnlyOnAChange(t *testing.T) {
 	}
 	if got := len(sink.Events()); got != 2 {
 		t.Fatalf("records after a change of the egress list = %d, want 2", got)
+	}
+}
+
+// A repair of drift in place is a change: it gets a record too. An object that
+// someone changed, and an object that someone deleted, are both repaired with a
+// record before the repair.
+func TestCatalogPlugins_DriftRepairWritesARecord(t *testing.T) {
+	sink := &audittest.Sink{}
+	r, c, _ := convergedInstance(t)
+	r.Audit = sink.Emitter(t)
+
+	// Someone widens the default-deny policy in place.
+	var np networkingv1.NetworkPolicy
+	key := client.ObjectKey{Namespace: cpNamespace, Name: "default-deny"}
+	cpGet(t, c, key, &np)
+	np.Spec.PolicyTypes = nil
+	if err := c.Update(context.Background(), &np); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if len(sink.Events()) != 1 {
+		t.Fatalf("records after a repair in place = %d, want 1", len(sink.Events()))
+	}
+	if err := r.converge(context.Background()); err != nil || len(sink.Events()) != 1 {
+		t.Fatalf("a settled pass: err = %v, records = %d; want no new record", err, len(sink.Events()))
+	}
+
+	// Someone deletes the service account.
+	if err := c.Delete(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: cpNamespace, Name: "gibson-plugin-" + cpPlugin}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.converge(context.Background()); err != nil || len(sink.Events()) != 2 {
+		t.Fatalf("after a delete: err = %v, records = %d; want 2", err, len(sink.Events()))
 	}
 }
 

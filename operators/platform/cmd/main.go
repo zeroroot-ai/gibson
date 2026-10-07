@@ -233,6 +233,11 @@ func run(cfg runConfig) error {
 	}).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to create PlatformBootstrap controller: %w", err)
 	}
+	// Pending audit records that a delete moved to ConfigMaps go to the daemon
+	// when it returns (gibson#676).
+	if err := (&controller.PendingAuditFlusher{Client: mgr.GetClient(), Audit: auditEmitter}).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to create the pending audit flusher: %w", err)
+	}
 	// +kubebuilder:scaffold:builder
 
 	// --- Readiness aggregator (internal/infra) ---

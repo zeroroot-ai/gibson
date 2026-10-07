@@ -5,9 +5,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -318,12 +315,8 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 	if !tenant.DeletionTimestamp.IsZero() {
 		return false, errTenantGone
 	}
-	steps := []func(context.Context, provision.DesiredCatalogPlugin) error{
-		r.ensureNamespace, r.ensureNamespaceRBAC, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
-		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensurePluginEgressPolicy, r.ensureDeployment,
-	}
 	apply := func() error {
-		for _, step := range steps {
+		for _, step := range r.steps() {
 			if err := step(ctx, p); err != nil {
 				return err
 			}
@@ -357,56 +350,73 @@ func (r *CatalogPluginRunnable) ensureInstance(ctx context.Context, p provision.
 	return dep.Status.AvailableReplicas >= 1, nil
 }
 
-// annotationDesiredHash holds, on the Deployment of an instance, the hash of
-// the state that the loop last applied. A pass that finds the same hash makes
-// no change that needs a record.
-const annotationDesiredHash = "gibson.zeroroot.ai/catalog-plugin-desired"
-
-// desiredHash is the hash of everything that the loop applies for one
-// instance: the wish and the pod that follows from it.
-func (r *CatalogPluginRunnable) desiredHash(p provision.DesiredCatalogPlugin) string {
-	raw, _ := json.Marshal(struct {
-		Wish provision.DesiredCatalogPlugin
-		Pod  corev1.PodSpec
-	}{p, r.podSpec(p)})
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
-}
-
-// instanceChanges reports whether a pass makes a change to the instance that
-// needs an audit record: one of its objects is missing, or its desired state
-// is not the one that the loop last applied. It reads the namespace and its
-// RoleBinding first, because the operator can read the objects inside the
-// namespace only through that RoleBinding. A Forbidden answer counts as a
-// missing object.
+// instanceChanges reports whether a pass would write anything for the
+// instance: it is new, one of its objects is missing, or one of its objects is
+// not as desired. A repair of drift in place is a change like the first
+// create, so it gets a record too.
+//
+// It runs every step against a client that writes nothing and notes the first
+// write that a step would make. CreateOrUpdate writes only when the object is
+// missing or differs from the desired object, so a pass that finds the
+// instance as desired writes nothing. A Forbidden answer counts as a change:
+// the operator reads the objects inside a plugin namespace only through the
+// RoleBinding that the first step makes.
 func (r *CatalogPluginRunnable) instanceChanges(ctx context.Context, p provision.DesiredCatalogPlugin) (bool, error) {
-	ns, name := pluginNamespace(p.TenantID), pluginObjectName(p.PluginID)
-	cnp := ciliumegress.NewPolicy()
-	id := &unstructured.Unstructured{}
-	id.SetGroupVersionKind(clusterSPIFFEIDGVK)
-	var dep appsv1.Deployment
-	objects := []struct {
-		key client.ObjectKey
-		obj client.Object
-	}{
-		{client.ObjectKey{Name: ns}, &corev1.Namespace{}},
-		{client.ObjectKey{Namespace: ns, Name: pluginNamespaceRoleBinding}, &rbacv1.RoleBinding{}},
-		{client.ObjectKey{Name: clusterSPIFFEIDName(p.PluginID, p.TenantID)}, id},
-		{client.ObjectKey{Namespace: ns, Name: "default-deny"}, &networkingv1.NetworkPolicy{}},
-		{client.ObjectKey{Namespace: ns, Name: name}, &corev1.ServiceAccount{}},
-		{client.ObjectKey{Namespace: ns, Name: name}, &networkingv1.NetworkPolicy{}},
-		{client.ObjectKey{Namespace: ns, Name: egressPolicyName(name)}, cnp},
-		{client.ObjectKey{Namespace: ns, Name: name}, &dep},
-	}
-	for _, o := range objects {
-		switch err := r.Client.Get(ctx, o.key, o.obj); {
+	dry := &dryRunClient{Client: r.Client}
+	probe := *r
+	probe.Client = dry
+	for _, step := range probe.steps() {
+		err := step(ctx, p)
+		switch {
+		case dry.wrote:
+			return true, nil
 		case apierrors.IsNotFound(err), apierrors.IsForbidden(err):
 			return true, nil
 		case err != nil:
-			return false, fmt.Errorf("get %T %s: %w", o.obj, o.key, err)
+			return false, err
 		}
 	}
-	return dep.Annotations[annotationDesiredHash] != r.desiredHash(p), nil
+	return dry.wrote, nil
+}
+
+// dryRunClient reads through the client it wraps and writes nothing. It notes
+// that a write was asked for.
+type dryRunClient struct {
+	client.Client
+	wrote bool
+}
+
+func (d *dryRunClient) Create(context.Context, client.Object, ...client.CreateOption) error {
+	d.wrote = true
+	return nil
+}
+
+func (d *dryRunClient) Update(context.Context, client.Object, ...client.UpdateOption) error {
+	d.wrote = true
+	return nil
+}
+
+func (d *dryRunClient) Patch(context.Context, client.Object, client.Patch, ...client.PatchOption) error {
+	d.wrote = true
+	return nil
+}
+
+func (d *dryRunClient) Delete(context.Context, client.Object, ...client.DeleteOption) error {
+	d.wrote = true
+	return nil
+}
+
+func (d *dryRunClient) DeleteAllOf(context.Context, client.Object, ...client.DeleteAllOfOption) error {
+	d.wrote = true
+	return nil
+}
+
+// steps are the ordered steps that make an instance. Each one is idempotent.
+func (r *CatalogPluginRunnable) steps() []func(context.Context, provision.DesiredCatalogPlugin) error {
+	return []func(context.Context, provision.DesiredCatalogPlugin) error{
+		r.ensureNamespace, r.ensureNamespaceRBAC, r.ensureDefaultDeny, r.ensureEnvoyCA, r.ensureServiceAccount,
+		r.ensureClusterSPIFFEID, r.ensurePluginNetworkPolicy, r.ensurePluginEgressPolicy, r.ensureDeployment,
+	}
 }
 
 func instanceLabels(p provision.DesiredCatalogPlugin) map[string]string {
@@ -659,10 +669,6 @@ func (r *CatalogPluginRunnable) ensureDeployment(ctx context.Context, p provisio
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: pluginObjectName(p.PluginID), Namespace: pluginNamespace(p.TenantID)}}
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Labels = instanceLabels(p)
-		if dep.Annotations == nil {
-			dep.Annotations = map[string]string{}
-		}
-		dep.Annotations[annotationDesiredHash] = r.desiredHash(p)
 		replicas := int32(1)
 		dep.Spec.Replicas = &replicas
 		dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: map[string]string{
