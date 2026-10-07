@@ -1,6 +1,6 @@
 {
   "version": "base-v1",
-  "description": "Minimal OSS base belief network (gibson#750, gibson#478, ADR-0005). reachable+exposed services, confirmed findings and a demonstrated exploit -> exploitable -> juicy. finding_critical/finding_high/exploit_demonstrated are noisy-OR parents of exploitable: a cause that is false contributes nothing, so a host with no finding evidence scores exactly as it did before gibson#478. Not the curated commercial base model (vendor red-team + CVE/ATT&CK), which the commercial layer ships as additional model artifacts.",
+  "description": "Minimal OSS base belief network (gibson#750, gibson#478, ADR-0129). reachable+exposed services, confirmed findings and a demonstrated exploit -> exploitable -> juicy. finding_critical/finding_high/exploit_demonstrated are noisy-OR parents of exploitable: a cause that is false contributes nothing, so a host with no finding evidence scores exactly as it did before gibson#478. Not the curated commercial base model (vendor red-team + CVE/ATT&CK), which the commercial layer ships as additional model artifacts.",
   "variables": [
     "reachable",
     "svc_ssh",
