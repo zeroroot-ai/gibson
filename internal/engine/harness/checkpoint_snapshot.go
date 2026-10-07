@@ -27,7 +27,14 @@ func CheckpointSnapshot(res agent.Result) string {
 // checkpointSnapshot takes the snapshot of a parked checkpoint node. A
 // failed snapshot does not fail the node: its checkpoint then has no
 // snapshot, and a rewind to it starts a fresh sandbox (ADR-0170).
-func (h *DefaultAgentHarness) checkpointSnapshot(ctx context.Context, tenant string, task agent.Task, sandboxID string) map[string]any {
+//
+// The process in the snapshot still holds the grant of the node in memory, and
+// a rewind can start seconds after the checkpoint. So the grant of the node is
+// marked as forked from its sandbox now, as a fork marks its source grant
+// (D74, D80): from then on the grant works only in the source sandbox, and a
+// restored sandbox that presents it is refused. When the mark cannot be
+// written, the snapshot is dropped, and a rewind starts a fresh sandbox.
+func (h *DefaultAgentHarness) checkpointSnapshot(ctx context.Context, tenant string, task agent.Task, sandboxID, grantID string) map[string]any {
 	snap, err := h.agentLauncher.SnapshotSandbox(ctx, tenant, sandboxID, SnapshotLife)
 	if err != nil {
 		h.logger.Warn("checkpoint snapshot not taken; a rewind to this node starts a fresh sandbox",

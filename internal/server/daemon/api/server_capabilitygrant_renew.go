@@ -86,6 +86,21 @@ func (s *DaemonServer) WithLiveMissionLookup(l LiveMissionLookup) *DaemonServer 
 	return s
 }
 
+// RenewalForkGuard refuses the renewal of the grant of a forked source outside
+// the source sandbox (D74, D80). The renewal mints a grant with a new id, so a
+// fork or a restored sandbox must not get one from the grant of its source.
+type RenewalForkGuard interface {
+	CheckGrant(ctx context.Context, claims sdkcg.Claims) error
+}
+
+// WithRenewalForkGuard wires the fork check of the renewal. Renewal refuses
+// every request without it, because a renewal that skips the check would
+// give a fork the source grant again.
+func (s *DaemonServer) WithRenewalForkGuard(g RenewalForkGuard) *DaemonServer {
+	s.renewalForks = g
+	return s
+}
+
 // WithCGMinter wires the CG Minter independently of the renewal verifier, so the
 // bootstrap-token issuance path (CreateAgentIdentity, gibson#648 / ADR-0045) can
 // mint a first-registration bootstrap token even when CG renewal is not
@@ -155,6 +170,15 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	if !s.liveMissions.IsMissionLive(claims.MissionID) {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
+	}
+
+	// The grant of a forked source works only in the source sandbox.
+	if s.renewalForks == nil {
+		return nil, status.Error(codes.FailedPrecondition,
+			"capability-grant renewal not enabled on this daemon: no fork check is wired")
+	}
+	if err := s.renewalForks.CheckGrant(ctx, claims); err != nil {
+		return nil, err //nolint:wrapcheck // a gRPC status
 	}
 
 	// Mint the renewal. allowed_rpcs and tenant carry over verbatim;

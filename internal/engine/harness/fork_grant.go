@@ -15,6 +15,7 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"github.com/zeroroot-ai/sdk/fork"
 	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc"
@@ -84,7 +85,16 @@ func checkForkGrant(ctx context.Context, guard *forkGuard, method string, logger
 		return nil
 	}
 	claims, ok := TaskGrantClaimsFromContext(ctx)
-	if !ok || claims.JTI == "" {
+	if !ok {
+		return nil
+	}
+	return checkForkedGrant(ctx, guard, claims, method, logger)
+}
+
+// checkForkedGrant is the check of checkForkGrant for the verified claims of
+// a grant.
+func checkForkedGrant(ctx context.Context, guard *forkGuard, claims sdkcg.Claims, method string, logger *slog.Logger) error {
+	if claims.JTI == "" {
 		return nil
 	}
 	source, forked, err := guard.ledger.ForkedSource(ctx, claims.JTI)
@@ -107,6 +117,28 @@ func checkForkGrant(ctx context.Context, guard *forkGuard, method string, logger
 		st = detailed
 	}
 	return deny(ctx, logger, method, "source grant used outside the source sandbox", st.Err())
+}
+
+// ForkGrantGuard refuses the grant of a forked source outside the source
+// sandbox on a path that is not a callback of the harness listener. The
+// renewal of a grant uses it: a renewal mints a grant with a new id, which
+// the ledger does not know, so a restored or forked sandbox must not get one
+// from the grant of its source.
+type ForkGrantGuard struct {
+	guard  forkGuard
+	logger *slog.Logger
+}
+
+// NewForkGrantGuard returns a guard over the ledger and the sandbox identity
+// check of the callback service.
+func NewForkGrantGuard(l ForkLedger, v SandboxIdentityVerifier, logger *slog.Logger) *ForkGrantGuard {
+	return &ForkGrantGuard{guard: forkGuard{ledger: l, identity: v}, logger: logger}
+}
+
+// CheckGrant returns nil when the call may use the grant in claims. The
+// result is a gRPC status.
+func (g *ForkGrantGuard) CheckGrant(ctx context.Context, claims sdkcg.Claims) error {
+	return checkForkedGrant(ctx, &g.guard, claims, "RenewCapabilityGrant", g.logger)
 }
 
 // verifiedSandbox returns the sandbox id that setec verifies from the

@@ -81,6 +81,33 @@ func TestCheckpointMode_NoMarkMeansNoSnapshot(t *testing.T) {
 	}
 }
 
+// A grant with no id cannot be marked, so the snapshot is dropped.
+func TestCheckpointMode_AGrantWithNoIDMeansNoSnapshot(t *testing.T) {
+	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
+	h, ledger := forkHarness(t, launcher)
+	got := h.checkpointSnapshot(context.Background(), "zerocool-lab", agent.Task{NodeID: "recon"}, "ns/n1/u1", "")
+	if got != nil || len(ledger.forks) != 0 {
+		t.Fatalf("snapshot = %v, fork records = %d; want none", got, len(ledger.forks))
+	}
+}
+
+// A node that is a checkpoint and also forkable marks its grant once and
+// still parks for a later node.
+func TestCheckpointMode_ACheckpointNodeThatIsAlsoForkable(t *testing.T) {
+	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
+	h, ledger := forkHarness(t, launcher)
+	task := agent.NewTask("recon", "x", nil)
+	task.NodeID, task.Checkpoint, task.Forkable = "recon", true, true
+
+	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
+	if err != nil || CheckpointSnapshot(res) != "snap-1" {
+		t.Fatalf("snapshot = %q, err = %v", CheckpointSnapshot(res), err)
+	}
+	if _, ok := h.forks.Parked.Lookup("run-xyz", "recon"); !ok || len(ledger.forks) != 1 {
+		t.Fatalf("parked = %v, fork records = %d; want the node parked and one mark", ok, len(ledger.forks))
+	}
+}
+
 // A failed snapshot does not fail the node. Its checkpoint has no snapshot.
 func TestCheckpointMode_AFailedSnapshotKeepsTheNode(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshotErr: errors.New("disk full")}

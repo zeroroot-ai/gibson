@@ -249,6 +249,8 @@ type daemonImpl struct {
 
 	// forks holds the parked sources and the fork ledger (ADR-0169, D74).
 	forks *harness.ForkSupport
+	// sandboxIdentity checks the setec identity token of a caller sandbox.
+	sandboxIdentity harness.SandboxIdentityVerifier
 	// sandboxSuspender suspends and resumes an idle bank member through setec
 	// (gibson#809). Nil in a build without setec.
 	sandboxSuspender        sandboxSuspender
@@ -613,6 +615,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		slogLogger.Warn("sandbox identity check unavailable; a forked grant is refused everywhere",
 			"error", idErr)
 	}
+	d.sandboxIdentity = identityVerifier
 	if cfg.Sandbox.Devbox.Image == "" {
 		// No image means no session surface at all. Say so once at startup
 		// rather than letting every DevboxExec fail with no explanation.
