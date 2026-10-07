@@ -44,7 +44,7 @@ func TestDelegateToAgent_ForkableNodeParks(t *testing.T) {
 		t.Fatal("the dispatch of a forkable node must be forkable")
 	}
 	src, ok := h.forks.Parked.Lookup("run-xyz", "recon")
-	if !ok || src.SandboxID != "ns/src-1/u0" || src.Tenant != "zerocool-lab" || src.GrantJTI == "" {
+	if !ok || src.SandboxID != "ns/src-1/u0" || src.Tenant != "zerocool-lab" || src.GrantJTI == "" || src.AgentName != "zerocool" {
 		t.Fatalf("parked source = %+v, %v", src, ok)
 	}
 }
@@ -126,6 +126,13 @@ func TestDelegateToAgent_StartsFromRefusals(t *testing.T) {
 	h.forks.Parked.Park("run-xyz", "recon", ParkedSource{Tenant: "zerocool-lab", AgentName: "zerocool", SandboxID: "s"})
 	if _, err := h.DelegateToAgent(ctx, "zerocool", task); err == nil || !strings.Contains(err.Error(), "no id") {
 		t.Errorf("grant with no id: err = %v", err)
+	}
+
+	// A parked source that records no agent is refused: the check fails closed.
+	h, _ = forkHarness(t, &recordingLauncher{})
+	h.forks.Parked.Park("run-xyz", "recon", ParkedSource{Tenant: "zerocool-lab", SandboxID: "s", GrantJTI: "j"})
+	if _, err := h.DelegateToAgent(ctx, "zerocool", task); err == nil || !strings.Contains(err.Error(), "another agent") {
+		t.Errorf("no recorded agent: err = %v", err)
 	}
 
 	// The source ran another agent: the fork would continue its process

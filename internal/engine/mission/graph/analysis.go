@@ -298,6 +298,10 @@ func findStartsFromRefusals(nodes map[string]*missionv1.MissionNode, edges []edg
 			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not exist"})
 		case !hasCycle && !reaches(adj, from, id):
 			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "does not run before it"})
+		case nodes[from].GetAgentConfig() == nil || nodes[id].GetAgentConfig() == nil:
+			// A fork continues the process of an agent. Another node kind has
+			// no such process.
+			out = append(out, StartsFromRefusal{Node: id, StartsFrom: from, Reason: "is not an agent node"})
 		case nodes[from].GetAgentConfig().GetAgentName() != nodes[id].GetAgentConfig().GetAgentName():
 			// A fork continues the process of the earlier node, so only the
 			// agent of that node can run the later one.

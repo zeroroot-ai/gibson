@@ -545,6 +545,16 @@ func TestProject_StartsFrom_Refusals(t *testing.T) {
 			},
 			node: "first", from: "second", reason: "does not run before it",
 		},
+		"a source that is not an agent": {
+			def: &missionv1.MissionDefinition{
+				Nodes: map[string]*missionv1.MissionNode{
+					"scan":    tool("scan", "nmap"),
+					"exploit": agentFrom("exploit", "alpha", "scan"),
+				},
+				Edges: []*missionv1.MissionEdge{{From: "scan", To: "exploit"}},
+			},
+			node: "exploit", from: "scan", reason: "is not an agent node",
+		},
 		"another agent": {
 			def: &missionv1.MissionDefinition{
 				Nodes: map[string]*missionv1.MissionNode{
@@ -594,7 +604,7 @@ func TestProject_StartsFrom_CycleSkipsTheCheck(t *testing.T) {
 	def := &missionv1.MissionDefinition{
 		Nodes: map[string]*missionv1.MissionNode{
 			"a": agent("a", "x"),
-			"b": agentFrom("b", "y", "a"),
+			"b": agentFrom("b", "x", "a"),
 		},
 		Edges: []*missionv1.MissionEdge{{From: "a", To: "b"}, {From: "b", To: "a"}},
 	}
