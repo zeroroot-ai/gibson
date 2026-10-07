@@ -191,7 +191,9 @@ WHERE  tenant_id = $1 AND connector_id = $2`,
 }
 
 // SetDiscoveredTools records the number of tools that one connector of the
-// tenant served when the daemon listed them (gibson#723). The daemon is the
+// tenant served when the daemon listed them (gibson#723). The stored value is
+// the count of the last list that the connector answered: a connector that
+// stops answering keeps its last count. The daemon is the
 // one MCP client, so it is the one writer of the count. Like ReportStatus, it
 // never creates a row: a connector that the tenant did not enable has none.
 func (s *Store) SetDiscoveredTools(ctx context.Context, tenantID, connectorID string, n int32) error {
