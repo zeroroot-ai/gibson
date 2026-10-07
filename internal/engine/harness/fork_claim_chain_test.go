@@ -103,3 +103,37 @@ func TestClaimFork_TenantComesFromTheStartRecord(t *testing.T) {
 		t.Fatalf("tenant = %q, err = %v; want acme", seen, err)
 	}
 }
+
+// The interceptor leaves every other method and every other credential as it
+// is, refuses a request of the wrong type, and answers Unavailable when the
+// start record cannot be read.
+func TestClaimForkTenantInterceptor_Branches(t *testing.T) {
+	run := func(s *HarnessCallbackService, method, credential string, req any) (bool, error) {
+		called := false
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(auth.HeaderCredentialType, credential))
+		_, err := s.claimForkTenantInterceptor()(ctx, req, &grpc.UnaryServerInfo{FullMethod: method},
+			func(context.Context, any) (any, error) { called = true; return nil, nil })
+		return called, err
+	}
+	s, l := claimService(t)
+	recordFork(t, l, "ns/fork-1/u1", "n2")
+	claim := &harnesspb.ClaimForkRequest{SandboxId: "fork-1"}
+
+	if called, err := run(s, scopeMethod, credentialSandboxIdentity, claim); !called || err != nil {
+		t.Errorf("other method: called = %v, err = %v; want a pass-through", called, err)
+	}
+	if called, err := run(s, claimForkMethod, "oidc-user", claim); !called || err != nil {
+		t.Errorf("other credential: called = %v, err = %v; want a pass-through", called, err)
+	}
+	if called, err := run(s, claimForkMethod, credentialSandboxIdentity, &harnesspb.ObserveRequest{}); called || status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("wrong request type: called = %v, code = %v", called, status.Code(err))
+	}
+	l.Close()
+	if called, err := run(s, claimForkMethod, credentialSandboxIdentity, claim); called || status.Code(err) != codes.Unavailable {
+		t.Errorf("ledger down: called = %v, code = %v; want Unavailable", called, status.Code(err))
+	}
+	s.forkLedger = nil
+	if called, err := run(s, claimForkMethod, credentialSandboxIdentity, claim); called || status.Code(err) != codes.FailedPrecondition {
+		t.Errorf("no ledger: called = %v, code = %v; want FailedPrecondition", called, status.Code(err))
+	}
+}
