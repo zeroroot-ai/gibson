@@ -28,6 +28,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -94,18 +96,9 @@ func NewMetricsServer(cfg MetricsServerConfig) (*MetricsServer, error) {
 			cfg.CertPath, cfg.KeyPath, cfg.ClientCAPath)
 	}
 
-	cert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("metrics: load server cert/key from %s/%s: %w", cfg.CertPath, cfg.KeyPath, err)
-	}
-
-	caBytes, err := os.ReadFile(cfg.ClientCAPath)
-	if err != nil {
-		return nil, fmt.Errorf("metrics: load client CA from %s: %w", cfg.ClientCAPath, err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caBytes) {
-		return nil, fmt.Errorf("metrics: client CA bundle at %s is not valid PEM", cfg.ClientCAPath)
+	mat := &tlsMaterial{certPath: cfg.CertPath, keyPath: cfg.KeyPath, caPath: cfg.ClientCAPath}
+	if _, err := mat.config(); err != nil {
+		return nil, err
 	}
 
 	addr := cfg.Addr
@@ -117,15 +110,74 @@ func NewMetricsServer(cfg MetricsServerConfig) (*MetricsServer, error) {
 		Addr:    addr,
 		Handler: cfg.Handler,
 		TLSConfig: &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			ClientAuth:   tls.RequireAndVerifyClientCert,
-			ClientCAs:    pool,
-			MinVersion:   tls.VersionTLS13,
+			MinVersion: tls.VersionTLS13,
+			// cert-manager renews the mounted Secret in place. Each
+			// handshake reads the current material, so a renewed cert and
+			// CA take effect with no restart (the material is re-parsed
+			// only when a file changes).
+			GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+				return mat.config()
+			},
 		},
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
 	return &MetricsServer{srv: srv}, nil
+}
+
+// tlsMaterial holds the server cert, its key and the client CA bundle,
+// and re-reads them when a file changes on disk.
+type tlsMaterial struct {
+	certPath, keyPath, caPath string
+
+	mu     sync.Mutex
+	stamp  string
+	cached *tls.Config
+}
+
+// config returns the server TLS config for the current files on disk.
+func (m *tlsMaterial) config() (*tls.Config, error) {
+	// A file that cannot be read gives no stamp, so the load below runs
+	// and names the file in its error.
+	stamp, statErr := m.stampOf()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if statErr == nil && m.cached != nil && stamp == m.stamp {
+		return m.cached, nil
+	}
+	cert, err := tls.LoadX509KeyPair(m.certPath, m.keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("metrics: load server cert/key from %s/%s: %w", m.certPath, m.keyPath, err)
+	}
+	caBytes, err := os.ReadFile(m.caPath)
+	if err != nil {
+		return nil, fmt.Errorf("metrics: load client CA from %s: %w", m.caPath, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(caBytes) {
+		return nil, fmt.Errorf("metrics: client CA bundle at %s is not valid PEM", m.caPath)
+	}
+	m.cached = &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    pool,
+		MinVersion:   tls.VersionTLS13,
+	}
+	m.stamp = stamp
+	return m.cached, nil
+}
+
+// stampOf names the size and modification time of the three files.
+func (m *tlsMaterial) stampOf() (string, error) {
+	var out strings.Builder
+	for _, p := range []string{m.certPath, m.keyPath, m.caPath} {
+		fi, err := os.Stat(p)
+		if err != nil {
+			return "", fmt.Errorf("metrics: stat TLS material %s: %w", p, err)
+		}
+		fmt.Fprintf(&out, "%s:%d:%d;", p, fi.Size(), fi.ModTime().UnixNano())
+	}
+	return out.String(), nil
 }
 
 // Addr returns the configured bind address. Useful for log lines and tests.
@@ -179,10 +231,10 @@ func (s *MetricsServer) Serve(ctx context.Context) error {
 }
 
 // DefaultPrometheusHandler returns the standard /metrics HTTP handler bound
-// to the global Prometheus registry. Both the OTel-Prometheus exporter
-// (initPrometheusProvider) and the daemon's promauto-registered metrics
-// land on the global registry, so this single handler captures the whole
-// surface. Tests may pass their own handler via MetricsServerConfig.Handler.
+// to the global Prometheus registry. The promauto-registered metrics land on
+// that registry. An OTel instrument reaches it only in a process that wires
+// a Prometheus exporter; ext-authz sends its OTel metrics to the collector
+// only. Tests may pass their own handler via MetricsServerConfig.Handler.
 func DefaultPrometheusHandler() http.Handler {
 	return promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
 		// Per Prom guidance — surface internal errors as 500s so

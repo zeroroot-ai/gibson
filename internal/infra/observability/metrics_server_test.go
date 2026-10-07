@@ -4,6 +4,7 @@
 package observability
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -324,4 +325,48 @@ func mustWriteTempFile(t *testing.T, data []byte) string {
 		t.Fatalf("write temp: %v", err)
 	}
 	return p
+}
+
+// TestMetricsServer_ReloadsRenewedMaterial proves a renewed cert in place
+// takes effect with no restart: cert-manager rewrites the mounted Secret,
+// and the next handshake presents the new leaf (charts#515 review).
+func TestMetricsServer_ReloadsRenewedMaterial(t *testing.T) {
+	t.Parallel()
+
+	caCert, caKey, caPEM, _ := mustGenerateCA(t)
+	caPath := mustWriteTempFile(t, caPEM)
+	certPath, keyPath := mustWriteServerLeaf(t, caCert, caKey)
+	mat := &tlsMaterial{certPath: certPath, keyPath: keyPath, caPath: caPath}
+
+	first, err := mat.config()
+	if err != nil {
+		t.Fatalf("first load: %v", err)
+	}
+	again, err := mat.config()
+	if err != nil || again != first {
+		t.Fatalf("an unchanged file must reuse the parsed config (err %v)", err)
+	}
+
+	newCert, newKey := mustGenerateLeaf(t, caCert, caKey, false)
+	time.Sleep(10 * time.Millisecond)
+	if err := os.WriteFile(certPath, newCert, 0o600); err != nil {
+		t.Fatalf("rewrite cert: %v", err)
+	}
+	if err := os.WriteFile(keyPath, newKey, 0o600); err != nil {
+		t.Fatalf("rewrite key: %v", err)
+	}
+	renewed, err := mat.config()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if renewed == first {
+		t.Fatal("a renewed cert on disk must give a new config")
+	}
+	want, err := tls.X509KeyPair(newCert, newKey)
+	if err != nil {
+		t.Fatalf("X509KeyPair: %v", err)
+	}
+	if !bytes.Equal(renewed.Certificates[0].Certificate[0], want.Certificate[0]) {
+		t.Fatal("the reloaded config does not present the renewed leaf")
+	}
 }
