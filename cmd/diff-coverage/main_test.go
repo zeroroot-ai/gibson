@@ -452,3 +452,53 @@ github.com/zeroroot-ai/gibson/internal/x/file.go:4.12,7.3 1 0
 		t.Fatalf("with no source to read the line must still count, got total=%d", r.Total)
 	}
 }
+
+// TestParseAddedLines_TrailingCommentOnlyChangeExcluded: a line whose
+// statement is unchanged and whose trailing comment changed is not a changed
+// statement (gibson#830).
+func TestParseAddedLines_TrailingCommentOnlyChangeExcluded(t *testing.T) {
+	diff := `--- a/pkg/x.go
++++ b/pkg/x.go
+@@ -10 +10 @@
+-	ingest(d.registry), // findings reach the projector (old text)
++	ingest(d.registry), // findings reach the projector (new text)
+`
+	got := parseAddedLines([]byte(diff))
+	if len(got["pkg/x.go"]) != 0 {
+		t.Fatalf("a trailing-comment-only change counted as changed: %v", got["pkg/x.go"])
+	}
+}
+
+// TestParseAddedLines_StatementAndCommentChangeCounts: when the statement
+// text changed as well, the comment does not hide the change.
+func TestParseAddedLines_StatementAndCommentChangeCounts(t *testing.T) {
+	diff := `--- a/pkg/x.go
++++ b/pkg/x.go
+@@ -10 +10 @@
+-	ingest(d.registry), // old note
++	ingest(d.brain), // new note
+`
+	got := parseAddedLines([]byte(diff))
+	if lines := got["pkg/x.go"]; len(lines) != 1 || lines[0] != 10 {
+		t.Fatalf("want [10], got %v", lines)
+	}
+}
+
+// TestStripLineComment keeps a `//` inside a string literal and drops a
+// trailing comment outside one.
+func TestStripLineComment(t *testing.T) {
+	cases := map[string]string{
+		`x := f() // note`:                        `x := f() `,
+		`u := "https://example.test" // trailing`: `u := "https://example.test" `,
+		"r := `a//b` // c":                        "r := `a//b` ",
+		`q := "a\"//b" // c`:                      `q := "a\"//b" `,
+		`c := '/' // rune`:                        `c := '/' `,
+		`plain := 1`:                              `plain := 1`,
+		`// only a comment`:                       ``,
+	}
+	for in, want := range cases {
+		if got := stripLineComment(in); got != want {
+			t.Errorf("stripLineComment(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

@@ -70,7 +70,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 			d.brainRegistry,     // ECS brain engine (gibson#851)
 			d.brainExecutor,     // concrete Dispatcher + DeciderLLM bindings (gibson#851)
-			d.graphWriter,       // sole writer of the knowledge graph (ADR-0012, gibson#551)
+			d.graphWriter,       // sole writer of the knowledge graph (ADR-0112, gibson#551)
 		)
 		// Each mission pins the belief version of its tenant at its start
 		// (ADR-0106, gibson#615). Set here, after the brain registry init built
