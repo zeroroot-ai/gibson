@@ -296,6 +296,7 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
 		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
 	}); err != nil {
+		failed()
 		return nil, status.Errorf(codes.Unavailable, "binding revoked but the plugin was not told; retry: %v", err)
 	}
 

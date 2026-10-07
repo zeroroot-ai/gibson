@@ -329,8 +329,10 @@ func TestRevokePluginSecretBinding_TellsTheRunningPlugin(t *testing.T) {
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("publish failure must be Unavailable, got %v", err)
 	}
-	if len(au.events) != 1 {
-		t.Fatalf("the audit line must not claim a revocation the plugin did not hear: %d audit events", len(au.events))
+	// The record came first (gibson#676). The failed publish adds a failure
+	// record, so the trail does not claim a revocation the plugin did not hear.
+	if len(au.events) != 3 || au.events[2].Success || au.events[2].Decision != "deny" {
+		t.Fatalf("audit events = %+v, want the first revocation and then a record and a failure record", au.events)
 	}
 }
 

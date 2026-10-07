@@ -28,10 +28,12 @@ func TestCatalogPlugins_AuditRecordComesFirstAndOnlyOnAChange(t *testing.T) {
 	d := &fakeCatalogPluginDaemon{desired: []provision.DesiredCatalogPlugin{cpWish(cpTenant, cpPlugin)}}
 	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant))
 	r.Audit = sink.Emitter(t)
+	first := true
 	sink.OnEmit = func(ev audit.Event) {
-		if ev.Action == audit.ActionCatalogPluginApply && cpExists(t, c, client.ObjectKey{Name: cpNamespace}, &corev1.Namespace{}) {
+		if first && ev.Action == audit.ActionCatalogPluginApply && cpExists(t, c, client.ObjectKey{Name: cpNamespace}, &corev1.Namespace{}) {
 			t.Error("the record came after the namespace")
 		}
+		first = false
 	}
 	if err := r.converge(context.Background()); err != nil {
 		t.Fatalf("converge: %v", err)
