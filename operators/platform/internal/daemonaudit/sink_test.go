@@ -17,9 +17,13 @@ import (
 type fakeDaemon struct {
 	operatorv1.DaemonOperatorServiceClient
 	got []*operatorv1.EmitAuditEventRequest
+	err error
 }
 
 func (f *fakeDaemon) EmitAuditEvent(_ context.Context, in *operatorv1.EmitAuditEventRequest, _ ...grpc.CallOption) (*operatorv1.EmitAuditEventResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	f.got = append(f.got, in)
 	return &operatorv1.EmitAuditEventResponse{}, nil
 }
@@ -68,5 +72,27 @@ func TestSettings_RequiresBoth(t *testing.T) {
 	env["GIBSON_DAEMON_SPIFFE_ID"] = "spiffe://example.org/platform/daemon"
 	if addr, svid, err := Settings(func(k string) string { return env[k] }); err != nil || addr == "" || svid == "" {
 		t.Fatalf("Settings = %q %q %v", addr, svid, err)
+	}
+}
+
+// The sink needs a dial function, returns the error of a refused record, and
+// closes nothing when it never dialed.
+func TestSink_RefusedRecordAndClose(t *testing.T) {
+	if _, err := New(nil); err == nil {
+		t.Fatal("New(nil) must be refused")
+	}
+	daemon := &fakeDaemon{err: errors.New("refused")}
+	s, err := New(func(context.Context) (operatorv1.DaemonOperatorServiceClient, func() error, error) {
+		return daemon, func() error { return nil }, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close before a dial: %v", err)
+	}
+	ev := audit.Event{Action: audit.ActionPlatformBootstrap, TenantID: "_system", TargetType: "platformbootstrap", TargetID: "platform"}
+	if err := s.EmitAuditEvent(context.Background(), ev); err == nil || !errors.Is(err, daemon.err) {
+		t.Fatalf("a refused record: %v", err)
 	}
 }

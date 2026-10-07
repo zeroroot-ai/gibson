@@ -67,3 +67,37 @@ func TestLazyForkLedger_UsesTheStateClient(t *testing.T) {
 		t.Fatalf("Claim = %+v %v", d, err)
 	}
 }
+
+// The fork seats go through the ledger too: none without the state client,
+// and a round trip with it.
+func TestLazyForkLedger_ForkSeats(t *testing.T) {
+	ctx := context.Background()
+	none := &lazyForkLedger{daemon: &daemonImpl{}}
+	seat := harness.ForkSeat{MissionID: "m", NodeID: "n", Tenant: "acme", AgentName: "claude", SandboxID: "ns/f/u", SandboxClass: "agent", SourceSandboxID: "ns/src/u", SourceJTI: "j"}
+	if err := none.ReserveForkSeat(ctx, seat, time.Hour); !errors.Is(err, errNoForkStore) {
+		t.Fatalf("ReserveForkSeat with no store: %v", err)
+	}
+	if _, ok, err := none.TakeForkSeat(ctx, "m", "n"); ok || err != nil {
+		t.Fatalf("TakeForkSeat with no store = %v, %v; want none", ok, err)
+	}
+
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	z := &lazyForkLedger{daemon: &daemonImpl{stateClient: sc}}
+	if err := z.ReserveForkSeat(ctx, seat, time.Hour); err != nil {
+		t.Fatalf("ReserveForkSeat: %v", err)
+	}
+	got, ok, err := z.TakeForkSeat(ctx, "m", "n")
+	if err != nil || !ok || got.SandboxID != "ns/f/u" {
+		t.Fatalf("TakeForkSeat = %+v, %v, %v; want the seat", got, ok, err)
+	}
+	if _, ok, err := z.TakeForkSeat(ctx, "m", "n"); ok || err != nil {
+		t.Fatalf("a seat is taken once: %v, %v", ok, err)
+	}
+}

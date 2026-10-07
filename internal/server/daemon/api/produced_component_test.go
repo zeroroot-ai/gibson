@@ -249,3 +249,28 @@ func TestProducedComponentLimitFromEnv(t *testing.T) {
 		}
 	}
 }
+
+// The enrollment refuses a call with no tenant, with no authorizer, with an
+// owner that cannot be read, and a name that a produced component holds.
+func TestEnrollProducedComponent_MoreRefusals(t *testing.T) {
+	ctx := context.Background()
+	srv, az, _, _, _ := producedServer(t, 5)
+	if _, err := srv.EnrollProducedComponent(ctx, "", testProducer, tool("a-tool")); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("no tenant: %v", err)
+	}
+	az.listUsersErr = errors.New("fga down")
+	if _, err := srv.EnrollProducedComponent(ctx, "acme", testProducer, tool("a-tool")); status.Code(err) != codes.Internal {
+		t.Fatalf("an owner that cannot be read: %v", err)
+	}
+	az.listUsersErr = nil
+	if _, err := srv.EnrollProducedComponent(ctx, "acme", testProducer, tool("a-tool")); err != nil {
+		t.Fatalf("first enrollment: %v", err)
+	}
+	if _, err := srv.EnrollProducedComponent(ctx, "acme", testProducer, tool("a-tool")); status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("a taken name: %v", err)
+	}
+	srv.authorizer = nil
+	if _, err := srv.EnrollProducedComponent(ctx, "acme", testProducer, tool("b-tool")); status.Code(err) != codes.Unavailable {
+		t.Fatalf("no authorizer: %v", err)
+	}
+}
