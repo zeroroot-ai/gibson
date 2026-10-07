@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.156.0](https://github.com/zeroroot-ai/gibson/compare/v0.155.0...v0.156.0) (2026-10-07)
+
+
+### Features
+
+* **capabilitygrant:** the daemon reads a rotated signing key with no restart ([#1035](https://github.com/zeroroot-ai/gibson/issues/1035)) ([53020dd](https://github.com/zeroroot-ai/gibson/commit/53020dd0e01bb2d75a69f81370ab91661f529979))
+* **daemon:** each error status carries an ErrorDetail ([#1009](https://github.com/zeroroot-ai/gibson/issues/1009)) ([260d548](https://github.com/zeroroot-ai/gibson/commit/260d548a772af28df378b8dbe22d4457146f4e82))
+* **ext-authz:** serve metrics on a separate metrics-only port ([#1034](https://github.com/zeroroot-ai/gibson/issues/1034)) ([adbab10](https://github.com/zeroroot-ai/gibson/commit/adbab10c55921ab29f7a6c8f63f89a688c2f3983))
+* **vaulttoken:** the platform-operator moves to a rotated OpenBao token at once ([#1037](https://github.com/zeroroot-ai/gibson/issues/1037)) ([c4a6cab](https://github.com/zeroroot-ai/gibson/commit/c4a6cab71c92e0828a0acd65e6c68cd1857870d4))
+
+
+### Bug Fixes
+
+* **audit:** listed state changes write their audit record first ([#1028](https://github.com/zeroroot-ai/gibson/issues/1028)) ([d7cd223](https://github.com/zeroroot-ai/gibson/commit/d7cd2231aaae466b48d5ef5cfd71cb222c15cd94))
+* **callback:** a fork claim takes its tenant from the start record ([#1020](https://github.com/zeroroot-ai/gibson/issues/1020)) ([c64d5e1](https://github.com/zeroroot-ai/gibson/commit/c64d5e1dda0658447b8eb3de5c19a33b9e204d7e))
+* **capabilitygrant:** a host re-registration keeps the bounds of its enrollment ([#1026](https://github.com/zeroroot-ai/gibson/issues/1026)) ([8000e17](https://github.com/zeroroot-ai/gibson/commit/8000e173a06c82ac708925a12397287979795206))
+* **graph:** a duplicate node stops the schema retry and reports the tenant ([#1011](https://github.com/zeroroot-ai/gibson/issues/1011)) ([55fb2c2](https://github.com/zeroroot-ai/gibson/commit/55fb2c23a465303deb12f44687888bc2104dea8e))
+* **harness:** a callback names only the agent of its grant ([#1027](https://github.com/zeroroot-ai/gibson/issues/1027)) ([2b328ad](https://github.com/zeroroot-ai/gibson/commit/2b328adcbf8dacc9d8084b419a35eeaa3478c9b1))
+* **harness:** a fork node starts only from a node of the same agent ([#1025](https://github.com/zeroroot-ai/gibson/issues/1025)) ([b1e1eea](https://github.com/zeroroot-ai/gibson/commit/b1e1eeabc72a3261120034ec3f70fc63a85fd91e))
+* **harness:** a restored or forked sandbox cannot use the grant of its source ([#1029](https://github.com/zeroroot-ai/gibson/issues/1029)) ([0ca7f99](https://github.com/zeroroot-ai/gibson/commit/0ca7f99b722efc0ce0c4769f401cc75bd31d68df))
+* **invitations:** an invitation call writes nothing that it cannot mail ([#1013](https://github.com/zeroroot-ai/gibson/issues/1013)) ([e3fa104](https://github.com/zeroroot-ai/gibson/commit/e3fa1042f201e7edd94c6dbf8222da87d3b84e47))
+
 ## [0.155.0](https://github.com/zeroroot-ai/gibson/compare/v0.154.0...v0.155.0) (2026-10-07)
 
 
