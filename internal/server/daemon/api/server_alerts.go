@@ -67,14 +67,6 @@ type redisAlertStore struct {
 	logger *slog.Logger
 }
 
-// NewRedisAlertStore creates an alert store backed by the given Redis client.
-func NewRedisAlertStore(client goredis.UniversalClient, logger *slog.Logger) alertStoreIface {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	return &redisAlertStore{client: client, logger: logger}
-}
-
 const (
 	// alertsDefaultPageSize is the page size of ListAlerts when page_size is 0.
 	alertsDefaultPageSize = 50

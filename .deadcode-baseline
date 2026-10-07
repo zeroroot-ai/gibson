@@ -68,11 +68,11 @@ internal/engine/graphrag/graph/neo4j.go	Neo4jClient.ExecuteRead
 internal/engine/graphrag/graph/neo4j.go	Neo4jClient.Health
 internal/engine/graphrag/graph/neo4j.go	Neo4jClient.Query
 internal/engine/graphrag/graph/neo4j.go	NewNeo4jClient
+internal/engine/graphrag/graph/neo4j.go	connectNeo4j
 internal/engine/harness/callback_service.go	NewHarnessCallbackService
 internal/engine/harness/callback_service.go	WithAgentOwnerLookup
 internal/engine/harness/callback_service.go	WithCredentialStore
 internal/engine/harness/callback_service.go	WithDiscoveryProcessor
-internal/engine/harness/callback_service.go	WithEventBus
 internal/engine/harness/callback_service.go	WithLLMCallSink
 internal/engine/harness/callback_service.go	WithMissionManager
 internal/engine/harness/callback_service.go	WithObservationSink
@@ -256,12 +256,6 @@ internal/server/daemon/api/server_alerts.go	alertIndexKey
 internal/server/daemon/api/server_alerts.go	redisAlertStore.ListAlerts
 internal/server/daemon/api/server_alerts.go	redisAlertStore.MarkAlertRead
 internal/server/daemon/api/server_alerts.go	redisAlertStore.MarkAllAlertsRead
-internal/server/daemon/broker_init_vault_auth.go	loginAppRole
-internal/server/daemon/broker_init_vault_auth.go	loginFallbackViaProvider
-internal/server/daemon/broker_init_vault_auth.go	loginJWT
-internal/server/daemon/broker_init_vault_auth.go	newVaultBareClient
-internal/server/daemon/broker_init_vault_auth.go	postLogin
-internal/server/daemon/broker_init_vault_auth.go	vaultAuthLogin
 internal/server/daemon/eventbus.go	NewAgentRegisteredEvent
 internal/server/daemon/eventbus.go	NewAgentUnregisteredEvent
 internal/server/daemon/eventbus.go	NewFindingDiscoveredEvent
@@ -277,9 +271,6 @@ internal/server/daemon/test_helpers.go	mockComponentDiscovery.ListTools
 operators/internal/audit/audittest/sink.go	Sink.EmitAuditEvent
 operators/internal/audit/audittest/sink.go	Sink.Emitter
 operators/internal/audit/audittest/sink.go	Sink.Events
-operators/tenant/cmd/gibson-backup/internal/s3/client.go	Client.StatObject
-operators/tenant/cmd/require_smtp.go	validateSMTPEnvKey
-operators/tenant/internal/clients/fga/plugin_grants.go	BackfillPluginCanInvokeGrants
 operators/tenant/internal/clients/fga/secrets_grants.go	BackfillSecretResolveGrants
 operators/tenant/internal/clients/signupprogress/redis.go	NewRedisClientFromRedis
 operators/tenant/internal/dataplane/client/client.go	PerTenantKinds

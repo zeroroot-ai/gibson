@@ -90,7 +90,7 @@ type TenantReconciler struct {
 	// Mail sends the workspace-ready welcome email to the founding owner at
 	// the Tenant's Ready transition (gibson#1447). Production always injects
 	// the SMTP sender (SMTP_HOST is a hard boot requirement — see
-	// cmd/require_smtp.go); may be nil in tests, where the send is a no-op
+	// cmd/main.go); may be nil in tests, where the send is a no-op
 	// like MigrationEmitter.
 	Mail mail.Sender
 
@@ -262,7 +262,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	// best-effort: a failure requeues without failing the reconcile.
 	//
 	// Production always injects the mailer (SMTP_HOST is boot-required, see
-	// cmd/require_smtp.go); the positive guard keeps unit tests that omit it
+	// cmd/main.go); the positive guard keeps unit tests that omit it
 	// from dereferencing nil, matching this reconciler's other
 	// optional-collaborator gate (r.MigrationEmitter).
 	welcomeRetry := false

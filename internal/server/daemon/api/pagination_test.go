@@ -44,7 +44,7 @@ func TestListAlerts_PagesWithATokenAndKeepsTheUnreadFilter(t *testing.T) {
 		require.NoError(t, client.Set(ctx, alertDataKey("acme", a.ID), raw, 0).Err())
 		require.NoError(t, client.ZAdd(ctx, alertIndexKey("acme", "u1"), goredis.Z{Score: float64(i), Member: a.ID}).Err())
 	}
-	srv := &DaemonServer{logger: slog.Default(), alertStore: NewRedisAlertStore(client, slog.Default())}
+	srv := &DaemonServer{logger: slog.Default(), alertStore: &redisAlertStore{client: client, logger: slog.Default()}}
 	callCtx := tenantAndSubjectCtx("acme", "u1")
 
 	var seen []string
