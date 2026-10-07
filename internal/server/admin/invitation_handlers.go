@@ -34,25 +34,29 @@ import (
 // ownership transfers via TransferOwnership, not invitation.
 var invitableRoles = map[string]struct{}{"admin": {}, "member": {}, "writer": {}}
 
-// sendInvitationEmail builds the accept link and sends the invitation email.
-// The raw token rides the link only; it is never stored or returned over the
-// RPC.
-//
-// When the mailer or base URL is unconfigured this refuses the call with
-// FailedPrecondition rather than returning nil. Returning nil reported a
-// delivery that never happened: the admin saw InviteMember succeed, the invitee
-// never got a link, and nothing surfaced the gap. The invitation row is already
-// persisted and idempotent on (tenant, email), so ResendInvitation replays the
-// send once mail is configured.
+// requireInviteMail refuses an invitation call before it writes anything when
+// the mailer or the public URL is not configured. A row whose accept link was
+// never mailed cannot be redeemed, because only the hash of the token is
+// stored. So the call writes nothing and says why (gibson#480).
 //
 // The refusal is per-call by design. A mail misconfiguration must degrade the
 // invitation RPCs only — never fail daemon startup and take every other RPC
 // down with it.
+func (s *TenantAdminServer) requireInviteMail(ctx context.Context, tenantID string) error {
+	if s.inviteMailer != nil && s.inviteBaseURL != "" {
+		return nil
+	}
+	s.logger.WarnContext(ctx, "invitation refused: mailer or base URL unconfigured", "tenant", tenantID)
+	return status.Error(codes.FailedPrecondition,
+		"transactional email is not configured, so no invitation was recorded; configure the email provider and public URL, then invite again")
+}
+
+// sendInvitationEmail builds the accept link and sends the invitation email.
+// The raw token rides the link only; it is never stored or returned over the
+// RPC. Each caller runs requireInviteMail before it writes the row.
 func (s *TenantAdminServer) sendInvitationEmail(ctx context.Context, tenantID, to, role, rawToken string, expiresAt time.Time) error {
-	if s.inviteMailer == nil || s.inviteBaseURL == "" {
-		s.logger.WarnContext(ctx, "invitation email not sent: mailer or base URL unconfigured", "tenant", tenantID, "to", to)
-		return status.Error(codes.FailedPrecondition,
-			"transactional email is not configured; the invitation was recorded but no email was sent — configure the email provider and public URL, then resend")
+	if err := s.requireInviteMail(ctx, tenantID); err != nil {
+		return err
 	}
 	appURL := strings.TrimRight(s.inviteBaseURL, "/")
 	acceptURL := appURL + "/invite/" + rawToken
@@ -179,6 +183,9 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 	if s.invitations == nil {
 		return nil, status.Error(codes.Unavailable, "invitation store not configured")
 	}
+	if err := s.requireInviteMail(ctx, tenantID); err != nil {
+		return nil, err
+	}
 
 	// The invited address may already belong to a DIFFERENT tenant
 	// (ADR-0093 decision 1: one tenant per person, emails unique
@@ -216,10 +223,15 @@ func (s *TenantAdminServer) InviteMember(ctx context.Context, req *tenantv1.Invi
 		return nil, status.Errorf(codes.Internal, "issue invitation: %v", err)
 	}
 
-	// Email the accept link (gibson#632). The invitation is already persisted +
-	// idempotent on (tenant,email), so a send failure is recoverable via
-	// ResendInvitation; surface it so the admin knows delivery didn't happen.
+	// Email the accept link (gibson#632). When the send fails, the row is
+	// cancelled: its token was never delivered, so nobody can redeem it, and a
+	// failed call must not leave a person shown as invited (gibson#480). The
+	// administrator invites again.
 	if err := s.sendInvitationEmail(ctx, tenantID, req.GetEmail(), role, token, expiresAt); err != nil {
+		if cerr := s.invitations.SetStatus(ctx, tenantID, id, "cancelled"); cerr != nil {
+			s.logger.ErrorContext(ctx, "InviteMember: the email failed and the invitation could not be withdrawn",
+				slog.String("invitation_id", id), slog.String("error", cerr.Error()))
+		}
 		return nil, err
 	}
 
@@ -359,6 +371,11 @@ func (s *TenantAdminServer) lookupPendingInvitation(ctx context.Context, req int
 func (s *TenantAdminServer) ResendInvitation(ctx context.Context, req *tenantv1.ResendInvitationRequest) (*tenantv1.ResendInvitationResponse, error) {
 	tenantID, rec, err := s.lookupPendingInvitation(ctx, req)
 	if err != nil {
+		return nil, err
+	}
+	// Refuse before the reissue: a new token replaces the one the invitee
+	// already holds, so a reissue with no mail would kill a working link.
+	if err := s.requireInviteMail(ctx, tenantID); err != nil {
 		return nil, err
 	}
 	token, hash, gerr := GenerateInvitationToken()

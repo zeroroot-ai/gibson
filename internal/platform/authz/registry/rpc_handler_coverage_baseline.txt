@@ -70,7 +70,6 @@
 /gibson.tenant.v1.MembershipService/DeleteTeam
 /gibson.tenant.v1.MembershipService/GetReservedNames
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
-/gibson.tenant.v1.MembershipService/ResendInvitation
 /gibson.tenant.v1.MembershipService/SetTeamAdmin
 /gibson.tenant.v1.ModelAccessService/GrantAccess
 /gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents
