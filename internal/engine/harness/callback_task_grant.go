@@ -103,11 +103,30 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 			return ctx, deny(ctx, logger, method, "task grant mission does not match ContextInfo.mission_id",
 				status.Error(codes.PermissionDenied, "task grant is for another mission"))
 		}
+		// The grant names one agent. A request that names another agent
+		// would act as that agent: its harness, its fork and its next grant.
+		if info := carrier.GetContext(); info != nil && info.GetAgentName() != "" {
+			if grantAgent, isAgent := grantAgentName(claims); isAgent && info.GetAgentName() != grantAgent {
+				return ctx, deny(ctx, logger, method, "task grant agent does not match ContextInfo.agent_name",
+					status.Error(codes.PermissionDenied, "task grant is for another agent"))
+			}
+		}
 	}
 	// The verified claims travel with the request. A handler that must know
 	// which job or which task a callback belongs to reads them from there,
 	// never from a request field the caller filled in.
 	return withTaskGrantClaims(ctx, claims), nil
+}
+
+// agentGrantSubjectPrefix starts the subject of the grant of an agent. The
+// daemon mints it as "component:agent:<name>" (mintCGForWork, MintForkGrant).
+const agentGrantSubjectPrefix = "component:agent:"
+
+// grantAgentName returns the agent that a verified grant is for, and whether
+// the grant is the grant of an agent at all.
+func grantAgentName(claims sdkcg.Claims) (string, bool) {
+	name, ok := strings.CutPrefix(claims.Subject, agentGrantSubjectPrefix)
+	return name, ok && name != ""
 }
 
 func deny(ctx context.Context, logger *slog.Logger, method, reason string, err error) error {

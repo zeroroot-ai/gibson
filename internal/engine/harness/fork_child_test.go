@@ -199,7 +199,7 @@ func forkOriginCtx(t *testing.T, token string) context.Context {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant})
+	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant, Subject: "component:agent:zerocool"})
 	if token != "" {
 		ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, token))
 	}
@@ -266,6 +266,32 @@ func TestCreateMission_StartsFromCallerStateRefusals(t *testing.T) {
 	}
 	if mgr.got != nil {
 		t.Error("no fork support: a mission was created")
+	}
+}
+
+// The caller fork takes the agent from the verified grant. A request that
+// names another agent gets the agent of the grant, and a grant that is not an
+// agent grant cannot fork the caller.
+func TestCreateMission_CallerForkAgentComesFromTheGrant(t *testing.T) {
+	mgr := &childNodeOperator{node: brain.WorkNode{ID: "exploit", Kind: "agent", Target: "beta"}}
+	parent := &forkingParent{}
+	svc := forkOriginService(t, mgr, parent)
+	req := forkOriginRequest()
+	req.Context.AgentName = "beta" // alpha's grant, beta in the request
+	_, err := svc.CreateMission(forkOriginCtx(t, "tok-src"), req)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition (first node targets beta, grant is zerocool)", status.Code(err))
+	}
+	if parent.got.AgentName != "zerocool" {
+		t.Fatalf("fork agent = %q, want the agent of the grant", parent.got.AgentName)
+	}
+
+	tenant, _ := auth.NewTenantID(originTenant)
+	ctx := withTaskGrantClaims(originCtx(), sdkcg.Claims{JTI: "jti-c", Tenant: tenant, Subject: "component:tool:nmap"})
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs(fork.MetadataSandboxIdentity, "tok-src"))
+	mgr2 := &childNodeOperator{node: brain.WorkNode{ID: "exploit", Kind: "agent", Target: "zerocool"}}
+	if _, err := forkOriginService(t, mgr2, &forkingParent{}).CreateMission(ctx, forkOriginRequest()); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("non-agent grant: code = %v, want PermissionDenied", status.Code(err))
 	}
 }
 
