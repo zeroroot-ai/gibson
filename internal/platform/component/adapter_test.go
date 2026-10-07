@@ -239,7 +239,7 @@ func TestListPlugins_UsesContextTenant(t *testing.T) {
 // DescribeTool — the registry entry, no dial (gibson#813)
 // ---------------------------------------------------------------------------
 
-func TestDescribeTool_ReturnsTheRegistryEntry(t *testing.T) {
+func TestAdapterToolEntry_ReturnsTheRegistryEntry(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	ctx := context.Background()
 	_, err := reg.Register(ctx, "acme-corp", "tool", "custom-tool", ComponentInfo{
