@@ -1303,7 +1303,7 @@ func (h *DefaultAgentHarness) GetToolDescriptor(ctx context.Context, name string
 			nil,
 		)
 	}
-	remoteTool, err := h.registryAdapter.DiscoverTool(ctx, name)
+	info, err := h.registryAdapter.DescribeTool(ctx, name)
 	if err != nil {
 		h.logger.Error("tool not found via registry adapter", "tool", name, "error", err)
 		return nil, types.WrapError(
@@ -1312,7 +1312,7 @@ func (h *DefaultAgentHarness) GetToolDescriptor(ctx context.Context, name string
 			err,
 		)
 	}
-	desc := FromTool(remoteTool)
+	desc := toolDescriptorFromInfo(info)
 	return &desc, nil
 }
 
@@ -1332,7 +1332,7 @@ func (h *DefaultAgentHarness) GetToolCapabilities(ctx context.Context, toolName 
 			nil,
 		)
 	}
-	t, err := h.registryAdapter.DiscoverTool(ctx, toolName)
+	info, err := h.registryAdapter.DescribeTool(ctx, toolName)
 	if err != nil {
 		h.logger.Error("tool not found via registry adapter", "tool", toolName, "error", err)
 		return nil, types.WrapError(
@@ -1341,25 +1341,11 @@ func (h *DefaultAgentHarness) GetToolCapabilities(ctx context.Context, toolName 
 			err,
 		)
 	}
-
-	type capabilityProvider interface {
-		Capabilities(ctx context.Context) *sdktypes.Capabilities
+	caps := component.ToolCapabilities(info)
+	if caps == nil {
+		h.logger.Debug("tool does not provide capabilities", "tool", toolName)
 	}
-
-	if provider, ok := t.(capabilityProvider); ok {
-		if caps := provider.Capabilities(ctx); caps != nil {
-			h.logger.Debug("retrieved capabilities for tool",
-				"tool", toolName,
-				"has_root", caps.HasRoot,
-				"has_sudo", caps.HasSudo,
-				"can_raw_socket", caps.CanRawSocket,
-				"blocked_args_count", len(caps.BlockedArgs))
-			return caps, nil
-		}
-	}
-
-	h.logger.Debug("tool does not provide capabilities", "tool", toolName)
-	return nil, nil
+	return caps, nil
 }
 
 // GetAllToolCapabilities returns capabilities for all registered tools.
@@ -1375,33 +1361,16 @@ func (h *DefaultAgentHarness) GetAllToolCapabilities(ctx context.Context) (map[s
 		return result, nil
 	}
 
-	type capabilityProvider interface {
-		Capabilities(ctx context.Context) *sdktypes.Capabilities
-	}
-
+	// ListTools parses the capabilities each tool registered, so no tool is
+	// dialled to read them (gibson#813).
 	remoteTools, err := h.registryAdapter.ListTools(ctx)
 	if err != nil {
 		h.logger.Warn("failed to list remote tools for capabilities", "error", err)
 		return result, nil
 	}
 	for _, remoteTool := range remoteTools {
-		t, err := h.registryAdapter.DiscoverTool(ctx, remoteTool.Name)
-		if err != nil {
-			h.logger.Warn("failed to discover remote tool",
-				"tool", remoteTool.Name,
-				"error", err)
-			continue
-		}
-		if provider, ok := t.(capabilityProvider); ok {
-			if caps := provider.Capabilities(ctx); caps != nil {
-				result[remoteTool.Name] = caps
-				h.logger.Debug("retrieved capabilities for tool",
-					"tool", remoteTool.Name,
-					"has_root", caps.HasRoot,
-					"has_sudo", caps.HasSudo,
-					"can_raw_socket", caps.CanRawSocket,
-					"blocked_args_count", len(caps.BlockedArgs))
-			}
+		if remoteTool.Capabilities != nil {
+			result[remoteTool.Name] = remoteTool.Capabilities
 		}
 	}
 

@@ -4,8 +4,10 @@
 package harness
 
 import (
+	"strings"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/sdk/schema"
 )
 
@@ -42,37 +44,30 @@ type ToolDescriptor struct {
 	Metadata        map[string]string `json:"metadata,omitempty"`          // Additional metadata (e.g., FileDescriptorSet for proto resolution)
 }
 
-// FromTool creates a ToolDescriptor from a Tool interface.
-// This extracts metadata without exposing the full tool implementation.
-func FromTool(t tool.Tool) ToolDescriptor {
-	desc := ToolDescriptor{
-		Name:            t.Name(),
-		Description:     t.Description(),
-		Version:         t.Version(),
-		Tags:            t.Tags(),
-		InputProtoType:  t.InputMessageType(),
-		OutputProtoType: t.OutputMessageType(),
+// toolDescriptorFromInfo builds a ToolDescriptor from the registry entry of a
+// tool. Every field comes from what the tool registered, so the daemon dials
+// no component to describe it (gibson#813).
+func toolDescriptorFromInfo(info component.ComponentInfo) ToolDescriptor {
+	return ToolDescriptor{
+		Name:            info.Name,
+		Description:     info.Metadata["description"],
+		Version:         info.Version,
+		Tags:            splitTags(info.Metadata["tags"]),
+		InputProtoType:  info.Metadata["input_message_type"],
+		OutputProtoType: info.Metadata["output_message_type"],
+		Metadata:        info.Metadata,
 	}
+}
 
-	// Check if the tool still supports legacy schema methods (for backward compatibility)
-	type legacyTool interface {
-		InputSchema() schema.JSON
-		OutputSchema() schema.JSON
+// splitTags parses the comma-separated tags metadata value.
+func splitTags(value string) []string {
+	var tags []string
+	for _, t := range strings.Split(value, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
 	}
-	if lt, ok := t.(legacyTool); ok {
-		desc.InputSchema = lt.InputSchema()
-		desc.OutputSchema = lt.OutputSchema()
-	}
-
-	// Extract metadata if the tool provides it
-	type metadataTool interface {
-		Metadata() map[string]string
-	}
-	if mt, ok := t.(metadataTool); ok {
-		desc.Metadata = mt.Metadata()
-	}
-
-	return desc
+	return tags
 }
 
 // PluginDescriptor provides lightweight metadata about a plugin.

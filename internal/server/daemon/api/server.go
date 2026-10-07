@@ -584,7 +584,6 @@ type AgentInfoInternal struct {
 	Name         string
 	Kind         string
 	Version      string
-	Endpoint     string
 	Capabilities []string
 	Health       string
 	LastSeen     time.Time
@@ -605,7 +604,6 @@ type ToolInfoInternal struct {
 	ID           string
 	Name         string
 	Version      string
-	Endpoint     string
 	Description  string
 	Health       string
 	LastSeen     time.Time
@@ -618,7 +616,6 @@ type PluginInfoInternal struct {
 	ID          string
 	Name        string
 	Version     string
-	Endpoint    string
 	Description string
 	Health      string
 	LastSeen    time.Time
@@ -1566,7 +1563,6 @@ func (s *DaemonServer) ListAgents(ctx context.Context, req *daemonpb.ListAgentsR
 			Name:         a.Name,
 			Kind:         a.Kind,
 			Version:      a.Version,
-			Endpoint:     a.Endpoint,
 			Capabilities: a.Capabilities,
 			Health:       a.Health,
 			LastSeen:     a.LastSeen.Unix(),
@@ -1594,7 +1590,6 @@ func (s *DaemonServer) GetAgentStatus(ctx context.Context, req *daemonpb.GetAgen
 			Name:         agentStatus.Agent.Name,
 			Kind:         agentStatus.Agent.Kind,
 			Version:      agentStatus.Agent.Version,
-			Endpoint:     agentStatus.Agent.Endpoint,
 			Capabilities: agentStatus.Agent.Capabilities,
 			Health:       agentStatus.Agent.Health,
 			LastSeen:     agentStatus.Agent.LastSeen.Unix(),
@@ -1635,7 +1630,6 @@ func (s *DaemonServer) ListTools(ctx context.Context, req *daemonpb.ListToolsReq
 			Id:           t.ID,
 			Name:         t.Name,
 			Version:      t.Version,
-			Endpoint:     t.Endpoint,
 			Description:  t.Description,
 			Health:       t.Health,
 			LastSeen:     t.LastSeen.Unix(),
@@ -1669,7 +1663,6 @@ func (s *DaemonServer) ListPlugins(ctx context.Context, req *daemonpb.ListPlugin
 			Id:          p.ID,
 			Name:        p.Name,
 			Version:     p.Version,
-			Endpoint:    p.Endpoint,
 			Description: p.Description,
 			Health:      p.Health,
 			LastSeen:    p.LastSeen.Unix(),

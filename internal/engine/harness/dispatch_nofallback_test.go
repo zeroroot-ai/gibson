@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/tool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -18,19 +17,19 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
-// spyAdapter is a component.ComponentDiscovery whose DiscoverTool records
+// spyAdapter is a component.ComponentDiscovery whose DescribeTool records
 // whether it was reached. Every other method is inherited from the embedded
 // nil interface and panics if invoked. A tool has the sandbox path and the
-// work queue path only (ADR-0110), so a dispatch that reaches DiscoverTool is
-// a third path.
+// work queue path only (ADR-0110), so the dispatch asks the adapter for
+// nothing.
 type spyAdapter struct {
 	component.ComponentDiscovery
 	discoverToolCalled bool
 }
 
-func (s *spyAdapter) DiscoverTool(_ context.Context, _ string) (tool.Tool, error) {
+func (s *spyAdapter) DescribeTool(_ context.Context, _ string) (component.ComponentInfo, error) {
 	s.discoverToolCalled = true
-	return nil, errors.New("spy: the registry adapter was selected for a dispatch")
+	return component.ComponentInfo{}, errors.New("spy: the registry adapter was selected for a dispatch")
 }
 
 // newNoFallbackHarness wires a harness whose one tool instance reports a

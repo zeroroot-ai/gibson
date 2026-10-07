@@ -69,14 +69,14 @@ func TestListAgents_UsesContextTenant(t *testing.T) {
 	// Register an agent under "acme-corp" tenant
 	_, err := reg.Register(ctx, "acme-corp", "agent", "custom-scanner", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9001"},
+		Metadata: map[string]string{"description": "test component 1"},
 	})
 	require.NoError(t, err)
 
 	// Register an agent under "_system" tenant
 	_, err = reg.Register(ctx, "_system", "agent", "platform-agent", ComponentInfo{
 		Version:  "2.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9002"},
+		Metadata: map[string]string{"description": "test component 2"},
 	})
 	require.NoError(t, err)
 
@@ -102,14 +102,14 @@ func TestListAgents_OtherTenantCannotSeeAcme(t *testing.T) {
 	// Register an agent under "acme-corp" only
 	_, err := reg.Register(ctx, "acme-corp", "agent", "acme-private", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9001"},
+		Metadata: map[string]string{"description": "test component 1"},
 	})
 	require.NoError(t, err)
 
 	// Register a _system agent
 	_, err = reg.Register(ctx, "_system", "agent", "shared-agent", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9002"},
+		Metadata: map[string]string{"description": "test component 2"},
 	})
 	require.NoError(t, err)
 
@@ -138,7 +138,7 @@ func TestDiscoveryRefusesEveryQueryWithNoTenant(t *testing.T) {
 	for _, kind := range []string{"agent", "tool", "plugin"} {
 		_, err := reg.Register(ctx, "default", kind, "shared-"+kind, ComponentInfo{
 			Version:  "1.0.0",
-			Metadata: map[string]string{"grpc_endpoint": "localhost:9001"},
+			Metadata: map[string]string{"description": "test component 1"},
 		})
 		require.NoError(t, err)
 	}
@@ -160,10 +160,10 @@ func TestDiscoveryRefusesEveryQueryWithNoTenant(t *testing.T) {
 		require.ErrorIs(t, err, ErrNoTenantInContext)
 		assert.Empty(t, got)
 	})
-	t.Run("DiscoverTool", func(t *testing.T) {
-		got, err := adapter.DiscoverTool(ctx, "shared-tool")
+	t.Run("DescribeTool", func(t *testing.T) {
+		got, err := adapter.DescribeTool(ctx, "shared-tool")
 		require.ErrorIs(t, err, ErrNoTenantInContext)
-		assert.Nil(t, got)
+		assert.Empty(t, got.Name)
 	})
 }
 
@@ -177,13 +177,13 @@ func TestListTools_UsesContextTenant(t *testing.T) {
 
 	_, err := reg.Register(ctx, "acme-corp", "tool", "custom-tool", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9001"},
+		Metadata: map[string]string{"description": "test component 1"},
 	})
 	require.NoError(t, err)
 
 	_, err = reg.Register(ctx, "_system", "tool", "nmap", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9002"},
+		Metadata: map[string]string{"description": "test component 2"},
 	})
 	require.NoError(t, err)
 
@@ -211,13 +211,13 @@ func TestListPlugins_UsesContextTenant(t *testing.T) {
 
 	_, err := reg.Register(ctx, "acme-corp", "plugin", "acme-jira", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9001"},
+		Metadata: map[string]string{"description": "test component 1"},
 	})
 	require.NoError(t, err)
 
 	_, err = reg.Register(ctx, "_system", "plugin", "gitlab", ComponentInfo{
 		Version:  "1.0.0",
-		Metadata: map[string]string{"grpc_endpoint": "localhost:9002"},
+		Metadata: map[string]string{"description": "test component 2"},
 	})
 	require.NoError(t, err)
 
@@ -233,4 +233,36 @@ func TestListPlugins_UsesContextTenant(t *testing.T) {
 	}
 	assert.True(t, names["acme-jira"], "should see acme-corp's acme-jira")
 	assert.True(t, names["gitlab"], "should see _system's gitlab")
+}
+
+// ---------------------------------------------------------------------------
+// DescribeTool — the registry entry, no dial (gibson#813)
+// ---------------------------------------------------------------------------
+
+func TestAdapterToolEntry_ReturnsTheRegistryEntry(t *testing.T) {
+	reg, _ := newTestRegistry(t)
+	ctx := context.Background()
+	_, err := reg.Register(ctx, "acme-corp", "tool", "custom-tool", ComponentInfo{
+		Version:  "1.2.0",
+		Metadata: map[string]string{"input_message_type": "acme.v1.Request"},
+	})
+	require.NoError(t, err)
+	adapter := NewRegistryAdapter(reg)
+	acmeCtx := auth.ContextWithTenantString(ctx, "acme-corp")
+
+	info, err := adapter.DescribeTool(acmeCtx, "custom-tool")
+	require.NoError(t, err)
+	assert.Equal(t, "1.2.0", info.Version)
+	assert.Equal(t, "acme.v1.Request", info.Metadata["input_message_type"])
+
+	_, err = adapter.DescribeTool(acmeCtx, "missing-tool")
+	var notFound *ToolNotFoundError
+	require.ErrorAs(t, err, &notFound)
+}
+
+func TestToolCapabilities_ParsesTheRegisteredJSON(t *testing.T) {
+	caps := ToolCapabilities(ComponentInfo{Metadata: map[string]string{"capabilities": `{"has_root":true}`}})
+	require.NotNil(t, caps)
+	assert.True(t, caps.HasRoot)
+	assert.Nil(t, ToolCapabilities(ComponentInfo{}))
 }

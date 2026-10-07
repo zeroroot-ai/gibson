@@ -2274,10 +2274,6 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 
 	result := make([]api.AgentInfoInternal, len(agents))
 	for i, a := range agents {
-		endpoint := ""
-		if len(a.Endpoints) > 0 {
-			endpoint = a.Endpoints[0]
-		}
 
 		health := a.Health
 		if health == "" {
@@ -2296,7 +2292,6 @@ func (d *daemonImpl) ListAgents(ctx context.Context, kind string) ([]api.AgentIn
 			Name:         a.Name,
 			Kind:         "agent",
 			Version:      a.Version,
-			Endpoint:     endpoint,
 			Capabilities: a.Capabilities,
 			Health:       health,
 			LastSeen:     lastSeen,
@@ -2321,11 +2316,6 @@ func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.Ag
 	// Find the specific agent by ID (using name as ID)
 	for _, agent := range agents {
 		if agent.Name == agentID {
-			// Use first endpoint if available
-			endpoint := ""
-			if len(agent.Endpoints) > 0 {
-				endpoint = agent.Endpoints[0]
-			}
 
 			// Determine health status
 			health := "healthy"
@@ -2346,7 +2336,6 @@ func (d *daemonImpl) GetAgentStatus(ctx context.Context, agentID string) (api.Ag
 				Name:         agent.Name,
 				Kind:         "agent",
 				Version:      agent.Version,
-				Endpoint:     endpoint,
 				Capabilities: agent.Capabilities,
 				Health:       health,
 				LastSeen:     lastSeen,
@@ -2389,10 +2378,6 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 
 	result := make([]api.ToolInfoInternal, len(tools))
 	for i, t := range tools {
-		endpoint := ""
-		if len(t.Endpoints) > 0 {
-			endpoint = t.Endpoints[0]
-		}
 
 		var caps *daemonpb.Capabilities
 		if t.Capabilities != nil {
@@ -2420,7 +2405,6 @@ func (d *daemonImpl) ListTools(ctx context.Context) ([]api.ToolInfoInternal, err
 			ID:           t.Name,
 			Name:         t.Name,
 			Version:      t.Version,
-			Endpoint:     endpoint,
 			Description:  t.Description,
 			Health:       health,
 			LastSeen:     time.Now(),
@@ -2443,10 +2427,6 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 
 	result := make([]api.PluginInfoInternal, len(plugins))
 	for i, p := range plugins {
-		endpoint := ""
-		if len(p.Endpoints) > 0 {
-			endpoint = p.Endpoints[0]
-		}
 
 		health := p.Health
 		if health == "" {
@@ -2461,7 +2441,6 @@ func (d *daemonImpl) ListPlugins(ctx context.Context) ([]api.PluginInfoInternal,
 			ID:          p.Name,
 			Name:        p.Name,
 			Version:     p.Version,
-			Endpoint:    endpoint,
 			Description: p.Description,
 			Health:      health,
 			LastSeen:    time.Now(),

@@ -297,14 +297,12 @@ func TestListAgents_Success(t *testing.T) {
 				{
 					Name:         "test-agent-1",
 					Version:      "1.0.0",
-					Endpoints:    []string{"localhost:50100"},
 					Capabilities: []string{"llm", "web"},
 					Instances:    1,
 				},
 				{
 					Name:         "test-agent-2",
 					Version:      "2.0.0",
-					Endpoints:    []string{"localhost:50101", "localhost:50102"},
 					Capabilities: []string{"cli"},
 					Instances:    2,
 				},
@@ -327,14 +325,12 @@ func TestListAgents_Success(t *testing.T) {
 	assert.Equal(t, "test-agent-1", agents[0].Name)
 	assert.Equal(t, "test-agent-1", agents[0].ID)
 	assert.Equal(t, "1.0.0", agents[0].Version)
-	assert.Equal(t, "localhost:50100", agents[0].Endpoint)
 	assert.Equal(t, []string{"llm", "web"}, agents[0].Capabilities)
 	assert.Equal(t, "healthy", agents[0].Health)
 
 	// Verify second agent
 	assert.Equal(t, "test-agent-2", agents[1].Name)
 	assert.Equal(t, "2.0.0", agents[1].Version)
-	assert.Equal(t, "localhost:50101", agents[1].Endpoint) // First endpoint used
 	assert.Equal(t, "healthy", agents[1].Health)
 }
 
@@ -366,7 +362,6 @@ func TestListAgents_NoInstances(t *testing.T) {
 				{
 					Name:      "offline-agent",
 					Version:   "1.0.0",
-					Endpoints: []string{"localhost:50100"},
 					Instances: 0, // No instances running
 				},
 			}, nil
@@ -419,7 +414,6 @@ func TestGetAgentStatus_Success(t *testing.T) {
 				{
 					Name:         "target-agent",
 					Version:      "1.5.0",
-					Endpoints:    []string{"localhost:50200"},
 					Capabilities: []string{"recon"},
 					Instances:    3,
 				},
@@ -438,7 +432,6 @@ func TestGetAgentStatus_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "target-agent", status.Agent.Name)
 	assert.Equal(t, "1.5.0", status.Agent.Version)
-	assert.Equal(t, "localhost:50200", status.Agent.Endpoint)
 	assert.Equal(t, "healthy", status.Agent.Health)
 	assert.True(t, status.Active) // Active because instances > 0
 	assert.Empty(t, status.CurrentTask)
@@ -502,14 +495,12 @@ func TestListTools_Success(t *testing.T) {
 					Name:        "nmap",
 					Version:     "7.92",
 					Description: "Network scanner",
-					Endpoints:   []string{"localhost:50300"},
 					Instances:   1,
 				},
 				{
 					Name:        "sqlmap",
 					Version:     "1.5",
 					Description: "SQL injection tool",
-					Endpoints:   []string{"localhost:50301"},
 					Instances:   1,
 				},
 			}, nil
@@ -537,7 +528,6 @@ func TestListTools_Success(t *testing.T) {
 	assert.Equal(t, "nmap", nmap.ID)
 	assert.Equal(t, "7.92", nmap.Version)
 	assert.Equal(t, "Network scanner", nmap.Description)
-	assert.Equal(t, "localhost:50300", nmap.Endpoint)
 	assert.Equal(t, "healthy", nmap.Health)
 
 	sqlmap := toolMap["sqlmap"]
@@ -595,7 +585,6 @@ func TestListPlugins_Success(t *testing.T) {
 					Name:        "mitre-lookup",
 					Version:     "1.0.0",
 					Description: "MITRE ATT&CK lookup plugin",
-					Endpoints:   []string{"localhost:50400"},
 					Instances:   1,
 				},
 			}, nil
@@ -618,7 +607,6 @@ func TestListPlugins_Success(t *testing.T) {
 	assert.Equal(t, "mitre-lookup", plugins[0].ID)
 	assert.Equal(t, "1.0.0", plugins[0].Version)
 	assert.Equal(t, "MITRE ATT&CK lookup plugin", plugins[0].Description)
-	assert.Equal(t, "localhost:50400", plugins[0].Endpoint)
 	assert.Equal(t, "healthy", plugins[0].Health)
 }
 
@@ -664,91 +652,6 @@ func TestListPlugins_RegistryError(t *testing.T) {
 	assert.Contains(t, err.Error(), "list plugins")
 	assert.Contains(t, err.Error(), "plugin registry error")
 	assert.Nil(t, plugins)
-}
-
-// TestListAgents_NoEndpoints tests handling of agents with no endpoints.
-func TestListAgents_NoEndpoints(t *testing.T) {
-	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
-			return []component.AgentInfo{
-				{
-					Name:      "no-endpoint-agent",
-					Version:   "1.0.0",
-					Endpoints: []string{}, // Empty endpoints
-					Instances: 1,
-				},
-			}, nil
-		},
-	}
-
-	daemon := &daemonImpl{
-		registryAdapter: mockRegistry,
-		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
-	}
-
-	ctx := context.Background()
-	agents, err := daemon.ListAgents(ctx, "")
-
-	require.NoError(t, err)
-	assert.Len(t, agents, 1)
-	assert.Empty(t, agents[0].Endpoint)          // Should be empty string when no endpoints
-	assert.Equal(t, "healthy", agents[0].Health) // Still healthy if instances > 0
-}
-
-// TestListTools_NoEndpoints tests handling of tools with no endpoints.
-func TestListTools_NoEndpoints(t *testing.T) {
-	mockRegistry := &mockComponentDiscovery{
-		listToolsFunc: func(ctx context.Context) ([]component.ToolInfo, error) {
-			return []component.ToolInfo{
-				{
-					Name:      "no-endpoint-tool",
-					Version:   "1.0.0",
-					Endpoints: nil, // Nil endpoints
-					Instances: 1,
-				},
-			}, nil
-		},
-	}
-
-	daemon := &daemonImpl{
-		registryAdapter: mockRegistry,
-		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
-	}
-
-	ctx := context.Background()
-	tools, err := daemon.ListTools(ctx)
-
-	require.NoError(t, err)
-	assert.Len(t, tools, 1)
-	assert.Empty(t, tools[0].Endpoint) // Should be empty string when no endpoints
-}
-
-// TestGetAgentStatus_NoEndpoints tests GetAgentStatus with agent that has no endpoints.
-func TestGetAgentStatus_NoEndpoints(t *testing.T) {
-	mockRegistry := &mockComponentDiscovery{
-		listAgentsFunc: func(ctx context.Context) ([]component.AgentInfo, error) {
-			return []component.AgentInfo{
-				{
-					Name:      "target-agent",
-					Version:   "1.0.0",
-					Endpoints: []string{}, // No endpoints
-					Instances: 1,
-				},
-			}, nil
-		},
-	}
-
-	daemon := &daemonImpl{
-		registryAdapter: mockRegistry,
-		logger:          observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
-	}
-
-	ctx := context.Background()
-	status, err := daemon.GetAgentStatus(ctx, "target-agent")
-
-	require.NoError(t, err)
-	assert.Empty(t, status.Agent.Endpoint)
-	assert.True(t, status.Active)
 }
 
 // TestListAgents_WithKindFilter tests ListAgents with kind parameter (even though not yet used).
