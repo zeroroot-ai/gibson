@@ -86,9 +86,9 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// so d.authorizer is always a real FGA client here.
 		ComponentAuthorizer: d.authorizer,
 
-		// ComponentRegistry enables tenant-scoped discovery (Path 2 in CallToolProto/QueryPlugin).
-		// RegistryAdapter reads registry entries only. The daemon dials no component.
-		// WorkQueue handles pull-based dispatch for components without a direct gRPC endpoint.
+		// ComponentRegistry enables tenant-scoped discovery for CallToolProto and QueryPlugin.
+		// RegistryAdapter reads registry entries only. The daemon dials no component:
+		// work reaches a component through the work queue or a sandbox (ADR-0110).
 		// EnvelopeSigner removed (admin-services-completion Req 6.4): AuthzContext is now
 		// populated unsigned; FGA tuples binding agent_principal to mission are the auth gate.
 		ComponentRegistry: d.compRegistry,

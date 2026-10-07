@@ -449,13 +449,13 @@ func (e *NoHealthyInstancesError) Error() string {
 	return fmt.Sprintf("no healthy instances of '%s' available (%d total instances)", e.Name, e.Total)
 }
 
-// parseCapabilitiesJSON deserializes a JSON-encoded Capabilities struct from metadata.
 // ToolCapabilities returns the capabilities a tool declared in its registry
 // metadata, or nil when it declared none.
 func ToolCapabilities(info ComponentInfo) *types.Capabilities {
 	return parseCapabilitiesJSON(info.Metadata["capabilities"])
 }
 
+// parseCapabilitiesJSON deserializes a JSON-encoded Capabilities struct from metadata.
 func parseCapabilitiesJSON(capsJSON string) *types.Capabilities {
 	if capsJSON == "" {
 		return nil
