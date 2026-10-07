@@ -34,9 +34,3 @@ func TestRecordConnectorTools_StoresTheCount(t *testing.T) {
 		t.Fatalf("expectations: %v", err)
 	}
 }
-
-// With no platform database the daemon records nothing.
-func TestRecordConnectorTools_NoDatabaseRecordsNothing(t *testing.T) {
-	d := &daemonImpl{}
-	d.recordConnectorTools(context.Background(), "acme", "github", 3)
-}

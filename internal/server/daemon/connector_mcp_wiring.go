@@ -46,11 +46,9 @@ func (d *daemonImpl) connectorProxyToken(ctx context.Context) (string, error) {
 
 // recordConnectorTools stores the tool count of one connector of a tenant,
 // which ListConnectors serves. A failed write is logged: the tool list of the
-// call is still correct without it.
+// call is still correct without it. Start opens the platform database before
+// any request, so it is set here.
 func (d *daemonImpl) recordConnectorTools(ctx context.Context, tenant, connector string, n int) {
-	if d.platformDB == nil {
-		return
-	}
 	count := int32(min(n, math.MaxInt32)) //nolint:gosec // bounded by the min above
 	if err := tenantconnector.NewStore(d.platformDB).SetDiscoveredTools(ctx, tenant, connector, count); err != nil {
 		d.logger.WithComponent("connector-mcp").Slog().WarnContext(ctx, "record the tool count of a connector",
