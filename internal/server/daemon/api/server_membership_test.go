@@ -126,7 +126,7 @@ func TestListMyMemberships_RoleIsTheSharedResolution(t *testing.T) {
 			want, ok := tenantrole.HighestRelation(held)
 			require.True(t, ok)
 			assert.Equal(t, want, resp.GetMemberships()[0].GetRole())
-			assert.Equal(t, name, want)
+			assert.Equal(t, want, name, "the fixture state names its own role")
 		})
 	}
 }
