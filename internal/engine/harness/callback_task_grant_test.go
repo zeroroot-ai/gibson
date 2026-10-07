@@ -462,6 +462,15 @@ func TestCheckTaskGrantScope_ToolGrantNamesItsCallingAgent(t *testing.T) {
 			t.Errorf("%s: code = %v, want %v", name, status.Code(err), tc.want)
 		}
 	}
+	// The turn grant of a member has a user or principal subject and no claim.
+	// It is not a tool or plugin grant, and a named agent is not refused.
+	turn := grantClaims(t, "acme", "m-1")
+	turn.Subject = "user:alice"
+	req2 := observeReq("m-1")
+	req2.Context.AgentName = "zerocool-member"
+	if _, err := checkTaskGrantScope(grantCtx("acme", compactJWT("JWT")), req2, getter(callerGrantVerifier{claims: turn}), scopeMethod, slog.Default()); err != nil {
+		t.Errorf("turn grant: %v, want it left to its own checks", err)
+	}
 	// A verifier that cannot read the claim refuses a named agent on a tool grant.
 	req := observeReq("m-1")
 	req.Context.AgentName = "alpha"

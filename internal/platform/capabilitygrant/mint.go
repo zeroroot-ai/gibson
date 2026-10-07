@@ -261,11 +261,11 @@ func loadSigningKeys(ctx context.Context, cfg Config) (*SigningKeySet, error) {
 	}, nil
 }
 
-// MintRequest carries the per-task scope.
 // CallingAgentClaim is the name of the signed claim that carries the agent
 // that dispatched a tool or plugin grant.
 const CallingAgentClaim = "cag"
 
+// MintRequest carries the per-task scope.
 type MintRequest struct {
 	// Subject is the agent's Zitadel service-account ID. Required.
 	Subject string

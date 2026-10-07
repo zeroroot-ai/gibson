@@ -108,13 +108,15 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 		if info := carrier.GetContext(); info != nil && info.GetAgentName() != "" {
 			// The grant of an agent names the agent in its subject. The grant of a
 			// tool or a plugin names the dispatching agent in its signed claim.
-			// A grant with neither (minted before the claim existed) cannot name
-			// any agent, so a request that names one is refused.
-			want, isAgent := grantAgentName(claims)
-			if !isAgent {
-				want = caller
+			// A tool or plugin grant with no claim (minted before the claim
+			// existed) cannot name any agent, so a request that names one is
+			// refused. Another grant, such as the turn grant of a member, is
+			// bound by its own checks and is not changed here.
+			want, bound := grantAgentName(claims)
+			if !bound && isComponentGrant(claims.Subject) {
+				want, bound = caller, true
 			}
-			if info.GetAgentName() != want {
+			if bound && info.GetAgentName() != want {
 				return ctx, deny(ctx, logger, method, "task grant agent does not match ContextInfo.agent_name",
 					status.Error(codes.PermissionDenied, "task grant is for another agent"))
 			}
@@ -126,9 +128,9 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 	return withTaskGrantClaims(ctx, claims), nil
 }
 
-// callerVerifier is a TaskGrantVerifier that also returns the calling agent
+// CallerVerifier is a TaskGrantVerifier that also returns the calling agent
 // of a tool or plugin grant (the signed claim "cag").
-type callerVerifier interface {
+type CallerVerifier interface {
 	VerifyCaller(ctx context.Context, token string) (sdkcg.Claims, string, error)
 }
 
@@ -136,7 +138,7 @@ type callerVerifier interface {
 // without the claim returns an empty caller, and the check then refuses a
 // request that names an agent on a tool or plugin grant.
 func verifyGrant(ctx context.Context, v TaskGrantVerifier, token string) (sdkcg.Claims, string, error) {
-	if cv, ok := v.(callerVerifier); ok {
+	if cv, ok := v.(CallerVerifier); ok {
 		claims, caller, err := cv.VerifyCaller(ctx, token)
 		if err != nil {
 			return sdkcg.Claims{}, "", fmt.Errorf("verify grant: %w", err)
@@ -148,6 +150,12 @@ func verifyGrant(ctx context.Context, v TaskGrantVerifier, token string) (sdkcg.
 		return sdkcg.Claims{}, "", fmt.Errorf("verify grant: %w", err)
 	}
 	return claims, "", nil
+}
+
+// isComponentGrant reports whether the subject is the grant of a tool or a
+// plugin, which carries the dispatching agent as a signed claim.
+func isComponentGrant(subject string) bool {
+	return strings.HasPrefix(subject, "component:tool:") || strings.HasPrefix(subject, "component:plugin:")
 }
 
 // agentGrantSubjectPrefix starts the subject of the grant of an agent. The
