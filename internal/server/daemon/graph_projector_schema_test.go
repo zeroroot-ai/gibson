@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/migrations"
@@ -136,6 +137,7 @@ type fakeStore struct {
 	version map[string]any
 	delay   time.Duration
 	failOn  string
+	failErr error
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{created: map[string]bool{}} }
@@ -150,6 +152,9 @@ func (f *fakeStore) run(_ context.Context, stmt schemaStatement, params map[stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failOn != "" && strings.Contains(cypher, f.failOn) {
+		if f.failErr != nil {
+			return f.failErr
+		}
 		return errors.New("simulated failure")
 	}
 	f.log = append(f.log, cypher)
@@ -405,5 +410,77 @@ func TestSchemaStatement_RefusesANameThatIsNotAnIdentifier(t *testing.T) {
 	}
 	if _, err := ddlIndex("Host", []string{"scope", "address"}); err != nil {
 		t.Errorf("ddlIndex refused plain identifiers: %v", err)
+	}
+}
+
+// duplicateHostError is the error Neo4j returns when two Host nodes share one
+// brain_id and the uniqueness constraint cannot be created.
+func duplicateHostError() error {
+	// The code is the literal that neo4j 5.26 returns, not the constant under
+	// test, so a wrong constant fails here.
+	return fmt.Errorf("apply schema statement: %w", &neo4j.Neo4jError{
+		Code: "Neo.DatabaseError.Schema.ConstraintCreationFailed",
+		Msg:  "Both Node(0) and Node(1) have the label `Host` and property `brain_id` = 'h-1'",
+	})
+}
+
+// A constraint that the data violates does not stop the other statements, and
+// the error names the duplicate. No version is recorded (gibson#487).
+func TestApplySchema_DataViolationNamesTheDuplicate(t *testing.T) {
+	store := newFakeStore()
+	store.failOn = "gibson_host_brain_id_unique"
+	store.failErr = duplicateHostError()
+
+	err := applySchema(context.Background(), taxonomy.Global, store.run)
+	var blocked *schemaBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("err = %v, want a schemaBlockedError", err)
+	}
+	if len(blocked.violations) != 1 || !strings.Contains(blocked.violations[0], "brain_id` = 'h-1'") {
+		t.Fatalf("violations = %v, want the duplicate Host named", blocked.violations)
+	}
+	if want := len(mustSchemaDDL(t, taxonomy.Global)) - 1; store.count() != want {
+		t.Fatalf("issued %d statements, want every other DDL statement (%d)", store.count(), want)
+	}
+	if store.version != nil {
+		t.Fatalf("a blocked schema recorded version %v", store.version)
+	}
+}
+
+// A tenant with a duplicate node stops the DDL after one attempt and reports
+// it on the gauge. Later writes do not run the DDL again. A promotion clears
+// the state, and a clean graph then applies once and clears the gauge.
+func TestSchemaTracker_BlockedTenantStopsAndReports(t *testing.T) {
+	var tr schemaTracker
+	store := newFakeStore()
+	store.failOn = "gibson_host_brain_id_unique"
+	store.failErr = duplicateHostError()
+	var calls int
+	apply := func() error { calls++; return applySchema(context.Background(), taxonomy.Global, store.run) }
+
+	for range 5 {
+		if err := tr.ensure("dup-tenant", apply); err != nil {
+			t.Fatalf("a blocked tenant must not fail its writes: %v", err)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("schema applied %d times for a blocked tenant, want 1", calls)
+	}
+	if got := testutil.ToFloat64(graphSchemaBlocked.WithLabelValues("dup-tenant")); got != 1 {
+		t.Fatalf("gibson_graph_schema_blocked = %v, want 1", got)
+	}
+
+	store.mu.Lock()
+	store.failOn = ""
+	store.mu.Unlock()
+	tr.invalidate()
+	if err := tr.ensure("dup-tenant", apply); err != nil || calls != 2 {
+		t.Fatalf("after invalidate: err=%v calls=%d, want nil and 2", err, calls)
+	}
+	if got := testutil.ToFloat64(graphSchemaBlocked.WithLabelValues("dup-tenant")); got != 0 {
+		t.Fatalf("gibson_graph_schema_blocked = %v after a clean apply, want 0", got)
+	}
+	if err := tr.ensure("dup-tenant", apply); err != nil || calls != 2 {
+		t.Fatalf("a clean tenant applies once: err=%v calls=%d", err, calls)
 	}
 }

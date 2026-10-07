@@ -84,19 +84,15 @@ func TestInviteMember_IssuesPendingInvitation(t *testing.T) {
 	}
 }
 
-// An unconfigured mailer must not let InviteMember report success. The
-// invitation row is written, but no email went out, so the admin has to be told
-// — otherwise they wait on an invitee who never received a link.
-func TestInviteMember_UnconfiguredMailerRefuses(t *testing.T) {
+// An unconfigured mailer refuses InviteMember before it writes anything. A row
+// whose link was never mailed cannot be redeemed, and the member list would
+// show the person as invited over a failed call (gibson#480).
+func TestInviteMember_UnconfiguredMailerRefusesAndWritesNothing(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
 
 	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
 	srv.invitations = NewInvitationStore(db)
@@ -104,11 +100,37 @@ func TestInviteMember_UnconfiguredMailerRefuses(t *testing.T) {
 
 	ctx := ctxWithTenant(t, "acme")
 	_, err = srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"})
-	if err == nil {
-		t.Fatal("InviteMember reported success with no mailer configured; nothing was delivered")
-	}
 	if got := status_grpc.Code(err); got != codes.FailedPrecondition {
 		t.Fatalf("code = %v, want FailedPrecondition (%v)", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the store was touched: %v", err)
+	}
+}
+
+// An unconfigured mailer refuses ResendInvitation before the reissue, so the
+// link the invitee already holds stays valid (gibson#480).
+func TestResendInvitation_UnconfiguredMailerKeepsTheOldLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "email", "role", "status", "expires_at"}).
+			AddRow("inv-1", "acme", "alice@example.com", "member", "pending", nowPlus()))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+
+	_, err = srv.ResendInvitation(ctxWithTenant(t, "acme"), &tenantv1.ResendInvitationRequest{Email: "alice@example.com"})
+	if got := status_grpc.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want FailedPrecondition (%v)", got, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected store calls: %v", err)
 	}
 }
 
@@ -164,6 +186,8 @@ func TestInviteMember_EmailsAcceptLink(t *testing.T) {
 	}
 }
 
+// A send failure withdraws the row it wrote, so a failed call leaves no
+// person shown as invited (gibson#480).
 func TestInviteMember_SendFailureSurfaces(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -175,6 +199,11 @@ func TestInviteMember_SendFailureSurfaces(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
 
+	// The send fails, so the row is withdrawn: nobody holds its token.
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations SET status = $2")).
+		WithArgs("inv-1", "cancelled", "acme").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
 	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
 	srv.invitations = NewInvitationStore(db)
 	srv.inviteMailer = &captureInviteMailer{err: errors.New("smtp down")}
@@ -183,6 +212,9 @@ func TestInviteMember_SendFailureSurfaces(t *testing.T) {
 	ctx := ctxWithTenant(t, "acme")
 	if _, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"}); err == nil {
 		t.Fatal("expected InviteMember to surface a send failure")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the invitation was not withdrawn: %v", err)
 	}
 }
 
@@ -374,6 +406,8 @@ func TestInviteMember_RolesNilAfterFindingExistingUserIsInternalError(t *testing
 	srv := newMembersTestServer(t, &membersAuthorizer{}, idpC)
 	srv.invitations = NewInvitationStore(db)
 	srv.orgResolver = staticOrgResolver{orgID: "org-1"}
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
 	// srv.roles deliberately left nil.
 
 	ctx := ctxWithTenant(t, "acme")
@@ -410,6 +444,7 @@ func TestInviteMember_ConflictNoticeSendFailureStillReportsSent(t *testing.T) {
 	srv.roles = tenantrole.NewSyncer(grants, tuples, nil)
 	capture := &captureInviteMailer{conflictSendErr: errors.New("smtp down")}
 	srv.inviteMailer = capture
+	srv.inviteBaseURL = "https://app.example.com"
 
 	ctx := ctxWithTenant(t, "acme")
 	resp, err := srv.InviteMember(ctx, &tenantv1.InviteMemberRequest{Email: "taken@example.com", Role: "member"})
@@ -842,5 +877,34 @@ func TestInviteProvisionedOwner_Refusals(t *testing.T) {
 	srv.invitations = NewInvitationStore(db)
 	if err := srv.InviteProvisionedOwner(context.Background(), "second", "owner@example.com", "p"); status_grpc.Code(err) != codes.Internal {
 		t.Fatalf("Issue failure: expected Internal, got %v", err)
+	}
+}
+
+// When the send fails and the withdrawal fails too, the call still reports
+// the send failure: the administrator must not read a success (gibson#480).
+func TestInviteMember_SendAndWithdrawalFailureSurfaces(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("INSERT INTO tenant_invitations")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "expires_at"}).AddRow("inv-1", nowPlus()))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations SET status = $2")).
+		WillReturnError(errors.New("postgres down"))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{err: errors.New("smtp down")}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.InviteMember(ctxWithTenant(t, "acme"), &tenantv1.InviteMemberRequest{Email: "alice@example.com", Role: "member"})
+	if status_grpc.Code(err) != codes.Internal || !strings.Contains(err.Error(), "smtp down") {
+		t.Fatalf("err = %v, want the send failure", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("the withdrawal was not tried: %v", err)
 	}
 }

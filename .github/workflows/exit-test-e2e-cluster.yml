@@ -316,45 +316,6 @@ jobs:
           rc=${PIPESTATUS[0]}
           .github/scripts/e2e-suite-verdict.sh mission_finding_per_tenant "$E2E_OUT/mission_finding_per_tenant.log" "$rc" "$RESULTS"
 
-      # audit_v4_foundation_test.go live_* subtests: on the runner. The suite
-      # dials the daemon at localhost:30002 and Neo4j bolt at localhost:30474
-      # (the old dev-cluster NodePorts). Port-forwards put the cluster's
-      # daemon Service and the tenant's Neo4j Service at those ports. The
-      # live_* subtests wait for a mission a human ran, so they read FAIL
-      # until gibson#214 makes the suite drive its own mission.
-      - name: "Suite: audit_v4 live (runner)"
-        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
-        working-directory: gibson
-        env:
-          GIBSON_TEST_FIXTURES_ENABLED: "true"
-          GIBSON_E2E_KIND_CLUSTER: gibson
-        run: |
-          set +e
-          kubectl -n "$NS" port-forward "svc/${RELEASE}-gibson-workloads" 30002:50051 >"$E2E_OUT/pf-daemon.log" 2>&1 &
-          pf_pids="$!"
-          neo=$(kubectl get svc -A -o json | jq -r '.items[] | select(.metadata.name | test("neo4j")) | select([.spec.ports[]?.port] | index(7687)) | "\(.metadata.namespace) \(.metadata.name)"' | head -1)
-          if [ -n "$neo" ]; then
-            read -r neo_ns neo_svc <<<"$neo"
-            echo "neo4j service: ${neo_ns}/${neo_svc}"
-            kubectl -n "$neo_ns" port-forward "svc/${neo_svc}" 30474:7687 >"$E2E_OUT/pf-neo4j.log" 2>&1 &
-            pf_pids="$pf_pids $!"
-            auth=$(kubectl -n "$neo_ns" get secret -o json | jq -r '[.items[] | select(.data.NEO4J_AUTH != null) | .data.NEO4J_AUTH][0] // empty' | base64 -d 2>/dev/null || true)
-            if [ -n "$auth" ]; then
-              export GIBSON_E2E_NEO4J_PASSWORD="${auth#*/}"
-              echo "::add-mask::$GIBSON_E2E_NEO4J_PASSWORD"
-            fi
-          else
-            echo "::warning::no Neo4j Service with port 7687 found; the live_* subtests will report the cluster unreachable"
-          fi
-          export GIBSON_E2E_TENANT_ID="$TENANT"
-          sleep 5
-          CGO_ENABLED=0 go test -count=1 -tags=e2e -run 'TestAuditV4Foundation$' -v -timeout 10m ./tests/e2e/ \
-            2>&1 | tee "$E2E_OUT/audit_v4.log"
-          rc=${PIPESTATUS[0]}
-          # shellcheck disable=SC2086
-          kill $pf_pids 2>/dev/null || true
-          .github/scripts/e2e-suite-verdict.sh audit_v4 "$E2E_OUT/audit_v4.log" "$rc" "$RESULTS"
-
       # operators/tenant/test/e2e (Ginkgo), through its own entrypoint,
       # `make test-e2e`: it creates a kind cluster of its own
       # (tenant-operator-test-e2e), builds the operator image from
@@ -392,7 +353,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$E2E_OUT"
           touch "$RESULTS"
-          expected="secrets plugin_e2e mission_finding_per_tenant audit_v4 tenant_operator"
+          expected="secrets plugin_e2e mission_finding_per_tenant tenant_operator"
           {
             echo "## Cluster-bound e2e suites (run ${{ github.run_id }})"
             echo

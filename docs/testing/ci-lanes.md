@@ -185,7 +185,6 @@ Two ways a suite reaches the cluster:
 | `tests/e2e/secrets/*` (3 files, 2 tests) | `exit-test-e2e-cluster.yml` | in-cluster Job, `secrets.test` binary. Admin calls with the runner SVID, component calls through the Envoy edge (gibson#213) |
 | `plugin_e2e_test.go` | `exit-test-e2e-cluster.yml` | SKIP by design: needs a debug-plugin subprocess and a human-minted bootstrap token. The plugin path is proven by `plugin_secret_revocation_test.go` |
 | `mission_finding_per_tenant_e2e_test.go` | `exit-test-e2e-cluster.yml` | on the runner, `kubectl`-driven |
-| `audit_v4_foundation_test.go` `live_*` | `exit-test-e2e-cluster.yml` | on the runner, port-forwards at the suite's NodePort constants. Reads FAIL until gibson#214 makes the suite drive its own mission |
 | `operators/tenant/test/e2e` | `exit-test-e2e-cluster.yml` | on the runner through `make test-e2e`, on a kind cluster of its own, with `plans.yaml` copied from the charts checkout |
 
 `exit-test-e2e-cluster.yml` writes one verdict row per suite

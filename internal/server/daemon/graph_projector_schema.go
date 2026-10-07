@@ -16,12 +16,16 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 )
 
@@ -220,17 +224,55 @@ func schemaDDL(reg *taxonomy.Registry) ([]schemaStatement, error) {
 // transaction.
 type cypherExec func(ctx context.Context, stmt schemaStatement, params map[string]any) error
 
+// constraintDataViolationCode is the Neo4j code of a constraint that cannot be
+// created because the data already violates it, for example two nodes with one
+// identity. Neo4j 5 classifies it as a database error.
+// TestApplySchema_RealNeo4jDuplicateBlocks (integration) proves the code
+// against the neo4j 5.26 image that tenants run.
+const constraintDataViolationCode = "Neo.DatabaseError.Schema.ConstraintCreationFailed"
+
+// isConstraintDataViolation reports whether err is a constraint creation that
+// failed for a data reason. The same statement fails again until a person
+// changes the data, so a retry is a loop.
+func isConstraintDataViolation(err error) bool {
+	var nerr *neo4j.Neo4jError
+	return errors.As(err, &nerr) && nerr.Code == constraintDataViolationCode
+}
+
+// schemaBlockedError reports the statements that the data of the tenant
+// violates. Each entry holds the statement and the text of Neo4j, which names
+// the duplicate nodes.
+type schemaBlockedError struct {
+	violations []string
+}
+
+func (e *schemaBlockedError) Error() string {
+	return "graph schema blocked by the tenant data: " + strings.Join(e.violations, "; ")
+}
+
 // applySchema runs the schema DDL for reg and then records the version. Every
 // statement is IF NOT EXISTS or a MERGE, so running it again is safe.
+//
+// A constraint that the data violates does not stop the other statements. When
+// one or more fail for that reason, applySchema records no version and returns
+// a *schemaBlockedError that names each one (gibson#487).
 func applySchema(ctx context.Context, reg *taxonomy.Registry, run cypherExec) error {
 	ddl, err := schemaDDL(reg)
 	if err != nil {
 		return fmt.Errorf("build schema: %w", err)
 	}
+	var blocked []string
 	for _, stmt := range ddl {
 		if err := run(ctx, stmt, nil); err != nil {
+			if isConstraintDataViolation(err) {
+				blocked = append(blocked, fmt.Sprintf("%s: %v", stmt, err))
+				continue
+			}
 			return fmt.Errorf("%s: %w", stmt, err)
 		}
+	}
+	if len(blocked) > 0 {
+		return &schemaBlockedError{violations: blocked}
 	}
 	if err := run(ctx, versionCypher, map[string]any{
 		"name":    schemaVersionName,
@@ -262,18 +304,33 @@ func sessionExec(sess neo4j.SessionWithContext) cypherExec {
 	}
 }
 
+// graphSchemaBlocked is 1 for a tenant whose graph data violates a schema
+// constraint, and 0 after the schema applies. An operator reads it without the
+// daemon log (gibson#487).
+var graphSchemaBlocked = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "gibson_graph_schema_blocked",
+	Help: "1 when the graph data of the tenant violates a schema constraint, so the constraint is missing.",
+}, []string{"tenant"})
+
 // schemaTracker remembers which tenants have had their schema ensured, so the
 // DDL does not run on every projection tick. Each tenant has its own lock: two
 // concurrent first touches for one tenant serialize, and the second sees the
-// first's result. A failure is not remembered, so the next write retries.
+// first's result.
+//
+// A transient failure is not remembered, so the next write retries. A failure
+// for a data reason is remembered: the tenant is blocked, the gauge reports it
+// once, and the DDL does not run again until invalidate. Writes continue
+// without the missing constraint, because the projection is still correct
+// data and stopping it hides more than it protects.
 type schemaTracker struct {
 	mu      sync.Mutex
 	tenants map[string]*tenantSchema
 }
 
 type tenantSchema struct {
-	mu   sync.Mutex
-	done bool
+	mu      sync.Mutex
+	done    bool
+	blocked *schemaBlockedError
 }
 
 func (t *schemaTracker) entry(tenant string) *tenantSchema {
@@ -291,18 +348,28 @@ func (t *schemaTracker) entry(tenant string) *tenantSchema {
 }
 
 // ensure runs apply once per tenant. It returns nil without calling apply when
-// an earlier call already succeeded.
+// an earlier call already succeeded or found the tenant blocked.
 func (t *schemaTracker) ensure(tenant string, apply func() error) error {
 	e := t.entry(tenant)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.done {
+	if e.done || e.blocked != nil {
 		return nil
 	}
-	if err := apply(); err != nil {
+	err := apply()
+	var blocked *schemaBlockedError
+	if errors.As(err, &blocked) {
+		e.blocked = blocked
+		graphSchemaBlocked.WithLabelValues(tenant).Set(1)
+		slog.Warn("graph projector: the tenant graph data violates the schema, so a constraint is missing",
+			"tenant", tenant, "error", blocked.Error())
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	e.done = true
+	graphSchemaBlocked.WithLabelValues(tenant).Set(0)
 	return nil
 }
 
@@ -330,13 +397,15 @@ func (w *neo4jGraphWriter) ensureSchema(ctx context.Context, tenant string, sess
 // by tenant), so the label becomes writable in every tenant's graph at once.
 //
 // The DDL is idempotent — every statement is IF NOT EXISTS — so re-running it
-// costs one round trip per tenant that writes again, and nothing else.
+// costs one round trip per tenant that writes again, and nothing else. A
+// blocked tenant is cleared too, so its DDL runs one more time.
 func (t *schemaTracker) invalidate() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, e := range t.tenants {
 		e.mu.Lock()
 		e.done = false
+		e.blocked = nil
 		e.mu.Unlock()
 	}
 }

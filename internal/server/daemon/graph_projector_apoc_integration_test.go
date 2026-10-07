@@ -7,8 +7,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	pdataplane "github.com/zeroroot-ai/gibson/pkg/platform/dataplane"
 )
 
@@ -285,5 +288,29 @@ func TestHostProjectionTreatsALabelAsData(t *testing.T) {
 	canary = runWrite(t, ctx, drv, "MATCH (c:Canary) RETURN count(c) AS n", nil)
 	if n, _ := canary[0].Get("n"); n != int64(1) {
 		t.Fatalf("the canary node is gone (count %v) after projecting the real taxonomy", n)
+	}
+}
+
+// TestApplySchema_RealNeo4jDuplicateBlocks seeds two Host nodes with one
+// brain_id in the neo4j image that tenants run. The uniqueness constraint
+// cannot be created, and applySchema reports the tenant as blocked rather
+// than failing in a way that the next write retries (gibson#487).
+func TestApplySchema_RealNeo4jDuplicateBlocks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	drv := startProvisionedNeo4j(t, ctx)
+
+	runWrite(t, ctx, drv, "CREATE (:Host {brain_id: 'h-dup'}), (:Host {brain_id: 'h-dup'})", nil)
+
+	sess := drv.NewSession(ctx, neo4j.SessionConfig{AccessMode: neo4j.AccessModeWrite})
+	defer func() { _ = sess.Close(ctx) }()
+
+	err := applySchema(ctx, taxonomy.Global, sessionExec(sess))
+	var blocked *schemaBlockedError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("applySchema = %v, want a schemaBlockedError for the duplicate Host", err)
+	}
+	if len(blocked.violations) != 1 || !strings.Contains(blocked.violations[0], "gibson_host_brain_id_unique") {
+		t.Fatalf("violations = %v, want the Host brain_id constraint only", blocked.violations)
 	}
 }
