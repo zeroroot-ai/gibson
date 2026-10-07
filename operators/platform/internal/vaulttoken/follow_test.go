@@ -13,13 +13,30 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	vaultapi "github.com/openbao/openbao/api/v2"
 )
 
 // fakeVaultTokens is a fake OpenBao that accepts each token in its set. A test
 // adds a token to start a rotation and removes one to revoke it.
 type fakeVaultTokens struct {
-	mu   sync.Mutex
-	good map[string]bool
+	mu        sync.Mutex
+	good      map[string]bool
+	fixedOnes map[string]bool
+}
+
+// setRenewable adds a token that OpenBao accepts, with or without renewal.
+func (f *fakeVaultTokens) setRenewable(tok string, renewable bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.good[tok] = true
+	f.fixedOnes[tok] = !renewable
+}
+
+func (f *fakeVaultTokens) renewable(tok string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.fixedOnes[tok]
 }
 
 func (f *fakeVaultTokens) set(tok string, ok bool) {
@@ -36,7 +53,7 @@ func (f *fakeVaultTokens) accepts(tok string) bool {
 
 func newFakeVaultTokens(t *testing.T, tokens ...string) (*fakeVaultTokens, *httptest.Server) {
 	t.Helper()
-	f := &fakeVaultTokens{good: map[string]bool{}}
+	f := &fakeVaultTokens{good: map[string]bool{}, fixedOnes: map[string]bool{}}
 	for _, tok := range tokens {
 		f.good[tok] = true
 	}
@@ -52,6 +69,10 @@ func newFakeVaultTokens(t *testing.T, tokens ...string) (*fakeVaultTokens, *http
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/auth/token/lookup-self", func(w http.ResponseWriter, r *http.Request) {
+		if !f.renewable(r.Header.Get("X-Vault-Token")) {
+			answer(w, r, `{"data":{"renewable":false,"ttl":0,"id":%q}}`)
+			return
+		}
 		answer(w, r, `{"data":{"renewable":true,"ttl":3600,"id":%q}}`)
 	})
 	mux.HandleFunc("/v1/auth/token/renew-self", func(w http.ResponseWriter, r *http.Request) {
@@ -138,5 +159,70 @@ func TestRenewerIgnoresAFileTokenThatOpenBaoRefuses(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if tok, err := r.Token(); err != nil || tok != "token-good" {
 		t.Fatalf("Token() = %q, %v; want token-good to stay in force", tok, err)
+	}
+}
+
+// A file token that OpenBao accepts and that has no renewal still replaces
+// the token in force, and the loop keeps following the file.
+func TestRenewerFollowsANonRenewableFileToken(t *testing.T) {
+	oldFollow := followInterval
+	followInterval = 10 * time.Millisecond
+	defer func() { followInterval = oldFollow }()
+
+	vault, srv := newFakeVaultTokens(t, "token-old")
+	path := filepath.Join(t.TempDir(), "VAULT_ADMIN_TOKEN")
+	if err := os.WriteFile(path, []byte("token-old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(context.Background(), srv.URL, "", path)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = r.Close() }()
+	waitForToken(t, r, "token-old")
+
+	vault.setRenewable("token-fixed", false)
+	if err := os.WriteFile(path, []byte("token-fixed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForToken(t, r, "token-fixed")
+
+	vault.set("token-later", true)
+	if err := os.WriteFile(path, []byte("token-later"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForToken(t, r, "token-later")
+}
+
+// After a move, the client that renews holds the new token, so each later
+// renewal sends it.
+func TestAMoveSetsTheNewTokenOnTheRenewalClient(t *testing.T) {
+	vault, srv := newFakeVaultTokens(t, "token-old")
+	path := filepath.Join(t.TempDir(), "VAULT_ADMIN_TOKEN")
+	if err := os.WriteFile(path, []byte("token-new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	vault.set("token-new", true)
+	cfg := vaultapi.DefaultConfig()
+	cfg.Address = srv.URL
+	client, err := vaultapi.NewClient(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetToken("token-old")
+	r := &Renewer{token: "token-old", cancel: func() {}, done: make(chan struct{})}
+
+	interval, ok := r.followRotatedToken(context.Background(), client, path)
+	if !ok {
+		t.Fatal("followRotatedToken did not move to an accepted file token")
+	}
+	if interval <= 0 {
+		t.Fatalf("interval = %v, want the renewal interval of the new token", interval)
+	}
+	if got := client.Token(); got != "token-new" {
+		t.Fatalf("the renewal client holds %q, want token-new", got)
+	}
+	if tok, err := r.Token(); err != nil || tok != "token-new" {
+		t.Fatalf("Token() = %q, %v; want token-new", tok, err)
 	}
 }

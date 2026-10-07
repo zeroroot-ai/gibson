@@ -37,8 +37,12 @@
 //
 // Rotation design (ADR-0171, row openbao-service-tokens):
 //   - The openbao-auto-init sidecar mints a NEW token by age and writes it to
-//     the projected Secret while the old token is still valid. It revokes the
-//     old token after a grace period.
+//     its Secret while the old token is still valid. It revokes the old token
+//     after a grace period. For the platform-operator the token reaches the
+//     file through one more hop: the sidecar seeds KV gibson-vault-admin-token,
+//     ESO copies it to gibson-openbao-keys (60s), and the kubelet updates the
+//     file (60 to 90s). With followInterval the worst case is about 3 minutes,
+//     and the grace period must be longer.
 //   - renewLoop re-reads tokenPath every followInterval. When the file holds a
 //     different token and LookupSelf accepts it, the Renewer moves to it at
 //     once. So the operator uses the new token long before the sidecar
@@ -76,9 +80,9 @@ var acquirePollInterval = 5 * time.Second
 var retryBackoff = minRenewInterval
 
 // followInterval is how often renewLoop re-reads tokenPath to find a rotated
-// token. The kubelet syncs a projected Secret in about a minute, and the
-// sidecar keeps the old token valid for much longer than both. A var so tests
-// can shorten it.
+// token. The new token reaches the file after the ESO refresh and the kubelet
+// sync, and the sidecar keeps the old token valid for much longer than the
+// sum of the three. A var so tests can shorten it.
 var followInterval = 30 * time.Second
 
 // Renewer holds a Vault admin token and keeps it alive via background renewal.
@@ -276,7 +280,7 @@ func (r *Renewer) renewLoop(ctx context.Context, client *vaultapi.Client, interv
 		follow = t.C
 	}
 	renew := newRenewTimer(interval)
-	defer renew.Stop()
+	defer func() { renew.Stop() }()
 	for {
 		select {
 		case <-ctx.Done():
@@ -297,12 +301,12 @@ func (r *Renewer) renewLoop(ctx context.Context, client *vaultapi.Client, interv
 				r.renErr = err
 				r.mu.Unlock()
 				interval = retryBackoff // back off and retry
+				// The cached token may have gone bad (gibson#1173). A token on
+				// disk that OpenBao accepts replaces it, through the same
+				// check as a rotation, so a refused file token never does.
 				if tokenPath != "" {
-					if fresh := resolveToken("", tokenPath); fresh != "" {
-						r.mu.Lock()
-						r.token = fresh
-						r.mu.Unlock()
-						client.SetToken(fresh)
+					if next, ok := r.followRotatedToken(ctx, client, tokenPath); ok && next > 0 {
+						interval = next
 					}
 				}
 				renew = newRenewTimer(interval)
