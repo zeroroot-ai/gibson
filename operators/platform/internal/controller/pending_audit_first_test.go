@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -515,7 +516,7 @@ func TestPendingDurable_NameFlusherAndTeardown(t *testing.T) {
 	if parentInTeardown(ctx, cl, oc) {
 		t.Error("a live parent is not a teardown")
 	}
-	failing := interceptor.NewClient(cl.(client.WithWatch), interceptor.Funcs{
+	failing := interceptor.NewClient(cl, interceptor.Funcs{
 		Get: func(context.Context, client.WithWatch, client.ObjectKey, client.Object, ...client.GetOption) error {
 			return errors.New("api server down")
 		},
@@ -537,7 +538,10 @@ func (f *flakySink) EmitAuditEvent(ctx context.Context, ev audit.Event) error {
 		return errNoDaemon
 	}
 	f.n++
-	return f.inner.EmitAuditEvent(ctx, ev)
+	if err := f.inner.EmitAuditEvent(ctx, ev); err != nil {
+		return fmt.Errorf("inner sink: %w", err)
+	}
+	return nil
 }
 
 // A PlatformBootstrap delete that cannot write its ConfigMap goes on and logs
@@ -561,4 +565,61 @@ func TestPlatformBootstrap_DeleteLogsATeardownWhenNoConfigMapCanBeWritten(t *tes
 	if _, err := r.reconcileDeletion(context.Background(), pb); err != nil || len(pb.Finalizers) != 0 {
 		t.Fatalf("err = %v, finalizers = %v; want the delete to go on", err, pb.Finalizers)
 	}
+}
+
+// The flusher refuses to start with no audit emitter, asks for leader
+// election, and its loop sends a ConfigMap on a tick and then stops with the
+// context.
+func TestPendingAuditFlusher_SetupAndLoop(t *testing.T) {
+	if err := (&PendingAuditFlusher{}).SetupWithManager(nil); !errors.Is(err, errNoAuditEmitter) {
+		t.Fatalf("setup with no emitter: %v", err)
+	}
+	if !(&PendingAuditFlusher{}).NeedLeaderElection() {
+		t.Fatal("the flusher must run on the leader only")
+	}
+	s := mustScheme(t)
+	obj := &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}}
+	cli := fake.NewClientBuilder().WithScheme(s).Build()
+	if err := saveDurable(context.Background(), cli, []gibsonv1alpha1.PendingAuditRecord{
+		pendingRecord(audit.ActionOIDCClientDelete, obj, "", "", map[string]string{"client": "a"}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// One tick with the daemon down keeps the ConfigMap. The next with it up sends it.
+	sink := &toggleSink{}
+	em, err := audit.NewSagaEmitter(sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &PendingAuditFlusher{Client: cli, Audit: em, Interval: 5 * time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- f.Start(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+	sink.up.Store(true) // the daemon returns
+	deadline := time.Now().Add(5 * time.Second)
+	for sink.sent.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if sink.sent.Load() != 1 {
+		t.Fatalf("sent = %d, want the record sent once the daemon returned", sink.sent.Load())
+	}
+}
+
+// toggleSink refuses each record until up is set.
+type toggleSink struct {
+	up   atomic.Bool
+	sent atomic.Int32
+}
+
+func (s *toggleSink) EmitAuditEvent(context.Context, audit.Event) error {
+	if !s.up.Load() {
+		return errNoDaemon
+	}
+	s.sent.Add(1)
+	return nil
 }
