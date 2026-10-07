@@ -190,7 +190,7 @@ func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
 	reg := &fakeRegistrar{
 		hostClaims: &capabilitygrant.HostClaims{
 			HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", PrincipalRef: "agent_principal:9",
-			AgentName: "hello", CapabilityCeiling: []string{"execute:tool:nmap"},
+			AgentName: "hello", CapabilityCeiling: []string{"execute:tool:nmap"}, CeilingRecorded: true,
 		},
 		result: &capabilitygrant.RegisterCapabilityGrantResult{AgentID: "agent-new", ComponentScope: "component:hello"},
 	}
@@ -229,7 +229,7 @@ func TestCGRegister_HostJWT_ReRegistration(t *testing.T) {
 func TestCGRegister_HostJWT_NotRegistrableIs403(t *testing.T) {
 	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "")
 	reg := &fakeRegistrar{
-		hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello"},
+		hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello", CeilingRecorded: true},
 		err:        fmt.Errorf("enroll: %w", capabilitygrant.ErrHostNotRegistrable),
 	}
 	h := capabilityGrantRegisterHandler(fakeBootstrapVerifier{}, reg, nil, "https://api.test", nil)
@@ -242,11 +242,23 @@ func TestCGRegister_HostJWT_NotRegistrableIs403(t *testing.T) {
 	}
 }
 
+// A host with an unknown ceiling fails closed: it is refused, and nothing is
+// registered with an empty ceiling.
+func TestCGRegister_HostJWT_UnknownCeilingRefuses(t *testing.T) {
+	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "")
+	reg := &fakeRegistrar{hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello"}}
+	h := capabilityGrantRegisterHandler(fakeBootstrapVerifier{}, reg, nil, "https://api.test", nil)
+	rr := postRegister(t, h, "Bearer "+hostJWTToken(), body)
+	if rr.Code != http.StatusForbidden || reg.gotName != "" || reg.gotCeiling != nil {
+		t.Fatalf("status = %d, name = %q, ceiling = %v; want 403 and no registration", rr.Code, reg.gotName, reg.gotCeiling)
+	}
+}
+
 // A second component on a host that enrolled under another name is refused
 // with a clear answer. The body name does not replace the stored name.
 func TestCGRegister_HostJWT_RefusesAnotherAgentName(t *testing.T) {
 	body, hostID := reRegBody(t, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "other-agent")
-	reg := &fakeRegistrar{hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello"}}
+	reg := &fakeRegistrar{hostClaims: &capabilitygrant.HostClaims{HostID: hostID, TenantID: "acme", OwnerUserID: "user-1", AgentName: "hello", CeilingRecorded: true}}
 	h := capabilityGrantRegisterHandler(fakeBootstrapVerifier{}, reg, nil, "https://api.test", nil)
 	rr := postRegister(t, h, "Bearer "+hostJWTToken(), body)
 	if rr.Code != http.StatusConflict || reg.gotName != "" {

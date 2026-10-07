@@ -219,6 +219,13 @@ func capabilityGrantRegisterHandler(
 				http.Error(w, "host has no recorded agent; enroll with a bootstrap token", http.StatusForbidden)
 				return
 			}
+			// A host whose ceiling is unknown (it enrolled before the ceiling was
+			// stored) fails closed. An empty ceiling would allow every capability.
+			if !hc.CeilingRecorded {
+				logger.WarnContext(r.Context(), "capability-grant: host re-registration refused: the host has no recorded capability ceiling")
+				http.Error(w, "host has no recorded capability ceiling; enroll with a bootstrap token", http.StatusForbidden)
+				return
+			}
 			// Several components that share one host key cannot share one name.
 			// A caller that names another agent than the host enrolled as gets
 			// a clear refusal, not a registration under the first name.

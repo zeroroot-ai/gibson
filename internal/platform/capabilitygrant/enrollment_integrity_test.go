@@ -1379,6 +1379,22 @@ func TestGetHost_ReadsTheEnrollmentBounds(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "hello-agent", h.AgentName)
 	assert.Equal(t, []string{"execute:tool:nmap"}, h.CapabilityCeiling)
+	assert.True(t, h.CeilingRecorded)
+}
+
+// A host whose ceiling is NULL has an unknown ceiling, which is not an empty
+// one: CeilingRecorded is false.
+func TestGetHost_NullCeilingIsUnknown(t *testing.T) {
+	m := newMockedService(t)
+	m.mock.ExpectQuery("FROM   capability_grant_hosts").WillReturnRows(
+		sqlmock.NewRows([]string{"id", "tenant_id", "user_id", "display_name", "public_key_jwk", "status",
+			"principal_ref", "agent_name", "capability_ceiling", "created_at", "updated_at"}).
+			AddRow("h1", "acme", "owner-1", "h1", []byte(hostJWK), "active", "agent_principal:1",
+				"hello-agent", nil, time.Now(), time.Now()))
+	h, err := m.svc.store.GetHost(context.Background(), "h1")
+	require.NoError(t, err)
+	assert.False(t, h.CeilingRecorded)
+	assert.Empty(t, h.CapabilityCeiling)
 }
 
 // A stored ceiling that is not a list is an error, not an empty ceiling.
