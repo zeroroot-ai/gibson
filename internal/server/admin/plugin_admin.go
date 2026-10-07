@@ -76,6 +76,12 @@ type ComponentInstallInfo struct {
 // Tests inject a recorder; production wiring delegates to the secrets audit
 // pipeline.
 type BootstrapTokenAuditor interface {
+	// Record writes the event durably and returns its error. A state change
+	// calls it before the change and makes the change only when it returns
+	// nil.
+	Record(ctx context.Context, event secrets.AuditEvent) error
+	// Audit writes the event without a wait. A change that failed after its
+	// record calls it with Success false.
 	Audit(ctx context.Context, event secrets.AuditEvent)
 }
 
@@ -257,21 +263,9 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		Relation: "can_resolve",
 		Object:   authz.SecretObject(tenant.String(), req.GetDeclaredName()),
 	}
-	if err := s.authzr.Delete(ctx, []authz.Tuple{tuple}); err != nil {
-		return nil, status.Errorf(codes.Internal, "delete tuple: %v", err)
-	}
-
-	// Tell the running plugin before the audit line says the revocation
-	// landed. The tuple is already gone, so a failed publish leaves the
-	// plugin denied on its next resolve and holding its cache until the
-	// operator retries; Unavailable asks for that retry (gibson#154).
-	if err := s.events.Publish(ctx, tenant.String(), principal, componentevents.Event{
-		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
-		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
-	}); err != nil {
-		return nil, status.Errorf(codes.Unavailable, "binding revoked but the plugin was not told; retry: %v", err)
-	}
-	s.auditor.Audit(ctx, secrets.AuditEvent{
+	identity, _ := auth.IdentityFromContext(ctx)
+	event := secrets.AuditEvent{
+		ActorID:       identity.Subject,
 		ActorTenantID: tenant.String(),
 		Action:        "secret_access_revoked",
 		Effect:        secrets.EffectAllow,
@@ -280,7 +274,30 @@ func (s *PluginsAdminServer) RevokePluginSecretBinding(ctx context.Context, req 
 		Decision:      "allow",
 		Success:       true,
 		OccurredAt:    s.now().UTC(),
-	})
+	}
+	// The audit record is durable before the binding changes. With no record
+	// the binding stays (gibson#676).
+	if err := s.auditor.Record(ctx, event); err != nil {
+		return nil, status.Error(codes.Unavailable, "the audit record could not be written; the binding is unchanged")
+	}
+	failed := func() {
+		event.Success, event.Effect, event.Decision = false, secrets.EffectDeny, "deny"
+		s.auditor.Audit(ctx, event)
+	}
+	if err := s.authzr.Delete(ctx, []authz.Tuple{tuple}); err != nil {
+		failed()
+		return nil, status.Errorf(codes.Internal, "delete tuple: %v", err)
+	}
+
+	// Tell the running plugin. The tuple is already gone, so a failed publish
+	// leaves the plugin denied on its next resolve and holding its cache until
+	// the operator retries; Unavailable asks for that retry (gibson#154).
+	if err := s.events.Publish(ctx, tenant.String(), principal, componentevents.Event{
+		Type: componentevents.TypeSecretAccessRevoked, SecretName: req.GetDeclaredName(),
+		Reason: "binding revoked by a tenant admin", OccurredAt: s.now().UTC(),
+	}); err != nil {
+		return nil, status.Errorf(codes.Unavailable, "binding revoked but the plugin was not told; retry: %v", err)
+	}
 
 	return &tenantv1.RevokePluginSecretBindingResponse{}, nil
 }

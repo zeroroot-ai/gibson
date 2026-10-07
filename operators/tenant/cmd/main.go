@@ -736,6 +736,7 @@ func main() {
 			Client: mgr.GetClient(),
 			Daemon: grpcClient,
 			Config: controller.CatalogPluginConfigFromEnv(os.Getenv),
+			Audit:  sagaAudit,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "Failed to register the catalog plugin runnable")
 			os.Exit(1)

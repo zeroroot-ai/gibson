@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
 )
@@ -109,6 +110,11 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 			if slices.Equal(m.Roles, []string{loginClientRole}) {
 				continue
 			}
+			if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
+				"change": "reset_login_client_roles", "user_id": m.UserID,
+			})); rerr != nil {
+				return ctrl.Result{}, rerr
+			}
 			if aerr := zc.AddIAMMember(ctx, m.UserID, []string{loginClientRole}); aerr != nil {
 				return machineAdminsZitadelError(pb, "AddIAMMember user="+m.UserID, aerr), nil
 			}
@@ -116,6 +122,11 @@ func (r *PlatformBootstrapReconciler) reconcileMachineAdminsScoped(
 				"reset the Zitadel login client %s roles from %v to [%s]", m.UserID, m.Roles, loginClientRole)
 			logger.Info("reset the Zitadel login client roles", "userID", m.UserID, "was", m.Roles)
 			continue
+		}
+		if rerr := r.recordBefore(ctx, pb, pendingRecord(audit.ActionPlatformBootstrap, pb, "", "", map[string]string{
+			"change": "remove_machine_iam_member", "user_id": m.UserID, "login_name": m.PreferredLoginName,
+		})); rerr != nil {
+			return ctrl.Result{}, rerr
 		}
 		if rerr := zc.RemoveIAMMember(ctx, m.UserID); rerr != nil {
 			return machineAdminsZitadelError(pb, "RemoveIAMMember user="+m.UserID, rerr), nil

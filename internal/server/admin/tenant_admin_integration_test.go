@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
@@ -400,3 +403,39 @@ func withTenant(t *testing.T, raw string) context.Context {
 	t.Helper()
 	return ctxWithTenant(t, raw)
 }
+
+// With no durable audit record, the secrets backend of a tenant does not
+// change (gibson#676).
+func TestSetBrokerConfig_NoRecordMeansNoChange(t *testing.T) {
+	getter := &inMemoryConfigGetter{rows: map[auth.TenantID]secrets.BrokerConfig{}}
+	srv, err := NewTenantAdminServer(TenantAdminConfig{
+		Reader:         getter,
+		Writer:         &memoryWriter{getter: getter},
+		ProbeFactory:   &fakeProbeFactory{},
+		Auditor:        &fakeAuditor{recordErr: errors.New("audit store down")},
+		Reloader:       noopReloader{},
+		SecretsService: &fakeSecretsLister{},
+		Now:            func() time.Time { return time.Unix(1700000000, 0).UTC() },
+	})
+	if err != nil {
+		t.Fatalf("NewTenantAdminServer: %v", err)
+	}
+	_, err = srv.SetBrokerConfig(withTenant(t, "acme"), &secretsv1.SetBrokerConfigRequest{
+		Candidate: &secretsv1.CandidateConfig{
+			Provider:   secretsv1.BrokerProvider_BROKER_PROVIDER_VAULT_HOSTED,
+			Address:    "https://vault",
+			AuthMethod: "token",
+			VaultToken: []byte("hvs.xyz"),
+		},
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+	if len(getter.rows) != 0 {
+		t.Fatalf("the config changed with no audit record: %+v", getter.rows)
+	}
+}
+
+type noopReloader struct{}
+
+func (noopReloader) Reload(context.Context, auth.TenantID) {}

@@ -21,6 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/audit"
+	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
@@ -101,6 +103,7 @@ func newCatalogPluginLoop(t *testing.T, d *fakeCatalogPluginDaemon, objs ...clie
 		Client:   c,
 		Daemon:   d,
 		Config:   cpConfig(),
+		Audit:    (&audittest.Sink{}).Emitter(t),
 		readFile: func(string) ([]byte, error) { return []byte("PEM"), nil },
 	}, c
 }

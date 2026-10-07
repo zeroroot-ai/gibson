@@ -175,6 +175,23 @@ func TestRevokePluginSecretBinding_DeletesAndAudits(t *testing.T) {
 	}
 }
 
+// With no durable audit record, the binding stays (gibson#676).
+func TestRevokePluginSecretBinding_NoRecordMeansNoRevoke(t *testing.T) {
+	srv, reg, az, au := newPluginsTestServer(t)
+	reg.installs["abc"] = ComponentInstallInfo{InstallID: "abc", TenantID: "acme", Name: "github", PrincipalRef: "plugin_principal:github"}
+	au.recordErr = errors.New("audit store down")
+
+	_, err := srv.RevokePluginSecretBinding(ctxWithTenant(t, "acme"), &tenantv1.RevokePluginSecretBindingRequest{
+		InstallId: "abc", DeclaredName: "cred:db",
+	})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+	if len(az.deletes) != 0 {
+		t.Fatalf("the tuple was deleted with no audit record: %+v", az.deletes)
+	}
+}
+
 // TestRevokePluginSecretBinding_RefusesAnInstallItCannotAddress: an install
 // with no recorded principal predates gibson#154. Deleting a guessed tuple
 // and publishing to a guessed channel would report a revocation that never

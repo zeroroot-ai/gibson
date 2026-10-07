@@ -88,8 +88,16 @@ func keepPending(list *[]gibsonv1alpha1.PendingAuditRecord, rec gibsonv1alpha1.P
 // daemon accepts. It stops at the first refusal and keeps the rest. It
 // returns the error of that refusal, which only delays the records.
 func flushPending(ctx context.Context, em *audit.SagaEmitter, list *[]gibsonv1alpha1.PendingAuditRecord) error {
+	_, err := flushPendingSent(ctx, em, list)
+	return err
+}
+
+// flushPendingSent is flushPending that also returns the records that the
+// daemon accepted. A status write that loses a conflict uses them, so it does
+// not bring back a record that this pass already sent.
+func flushPendingSent(ctx context.Context, em *audit.SagaEmitter, list *[]gibsonv1alpha1.PendingAuditRecord) ([]gibsonv1alpha1.PendingAuditRecord, error) {
 	if len(*list) == 0 {
-		return nil
+		return nil, nil
 	}
 	fctx, cancel := context.WithTimeout(ctx, flushTimeout)
 	defer cancel()
@@ -107,12 +115,57 @@ func flushPending(ctx context.Context, em *audit.SagaEmitter, list *[]gibsonv1al
 		}
 		sent++
 	}
+	accepted := append([]gibsonv1alpha1.PendingAuditRecord(nil), (*list)[:sent]...)
 	*list = append([]gibsonv1alpha1.PendingAuditRecord(nil), (*list)[sent:]...)
 	if len(*list) == 0 {
 		*list = nil
 	}
 	if err != nil {
-		return fmt.Errorf("send the pending audit records: %w", err)
+		return accepted, fmt.Errorf("send the pending audit records: %w", err)
+	}
+	return accepted, nil
+}
+
+// samePending reports whether two pending records stand for the same change.
+func samePending(a, b gibsonv1alpha1.PendingAuditRecord) bool {
+	return a.Action == b.Action && a.TargetType == b.TargetType && a.TargetID == b.TargetID &&
+		a.Result == b.Result && a.Reason == b.Reason && maps.Equal(a.Fields, b.Fields)
+}
+
+func containsPending(list []gibsonv1alpha1.PendingAuditRecord, rec gibsonv1alpha1.PendingAuditRecord) bool {
+	for _, p := range list {
+		if samePending(p, rec) {
+			return true
+		}
+	}
+	return false
+}
+
+// mergePending is the pending list that a status write keeps after it lost a
+// conflict. It holds every record of this pass (desired), and every record
+// that another writer added in the meantime (fresh), for example the delete
+// record of an OIDC client. It drops a record that this pass already sent
+// (flushed), so a sent record does not come back.
+func mergePending(desired, fresh, flushed []gibsonv1alpha1.PendingAuditRecord) []gibsonv1alpha1.PendingAuditRecord {
+	merged := append([]gibsonv1alpha1.PendingAuditRecord(nil), desired...)
+	for _, f := range fresh {
+		if !containsPending(merged, f) && !containsPending(flushed, f) {
+			merged = append(merged, f)
+		}
+	}
+	return merged
+}
+
+// recordBefore keeps the pending record of a change and writes the status
+// that holds it, before the change. When the status is not written, it
+// returns an error and the caller makes no change: no admin removal, user
+// delete or role reset exists without its record (gibson#676). The record
+// still waits for the daemon, because the platform operator runs before the
+// daemon exists.
+func (r *PlatformBootstrapReconciler) recordBefore(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap, rec gibsonv1alpha1.PendingAuditRecord) error {
+	keepPending(&pb.Status.PendingAuditRecords, rec)
+	if err := r.statusUpdate(ctx, pb); err != nil {
+		return fmt.Errorf("keep the audit record before the change: %w", err)
 	}
 	return nil
 }

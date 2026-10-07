@@ -336,22 +336,9 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *secretsv1.
 			status.Errorf(codes.FailedPrecondition, "probe failed: %s", probeRes.GetErrorClass())
 	}
 
-	// Persist on probe success.
-	if err := s.writer.Set(ctx, tenant, secrets.BrokerConfig{
-		Provider:   providerName,
-		ConfigBlob: blob,
-	}, identity.Subject); err != nil {
-		return nil, status.Errorf(codes.Internal, "persist broker config: %v", err)
-	}
-
-	// Invalidate the per-tenant cached SecretsBroker so the next
-	// Resolve/Put/Delete/List call rebuilds it from the just-persisted row.
-	// Without this, in-flight callers keep hitting the previously-cached
-	// provider until the daemon restarts.
-	s.reloader.Reload(ctx, tenant)
-
-	// Audit the change as tenant_secrets_backend_configured.
-	s.auditor.Audit(ctx, secrets.AuditEvent{
+	// The audit record is durable before the config changes. With no record
+	// the config stays (gibson#676).
+	event := secrets.AuditEvent{
 		ActorID:       identity.Subject,
 		ActorTenantID: tenant.String(),
 		Action:        "tenant_secrets_backend_configured",
@@ -361,7 +348,26 @@ func (s *TenantAdminServer) SetBrokerConfig(ctx context.Context, req *secretsv1.
 		Decision:      "allow",
 		Success:       true,
 		OccurredAt:    s.now().UTC(),
-	})
+	}
+	if err := s.auditor.Record(ctx, event); err != nil {
+		return nil, status.Error(codes.Unavailable, "the audit record could not be written; the config is unchanged")
+	}
+
+	// Persist on probe success.
+	if err := s.writer.Set(ctx, tenant, secrets.BrokerConfig{
+		Provider:   providerName,
+		ConfigBlob: blob,
+	}, identity.Subject); err != nil {
+		event.Success, event.Effect, event.Decision = false, secrets.EffectDeny, "deny"
+		s.auditor.Audit(ctx, event)
+		return nil, status.Errorf(codes.Internal, "persist broker config: %v", err)
+	}
+
+	// Invalidate the per-tenant cached SecretsBroker so the next
+	// Resolve/Put/Delete/List call rebuilds it from the just-persisted row.
+	// Without this, in-flight callers keep hitting the previously-cached
+	// provider until the daemon restarts.
+	s.reloader.Reload(ctx, tenant)
 
 	// Build the redacted view of what was saved.
 	redacted, err := brokercodec.Redact(blob)

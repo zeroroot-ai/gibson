@@ -310,7 +310,19 @@ func (a *AuditLogger) Record(
 	action, resource, resourceID string,
 	details map[string]any,
 ) (string, error) {
-	rec, ok := a.build(ctx, action, resource, resourceID, resultSuccess, details)
+	return a.RecordWithResult(ctx, action, resource, resourceID, resultSuccess, details)
+}
+
+// RecordWithResult is Record with an explicit result, for example "failure".
+// It writes durably and returns the error of the write, so a caller that must
+// not lose the record (a failure record that an operator then clears) learns
+// when Postgres did not accept it.
+func (a *AuditLogger) RecordWithResult(
+	ctx context.Context,
+	action, resource, resourceID, result string,
+	details map[string]any,
+) (string, error) {
+	rec, ok := a.build(ctx, action, resource, resourceID, result, details)
 	if !ok {
 		return "", ErrNoActor
 	}

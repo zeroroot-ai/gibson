@@ -91,7 +91,11 @@ type fakeCircuit struct{}
 func (fakeCircuit) Execute(_, _ string, fn func() error) error { return fn() }
 
 // fakeAuditor captures emitted events.
-type fakeAuditor struct{ events []secrets.AuditEvent }
+type fakeAuditor struct {
+	events []secrets.AuditEvent
+	// recordErr, when set, makes Record fail and keep nothing.
+	recordErr error
+}
 
 func (f *fakeAuditor) Audit(_ context.Context, e secrets.AuditEvent) {
 	f.events = append(f.events, e)
@@ -99,6 +103,9 @@ func (f *fakeAuditor) Audit(_ context.Context, e secrets.AuditEvent) {
 
 // Record captures the event, as the durable write would keep it.
 func (f *fakeAuditor) Record(_ context.Context, e secrets.AuditEvent) error {
+	if f.recordErr != nil {
+		return f.recordErr
+	}
 	f.events = append(f.events, e)
 	return nil
 }

@@ -139,11 +139,20 @@ func basePlatformOwnerCR(zitadelURL string) *gibsonv1alpha1.PlatformBootstrap {
 func newOwnerTestReconciler(t *testing.T, zitadelURL, fgaURL string, objs ...client.Object) *PlatformBootstrapReconciler {
 	t.Helper()
 	s := mustScheme(t)
-	builder := fake.NewClientBuilder().WithScheme(s)
-	if len(objs) > 0 {
-		builder = builder.WithObjects(objs...)
+	// A change writes its pending audit record to the status before it
+	// happens, so the PlatformBootstrap exists in the client with a status
+	// subresource (gibson#676).
+	hasPB := false
+	for _, o := range objs {
+		if _, ok := o.(*gibsonv1alpha1.PlatformBootstrap); ok {
+			hasPB = true
+		}
 	}
-	cli := builder.Build()
+	if !hasPB {
+		objs = append(objs, &gibsonv1alpha1.PlatformBootstrap{ObjectMeta: metav1.ObjectMeta{Name: "platform"}})
+	}
+	cli := fake.NewClientBuilder().WithScheme(s).WithObjects(objs...).
+		WithStatusSubresource(&gibsonv1alpha1.PlatformBootstrap{}).Build()
 	return &PlatformBootstrapReconciler{
 		Audit:    (&audittest.Sink{}).Emitter(t),
 		Client:   cli,

@@ -185,6 +185,9 @@ func hasPrefix(s, prefix string) bool {
 // failed after its first record was written.
 const auditResultFailure = "failure"
 
+// auditResultSuccess is the result of the first record of a change.
+const auditResultSuccess = "success"
+
 // EmitAuditEvent writes the audit record of a change that an operator
 // workload makes outside the daemon (gibson#583). Only operator and platform
 // workloads may call it, so a user or an agent cannot forge an audit trail.
@@ -238,13 +241,14 @@ func (s *DaemonServer) EmitAuditEvent(ctx context.Context, req *daemonoperatorv1
 	// The record belongs to the tenant of the target, so the tenant's own
 	// ListAuditEvents and the compliance reader return it.
 	ctx = auth.ContextWithTenant(ctx, tenant)
+	// Each record is durable before the RPC answers, a failure record too.
+	// The caller learns when its audit record is lost, and the operator
+	// keeps its pending record until then (gibson#676).
+	result := auditResultSuccess
 	if ev.GetResult() == auditResultFailure {
-		s.auditLogger.LogWithResult(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), auditResultFailure, details)
-		return &daemonoperatorv1.EmitAuditEventResponse{}, nil
+		result = auditResultFailure
 	}
-	// The record is durable before the RPC answers, so the caller learns
-	// when its audit record is lost and makes no change (gibson#676).
-	if _, err := s.auditLogger.Record(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), details); err != nil {
+	if _, err := s.auditLogger.RecordWithResult(ctx, ev.GetType(), ev.GetTargetType(), ev.GetTargetId(), result, details); err != nil {
 		s.logger.ErrorContext(ctx, "EmitAuditEvent: durable write failed", "error", err.Error())
 		return nil, status.Error(codes.Unavailable, "the audit record could not be written; try again")
 	}
