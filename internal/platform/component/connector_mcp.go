@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -79,6 +80,21 @@ func catalogConnectorIDs() []string {
 
 // tenantNamespace is the namespace of the connectors of a tenant.
 func tenantNamespace(tenant string) string { return "tenant-" + tenant }
+
+// ConnectorProxyHosts returns the host of the proxy of each catalog connector
+// in the namespace of tenant: the hosts that the daemon dials. The sandbox
+// network scope resolves them, so that no egress rule reaches a connector
+// (gibson#723).
+func ConnectorProxyHosts(tenant string) []string {
+	ids := catalogConnectorIDs()
+	hosts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if u, err := url.Parse(connectorv1alpha1.ProxyURL(id, tenantNamespace(tenant))); err == nil {
+			hosts = append(hosts, u.Hostname())
+		}
+	}
+	return hosts
+}
 
 // open starts an MCP session with one connector of one tenant.
 func (c *ConnectorMCP) open(ctx context.Context, tenant, connector string) (*mcp.ClientSession, error) {

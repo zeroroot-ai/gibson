@@ -15,7 +15,7 @@ func TestIsProxyHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	for _, h := range []string{u.Hostname(), "mcp-gitlab-proxy", "mcp-gitlab-proxy.tenant-acme", "mcp-gitlab-proxy.tenant-acme.svc", "MCP-GITLAB-PROXY.tenant-acme.svc.cluster.local."} {
+	for _, h := range []string{u.Hostname(), "mcp-gitlab-proxy", "mcp-gitlab-proxy.tenant-acme", "mcp-gitlab-proxy.tenant-acme.svc", "MCP-GITLAB-PROXY.tenant-acme.svc.cluster.local.", "mcp-gitlab-proxy.tenant-acme.svc.example.internal"} {
 		if !IsProxyHost(h) {
 			t.Errorf("IsProxyHost(%q) = false, want true", h)
 		}

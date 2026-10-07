@@ -283,8 +283,10 @@ func TestLoad_RefusesAConnectorProxyEgress(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "connector proxy") {
 		t.Fatalf("load error = %v, want the connector proxy refused", err)
 	}
-	if err := validateEgressAllow("t", []string{"api.example.com:443", "mcp-gitlab-proxy"}); err == nil {
-		t.Fatal("a bare proxy host was allowed")
+	for _, entry := range []string{"mcp-gitlab-proxy", "http://mcp-gitlab-proxy.tenant-acme.svc.cluster.local:8080/mcp", "mcp-gitlab-proxy.tenant-acme.svc.example.internal:8080"} {
+		if err := validateEgressAllow("t", []string{"api.example.com:443", entry}); err == nil {
+			t.Fatalf("the proxy entry %q was allowed", entry)
+		}
 	}
 	if err := validateEgressAllow("t", []string{"api.example.com:443", "mcp.example.com"}); err != nil {
 		t.Fatalf("an ordinary host was refused: %v", err)

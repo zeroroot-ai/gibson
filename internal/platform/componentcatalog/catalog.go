@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
@@ -360,7 +361,11 @@ func validateEgressAllow(id string, allow []string) error {
 			return fmt.Errorf(`%s: egressAllow holds "*": the catalog states no wildcard; the network scope of the mission node decides`, id)
 		}
 		host := entry
-		if h, _, err := net.SplitHostPort(entry); err == nil {
+		if strings.Contains(entry, "://") {
+			if u, err := url.Parse(entry); err == nil {
+				host = u.Hostname()
+			}
+		} else if h, _, err := net.SplitHostPort(entry); err == nil {
 			host = h
 		}
 		if connectorv1alpha1.IsProxyHost(host) {

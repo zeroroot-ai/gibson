@@ -768,7 +768,7 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 	// ── Manifest-sourced sandboxed tool (ADR-0117) ────────────────────────
 	// A kind:tool catalog manifest is the source of truth for a tool's runtime
 	// shape. A sandboxed manifest tool is dispatched to the sandbox.
-	if spec, ok := h.sandboxedToolSpecFromManifest(name); ok {
+	if spec, ok := h.sandboxedToolSpecFromManifest(ctx, name); ok {
 		if h.sandboxedExecutor == nil {
 			return types.WrapError(types.SANDBOX_TOOL_NOT_REGISTERED,
 				fmt.Sprintf("tool %q is a sandboxed manifest tool but no sandboxed executor is wired", name), nil)
@@ -1864,7 +1864,7 @@ func (h *DefaultAgentHarness) addDeclaredSecrets(ctx context.Context, toolName s
 	return nil
 }
 
-func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandboxed.ToolSpec, bool) {
+func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(ctx context.Context, name string) (sandboxed.ToolSpec, bool) {
 	entry, ok := componentcatalog.LookupTool(name)
 	if !ok || entry.DispatchMode != componentcatalog.DispatchModeSandboxed {
 		return sandboxed.ToolSpec{}, false
@@ -1879,7 +1879,7 @@ func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(name string) (sandbo
 	}
 	// A tool that runs inside a node gets the network of that node (S6).
 	if n := h.missionCtx.NodeNetwork; n != nil {
-		spec.NetworkMode, spec.Egress = nodeNetworkScope(n)
+		spec.NetworkMode, spec.Egress = nodeNetworkScope(n, connectorProxyGuard(ctx))
 	}
 	return spec, true
 }
