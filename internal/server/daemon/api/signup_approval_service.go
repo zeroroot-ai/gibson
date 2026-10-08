@@ -368,8 +368,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 				"owner_user_id", row.OwnerUserID, "error", derr.Error())
 		}
 		if errors.Is(err, errTenantIDTaken) {
-			return nil, status.Error(codes.AlreadyExists,
-				"another workspace already has this name; reject this registration")
+			return nil, workspaceNameTaken("another workspace already has this name; reject this registration")
 		}
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}

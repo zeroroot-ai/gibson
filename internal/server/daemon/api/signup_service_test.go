@@ -745,10 +745,8 @@ func TestSignup_EnqueueFailureIsFatal(t *testing.T) {
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
 	}
-	// entitlementsDB() returns nil with no platform DB wired, which makes
-	// enqueue a silent no-op rather than an error, so drive the error path with
-	// a closed handle instead.
-	h.srv.platformDB = closedDB(t)
+	// The name check passes, and the insert itself fails.
+	h.queue.insertErr = errors.New("connection reset")
 
 	_, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
 		AttemptId:            testAttemptID,

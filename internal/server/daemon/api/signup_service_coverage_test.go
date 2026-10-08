@@ -18,7 +18,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // TestExistingSignupUserID_NoIdPClientMeansNoAccount — a daemon that somehow
@@ -124,9 +126,10 @@ func TestSignup_MarkConsumedFailureIsLoggedNotFatal(t *testing.T) {
 	}
 }
 
-// A signup whose workspace name gives the tenant id of another owner queues
-// nothing, so it must not report that tenant as its own.
-func TestSignup_ATakenNameIsRefused(t *testing.T) {
+// A signup whose workspace name gives a tenant id in use is refused before
+// the owner account exists, so no account is left without a workspace. The
+// status carries the reason that a client branches on.
+func TestSignup_ATakenNameIsRefusedBeforeTheAccount(t *testing.T) {
 	h := newSignupHarness(t)
 	session := h.requestAndRedeem(t)
 	h.queue.rows = append(h.queue.rows, fakeQueueRow{
@@ -136,10 +139,49 @@ func TestSignup_ATakenNameIsRefused(t *testing.T) {
 	_, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
 		AttemptId: testAttemptID, VerifiedSessionToken: session, Password: "s3cret-passw0rd!",
 	})
-	if status.Code(err) != codes.AlreadyExists {
-		t.Fatalf("code = %v, want AlreadyExists", status.Code(err))
+	assertWorkspaceNameTaken(t, err)
+	if len(h.idp.createHumanReqs) != 0 {
+		t.Errorf("accounts created = %d, want none for a taken name", len(h.idp.createHumanReqs))
 	}
 	if row, _ := h.queue.row("acme-red-team"); row.ownerUserID != "another-owner" {
 		t.Errorf("queued row = %+v, want the row of the other owner untouched", row)
 	}
+}
+
+// Another signup can take the name between the check and the queue insert.
+// Then the account of this call has no workspace, and it is deleted, so the
+// person can start again with the same address.
+func TestSignup_ANameTakenAfterTheCheckDeletesTheAccount(t *testing.T) {
+	h := newSignupHarness(t)
+	session := h.requestAndRedeem(t)
+	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		h.queue.rows = append(h.queue.rows, fakeQueueRow{
+			tenantID: "acme-red-team", ownerUserID: "another-owner", status: "pending",
+		})
+		return idp.CreateHumanUserResult{UserID: "user-1"}, nil
+	}
+
+	_, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
+		AttemptId: testAttemptID, VerifiedSessionToken: session, Password: "s3cret-passw0rd!",
+	})
+	assertWorkspaceNameTaken(t, err)
+	if len(h.idp.deletedUsers) != 1 || h.idp.deletedUsers[0] != "user-1" {
+		t.Errorf("deleted users = %v, want the account of this call", h.idp.deletedUsers)
+	}
+}
+
+// assertWorkspaceNameTaken checks the code and the ErrorDetail reason of a
+// taken workspace name.
+func assertWorkspaceNameTaken(t *testing.T, err error) {
+	t.Helper()
+	st := status.Convert(err)
+	if st.Code() != codes.AlreadyExists {
+		t.Fatalf("code = %v, want AlreadyExists", st.Code())
+	}
+	for _, d := range st.Details() {
+		if ed, ok := d.(*commonpb.ErrorDetail); ok && ed.GetReason() == workspaceNameTakenReason {
+			return
+		}
+	}
+	t.Fatalf("details = %v, want the reason %s", st.Details(), workspaceNameTakenReason)
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // enqueuePendingTenantProvisioning records a tenant awaiting Tenant-CR creation.
@@ -115,6 +116,48 @@ func (s *DaemonServer) enqueueOwnedTenant(
 		return errTenantIDTaken
 	}
 	return nil
+}
+
+// tenantIDQueued reports whether the queue holds a row for tenantID, in any
+// status. The queue keeps the row of a built tenant, so a row means that the
+// tenant id is in use.
+func (s *DaemonServer) tenantIDQueued(ctx context.Context, tenantID string) (bool, error) {
+	db := s.entitlementsDB()
+	if db == nil {
+		return false, errNoPlatformDB
+	}
+	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
+		return false, fmt.Errorf("ensure table: %w", err)
+	}
+	var owner string
+	err := db.QueryRowContext(ctx,
+		`SELECT owner_user_id FROM pending_tenant_provisioning WHERE tenant_id = $1`,
+		tenantID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read queued tenant %s: %w", tenantID, err)
+	}
+	return true, nil
+}
+
+// workspaceNameTakenReason is the ErrorDetail reason of a workspace name whose
+// tenant id is in use. A client branches on it, never on the message.
+const workspaceNameTakenReason = "WORKSPACE_NAME_TAKEN"
+
+// workspaceNameTaken is the AlreadyExists status of a workspace name whose
+// tenant id is in use. It carries the reason, so that a client can tell it
+// from an account that already exists.
+func workspaceNameTaken(msg string) error {
+	st, err := status.New(codes.AlreadyExists, msg).WithDetails(&commonpb.ErrorDetail{
+		Code:   commonpb.ErrorCode_ERROR_CODE_ALREADY_EXISTS,
+		Reason: workspaceNameTakenReason,
+	})
+	if err != nil {
+		return status.Error(codes.AlreadyExists, msg)
+	}
+	return status.ErrorProto(st.Proto())
 }
 
 // ListPendingTenantProvisioning returns the queue of tenants awaiting Tenant-CR

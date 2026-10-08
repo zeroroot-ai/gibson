@@ -19,7 +19,10 @@ import (
 
 // expectPendingInsert wires a sqlmock platform DB that accepts one pending
 // tenant and keeps the audit_record_id it was given.
-func expectPendingInsert(t *testing.T, srv *DaemonServer) (*captureArg, sqlmock.Sqlmock) {
+//
+// nameCheck adds the check of a signup that the workspace name is free: the
+// table guard and an owner read that finds no row.
+func expectPendingInsert(t *testing.T, srv *DaemonServer, nameCheck bool) (*captureArg, sqlmock.Sqlmock) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -27,6 +30,11 @@ func expectPendingInsert(t *testing.T, srv *DaemonServer) (*captureArg, sqlmock.
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	srv.platformDB = db
+	if nameCheck {
+		expectEnsureTable(mock)
+		mock.ExpectQuery("SELECT owner_user_id FROM pending_tenant_provisioning").
+			WillReturnRows(sqlmock.NewRows([]string{"owner_user_id"}))
+	}
 	expectEnsureTable(mock)
 	recordID := &captureArg{}
 	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").
@@ -58,7 +66,7 @@ func TestSignup_QueueEntryNamesTheRequestRecord(t *testing.T) {
 	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
 	}
-	recordID, mock := expectPendingInsert(t, h.srv)
+	recordID, mock := expectPendingInsert(t, h.srv, true)
 
 	if _, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
 		AttemptId: testAttemptID, VerifiedSessionToken: session, Password: "s3cret-passw0rd!",
@@ -108,7 +116,7 @@ func TestSignup_NoRecordNoQueue(t *testing.T) {
 func TestAdminApproveRegistration_QueueEntryNamesTheApproval(t *testing.T) {
 	h, writer := newApprovalHarness(t)
 	regID := registerPending(t, h)
-	recordID, mock := expectPendingInsert(t, h.srv)
+	recordID, mock := expectPendingInsert(t, h.srv, false)
 
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
 		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); err != nil {

@@ -692,9 +692,7 @@ func TestAdminApproveRegistration_ATakenNameIsRefused(t *testing.T) {
 
 	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
 		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
-	if status.Code(err) != codes.AlreadyExists {
-		t.Fatalf("code = %v, want AlreadyExists", status.Code(err))
-	}
+	assertWorkspaceNameTaken(t, err)
 	if len(h.idp.deactivated) != before+1 {
 		t.Errorf("deactivations = %v, want the owner inactive again", h.idp.deactivated)
 	}

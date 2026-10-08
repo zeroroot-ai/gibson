@@ -23,6 +23,8 @@ import (
 type fakePendingQueue struct {
 	mu   sync.Mutex
 	rows []fakeQueueRow
+	// insertErr, when set, fails each insert.
+	insertErr error
 }
 
 // fakeQueueRow is one queued tenant.
@@ -102,6 +104,9 @@ func (c *fakeQueueConn) ExecContext(_ context.Context, query string, args []driv
 		id := argString(args, 0)
 		c.q.mu.Lock()
 		defer c.q.mu.Unlock()
+		if c.q.insertErr != nil {
+			return nil, c.q.insertErr
+		}
 		for _, r := range c.q.rows {
 			if r.tenantID == id {
 				return driver.RowsAffected(0), nil
