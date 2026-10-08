@@ -170,6 +170,25 @@ func TestSignup_ANameTakenAfterTheCheckDeletesTheAccount(t *testing.T) {
 	}
 }
 
+// A failed delete of that account is logged, and the call still reports the
+// taken name.
+func TestSignup_AFailedDeleteStillReportsTheTakenName(t *testing.T) {
+	h := newSignupHarness(t)
+	session := h.requestAndRedeem(t)
+	h.idp.deleteUserErr = errors.New("identity provider unreachable")
+	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		h.queue.rows = append(h.queue.rows, fakeQueueRow{
+			tenantID: "acme-red-team", ownerUserID: "another-owner", status: "pending",
+		})
+		return idp.CreateHumanUserResult{UserID: "user-1"}, nil
+	}
+
+	_, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
+		AttemptId: testAttemptID, VerifiedSessionToken: session, Password: "s3cret-passw0rd!",
+	})
+	assertWorkspaceNameTaken(t, err)
+}
+
 // assertWorkspaceNameTaken checks the code and the ErrorDetail reason of a
 // taken workspace name.
 func assertWorkspaceNameTaken(t *testing.T, err error) {

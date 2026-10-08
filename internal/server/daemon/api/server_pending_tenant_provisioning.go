@@ -150,12 +150,13 @@ const workspaceNameTakenReason = "WORKSPACE_NAME_TAKEN"
 // tenant id is in use. It carries the reason, so that a client can tell it
 // from an account that already exists.
 func workspaceNameTaken(msg string) error {
-	st, err := status.New(codes.AlreadyExists, msg).WithDetails(&commonpb.ErrorDetail{
+	st := status.New(codes.AlreadyExists, msg)
+	// WithDetails fails only for the code OK, so the detail is always added.
+	if withDetail, err := st.WithDetails(&commonpb.ErrorDetail{
 		Code:   commonpb.ErrorCode_ERROR_CODE_ALREADY_EXISTS,
 		Reason: workspaceNameTakenReason,
-	})
-	if err != nil {
-		return status.Error(codes.AlreadyExists, msg)
+	}); err == nil {
+		st = withDetail
 	}
 	return status.ErrorProto(st.Proto())
 }

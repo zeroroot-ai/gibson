@@ -15,6 +15,7 @@ import (
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
@@ -215,5 +216,56 @@ func TestAckTenantProvisioned_UnknownOrAlreadyDone_NoOp(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("expectations: %v", err)
+	}
+}
+
+// A failed read of the owner after a conflict is an error, never a success.
+func TestEnqueueOwnedTenant_AFailedOwnerReadIsAnError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	srv := newPendingServer()
+	srv.platformDB = db
+	expectEnsureTable(mock)
+	mock.ExpectExec("INSERT INTO pending_tenant_provisioning").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT owner_user_id FROM pending_tenant_provisioning").WillReturnError(errors.New("down"))
+
+	err = srv.enqueueOwnedTenant(context.Background(),
+		&daemonoperatorv1.PendingTenant{TenantId: "acme", OwnerUserId: "u-1"}, nil, false)
+	if err == nil || errors.Is(err, errTenantIDTaken) {
+		t.Fatalf("err = %v, want the read error", err)
+	}
+}
+
+// The name check needs the database, and a failed read is an error.
+func TestTenantIDQueued_Refusals(t *testing.T) {
+	srv := newPendingServer()
+	if _, err := srv.tenantIDQueued(context.Background(), "acme"); !errors.Is(err, errNoPlatformDB) {
+		t.Fatalf("no database: err = %v, want errNoPlatformDB", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	srv.platformDB = db
+	expectEnsureTable(mock)
+	mock.ExpectQuery("SELECT owner_user_id FROM pending_tenant_provisioning").WillReturnError(errors.New("down"))
+	if queued, err := srv.tenantIDQueued(context.Background(), "acme"); err == nil || queued {
+		t.Fatalf("failed read: queued = %v, err = %v; want an error", queued, err)
+	}
+}
+
+// With no database the operator seed is Unavailable. It used to report
+// already_existed for a tenant that nobody queued.
+func TestEnqueueTenantProvisioning_NoDatabaseIsUnavailable(t *testing.T) {
+	srv := newPendingServer()
+	_, err := srv.EnqueueTenantProvisioning(context.Background(),
+		&daemonoperatorv1.EnqueueTenantProvisioningRequest{TenantId: "acme", OwnerEmail: "o@example.test"})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
 	}
 }
