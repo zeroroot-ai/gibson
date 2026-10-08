@@ -8,6 +8,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -31,15 +32,17 @@ func expectEnsureTable(mock sqlmock.Sqlmock) {
 		WillReturnResult(sqlmock.NewResult(0, 0))
 }
 
-func TestEnqueuePendingTenantProvisioning_NilDB_NoError(t *testing.T) {
+// With no platform database no tenant can be queued. That is an error, never
+// a silent success: a caller that reports a tenant must have queued it.
+func TestEnqueuePendingTenantProvisioning_NilDBIsAnError(t *testing.T) {
 	srv := newPendingServer()
 	srv.platformDB = nil
 	enq, err := srv.enqueuePendingTenantProvisioning(context.Background(), &daemonoperatorv1.PendingTenant{TenantId: "acme"}, nil, false)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, errNoPlatformDB) {
+		t.Fatalf("err = %v, want errNoPlatformDB", err)
 	}
 	if enq {
-		t.Errorf("expected enqueued=false when no platform DB configured")
+		t.Errorf("enqueued = true with no platform DB")
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
+	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -273,6 +274,25 @@ func TestAdminApproveRegistration_ActivatesTheOwnerAndProvisions(t *testing.T) {
 	}
 	if decision.actor != "admin-1" || decision.target != regID {
 		t.Errorf("audit event = %+v, want admin-1 deciding %s", decision, regID)
+	}
+
+	// The tenant is in the provisioning queue, and the tenant operator reads
+	// it there: the operator creates the Tenant CR of each row that it lists.
+	row, ok := h.queue.row("acme-research")
+	if !ok {
+		t.Fatal("the approval queued no tenant")
+	}
+	if row.ownerUserID != resp.GetOwnerUserId() || row.tier != "team" || row.status != "pending" {
+		t.Errorf("queued row = %+v, want owner %q, tier team, status pending", row, resp.GetOwnerUserId())
+	}
+	listed, err := h.srv.ListPendingTenantProvisioning(context.Background(),
+		&daemonoperatorv1.ListPendingTenantProvisioningRequest{})
+	if err != nil {
+		t.Fatalf("ListPendingTenantProvisioning: %v", err)
+	}
+	if got := listed.GetPending(); len(got) != 1 || got[0].GetTenantId() != "acme-research" ||
+		got[0].GetOwnerUserId() != resp.GetOwnerUserId() {
+		t.Errorf("operator queue = %v, want the approved tenant", got)
 	}
 
 	// The queue is empty: a decided registration is not pending.
@@ -655,5 +675,78 @@ func TestAdminRegistrationDecisions_SurviveAMissingAuditWriter(t *testing.T) {
 	if _, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
 		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID}); err != nil {
 		t.Fatalf("AdminApproveRegistration: %v", err)
+	}
+}
+
+// An approval whose workspace name gives the tenant id of another owner
+// queues nothing. It must not report a tenant that it did not queue. The
+// owner is inactive again and the registration is back in the queue, so an
+// administrator can reject it.
+func TestAdminApproveRegistration_ATakenNameIsRefused(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.queue.rows = append(h.queue.rows, fakeQueueRow{
+		tenantID: "acme-research", ownerUserID: "another-owner", status: "done",
+	})
+	before := len(h.idp.deactivated)
+
+	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("code = %v, want AlreadyExists", status.Code(err))
+	}
+	if len(h.idp.deactivated) != before+1 {
+		t.Errorf("deactivations = %v, want the owner inactive again", h.idp.deactivated)
+	}
+	if len(h.store.releaseCalls) != 1 {
+		t.Errorf("release calls = %v, want the registration back in the queue", h.store.releaseCalls)
+	}
+	if row, _ := h.queue.row("acme-research"); row.ownerUserID != "another-owner" {
+		t.Errorf("queued row = %+v, want the row of the other owner untouched", row)
+	}
+}
+
+// A row that the queue already holds for the same owner is a retry: the
+// approval succeeds and queues no second row.
+func TestAdminApproveRegistration_ARetryForTheSameOwnerSucceeds(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	owner := h.store.rows[regID].OwnerUserID
+	if owner == "" {
+		t.Fatal("the registration has no owner")
+	}
+	h.queue.rows = append(h.queue.rows, fakeQueueRow{
+		tenantID: "acme-research", ownerUserID: owner, status: "pending",
+	})
+
+	resp, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
+	if err != nil {
+		t.Fatalf("AdminApproveRegistration: %v", err)
+	}
+	if resp.GetTenantId() != "acme-research" || len(h.queue.rows) != 1 {
+		t.Errorf("tenant %q, queue %+v; want one row for acme-research", resp.GetTenantId(), h.queue.rows)
+	}
+}
+
+// With no platform database an approval would queue nothing. It is refused
+// before the claim, so the decision is not spent and the owner stays inactive.
+func TestAdminApproveRegistration_NoPlatformDatabaseIsRefusedBeforeTheClaim(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.srv.platformDB = nil
+
+	_, err := h.srv.AdminApproveRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminApproveRegistrationRequest{RegistrationId: regID})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable", status.Code(err))
+	}
+	if len(h.idp.reactivated) != 0 {
+		t.Errorf("reactivations = %v, want none", h.idp.reactivated)
+	}
+	pending, _ := h.srv.AdminListPendingRegistrations(adminCtx("admin-1"),
+		&tenantv1.AdminListPendingRegistrationsRequest{})
+	if len(pending.GetRegistrations()) != 1 {
+		t.Errorf("pending = %d, want the registration still waiting", len(pending.GetRegistrations()))
 	}
 }

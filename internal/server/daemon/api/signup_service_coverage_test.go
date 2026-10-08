@@ -123,3 +123,23 @@ func TestSignup_MarkConsumedFailureIsLoggedNotFatal(t *testing.T) {
 		t.Fatal("expected a response")
 	}
 }
+
+// A signup whose workspace name gives the tenant id of another owner queues
+// nothing, so it must not report that tenant as its own.
+func TestSignup_ATakenNameIsRefused(t *testing.T) {
+	h := newSignupHarness(t)
+	session := h.requestAndRedeem(t)
+	h.queue.rows = append(h.queue.rows, fakeQueueRow{
+		tenantID: "acme-red-team", ownerUserID: "another-owner", status: "done",
+	})
+
+	_, err := h.srv.Signup(context.Background(), &tenantv1.SignupRequest{
+		AttemptId: testAttemptID, VerifiedSessionToken: session, Password: "s3cret-passw0rd!",
+	})
+	if status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("code = %v, want AlreadyExists", status.Code(err))
+	}
+	if row, _ := h.queue.row("acme-red-team"); row.ownerUserID != "another-owner" {
+		t.Errorf("queued row = %+v, want the row of the other owner untouched", row)
+	}
+}

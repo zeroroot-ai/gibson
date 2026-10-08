@@ -39,9 +39,9 @@ import (
 // mirroring the already_existed handling in the owner-provisioning path —
 // re-creating it would risk re-provisioning a tenant the operator already built.
 //
-// Returns (false, nil) when no platform DB is configured: enqueue is best-effort
-// in dev/kind where Postgres may be absent, and the caller logs rather than
-// failing the signup.
+// It returns errNoPlatformDB when no platform DB is configured. Every install
+// runs the platform Postgres, and a tenant that is not queued is never built, so
+// a missing database is an error and never a silent success.
 //
 // hold, when not nil, puts the row in status 'waiting_step': the operator does
 // not see it until the external signup step is done (signup_step.go).
@@ -55,7 +55,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 ) (bool, error) {
 	db := s.entitlementsDB()
 	if db == nil {
-		return false, nil
+		return false, errNoPlatformDB
 	}
 	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
 		return false, fmt.Errorf("ensure table: %w", err)
@@ -83,6 +83,38 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// errNoPlatformDB means that the daemon has no platform Postgres, so no tenant
+// can be queued.
+var errNoPlatformDB = errors.New("platform Postgres not configured")
+
+// errTenantIDTaken means that the queue already holds the tenant id for another
+// owner. Two workspace names can give one slug.
+var errTenantIDTaken = errors.New("the tenant id is queued for another owner")
+
+// enqueueOwnedTenant queues the tenant of an owner. A row that the queue already
+// holds for the same owner is a retry and counts as queued. A row for another
+// owner returns errTenantIDTaken: the caller must not report a tenant that it
+// did not queue.
+func (s *DaemonServer) enqueueOwnedTenant(
+	ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold, welcomeOwner bool,
+) error {
+	inserted, err := s.enqueuePendingTenantProvisioning(ctx, p, hold, welcomeOwner)
+	if err != nil || inserted {
+		return err
+	}
+	var owner string
+	err = s.entitlementsDB().QueryRowContext(ctx,
+		`SELECT owner_user_id FROM pending_tenant_provisioning WHERE tenant_id = $1`,
+		p.GetTenantId()).Scan(&owner)
+	if err != nil {
+		return fmt.Errorf("read the owner of queued tenant %s: %w", p.GetTenantId(), err)
+	}
+	if owner == "" || owner != p.GetOwnerUserId() {
+		return errTenantIDTaken
+	}
+	return nil
 }
 
 // ListPendingTenantProvisioning returns the queue of tenants awaiting Tenant-CR
@@ -263,6 +295,9 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 		WorkspaceName: req.GetDisplayName(),
 		Tier:          tier,
 	}, nil, false)
+	if errors.Is(err, errNoPlatformDB) {
+		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}

@@ -388,7 +388,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		return nil, err
 	}
 
-	if s.signupVerifications == nil {
+	if s.signupVerifications == nil || s.entitlementsDB() == nil {
 		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
 	}
 	if s.idpAdminClient == nil {
@@ -509,7 +509,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
 		return nil, status.Error(codes.Unavailable, "failed to complete signup; try again")
 	}
-	if _, eerr := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
+	if eerr := s.enqueueOwnedTenant(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      slug,
 		OwnerUserId:   result.UserID,
 		OwnerEmail:    row.Email,
@@ -524,6 +524,10 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"tenant_id", slug,
 			"error", eerr.Error(),
 		)
+		if errors.Is(eerr, errTenantIDTaken) {
+			return nil, status.Error(codes.AlreadyExists,
+				"another workspace already has this name; choose another name")
+		}
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
 

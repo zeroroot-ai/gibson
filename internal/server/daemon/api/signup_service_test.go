@@ -364,6 +364,8 @@ type signupHarness struct {
 	idp    *fakeIDPClient
 	clock  func() time.Time
 	nowPtr *time.Time
+	// queue is the pending tenant queue of the platform Postgres.
+	queue *fakePendingQueue
 }
 
 func newSignupHarness(t *testing.T) *signupHarness {
@@ -391,6 +393,7 @@ func newSignupHarness(t *testing.T) *signupHarness {
 	h.srv.WithSignupVerificationStore(h.store).
 		WithSignupMailer(h.mail).
 		WithSignupLimiter(&allowAllLimiter{})
+	h.queue = withPendingQueue(t, h.srv)
 	return h
 }
 
