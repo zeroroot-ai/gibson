@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,12 @@ const (
 	// DefaultSystemKeyPath is the mount point the chart guarantees for the
 	// SYSTEM_OWNER RSA private key. Overridable via ZITADEL_SYSTEM_KEY_PATH.
 	DefaultSystemKeyPath = "/etc/zitadel-system/private-key.pem"
+
+	// SystemUserFile is the file, next to the private key, that names the
+	// System API user the key belongs to. The chart projects the key and the
+	// user of the active slot together, so a rotation that moves to the
+	// other user moves both at once (ADR-0171, row platform-generated-secrets).
+	SystemUserFile = "user"
 
 	// systemJWTTTL is how long each signed JWT assertion remains valid.
 	// The JWT is used directly as the System API bearer token; short TTL
@@ -91,12 +98,7 @@ type PAT struct {
 // keyPath is the file-system path of the RSA private key PEM; pass "" to fall
 // back to DefaultSystemKeyPath / ZITADEL_SYSTEM_KEY_PATH env.
 func NewSystemClient(connectURL, systemUserName, externalDomain, keyPath string) (SystemClient, error) {
-	if keyPath == "" {
-		keyPath = os.Getenv("ZITADEL_SYSTEM_KEY_PATH")
-	}
-	if keyPath == "" {
-		keyPath = DefaultSystemKeyPath
-	}
+	keyPath = ResolveSystemKeyPath(keyPath)
 
 	key, err := loadRSAKey(keyPath)
 	if err != nil {
@@ -114,6 +116,35 @@ func NewSystemClient(connectURL, systemUserName, externalDomain, keyPath string)
 		key:            key,
 		http:           ep.HTTPClient(requestTimeout),
 	}, nil
+}
+
+// ResolveSystemKeyPath returns keyPath, or ZITADEL_SYSTEM_KEY_PATH when keyPath
+// is empty, or DefaultSystemKeyPath when both are empty.
+func ResolveSystemKeyPath(keyPath string) string {
+	if keyPath == "" {
+		keyPath = os.Getenv("ZITADEL_SYSTEM_KEY_PATH")
+	}
+	if keyPath == "" {
+		keyPath = DefaultSystemKeyPath
+	}
+	return keyPath
+}
+
+// ReadSystemUser returns the System API user name from the SystemUserFile
+// next to the private key at keyPath (resolved as ResolveSystemKeyPath does).
+// A missing or empty file is an error: the key alone does not say which user
+// it signs for.
+func ReadSystemUser(keyPath string) (string, error) {
+	path := filepath.Clean(filepath.Join(filepath.Dir(ResolveSystemKeyPath(keyPath)), SystemUserFile))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("zitadel system user: read %q: %w", path, err)
+	}
+	name := strings.TrimSpace(string(raw))
+	if name == "" {
+		return "", fmt.Errorf("zitadel system user: %q is empty: %w", path, ErrInvalidInput)
+	}
+	return name, nil
 }
 
 // LoadRSAKey reads and parses an RSA private key PEM file. Exported so

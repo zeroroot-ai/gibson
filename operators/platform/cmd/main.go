@@ -221,7 +221,11 @@ func run(cfg runConfig) error {
 		return fmt.Errorf("ZITADEL_SYSTEM_KEY_PATH key not parseable at %q (chart mount missing?): %w",
 			systemKeyPath, err)
 	}
-	setupLog.Info("zitadel system key loaded", "path", systemKeyPath)
+	systemUser, err := zitadel.ReadSystemUser(systemKeyPath)
+	if err != nil {
+		return fmt.Errorf("the zitadel system key mount names no user (chart mount missing?): %w", err)
+	}
+	setupLog.Info("zitadel system key loaded", "path", systemKeyPath, "user", systemUser)
 
 	if err := (&controller.PlatformBootstrapReconciler{
 		Client:     mgr.GetClient(),
@@ -323,6 +327,9 @@ func (p *systemKeyProbe) Name() string { return "system-key" }
 func (p *systemKeyProbe) Check(_ context.Context) error {
 	if _, err := zitadel.LoadRSAKey(p.path); err != nil {
 		return fmt.Errorf("zitadel system key not parseable at %q: %w", p.path, err)
+	}
+	if _, err := zitadel.ReadSystemUser(p.path); err != nil {
+		return fmt.Errorf("zitadel system key mount: %w", err)
 	}
 	return nil
 }

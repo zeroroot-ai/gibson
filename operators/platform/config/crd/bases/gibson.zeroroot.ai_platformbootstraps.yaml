@@ -707,14 +707,9 @@ spec:
                           provisioned by the chart for the SYSTEM_OWNER user. Falls back to
                           ZITADEL_SYSTEM_KEY_PATH env, then "/etc/zitadel-system/private-key.pem".
                           The chart guarantees this mount; the operator fails at startup when
-                          the file is absent.
-                        type: string
-                      systemUserName:
-                        default: gibson-system-bot
-                        description: |-
-                          SystemUserName is the Zitadel SYSTEM_OWNER machine user name.
-                          The JWT iss and sub claims are set to this value.
-                          Defaults to "gibson-system-bot".
+                          the file is absent. The file "user" in the same directory names the
+                          System API user of the key (the JWT iss and sub). The chart projects
+                          the key and the user of the active slot together (ADR-0171).
                         type: string
                       trustedClusterDomain:
                         description: |-

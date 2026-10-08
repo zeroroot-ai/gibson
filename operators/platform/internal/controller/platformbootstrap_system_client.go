@@ -87,9 +87,11 @@ func zitadelServiceHost(pb *gibsonv1alpha1.PlatformBootstrap) string {
 func (r *PlatformBootstrapReconciler) systemClient(pb *gibsonv1alpha1.PlatformBootstrap) (zitadel.SystemClient, error) {
 	sc := pb.Spec.Zitadel.SystemClient
 	apiURL := systemAPIBaseURL(sc.APIURL, zitadelServiceHost(pb))
-	systemUserName := sc.SystemUserName
-	if systemUserName == "" {
-		systemUserName = "gibson-system-bot"
+	// The user comes from the mount, next to its key: a rotation of the
+	// System API key moves to the other user (ADR-0171).
+	systemUserName, err := zitadel.ReadSystemUser(sc.KeyPath)
+	if err != nil {
+		return nil, fmt.Errorf("zitadel system client: %w", err)
 	}
 	factory := r.SystemClientFactory
 	if factory == nil {
