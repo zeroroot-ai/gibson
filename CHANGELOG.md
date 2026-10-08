@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.1](https://github.com/zeroroot-ai/gibson/compare/v0.157.0...v0.157.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **platform-operator:** read the iam-admin user id from the admin token Secret, not from a machine key ([#1048](https://github.com/zeroroot-ai/gibson/issues/1048)) ([4483cf6](https://github.com/zeroroot-ai/gibson/commit/4483cf61f17054867048625d2ea25046dbecca76))
+
 ## [0.157.0](https://github.com/zeroroot-ai/gibson/compare/v0.156.0...v0.157.0) (2026-10-07)
 
 
