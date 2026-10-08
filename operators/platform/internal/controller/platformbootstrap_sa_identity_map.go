@@ -5,7 +5,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -30,15 +29,6 @@ const (
 	// numeric before the ConfigMap is considered Ready.
 	saIdentityMapName = "gibson-sa-identity-map"
 
-	// iamAdminSecretName is the machine-key Secret the Zitadel setup Job
-	// writes once Zitadel is live. Its iam-admin.json entry holds a service
-	// account key JSON ({"userId":"...","type":"serviceaccount"}); the numeric
-	// userId is the iam-admin Zitadel subject. iamAdminMachineKeyFile is the
-	// data-map entry name (a filename, not a credential — named to avoid the
-	// gosec G101 hardcoded-credential heuristic that fires on a *Key suffix).
-	iamAdminSecretName     = "iam-admin"
-	iamAdminMachineKeyFile = "iam-admin.json"
-
 	// saIAMAdminEntry is the gibson-sa-identity-map key for the iam-admin
 	// machine user.
 	saIAMAdminEntry = "gibson-iam-admin"
@@ -50,7 +40,7 @@ const (
 // users and persisted status.clientID (the numeric subject for a MACHINE_USER).
 //
 // Entries written:
-//   - "gibson-iam-admin"     → .userId from secret/iam-admin key iam-admin.json
+//   - "gibson-iam-admin"     → key userId of the admin token Secret (iam-admin-pat)
 //   - one key per Ready MACHINE_USER OIDCClient child → child.status.clientID
 //     (e.g. "gibson-tenant-operator")
 //
@@ -63,9 +53,9 @@ const (
 // deliberately excluded: their status.clientID is an OAuth client_id, not a
 // numeric Zitadel subject.
 //
-// secret/iam-admin is written by the Zitadel setup Job only after Zitadel is
-// live, so a missing Secret is a normal early-bootstrap state: requeue short
-// rather than erroring. Idempotent — CreateOrUpdate only writes when the
+// The admin token Secret gets its userId only after the admin token step
+// minted the token and ESO refreshed, so a missing Secret or key is a normal
+// early-bootstrap state: requeue short rather than erroring. Idempotent — CreateOrUpdate only writes when the
 // computed entries differ from what's stored.
 //
 // Replaces the gitops sa-identity-map-populator kubectl-exec Sync Job
@@ -136,7 +126,7 @@ type serviceSubjectsWait struct {
 // platformServiceSubjects returns the numeric Zitadel subject of every
 // platform service account, keyed by its gibson-sa-identity-map name:
 //
-//   - "gibson-iam-admin" → .userId from secret/iam-admin key iam-admin.json
+//   - "gibson-iam-admin" → key userId of the admin token Secret (iam-admin-pat)
 //   - one key per MACHINE_USER OIDCClient child in spec.oidcClients →
 //     child.status.clientID (e.g. "gibson-tenant-operator")
 //
@@ -146,37 +136,25 @@ type serviceSubjectsWait struct {
 func (r *PlatformBootstrapReconciler) platformServiceSubjects(ctx context.Context, pb *gibsonv1alpha1.PlatformBootstrap) (map[string]string, *serviceSubjectsWait, error) {
 	entries := map[string]string{}
 
-	// iam-admin numeric subject from the machine-key Secret.
-	var sec corev1.Secret
-	err := r.Get(ctx, types.NamespacedName{Namespace: defaultChildNamespace, Name: iamAdminSecretName}, &sec)
-	switch {
-	case apierrors.IsNotFound(err):
-		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s not yet written by the Zitadel setup Job", defaultChildNamespace, iamAdminSecretName),
-			requeueShort}, nil
-	case err != nil:
-		return nil, nil, fmt.Errorf("get secret %s/%s: %w", defaultChildNamespace, iamAdminSecretName, err)
+	// iam-admin numeric subject from the admin token Secret
+	// (spec.zitadel.adminTokenRef). The admin token step writes the user id
+	// next to the token, and the ExternalSecret iam-admin-pat projects both.
+	// No machine key of that user is read: no code authenticates with one
+	// (ADR-0171).
+	ref := pb.Spec.Zitadel.AdminTokenRef
+	ns := secretNamespace(ref, defaultChildNamespace)
+	userID, ok, err := r.readSecretKey(ctx, defaultChildNamespace,
+		gibsonv1alpha1.SecretKeyRef{Name: ref.Name, Namespace: ref.Namespace, Key: adminUserProperty})
+	if err != nil {
+		return nil, nil, fmt.Errorf("get secret %s/%s: %w", ns, ref.Name, err)
 	}
-	raw, ok := sec.Data[iamAdminMachineKeyFile]
-	if !ok || len(raw) == 0 {
-		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s missing key %q", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile),
-			requeueShort}, nil
-	}
-	var machineKey struct {
-		UserID string `json:"userId"`
-	}
-	if jerr := json.Unmarshal(raw, &machineKey); jerr != nil {
-		return nil, &serviceSubjectsWait{"MalformedIAMAdminSecret",
-			fmt.Sprintf("parse %s key %q: %v", iamAdminSecretName, iamAdminMachineKeyFile, jerr),
-			0}, nil
-	}
-	if strings.TrimSpace(machineKey.UserID) == "" {
-		return nil, &serviceSubjectsWait{"WaitingForIAMAdminSecret",
-			fmt.Sprintf("Secret %s/%s key %q has empty userId", defaultChildNamespace, iamAdminSecretName, iamAdminMachineKeyFile),
+	if !ok || userID == "" {
+		return nil, &serviceSubjectsWait{"WaitingForIAMAdminUserID",
+			fmt.Sprintf("Secret %s/%s has no %s yet (the admin token step and its ExternalSecret write it)",
+				ns, ref.Name, adminUserProperty),
 			requeueShort}, nil
 	}
-	entries[saIAMAdminEntry] = strings.TrimSpace(machineKey.UserID)
+	entries[saIAMAdminEntry] = userID
 
 	// MACHINE_USER children: collect {name → status.clientID}. For a
 	// MACHINE_USER the OIDCClient controller persists the numeric Zitadel

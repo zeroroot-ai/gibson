@@ -103,7 +103,6 @@ func machineAdminsCR(zitadelURL string) *gibsonv1alpha1.PlatformBootstrap {
 
 func machineAdminsObjects() []client.Object {
 	return []client.Object{
-		adminPATSecret(),
 		iamAdminSecret("UID-IAMADMIN"),
 		machineUserChild("gibson-daemon", "UID-DAEMON"),
 		machineUserChild("gibson-tenant-operator", "UID-TENANTOP"),
@@ -202,7 +201,7 @@ func TestReconcileMachineAdminsScoped_LoginClientNameInOtherOrg_Removed(t *testi
 func TestReconcileMachineAdminsScoped_WaitsForMachineUsers(t *testing.T) {
 	srv, removed, _ := machineAdminsMux(t, stagingMembers(), nil)
 	r := newOwnerTestReconciler(t, srv.URL, "http://unused.invalid",
-		adminPATSecret(), iamAdminSecret("UID-IAMADMIN"), machineUserChild("gibson-daemon", "UID-DAEMON"))
+		iamAdminSecret("UID-IAMADMIN"), machineUserChild("gibson-daemon", "UID-DAEMON"))
 	pb := machineAdminsCR(srv.URL)
 
 	res, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard())
@@ -227,9 +226,9 @@ func TestReconcileMachineAdminsScoped_WaitsForIAMAdminSecret(t *testing.T) {
 		t.Fatalf("reconcileMachineAdminsScoped: %v", err)
 	}
 	if res.RequeueAfter == 0 {
-		t.Fatal("expected a requeue while the iam-admin Secret is missing")
+		t.Fatal("expected a requeue while the admin token Secret is missing")
 	}
-	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForIAMAdminSecret")
+	wantMachineAdminsCond(t, pb, metav1.ConditionFalse, "WaitingForIAMAdminUserID")
 }
 
 // TestReconcileMachineAdminsScoped_ZitadelErrors pins every Zitadel failure
@@ -273,8 +272,11 @@ func TestReconcileMachineAdminsScoped_ZitadelErrors(t *testing.T) {
 }
 
 func TestReconcileMachineAdminsScoped_WaitsForAdminToken(t *testing.T) {
+	// The Secret holds the user id and no token yet.
+	noToken := iamAdminSecret("UID-IAMADMIN")
+	delete(noToken.Data, "pat")
 	r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid",
-		iamAdminSecret("UID-IAMADMIN"),
+		noToken,
 		machineUserChild("gibson-daemon", "UID-DAEMON"),
 		machineUserChild("gibson-tenant-operator", "UID-TENANTOP"))
 	pb := machineAdminsCR("http://unused.invalid")
@@ -293,16 +295,12 @@ func TestReconcileMachineAdminsScoped_WaitsForAdminToken(t *testing.T) {
 // API error reading the service accounts or the admin token is returned, so
 // controller-runtime retries with backoff.
 func TestReconcileMachineAdminsScoped_APIErrorsReturned(t *testing.T) {
-	for _, name := range []string{iamAdminSecretName, "iam-admin-pat"} {
-		t.Run(name, func(t *testing.T) {
-			r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid", machineAdminsObjects()...)
-			r.Client = failGetNamed(r.Client.(client.WithWatch), name)
-			pb := machineAdminsCR("http://unused.invalid")
+	r := newOwnerTestReconciler(t, "http://unused.invalid", "http://unused.invalid", machineAdminsObjects()...)
+	r.Client = failGetNamed(r.Client.(client.WithWatch), "iam-admin-pat")
+	pb := machineAdminsCR("http://unused.invalid")
 
-			if _, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard()); err == nil {
-				t.Fatal("expected the API error to be returned")
-			}
-		})
+	if _, err := r.reconcileMachineAdminsScoped(context.Background(), pb, logr.Discard()); err == nil {
+		t.Fatal("expected the API error to be returned")
 	}
 }
 
