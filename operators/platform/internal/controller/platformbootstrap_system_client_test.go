@@ -181,7 +181,9 @@ func TestSystemClient_UnsetAPIURL_DialsInCluster(t *testing.T) {
 	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
 
 	// No apiURL, no externalDomain: the shape an already-installed cluster has.
-	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, "")); err != nil {
+	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
+		KeyPath: writeTestSystemMount(t, "gibson-system-bot"),
+	}, "")); err != nil {
 		t.Fatalf("systemClient: %v", err)
 	}
 	if got.apiURL != testInClusterAddr {
@@ -194,7 +196,7 @@ func TestSystemClient_UnsetAPIURL_DialsInCluster(t *testing.T) {
 		t.Errorf("claimed host = %q, want %q", got.externalDomain, "app.example.com")
 	}
 	if got.systemUserName != "gibson-system-bot" {
-		t.Errorf("systemUserName = %q, want default gibson-system-bot", got.systemUserName)
+		t.Errorf("systemUserName = %q, want gibson-system-bot from the mount", got.systemUserName)
 	}
 }
 
@@ -206,8 +208,8 @@ func TestSystemClient_ExplicitAPIURL(t *testing.T) {
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
 	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
-		APIURL:         "http://zitadel.gibson.svc:8080",
-		SystemUserName: "custom-bot",
+		APIURL:  "http://zitadel.gibson.svc:8080",
+		KeyPath: writeTestSystemMount(t, "gibson-system-bot-b"),
 	}, testExternalDomain)
 
 	if _, err := r.systemClient(pb); err != nil {
@@ -219,8 +221,8 @@ func TestSystemClient_ExplicitAPIURL(t *testing.T) {
 	if got.externalDomain != testExternalDomain {
 		t.Errorf("claimed host = %q, want %q", got.externalDomain, testExternalDomain)
 	}
-	if got.systemUserName != "custom-bot" {
-		t.Errorf("systemUserName = %q, want custom-bot", got.systemUserName)
+	if got.systemUserName != "gibson-system-bot-b" {
+		t.Errorf("systemUserName = %q, want gibson-system-bot-b from the mount", got.systemUserName)
 	}
 }
 
@@ -231,7 +233,9 @@ func TestSystemClient_EnvFallback(t *testing.T) {
 
 	var got capturedFactoryArgs
 	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
-	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{}, testExternalDomain)); err != nil {
+	if _, err := r.systemClient(newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
+		KeyPath: writeTestSystemMount(t, "gibson-system-bot"),
+	}, testExternalDomain)); err != nil {
 		t.Fatalf("systemClient: %v", err)
 	}
 	if got.apiURL != "http://gibson-zitadel.gibson.svc:8080" {
@@ -259,7 +263,7 @@ func TestSystemClient_ClaimedHostReachesTheWire(t *testing.T) {
 	// the public domain.
 	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{
 		APIURL:  srv.URL,
-		KeyPath: writeTestRSAKey(t),
+		KeyPath: writeTestSystemMount(t, "gibson-system-bot"),
 	}, testExternalDomain)
 
 	sys, err := r.systemClient(pb)
@@ -279,6 +283,32 @@ func TestSystemClient_ClaimedHostReachesTheWire(t *testing.T) {
 
 // writeTestRSAKey writes a throwaway RSA private key PEM into t's temp dir
 // and returns its path.
+// writeTestSystemMount writes a key and the file "user" beside it, as the
+// chart mount holds them, and returns the key path.
+func writeTestSystemMount(t *testing.T, user string) string {
+	t.Helper()
+	path := writeTestRSAKey(t)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), zitadel.SystemUserFile), []byte(user+"\n"), 0o600); err != nil {
+		t.Fatalf("write user: %v", err)
+	}
+	return path
+}
+
+// TestSystemClient_MountNamesNoUser: a key with no user beside it is an error,
+// not a default user.
+func TestSystemClient_MountNamesNoUser(t *testing.T) {
+	var got capturedFactoryArgs
+	r := &PlatformBootstrapReconciler{SystemClientFactory: capturingFactory(&got)}
+	pb := newTestBootstrap(&gibsonv1alpha1.SystemClientSpec{KeyPath: writeTestRSAKey(t)}, testExternalDomain)
+	_, err := r.systemClient(pb)
+	if err == nil {
+		t.Fatal("systemClient with no user file: want an error, got nil")
+	}
+	if got.systemUserName != "" {
+		t.Errorf("the factory ran with user %q", got.systemUserName)
+	}
+}
+
 func writeTestRSAKey(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)

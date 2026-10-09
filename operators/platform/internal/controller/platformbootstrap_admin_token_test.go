@@ -30,6 +30,8 @@ func adminTokenReconciler(t *testing.T, vc *fakeVaultClient, sys *fakeSystemClie
 		ObjectMeta: metav1.ObjectMeta{Namespace: defaultChildNamespace, Name: "vault-admin-token"},
 		Data:       map[string][]byte{"token": []byte("root-token")},
 	}
+	// The System API key mount, with its user (ADR-0171).
+	t.Setenv("ZITADEL_SYSTEM_KEY_PATH", writeTestSystemMount(t, "gibson-system-bot"))
 	return &PlatformBootstrapReconciler{
 		Audit:  (&audittest.Sink{}).Emitter(t),
 		Client: fake.NewClientBuilder().WithScheme(s).WithObjects(tokenSecret).Build(),

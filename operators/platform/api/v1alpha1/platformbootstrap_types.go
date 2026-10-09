@@ -197,18 +197,13 @@ type LoginBrandingSpec struct {
 // assertion (RFC 7523) — distinct from the IAM_OWNER PAT used by the
 // admin-API client.
 type SystemClientSpec struct {
-	// SystemUserName is the Zitadel SYSTEM_OWNER machine user name.
-	// The JWT iss and sub claims are set to this value.
-	// Defaults to "gibson-system-bot".
-	// +optional
-	// +kubebuilder:default="gibson-system-bot"
-	SystemUserName string `json:"systemUserName,omitempty"`
-
 	// KeyPath is the file-system path of the RSA private key PEM file
 	// provisioned by the chart for the SYSTEM_OWNER user. Falls back to
 	// ZITADEL_SYSTEM_KEY_PATH env, then "/etc/zitadel-system/private-key.pem".
 	// The chart guarantees this mount; the operator fails at startup when
-	// the file is absent.
+	// the file is absent. The file "user" in the same directory names the
+	// System API user of the key (the JWT iss and sub). The chart projects
+	// the key and the user of the active slot together (ADR-0171).
 	// +optional
 	KeyPath string `json:"keyPath,omitempty"`
 
