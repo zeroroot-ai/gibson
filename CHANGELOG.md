@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.158.0](https://github.com/zeroroot-ai/gibson/compare/v0.157.1...v0.158.0) (2026-10-09)
+
+
+### Features
+
+* **platform-operator:** the System API user comes from the key mount, next to its key ([#1054](https://github.com/zeroroot-ai/gibson/issues/1054)) ([9097803](https://github.com/zeroroot-ai/gibson/commit/9097803dc5b20e0ee68443c8ab9f4619f10f9931))
+
+
+### Bug Fixes
+
+* **signup:** an approval or a signup reports a tenant only when it queued one ([#1050](https://github.com/zeroroot-ai/gibson/issues/1050)) ([cbfc474](https://github.com/zeroroot-ai/gibson/commit/cbfc474112be65368f048450db5133de3fe30fb5))
+
 ## [0.157.1](https://github.com/zeroroot-ai/gibson/compare/v0.157.0...v0.157.1) (2026-10-08)
 
 
