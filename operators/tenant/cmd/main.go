@@ -1164,6 +1164,11 @@ func buildDataPlaneProvisioner(
 		// (gibson#1255). The chart sets OPERATOR_NAMESPACE from the
 		// downward API, so this is the daemon's own namespace.
 		PlatformNamespace: os.Getenv("OPERATOR_NAMESPACE"),
+		// Image is the tenant Neo4j image with its digest. The chart sets
+		// it from the mirror, so an air-gapped install pulls it from its
+		// own registry (gibson#1051). The provisioner refuses an empty
+		// value or a value with no digest.
+		Image: os.Getenv("TENANT_NEO4J_IMAGE"),
 	})
 	if err != nil {
 		log.Error(err, "neo4j provisioner init failed")

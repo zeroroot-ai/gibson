@@ -62,7 +62,10 @@ func TestBuildStorePipeline_BuildsThePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n4j, err := dataplane.NewNeo4jProvisioner(dataplane.Neo4jConfig{K8sClient: dataplaneclient.New(k8s, "gibson"), VaultClient: nopVault{}})
+	n4j, err := dataplane.NewNeo4jProvisioner(dataplane.Neo4jConfig{
+		K8sClient: dataplaneclient.New(k8s, "gibson"), VaultClient: nopVault{},
+		Image: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:" + strings.Repeat("a", 64),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

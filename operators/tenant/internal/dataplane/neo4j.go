@@ -81,6 +81,11 @@ type Neo4jConfig struct {
 	// from the downward API, so this is the release namespace in every
 	// environment. Empty falls back to neo4jTemplateNamespace.
 	PlatformNamespace string
+
+	// Image is the per-tenant Neo4j image, a reference with a digest. The
+	// chart sets it from the mirror (TENANT_NEO4J_IMAGE), so an air-gapped
+	// install pulls it from its own registry (gibson#1051). Required.
+	Image string
 }
 
 // Neo4jProvisioner provisions per-tenant Neo4j instances as K8s resources
@@ -98,7 +103,23 @@ func NewNeo4jProvisioner(cfg Neo4jConfig) (*Neo4jProvisioner, error) {
 	if cfg.VaultClient == nil {
 		return nil, fmt.Errorf("dataplane/neo4j: VaultClient required")
 	}
+	if err := validateNeo4jImage(cfg.Image); err != nil {
+		return nil, err
+	}
 	return &Neo4jProvisioner{cfg: cfg}, nil
+}
+
+// validateNeo4jImage refuses a tenant Neo4j image with no digest. A tag alone
+// can move, and every other image of the platform is pinned by digest.
+func validateNeo4jImage(image string) error {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return fmt.Errorf("dataplane/neo4j: Image required (TENANT_NEO4J_IMAGE)")
+	}
+	if _, digest, ok := strings.Cut(image, "@sha256:"); !ok || len(digest) != 64 {
+		return fmt.Errorf("dataplane/neo4j: Image %q has no sha256 digest", image)
+	}
+	return nil
 }
 
 // Provision creates the per-tenant Neo4j instance (StatefulSet, Service, PVC,
@@ -488,12 +509,12 @@ func (n *Neo4jProvisioner) buildResources(ctx context.Context, safe, tenantID, t
 					// pkg/platform/dataplane/apoc.go for why that distinction
 					// is load-bearing (ADR-0112, gibson#1257).
 					SecurityContext: neo4jPodSecurityContext(),
-					InitContainers:  []corev1.Container{apocInitContainer()},
+					InitContainers:  []corev1.Container{apocInitContainer(n.cfg.Image)},
 					Volumes:         []corev1.Volume{apocPluginVolume()},
 					Containers: []corev1.Container{
 						{
 							Name:            "neo4j",
-							Image:           neo4jImage,
+							Image:           n.cfg.Image,
 							SecurityContext: neo4jContainerSecurityContext(),
 							Env:             append(neo4jSecurityEnv(), neo4jMemoryEnv(memRequest)...),
 							Ports: []corev1.ContainerPort{
