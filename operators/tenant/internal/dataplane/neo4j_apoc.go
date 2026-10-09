@@ -26,11 +26,6 @@ const (
 
 	// apocInitContainerName installs APOC Core before Neo4j starts.
 	apocInitContainerName = "install-apoc-core"
-
-	// neo4jImage is the per-tenant Neo4j image. The init container runs the
-	// SAME image, which is what keeps the APOC Core jar version locked to
-	// the server version — they ship together.
-	neo4jImage = "neo4j:5.26.0-community"
 )
 
 // apocPluginVolume returns the emptyDir the plugin jar is installed into.
@@ -52,10 +47,12 @@ func apocPluginMount() corev1.VolumeMount {
 // apocInitContainer copies APOC Core out of the Neo4j image's labs directory
 // into the plugins volume. No network: the jar is already in the image, which
 // matters because the tenant Neo4j NetworkPolicy permits egress to DNS only.
-func apocInitContainer() corev1.Container {
+// It runs the SAME image as the Neo4j container (Neo4jConfig.Image), which is
+// what keeps the APOC Core jar version locked to the server version.
+func apocInitContainer(image string) corev1.Container {
 	return corev1.Container{
 		Name:            apocInitContainerName,
-		Image:           neo4jImage,
+		Image:           image,
 		Command:         []string{"sh", "-c", pdataplane.APOCInstallCommand(pdataplane.Neo4jPluginsDir)},
 		VolumeMounts:    []corev1.VolumeMount{apocPluginMount()},
 		SecurityContext: neo4jContainerSecurityContext(),

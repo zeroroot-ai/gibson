@@ -305,7 +305,7 @@ func TestTenantNeo4jAPOCReachesAlreadyProvisionedTenants(t *testing.T) {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: neo4jLabels(testTenantID, testTenantNS)},
 				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{{Name: "neo4j", Image: neo4jImage}},
+					Containers: []corev1.Container{{Name: "neo4j", Image: testNeo4jImage}},
 				},
 			},
 		},
@@ -316,6 +316,7 @@ func TestTenantNeo4jAPOCReachesAlreadyProvisionedTenants(t *testing.T) {
 		K8sClient:         dpclient.New(k8s, ""),
 		VaultClient:       newRecordingVaultAdmin(),
 		PlatformNamespace: testPlatformNS,
+		Image:             testNeo4jImage,
 	}}
 	ctx := context.Background()
 
