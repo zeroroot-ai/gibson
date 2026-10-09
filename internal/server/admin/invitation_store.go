@@ -200,6 +200,33 @@ func (s *InvitationStore) SetStatus(ctx context.Context, tenantID, id, status st
 	return nil
 }
 
+// Reissue replaces the token hash and the expiry of one pending invitation
+// of tenantID. ResendInvitation calls it only after the new link is mailed,
+// so a failed send leaves the earlier link valid (gibson#1019). An invitation
+// that is no longer pending returns ErrInvitationNotFound.
+func (s *InvitationStore) Reissue(
+	ctx context.Context, tenantID, id, tokenHash, invitedBy string, expiresAt time.Time,
+) error {
+	if s == nil || s.db == nil {
+		return errors.New("invitation store not configured")
+	}
+	if tenantID == "" {
+		return errors.New("reissue invitation: tenant required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE tenant_invitations
+		SET token_hash = $3, invited_by = $4, expires_at = $5, updated_at = NOW()
+		WHERE id = $1 AND tenant_id = $2 AND status = 'pending'`,
+		id, tenantID, tokenHash, invitedBy, expiresAt)
+	if err != nil {
+		return fmt.Errorf("reissue invitation: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrInvitationNotFound
+	}
+	return nil
+}
+
 // FindPendingByEmail returns the pending invitation for (tenant, email), or
 // ErrInvitationNotFound. Used by resend/cancel when addressed by email.
 func (s *InvitationStore) FindPendingByEmail(ctx context.Context, tenantID, email string) (*InvitationRecord, error) {
