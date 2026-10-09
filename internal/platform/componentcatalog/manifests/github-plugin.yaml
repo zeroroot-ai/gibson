@@ -13,7 +13,7 @@
 # the source tree it built from (gibson#790). No person edits the image line.
 # The exit test .github/workflows/exit-test-tool-dispatch.yml deploys this
 # image.
-# plugin-source-tree: dd41bb79f4b738c079a9d5e6e47ba299b2f38c2f
+# plugin-source-tree: 9e926c90a0352bdb59b9b183898de1bdca15e540
 id: github
 kind: plugin
 displayName: GitHub
@@ -24,7 +24,7 @@ egressAllow:
   - api.github.com:443
 spec:
   runtime: pod
-  image: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:1ad5caaed1eb8f21f6bf41aea111a62b28c13ea3930f5930fc3c3f1c3994bb50
+  image: ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:ebdf8abf059ca316df8eb9076e58b8a93432fe700cc20599b3a0ef9cf15ea96c
   # Trusted, and four facts make it so. We wrote the code. The image is signed
   # and pinned by digest. The plugin passes the content it handles through and
   # does not execute or interpret it. Its egress is the one host above. An
