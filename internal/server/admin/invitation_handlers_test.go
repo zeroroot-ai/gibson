@@ -233,6 +233,54 @@ func TestResendInvitation_NoLongerPendingIsNotFound(t *testing.T) {
 	}
 }
 
+// A store error after the send answers Internal. The earlier link stays
+// valid, because the update did not commit.
+func TestResendInvitation_StoreErrorIsInternal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).WillReturnRows(pendingInvitationRows())
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations")).WillReturnError(errors.New("connection reset"))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.ResendInvitation(ctxWithTenant(t, "acme"), &tenantv1.ResendInvitationRequest{Email: "alice@example.com"})
+	if got := status_grpc.Code(err); got != codes.Internal {
+		t.Fatalf("code = %v, want Internal (%v)", got, err)
+	}
+}
+
+// Reissue refuses a store with no database and a call with no tenant, and
+// writes nothing for either.
+func TestInvitationStore_ReissueGuards(t *testing.T) {
+	ctx := context.Background()
+	var nilStore *InvitationStore
+	if err := nilStore.Reissue(ctx, "acme", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("a nil store: no error")
+	}
+	if err := NewInvitationStore(nil).Reissue(ctx, "acme", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("a store with no database: no error")
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := NewInvitationStore(db).Reissue(ctx, "", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("no tenant: no error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected store calls: %v", err)
+	}
+}
+
 // hashCapture is a sqlmock argument that records a string value.
 type hashCapture string
 
