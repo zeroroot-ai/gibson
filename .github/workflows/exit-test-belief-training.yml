@@ -11,6 +11,8 @@
 #      for the tenant and labels an item of its review queue.
 #   3. A Job from the belief-trainer CronJob that the tenant operator created
 #      in the tenant namespace runs once and must complete.
+#   2b. assert-run-nodes.sh reads the tenant graph: the mission wrote one
+#      MissionRun and one AgentRun node (gibson#1021).
 #   4. After one reload interval of the daemon, TestBeliefTraining_NextMissionPins
 #      runs one more mission and asserts that it pins a stored version of the
 #      tenant (tenant-<id>-v<n>). The daemon pins a stored version only when
@@ -32,6 +34,9 @@ on:
       - 'internal/platform/beliefartifact/**'
       - 'operators/tenant/internal/saga/flows/belief_trainer.go'
       - 'tests/e2e/belief_training_test.go'
+      # The run nodes of the mission (gibson#1021).
+      - 'internal/server/daemon/graph_projector_*.go'
+      - '.github/scripts/assert-run-nodes.sh'
       - '.github/workflows/exit-test-belief-training.yml'
   schedule:
     - cron: '45 7 * * *'
@@ -224,6 +229,12 @@ jobs:
           set -o pipefail
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-belief-seed 'TestBeliefTraining_Seed$' 15m \
             2>&1 | tee "$E2E_OUT/seed.log"
+
+      # The seed ran a real nmap mission. The projector must have written its
+      # run nodes to the graph of the tenant: one MissionRun keyed on id and
+      # one AgentRun keyed on brain_id (ADR-0112, gibson#1021).
+      - name: The mission wrote its run nodes to the tenant graph
+        run: gibson/.github/scripts/assert-run-nodes.sh "$TENANT"
 
       # The tenant operator creates the CronJob during provisioning. A Job from
       # it is the nightly run, started now.
