@@ -215,17 +215,13 @@ func run(cfg runConfig) error {
 	if systemKeyPath == "" {
 		systemKeyPath = zitadel.DefaultSystemKeyPath
 	}
-	if _, err := zitadel.LoadRSAKey(systemKeyPath); err != nil {
-		// Fail loud — the chart is required to mount this file. Any operator
-		// deployment without it is misconfigured and should not start.
-		return fmt.Errorf("ZITADEL_SYSTEM_KEY_PATH key not parseable at %q (chart mount missing?): %w",
-			systemKeyPath, err)
+	// Fail loud: the chart is required to mount the key and its user (the
+	// same check as the readiness probe). Any operator deployment without
+	// them is misconfigured and should not start.
+	if err := (&systemKeyProbe{path: systemKeyPath}).Check(context.Background()); err != nil {
+		return fmt.Errorf("ZITADEL_SYSTEM_KEY_PATH mount at %q (chart mount missing?): %w", systemKeyPath, err)
 	}
-	systemUser, err := zitadel.ReadSystemUser(systemKeyPath)
-	if err != nil {
-		return fmt.Errorf("the zitadel system key mount names no user (chart mount missing?): %w", err)
-	}
-	setupLog.Info("zitadel system key loaded", "path", systemKeyPath, "user", systemUser)
+	setupLog.Info("zitadel system key loaded", "path", systemKeyPath)
 
 	if err := (&controller.PlatformBootstrapReconciler{
 		Client:     mgr.GetClient(),
