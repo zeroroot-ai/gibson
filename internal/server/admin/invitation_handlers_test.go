@@ -5,6 +5,7 @@ package admin
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"reflect"
 	"regexp"
@@ -132,6 +133,170 @@ func TestResendInvitation_UnconfiguredMailerKeepsTheOldLink(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unexpected store calls: %v", err)
 	}
+}
+
+// pendingInvitationRows is the row that FindPendingByEmail reads.
+func pendingInvitationRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{"id", "tenant_id", "email", "role", "status", "expires_at"}).
+		AddRow("inv-1", "acme", "alice@example.com", "member", "pending", nowPlus())
+}
+
+// A resend whose send fails writes no new token hash, so the link the
+// invitee already holds stays valid (gibson#1019). Before the fix the store
+// replaced the hash first, and the failed send left a dead link.
+func TestResendInvitation_FailedSendKeepsTheOldLink(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).WillReturnRows(pendingInvitationRows())
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{err: errors.New("smtp: connection refused")}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.ResendInvitation(ctxWithTenant(t, "acme"), &tenantv1.ResendInvitationRequest{Email: "alice@example.com"})
+	if got := status_grpc.Code(err); got != codes.Internal {
+		t.Fatalf("code = %v, want Internal (%v)", got, err)
+	}
+	// sqlmock fails on any statement it does not expect, so a write of the
+	// token hash (UPDATE or INSERT) fails the call above or this check.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected store calls: %v", err)
+	}
+}
+
+// A resend whose send succeeds stores the hash of the token in the mailed
+// link, with the expiry that the email states.
+func TestResendInvitation_StoresTheMailedToken(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).WillReturnRows(pendingInvitationRows())
+
+	mail := &captureInviteMailer{}
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = mail
+	srv.inviteBaseURL = "https://app.example.com"
+
+	var hash hashCapture
+	var expires expiryCapture
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations")).
+		WithArgs("inv-1", "acme", &hash, sqlmock.AnyArg(), &expires).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	req := &tenantv1.ResendInvitationRequest{Email: "alice@example.com"}
+	if _, err := srv.ResendInvitation(ctxWithTenant(t, "acme"), req); err != nil {
+		t.Fatalf("ResendInvitation: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sqlmock expectations: %v", err)
+	}
+	token := strings.TrimPrefix(mail.last.AcceptURL, "https://app.example.com/invite/")
+	if token == mail.last.AcceptURL || HashInvitationToken(token) != string(hash) {
+		t.Fatalf("stored hash %q is not the hash of the mailed link %q", hash, mail.last.AcceptURL)
+	}
+	if !time.Time(expires).Equal(mail.last.ExpiresAt) {
+		t.Fatalf("stored expiry %v, mailed expiry %v", time.Time(expires), mail.last.ExpiresAt)
+	}
+}
+
+// A resend that races an accept or a cancel finds no pending row to update.
+func TestResendInvitation_NoLongerPendingIsNotFound(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).WillReturnRows(pendingInvitationRows())
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations")).WillReturnResult(sqlmock.NewResult(0, 0))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.ResendInvitation(ctxWithTenant(t, "acme"), &tenantv1.ResendInvitationRequest{Email: "alice@example.com"})
+	if got := status_grpc.Code(err); got != codes.NotFound {
+		t.Fatalf("code = %v, want NotFound (%v)", got, err)
+	}
+}
+
+// A store error after the send answers Internal. The earlier link stays
+// valid, because the update did not commit.
+func TestResendInvitation_StoreErrorIsInternal(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS tenant_invitations").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM tenant_invitations")).WillReturnRows(pendingInvitationRows())
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE tenant_invitations")).WillReturnError(errors.New("connection reset"))
+
+	srv := newMembersTestServer(t, &membersAuthorizer{}, nil)
+	srv.invitations = NewInvitationStore(db)
+	srv.inviteMailer = &captureInviteMailer{}
+	srv.inviteBaseURL = "https://app.example.com"
+
+	_, err = srv.ResendInvitation(ctxWithTenant(t, "acme"), &tenantv1.ResendInvitationRequest{Email: "alice@example.com"})
+	if got := status_grpc.Code(err); got != codes.Internal {
+		t.Fatalf("code = %v, want Internal (%v)", got, err)
+	}
+}
+
+// Reissue refuses a store with no database and a call with no tenant, and
+// writes nothing for either.
+func TestInvitationStore_ReissueGuards(t *testing.T) {
+	ctx := context.Background()
+	var nilStore *InvitationStore
+	if err := nilStore.Reissue(ctx, "acme", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("a nil store: no error")
+	}
+	if err := NewInvitationStore(nil).Reissue(ctx, "acme", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("a store with no database: no error")
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := NewInvitationStore(db).Reissue(ctx, "", "inv-1", "h", "", time.Now()); err == nil {
+		t.Error("no tenant: no error")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected store calls: %v", err)
+	}
+}
+
+// hashCapture is a sqlmock argument that records a string value.
+type hashCapture string
+
+func (h *hashCapture) Match(v driver.Value) bool {
+	s, ok := v.(string)
+	*h = hashCapture(s)
+	return ok && s != ""
+}
+
+// expiryCapture is a sqlmock argument that records a time value.
+type expiryCapture time.Time
+
+func (e *expiryCapture) Match(v driver.Value) bool {
+	ts, ok := v.(time.Time)
+	*e = expiryCapture(ts)
+	return ok
 }
 
 // captureInviteMailer records the last invitation email for assertions.

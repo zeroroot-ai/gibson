@@ -384,12 +384,19 @@ func (s *TenantAdminServer) ResendInvitation(ctx context.Context, req *tenantv1.
 	if id, ierr := auth.IdentityFromContext(ctx); ierr == nil {
 		invitedBy = id.Subject
 	}
-	_, expiresAt, ierr := s.invitations.Issue(ctx, tenantID, rec.Email, rec.Role, hash, invitedBy)
-	if ierr != nil {
-		return nil, status.Errorf(codes.Internal, "reissue invitation: %v", ierr)
-	}
+	// Mail the new link before the store replaces the hash. A failed send
+	// then changes nothing, and the link the invitee holds stays valid
+	// (gibson#1019). If the store write fails after the send, the earlier
+	// link also stays valid, and the caller can resend.
+	expiresAt := time.Now().Add(InvitationTTL).UTC()
 	if err := s.sendInvitationEmail(ctx, tenantID, rec.Email, rec.Role, token, expiresAt); err != nil {
 		return nil, err
+	}
+	if err := s.invitations.Reissue(ctx, tenantID, rec.ID, hash, invitedBy, expiresAt); err != nil {
+		if errors.Is(err, ErrInvitationNotFound) {
+			return nil, status.Error(codes.NotFound, "no pending invitation for that email")
+		}
+		return nil, status.Errorf(codes.Internal, "reissue invitation: %v", err)
 	}
 	return &tenantv1.ResendInvitationResponse{}, nil
 }
