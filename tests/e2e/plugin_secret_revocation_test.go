@@ -13,10 +13,13 @@
 //
 // The proof on a live kind cluster:
 //
-//  1. The GitHub plugin image (ghcr.io/zeroroot-ai/gibson-plugin-github)
-//     runs beside Envoy the way a customer deploys it: chart-rendered pod,
-//     SPIFFE-SVID enrolment, cred:github_token resolved in its start hook.
-//     It reaches the daemon through Envoy and ext-authz,
+//  1. A tenant admin enables the GitHub catalog plugin for the tenant
+//     (CatalogPluginService.EnableCatalogPlugin, gibson#815). The tenant
+//     operator runs one instance of the image that the catalog pins
+//     (ghcr.io/zeroroot-ai/gibson-plugin-github) in tenant-<tenant>-plugins,
+//     the way a customer gets it: SPIFFE-SVID enrolment as
+//     spiffe://<td>/plugin/github/<tenant>, cred:github_token resolved in
+//     its start hook. It reaches the daemon through Envoy and ext-authz,
 //     never through the mTLS listener this suite dials.
 //  2. This suite seeds cred:github_token, grants it to the plugin principal
 //     as a tenant admin (GrantsService.WriteSecretGrants, ADR-0097), waits
@@ -32,8 +35,8 @@
 //
 // Per ADR-0080 this runs on `main` and on a schedule, never on a PR. The
 // workflow is .github/workflows/exit-test-tool-dispatch.yml: the cluster
-// it stands up has Envoy, Zitadel, SPIRE and the test-mode daemon, and the
-// plugin is patched into the Argo application before this suite runs.
+// it stands up has Envoy, Zitadel, SPIRE, the tenant operator and the
+// test-mode daemon.
 //
 // Invocation (in-cluster, from the exit-test Job):
 //
@@ -57,13 +60,14 @@ import (
 
 const (
 	// revocationPluginName is the name the plugin declares in code
-	// (plugins/github/handler.go, pluginName) and the vendor key the chart
-	// renders it under (plugins.github).
+	// (plugins/github/handler.go, pluginName) and its catalog id.
 	revocationPluginName = "github"
 
-	// revocationPrincipal is the FGA user the chart-deployed plugin enrols
-	// as. The tenant admin grants it the secret (ADR-0097, sdk#129).
-	revocationPrincipal = "plugin_principal:github"
+	// revocationPrincipal is the FGA user the instance of the plugin for
+	// revocationTenant enrols as: one principal for each (plugin, tenant)
+	// pair (gibson#815, pluginInstancePrincipalName). The tenant admin
+	// grants it the secret (ADR-0097, sdk#129).
+	revocationPrincipal = "plugin_principal:" + revocationPluginName + "." + revocationTenant
 
 	// revocationSecretName is the caller-facing name; SetSecret stores it
 	// under the category prefix as revocationDeclaredName, which is the
@@ -71,9 +75,10 @@ const (
 	revocationSecretName   = "github_token"
 	revocationDeclaredName = "cred:github_token"
 
-	// revocationTenant is the install tenant the SVID-enrolled plugin binds
-	// to: the daemon's GIBSON_PLATFORM_TENANT, "primary" on the baseline
-	// profile (charts values-baseline.yaml).
+	// revocationTenant is the tenant that enables the plugin: "primary",
+	// the tenant the baseline profile provisions (charts
+	// values-baseline.yaml). The workflow reads the instance from
+	// tenant-primary-plugins (PLUGIN_NS).
 	revocationTenant = "primary"
 
 	// pluginReadyBudget bounds the wait for the plugin to enrol, resolve
@@ -109,13 +114,25 @@ func TestPluginSecretRevocation(t *testing.T) {
 	t.Cleanup(func() { _ = clients.Close() })
 
 	plugins := pluginadminv1.NewPluginAdminServiceClient(clients.Conn())
+	catalogPlugins := tenantv1.NewCatalogPluginServiceClient(clients.Conn())
 	secretsAdmin := secretsv1.NewSecretsServiceClient(clients.Conn())
 	grants := tenantv1.NewGrantsServiceClient(clients.Conn())
 	ctx := auth.ContextWithTenantString(context.Background(), revocationTenant)
 
+	// The tenant enables the catalog plugin. The tenant operator pulls the
+	// desired instances and runs one for this tenant (gibson#815). The pod
+	// restarts on a back-off until the secret below exists.
+	t.Run("a tenant admin enables the catalog plugin", func(t *testing.T) {
+		resp, err := catalogPlugins.EnableCatalogPlugin(ctx, &tenantv1.EnableCatalogPluginRequest{
+			PluginId: revocationPluginName,
+		})
+		require.NoError(t, err, "EnableCatalogPlugin(%s) for %q", revocationPluginName, revocationTenant)
+		require.Equal(t, revocationPluginName, resp.GetPlugin().GetId())
+	})
+
 	// The plugin resolves cred:github_token in its OnStart hook: plugin.Serve
-	// fails until it can. Seed the secret and grant it to the plugin, so the
-	// pod the workflow already deployed comes up on its next restart.
+	// fails until it can. Seed the secret and grant it to the instance, so
+	// the pod comes up on its next restart.
 	t.Run("the declared secret exists for the tenant", func(t *testing.T) {
 		_, err := secretsAdmin.SetSecret(ctx, &secretsv1.SetSecretRequest{
 			Name:     revocationSecretName,

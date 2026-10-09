@@ -59,6 +59,10 @@ on:
       - 'internal/platform/componentevents/**'
       - 'internal/server/admin/**'
       - 'tests/e2e/plugin_secret_revocation_test.go'
+      # The per-tenant plugin instance (gibson#815): the enable API, its
+      # store and the operator loop that runs the instance.
+      - 'internal/platform/catalogplugin/**'
+      - 'operators/tenant/internal/controller/catalog_plugin_controller.go'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-tool-dispatch.yml'
   schedule:
@@ -89,6 +93,9 @@ env:
   CLUSTER: gibson
   # The kind node the hosted bring-up creates (baseline-up.sh: <cluster>-control-plane).
   NODE: gibson-control-plane
+  # The namespace of the GitHub plugin instance of the tenant "primary"
+  # (gibson#815): the tenant operator names it tenant-<tenant>-plugins.
+  PLUGIN_NS: tenant-primary-plugins
 
 jobs:
   tool-dispatch:
@@ -224,37 +231,15 @@ jobs:
           docker build -t ghcr.io/zeroroot-ai/gibson:e2e-tool /tmp/dctx
           kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-tool --name "$CLUSTER"
 
-      # The same patch deploys the GitHub plugin, the fixture of the plugin
-      # secret revocation exit test (gibson#154): the real image that the
-      # catalog entry pins by digest, rendered by the chart's
-      # plugins template beside Envoy (pod runtime, SVID enrolment,
-      # cred:github_token declared as a required startup secret). One patch
-      # means one Argo sync and one daemon rollout: a second sync later rolled
-      # the daemon again and the revocation suite started against a
-      # restarting daemon (run 35626821216). The plugin pod restarts on a
-      # back-off until the suite seeds its secret; the suite waits for that.
-      #
-      # The digest is spliced into the JSON outside the single quotes, on
-      # purpose. Argo CD expands `${NAME}` in a Helm parameter value from its
-      # own build environment and an unknown name expands to nothing, so a
-      # literal `${PLUGIN_IMAGE_DIGEST}` reached the chart as an empty digest
-      # and the template fell back to the appVersion tag (run 35626821216).
-      # `enabled` is not forceString: the template tests the value's truth,
-      # and the string "false" is a non-empty string.
-      - name: Point the daemon at the test-mode image with authz off + fixtures on, and deploy the GitHub plugin
+      # The GitHub plugin, the fixture of the plugin secret revocation exit
+      # test (gibson#154), is not part of this patch. Each tenant enables a
+      # catalog plugin through CatalogPluginService, and the tenant operator
+      # runs one instance for that tenant in tenant-<tenant>-plugins
+      # (gibson#815). The revocation suite enables it for its tenant.
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
         working-directory: hosted
         run: |
           set -euo pipefail
-          # The plugin image is the one the catalog entry pins (gibson#790):
-          # the daemon binds the declared secret of the plugin only for the
-          # catalog entry, and the seeder verifies exactly that image
-          # (gibson#554). The image workflow writes that pin, so this test
-          # reads it and never holds a second copy.
-          plugin_image=$(sed -n 's/^  image: //p' ../gibson/internal/platform/componentcatalog/manifests/github-plugin.yaml)
-          PLUGIN_IMAGE_REPOSITORY=${plugin_image%@*}
-          PLUGIN_IMAGE_DIGEST=${plugin_image#*@}
-          case "$PLUGIN_IMAGE_DIGEST" in sha256:*) ;; *) echo "::error::the github plugin catalog entry is not pinned by digest: $plugin_image"; exit 1 ;; esac
-          echo "plugin image from the catalog: $PLUGIN_IMAGE_REPOSITORY@$PLUGIN_IMAGE_DIGEST"
           # The e2eRunner values register the runner's ClusterSPIFFEID,
           # allow-list its SVID, and set GIBSON_TEST_FIXTURES_ENABLED on the
           # daemon (charts#142): the chart has no gibson.extraEnv seam, so
@@ -269,15 +254,10 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.enabled","value":"true"}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.runtime","value":"pod","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.repository","value":"'"${PLUGIN_IMAGE_REPOSITORY}"'","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.digest","value":"'"${PLUGIN_IMAGE_DIGEST}"'","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.plugins.github.image.pullPolicy","value":"IfNotPresent","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
             ]'
 
-          for _ in $(seq 1 60); do
+          for i in $(seq 1 60); do
             img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
                     -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
             case "$img" in *:e2e-tool) echo "daemon image is $img"; break;; esac
@@ -293,7 +273,7 @@ jobs:
           # reports the PIPELINE as failed even though the match succeeded, so
           # the check can never pass. Read into a variable and match the string.
           # Poll too: the line lands a few seconds after the Pod is Ready.
-          for _ in $(seq 1 30); do
+          for i in $(seq 1 30); do
             logs=$(kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 2>/dev/null || true)
             case "$logs" in
               *"sandboxed tool executor wired"*) echo "daemon wired the sandboxed tool executor"; break ;;
@@ -305,15 +285,6 @@ jobs:
             fi
             sleep 10
           done
-          # The plugin Deployment carrying the digest is the proof the plugin
-          # values reached the chart. Readiness is not awaited: the pod cannot
-          # pass its startup probe before the suite seeds the secret it declares.
-          img=$(kubectl -n "$NS" get deployment "${RELEASE}-plugin-github" \
-                  -o jsonpath='{.spec.template.spec.containers[?(@.name=="plugin")].image}' 2>/dev/null || true)
-          case "$img" in
-            *"@${PLUGIN_IMAGE_DIGEST}") echo "plugin Deployment rendered: $img" ;;
-            *) echo "::error::the GitHub plugin Deployment did not render with the pinned digest (got '${img}'; Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1 ;;
-          esac
 
       # The suite runs INSIDE the cluster, not over a port-forward.
       #
@@ -408,6 +379,25 @@ jobs:
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         run: gibson/.github/scripts/run-e2e-job.sh gibson-e2e-plugin-revocation TestPluginSecretRevocation 20m
 
+      # The suite enabled the plugin through CatalogPluginService, and the
+      # tenant operator rendered the instance. The Deployment must carry the
+      # image that the catalog entry pins (gibson#790): the daemon binds the
+      # declared secret only for that entry, and the image workflow writes
+      # the pin, so this step reads it and never holds a second copy.
+      - name: The tenant operator ran the plugin with the catalog digest
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          plugin_image=$(sed -n 's/^  image: //p' gibson/internal/platform/componentcatalog/manifests/github-plugin.yaml)
+          case "${plugin_image#*@}" in sha256:*) ;; *) echo "::error::the github plugin catalog entry is not pinned by digest: $plugin_image"; exit 1 ;; esac
+          img=$(kubectl -n "$PLUGIN_NS" get deployment gibson-plugin-github \
+                  -o jsonpath='{.spec.template.spec.containers[?(@.name=="plugin")].image}' 2>/dev/null || true)
+          if [ "$img" != "$plugin_image" ]; then
+            echo "::error::the tenant operator did not run the GitHub plugin of the catalog in $PLUGIN_NS (got '${img}', want '${plugin_image}')"
+            exit 1
+          fi
+          echo "plugin Deployment in $PLUGIN_NS runs $img"
+
       # always(), not failure(): a job that hits timeout-minutes is
       # cancelled, and a cancelled job skips failure() steps, so the
       # 2026-09-18 timeout (run 35399104370) left nothing to read.
@@ -443,13 +433,15 @@ jobs:
           # The plugin's own account of the revocation (gibson#154): its
           # enrolment, "startup secret resolved", "events: secret access
           # revoked" and the Degraded transition are all SDK log lines.
-          echo "=== GitHub plugin pod ==="
-          kubectl -n "$NS" get pods -l gibson.zeroroot.ai/plugin=github -o wide || true
-          for p in $(kubectl -n "$NS" get pods -l gibson.zeroroot.ai/plugin=github -o name 2>/dev/null); do
-            kubectl -n "$NS" describe "$p" | grep -A15 '^Events' || true
-            kubectl -n "$NS" logs "$p" -c plugin --tail=200 || true
-            kubectl -n "$NS" logs "$p" -c plugin --previous --tail=60 2>/dev/null || true
+          echo "=== GitHub plugin instance ($PLUGIN_NS) ==="
+          kubectl -n "$PLUGIN_NS" get deployment,pods -l gibson.zeroroot.ai/plugin=github -o wide || true
+          for p in $(kubectl -n "$PLUGIN_NS" get pods -l gibson.zeroroot.ai/plugin=github -o name 2>/dev/null); do
+            kubectl -n "$PLUGIN_NS" describe "$p" | grep -A15 '^Events' || true
+            kubectl -n "$PLUGIN_NS" logs "$p" -c plugin --tail=200 || true
+            kubectl -n "$PLUGIN_NS" logs "$p" -c plugin --previous --tail=60 2>/dev/null || true
           done
+          echo "=== tenant operator (catalog plugin loop) ==="
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=tenant-operator --tail=300 2>/dev/null | grep -i plugin || true
           # ext-authz decides every edge call a plugin makes; a deny at the
           # edge never reaches the daemon log (run 35630951761: the plugin's
           # RegisterComponent was PermissionDenied and the daemon log had
