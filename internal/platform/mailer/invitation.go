@@ -109,7 +109,7 @@ const adkCloneURL = "https://github.com/zeroroot-ai/adk.git"
 // goToolchain is the Go version adk/.tool-versions pins. It appears here only
 // to tell a new person which toolchain asdf or mise will select for them, and
 // it is cheap to be wrong about — but keep it in step with that file.
-const goToolchain = "1.27.1"
+const goToolchain = "1.27.2"
 
 // onboardingStep is one numbered item of the runbook: a title, prose, and an
 // optional block of shell lines.

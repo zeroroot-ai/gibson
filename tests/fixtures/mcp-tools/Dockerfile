@@ -1,7 +1,7 @@
 # The fixture MCP server of the Hosted connector exit test (gibson#811). The
 # build context is the root of the gibson repo. The exit test builds this
 # image in the run and loads it into kind, so it never leaves the run.
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.1-alpine@sha256:8a5910f31396cd4d89662f56c68b3ae31d374308270a1c3bd96672ee5ed43414 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
 ARG GOTOOLCHAIN=local
 ENV GOTOOLCHAIN=${GOTOOLCHAIN}
 WORKDIR /src

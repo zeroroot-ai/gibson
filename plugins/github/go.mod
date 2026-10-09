@@ -1,6 +1,6 @@
 module github.com/zeroroot-ai/gibson/plugins/github
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/google/go-github/v90 v90.0.0
@@ -15,7 +15,7 @@ require (
 	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.8.2 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
