@@ -114,7 +114,7 @@ func NewNeo4jProvisioner(cfg Neo4jConfig) (*Neo4jProvisioner, error) {
 func validateNeo4jImage(image string) error {
 	image = strings.TrimSpace(image)
 	if image == "" {
-		return fmt.Errorf("dataplane/neo4j: Image required (TENANT_NEO4J_IMAGE)")
+		return errors.New("dataplane/neo4j: Image required (TENANT_NEO4J_IMAGE)")
 	}
 	if _, digest, ok := strings.Cut(image, "@sha256:"); !ok || len(digest) != 64 {
 		return fmt.Errorf("dataplane/neo4j: Image %q has no sha256 digest", image)
