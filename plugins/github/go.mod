@@ -1,6 +1,6 @@
 module github.com/zeroroot-ai/gibson/plugins/github
 
-go 1.27.1
+go 1.27.2
 
 require (
 	github.com/google/go-github/v90 v90.0.0
