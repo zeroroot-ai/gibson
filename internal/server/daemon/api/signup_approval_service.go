@@ -256,6 +256,11 @@ func (s *DaemonServer) AdminApproveRegistration(ctx context.Context, req *tenant
 	if s.idpAdminClient == nil {
 		return nil, status.Error(codes.Unavailable, "identity provider not configured")
 	}
+	// An approval queues the tenant in the platform Postgres. With no queue
+	// the approval would build nothing, so it is refused before the claim.
+	if s.entitlementsDB() == nil {
+		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
+	}
 	if req.GetRegistrationId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "registration_id is required")
 	}
@@ -346,7 +351,7 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}
 
-	if _, err := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
+	if err := s.enqueueOwnedTenant(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      slug,
 		OwnerUserId:   row.OwnerUserID,
 		OwnerEmail:    row.Email,
@@ -361,6 +366,9 @@ func (s *DaemonServer) applyRegistrationApproval(ctx context.Context, row Signup
 		if derr := s.idpAdminClient.DeactivateHumanUser(ctx, idp.HumanUserStateRequest{UserID: row.OwnerUserID}); derr != nil {
 			s.logger.ErrorContext(ctx, "AdminApproveRegistration: could not deactivate the owner of a registration that was not provisioned",
 				"owner_user_id", row.OwnerUserID, "error", derr.Error())
+		}
+		if errors.Is(err, errTenantIDTaken) {
+			return nil, workspaceNameTaken("another workspace already has this name; reject this registration")
 		}
 		return nil, status.Error(codes.Internal, "failed to approve the registration")
 	}

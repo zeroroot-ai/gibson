@@ -388,7 +388,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		return nil, err
 	}
 
-	if s.signupVerifications == nil {
+	if s.signupVerifications == nil || s.entitlementsDB() == nil {
 		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
 	}
 	if s.idpAdminClient == nil {
@@ -438,6 +438,18 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"error", err.Error(),
 		)
 		return nil, err
+	}
+
+	// ---- the workspace name is free ----
+	// The tenant id comes from the workspace name of the verification row.
+	// Check it before the owner account exists, so a taken name leaves no
+	// account behind. The person starts again with another name.
+	if queued, qerr := s.tenantIDQueued(ctx, slug); qerr != nil {
+		s.logger.ErrorContext(ctx, "Signup: read the tenant queue failed",
+			"attempt_id", req.GetAttemptId(), "error", qerr.Error())
+		return nil, status.Error(codes.Unavailable, "signup is temporarily unavailable; please try again shortly")
+	} else if queued {
+		return nil, workspaceNameTaken(signupNameTakenMessage)
 	}
 
 	// ---- create the founding-owner user ----
@@ -509,7 +521,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
 		return nil, status.Error(codes.Unavailable, "failed to complete signup; try again")
 	}
-	if _, eerr := s.enqueuePendingTenantProvisioning(ctx, &daemonoperatorv1.PendingTenant{
+	if eerr := s.enqueueOwnedTenant(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      slug,
 		OwnerUserId:   result.UserID,
 		OwnerEmail:    row.Email,
@@ -524,6 +536,16 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"tenant_id", slug,
 			"error", eerr.Error(),
 		)
+		if errors.Is(eerr, errTenantIDTaken) {
+			// Another signup took the name after the check above. The owner
+			// account of this call has no workspace, so delete it: the person
+			// can then start again with the same address.
+			if derr := s.idpAdminClient.DeleteHumanUser(ctx, idp.HumanUserStateRequest{UserID: result.UserID}); derr != nil {
+				s.logger.ErrorContext(ctx, "Signup: could not delete the owner of a workspace name that was taken",
+					"attempt_id", req.GetAttemptId(), "error", derr.Error())
+			}
+			return nil, workspaceNameTaken(signupNameTakenMessage)
+		}
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
 
@@ -556,6 +578,11 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		StepToken: stepToken,
 	}, nil
 }
+
+// signupNameTakenMessage is the message of a signup whose workspace name is
+// in use. The name comes from the verification row, so the person starts
+// again with another name.
+const signupNameTakenMessage = "another workspace already has this name; start the signup again with another name"
 
 // stepURLFor returns the step URL when the signup waits for the step.
 func stepURLFor(hold *signupStepHold, u string) string {

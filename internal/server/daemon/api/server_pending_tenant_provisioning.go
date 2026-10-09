@@ -30,6 +30,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
+	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 )
 
 // enqueuePendingTenantProvisioning records a tenant awaiting Tenant-CR creation.
@@ -39,9 +40,9 @@ import (
 // mirroring the already_existed handling in the owner-provisioning path —
 // re-creating it would risk re-provisioning a tenant the operator already built.
 //
-// Returns (false, nil) when no platform DB is configured: enqueue is best-effort
-// in dev/kind where Postgres may be absent, and the caller logs rather than
-// failing the signup.
+// It returns errNoPlatformDB when no platform DB is configured. Every install
+// runs the platform Postgres, and a tenant that is not queued is never built, so
+// a missing database is an error and never a silent success.
 //
 // hold, when not nil, puts the row in status 'waiting_step': the operator does
 // not see it until the external signup step is done (signup_step.go).
@@ -55,7 +56,7 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 ) (bool, error) {
 	db := s.entitlementsDB()
 	if db == nil {
-		return false, nil
+		return false, errNoPlatformDB
 	}
 	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
 		return false, fmt.Errorf("ensure table: %w", err)
@@ -83,6 +84,81 @@ func (s *DaemonServer) enqueuePendingTenantProvisioning(
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// errNoPlatformDB means that the daemon has no platform Postgres, so no tenant
+// can be queued.
+var errNoPlatformDB = errors.New("platform Postgres not configured")
+
+// errTenantIDTaken means that the queue already holds the tenant id for another
+// owner. Two workspace names can give one slug.
+var errTenantIDTaken = errors.New("the tenant id is queued for another owner")
+
+// enqueueOwnedTenant queues the tenant of an owner. A row that the queue already
+// holds for the same owner is a retry and counts as queued. A row for another
+// owner returns errTenantIDTaken: the caller must not report a tenant that it
+// did not queue.
+func (s *DaemonServer) enqueueOwnedTenant(
+	ctx context.Context, p *daemonoperatorv1.PendingTenant, hold *signupStepHold, welcomeOwner bool,
+) error {
+	inserted, err := s.enqueuePendingTenantProvisioning(ctx, p, hold, welcomeOwner)
+	if err != nil || inserted {
+		return err
+	}
+	var owner string
+	err = s.entitlementsDB().QueryRowContext(ctx,
+		`SELECT owner_user_id FROM pending_tenant_provisioning WHERE tenant_id = $1`,
+		p.GetTenantId()).Scan(&owner)
+	if err != nil {
+		return fmt.Errorf("read the owner of queued tenant %s: %w", p.GetTenantId(), err)
+	}
+	if owner == "" || owner != p.GetOwnerUserId() {
+		return errTenantIDTaken
+	}
+	return nil
+}
+
+// tenantIDQueued reports whether the queue holds a row for tenantID, in any
+// status. The queue keeps the row of a built tenant, so a row means that the
+// tenant id is in use.
+func (s *DaemonServer) tenantIDQueued(ctx context.Context, tenantID string) (bool, error) {
+	db := s.entitlementsDB()
+	if db == nil {
+		return false, errNoPlatformDB
+	}
+	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
+		return false, fmt.Errorf("ensure table: %w", err)
+	}
+	var owner string
+	err := db.QueryRowContext(ctx,
+		`SELECT owner_user_id FROM pending_tenant_provisioning WHERE tenant_id = $1`,
+		tenantID).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read queued tenant %s: %w", tenantID, err)
+	}
+	return true, nil
+}
+
+// workspaceNameTakenReason is the ErrorDetail reason of a workspace name whose
+// tenant id is in use. A client branches on it, never on the message.
+const workspaceNameTakenReason = "WORKSPACE_NAME_TAKEN"
+
+// workspaceNameTaken is the AlreadyExists status of a workspace name whose
+// tenant id is in use. It carries the reason, so that a client can tell it
+// from an account that already exists.
+func workspaceNameTaken(msg string) error {
+	st := status.New(codes.AlreadyExists, msg)
+	// WithDetails fails only for the code OK, so the detail is always added.
+	if withDetail, err := st.WithDetails(&commonpb.ErrorDetail{
+		Code:   commonpb.ErrorCode_ERROR_CODE_ALREADY_EXISTS,
+		Reason: workspaceNameTakenReason,
+	}); err == nil {
+		st = withDetail
+	}
+	return status.ErrorProto(st.Proto())
 }
 
 // ListPendingTenantProvisioning returns the queue of tenants awaiting Tenant-CR
@@ -263,6 +339,9 @@ func (s *DaemonServer) EnqueueTenantProvisioning(ctx context.Context, req *daemo
 		WorkspaceName: req.GetDisplayName(),
 		Tier:          tier,
 	}, nil, false)
+	if errors.Is(err, errNoPlatformDB) {
+		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
+	}
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "enqueue tenant provisioning: %v", err)
 	}

@@ -41,21 +41,6 @@ func newMockStore(t *testing.T) (*SignupVerificationStore, sqlmock.Sqlmock, time
 	return s, mock, now
 }
 
-// closedDB returns a *sql.DB whose connection is already closed, so any
-// statement fails. Used to drive error paths.
-func closedDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	mock.ExpectClose()
-	if err := db.Close(); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	return db
-}
-
 // TestRedeemToken_IsACompareAndSet is the core of the single-use guarantee.
 //
 // Redemption must be ONE statement whose WHERE clause includes the current
