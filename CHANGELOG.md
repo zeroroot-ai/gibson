@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.158.1](https://github.com/zeroroot-ai/gibson/compare/v0.158.0...v0.158.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **invitations:** a resend whose email fails keeps the earlier link ([#1060](https://github.com/zeroroot-ai/gibson/issues/1060)) ([6ebf608](https://github.com/zeroroot-ai/gibson/commit/6ebf60891e547679f2315f4ff8840b3ca4fda5fa))
+* **tenant-operator:** the tenant Neo4j image comes from the chart, with a digest ([#1061](https://github.com/zeroroot-ai/gibson/issues/1061)) ([22512fb](https://github.com/zeroroot-ai/gibson/commit/22512fb82945370a1aaba7e3c320b13fa856b2f7))
+
 ## [0.158.0](https://github.com/zeroroot-ai/gibson/compare/v0.157.1...v0.158.0) (2026-10-09)
 
 
