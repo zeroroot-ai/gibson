@@ -26,11 +26,20 @@ import (
 // RegisterTestTarget creates a web target named name at targetURL for the
 // tenant on ctx and returns its id.
 func RegisterTestTarget(ctx context.Context, daemon daemonpb.DaemonServiceClient, name, targetURL string) (string, error) {
+	return RegisterTestTargetOfType(ctx, daemon, name, "web", targetURL)
+}
+
+// RegisterTestTargetOfType creates a target of targetType named name at
+// address for the tenant on ctx and returns its id. address is a URL, a
+// host, or a CIDR: the network scope of a node reads each form.
+func RegisterTestTargetOfType(
+	ctx context.Context, daemon daemonpb.DaemonServiceClient, name, targetType, address string,
+) (string, error) {
 	resp, err := daemon.CreateTarget(ctx, &daemonpb.CreateTargetRequest{
 		Target: &targetpb.Target{
 			Name:        name,
-			Type:        "web",
-			Url:         targetURL,
+			Type:        targetType,
+			Url:         address,
 			Status:      "active",
 			Description: "exit-test fixture",
 			Tags:        []string{"e2e", "test-fixture"},

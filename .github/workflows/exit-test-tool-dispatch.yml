@@ -373,6 +373,35 @@ jobs:
           kill "$pf" || true
           exit "$status"
 
+      # A sandbox whose CIDR target holds the address of a connector proxy gets
+      # no connection (gibson#723, D76). The suite runs a scan of the proxy
+      # port from a sandbox (TestToolDispatch). Here the workflow gives the
+      # suite the proxy address and starts the Cilium drop monitor of each
+      # node. The step after the suite reads the drops.
+      - name: Give the suite the connector proxy address and watch for drops
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh --selftest
+          ip=$(kubectl -n tenant-connector-e2e get endpointslices \
+                 -l kubernetes.io/service-name=mcp-fixture-mcp-tools-proxy \
+                 -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
+          if [ -z "$ip" ]; then
+            echo "::error::the proxy Service of the fixture connector has no endpoint address"
+            kubectl -n tenant-connector-e2e get svc,endpointslices -o wide || true
+            exit 1
+          fi
+          echo "CONNECTOR_PROXY_IP=$ip" >> "$GITHUB_ENV"
+          printf 'E2E_CONNECTOR_PROXY_IP=%s\n' "$ip" > /tmp/e2e-runner.env
+          mkdir -p /tmp/cilium-drops
+          for p in $(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[*].metadata.name}'); do
+            nohup kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg monitor --type drop \
+              > "/tmp/cilium-drops/${p}.log" 2>&1 &
+          done
+          sleep 5
+          ls /tmp/cilium-drops/*.log >/dev/null
+          echo "the suite scans the connector proxy at ${ip}:8080"
+
       # Cilium enforces each network policy of the chart on this cluster
       # (hosted#436). Prove it for the daemon before the tests run, so a
       # missing policy rule fails here and not on staging (gibson#220).
@@ -401,7 +430,20 @@ jobs:
           kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
 
       - name: Run the tool-dispatch exit test in-cluster
+        env:
+          E2E_RUNNER_ENV_FILE: /tmp/e2e-runner.env
         run: gibson/.github/scripts/run-e2e-job.sh gibson-e2e-tool-dispatch TestToolDispatch 20m
+
+      # The network dropped each packet of the scan of the connector proxy
+      # (gibson#723). It runs whenever the suite image built, so a failed
+      # subtest before the scan still reports this verdict.
+      - name: The network refused the sandbox that dialed the connector proxy
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          pkill -f 'cilium-dbg monitor' || true
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$CONNECTOR_PROXY_IP" 8080 /tmp/cilium-drops/*.log
 
       # Plugin secret revocation (gibson#154), on the plugin the daemon patch
       # deployed. Runs whenever the suite image built, so a tool-dispatch
