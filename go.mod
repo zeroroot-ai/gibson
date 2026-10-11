@@ -61,8 +61,8 @@ require (
 	github.com/testcontainers/testcontainers-go v0.42.0
 	github.com/tidwall/gjson v1.18.0
 	github.com/zeroroot-ai/adk/gibson v0.114.0
-	github.com/zeroroot-ai/ast-checks v0.8.0
-	github.com/zeroroot-ai/sdk v0.202.0
+	github.com/zeroroot-ai/ast-checks v0.9.0
+	github.com/zeroroot-ai/sdk v0.203.0
 	github.com/zeroroot-ai/setec v0.126.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.71.0
 	go.opentelemetry.io/otel v1.47.0
@@ -78,7 +78,7 @@ require (
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/term v0.46.0
-	golang.org/x/tools v0.50.0
+	golang.org/x/tools v0.51.0
 	gonum.org/v1/gonum v0.17.0
 	google.golang.org/genai v1.71.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260928230214-8a89bd6388cc
