@@ -177,3 +177,42 @@ func TestWorkQueue_EnqueueRefusesABadAuthzContext(t *testing.T) {
 	})
 	require.Error(t, err, "a work item whose run cannot be read must not be dispatched")
 }
+
+// TestDelegatedAgentGetsTheRunOfItsCaller proves that the work item of a
+// delegated agent carries the run of the caller, so its own Authorize resolves.
+func TestDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
+	env := newWorkIDEnv(t)
+	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
+	env.svc.WithRunAuthorizer(fake)
+	callerWork := env.enqueueRun(t, victimTenant, "work-caller", "run-42")
+
+	entry := env.svc.delegatedAuthzContext(ctxForTenant(victimTenant), victimTenant, callerWork)
+	require.Contains(t, entry, authz.AuthzContextWorkKey)
+
+	// The delegated item goes through the same Enqueue as any other work item.
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "recon", WorkItem{
+		WorkID: "work-delegated", WorkType: WorkTypeAgentExecute, Context: entry,
+	})
+	require.NoError(t, err)
+
+	resp, err := env.svc.Authorize(ctxForTenant(victimTenant), &componentpb.AuthorizeRequest{
+		WorkId: "work-delegated", Action: "execute", Resource: "tool:nmap",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls, "the delegated agent acts for the run of its caller")
+}
+
+// TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant proves that the source
+// work id the caller names is checked against its owner before it selects a run.
+func TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant(t *testing.T) {
+	env := newWorkIDEnv(t)
+	foreign := env.enqueueRun(t, victimTenant, "work-foreign", "run-victim")
+
+	assert.Empty(t, env.svc.delegatedAuthzContext(ctxForTenant(attackerTenant), attackerTenant, foreign))
+	assert.Empty(t, env.svc.delegatedAuthzContext(ctxForTenant(victimTenant), victimTenant, "no-such-work"))
+	assert.Empty(t, env.svc.delegatedAuthzContext(ctxForTenant(victimTenant), victimTenant, ""))
+
+	noRun := env.enqueueRun(t, victimTenant, "work-norun", "")
+	assert.Empty(t, env.svc.delegatedAuthzContext(ctxForTenant(victimTenant), victimTenant, noRun))
+}
