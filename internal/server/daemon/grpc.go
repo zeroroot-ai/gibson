@@ -719,11 +719,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if d.infrastructure != nil {
 		daemonSvc.WithProviderCatalogue(d.infrastructure.catalogue)
 	}
-	// The Platform owner's health view asks the secret source to answer
-	// (hosted#174). Without a broker registry the plane reads UNKNOWN.
-	if d.secretsRegistry != nil {
-		daemonSvc.WithSecretPlaneProbe(&secretPlaneProbeAdapter{registry: d.secretsRegistry})
-	}
+	// The Platform owner's health view asks the secret backend of the
+	// platform to answer (hosted#174, gibson#1078).
+	daemonSvc.WithSecretPlaneProbe(d.secretBackendProbe())
 	auditLogger, err := wireDaemonAudit(ctx, d.stateClient, d.platformDB, d.logger.Slog(), daemonSvc)
 	if err != nil {
 		return nil, err

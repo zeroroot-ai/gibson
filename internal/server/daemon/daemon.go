@@ -1739,15 +1739,21 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered key provider readiness check")
 	}
 
-	// Register broker health check for /readyz (Task 30, secrets-broker Phase 11).
-	//
-	// SYSTEM-TENANT RULE: if the system-tenant (Postgres) broker is unreachable,
-	// flip readiness to 503 — the daemon cannot serve any tenant secrets.
-	//
+	// The secret backend of the platform gates /readyz at start. The check
+	// asks the backend that the chart configures, with the same bounded probe
+	// as AdminGetPlatformHealth. It never reads the cached health map: that
+	// map holds nothing until a secret operation ran, and a dead source then
+	// read as healthy (hosted#174). It does not read a broker config row
+	// either: no row names the platform backend (gibson#1078). It is a start
+	// gate: not ready until a probe passes, and a later failure does not
+	// change readiness (secretSourceReadiness).
+	d.healthServer.RegisterReadinessCheck("secrets_broker",
+		secretSourceReadiness(d.secretBackendProbe()))
+	d.logger.Debug(ctx, "registered the secret backend readiness check")
+
 	// PER-TENANT RULE: per-tenant broker outages must NOT flip readiness; they
 	// only emit the gibson_secrets_broker_health{tenant,provider} Prometheus gauge
-	// so SRE can see which tenant's backend is unhealthy. The system-tenant health
-	// check is the sole gating condition here.
+	// so SRE can see which tenant's backend is unhealthy.
 	if d.secretsRegistry != nil {
 		brokerReg := d.secretsRegistry
 
@@ -1778,15 +1784,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 			}
 		}()
 
-		// The check asks the source to answer, with the same bounded probe as
-		// AdminGetPlatformHealth. It never reads the cached health map for
-		// this answer: that map holds nothing until a secret operation ran,
-		// and a dead source then read as healthy (hosted#174). It is a start
-		// gate: not ready until a probe passes, and a later failure does not
-		// change readiness (secretSourceReadiness).
-		d.healthServer.RegisterReadinessCheck("secrets_broker",
-			secretSourceReadiness(&secretPlaneProbeAdapter{registry: brokerReg}))
-		d.logger.Debug(ctx, "registered secrets broker readiness check (system-tenant gates /readyz; per-tenant emits gauge only)")
 	}
 
 	// Register FGA readiness check. After one-code-path slice deploy#195
