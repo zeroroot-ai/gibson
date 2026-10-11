@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.159.0](https://github.com/zeroroot-ai/gibson/compare/v0.158.0...v0.159.0) (2026-10-11)
+
+
+### Features
+
+* **component:** serve ComponentService.Authorize with the callback decision (D86) ([#1066](https://github.com/zeroroot-ai/gibson/issues/1066)) ([0751953](https://github.com/zeroroot-ai/gibson/commit/075195320f96d08fc6fc8c518b8c2b099c6c0a97))
+
+
+### Bug Fixes
+
+* **connector:** the connector policy opens no egress to the daemon ([#1065](https://github.com/zeroroot-ai/gibson/issues/1065)) ([9668a9a](https://github.com/zeroroot-ai/gibson/commit/9668a9a3a963bc9d03978a3a3d3ddabd2d2e0b1a))
+* **daemon:** the start gate asks the configured secret backend, not a broker row ([#1079](https://github.com/zeroroot-ai/gibson/issues/1079)) ([9c8c94d](https://github.com/zeroroot-ai/gibson/commit/9c8c94d8857030759b21edac6feff8a63e098a3d))
+* **harness:** Authorize decides a run only for the tenant and mission of the caller ([d74e9ab](https://github.com/zeroroot-ai/gibson/commit/d74e9ab42cba8154bbf92899a141641a5ee51c84))
+* **harness:** authorize decides a run only for the tenant and mission of the caller ([#1070](https://github.com/zeroroot-ai/gibson/issues/1070)) ([d74e9ab](https://github.com/zeroroot-ai/gibson/commit/d74e9ab42cba8154bbf92899a141641a5ee51c84))
+* **invitations:** a resend whose email fails keeps the earlier link ([#1060](https://github.com/zeroroot-ai/gibson/issues/1060)) ([6ebf608](https://github.com/zeroroot-ai/gibson/commit/6ebf60891e547679f2315f4ff8840b3ca4fda5fa))
+* **tenant-operator:** the tenant Neo4j image comes from the chart, with a digest ([#1061](https://github.com/zeroroot-ai/gibson/issues/1061)) ([22512fb](https://github.com/zeroroot-ai/gibson/commit/22512fb82945370a1aaba7e3c320b13fa856b2f7))
+* **tenant:** the default deny of a tenant namespace opens no egress to the daemon ([#1068](https://github.com/zeroroot-ai/gibson/issues/1068)) ([25ae2e9](https://github.com/zeroroot-ai/gibson/commit/25ae2e93fbb0fc84ac5eb6d3740a222a2d960c3a))
+
 ## [0.158.0](https://github.com/zeroroot-ai/gibson/compare/v0.157.1...v0.158.0) (2026-10-09)
 
 
