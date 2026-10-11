@@ -12,16 +12,20 @@ want=${3:?usage: $0 <mcp-url> <host:port> <reachable|unreachable>}
 case "$want" in reachable|unreachable) ;; *) echo "usage: want is reachable or unreachable" >&2; exit 2 ;; esac
 hdr=$(mktemp); trap 'rm -f "$hdr"' EXIT
 accept='Accept: application/json, text/event-stream'
+# The proxy of a connector accepts only the JWT-SVID of the daemon
+# (ADR-0114). MCP_BEARER carries that token when the caller has one.
+auth=()
+[ -n "${MCP_BEARER:-}" ] && auth=(-H "Authorization: Bearer ${MCP_BEARER}")
 body_json() { sed -n 's/^data: //p; /^{/p' | head -1; }
 
-curl -fsS -D "$hdr" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+curl -fsS "${auth[@]}" -D "$hdr" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"gibson-exit-test","version":"1"}}}' >/dev/null
 session=$(sed -n 's/^[Mm]cp-[Ss]ession-[Ii]d: *\([^[:space:]]*\).*/\1/p' "$hdr" | head -1)
 sh=()
 [ -n "$session" ] && sh=(-H "Mcp-Session-Id: $session")
-curl -fsS "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+curl -fsS "${auth[@]}" "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
-got=$(curl -fsS -m 30 "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+got=$(curl -fsS -m 30 "${auth[@]}" "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"probe_egress\",\"arguments\":{\"address\":\"$address\"}}}" \
   | body_json | jq -r '.result.content[0].text // .error.message')
 case "$got" in
