@@ -247,10 +247,10 @@ func (s *HarnessCallbackService) authorizeRun(
 // AuthorizeRun runs the decision of the Authorize RPC for a run that the caller
 // names. The component pull service uses it, so that both transports decide
 // the same way. The error is a gRPC status, as for the RPC.
-func (s *HarnessCallbackService) AuthorizeRun(ctx context.Context, runID, action, resource string) (bool, string, error) {
-	resp, err := s.Authorize(ctx, &harnesspb.AuthorizeRequest{RunId: runID, Action: action, Resource: resource})
-	if err != nil {
-		return false, "", err
+func (s *HarnessCallbackService) AuthorizeRun(ctx context.Context, runID, action, resource string) (allowed bool, reason string, err error) {
+	resp, rpcErr := s.Authorize(ctx, &harnesspb.AuthorizeRequest{RunId: runID, Action: action, Resource: resource})
+	if rpcErr != nil {
+		return false, "", rpcErr
 	}
 	return resp.GetAllowed(), resp.GetReason(), nil
 }

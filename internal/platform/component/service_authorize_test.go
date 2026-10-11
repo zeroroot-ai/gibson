@@ -26,7 +26,7 @@ type fakeRunAuthorizer struct {
 	err     error
 }
 
-func (f *fakeRunAuthorizer) AuthorizeRun(_ context.Context, runID, action, resource string) (bool, string, error) {
+func (f *fakeRunAuthorizer) AuthorizeRun(_ context.Context, runID, action, resource string) (allowed bool, reason string, err error) {
 	f.calls = append(f.calls, runID+"|"+action+"|"+resource)
 	return f.allowed, f.reason, f.err
 }

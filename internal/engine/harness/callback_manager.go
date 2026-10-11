@@ -649,12 +649,8 @@ func (m *CallbackManager) SetProtoResolver(resolver protoresolver.ProtoResolver)
 
 // RunAuthorizer returns the callback service as the decision that
 // ComponentService.Authorize runs, so the pull transport and the callback
-// transport decide the same way (D86). It returns nil when the manager has no
-// server.
+// transport decide the same way (D86).
 func (m *CallbackManager) RunAuthorizer() *HarnessCallbackService {
-	if m.server == nil {
-		return nil
-	}
 	return m.server.Service()
 }
 

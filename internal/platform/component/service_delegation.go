@@ -240,9 +240,10 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 // the entry is absent and the delegated agent has no run, so its Authorize is
 // refused (fail closed). Delegation itself is not blocked.
 func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
-	if sourceWorkID == "" || s.workContext == nil {
+	if sourceWorkID == "" {
 		return nil
 	}
+	// resolveWorkOwner refuses when no work-context registry is wired.
 	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
 		return nil
 	}
