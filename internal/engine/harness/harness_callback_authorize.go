@@ -244,6 +244,17 @@ func (s *HarnessCallbackService) authorizeRun(
 	return &harnesspb.AuthorizeResponse{Allowed: true, Reason: reason}, nil
 }
 
+// AuthorizeRun runs the decision of the Authorize RPC for a run that the caller
+// names. The component pull service uses it, so that both transports decide
+// the same way. The error is a gRPC status, as for the RPC.
+func (s *HarnessCallbackService) AuthorizeRun(ctx context.Context, runID, action, resource string) (bool, string, error) {
+	resp, err := s.Authorize(ctx, &harnesspb.AuthorizeRequest{RunId: runID, Action: action, Resource: resource})
+	if err != nil {
+		return false, "", err
+	}
+	return resp.GetAllowed(), resp.GetReason(), nil
+}
+
 // deriveFGAObject maps a component resource string to the canonical FGA object
 // "component:<kind>/<name>" (ADR-0136).
 //

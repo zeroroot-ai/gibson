@@ -407,3 +407,44 @@ func TestAuthorize_AGrantWithAMissionRefusesARunWithNoMission(t *testing.T) {
 		&harnesspb.AuthorizeRequest{RunId: "run-1", Action: "execute", Resource: "tool:nmap"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
+
+// TestAuthorizeRun_IsTheDecisionOfTheRPC proves that the pull transport and the
+// callback transport run one decision (D86): AuthorizeRun gives the same answer
+// as the Authorize RPC for an allow, a deny, an unknown run and an inactive run.
+func TestAuthorizeRun_IsTheDecisionOfTheRPC(t *testing.T) {
+	az := newFGABackedAuthorizer()
+	az.Seed("user:u-1", "can_execute", "component:tool/nmap")
+	active := &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "t", Status: "active"}
+
+	cases := []struct {
+		name     string
+		store    *stubRunAuthzLookup
+		resource string
+		allowed  bool
+		code     codes.Code
+	}{
+		{"allow", &stubRunAuthzLookup{state: active}, "tool:nmap", true, codes.OK},
+		{"deny", &stubRunAuthzLookup{state: active}, "tool:sqlmap", false, codes.OK},
+		{"unknown run", &stubRunAuthzLookup{err: ErrRunNotFound}, "tool:nmap", false, codes.NotFound},
+		{"inactive run", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", Status: "completed"}},
+			"tool:nmap", false, codes.FailedPrecondition},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newAuthorizeService(tc.store, az)
+
+			allowed, reason, err := svc.AuthorizeRun(context.Background(), "run-1", "execute", tc.resource)
+			rpc, rpcErr := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+				RunId: "run-1", Action: "execute", Resource: tc.resource,
+			})
+
+			assert.Equal(t, tc.code, grpcCode(err))
+			assert.Equal(t, grpcCode(rpcErr), grpcCode(err), "same status as the RPC")
+			assert.Equal(t, tc.allowed, allowed)
+			if rpcErr == nil {
+				assert.Equal(t, rpc.GetAllowed(), allowed)
+				assert.Equal(t, rpc.GetReason(), reason)
+			}
+		})
+	}
+}

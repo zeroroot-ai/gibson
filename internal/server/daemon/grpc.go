@@ -1887,6 +1887,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// tiers were retired (gibson#756); only this mapping remains.
 			compSvc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(d.stateClient))
 
+			// Wire the decision of the callback path into ComponentService.Authorize,
+			// so the pull transport and the callback transport run one FGA check
+			// (D86). Without it Authorize refuses every request.
+			if d.callback != nil {
+				compSvc.WithRunAuthorizer(d.callback.Service())
+				d.logger.Info(ctx, "ComponentService.Authorize wired to the callback authorization decision")
+			}
+
 			// Wire the capability checker so DelegateToAgent (and, once slice 2
 			// lands, mission origination) can enforce capname.MissionDelegate /
 			// capname.MissionOriginate (gibson#1186 slice C). *capabilitygrant.
