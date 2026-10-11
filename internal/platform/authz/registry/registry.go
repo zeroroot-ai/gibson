@@ -182,6 +182,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.component.v1.ComponentService/Authorize": {
+		Service:           "gibson.component.v1.ComponentService",
+		Relation:          "can_execute",
+		ObjectType:        "component",
+		ObjectDeriver:     "system_tenant",
+		AllowedIdentities: IdentityComponent,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.component.v1.ComponentService/CallTool": {
 		Service:           "gibson.component.v1.ComponentService",
 		Relation:          "can_execute",
