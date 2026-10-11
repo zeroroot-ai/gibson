@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.160.0](https://github.com/zeroroot-ai/gibson/compare/v0.159.0...v0.160.0) (2026-10-11)
+
+
+### Features
+
+* **authz:** each OpenFGA client sends the preshared key ([#1091](https://github.com/zeroroot-ai/gibson/issues/1091)) ([99042aa](https://github.com/zeroroot-ai/gibson/commit/99042aae40d76d49d3f0677803add695a4c1a5a1))
+
+
+### Bug Fixes
+
+* **extauthz:** a late concurrent miss reads the stored tenant, not a second fetch ([#1081](https://github.com/zeroroot-ai/gibson/issues/1081)) ([c26d84c](https://github.com/zeroroot-ai/gibson/commit/c26d84cb8819b3bb8de910225962938161690c23)), closes [#1080](https://github.com/zeroroot-ai/gibson/issues/1080)
+
 ## [0.159.0](https://github.com/zeroroot-ai/gibson/compare/v0.158.0...v0.159.0) (2026-10-11)
 
 
