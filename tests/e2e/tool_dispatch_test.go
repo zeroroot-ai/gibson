@@ -20,6 +20,9 @@
 //     (fail-closed, `authorizeToolDispatch` → SANDBOX_POLICY_DENIED).
 //  3. A tool name that is in no catalog manifest never dispatches, whatever the
 //     tenant has enabled — there is no second, ungated path to reach one.
+//  4. A sandbox whose CIDR target holds the address of a connector proxy gets
+//     no connection to it (gibson#723, D76). The workflow reads the Cilium
+//     drop records of the scan.
 //
 // WHY THIS EXISTS. Until ADR-0117 a tool could reach dispatch two ways: the
 // manifest path, and a runtime catalog refresher that wrote `_system` registry
@@ -47,6 +50,8 @@ package e2e
 
 import (
 	"context"
+	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -87,6 +92,10 @@ const (
 	toolScanHost   = "127.0.0.1"
 	toolScanPorts  = "22,80,443"
 )
+
+// connectorProxyPort is the port of the ToolHive proxy of a connector
+// (connectorv1alpha1.ProxyPort).
+const connectorProxyPort = "8080"
 
 // TestToolDispatch is the gibson#1659 exit test. Each named subtest is an
 // independent assertion; the deterministic security guarantees (denial, absent
@@ -186,11 +195,76 @@ func TestToolDispatch(t *testing.T) {
 			"an enabled tenant's tool mission must complete; got %q (reason: %s)",
 			terminal.EventType, failureReason(terminal, collected))
 	})
+
+	// -----------------------------------------------------------------------
+	// Network guarantee (gibson#723, D76): a sandbox whose CIDR target holds
+	// the address of a connector proxy gets no connection to it. Only the
+	// daemon calls a connector (ADR-0065).
+	//
+	// The proxy is the fixture connector of the workflow, which is not a
+	// catalog connector. So the scope guard of the harness (node_network.go)
+	// does not know its address, the CIDR rule reaches the sandbox, and only
+	// the network can refuse the connection. The tool scans the proxy port
+	// with no host discovery (-Pn), so its SYN packets go to the proxy. The
+	// workflow step after this suite reads the Cilium drop records and fails
+	// when no packet to the proxy port was dropped by a policy.
+	// -----------------------------------------------------------------------
+	t.Run("a sandbox whose CIDR target holds a connector proxy address gets no connection", func(t *testing.T) {
+		proxyIP := os.Getenv("E2E_CONNECTOR_PROXY_IP")
+		require.NotEmpty(t, proxyIP,
+			"E2E_CONNECTOR_PROXY_IP is empty: the workflow did not pass the address of the fixture connector proxy")
+		require.NotNil(t, net.ParseIP(proxyIP), "E2E_CONNECTOR_PROXY_IP %q is not an IP address", proxyIP)
+
+		cidrTargetID, err := helpers.RegisterTestTargetOfType(ctxEnabled, clients.Daemon,
+			"connector-proxy-cidr-e2e", "network", proxyIP+"/32")
+		require.NoError(t, err, "register the CIDR target that holds the connector proxy address")
+		t.Cleanup(func() {
+			c, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			helpers.DeleteTestTarget(auth.ContextWithTenantString(c, toolTenant), clients.Daemon, cidrTargetID)
+		})
+
+		defID := createToolMissionDefinitionWithInput(t, ctxEnabled, clients.Daemon, "tool-proxy-cidr-e2e", toolName,
+			map[string]string{
+				"target": proxyIP,
+				"ports":  connectorProxyPort,
+				"args":   `["-Pn"]`,
+			})
+
+		runCtx, cancelRun := context.WithTimeout(ctxEnabled, 10*time.Minute)
+		defer cancelRun()
+		eventCh, err := helpers.Subscribe(runCtx, clients.Daemon, defID, cidrTargetID)
+		require.NoError(t, err, "RunMission open for the CIDR target")
+
+		// The scan of a port that drops each packet ends with the state
+		// "filtered", and the mission completes. A completed mission proves
+		// that a sandbox ran the scan, so the drop records have a source.
+		terminal, collected, waitErr := helpers.WaitForTerminal(runCtx, eventCh, 8*time.Minute)
+		require.NoError(t, waitErr, "the scan mission must reach a terminal state")
+		require.Equal(t, "mission_completed", terminal.EventType,
+			"the scan of the connector proxy must run in a sandbox and complete; got %q (reason: %s)",
+			terminal.EventType, failureReason(terminal, collected))
+		t.Logf("the sandbox scanned %s:%s; the workflow checks that the network dropped each packet",
+			proxyIP, connectorProxyPort)
+	})
 }
 
 // createToolMissionDefinition creates a single-node mission definition whose one
-// TOOL node runs the named tool, and returns its id.
+// TOOL node runs the named tool against the loopback scan host, and returns its
+// id.
 func createToolMissionDefinition(t *testing.T, ctx context.Context, daemon daemonpb.DaemonServiceClient, name, tool string) string {
+	t.Helper()
+	return createToolMissionDefinitionWithInput(t, ctx, daemon, name, tool, map[string]string{
+		"target": toolScanHost,
+		"ports":  toolScanPorts,
+	})
+}
+
+// createToolMissionDefinitionWithInput creates a single-node mission definition
+// whose one TOOL node runs the named tool with input, and returns its id.
+func createToolMissionDefinitionWithInput(
+	t *testing.T, ctx context.Context, daemon daemonpb.DaemonServiceClient, name, tool string, input map[string]string,
+) string {
 	t.Helper()
 	resp, err := daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{
 		Definition: &missionpb.MissionDefinition{
@@ -205,10 +279,7 @@ func createToolMissionDefinition(t *testing.T, ctx context.Context, daemon daemo
 					Config: &missionpb.MissionNode_ToolConfig{
 						ToolConfig: &missionpb.ToolNodeConfig{
 							ToolName: tool,
-							Input: map[string]string{
-								"target": toolScanHost,
-								"ports":  toolScanPorts,
-							},
+							Input:    input,
 						},
 					},
 				},
