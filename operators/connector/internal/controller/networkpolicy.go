@@ -31,6 +31,12 @@ import (
 // which equals the ConnectorInstance name. The policy selects on that label,
 // so it covers both the proxy pod and the server pod.
 //
+// The policy opens no egress to the daemon. A connector runs third-party MCP
+// server code, and no runner is given a daemon address. The daemon admits only
+// the belief trainer of a tenant namespace (charts daemon-tenant-callers), so
+// an egress rule here would name a flow that nothing makes and the daemon
+// refuses (charts#519).
+//
 // NetworkPolicies union, so this ADDS to the default-deny baseline; it does not
 // replace it. It has no egress rule to a public address: the egress to a
 // vendor host is the CiliumNetworkPolicy of the connector, which names each
@@ -103,10 +109,6 @@ func desiredNetworkPolicy(ci *connectorv1alpha1.ConnectorInstance) *networkingv1
 						{Protocol: &udp, Port: &dns}, {Protocol: &tcpProto, Port: &dns},
 					},
 				},
-				// The daemon, for any gibson callback the runner makes.
-				{To: daemonPeer, Ports: []networkingv1.NetworkPolicyPort{
-					tcp(mcpProxyPort), tcp(50002), tcp(50100),
-				}},
 			},
 		},
 	}

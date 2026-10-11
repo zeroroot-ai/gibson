@@ -99,6 +99,24 @@ func TestNetworkPolicyHasNoPublicEgress(t *testing.T) {
 	}
 }
 
+// The owned NetworkPolicy opens no egress to the daemon namespace: a
+// connector runs third-party MCP server code, and the daemon admits no
+// connector pod (charts#519).
+func TestNetworkPolicyHasNoDaemonEgress(t *testing.T) {
+	np := desiredNetworkPolicy(hostedInstance("gh", "tenant-acme"))
+	for _, rule := range np.Spec.Egress {
+		for _, peer := range rule.To {
+			if peer.NamespaceSelector == nil {
+				continue
+			}
+			if ns := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; ns == daemonNamespace {
+				t.Errorf("egress rule to the daemon namespace %q on %d port(s): no runner calls the daemon",
+					ns, len(rule.Ports))
+			}
+		}
+	}
+}
+
 // The reconcile creates the policy, updates it when the list changes, and
 // deletes it when the list becomes empty. A connector with an empty list has
 // no policy, so it reaches no public host.
