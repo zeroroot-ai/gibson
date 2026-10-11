@@ -300,11 +300,12 @@ jobs:
       # from tests/fixtures/mcp-tools in this run and loaded into kind. The
       # connector operator turns it into a ToolHive MCPServer.
       #
-      # The proxy admits only the JWT-SVID of the daemon (ADR-0065, D22,
+      # The proxy admits only the JWT-SVID of the daemon (ADR-0114, D22,
       # operators/connector/internal/controller/proxyauth.go). So the test
-      # first asserts that the proxy answers 401 to a call with no token
-      # (gibson#723). Then it reads the tool list and probes the egress on
-      # the MCP server Pod itself, behind the proxy.
+      # first asserts that the proxy refuses a call with no token and a call
+      # with a token for another audience, and accepts the token of the
+      # daemon (gibson#723). Then it reads the tool list and probes the
+      # egress through the proxy with the token of the daemon.
       - name: Start the fixture Hosted connector and read its tool list
         working-directory: gibson
         run: |
@@ -333,42 +334,37 @@ jobs:
             curl -s -o /dev/null http://127.0.0.1:18080/ && break
             sleep 1
           done
-          # A call with no token gets 401. Any other code fails the step: 200
-          # is an open proxy, and 000 means that the call reached nothing.
-          code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST http://127.0.0.1:18080/mcp \
-            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"gibson-exit-test","version":"1"}}}' || true)
-          kill "$pf" || true
-          if [ "$code" != 401 ]; then
-            echo "::error::the connector proxy answered ${code} to a call with no token, want 401"
+          # The proxy accepts only the daemon (ADR-0114). SPIRE mints a
+          # JWT-SVID of the daemon for the proxy audience, and one for
+          # another audience. A call with no token and a call with the second
+          # token are refused, and the first is accepted. Each later call of
+          # this step carries the token of the daemon.
+          daemon_id=$(kubectl -n "$NS" get deploy -o json \
+            | jq -r '[.items[].spec.template.spec.containers[].env[]? | select(.name == "GIBSON_DAEMON_SPIFFE_ID") | .value][0] // empty')
+          spire_pod=$(kubectl -n "$NS" get pod -l app.kubernetes.io/name=server,app.kubernetes.io/component=server -o name | head -n1)
+          if [ -z "$daemon_id" ] || [ -z "$spire_pod" ]; then
+            echo "::error::no daemon SPIFFE ID ('${daemon_id}') or no SPIRE server pod ('${spire_pod}') in ${NS}"
             exit 1
           fi
-          echo "the connector proxy refuses a call with no token (401)"
-          # The MCP server Pod is the Pod of the StatefulSet that ToolHive
-          # makes, with the label toolhive-name that the egress policy of the
-          # operator selects. It listens on the mcpPort of the MCPServer, 8080.
-          mcp_pod=$(kubectl -n tenant-connector-e2e get pods -l toolhive-name=fixture-mcp-tools \
-            -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].kind=="StatefulSet")]}{.metadata.name}{"\n"}{end}' | head -1)
-          if [ -z "$mcp_pod" ] || ! kubectl -n tenant-connector-e2e wait --for=condition=Ready "pod/${mcp_pod}" --timeout=120s; then
-            echo "::error::the MCP server Pod of the fixture connector is not Ready (pod '${mcp_pod}')"
-            kubectl -n tenant-connector-e2e get statefulset,deployment,pods -o wide --show-labels || true
-            exit 1
-          fi
-          kubectl -n tenant-connector-e2e port-forward "pod/${mcp_pod}" 18081:8080 >/tmp/pf-mcp.log 2>&1 &
-          pf=$!
-          for _ in $(seq 1 30); do
-            curl -s -o /dev/null http://127.0.0.1:18081/ && break
-            sleep 1
-          done
+          mint() {
+            kubectl -n "$NS" exec "$spire_pod" -c spire-server -- \
+              spire-server jwt mint -spiffeID "$daemon_id" -audience "$1" -ttl 10m | tr -d '[:space:]'
+          }
+          daemon_token=$(mint gibson-connector-proxy)
+          other_token=$(mint another-audience)
+          echo "::add-mask::${daemon_token}"
+          echo "::add-mask::${other_token}"
           status=0
-          bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18081/mcp || status=$?
+          bash tests/fixtures/mcp-tools/check-caller-auth.sh http://127.0.0.1:18080/mcp "$daemon_token" "$other_token" || status=$?
+          export MCP_BEARER="$daemon_token"
+          [ "$status" -eq 0 ] && { bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18080/mcp || status=$?; }
           # The egress of the connector follows its host list (ADR-0114,
           # gibson#758): the operator wrote its CiliumNetworkPolicy, the listed
           # host opens, and a public host outside the list does not.
           if [ "$status" -eq 0 ]; then
             kubectl -n tenant-connector-e2e get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
-            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18081/mcp example.com:443 reachable || status=$?
-            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18081/mcp example.org:443 unreachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
           fi
           kill "$pf" || true
           exit "$status"
@@ -429,6 +425,65 @@ jobs:
             exit 1
           fi
           echo "plugin Deployment in $PLUGIN_NS runs $img"
+
+      # The egress of a plugin instance is its host list (ADR-0136): the
+      # tenant operator writes a CiliumNetworkPolicy with DNS, each host of
+      # the catalog entry and the edge host. An
+      # ephemeral container in the plugin pod shares its network, so the
+      # policy of the plugin applies to it. The listed host answers, and a
+      # public host outside the list gets no connection (curl exit 28).
+      - name: The plugin reaches only the hosts of its catalog entry
+        if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
+        env:
+          # kubectl debug --custom needs this before kubectl 1.31.
+          KUBECTL_DEBUG_CUSTOM_PROFILE: "true"
+        run: |
+          set -euo pipefail
+          pod=$(kubectl -n "$PLUGIN_NS" get pods -l gibson.zeroroot.ai/plugin=github \
+                  --field-selector=status.phase=Running -o name | head -n1)
+          if [ -z "$pod" ]; then
+            echo "::error::no running GitHub plugin pod in ${PLUGIN_NS}"
+            exit 1
+          fi
+          pod=${pod#pod/}
+          allowed=$(sed -n '/^egressAllow:/,/^[a-z]/s/^  - \([^:]*\):443$/\1/p' \
+                      gibson/internal/platform/componentcatalog/manifests/github-plugin.yaml | head -n1)
+          if [ -z "$allowed" ]; then
+            echo "::error::the GitHub plugin catalog entry lists no host on port 443"
+            exit 1
+          fi
+          # The plugin namespace enforces the restricted Pod Security
+          # Standard, so the probe runs as a numeric user that is not root.
+          cat > /tmp/egress-probe.json <<'JSON'
+          {"securityContext":{"runAsNonRoot":true,"runAsUser":100,"allowPrivilegeEscalation":false,
+            "capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}}
+          JSON
+          # probe prints the curl exit code of one connection from the pod.
+          probe() {
+            local name=$1 host=$2 rc=""
+            kubectl -n "$PLUGIN_NS" debug "pod/$pod" -c "$name" --image=ghcr.io/zeroroot-ai/mirror/curl:8.10.1 \
+              --profile=restricted --custom=/tmp/egress-probe.json -- \
+              sh -c "curl -sS -o /dev/null --connect-timeout 8 --max-time 12 https://${host}/ >/dev/null 2>&1; echo rc=\$?" >/dev/null
+            for _ in $(seq 1 30); do
+              rc=$(kubectl -n "$PLUGIN_NS" logs "$pod" -c "$name" 2>/dev/null | sed -n 's/^rc=//p' | tail -n1)
+              [ -n "$rc" ] && break
+              sleep 2
+            done
+            echo "${rc:-none}"
+          }
+          rc=$(probe egress-allowed "$allowed")
+          case "$rc" in
+            0|35|56|60) echo "the listed host ${allowed} answered the plugin pod (curl exit ${rc})" ;;
+            *)
+              echo "::error::the plugin pod could not reach its listed host ${allowed} (curl exit ${rc}); the probe looked at nothing"
+              exit 1 ;;
+          esac
+          rc=$(probe egress-refused example.org)
+          if [ "$rc" != "28" ]; then
+            echo "::error::the plugin pod reached example.org, a host outside its list (curl exit ${rc}, want 28)"
+            exit 1
+          fi
+          echo "a host outside the list got no connection (curl exit 28)"
 
       # always(), not failure(): a job that hits timeout-minutes is
       # cancelled, and a cancelled job skips failure() steps, so the

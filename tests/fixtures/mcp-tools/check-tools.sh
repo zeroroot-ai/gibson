@@ -10,18 +10,22 @@ url=${1:?usage: $0 <mcp-url> [expected-file]}
 expected=${2:-$(dirname "$0")/expected-tools.txt}
 hdr=$(mktemp); trap 'rm -f "$hdr"' EXIT
 accept='Accept: application/json, text/event-stream'
+# The proxy of a connector accepts only the JWT-SVID of the daemon
+# (ADR-0114). MCP_BEARER carries that token when the caller has one.
+auth=()
+[ -n "${MCP_BEARER:-}" ] && auth=(-H "Authorization: Bearer ${MCP_BEARER}")
 
 # The JSON of a response, from a JSON body or from the data line of an SSE body.
 body_json() { sed -n 's/^data: //p; /^{/p' | head -1; }
 
-curl -fsS -D "$hdr" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+curl -fsS "${auth[@]}" -D "$hdr" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"gibson-exit-test","version":"1"}}}' >/dev/null
 session=$(sed -n 's/^[Mm]cp-[Ss]ession-[Ii]d: *\([^[:space:]]*\).*/\1/p' "$hdr" | head -1)
 sh=()
 [ -n "$session" ] && sh=(-H "Mcp-Session-Id: $session")
-curl -fsS "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+curl -fsS "${auth[@]}" "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d '{"jsonrpc":"2.0","method":"notifications/initialized"}' >/dev/null
-got=$(curl -fsS "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
+got=$(curl -fsS "${auth[@]}" "${sh[@]}" -H 'Content-Type: application/json' -H "$accept" -X POST "$url" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | body_json | jq -r '.result.tools[].name')
 want=$(grep -v '^#' "$expected" | sed '/^$/d')
 if [ "$got" != "$want" ]; then
