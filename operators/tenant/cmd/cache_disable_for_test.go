@@ -134,11 +134,10 @@ func TestCacheDisableForParity_FailsOnAnUnknownAPIImport(t *testing.T) {
 // "<alias>.<Kind>", with the first file (relative to root) where it occurs.
 // It also returns each k8s.io/api import whose alias and path are not a pair
 // of apiAliases.
-func usedAPIKinds(t *testing.T, root string) (map[string]string, []string) {
+func usedAPIKinds(t *testing.T, root string) (used map[string]string, unknown []string) {
 	t.Helper()
 	known := clientgoscheme.Scheme.AllKnownTypes()
-	used := map[string]string{}
-	var unknown []string
+	used = map[string]string{}
 	fset := token.NewFileSet()
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
