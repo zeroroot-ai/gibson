@@ -65,7 +65,7 @@ func newFakeReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant) (*TenantReco
 		Client:               fakeClient,
 		Scheme:               scheme,
 		Runner:               runner,
-		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform"),
 		// Production always injects the daemon client as the reporter
 		// (cmd/main.go).
 		StatusReporter: &stubReporter{},
@@ -239,12 +239,12 @@ func TestReconcile_NetworkPolicy_NoBoltGrantOnDefaultDeny(t *testing.T) {
 	}
 }
 
-// TestReconcile_NetworkPolicy_DaemonEgressIsPodScoped verifies that the egress
-// rule opening the daemon ports selects the daemon pod, not merely the platform
-// namespace. A namespaceSelector on its own permits a tenant workload to reach
-// every pod in the platform namespace on those ports — Postgres, Redis,
-// OpenFGA, Zitadel, OpenBao and Envoy all live there.
-func TestReconcile_NetworkPolicy_DaemonEgressIsPodScoped(t *testing.T) {
+// TestReconcile_NetworkPolicy_EgressIsDNSOnly verifies that the default-deny
+// policy of a tenant namespace opens egress to kube-system DNS on port 53 and
+// to nothing else. No workload it selects calls the daemon (charts#519): a
+// connector runs third-party MCP server code, and the belief trainer has its
+// own policy.
+func TestReconcile_NetworkPolicy_EgressIsDNSOnly(t *testing.T) {
 	tenant := &gibsonv1alpha1.Tenant{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "acme",
@@ -268,32 +268,35 @@ func TestReconcile_NetworkPolicy_DaemonEgressIsPodScoped(t *testing.T) {
 		t.Fatalf("networkpolicy missing: %v", err)
 	}
 
-	foundDaemonEgress := false
-	for _, rule := range np.Spec.Egress {
+	if len(np.Spec.Egress) == 0 {
+		t.Fatal("the policy has no egress rule, so DNS is closed")
+	}
+	dnsRules := 0
+	for i, rule := range np.Spec.Egress {
+		// A rule with no peer reaches any destination, and a rule with no
+		// port reaches any port. Neither may pass for want of a loop.
+		if len(rule.To) == 0 || len(rule.Ports) == 0 {
+			t.Errorf("egress rule %d lists no peer or no port, so it opens any destination or any port", i)
+			continue
+		}
+		dnsRules++
+		for _, peer := range rule.To {
+			ns := ""
+			if peer.NamespaceSelector != nil {
+				ns = peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
+			}
+			if ns != "kube-system" || peer.PodSelector != nil || peer.IPBlock != nil {
+				t.Errorf("egress rule %d opens a peer that is not kube-system DNS: %+v", i, peer)
+			}
+		}
 		for _, port := range rule.Ports {
-			if port.Port == nil || port.Port.IntValue() != 50002 {
-				continue
-			}
-			foundDaemonEgress = true
-			if len(rule.To) == 0 {
-				t.Fatal("daemon egress rule has no To peers")
-			}
-			for i, peer := range rule.To {
-				if peer.NamespaceSelector == nil {
-					t.Errorf("daemon egress peer %d missing NamespaceSelector", i)
-				}
-				if peer.PodSelector == nil {
-					t.Errorf("daemon egress peer %d missing PodSelector — rule permits egress to the whole platform namespace", i)
-					continue
-				}
-				if got := peer.PodSelector.MatchLabels["app.kubernetes.io/component"]; got != "daemon" {
-					t.Errorf("daemon egress peer %d PodSelector component = %q, want daemon", i, got)
-				}
+			if port.Port == nil || port.Port.IntValue() != 53 {
+				t.Errorf("egress rule %d opens a port that is not DNS: %v", i, port.Port)
 			}
 		}
 	}
-	if !foundDaemonEgress {
-		t.Error("NetworkPolicy has no egress rule for the daemon gRPC port")
+	if dnsRules == 0 {
+		t.Error("no egress rule opens kube-system DNS")
 	}
 }
 
@@ -342,7 +345,7 @@ func TestReconcile_CorrelationID_FromAnnotation(t *testing.T) {
 		Client:               fakeClient,
 		Scheme:               scheme,
 		Runner:               runner,
-		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform"),
 		StatusReporter:       &stubReporter{},
 	}
 
@@ -395,7 +398,7 @@ func TestReconcile_CorrelationID_EmptyWhenMissing(t *testing.T) {
 		Client:               fakeClient,
 		Scheme:               scheme,
 		Runner:               runner,
-		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform"),
 		StatusReporter:       &stubReporter{},
 	}
 

@@ -105,12 +105,11 @@ type NamespaceProvisioner struct {
 
 	Client            client.Client
 	PlatformNamespace string // e.g. "gibson-platform"
-	DaemonPorts       []int  // e.g. {50002, 50100, 8080}
 }
 
 // NewNamespaceProvisioner builds a step-shaped NamespaceProvisioner with
 // the canonical Name + Condition + capability declarations.
-func NewNamespaceProvisioner(c client.Client, platformNamespace string, daemonPorts []int) *NamespaceProvisioner {
+func NewNamespaceProvisioner(c client.Client, platformNamespace string) *NamespaceProvisioner {
 	return &NamespaceProvisioner{
 		StepBase: saga.StepBase{
 			N:    "ProvisionNamespace",
@@ -119,7 +118,6 @@ func NewNamespaceProvisioner(c client.Client, platformNamespace string, daemonPo
 		},
 		Client:            c,
 		PlatformNamespace: platformNamespace,
-		DaemonPorts:       daemonPorts,
 	}
 }
 
@@ -219,62 +217,16 @@ func (p *NamespaceProvisioner) ensureNamespace(ctx context.Context, t *gibsonv1a
 	return nil
 }
 
-// The daemon pod's identifying label in the platform namespace. Both the
-// Neo4j ingress rule and the daemon egress rule select on it, so they are
-// named once — a NetworkPolicy peer that drops the pod selector silently
-// widens to the whole namespace, and that is not visible at a glance.
-const (
-	daemonComponentLabel = "app.kubernetes.io/component"
-	daemonComponentValue = "daemon"
-)
-
-// defaultDaemonEgressPorts are the daemon ports a tenant-namespace workload may
-// dial. Keep this list minimal — every entry is a hole in the tenant's
-// default-deny egress:
-//
-//   - 50002 — daemon gRPC API (config default GRPCAddress "localhost:50002").
-//     NOTE: the Helm chart publishes the daemon's gRPC Service on 50051, so
-//     this default is stale for chart-based installs. It is left as-is here
-//     because the operator's DaemonPorts field is the intended override point
-//     and correcting the number is a deploy-side change, not an operator one.
-//   - 50100 — registration gRPC listener (infra/config: RegistrationPort).
-//   - 8080  — daemon health/readiness HTTP (daemon.go: healthPort default).
-//     Egress to a health endpoint is not something a tenant workload needs;
-//     it is a candidate for removal once a cluster confirms nothing dials it.
-//
-// Narrowing the list is a separate change from narrowing the peer, and is
-// tracked as follow-up on gibson#1229.
-var defaultDaemonEgressPorts = []int{50002, 50100, 8080}
+// The default-deny policy of a tenant namespace opens no egress to the
+// daemon. No workload that it selects calls the daemon: a connector runs
+// third-party MCP server code and gets no daemon address, and the belief
+// trainer, the one tenant-namespace caller, has its own policy and is
+// excluded below. The chart admits only the trainer at the daemon
+// (daemon-tenant-callers). The rule that opened 50002, 50100 and 8080 named
+// flows that nothing makes, on ports that a runner cannot use, so it is
+// deleted (D78, charts#519).
 
 func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName string) error {
-	platformNs := p.PlatformNamespace
-	if platformNs == "" {
-		platformNs = "gibson-platform"
-	}
-	daemonPorts := p.DaemonPorts
-	if len(daemonPorts) == 0 {
-		daemonPorts = defaultDaemonEgressPorts
-	}
-	// Egress peer for the daemon ports. NamespaceSelector AND PodSelector — a
-	// namespaceSelector on its own permits egress to EVERY pod in the platform
-	// namespace on these ports, not just the daemon. The platform namespace
-	// also holds Postgres, Redis, OpenFGA, Zitadel, OpenBao and Envoy, so the
-	// broad form let any tenant workload probe the platform's own datastores.
-	// This mirrors the Neo4j ingress rule below, which already ANDs the two.
-	daemonPeer := []networkingv1.NetworkPolicyPeer{{
-		NamespaceSelector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{"kubernetes.io/metadata.name": platformNs},
-		},
-		PodSelector: &metav1.LabelSelector{
-			MatchLabels: map[string]string{daemonComponentLabel: daemonComponentValue},
-		},
-	}}
-	ports := make([]networkingv1.NetworkPolicyPort, 0, len(daemonPorts)+1)
-	for _, port := range daemonPorts {
-		p := intstr.FromInt(port)
-		proto := corev1.ProtocolTCP
-		ports = append(ports, networkingv1.NetworkPolicyPort{Protocol: &proto, Port: &p})
-	}
 	// DNS
 	dnsPort := intstr.FromInt(53)
 	protoTCP := corev1.ProtocolTCP
@@ -333,10 +285,6 @@ func (p *NamespaceProvisioner) ensureNetworkPolicy(ctx context.Context, nsName s
 				// would grant nothing while reading as though it did.
 			},
 			Egress: []networkingv1.NetworkPolicyEgressRule{
-				{
-					To:    daemonPeer,
-					Ports: ports,
-				},
 				{
 					To: []networkingv1.NetworkPolicyPeer{kubeSystemPeer},
 					Ports: []networkingv1.NetworkPolicyPort{
