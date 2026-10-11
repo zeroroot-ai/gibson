@@ -15,6 +15,7 @@ import (
 
 	fgasdk "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
+	"github.com/openfga/go-sdk/credentials"
 	"github.com/openfga/language/pkg/go/transformer"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -27,6 +28,13 @@ import (
 // the hand-coded model in integration_helpers_test.go remains for legacy
 // client_integration_test.go coverage only.
 func loadModelFromDSL(t *testing.T, ctx context.Context, baseURL, storeID string) string {
+	t.Helper()
+	return loadModelFromDSLWithKey(t, ctx, baseURL, storeID, "")
+}
+
+// loadModelFromDSLWithKey is loadModelFromDSL against an OpenFGA that runs
+// with the preshared key method. An empty key sends no key.
+func loadModelFromDSLWithKey(t *testing.T, ctx context.Context, baseURL, storeID, key string) string {
 	t.Helper()
 
 	// Locate model.fga relative to the test package (which runs in this
@@ -59,10 +67,17 @@ func loadModelFromDSL(t *testing.T, ctx context.Context, baseURL, storeID string
 	}
 	require.NoError(t, json.Unmarshal(jsonBytes, &payload), "unmarshal into SDK types")
 
-	c, err := fgaclient.NewSdkClient(&fgaclient.ClientConfiguration{
+	cfg := &fgaclient.ClientConfiguration{
 		ApiUrl:  baseURL,
 		StoreId: storeID,
-	})
+	}
+	if key != "" {
+		cfg.Credentials = &credentials.Credentials{
+			Method: credentials.CredentialsMethodApiToken,
+			Config: &credentials.Config{ApiToken: key},
+		}
+	}
+	c, err := fgaclient.NewSdkClient(cfg)
 	require.NoError(t, err)
 
 	req := fgaclient.ClientWriteAuthorizationModelRequest{

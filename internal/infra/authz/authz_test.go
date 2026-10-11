@@ -13,6 +13,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +23,7 @@ import (
 	"github.com/lestrrat-go/jwx/v2/jwa"
 	"github.com/lestrrat-go/jwx/v2/jwk"
 	"github.com/lestrrat-go/jwx/v2/jwt"
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 )
 
@@ -64,6 +68,7 @@ func TestFGAClient_TimesOutBelowEnvoyBudget(t *testing.T) {
 
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       slow.URL,
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: 100 * time.Millisecond,
@@ -107,6 +112,7 @@ func TestNewFGAClient_RejectsBudgetCeiling(t *testing.T) {
 
 	_, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       "http://gibson-fga:8080",
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: EnvoyExtAuthzBudgetDefault,
@@ -123,6 +129,7 @@ func TestFGAClient_RejectsEmptyFields(t *testing.T) {
 
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint: "http://unused:8080",
+		KeyDir:   testKeyDir(t),
 		StoreID:  testStoreID,
 		ModelID:  testModelID,
 	})
@@ -228,6 +235,7 @@ func TestFGAClient_CircuitOpensOnConsecutiveFailures(t *testing.T) {
 	cbTimeout := 50 * time.Millisecond
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       stalling.URL,
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: perCall,
@@ -287,6 +295,7 @@ func TestFGAClient_CircuitClosesAfterSuccessfulProbe(t *testing.T) {
 	cbTimeout := 80 * time.Millisecond
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       srv.URL,
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: perCall,
@@ -349,6 +358,7 @@ func TestCheck_ForwardsConditionContext(t *testing.T) {
 
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       srv.URL,
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: 2 * time.Second,
@@ -407,6 +417,7 @@ func TestCheck_NoConditionContextOmitsField(t *testing.T) {
 
 	c, err := NewFGAClient(FGAClientOptions{
 		Endpoint:       srv.URL,
+		KeyDir:         testKeyDir(t),
 		StoreID:        testStoreID,
 		ModelID:        testModelID,
 		PerCallTimeout: 2 * time.Second,
@@ -432,5 +443,69 @@ func TestCheck_NoConditionContextOmitsField(t *testing.T) {
 	}
 	if bytes.Contains(got, []byte(`"context"`)) {
 		t.Fatalf("unexpected context field on an unconditioned Check: body=%s", got)
+	}
+}
+
+// testKeyDir writes an OpenFGA key directory (fgakey) and returns its path.
+func testKeyDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// OpenFGA refuses a call with no preshared key, so the client refuses to
+// start without one.
+func TestNewFGAClient_RequiresAKey(t *testing.T) {
+	t.Parallel()
+
+	_, err := NewFGAClient(FGAClientOptions{
+		Endpoint: "http://gibson-fga:8080",
+		StoreID:  testStoreID,
+		ModelID:  testModelID,
+	})
+	if !errors.Is(err, fgakey.ErrNoKey) {
+		t.Fatalf("NewFGAClient with no KeyDir: err %v, want fgakey.ErrNoKey", err)
+	}
+}
+
+// Each Check carries the key as a bearer token, also through a caller's
+// HTTPClient.
+func TestFGAClient_CheckSendsTheKey(t *testing.T) {
+	t.Parallel()
+
+	var (
+		mu   sync.Mutex
+		seen []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("Authorization"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"allowed":true}`))
+	}))
+	defer srv.Close()
+
+	c, err := NewFGAClient(FGAClientOptions{
+		Endpoint:   srv.URL,
+		KeyDir:     testKeyDir(t),
+		StoreID:    testStoreID,
+		ModelID:    testModelID,
+		HTTPClient: &http.Client{Timeout: time.Second},
+	})
+	if err != nil {
+		t.Fatalf("NewFGAClient: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if _, err := c.Check(context.Background(), CheckRequest{User: "user:a", Relation: "member", Object: "tenant:t"}); err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 1 || !strings.EqualFold(seen[0], "Bearer test-key") {
+		t.Fatalf("Authorization headers %q, want one bearer key", seen)
 	}
 }

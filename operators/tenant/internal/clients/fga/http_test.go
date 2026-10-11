@@ -9,8 +9,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 )
@@ -19,7 +22,11 @@ func newHTTPClient(t *testing.T, handler http.HandlerFunc) fga.Client {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	c, err := fga.NewHTTPClient(fga.Config{BaseURL: srv.URL, StoreID: "store-1", ModelID: "model-1"})
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := fga.NewHTTPClient(fga.Config{BaseURL: srv.URL, StoreID: "store-1", ModelID: "model-1", KeyDir: dir})
 	if err != nil {
 		t.Fatalf("NewHTTPClient: %v", err)
 	}

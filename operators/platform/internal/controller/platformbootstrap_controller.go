@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
@@ -135,7 +136,14 @@ func (r *PlatformBootstrapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.ZitadelFactory = DefaultZitadelClientFactory
 	}
 	if r.FGAFactory == nil {
-		r.FGAFactory = fga.New
+		// OpenFGA refuses a call without the preshared key (fgakey).
+		keyDir, err := fgakey.DirFromEnv(os.Getenv)
+		if err != nil {
+			return fmt.Errorf("platformbootstrap: %w", err)
+		}
+		r.FGAFactory = func(apiEndpoint string) (fga.Client, error) {
+			return fga.New(apiEndpoint, keyDir)
+		}
 	}
 	if r.VaultFactory == nil {
 		r.VaultFactory = func(apiEndpoint string, tokenFn vault.TokenFunc) (vault.Client, error) {

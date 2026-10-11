@@ -73,6 +73,7 @@
 //	EXT_AUTHZ_FGA_ADDR               — HTTP endpoint of the OpenFGA server
 //	EXT_AUTHZ_FGA_STORE_ID           — FGA store ID
 //	EXT_AUTHZ_FGA_MODEL_ID           — FGA authorization model ID
+//	GIBSON_FGA_KEY_DIR               — directory of the OpenFGA preshared key
 //	GIBSON_PUBLIC_URL                — optional; base URL used to print the
 //	                                    sign-in path (e.g. https://app.example.com)
 //
@@ -121,6 +122,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp/zitadel"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
@@ -403,14 +405,16 @@ type fgaEnvConfig struct {
 	Addr    string
 	StoreID string
 	ModelID string
+	KeyDir  string
 }
 
-// resolveFgaEnvConfig reads the three required EXT_AUTHZ_FGA_* env vars.
-// Pure and independently testable.
+// resolveFgaEnvConfig reads the three required EXT_AUTHZ_FGA_* env vars and
+// the key directory of fgakey.EnvDir. Pure and independently testable.
 func resolveFgaEnvConfig() (fgaEnvConfig, error) {
 	addr := os.Getenv("EXT_AUTHZ_FGA_ADDR")
 	storeID := os.Getenv("EXT_AUTHZ_FGA_STORE_ID")
 	modelID := os.Getenv("EXT_AUTHZ_FGA_MODEL_ID")
+	keyDir := os.Getenv(fgakey.EnvDir)
 	var missing []string
 	if addr == "" {
 		missing = append(missing, "EXT_AUTHZ_FGA_ADDR")
@@ -421,10 +425,13 @@ func resolveFgaEnvConfig() (fgaEnvConfig, error) {
 	if modelID == "" {
 		missing = append(missing, "EXT_AUTHZ_FGA_MODEL_ID")
 	}
+	if keyDir == "" {
+		missing = append(missing, fgakey.EnvDir)
+	}
 	if len(missing) > 0 {
 		return fgaEnvConfig{}, fmt.Errorf("required env vars not set: %v", missing)
 	}
-	return fgaEnvConfig{Addr: addr, StoreID: storeID, ModelID: modelID}, nil
+	return fgaEnvConfig{Addr: addr, StoreID: storeID, ModelID: modelID, KeyDir: keyDir}, nil
 }
 
 // buildFgaClient constructs the real FGA authorizer. The dial inside
@@ -437,6 +444,7 @@ func buildFgaClient(ctx context.Context) (fgaClient, error) {
 	}
 	az, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  cfg.Addr,
+		KeyDir:    cfg.KeyDir,
 		StoreID:   cfg.StoreID,
 		ModelID:   cfg.ModelID,
 		TimeoutMs: 5000,
@@ -469,6 +477,7 @@ func buildTenantRoleSyncer(ctx context.Context) (tenantRoleAssigner, error) {
 	}
 	az, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  fgaCfg.Addr,
+		KeyDir:    fgaCfg.KeyDir,
 		StoreID:   fgaCfg.StoreID,
 		ModelID:   fgaCfg.ModelID,
 		TimeoutMs: 5000,

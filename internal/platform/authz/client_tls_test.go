@@ -79,6 +79,9 @@ func writeOtherCA(t *testing.T) string {
 
 func checkOnce(t *testing.T, cfg FgaConfig) error {
 	t.Helper()
+	if cfg.KeyDir == "" {
+		cfg.KeyDir = writeKeyDir(t, "test-key")
+	}
 	a, err := NewFgaAuthorizer(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("NewFgaAuthorizer: %v", err)

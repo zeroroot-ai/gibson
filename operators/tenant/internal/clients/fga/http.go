@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 )
@@ -24,7 +25,6 @@ type HTTPClient struct {
 	baseURL *url.URL
 	storeID string
 	modelID string
-	token   string
 	http    *http.Client
 }
 
@@ -41,12 +41,15 @@ func NewHTTPClient(cfg Config) (*HTTPClient, error) {
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
+	hc, err := fgakey.HTTPClient(cfg.KeyDir, &http.Client{Timeout: timeout})
+	if err != nil {
+		return nil, fmt.Errorf("fga: %w: %w", err, clients.ErrInvalidInput)
+	}
 	return &HTTPClient{
 		baseURL: u,
 		storeID: cfg.StoreID,
 		modelID: cfg.ModelID,
-		token:   cfg.APIToken,
-		http:    &http.Client{Timeout: timeout},
+		http:    hc,
 	}, nil
 }
 
@@ -243,9 +246,6 @@ func (c *HTTPClient) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("fga /healthz: %w", err)
@@ -308,9 +308,6 @@ func (c *HTTPClient) doJSON(ctx context.Context, path string, body any, out any)
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("fga: %v: %w", err, clients.ErrUnreachable)

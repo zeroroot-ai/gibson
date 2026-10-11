@@ -5,12 +5,63 @@ package fga
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 )
+
+// testKeyDir writes an OpenFGA key directory (fgakey) and returns its path.
+func testKeyDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// OpenFGA refuses a call with no preshared key, so New refuses a key
+// directory with no key.
+func TestNew_RequiresAKey(t *testing.T) {
+	if _, err := New("http://fga:8080", t.TempDir()); !errors.Is(err, fgakey.ErrNoKey) {
+		t.Fatalf("New with an empty key directory: err %v, want fgakey.ErrNoKey", err)
+	}
+}
+
+// Each request of the model load carries the key.
+func TestEnsureStore_SendsTheKey(t *testing.T) {
+	var unauthenticated int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stores", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			atomic.AddInt32(&unauthenticated, 1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte(`{"stores":[{"id":"STORE-1","name":"gibson"}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	c, err := New(srv.URL, testKeyDir(t))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	id, err := c.EnsureStore(context.Background(), "gibson")
+	if err != nil || id != "STORE-1" {
+		t.Fatalf("EnsureStore = %q, %v", id, err)
+	}
+	if n := atomic.LoadInt32(&unauthenticated); n != 0 {
+		t.Fatalf("%d requests had no key", n)
+	}
+}
 
 // TestWriteTuple_NoOpWhenAlreadyTrue pins WriteTuple's idempotency contract:
 // it Checks first and never calls Write when the tuple already holds, since
@@ -29,7 +80,7 @@ func TestWriteTuple_NoOpWhenAlreadyTrue(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c, err := New(srv.URL)
+	c, err := New(srv.URL, testKeyDir(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -58,7 +109,7 @@ func TestWriteTuple_WritesWhenAbsent(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c, err := New(srv.URL)
+	c, err := New(srv.URL, testKeyDir(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -80,7 +131,7 @@ func TestWriteTuple_CheckErrorPropagates(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := New(srv.URL)
+	c, err := New(srv.URL, testKeyDir(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -102,7 +153,7 @@ func TestWriteTuple_WriteErrorPropagates(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
-	c, err := New(srv.URL)
+	c, err := New(srv.URL, testKeyDir(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -118,7 +169,7 @@ func TestCheck_ReadsAllowedField(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	c, err := New(srv.URL)
+	c, err := New(srv.URL, testKeyDir(t))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

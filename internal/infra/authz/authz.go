@@ -39,6 +39,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sony/gobreaker"
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/infra/resilience"
 )
 
@@ -166,6 +167,11 @@ type FGAClientOptions struct {
 	// rejects any value at or above EnvoyExtAuthzBudgetDefault.
 	PerCallTimeout time.Duration
 
+	// KeyDir is the directory of the OpenFGA preshared key (package
+	// fgakey). Required: each Check carries the key, and OpenFGA refuses a
+	// call without it. The client wraps the transport of HTTPClient.
+	KeyDir string
+
 	// HTTPClient overrides the default HTTP client. If nil, a fresh
 	// client with a Timeout = 2 * PerCallTimeout is used (transport
 	// timeout slightly above per-call so the per-call context
@@ -225,6 +231,10 @@ func NewFGAClient(opts FGAClientOptions) (FGAClient, error) {
 	httpClient := opts.HTTPClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 2 * timeout}
+	}
+	httpClient, err := fgakey.HTTPClient(opts.KeyDir, httpClient)
+	if err != nil {
+		return nil, fmt.Errorf("authz: FGAClientOptions.KeyDir: %w", err)
 	}
 
 	logger := opts.Logger

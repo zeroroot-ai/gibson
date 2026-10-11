@@ -37,6 +37,7 @@ import (
 
 	"log/slog"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/pools"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
@@ -348,11 +349,17 @@ func main() {
 		setupLog.Error(err, "FGA env validation failed")
 		os.Exit(1)
 	}
+	// OpenFGA refuses a call without the preshared key (fgakey).
+	fgaKeyDir, err := fgakey.DirFromEnv(os.Getenv)
+	if err != nil {
+		setupLog.Error(err, "fga client init")
+		os.Exit(1)
+	}
 	fgaHTTP, err := fga.NewHTTPClient(fga.Config{
-		BaseURL:  os.Getenv("FGA_URL"),
-		StoreID:  os.Getenv("FGA_STORE_ID"),
-		ModelID:  os.Getenv("FGA_MODEL_ID"),
-		APIToken: os.Getenv("FGA_API_TOKEN"),
+		BaseURL: os.Getenv("FGA_URL"),
+		StoreID: os.Getenv("FGA_STORE_ID"),
+		ModelID: os.Getenv("FGA_MODEL_ID"),
+		KeyDir:  fgaKeyDir,
 	})
 	if err != nil {
 		setupLog.Error(err, "fga client init")

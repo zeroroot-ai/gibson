@@ -13,10 +13,49 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
+
+// testKeyDir writes an OpenFGA key directory (fgakey) and returns its path.
+func testKeyDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// OpenFGA refuses a call with no preshared key, so the client refuses a key
+// directory with no key.
+func TestNewHTTPClient_RequiresAKey(t *testing.T) {
+	_, err := NewHTTPClient(Config{BaseURL: "http://fga:8080", StoreID: "s", KeyDir: t.TempDir()})
+	if !errors.Is(err, fgakey.ErrNoKey) || !errors.Is(err, clients.ErrInvalidInput) {
+		t.Fatalf("err %v, want fgakey.ErrNoKey and clients.ErrInvalidInput", err)
+	}
+}
+
+// Each write carries the key as a bearer token.
+func TestWrite_SendsTheKey(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	c := newTestHTTPClient(t, srv.URL)
+	if err := c.Write(context.Background(), []Tuple{{User: "user:a", Relation: "member", Object: "tenant:t"}}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if auth != "Bearer test-key" {
+		t.Fatalf("Authorization = %q, want the bearer key", auth)
+	}
+}
 
 // newTestHTTPClient wires the FGA HTTPClient to the given test server URL.
 func newTestHTTPClient(t *testing.T, serverURL string) *HTTPClient {
@@ -25,6 +64,7 @@ func newTestHTTPClient(t *testing.T, serverURL string) *HTTPClient {
 		BaseURL: serverURL,
 		StoreID: "test-store-id",
 		ModelID: "test-model-id",
+		KeyDir:  testKeyDir(t),
 	})
 	if err != nil {
 		t.Fatalf("NewHTTPClient: %v", err)
