@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -15,6 +16,12 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 )
+
+// midWindow is a fixed clock in the middle of a minute. The limiter picks its
+// counter from the minute of the clock, so with the real clock a test that
+// runs across a minute boundary sees the count start again and allows a call
+// that it must refuse. A fixed clock removes that.
+func midWindow() time.Time { return time.Unix(1_700_000_030, 0) }
 
 // newTestClient starts an in-process miniredis server and returns a Redis
 // client wired to it. The server is closed automatically when the test ends.
@@ -31,7 +38,7 @@ func TestTenantLimiter_AllowsUnderLimit(t *testing.T) {
 	limits := map[string]ratelimit.RateLimit{
 		"ExecuteLLM": {RequestsPerMinute: 10},
 	}
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	for i := 0; i < 10; i++ {
@@ -47,7 +54,7 @@ func TestTenantLimiter_BlocksOnEleventhCall(t *testing.T) {
 	limits := map[string]ratelimit.RateLimit{
 		"ExecuteLLM": {RequestsPerMinute: 10},
 	}
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	for i := 0; i < 10; i++ {
@@ -67,7 +74,7 @@ func TestTenantLimiter_TenantsAreIsolated(t *testing.T) {
 	limits := map[string]ratelimit.RateLimit{
 		"ExecuteLLM": {RequestsPerMinute: 5},
 	}
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	// Exhaust tenant-a.
@@ -89,7 +96,7 @@ func TestTenantLimiter_RPCsHaveIndependentBuckets(t *testing.T) {
 		"ExecuteLLM": {RequestsPerMinute: 3},
 		"StreamLLM":  {RequestsPerMinute: 1000},
 	}
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	// Exhaust ExecuteLLM for tenant-a.
@@ -109,7 +116,7 @@ func TestTenantLimiter_RPCsHaveIndependentBuckets(t *testing.T) {
 func TestTenantLimiter_UnknownRPCAlwaysAllowed(t *testing.T) {
 	client := newTestClient(t)
 	limits := map[string]ratelimit.RateLimit{} // empty — no limits configured
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	for i := 0; i < 100; i++ {
@@ -124,7 +131,7 @@ func TestTenantLimiter_EmptyTenantAlwaysAllowed(t *testing.T) {
 	limits := map[string]ratelimit.RateLimit{
 		"ExecuteLLM": {RequestsPerMinute: 1},
 	}
-	limiter := ratelimit.NewRedisLimiter(client, limits)
+	limiter := ratelimit.NewRedisLimiterAt(client, limits, midWindow)
 	ctx := context.Background()
 
 	for i := 0; i < 5; i++ {
@@ -138,7 +145,7 @@ func TestTenantLimiter_EmptyTenantAlwaysAllowed(t *testing.T) {
 // TestProvider=10).
 func TestTenantLimiter_DefaultLimitsApplied(t *testing.T) {
 	client := newTestClient(t)
-	limiter := ratelimit.NewRedisLimiter(client, nil) // use defaults
+	limiter := ratelimit.NewRedisLimiterAt(client, nil, midWindow) // use defaults
 	ctx := context.Background()
 
 	// TestProvider default is 10 — the 11th call should be rate-limited.
@@ -148,4 +155,22 @@ func TestTenantLimiter_DefaultLimitsApplied(t *testing.T) {
 	err := limiter.Check(ctx, "tenant-defaults", "TestProvider")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ratelimit.ErrRateLimited))
+}
+
+// TestTenantLimiter_TheCounterStartsAgainInTheNextMinute documents the fixed
+// window: the budget of a tenant returns when the minute changes.
+func TestTenantLimiter_TheCounterStartsAgainInTheNextMinute(t *testing.T) {
+	client := newTestClient(t)
+	now := midWindow()
+	limiter := ratelimit.NewRedisLimiterAt(client, map[string]ratelimit.RateLimit{
+		"ExecuteLLM": {RequestsPerMinute: 2},
+	}, func() time.Time { return now })
+	ctx := context.Background()
+
+	require.NoError(t, limiter.Check(ctx, "tenant-a", "ExecuteLLM"))
+	require.NoError(t, limiter.Check(ctx, "tenant-a", "ExecuteLLM"))
+	require.ErrorIs(t, limiter.Check(ctx, "tenant-a", "ExecuteLLM"), ratelimit.ErrRateLimited)
+
+	now = now.Add(time.Minute)
+	assert.NoError(t, limiter.Check(ctx, "tenant-a", "ExecuteLLM"), "a new minute has a new budget")
 }
