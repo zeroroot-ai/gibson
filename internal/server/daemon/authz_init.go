@@ -7,10 +7,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
 	pcauthz "github.com/zeroroot-ai/gibson/internal/infra/authz"
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
@@ -95,9 +97,16 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 		"envoy_budget", pcauthz.EnvoyExtAuthzBudgetDefault,
 	)
 
+	// OpenFGA refuses a call without the preshared key (fgakey).
+	keyDir, err := fgakey.DirFromEnv(os.Getenv)
+	if err != nil {
+		return fmt.Errorf("authorization service: %w", err)
+	}
+
 	// Construct the real FGA authorizer.
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:   cfg.Fga.Endpoint,
+		KeyDir:     keyDir,
 		StoreID:    storeID,
 		ModelID:    modelID,
 		TimeoutMs:  cfg.Fga.TimeoutMs,

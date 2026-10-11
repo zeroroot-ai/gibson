@@ -21,8 +21,9 @@ import (
 )
 
 // setupFGAContainer starts an OpenFGA container with in-memory SQLite store.
-// Returns the container, HTTP base URL, and a cleanup function.
-func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string, func()) {
+// Returns the container, HTTP base URL, and a cleanup function. extraArgs go
+// to `openfga run`, for example the preshared key flags.
+func setupFGAContainer(t *testing.T, ctx context.Context, extraArgs ...string) (testcontainers.Container, string, func()) {
 	t.Helper()
 
 	// Check if Docker is available.
@@ -54,7 +55,7 @@ func setupFGAContainer(t *testing.T, ctx context.Context) (testcontainers.Contai
 	const openFGAImage = "ghcr.io/zeroroot-ai/mirror/openfga:v1.21.0"
 	req := testcontainers.ContainerRequest{
 		Image:        openFGAImage,
-		Cmd:          []string{"run", "--datastore-engine", "memory"},
+		Cmd:          append([]string{"run", "--datastore-engine", "memory"}, extraArgs...),
 		ExposedPorts: []string{"8080/tcp"},
 		WaitingFor: wait.ForAll(
 			wait.ForListeningPort("8080/tcp"),
@@ -137,6 +138,7 @@ func TestIntegration_FGA_FiveScenarios(t *testing.T) {
 	// Build the Authorizer under test.
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  baseURL,
+		KeyDir:    writeKeyDir(t, testFGAKey),
 		StoreID:   storeID,
 		ModelID:   modelID,
 		TimeoutMs: 5000,
@@ -200,6 +202,7 @@ func TestIntegration_FGA_EmptyInputReturnsError(t *testing.T) {
 
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  baseURL,
+		KeyDir:    writeKeyDir(t, testFGAKey),
 		StoreID:   storeID,
 		ModelID:   modelID,
 		TimeoutMs: 5000,
@@ -241,6 +244,7 @@ func TestIntegration_FGA_WriteDelete(t *testing.T) {
 
 	a, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  baseURL,
+		KeyDir:    writeKeyDir(t, testFGAKey),
 		StoreID:   storeID,
 		ModelID:   modelID,
 		TimeoutMs: 5000,

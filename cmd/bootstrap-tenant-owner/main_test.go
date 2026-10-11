@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn/zitadelconntest"
@@ -901,16 +903,28 @@ func TestResolveIdpEnvConfig_PartialMissing(t *testing.T) {
 
 // ---- resolveFgaEnvConfig tests -------------------------------------------
 
+// fgaKeyDir writes an OpenFGA key directory (fgakey) and returns its path.
+func fgaKeyDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestResolveFgaEnvConfig_AllPresent(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_FGA_ADDR", "http://fga:8080")
 	t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "store-123")
 	t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "model-456")
+	t.Setenv(fgakey.EnvDir, "/etc/gibson/openfga-key")
 
 	cfg, err := resolveFgaEnvConfig()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.Addr != "http://fga:8080" || cfg.StoreID != "store-123" || cfg.ModelID != "model-456" {
+	if cfg.Addr != "http://fga:8080" || cfg.StoreID != "store-123" || cfg.ModelID != "model-456" ||
+		cfg.KeyDir != "/etc/gibson/openfga-key" {
 		t.Errorf("unexpected cfg: %+v", cfg)
 	}
 }
@@ -923,6 +937,19 @@ func TestResolveFgaEnvConfig_AllMissing(t *testing.T) {
 	_, err := resolveFgaEnvConfig()
 	if err == nil {
 		t.Fatal("expected error when all env vars missing, got nil")
+	}
+}
+
+// The bootstrap Job never calls OpenFGA without the preshared key.
+func TestResolveFgaEnvConfig_KeyDirMissing(t *testing.T) {
+	t.Setenv("EXT_AUTHZ_FGA_ADDR", "http://fga:8080")
+	t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "store-123")
+	t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "model-456")
+	t.Setenv(fgakey.EnvDir, "")
+
+	_, err := resolveFgaEnvConfig()
+	if err == nil || !strings.Contains(err.Error(), fgakey.EnvDir) {
+		t.Fatalf("error = %v, want it to name %s", err, fgakey.EnvDir)
 	}
 }
 
@@ -1021,6 +1048,7 @@ func TestBuildFgaClient_ValidEnv_Succeeds(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_FGA_ADDR", "http://fga.example:8080")
 	t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	t.Setenv(fgakey.EnvDir, fgaKeyDir(t))
 
 	client, err := buildFgaClient(context.Background())
 	if err != nil {
@@ -1037,6 +1065,7 @@ func TestBuildFgaClient_InvalidStoreID_ReturnsWrappedError(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_FGA_ADDR", "http://fga.example:8080")
 	t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "not-a-ulid")
 	t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	t.Setenv(fgakey.EnvDir, fgaKeyDir(t))
 
 	_, err := buildFgaClient(context.Background())
 	if err == nil {

@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 )
 
 var (
@@ -51,15 +53,21 @@ type Client interface {
 	WriteTuple(ctx context.Context, storeID, modelID, user, relation, object string) error
 }
 
-// New returns an HTTP client at the given base URL.
-func New(apiURL string) (Client, error) {
+// New returns an HTTP client at the given base URL. Each request carries the
+// OpenFGA preshared key of keyDir (package fgakey), and New fails when
+// keyDir holds no key.
+func New(apiURL, keyDir string) (Client, error) {
 	u, err := url.Parse(apiURL)
 	if err != nil {
 		return nil, fmt.Errorf("fga: invalid apiURL %q: %w", apiURL, ErrInvalid)
 	}
+	hc, err := fgakey.HTTPClient(keyDir, &http.Client{Timeout: 30 * time.Second})
+	if err != nil {
+		return nil, fmt.Errorf("fga: %w", err)
+	}
 	return &httpClient{
 		baseURL: u,
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http:    hc,
 	}, nil
 }
 

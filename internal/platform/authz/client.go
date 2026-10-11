@@ -21,6 +21,8 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 )
 
 const (
@@ -72,6 +74,11 @@ type FgaConfig struct {
 	// TLSCAFile is the PEM CA bundle that signs the FGA server certificate.
 	// Required when TLSEnabled is true.
 	TLSCAFile string
+
+	// KeyDir is the directory of the OpenFGA preshared key (package
+	// fgakey). Required: each request carries the key, and OpenFGA refuses
+	// a request without it.
+	KeyDir string
 
 	// Logger for structured log output. Defaults to slog.Default() if nil.
 	Logger *slog.Logger
@@ -126,13 +133,17 @@ func NewFgaAuthorizer(_ context.Context, cfg FgaConfig) (Authorizer, error) {
 	if err != nil {
 		return nil, err
 	}
+	keyed, err := fgakey.Transport(cfg.KeyDir, transport)
+	if err != nil {
+		return nil, newInvalidArgumentError(fmt.Sprintf("FgaConfig.KeyDir: %v", err))
+	}
 
 	clientCfg := &fgaclient.ClientConfiguration{
 		ApiUrl:               endpoint,
 		StoreId:              cfg.StoreID,
 		AuthorizationModelId: cfg.ModelID,
 		HTTPClient: &http.Client{
-			Transport: transport,
+			Transport: keyed,
 			Timeout:   time.Duration(timeoutMs) * time.Millisecond * 2, // Transport timeout is 2x the per-call timeout
 		},
 	}

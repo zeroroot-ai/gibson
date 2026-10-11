@@ -9,11 +9,25 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 )
+
+// setKeyDir writes an OpenFGA key directory (fgakey) that holds key and
+// points GIBSON_FGA_KEY_DIR at it.
+func setKeyDir(t *testing.T, key string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte(key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fgakey.EnvDir, dir)
+}
 
 const buildCheckerRegistryYAML = `entries:
   "/test.v1.S/Public":
@@ -38,13 +52,20 @@ func buildCheckerRegistry(t *testing.T) *fga.Registry {
 func TestBuildChecker_RefusesAMissingSetting(t *testing.T) {
 	cases := []struct {
 		name, addr, store, model, want string
+		noKey                          bool
 	}{
-		{"no address", "", "store", "model", "EXT_AUTHZ_FGA_ADDR"},
-		{"no store", "openfga:8080", "", "model", "EXT_AUTHZ_FGA_STORE_ID"},
-		{"no model", "openfga:8080", "store", "", "EXT_AUTHZ_FGA_MODEL_ID"},
+		{"no address", "", "store", "model", "EXT_AUTHZ_FGA_ADDR", false},
+		{"no store", "openfga:8080", "", "model", "EXT_AUTHZ_FGA_STORE_ID", false},
+		{"no model", "openfga:8080", "store", "", "EXT_AUTHZ_FGA_MODEL_ID", false},
+		{"no preshared key", "openfga:8080", "store", "model", fgakey.EnvDir, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.noKey {
+				t.Setenv(fgakey.EnvDir, "")
+			} else {
+				setKeyDir(t, "test-key")
+			}
 			t.Setenv("EXT_AUTHZ_FGA_ADDR", tc.addr)
 			t.Setenv("EXT_AUTHZ_FGA_STORE_ID", tc.store)
 			t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", tc.model)
@@ -69,6 +90,7 @@ func TestBuildChecker_RefusesABadTimeout(t *testing.T) {
 	t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 	t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAW")
 	t.Setenv("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", "10s")
+	setKeyDir(t, "test-key")
 	_, _, err := buildChecker(context.Background(), slog.New(slog.DiscardHandler), buildCheckerRegistry(t))
 	if err == nil {
 		t.Fatal("buildChecker accepted a timeout above the Envoy budget")
@@ -83,6 +105,11 @@ func TestBuildChecker_RefusesABadTimeout(t *testing.T) {
 func TestBuildChecker_SelfCheck(t *testing.T) {
 	t.Run("passes", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// OpenFGA runs with the preshared key method.
+			if r.Header.Get("Authorization") != "Bearer test-key" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
 			if !strings.HasSuffix(r.URL.Path, "/check") {
 				http.NotFound(w, r)
 				return
@@ -96,6 +123,7 @@ func TestBuildChecker_SelfCheck(t *testing.T) {
 		t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 		t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAW")
 		t.Setenv("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", "")
+		setKeyDir(t, "test-key")
 
 		var logs bytes.Buffer
 		log := slog.New(slog.NewTextHandler(&logs, nil))
@@ -125,6 +153,7 @@ func TestBuildChecker_SelfCheck(t *testing.T) {
 		t.Setenv("EXT_AUTHZ_FGA_STORE_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
 		t.Setenv("EXT_AUTHZ_FGA_MODEL_ID", "01ARZ3NDEKTSV4RRFFQ69G5FAW")
 		t.Setenv("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", "")
+		setKeyDir(t, "test-key")
 
 		_, _, err := buildChecker(context.Background(), slog.New(slog.DiscardHandler), buildCheckerRegistry(t))
 		if err == nil {

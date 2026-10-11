@@ -50,6 +50,8 @@
 //	EXT_AUTHZ_FGA_ADDR              REQUIRED — missing causes immediate exit(1)
 //	                                (zero-trust-hardening Req 11.1)
 //	EXT_AUTHZ_FGA_STORE_ID          required in production
+//	GIBSON_FGA_KEY_DIR              REQUIRED — the directory of the OpenFGA
+//	                                preshared key (internal/infra/fgakey)
 //	EXT_AUTHZ_FGA_CACHE_TTL         default fga.DefaultCacheTTL (5s)
 //	EXT_AUTHZ_FGA_CACHE_MAX_SIZE    default 100000
 //	EXT_AUTHZ_CGJWT_KEYS_URL        required in production — the daemon per-kid
@@ -133,6 +135,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	"github.com/zeroroot-ai/gibson/internal/infra/authz"
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/otelinit"
 	"github.com/zeroroot-ai/gibson/internal/infra/readiness"
@@ -445,8 +448,15 @@ func buildChecker(ctx context.Context, log *slog.Logger, reg *fga.Registry) (*fg
 
 	perCallTimeout := durationOr("EXT_AUTHZ_FGA_PER_CALL_TIMEOUT", 1500*time.Millisecond)
 
+	// OpenFGA refuses a call without the preshared key (fgakey).
+	keyDir, err := fgakey.DirFromEnv(os.Getenv)
+	if err != nil {
+		return nil, nil, fmt.Errorf("ext-authz refuses to start: %w", err)
+	}
+
 	client, err := fga.NewPlatformFGAClient(authz.FGAClientOptions{
 		Endpoint:       fgaAddr,
+		KeyDir:         keyDir,
 		StoreID:        storeID,
 		ModelID:        modelID,
 		PerCallTimeout: perCallTimeout,

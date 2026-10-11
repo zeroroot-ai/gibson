@@ -75,9 +75,11 @@ type Client interface {
 
 // Config holds connection details.
 type Config struct {
-	BaseURL  string
-	StoreID  string
-	ModelID  string
-	APIToken string
-	Timeout  time.Duration
+	BaseURL string
+	StoreID string
+	ModelID string
+	// KeyDir is the directory of the OpenFGA preshared key (package
+	// fgakey). Required: OpenFGA refuses a call without the key.
+	KeyDir  string
+	Timeout time.Duration
 }

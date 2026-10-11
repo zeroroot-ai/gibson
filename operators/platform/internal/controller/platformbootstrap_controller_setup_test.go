@@ -38,6 +38,18 @@ func TestPlatformBootstrapReconciler_ReadsTheZitadelURL(t *testing.T) {
 	_ = r.SetupWithManager(nil)
 }
 
+// The reconciler loads the FGA model only with the OpenFGA preshared key.
+// With no key directory, it does not start.
+func TestPlatformBootstrapReconciler_RequiresTheFGAKeyDir(t *testing.T) {
+	t.Setenv("ZITADEL_URL", "http://gibson-zitadel:8080")
+	t.Setenv("ZITADEL_EXTERNAL_DOMAIN", "app.example.com")
+	t.Setenv("GIBSON_FGA_KEY_DIR", "")
+	err := (&PlatformBootstrapReconciler{Audit: (&audittest.Sink{}).Emitter(t)}).SetupWithManager(nil)
+	if err == nil || !strings.Contains(err.Error(), "GIBSON_FGA_KEY_DIR") {
+		t.Fatalf("SetupWithManager = %v, want the key directory error", err)
+	}
+}
+
 // Neither controller of the platform operator starts without the audit
 // emitter (gibson#583).
 func TestPlatformReconcilers_RefuseToStartWithoutAudit(t *testing.T) {

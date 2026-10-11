@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/fgakey"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/platform/api/v1alpha1"
 	fgaclient "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/fga"
 	zitadel "github.com/zeroroot-ai/gibson/operators/platform/internal/clients/zitadel"
@@ -162,9 +165,19 @@ func newOwnerTestReconciler(t *testing.T, zitadelURL, fgaURL string, objs ...cli
 			return zitadel.New(zitadelURL, pat, "app.example.test")
 		},
 		FGAFactory: func(_ string) (fgaclient.Client, error) {
-			return fgaclient.New(fgaURL)
+			return fgaclient.New(fgaURL, fgaKeyDir(t))
 		},
 	}
+}
+
+// fgaKeyDir writes an OpenFGA key directory (fgakey) and returns its path.
+func fgaKeyDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, fgakey.FileKey), []byte("test-key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func adminPATSecret() *corev1.Secret {

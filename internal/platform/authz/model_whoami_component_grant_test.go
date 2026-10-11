@@ -53,6 +53,7 @@ func TestIntegration_FGA_WhoAmI_ComponentPrincipalGrant(t *testing.T) {
 
 	az, err := authz.NewFgaAuthorizer(ctx, authz.FgaConfig{
 		Endpoint:  baseURL,
+		KeyDir:    writeKeyDir(t, testFGAKey),
 		StoreID:   storeID,
 		ModelID:   modelID,
 		TimeoutMs: 5000,

@@ -8,12 +8,29 @@ package authz_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	fgasdk "github.com/openfga/go-sdk"
 	fgaclient "github.com/openfga/go-sdk/client"
 	"github.com/stretchr/testify/require"
 )
+
+// testFGAKey is the OpenFGA preshared key of the integration tests. The
+// container of setupFGAContainer runs with no authentication and ignores it.
+// The preshared key test starts OpenFGA with this key.
+const testFGAKey = "integration-test-key"
+
+// writeKeyDir writes a key directory (package fgakey) that holds key and no
+// previous key, and returns its path.
+func writeKeyDir(t *testing.T, key string) string {
+	t.Helper()
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "key"), []byte(key), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "key_previous"), nil, 0o600))
+	return dir
+}
 
 // newRawFGAClient creates an FGA SDK client without a store ID (for management operations
 // like CreateStore and WriteAuthorizationModel).
