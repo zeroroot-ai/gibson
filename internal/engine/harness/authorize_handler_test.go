@@ -127,8 +127,17 @@ type stubRunAuthzLookup struct {
 	err   error
 }
 
-func (s *stubRunAuthzLookup) Get(_ context.Context, _ string) (*RunAuthzState, error) {
-	return s.state, s.err
+// Get answers only for the run id of its state. A state with a run id that
+// differs from the one asked for is an unknown run, so a test shows that the
+// run id a handler uses is the one it should.
+func (s *stubRunAuthzLookup) Get(_ context.Context, runID string) (*RunAuthzState, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.state != nil && s.state.RunID != "" && s.state.RunID != runID {
+		return nil, ErrRunNotFound
+	}
+	return s.state, nil
 }
 
 // ---------------------------------------------------------------------------

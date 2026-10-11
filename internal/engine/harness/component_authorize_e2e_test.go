@@ -79,6 +79,19 @@ func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, resp.GetAllowed())
 	})
+	t.Run("the run of the real binding reaches the decision", func(t *testing.T) {
+		// A work item bound to another run is an unknown run for the store, which
+		// answers only for run-1. If the binding were ignored this would be allowed.
+		_, err := queue.Enqueue(context.Background(), "tenant-alpha", "tool", "nmap", component.WorkItem{
+			WorkID: "work-2", WorkType: "execute",
+			Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-other","issued_at":1,"ttl_seconds":600}`},
+		})
+		require.NoError(t, err)
+		_, err = svc.Authorize(authzCtx("tenant-alpha"), &componentpb.AuthorizeRequest{
+			WorkId: "work-2", Action: "execute", Resource: "tool:nmap",
+		})
+		assert.Equal(t, codes.NotFound, grpcCode(err))
+	})
 	t.Run("another tenant cannot use the work item", func(t *testing.T) {
 		_, err := ask(authzCtx("tenant-beta"), "tool:nmap")
 		assert.Equal(t, codes.PermissionDenied, grpcCode(err))
