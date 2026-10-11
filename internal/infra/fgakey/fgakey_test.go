@@ -242,9 +242,85 @@ func TestTransport_FailsClosedWhenTheKeyGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(reloadInterval)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
+	closed := &closeRecorder{Reader: strings.NewReader("x")}
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:1/", closed)
 	if _, err := rt.RoundTrip(req); !errors.Is(err, ErrNoKey) {
 		t.Fatalf("err %v, want ErrNoKey", err)
+	}
+	if !closed.closed {
+		t.Fatal("a refused request kept its body open; a RoundTripper closes it")
+	}
+}
+
+// closeRecorder is a request body that records its Close.
+type closeRecorder struct {
+	io.Reader
+	closed bool
+}
+
+func (c *closeRecorder) Close() error { c.closed = true; return nil }
+
+// failingReader is a request body whose read fails.
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
+
+// A key file that cannot be read for another reason than its absence is an
+// error, and not ErrNoKey: a directory where the previous key belongs, or
+// where the key belongs.
+func TestTransport_AnUnreadableKeyFileFails(t *testing.T) {
+	for _, file := range []string{FileKey, FilePrevious} {
+		dir := t.TempDir()
+		writeKeys(t, dir, "k", "")
+		_ = os.Remove(filepath.Join(dir, file))
+		if err := os.Mkdir(filepath.Join(dir, file), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Transport(dir, nil)
+		if err == nil || errors.Is(err, ErrNoKey) {
+			t.Fatalf("%s is a directory: err %v, want a read error", file, err)
+		}
+	}
+	if _, err := HTTPClient("", nil); !errors.Is(err, ErrNoKey) {
+		t.Fatalf("HTTPClient with no directory: err %v, want ErrNoKey", err)
+	}
+}
+
+// A body that cannot be read for the second send fails the request.
+func TestTransport_ABodyThatCannotBeReadFails(t *testing.T) {
+	dir := t.TempDir()
+	writeKeys(t, dir, "new-key", "old-key")
+	rt, err := Transport(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:1/", io.NopCloser(failingReader{}))
+	req.GetBody = nil
+	if _, err := rt.RoundTrip(req); err == nil || !strings.Contains(err.Error(), "read the request body") {
+		t.Fatalf("err %v, want the body read error", err)
+	}
+}
+
+// When the body cannot be made again for the second send, the 401 stands.
+func TestTransport_NoSecondBodyKeepsThe401(t *testing.T) {
+	dir := t.TempDir()
+	writeKeys(t, dir, "new-key", "old-key")
+	srv := &keyServer{accepted: map[string]bool{"old-key": true}}
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+	rt, err := Transport(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL, strings.NewReader("x"))
+	req.GetBody = func() (io.ReadCloser, error) { return nil, errors.New("no second body") }
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || len(srv.seen) != 1 {
+		t.Fatalf("status %d after %d requests, want the first 401 and no second send", resp.StatusCode, len(srv.seen))
 	}
 }
 
