@@ -331,7 +331,7 @@ func TestWorkRun_ARedisErrorIsNotAnUnknownRun(t *testing.T) {
 
 	_, err := reg.WorkRun(context.Background(), "work-1")
 	require.Error(t, err)
-	assert.NotErrorIs(t, err, ErrWorkRunUnknown, "a broken Redis is not 'no run'; the caller must not read it as a missing run")
+	require.NotErrorIs(t, err, ErrWorkRunUnknown, "a broken Redis is not 'no run'; the caller must not read it as a missing run")
 
 	err = bindWorkRun(context.Background(), client, WorkItem{
 		WorkID: "work-1", Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-1"}`},
