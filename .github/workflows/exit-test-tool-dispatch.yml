@@ -298,8 +298,13 @@ jobs:
       # gibson#811). The catalog has no Hosted connector after gibson#750, so
       # the test applies a fixture ConnectorInstance. Its MCP server is built
       # from tests/fixtures/mcp-tools in this run and loaded into kind. The
-      # connector operator turns it into a ToolHive MCPServer, and the test
-      # calls tools/list through the ToolHive proxy and compares the names.
+      # connector operator turns it into a ToolHive MCPServer.
+      #
+      # The proxy admits only the JWT-SVID of the daemon (ADR-0065, D22,
+      # operators/connector/internal/controller/proxyauth.go). So the test
+      # first asserts that the proxy answers 401 to a call with no token
+      # (gibson#723). Then it reads the tool list and probes the egress on
+      # the MCP server Pod itself, behind the proxy.
       - name: Start the fixture Hosted connector and read its tool list
         working-directory: gibson
         run: |
@@ -328,15 +333,42 @@ jobs:
             curl -s -o /dev/null http://127.0.0.1:18080/ && break
             sleep 1
           done
+          # A call with no token gets 401. Any other code fails the step: 200
+          # is an open proxy, and 000 means that the call reached nothing.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 15 -X POST http://127.0.0.1:18080/mcp \
+            -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"gibson-exit-test","version":"1"}}}' || true)
+          kill "$pf" || true
+          if [ "$code" != 401 ]; then
+            echo "::error::the connector proxy answered ${code} to a call with no token, want 401"
+            exit 1
+          fi
+          echo "the connector proxy refuses a call with no token (401)"
+          # The MCP server Pod is the Pod of the StatefulSet that ToolHive
+          # makes, with the label toolhive-name that the egress policy of the
+          # operator selects. It listens on the mcpPort of the MCPServer, 8080.
+          mcp_pod=$(kubectl -n tenant-connector-e2e get pods -l toolhive-name=fixture-mcp-tools \
+            -o jsonpath='{range .items[?(@.metadata.ownerReferences[0].kind=="StatefulSet")]}{.metadata.name}{"\n"}{end}' | head -1)
+          if [ -z "$mcp_pod" ] || ! kubectl -n tenant-connector-e2e wait --for=condition=Ready "pod/${mcp_pod}" --timeout=120s; then
+            echo "::error::the MCP server Pod of the fixture connector is not Ready (pod '${mcp_pod}')"
+            kubectl -n tenant-connector-e2e get statefulset,deployment,pods -o wide --show-labels || true
+            exit 1
+          fi
+          kubectl -n tenant-connector-e2e port-forward "pod/${mcp_pod}" 18081:8080 >/tmp/pf-mcp.log 2>&1 &
+          pf=$!
+          for _ in $(seq 1 30); do
+            curl -s -o /dev/null http://127.0.0.1:18081/ && break
+            sleep 1
+          done
           status=0
-          bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18080/mcp || status=$?
+          bash tests/fixtures/mcp-tools/check-tools.sh http://127.0.0.1:18081/mcp || status=$?
           # The egress of the connector follows its host list (ADR-0114,
           # gibson#758): the operator wrote its CiliumNetworkPolicy, the listed
           # host opens, and a public host outside the list does not.
           if [ "$status" -eq 0 ]; then
             kubectl -n tenant-connector-e2e get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
-            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
-            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18081/mcp example.com:443 reachable || status=$?
+            bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18081/mcp example.org:443 unreachable || status=$?
           fi
           kill "$pf" || true
           exit "$status"
