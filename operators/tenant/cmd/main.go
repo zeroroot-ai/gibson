@@ -770,11 +770,8 @@ func main() {
 	{
 		// Build the foundation namespace step so it participates in
 		// validation alongside the rest of the graph.
-		nsStep := controller.NewNamespaceProvisioner(mgr.GetClient(), os.Getenv("OPERATOR_NAMESPACE"))
-		all := make([]saga.Step, 0, 1+len(provisionSteps)+len(teardownSteps))
-		all = append(all, nsStep)
-		all = append(all, provisionSteps...)
-		all = append(all, teardownSteps...)
+		all := startupGateSteps(controller.NewNamespaceProvisioner(mgr.GetClient(), os.Getenv("OPERATOR_NAMESPACE")),
+			provisionSteps, teardownSteps)
 		summary, vErr := saga.ValidateAtStartupVerbose(all, psagaDeps)
 		if vErr != nil {
 			setupLog.Error(vErr, "operator startup gate failed")
