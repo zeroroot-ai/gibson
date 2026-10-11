@@ -18,10 +18,11 @@ import (
 // *harness.HarnessCallbackService satisfies it, so the pull transport and the
 // callback transport run one decision (D86).
 type RunAuthorizer interface {
-	// AuthorizeRun returns allowed only on an explicit allow. The error is a
+	// AuthorizeRun returns allowed only on an explicit allow, for a run that
+	// belongs to ownerTenant, the tenant that owns the work item. The error is a
 	// gRPC status: NotFound for an unknown run, FailedPrecondition for a run
 	// that is no longer active, Unavailable when the decision cannot be made.
-	AuthorizeRun(ctx context.Context, runID, action, resource string) (allowed bool, reason string, err error)
+	AuthorizeRun(ctx context.Context, ownerTenant, runID, action, resource string) (allowed bool, reason string, err error)
 }
 
 // WithRunAuthorizer wires the decision that Authorize runs. Without it,
@@ -49,7 +50,8 @@ func (s *ComponentServiceServer) Authorize(
 		return nil, status.Error(codes.InvalidArgument, "authorize: work_id, action and resource are required")
 	}
 	tenant := auth.TenantStringFromContext(ctx)
-	if _, err := s.resolveWorkOwner(ctx, tenant, req.GetWorkId()); err != nil {
+	owner, err := s.resolveWorkOwner(ctx, tenant, req.GetWorkId())
+	if err != nil {
 		return nil, err
 	}
 	if s.runAuthorizer == nil {
@@ -68,7 +70,7 @@ func (s *ComponentServiceServer) Authorize(
 		return nil, status.Error(codes.Unavailable, "authorize: cannot resolve the mission run")
 	}
 
-	allowed, reason, err := s.runAuthorizer.AuthorizeRun(ctx, runID, req.GetAction(), req.GetResource())
+	allowed, reason, err := s.runAuthorizer.AuthorizeRun(ctx, owner, runID, req.GetAction(), req.GetResource())
 	if err != nil {
 		return nil, err //nolint:wrapcheck // the decision returns a gRPC status that the client maps by code
 	}

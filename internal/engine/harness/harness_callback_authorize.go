@@ -244,11 +244,22 @@ func (s *HarnessCallbackService) authorizeRun(
 	return &harnesspb.AuthorizeResponse{Allowed: true, Reason: reason}, nil
 }
 
-// AuthorizeRun runs the decision of the Authorize RPC for a run that the caller
-// names. The component pull service uses it, so that both transports decide
-// the same way. The error is a gRPC status, as for the RPC.
-func (s *HarnessCallbackService) AuthorizeRun(ctx context.Context, runID, action, resource string) (allowed bool, reason string, err error) {
-	resp, rpcErr := s.Authorize(ctx, &harnesspb.AuthorizeRequest{RunId: runID, Action: action, Resource: resource})
+// AuthorizeRun runs the decision of the Authorize RPC for the pull transport.
+// Both transports decide the same way (D86). The caller has already checked that
+// the work item belongs to ownerTenant, and runID comes from the binding that the
+// work queue wrote, so the run must belong to ownerTenant. The owner tenant, not
+// the tenant of the caller, is the rule: a shared component serves the work of
+// many tenants and holds the system tenant itself. A run of another tenant is
+// NotFound, as for the RPC. The error is a gRPC status.
+func (s *HarnessCallbackService) AuthorizeRun(
+	ctx context.Context, ownerTenant, runID, action, resource string,
+) (allowed bool, reason string, err error) {
+	if ownerTenant == "" {
+		return false, "", status.Errorf(codes.PermissionDenied, "authorize: the work item has no owner tenant")
+	}
+	resp, rpcErr := s.authorizeRun(ctx, ownerTenant, "", &harnesspb.AuthorizeRequest{
+		RunId: runID, Action: action, Resource: resource,
+	})
 	if rpcErr != nil {
 		return false, "", rpcErr
 	}

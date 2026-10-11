@@ -6,28 +6,39 @@ package component
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // fakeRunAuthorizer records the run it is asked about and answers as told.
 type fakeRunAuthorizer struct {
 	calls   []string
+	tenants []string
 	allowed bool
 	reason  string
 	err     error
 }
 
-func (f *fakeRunAuthorizer) AuthorizeRun(_ context.Context, runID, action, resource string) (allowed bool, reason string, err error) {
+func (f *fakeRunAuthorizer) AuthorizeRun(_ context.Context, ownerTenant, runID, action, resource string) (allowed bool, reason string, err error) {
 	f.calls = append(f.calls, runID+"|"+action+"|"+resource)
+	f.tenants = append(f.tenants, ownerTenant)
 	return f.allowed, f.reason, f.err
 }
 
@@ -215,4 +226,127 @@ func TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant(t *testing.T) {
 
 	noRun := env.enqueueRun(t, victimTenant, "work-norun", "")
 	assert.Empty(t, env.svc.delegatedAuthzContext(ctxForTenant(victimTenant), victimTenant, noRun))
+}
+
+// TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant proves that the run is
+// decided for the tenant that owns the work item, not for the tenant of the
+// caller. A shared component holds the system tenant and serves many tenants.
+func TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant(t *testing.T) {
+	env := newWorkIDEnv(t)
+	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
+	env.svc.WithRunAuthorizer(fake)
+	workID := env.enqueueRun(t, victimTenant, "work-shared", "run-42")
+
+	resp, err := env.svc.Authorize(auth.ContextWithTenant(context.Background(), auth.SystemTenant), &componentpb.AuthorizeRequest{
+		WorkId: workID, Action: "execute", Resource: "tool:nmap",
+	})
+
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, []string{victimTenant}, fake.tenants, "the owner tenant of the work item decides, not the system tenant")
+}
+
+// TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller runs the real
+// DelegateToAgent over a real queue and a real work-context registry. The agent
+// that claims the delegated item carries the run of its caller, the run is bound
+// to the delegated work id, and its own Authorize resolves to that run.
+func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
+	env := newWorkIDEnv(t)
+	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
+	env.svc.WithRunAuthorizer(fake)
+	env.svc.WithCapabilityChecker(grantedChecker())
+	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
+	const tenant = "test-tenant"
+	source := env.enqueueRun(t, tenant, "work-source", "run-42")
+
+	type claimed struct {
+		item *WorkItem
+		err  error
+	}
+	got := make(chan claimed, 1)
+	go func() {
+		ctx := context.Background()
+		for range 100 {
+			item, err := env.queue.Claim(ctx, tenant, "agent", "recon-agent", "inst-agent", 200*time.Millisecond)
+			if err != nil || item != nil {
+				if item != nil {
+					res := agentpb.ExecuteResponse{Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS}}
+					b, _ := protojson.Marshal(&res)
+					err = env.queue.DeliverResult(ctx, item.WorkID, WorkResult{WorkID: item.WorkID, Result: b})
+				}
+				got <- claimed{item: item, err: err}
+				return
+			}
+		}
+		got <- claimed{err: errors.New("no work item was claimed")}
+	}()
+
+	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
+	require.NoError(t, err)
+	_, err = env.svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
+		WorkId: source, AgentName: "recon-agent", TaskJson: taskJSON,
+	})
+	require.NoError(t, err)
+
+	c := <-got
+	require.NoError(t, c.err)
+	require.NotNil(t, c.item)
+	assert.Contains(t, c.item.Context[authz.AuthzContextWorkKey], "run-42")
+
+	run, err := NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), c.item.WorkID)
+	require.NoError(t, err)
+	assert.Equal(t, "run-42", run)
+
+	resp, err := env.svc.Authorize(ctxForTenant(tenant), &componentpb.AuthorizeRequest{
+		WorkId: c.item.WorkID, Action: "execute", Resource: "tool:nmap",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls)
+}
+
+func TestDelegatedAuthzContext_WithoutARegistryTheAgentGetsNoRun(t *testing.T) {
+	svc := newParityServer()
+	assert.Empty(t, svc.delegatedAuthzContext(context.Background(), "test-tenant", "work-1"))
+}
+
+// brokenRedisEnv returns a work-context registry and queue over a Redis that is
+// already closed, so every command fails.
+func brokenRedisEnv(t *testing.T) (*RedisWorkContextRegistry, redis.UniversalClient) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: -1})
+	t.Cleanup(func() { _ = client.Close() })
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sc.Close() })
+	mr.Close()
+	return NewRedisWorkContextRegistry(sc), client
+}
+
+func TestWorkRun_ARedisErrorIsNotAnUnknownRun(t *testing.T) {
+	reg, client := brokenRedisEnv(t)
+
+	_, err := reg.WorkRun(context.Background(), "work-1")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrWorkRunUnknown, "a broken Redis is not 'no run'; the caller must not read it as a missing run")
+
+	err = bindWorkRun(context.Background(), client, WorkItem{
+		WorkID: "work-1", Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-1"}`},
+	})
+	require.Error(t, err, "a run that cannot be written fails the enqueue")
+}
+
+func TestBindWorkRun_AnAuthzContextWithNoRunBindsNothing(t *testing.T) {
+	env := newWorkIDEnv(t)
+	client := redis.NewClient(&redis.Options{Addr: env.mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	err := bindWorkRun(context.Background(), client, WorkItem{
+		WorkID: "work-x", Context: map[string]string{authz.AuthzContextWorkKey: `{"issued_at":1}`},
+	})
+	require.NoError(t, err)
+	_, err = NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), "work-x")
+	require.ErrorIs(t, err, ErrWorkRunUnknown)
 }

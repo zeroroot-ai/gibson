@@ -426,15 +426,17 @@ func TestAuthorizeRun_IsTheDecisionOfTheRPC(t *testing.T) {
 		{"allow", &stubRunAuthzLookup{state: active}, "tool:nmap", true, codes.OK},
 		{"deny", &stubRunAuthzLookup{state: active}, "tool:sqlmap", false, codes.OK},
 		{"unknown run", &stubRunAuthzLookup{err: ErrRunNotFound}, "tool:nmap", false, codes.NotFound},
-		{"inactive run", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", Status: "completed"}},
+		{"inactive run", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "t", Status: "completed"}},
 			"tool:nmap", false, codes.FailedPrecondition},
+		{"a run of another tenant", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "other", Status: "active"}},
+			"tool:nmap", false, codes.NotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := newAuthorizeService(tc.store, az)
 
-			allowed, reason, err := svc.AuthorizeRun(context.Background(), "run-1", "execute", tc.resource)
-			rpc, rpcErr := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+			allowed, reason, err := svc.AuthorizeRun(context.Background(), "t", "run-1", "execute", tc.resource)
+			rpc, rpcErr := svc.Authorize(authzCtx("t"), &harnesspb.AuthorizeRequest{
 				RunId: "run-1", Action: "execute", Resource: tc.resource,
 			})
 
@@ -447,4 +449,13 @@ func TestAuthorizeRun_IsTheDecisionOfTheRPC(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAuthorizeRun_NeedsAnOwnerTenant proves that a work item with no owner tenant
+// is refused and never reaches the store.
+func TestAuthorizeRun_NeedsAnOwnerTenant(t *testing.T) {
+	svc := newAuthorizeService(&stubRunAuthzLookup{err: errors.New("must not be read")}, newFGABackedAuthorizer())
+	allowed, _, err := svc.AuthorizeRun(context.Background(), "", "run-1", "execute", "tool:nmap")
+	assert.False(t, allowed)
+	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }
