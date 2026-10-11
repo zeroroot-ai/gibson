@@ -37,6 +37,7 @@ func (a *missionAuthzStoreAdapter) Get(ctx context.Context, runID string) (*harn
 	}
 	return &harness.RunAuthzState{
 		RunID:     state.RunID,
+		MissionID: state.MissionID,
 		UserID:    state.UserID,
 		TenantID:  state.TenantID,
 		Status:    state.Status,

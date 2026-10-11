@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -31,6 +32,7 @@ type ComponentAuthzMetrics interface {
 // the harness→mission→eval→harness import cycle.
 type RunAuthzState struct {
 	RunID     string
+	MissionID string
 	UserID    string
 	TenantID  string
 	Status    string // "active", "completed", "cancelled"
@@ -79,13 +81,42 @@ func WithComponentAuthorizer(a authz.Authorizer) CallbackServiceOption {
 // Authorize implements HarnessCallbackService_AuthorizeServer.
 //
 // Flow:
-//  1. Look up run_id in authzStore → NotFound if missing.
+//  0. Take the tenant of the request, and the mission of the task grant if the
+//     request carries one. Refuse a request with no tenant.
+//  1. Look up run_id in authzStore → NotFound if missing, or if the run belongs
+//     to another tenant or another mission than the caller.
 //  2. Verify mission is still active → FailedPrecondition if completed/cancelled.
 //  3. Derive FGA check: user:<user_id> can_<action> <resource>.
 //  4. Call Authorizer.Check → Unavailable if FGA is unreachable.
 //  5. Return AuthorizeResponse{allowed, reason}.
 //  6. Emit audit event with decision.
 func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.AuthorizeRequest) (*harnesspb.AuthorizeResponse, error) {
+	// A run is decided for the tenant that the request resolved to and, when the
+	// request carries a task grant, for the mission of that grant. The run id
+	// comes from the request body, so on its own it proves nothing: without these
+	// two bindings a holder of any grant could ask about the run of another
+	// tenant or another mission.
+	tenant := auth.TenantStringFromContext(ctx)
+	if tenant == "" {
+		return nil, status.Errorf(codes.PermissionDenied, "authorize: the request has no tenant")
+	}
+	wantMission := ""
+	if claims, ok := TaskGrantClaimsFromContext(ctx); ok {
+		if claims.Tenant.String() != tenant {
+			return nil, status.Errorf(codes.PermissionDenied, "authorize: the task grant is for another tenant")
+		}
+		wantMission = claims.MissionID
+	}
+	return s.authorizeRun(ctx, tenant, wantMission, req)
+}
+
+// authorizeRun decides one request. wantTenant is the tenant that the run must
+// belong to. wantMission, when it is not empty, is the mission that the run must
+// belong to. A run of another tenant or mission is refused with the same
+// NotFound as an unknown run, so the answer does not say whether a run exists.
+func (s *HarnessCallbackService) authorizeRun(
+	ctx context.Context, wantTenant, wantMission string, req *harnesspb.AuthorizeRequest,
+) (*harnesspb.AuthorizeResponse, error) {
 	// One-code-path slice deploy#195: authzStore and componentAuthorizer are
 	// required at daemon startup. We deliberately do NOT add a nil-guard here
 	// — the old "graceful Unimplemented" / "graceful allow" branches were
@@ -117,6 +148,15 @@ func (s *HarnessCallbackService) Authorize(ctx context.Context, req *harnesspb.A
 			slog.String("error", err.Error()),
 		)
 		return nil, status.Errorf(codes.Unavailable, "authorize: authz store error")
+	}
+
+	if runState.TenantID != wantTenant || (wantMission != "" && runState.MissionID != wantMission) {
+		s.logger.Warn("authorize: run does not belong to the caller",
+			slog.String("run_id", runID),
+			slog.String("caller_tenant", wantTenant),
+			slog.String("grant_mission", wantMission),
+		)
+		return nil, status.Errorf(codes.NotFound, "authorize: run_id not found")
 	}
 
 	// 2. Verify mission is active.

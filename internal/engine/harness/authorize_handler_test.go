@@ -32,6 +32,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -149,6 +151,11 @@ func newAuthorizeService(
 	)
 }
 
+// authzCtx is the context of a request that resolved to tenant.
+func authzCtx(tenant string) context.Context {
+	return auth.ContextWithTenantString(context.Background(), tenant)
+}
+
 // grpcCode extracts the gRPC status code from an error or returns codes.OK.
 func grpcCode(err error) codes.Code {
 	if err == nil {
@@ -190,7 +197,7 @@ func TestAuthorize_HappyPath(t *testing.T) {
 
 	svc := newAuthorizeService(store, az)
 
-	resp, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+	resp, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 		RunId:    "run-1",
 		Action:   "execute",
 		Resource: "tool:nmap",
@@ -220,7 +227,7 @@ func TestAuthorize_FGADenied(t *testing.T) {
 
 	svc := newAuthorizeService(store, az)
 
-	resp, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+	resp, err := svc.Authorize(authzCtx("tenant-beta"), &harnesspb.AuthorizeRequest{
 		RunId:    "run-2",
 		Action:   "read",
 		Resource: "tool:sqlmap",
@@ -242,7 +249,7 @@ func TestAuthorize_RunNotFound(t *testing.T) {
 
 	svc := newAuthorizeService(store, az)
 
-	_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+	_, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 		RunId:    "unknown-run",
 		Action:   "execute",
 		Resource: "tool:nmap",
@@ -273,7 +280,7 @@ func TestAuthorize_MissionInactive(t *testing.T) {
 
 	svc := newAuthorizeService(store, az)
 
-	_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+	_, err := svc.Authorize(authzCtx("tenant-gamma"), &harnesspb.AuthorizeRequest{
 		RunId:    "run-3",
 		Action:   "execute",
 		Resource: "tool:nmap",
@@ -289,7 +296,7 @@ func TestAuthorize_MissionInactive(t *testing.T) {
 func TestAuthorize_InvalidArguments(t *testing.T) {
 	t.Run("missing run_id", func(t *testing.T) {
 		svc := newAuthorizeService(&stubRunAuthzLookup{}, newFGABackedAuthorizer())
-		_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+		_, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 			Action: "execute", Resource: "tool:nmap",
 		})
 		require.Error(t, err)
@@ -298,7 +305,7 @@ func TestAuthorize_InvalidArguments(t *testing.T) {
 
 	t.Run("missing action", func(t *testing.T) {
 		svc := newAuthorizeService(&stubRunAuthzLookup{}, newFGABackedAuthorizer())
-		_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+		_, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 			RunId: "run-x", Resource: "tool:nmap",
 		})
 		require.Error(t, err)
@@ -307,7 +314,7 @@ func TestAuthorize_InvalidArguments(t *testing.T) {
 
 	t.Run("missing resource", func(t *testing.T) {
 		svc := newAuthorizeService(&stubRunAuthzLookup{}, newFGABackedAuthorizer())
-		_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+		_, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 			RunId: "run-x", Action: "execute",
 		})
 		require.Error(t, err)
@@ -325,7 +332,7 @@ func TestAuthorize_AuthzStoreError(t *testing.T) {
 
 	svc := newAuthorizeService(store, az)
 
-	_, err := svc.Authorize(context.Background(), &harnesspb.AuthorizeRequest{
+	_, err := svc.Authorize(authzCtx("tenant-alpha"), &harnesspb.AuthorizeRequest{
 		RunId:    "run-z",
 		Action:   "execute",
 		Resource: "tool:nmap",
@@ -341,4 +348,62 @@ func TestAuthorize_AuthzStoreError(t *testing.T) {
 // silently skipped by every double that did not implement it.
 func (a *fgaBackedAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
 	return nil, nil
+}
+
+// grantCtx is the context of a request that carries a verified task grant.
+func boundGrantCtx(tenant, mission string) context.Context {
+	return withTaskGrantClaims(authzCtx(tenant), sdkcg.Claims{Tenant: auth.MustNewTenantID(tenant), MissionID: mission})
+}
+
+// TestAuthorize_BindsTheRunToTheCaller proves that the run id of the request body
+// cannot select the run of another tenant or another mission (GHSA-75rw-6f97-w3pm).
+func TestAuthorize_BindsTheRunToTheCaller(t *testing.T) {
+	az := newFGABackedAuthorizer()
+	az.Seed("user:u-1", "can_execute", "component:tool/nmap")
+	store := &stubRunAuthzLookup{state: &RunAuthzState{
+		RunID: "run-1", MissionID: "mission-A", UserID: "u-1", TenantID: "tenant-alpha", Status: "active",
+	}}
+	req := &harnesspb.AuthorizeRequest{RunId: "run-1", Action: "execute", Resource: "tool:nmap"}
+
+	cases := []struct {
+		name string
+		ctx  context.Context
+		code codes.Code
+	}{
+		{"same tenant, no grant", authzCtx("tenant-alpha"), codes.OK},
+		{"same tenant and mission, with a grant", boundGrantCtx("tenant-alpha", "mission-A"), codes.OK},
+		{"a run of another tenant", authzCtx("tenant-beta"), codes.NotFound},
+		{"a run of another tenant, with a grant", boundGrantCtx("tenant-beta", "mission-A"), codes.NotFound},
+		{"a run of another mission, with a grant", boundGrantCtx("tenant-alpha", "mission-B"), codes.NotFound},
+		{"no tenant on the request", context.Background(), codes.PermissionDenied},
+		{"a grant of another tenant than the request", withTaskGrantClaims(authzCtx("tenant-alpha"),
+			sdkcg.Claims{Tenant: auth.MustNewTenantID("tenant-beta"), MissionID: "mission-A"}), codes.PermissionDenied},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newAuthorizeService(store, az)
+			resp, err := svc.Authorize(tc.ctx, req)
+			assert.Equal(t, tc.code, grpcCode(err))
+			if tc.code == codes.OK {
+				require.NoError(t, err)
+				assert.True(t, resp.GetAllowed())
+				return
+			}
+			assert.Nil(t, resp, "a refused request gets no decision")
+		})
+	}
+}
+
+// TestAuthorize_AGrantWithAMissionRefusesARunWithNoMission proves the fail-closed
+// case: a run record from before the mission id was stored cannot be matched to a
+// grant, so it is refused.
+func TestAuthorize_AGrantWithAMissionRefusesARunWithNoMission(t *testing.T) {
+	az := newFGABackedAuthorizer()
+	az.Seed("user:u-1", "can_execute", "component:tool/nmap")
+	store := &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "tenant-alpha", Status: "active"}}
+	svc := newAuthorizeService(store, az)
+
+	_, err := svc.Authorize(boundGrantCtx("tenant-alpha", "mission-A"),
+		&harnesspb.AuthorizeRequest{RunId: "run-1", Action: "execute", Resource: "tool:nmap"})
+	assert.Equal(t, codes.NotFound, grpcCode(err))
 }
