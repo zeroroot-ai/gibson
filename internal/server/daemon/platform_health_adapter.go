@@ -5,34 +5,69 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"sync/atomic"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
-	"github.com/zeroroot-ai/sdk/auth"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
-// secretPlaneProbeAdapter asks the secret source of the platform (the
-// broker of the system tenant) to answer now. It does not read the cached
-// health map, which holds nothing until a secret operation ran and would
-// then report a dead source as healthy (hosted#174).
-type secretPlaneProbeAdapter struct {
-	registry *secrets.Registry
+// openbaoHealthProbe asks the secret backend of the platform, the OpenBao
+// server that the chart configures, to answer now. It calls the health
+// endpoint of the server, with no token and no tenant. It does not read
+// tenant_secrets_broker_config: no row there names the platform backend,
+// and asking the broker of the system tenant made the start gate wait
+// forever on a new install (gibson#1078). A problem of one tenant's broker
+// shows in the health of that tenant, never in the readiness of the daemon.
+type openbaoHealthProbe struct {
+	address string
+	client  *http.Client
 }
 
-var _ api.SecretPlaneProbe = (*secretPlaneProbeAdapter)(nil)
+var _ api.SecretPlaneProbe = (*openbaoHealthProbe)(nil)
 
-func (a *secretPlaneProbeAdapter) Probe(ctx context.Context) error {
-	broker, err := a.registry.For(ctx, auth.SystemTenant)
+// newOpenBaoHealthProbe returns the probe of the configured secret backend.
+// The client trusts the system roots, which include the OpenBao CA through
+// SSL_CERT_DIR. The caller bounds each call with its context.
+func newOpenBaoHealthProbe(address string) *openbaoHealthProbe {
+	return &openbaoHealthProbe{
+		address: strings.TrimRight(address, "/"),
+		client:  &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()},
+	}
+}
+
+// Probe calls /v1/sys/health. A standby answers 200 with standbyok and
+// perfstandbyok set, so only an active or standby server that is
+// initialized and unsealed passes. Every other answer, and silence, fails.
+func (p *openbaoHealthProbe) Probe(ctx context.Context) error {
+	if p.address == "" {
+		return errors.New("security.secret_source.address is not set: the daemon has no secret backend to ask")
+	}
+	url := p.address + "/v1/sys/health?standbyok=true&perfstandbyok=true"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("open the system-tenant broker: %w", err)
+		return fmt.Errorf("build the health request of %s: %w", p.address, err)
 	}
-	if err := broker.Health(ctx); err != nil {
-		return fmt.Errorf("system-tenant broker health: %w", err)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ask the secret backend %s: %w", p.address, err)
 	}
-	return nil
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotImplemented:
+		return fmt.Errorf("the secret backend %s is not initialized (status 501)", p.address)
+	case http.StatusServiceUnavailable:
+		return fmt.Errorf("the secret backend %s is sealed (status 503)", p.address)
+	default:
+		return fmt.Errorf("the secret backend %s answered status %d", p.address, resp.StatusCode)
+	}
 }
 
 // secretSourceReadiness is the readiness check of the secret source. It is
@@ -51,11 +86,31 @@ func secretSourceReadiness(probe api.SecretPlaneProbe) func(context.Context) sdk
 		switch {
 		case err == nil:
 			passed.Store(true)
-			return sdktypes.NewHealthyStatus("broker: the system-tenant secret source answered")
+			return sdktypes.NewHealthyStatus("broker: the secret backend answered")
 		case !passed.Load():
-			return sdktypes.NewUnhealthyStatus("broker: the system-tenant secret source has not answered since start: "+err.Error(), nil)
+			return sdktypes.NewUnhealthyStatus("broker: the secret backend has not answered since start: "+err.Error(), nil)
 		default:
 			return sdktypes.NewHealthyStatus("broker: the secret source did not answer; the daemon serves on its loaded secrets, see the platform health: " + err.Error())
 		}
 	}
+}
+
+// secretBackendProbe returns the probe of the secret backend that the
+// configuration names. The readiness check and AdminGetPlatformHealth share
+// it, so both ask the same backend.
+func (d *daemonImpl) secretBackendProbe() api.SecretPlaneProbe {
+	return newOpenBaoHealthProbe(d.config.Security.SecretSource.Address)
+}
+
+// registerSecretBackendReadiness registers the readiness check of the secret
+// backend. The check asks the backend that the chart configures, with the
+// same bounded probe as AdminGetPlatformHealth. It never reads the cached
+// health map: that map holds nothing until a secret operation ran, and a
+// dead source then read as healthy (hosted#174). It does not read a broker
+// config row either: no row names the platform backend (gibson#1078). It is
+// a start gate: not ready until a probe passes, and a later failure does not
+// change readiness (secretSourceReadiness).
+func (d *daemonImpl) registerSecretBackendReadiness(ctx context.Context, reg readinessRegistrar) {
+	reg.RegisterReadinessCheck("secrets_broker", secretSourceReadiness(d.secretBackendProbe()))
+	d.logger.Debug(ctx, "registered the secret backend readiness check")
 }

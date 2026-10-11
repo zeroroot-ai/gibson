@@ -170,6 +170,21 @@ type SecurityConfig struct {
 	// it on only for a self-hosted install whose tenants legitimately point
 	// BYO Vault at an in-cluster address.
 	AllowPrivateBrokerEndpoints bool `mapstructure:"allow_private_broker_endpoints" yaml:"allow_private_broker_endpoints"`
+
+	// SecretSource is the secret backend of the platform that the chart
+	// configures. The readiness check and AdminGetPlatformHealth ask it to
+	// answer (hosted#174, gibson#1078).
+	SecretSource SecretSourceConfig `mapstructure:"secret_source" yaml:"secret_source"`
+}
+
+// SecretSourceConfig names the secret backend of the platform.
+type SecretSourceConfig struct {
+	// Address is the base URL of the OpenBao server of the platform, for
+	// example https://gibson-openbao.gibson.svc:8200. The probe calls its
+	// unauthenticated health endpoint. The trust of its certificate comes
+	// from SSL_CERT_DIR, which the chart points at the OpenBao CA. An empty
+	// address is a failure of the probe, never a pass.
+	Address string `mapstructure:"address" yaml:"address"`
 }
 
 // LLMConfig contains the daemon's LLM execution settings. There is no
