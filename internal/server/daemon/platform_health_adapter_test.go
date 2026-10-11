@@ -6,14 +6,17 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	healthhttp "github.com/zeroroot-ai/sdk/health/http"
 )
 
 type readinessProbe func(ctx context.Context) error
@@ -167,5 +170,55 @@ func TestSecretBackendProbe_NoAddressIsNotReady(t *testing.T) {
 	}
 	if !strings.Contains(got.Message, "security.secret_source.address") {
 		t.Fatalf("message %q does not name the missing key", got.Message)
+	}
+}
+
+// Each answer of OpenBao other than 200 fails the probe and names itself.
+func TestSecretBackendProbe_EachOtherAnswerFailsWithItsCause(t *testing.T) {
+	for status, want := range map[int]string{
+		http.StatusNotImplemented:     "not initialized",
+		http.StatusServiceUnavailable: "sealed",
+		http.StatusTeapot:             fmt.Sprintf("status %d", http.StatusTeapot),
+	} {
+		code := status
+		srv := openbao(t, &code)
+		err := newOpenBaoHealthProbe(srv.URL).Probe(context.Background())
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("status %d: err = %v, want it to name %q", status, err, want)
+		}
+	}
+}
+
+// An address that is not a URL fails before any request is sent.
+func TestSecretBackendProbe_AnInvalidAddressFails(t *testing.T) {
+	err := newOpenBaoHealthProbe("http://bad\x7faddress").Probe(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "build the health request") {
+		t.Fatalf("err = %v, want a request build failure", err)
+	}
+}
+
+// checkRecorder is a readinessRegistrar that keeps each registered check.
+type checkRecorder map[string]healthhttp.CheckFunc
+
+func (r checkRecorder) RegisterReadinessCheck(name string, check healthhttp.CheckFunc) {
+	r[name] = check
+}
+
+// The daemon registers the check under secrets_broker, and it asks the
+// address of its own configuration, not a broker config row.
+func TestRegisterSecretBackendReadiness_AsksTheConfiguredBackend(t *testing.T) {
+	status := http.StatusOK
+	srv := openbao(t, &status)
+	d := &daemonImpl{logger: testObsLogger(), config: &config.Config{
+		Security: config.SecurityConfig{SecretSource: config.SecretSourceConfig{Address: srv.URL}},
+	}}
+	reg := checkRecorder{}
+	d.registerSecretBackendReadiness(context.Background(), reg)
+	check, ok := reg["secrets_broker"]
+	if !ok {
+		t.Fatalf("no secrets_broker check registered: %v", reg)
+	}
+	if got := check(context.Background()); !got.IsHealthy() {
+		t.Fatalf("the configured backend answered and the check fails: %+v", got)
 	}
 }

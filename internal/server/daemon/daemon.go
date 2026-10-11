@@ -1739,17 +1739,9 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Debug(ctx, "registered key provider readiness check")
 	}
 
-	// The secret backend of the platform gates /readyz at start. The check
-	// asks the backend that the chart configures, with the same bounded probe
-	// as AdminGetPlatformHealth. It never reads the cached health map: that
-	// map holds nothing until a secret operation ran, and a dead source then
-	// read as healthy (hosted#174). It does not read a broker config row
-	// either: no row names the platform backend (gibson#1078). It is a start
-	// gate: not ready until a probe passes, and a later failure does not
-	// change readiness (secretSourceReadiness).
-	d.healthServer.RegisterReadinessCheck("secrets_broker",
-		secretSourceReadiness(d.secretBackendProbe()))
-	d.logger.Debug(ctx, "registered the secret backend readiness check")
+	// The secret backend of the platform gates /readyz at start
+	// (registerSecretBackendReadiness).
+	d.registerSecretBackendReadiness(ctx, d.healthServer)
 
 	// PER-TENANT RULE: per-tenant broker outages must NOT flip readiness; they
 	// only emit the gibson_secrets_broker_health{tenant,provider} Prometheus gauge

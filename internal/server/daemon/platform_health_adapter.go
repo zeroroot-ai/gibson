@@ -101,3 +101,16 @@ func secretSourceReadiness(probe api.SecretPlaneProbe) func(context.Context) sdk
 func (d *daemonImpl) secretBackendProbe() api.SecretPlaneProbe {
 	return newOpenBaoHealthProbe(d.config.Security.SecretSource.Address)
 }
+
+// registerSecretBackendReadiness registers the readiness check of the secret
+// backend. The check asks the backend that the chart configures, with the
+// same bounded probe as AdminGetPlatformHealth. It never reads the cached
+// health map: that map holds nothing until a secret operation ran, and a
+// dead source then read as healthy (hosted#174). It does not read a broker
+// config row either: no row names the platform backend (gibson#1078). It is
+// a start gate: not ready until a probe passes, and a later failure does not
+// change readiness (secretSourceReadiness).
+func (d *daemonImpl) registerSecretBackendReadiness(ctx context.Context, reg readinessRegistrar) {
+	reg.RegisterReadinessCheck("secrets_broker", secretSourceReadiness(d.secretBackendProbe()))
+	d.logger.Debug(ctx, "registered the secret backend readiness check")
+}
