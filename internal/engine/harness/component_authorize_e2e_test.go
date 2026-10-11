@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -33,8 +32,6 @@ type unusedRegistry struct{ component.ComponentRegistry }
 // the tenant that owns the work item (D86).
 func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	t.Cleanup(func() { _ = client.Close() })
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
 	sc, err := state.NewStateClient(cfg)
@@ -47,7 +44,7 @@ func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 		RunID: "run-1", MissionID: "mission-A", UserID: "u-1", TenantID: "tenant-alpha", Status: "active",
 	}}, az)
 
-	queue := component.NewRedisWorkQueue(client)
+	queue := component.NewRedisWorkQueue(sc.Client())
 	svc := component.NewComponentServiceServer(unusedRegistry{}, queue, slog.New(slog.DiscardHandler), nil, nil, nil, nil).
 		WithWorkContextRegistry(component.NewRedisWorkContextRegistry(sc)).
 		WithRunAuthorizer(decision)
