@@ -394,9 +394,23 @@ jobs:
             nohup kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg monitor --type drop \
               > "/tmp/cilium-drops/${p}.log" 2>&1 &
           done
+          # The address of each sandbox Pod of the run, so the check ties a
+          # drop to a sandbox (gibson#1088). A launcher Pod lives only as
+          # long as its Sandbox, so the watch records each Pod event.
+          mkdir -p /tmp/sandbox-pods
+          sandbox_ns=$(kubectl get namespaces -l setec.zeroroot.ai/sandbox-namespace=true -o jsonpath='{.items[*].metadata.name}')
+          if [ -z "$sandbox_ns" ]; then
+            echo "::error::no namespace has the label setec.zeroroot.ai/sandbox-namespace=true"
+            exit 1
+          fi
+          for ns in $sandbox_ns; do
+            nohup kubectl -n "$ns" get pods --watch \
+              -o jsonpath='{.metadata.name}{" "}{.status.podIP}{"\n"}' \
+              > "/tmp/sandbox-pods/${ns}.txt" 2>&1 &
+          done
           sleep 5
           ls /tmp/cilium-drops/*.log >/dev/null
-          echo "the suite scans the connector proxy at ${ip}:8080"
+          echo "the suite scans the connector proxy at ${ip}:8080 from a sandbox in: ${sandbox_ns}"
 
       # Cilium enforces each network policy of the chart on this cluster
       # (hosted#436). Prove it for the daemon before the tests run, so a
@@ -430,16 +444,19 @@ jobs:
           E2E_RUNNER_ENV_FILE: /tmp/e2e-runner.env
         run: gibson/.github/scripts/run-e2e-job.sh gibson-e2e-tool-dispatch TestToolDispatch 20m
 
-      # The network dropped each packet of the scan of the connector proxy
-      # (gibson#723). It runs whenever the suite image built, so a failed
-      # subtest before the scan still reports this verdict.
+      # The network dropped the packets that a sandbox Pod of the scan sent
+      # to the connector proxy (gibson#723, gibson#1088). It runs whenever
+      # the suite image built, so a failed subtest before the scan still
+      # reports this verdict.
       - name: The network refused the sandbox that dialed the connector proxy
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         working-directory: gibson
         run: |
           set -euo pipefail
           pkill -f 'cilium-dbg monitor' || true
-          bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$CONNECTOR_PROXY_IP" 8080 /tmp/cilium-drops/*.log
+          pkill -f 'get pods --watch' || true
+          cat /tmp/sandbox-pods/*.txt > /tmp/sandbox-pods.txt
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$CONNECTOR_PROXY_IP" 8080 /tmp/sandbox-pods.txt /tmp/cilium-drops/*.log
 
       # Plugin secret revocation (gibson#154), on the plugin the daemon patch
       # deployed. Runs whenever the suite image built, so a tool-dispatch
