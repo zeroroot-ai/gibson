@@ -61,7 +61,7 @@ func Run(ctx context.Context, cl client.Client, opts Options) error {
 	if ns == "" {
 		ns = os.Getenv("OPERATOR_SERVICE_ACCOUNT_NAMESPACE")
 	}
-	provisioner := controller.NewNamespaceProvisioner(cl, ns, nil)
+	provisioner := controller.NewNamespaceProvisioner(cl, ns)
 
 	type result struct {
 		tenant string

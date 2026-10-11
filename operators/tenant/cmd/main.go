@@ -770,7 +770,7 @@ func main() {
 	{
 		// Build the foundation namespace step so it participates in
 		// validation alongside the rest of the graph.
-		nsStep := controller.NewNamespaceProvisioner(mgr.GetClient(), os.Getenv("OPERATOR_NAMESPACE"), nil)
+		nsStep := controller.NewNamespaceProvisioner(mgr.GetClient(), os.Getenv("OPERATOR_NAMESPACE"))
 		all := make([]saga.Step, 0, 1+len(provisionSteps)+len(teardownSteps))
 		all = append(all, nsStep)
 		all = append(all, provisionSteps...)

@@ -69,7 +69,7 @@ func newChildOrchestrationReconciler(t *testing.T, tenant *gibsonv1alpha1.Tenant
 		Scheme:               scheme,
 		Runner:               runner,
 		Recorder:             events.NewFakeRecorder(100),
-		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform", nil),
+		NamespaceProvisioner: NewNamespaceProvisioner(fakeClient, "gibson-platform"),
 		// Production always injects a reporter (cmd/main.go).
 		StatusReporter: &stubReporter{},
 		// Production always injects the backup gate (cmd/main.go). This stub

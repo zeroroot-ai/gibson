@@ -504,7 +504,7 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.APIReader = mgr.GetAPIReader()
 	}
 	if r.NamespaceProvisioner == nil {
-		r.NamespaceProvisioner = NewNamespaceProvisioner(r.Client, r.PlatformNamespace, nil)
+		r.NamespaceProvisioner = NewNamespaceProvisioner(r.Client, r.PlatformNamespace)
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&gibsonv1alpha1.Tenant{}).
