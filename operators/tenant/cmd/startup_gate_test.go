@@ -13,17 +13,17 @@ import (
 // TestStartupGateSteps checks that the gate validates the namespace step
 // first, then the provision and teardown steps in their order.
 func TestStartupGateSteps(t *testing.T) {
-	ns := controller.NewNamespaceProvisioner(nil, "gibson")
 	p1 := controller.NewNamespaceProvisioner(nil, "p1")
 	t1 := controller.NewNamespaceProvisioner(nil, "t1")
-	got := startupGateSteps(ns, []saga.Step{p1}, []saga.Step{t1})
-	want := []saga.Step{ns, p1, t1}
-	if len(got) != len(want) {
-		t.Fatalf("startupGateSteps returned %d steps, want %d", len(got), len(want))
+	got := startupGateSteps(nil, "gibson", []saga.Step{p1}, []saga.Step{t1})
+	if len(got) != 3 {
+		t.Fatalf("startupGateSteps returned %d steps, want 3", len(got))
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("step %d is %v, want %v", i, got[i], want[i])
-		}
+	ns, ok := got[0].(*controller.NamespaceProvisioner)
+	if !ok || ns.PlatformNamespace != "gibson" {
+		t.Errorf("step 0 is %v, want the namespace step of the operator namespace", got[0])
+	}
+	if got[1] != saga.Step(p1) || got[2] != saga.Step(t1) {
+		t.Errorf("steps 1 and 2 are %v and %v, want the provision step, then the teardown step", got[1], got[2])
 	}
 }
