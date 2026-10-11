@@ -145,12 +145,7 @@ func (r *Resolver) TenantForOrg(ctx context.Context, orgID string) (string, erro
 	}
 
 	v, err, _ := r.sf.Do(orgID, func() (any, error) {
-		tenant, ferr := r.fetch(ctx, orgID)
-		if ferr != nil {
-			return "", ferr
-		}
-		r.store(orgID, tenant)
-		return tenant, nil
+		return r.load(ctx, orgID)
 	})
 	if err != nil {
 		// The wrapped func above returns only errors fetch() already wraps
@@ -162,6 +157,22 @@ func (r *Resolver) TenantForOrg(ctx context.Context, orgID string) (string, erro
 	if tenant == "" {
 		return "", ErrNoTenant
 	}
+	return tenant, nil
+}
+
+// load is the body of one flight. It reads the cache again before it
+// fetches: a caller can miss the cache, then enter the flight group after
+// an earlier flight stored the result and ended. Without this read that
+// caller fetches a second time.
+func (r *Resolver) load(ctx context.Context, orgID string) (any, error) {
+	if tenant, hit := r.cached(orgID); hit {
+		return tenant, nil
+	}
+	tenant, err := r.fetch(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	r.store(orgID, tenant)
 	return tenant, nil
 }
 

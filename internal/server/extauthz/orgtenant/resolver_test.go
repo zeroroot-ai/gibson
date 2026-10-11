@@ -222,6 +222,31 @@ func TestTenantForOrg_ConcurrentMissesMakeOneFetch(t *testing.T) {
 	}
 }
 
+// A caller that missed the cache and enters the flight group after an
+// earlier flight stored the result must not fetch again (gibson#1080).
+func TestLoad_ReadsTheCacheBeforeItFetches(t *testing.T) {
+	var hits int64
+	srv := httptest.NewServer(countingHandler(t, &hits))
+	t.Cleanup(srv.Close)
+
+	r, err := New(Config{Client: srv.Client(), BaseURL: srv.URL + "/identity/v1/org-tenant/"})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.store("late", "acme")
+
+	v, err := r.load(context.Background(), "late")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got, _ := v.(string); got != "acme" {
+		t.Fatalf("load = %q, want acme (the stored result)", got)
+	}
+	if got := atomic.LoadInt64(&hits); got != 0 {
+		t.Fatalf("hits = %d, want 0 (the flight read the cache first)", got)
+	}
+}
+
 func TestTenantForOrg_MalformedOrgIDMakesNoFetch(t *testing.T) {
 	var hits int64
 	srv := httptest.NewServer(countingHandler(t, &hits))
