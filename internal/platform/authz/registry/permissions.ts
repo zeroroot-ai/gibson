@@ -180,6 +180,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.component.v1.ComponentService/Authorize": {
+    method: "/gibson.component.v1.ComponentService/Authorize",
+    service: "gibson.component.v1.ComponentService",
+    relation: "can_execute",
+    objectType: "component",
+    objectDeriver: "system_tenant",
+    allowedIdentities: IdentityClass.COMPONENT,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.component.v1.ComponentService/CallTool": {
     method: "/gibson.component.v1.ComponentService/CallTool",
     service: "gibson.component.v1.ComponentService",

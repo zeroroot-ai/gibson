@@ -109,6 +109,12 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.component.v1.ComponentService/Authorize":
+    relation: "can_execute"
+    object_type: "component"
+    object_deriver: "system_tenant"
+    allowed_identities:
+      - COMPONENT
   "/gibson.component.v1.ComponentService/CallTool":
     relation: "can_execute"
     object_type: "component"

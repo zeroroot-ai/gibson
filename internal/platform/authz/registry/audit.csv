@@ -15,6 +15,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.bank.v1.BankService/StreamSignIn,owner,bank,from_field('BankId'),USER|SERVICE,gibson/bank/v1/bank.proto,rule
 /gibson.bank.v1.BankService/SubmitSignInCode,owner,bank,from_field('BankId'),USER|SERVICE,gibson/bank/v1/bank.proto,rule
 /gibson.bank.v1.BankService/UpdateBank,owner,bank,from_field('Id'),USER|SERVICE,gibson/bank/v1/bank.proto,rule
+/gibson.component.v1.ComponentService/Authorize,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CallTool,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CallToolStream,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
 /gibson.component.v1.ComponentService/CancelMission,can_execute,component,system_tenant,COMPONENT,gibson/component/v1/component.proto,rule
