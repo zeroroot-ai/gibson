@@ -4,42 +4,49 @@
 package daemon
 
 import (
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
+	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
 
-// wiresRunAuthorizer reports whether src calls compSvc.WithRunAuthorizer in
-// code, not in a comment. Without that call ComponentService.Authorize refuses
-// every request (it fails closed), so a lost wire would stop every pull-mode
-// agent from passing an Authorize check and no other test would notice.
-func wiresRunAuthorizer(src string) bool {
-	for _, line := range strings.Split(src, "\n") {
-		code := strings.TrimSpace(line)
-		if strings.HasPrefix(code, "//") {
-			continue
-		}
-		if strings.Contains(code, "compSvc.WithRunAuthorizer(") {
-			return true
-		}
-	}
-	return false
+type recordingTarget struct{ got component.RunAuthorizer }
+
+func (r *recordingTarget) WithRunAuthorizer(a component.RunAuthorizer) *component.ComponentServiceServer {
+	r.got = a
+	return nil
 }
 
-func TestDaemonWiresTheRunAuthorizerIntoComponentService(t *testing.T) {
-	b, err := os.ReadFile("grpc.go")
-	require.NoError(t, err)
-	assert.True(t, wiresRunAuthorizer(string(b)),
-		"grpc.go must call compSvc.WithRunAuthorizer, or ComponentService.Authorize refuses every request (D86)")
+type fixedSource struct {
+	svc *harness.HarnessCallbackService
 }
 
-// TestWiresRunAuthorizerFixtures is the failing fixture of the guard above: it
-// shows the guard turns red when the call is gone or only named in a comment.
-func TestWiresRunAuthorizerFixtures(t *testing.T) {
-	assert.True(t, wiresRunAuthorizer("\tcompSvc.WithRunAuthorizer(d.callback.Service())\n"))
-	assert.False(t, wiresRunAuthorizer("\tcompSvc.WithWorkContextRegistry(r)\n"))
-	assert.False(t, wiresRunAuthorizer("\t// compSvc.WithRunAuthorizer(x) was removed\n"))
+func (f fixedSource) RunAuthorizer() *harness.HarnessCallbackService { return f.svc }
+
+// TestWireRunAuthorizer proves that the component service gets the callback
+// service as its decision, and that a source with no decision wires nothing.
+// A lost wire makes ComponentService.Authorize refuse every request (it fails
+// closed), and no other test would notice.
+func TestWireRunAuthorizer(t *testing.T) {
+	svc := &harness.HarnessCallbackService{}
+
+	t.Run("the callback service becomes the decision", func(t *testing.T) {
+		target := &recordingTarget{}
+		require.True(t, wireRunAuthorizer(target, fixedSource{svc: svc}))
+		assert.Same(t, svc, target.got)
+	})
+	t.Run("no decision wires nothing", func(t *testing.T) {
+		target := &recordingTarget{}
+		require.False(t, wireRunAuthorizer(target, fixedSource{}))
+		assert.Nil(t, target.got, "a nil service must not reach the component service as a non-nil interface")
+	})
 }
+
+// The real callback manager is the source in the daemon.
+var _ runAuthorizerSource = (*harness.CallbackManager)(nil)
+
+// The real component service is the target in the daemon.
+var _ runAuthorizerTarget = (*component.ComponentServiceServer)(nil)

@@ -1890,11 +1890,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire the decision of the callback path into ComponentService.Authorize,
 			// so the pull transport and the callback transport run one FGA check
 			// (D86). Without it Authorize refuses every request.
-			if d.callback != nil {
-				if ra := d.callback.RunAuthorizer(); ra != nil {
-					compSvc.WithRunAuthorizer(ra)
-					d.logger.Info(ctx, "ComponentService.Authorize wired to the callback authorization decision")
-				}
+			if d.callback != nil && wireRunAuthorizer(compSvc, d.callback) {
+				d.logger.Info(ctx, "ComponentService.Authorize wired to the callback authorization decision")
 			}
 
 			// Wire the capability checker so DelegateToAgent (and, once slice 2
