@@ -68,10 +68,11 @@ func TestRegisterComponent_RecordsPlacementFromTheEnrollmentRecord(t *testing.T)
 }
 
 // TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity is the
-// failing fixture for the rule that a catalog plugin name is not free
-// (ADR-0066). A token-enrolled caller and a caller with no enrollment record
-// are refused under the name "github". The attested workload checks in. A
-// token-enrolled caller keeps every name the catalog does not list.
+// failing fixture for the rule that a catalog name is not free (ADR-0066,
+// ADR-0097). A token-enrolled caller and a caller with no enrollment record
+// are refused under the plugin name "github". The attested workload checks
+// in. A token-enrolled caller is refused under the catalog agent "claude" and
+// the catalog tool "nmap" too, and keeps every name the catalog does not list.
 func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T) {
 	ctx := credCallerCtx(t, "plugin_principal:310000000000000001", "primary")
 	newSvc := func(r EnrollmentReader) (*ComponentServiceServer, *attestedRegistry) {
@@ -111,5 +112,11 @@ func TestRegisterComponent_CatalogPluginNameNeedsAnAttestedIdentity(t *testing.T
 	}
 	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("agent", "claude")); status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("a catalog agent name needs an attested identity too: err = %v", err)
+	}
+	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "nmap")); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("a catalog tool name needs an attested identity too: err = %v", err)
+	}
+	if _, err := svc.RegisterComponent(ctx, minimalRegisterReq("tool", "my-own-tool")); err != nil {
+		t.Fatalf("a tool name the catalog does not list: %v", err)
 	}
 }
