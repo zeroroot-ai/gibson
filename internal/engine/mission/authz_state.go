@@ -37,6 +37,10 @@ type MissionAuthzState struct {
 	// RunID is the unique identifier for this mission execution.
 	RunID string `json:"run_id"`
 
+	// MissionID is the mission this run belongs to. Authorize compares it with
+	// the mission of the task grant, so a grant cannot ask about another run.
+	MissionID string `json:"mission_id,omitempty"`
+
 	// UserID is the FGA user ID (without the "user:" prefix) that initiated the run.
 	UserID string `json:"user_id"`
 
@@ -58,7 +62,7 @@ type MissionAuthzState struct {
 type MissionAuthzStore interface {
 	// Put creates or replaces the authz state for a new mission run.
 	// Must be called when the mission starts so the daemon can resolve callbacks.
-	Put(ctx context.Context, runID, userID, tenantID string) error
+	Put(ctx context.Context, runID, missionID, userID, tenantID string) error
 
 	// Get retrieves the authz state for a run_id.
 	// Returns ErrMissionAuthzNotFound if the key does not exist.
@@ -92,13 +96,14 @@ func authzKey(runID string) string {
 // Put persists the authz state for a new mission run.
 // The key is set without a TTL while the mission is active;
 // the TTL is applied later when the mission completes or is cancelled.
-func (s *redisMissionAuthzStore) Put(ctx context.Context, runID, userID, tenantID string) error {
+func (s *redisMissionAuthzStore) Put(ctx context.Context, runID, missionID, userID, tenantID string) error {
 	if runID == "" {
 		return fmt.Errorf("authz state Put: run_id is required")
 	}
 
 	state := &MissionAuthzState{
 		RunID:     runID,
+		MissionID: missionID,
 		UserID:    userID,
 		TenantID:  tenantID,
 		Status:    authzStatusActive,

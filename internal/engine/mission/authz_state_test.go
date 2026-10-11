@@ -28,7 +28,7 @@ func TestMissionAuthzStore_PutAndGet(t *testing.T) {
 	store, _ := newTestAuthzStore(t)
 	ctx := context.Background()
 
-	err := store.Put(ctx, "run-01", "user-abc", "tenant-xyz")
+	err := store.Put(ctx, "run-01", "mission-1", "user-abc", "tenant-xyz")
 	require.NoError(t, err)
 
 	state, err := store.Get(ctx, "run-01")
@@ -54,7 +54,7 @@ func TestMissionAuthzStore_MarkCompleted(t *testing.T) {
 	store, mr := newTestAuthzStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, store.Put(ctx, "run-02", "user-abc", "tenant-xyz"))
+	require.NoError(t, store.Put(ctx, "run-02", "mission-1", "user-abc", "tenant-xyz"))
 
 	require.NoError(t, store.MarkCompleted(ctx, "run-02"))
 
@@ -72,7 +72,7 @@ func TestMissionAuthzStore_MarkCancelled(t *testing.T) {
 	store, mr := newTestAuthzStore(t)
 	ctx := context.Background()
 
-	require.NoError(t, store.Put(ctx, "run-03", "user-abc", "tenant-xyz"))
+	require.NoError(t, store.Put(ctx, "run-03", "mission-1", "user-abc", "tenant-xyz"))
 
 	require.NoError(t, store.MarkCancelled(ctx, "run-03"))
 
@@ -106,7 +106,7 @@ func TestMissionAuthzStore_PutEmptyRunID(t *testing.T) {
 	store, _ := newTestAuthzStore(t)
 	ctx := context.Background()
 
-	err := store.Put(ctx, "", "user-abc", "tenant-xyz")
+	err := store.Put(ctx, "", "mission-1", "user-abc", "tenant-xyz")
 	require.Error(t, err)
 }
 
@@ -125,6 +125,6 @@ func TestMissionAuthzStore_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	// Operations with a cancelled context should fail.
-	_ = store.Put(ctx, "run-04", "user", "tenant")
+	_ = store.Put(ctx, "run-04", "mission-1", "user", "tenant")
 	// No assertion needed — just shouldn't panic.
 }

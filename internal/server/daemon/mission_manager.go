@@ -634,7 +634,7 @@ func (m *missionManager) startRun(
 		if id, err := auth.IdentityFromContext(ctx); err == nil {
 			userID = id.Subject
 		}
-		if putErr := m.authzStore.Put(ctx, missionRun.ID.String(), userID, tenantID); putErr != nil {
+		if putErr := m.authzStore.Put(ctx, missionRun.ID.String(), missionRecord.ID.String(), userID, tenantID); putErr != nil {
 			m.logger.Warn("failed to record authz state on mission start",
 				slog.String("mission_id", missionRecord.ID.String()),
 				slog.String("run_id", missionRun.ID.String()),
