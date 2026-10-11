@@ -19,12 +19,14 @@ package component
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 const (
@@ -49,6 +51,15 @@ const (
 	// rather than from a component's request.
 	workOwnerKeyPrefix = "gibson:work:owner:"
 
+	// workRunKeyPrefix is the Redis key prefix for the work-item → mission run
+	// binding.
+	//   gibson:work:run:{work_id}
+	//
+	// WorkQueue.Enqueue writes it from the AuthzContext that the daemon itself
+	// put on the work item, so the run of a work item never comes from a
+	// component's request.
+	workRunKeyPrefix = "gibson:work:run:"
+
 	// workOwnerTTL bounds how long a work id stays bound to its tenant. It
 	// matches workContextTTL so that both records for a work item age out
 	// together and a work id cannot outlive its own execution window.
@@ -60,6 +71,8 @@ func workContextKey(workID string) string { return workContextKeyPrefix + workID
 
 // workOwnerKey returns the Redis key holding a work item's owning tenant.
 func workOwnerKey(workID string) string { return workOwnerKeyPrefix + workID }
+
+func workRunKey(workID string) string { return workRunKeyPrefix + workID }
 
 // ErrWorkOwnerUnknown reports that no owning tenant is on record for a work id:
 // the id was never enqueued, or its binding has aged out. Callers must treat it
@@ -77,6 +90,11 @@ type WorkContextRegistry interface {
 	// WorkQueue.Enqueue. It returns ErrWorkOwnerUnknown when no binding
 	// exists.
 	WorkOwner(ctx context.Context, workID string) (string, error)
+
+	// WorkRun returns the mission run that workID belongs to, as recorded by
+	// WorkQueue.Enqueue. It returns ErrWorkRunUnknown when the work item has
+	// no mission run.
+	WorkRun(ctx context.Context, workID string) (string, error)
 }
 
 // bindWorkOwner records tenant as the owner of workID.
@@ -95,6 +113,51 @@ func bindWorkOwner(ctx context.Context, client redis.UniversalClient, workID, te
 		return fmt.Errorf("work-context registry: bind owner of work %q: %w", workID, err)
 	}
 	return nil
+}
+
+// ErrWorkRunUnknown is returned when a work id has no mission run bound to it.
+var ErrWorkRunUnknown = errors.New("work-context registry: no mission run recorded for work id")
+
+// bindWorkRun records the mission run of workID, read from the AuthzContext on
+// the work item. A work item with no AuthzContext has no run, and nothing is
+// written. An AuthzContext that does not parse is an error: the daemon wrote
+// it, so a bad one is a defect and must not pass as "no run".
+func bindWorkRun(ctx context.Context, client redis.UniversalClient, item WorkItem) error {
+	raw := item.Context[authz.AuthzContextWorkKey]
+	if raw == "" {
+		return nil
+	}
+	var ac struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &ac); err != nil {
+		return fmt.Errorf("work-context registry: parse the authz context of work %q: %w", item.WorkID, err)
+	}
+	if ac.RunID == "" {
+		return nil
+	}
+	if err := client.Set(ctx, workRunKey(item.WorkID), ac.RunID, workOwnerTTL).Err(); err != nil {
+		return fmt.Errorf("work-context registry: bind run of work %q: %w", item.WorkID, err)
+	}
+	return nil
+}
+
+// lookupWorkRun returns the run bound to workID by bindWorkRun.
+func lookupWorkRun(ctx context.Context, client redis.UniversalClient, workID string) (string, error) {
+	if workID == "" {
+		return "", ErrWorkRunUnknown
+	}
+	run, err := client.Get(ctx, workRunKey(workID)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", ErrWorkRunUnknown
+		}
+		return "", fmt.Errorf("work-context registry: look up run of work %q: %w", workID, err)
+	}
+	if run == "" {
+		return "", ErrWorkRunUnknown
+	}
+	return run, nil
 }
 
 // lookupWorkOwner returns the tenant bound to workID by bindWorkOwner, or
@@ -164,6 +227,11 @@ func (r *RedisWorkContextRegistry) RegisterWorkContext(ctx context.Context, work
 // WorkQueue.Enqueue. The queue and this registry are constructed over the same
 // Redis (see the daemon wiring), so the binding the queue writes is the binding
 // read here.
+func (r *RedisWorkContextRegistry) WorkRun(ctx context.Context, workID string) (string, error) {
+	return lookupWorkRun(ctx, r.stateClient.Client(), workID)
+}
+
+// WorkOwner reads the owner (see WorkContextRegistry.WorkOwner).
 func (r *RedisWorkContextRegistry) WorkOwner(ctx context.Context, workID string) (string, error) {
 	return lookupWorkOwner(ctx, r.stateClient.Client(), workID)
 }

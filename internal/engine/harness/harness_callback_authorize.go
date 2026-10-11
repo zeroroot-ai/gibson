@@ -244,6 +244,28 @@ func (s *HarnessCallbackService) authorizeRun(
 	return &harnesspb.AuthorizeResponse{Allowed: true, Reason: reason}, nil
 }
 
+// AuthorizeRun runs the decision of the Authorize RPC for the pull transport.
+// Both transports decide the same way (D86). The caller has already checked that
+// the work item belongs to ownerTenant, and runID comes from the binding that the
+// work queue wrote, so the run must belong to ownerTenant. The owner tenant, not
+// the tenant of the caller, is the rule: a shared component serves the work of
+// many tenants and holds the system tenant itself. A run of another tenant is
+// NotFound, as for the RPC. The error is a gRPC status.
+func (s *HarnessCallbackService) AuthorizeRun(
+	ctx context.Context, ownerTenant, runID, action, resource string,
+) (allowed bool, reason string, err error) {
+	if ownerTenant == "" {
+		return false, "", status.Errorf(codes.PermissionDenied, "authorize: the work item has no owner tenant")
+	}
+	resp, rpcErr := s.authorizeRun(ctx, ownerTenant, "", &harnesspb.AuthorizeRequest{
+		RunId: runID, Action: action, Resource: resource,
+	})
+	if rpcErr != nil {
+		return false, "", rpcErr
+	}
+	return resp.GetAllowed(), resp.GetReason(), nil
+}
+
 // deriveFGAObject maps a component resource string to the canonical FGA object
 // "component:<kind>/<name>" (ADR-0136).
 //

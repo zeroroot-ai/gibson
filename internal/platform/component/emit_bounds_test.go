@@ -37,6 +37,10 @@ func (ownEveryWorkItem) RegisterWorkContext(context.Context, string, string, str
 	return nil
 }
 
+func (ownEveryWorkItem) WorkRun(context.Context, string) (string, error) {
+	return "", ErrWorkRunUnknown
+}
+
 func (o ownEveryWorkItem) WorkOwner(context.Context, string) (string, error) {
 	return o.tenant, nil
 }

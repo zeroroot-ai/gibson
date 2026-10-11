@@ -6,6 +6,7 @@ package component
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -143,6 +145,13 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		}
 	}
 
+	// The delegated agent acts for the mission run of its caller, so its own
+	// Authorize resolves to that run (D86). Without it every Authorize of a
+	// delegated agent is refused.
+	for k, v := range s.delegatedAuthzContext(ctx, tenant, req.GetWorkId()) {
+		workCtx[k] = v
+	}
+
 	workID := uuid.New().String()
 	workItem := WorkItem{
 		WorkID:   workID,
@@ -221,4 +230,34 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	)
 
 	return &componentpb.DelegateToAgentResponse{ResultJson: resultJSON}, nil
+}
+
+// delegatedAuthzContext returns the work item context entry that gives a
+// delegated agent the mission run of its caller. The caller names its own work
+// item in the request, so the id is checked against the owner recorded at
+// enqueue before it selects a run: a caller cannot borrow the run of another
+// tenant's work item. When the work item is not the caller's, or has no run,
+// the entry is absent and the delegated agent has no run, so its Authorize is
+// refused (fail closed). Delegation itself is not blocked.
+func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
+	if sourceWorkID == "" {
+		return nil
+	}
+	// resolveWorkOwner refuses when no work-context registry is wired.
+	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
+		return nil
+	}
+	runID, err := s.workContext.WorkRun(ctx, sourceWorkID)
+	if err != nil {
+		if !errors.Is(err, ErrWorkRunUnknown) {
+			s.logger.WarnContext(ctx, "delegate to agent: cannot read the run of the source work item",
+				slog.String("work_id", sourceWorkID), slog.String("error", err.Error()))
+		}
+		return nil
+	}
+	ac, err := json.Marshal(map[string]any{"run_id": runID, "issued_at": time.Now().Unix(), "ttl_seconds": authz.DefaultWorkTTLSeconds})
+	if err != nil {
+		return nil
+	}
+	return map[string]string{authz.AuthzContextWorkKey: string(ac)}
 }

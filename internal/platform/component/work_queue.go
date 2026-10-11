@@ -191,6 +191,11 @@ func (q *redisWorkQueue) Enqueue(ctx context.Context, tenant, kind, name string,
 	if err := bindWorkOwner(ctx, q.client, item.WorkID, tenant); err != nil {
 		return "", fmt.Errorf("work queue enqueue: %w", err)
 	}
+	// Bind the mission run the same way. Authorize resolves the run from this
+	// binding and never from the request.
+	if err := bindWorkRun(ctx, q.client, item); err != nil {
+		return "", fmt.Errorf("work queue enqueue: %w", err)
+	}
 
 	msgID, err := q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey(tenant, kind, name),

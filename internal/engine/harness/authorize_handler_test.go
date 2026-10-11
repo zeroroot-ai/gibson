@@ -127,8 +127,17 @@ type stubRunAuthzLookup struct {
 	err   error
 }
 
-func (s *stubRunAuthzLookup) Get(_ context.Context, _ string) (*RunAuthzState, error) {
-	return s.state, s.err
+// Get answers only for the run id of its state. A state with a run id that
+// differs from the one asked for is an unknown run, so a test shows that the
+// run id a handler uses is the one it should.
+func (s *stubRunAuthzLookup) Get(_ context.Context, runID string) (*RunAuthzState, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.state != nil && s.state.RunID != "" && s.state.RunID != runID {
+		return nil, ErrRunNotFound
+	}
+	return s.state, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -406,4 +415,56 @@ func TestAuthorize_AGrantWithAMissionRefusesARunWithNoMission(t *testing.T) {
 	_, err := svc.Authorize(boundGrantCtx("tenant-alpha", "mission-A"),
 		&harnesspb.AuthorizeRequest{RunId: "run-1", Action: "execute", Resource: "tool:nmap"})
 	assert.Equal(t, codes.NotFound, grpcCode(err))
+}
+
+// TestAuthorizeRun_IsTheDecisionOfTheRPC proves that the pull transport and the
+// callback transport run one decision (D86): AuthorizeRun gives the same answer
+// as the Authorize RPC for an allow, a deny, an unknown run and an inactive run.
+func TestAuthorizeRun_IsTheDecisionOfTheRPC(t *testing.T) {
+	az := newFGABackedAuthorizer()
+	az.Seed("user:u-1", "can_execute", "component:tool/nmap")
+	active := &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "t", Status: "active"}
+
+	cases := []struct {
+		name     string
+		store    *stubRunAuthzLookup
+		resource string
+		allowed  bool
+		code     codes.Code
+	}{
+		{"allow", &stubRunAuthzLookup{state: active}, "tool:nmap", true, codes.OK},
+		{"deny", &stubRunAuthzLookup{state: active}, "tool:sqlmap", false, codes.OK},
+		{"unknown run", &stubRunAuthzLookup{err: ErrRunNotFound}, "tool:nmap", false, codes.NotFound},
+		{"inactive run", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "t", Status: "completed"}},
+			"tool:nmap", false, codes.FailedPrecondition},
+		{"a run of another tenant", &stubRunAuthzLookup{state: &RunAuthzState{RunID: "run-1", UserID: "u-1", TenantID: "other", Status: "active"}},
+			"tool:nmap", false, codes.NotFound},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newAuthorizeService(tc.store, az)
+
+			allowed, reason, err := svc.AuthorizeRun(context.Background(), "t", "run-1", "execute", tc.resource)
+			rpc, rpcErr := svc.Authorize(authzCtx("t"), &harnesspb.AuthorizeRequest{
+				RunId: "run-1", Action: "execute", Resource: tc.resource,
+			})
+
+			assert.Equal(t, tc.code, grpcCode(err))
+			assert.Equal(t, grpcCode(rpcErr), grpcCode(err), "same status as the RPC")
+			assert.Equal(t, tc.allowed, allowed)
+			if rpcErr == nil {
+				assert.Equal(t, rpc.GetAllowed(), allowed)
+				assert.Equal(t, rpc.GetReason(), reason)
+			}
+		})
+	}
+}
+
+// TestAuthorizeRun_NeedsAnOwnerTenant proves that a work item with no owner tenant
+// is refused and never reaches the store.
+func TestAuthorizeRun_NeedsAnOwnerTenant(t *testing.T) {
+	svc := newAuthorizeService(&stubRunAuthzLookup{err: errors.New("must not be read")}, newFGABackedAuthorizer())
+	allowed, _, err := svc.AuthorizeRun(context.Background(), "", "run-1", "execute", "tool:nmap")
+	assert.False(t, allowed)
+	assert.Equal(t, codes.PermissionDenied, grpcCode(err))
 }

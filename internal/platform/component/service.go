@@ -270,6 +270,9 @@ type ComponentServiceServer struct {
 	// the full OntologyExtension payload over the enrollment RPC).
 	ontologyReasoner OntologyReasoner
 
+	// runAuthorizer decides Authorize. Nil refuses every Authorize request.
+	runAuthorizer RunAuthorizer
+
 	// emitCounts bounds how many observations one work item may emit
 	// (emitbounds.MaxObservationsPerTask, ADR-0112 "Write contract"). Remote
 	// components have a work id on the wire but no per-task object here to
