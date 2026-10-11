@@ -268,7 +268,18 @@ func TestReconcile_NetworkPolicy_EgressIsDNSOnly(t *testing.T) {
 		t.Fatalf("networkpolicy missing: %v", err)
 	}
 
+	if len(np.Spec.Egress) == 0 {
+		t.Fatal("the policy has no egress rule, so DNS is closed")
+	}
+	dnsRules := 0
 	for i, rule := range np.Spec.Egress {
+		// A rule with no peer reaches any destination, and a rule with no
+		// port reaches any port. Neither may pass for want of a loop.
+		if len(rule.To) == 0 || len(rule.Ports) == 0 {
+			t.Errorf("egress rule %d lists no peer or no port, so it opens any destination or any port", i)
+			continue
+		}
+		dnsRules++
 		for _, peer := range rule.To {
 			ns := ""
 			if peer.NamespaceSelector != nil {
@@ -283,6 +294,9 @@ func TestReconcile_NetworkPolicy_EgressIsDNSOnly(t *testing.T) {
 				t.Errorf("egress rule %d opens a port that is not DNS: %v", i, port.Port)
 			}
 		}
+	}
+	if dnsRules == 0 {
+		t.Error("no egress rule opens kube-system DNS")
 	}
 }
 
