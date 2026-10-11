@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // TestTranslateSQLError maps the driver's sentinels to portable ones, which is
@@ -109,6 +110,7 @@ func (r *fakePgxRows) Scan(...any) error      { return r.scanErr }
 func (r *fakePgxRows) Values() ([]any, error) { return nil, nil }
 func (r *fakePgxRows) RawValues() [][]byte    { return nil }
 func (r *fakePgxRows) Conn() *pgx.Conn        { return nil }
+func (r *fakePgxRows) TypeMap() *pgtype.Map   { return nil }
 
 func TestSQLHandle_ExecReportsRowsAndTranslates(t *testing.T) {
 	q := &fakePgxQuerier{execTag: pgconn.NewCommandTag("UPDATE 3")}
