@@ -92,6 +92,10 @@ type TenantLimiter interface {
 type redisTenantLimiter struct {
 	client redis.UniversalClient
 	limits map[string]RateLimit
+	// now reads the clock that picks the minute window. It is time.Now in the
+	// daemon. A test sets it, because the window changes at a minute boundary
+	// and a test that runs across the boundary sees the counter start again.
+	now func() time.Time
 }
 
 // Ensure redisTenantLimiter satisfies TenantLimiter at compile time.
@@ -109,6 +113,7 @@ func NewRedisLimiter(client redis.UniversalClient, limits map[string]RateLimit) 
 	return &redisTenantLimiter{
 		client: client,
 		limits: limits,
+		now:    time.Now,
 	}
 }
 
@@ -137,7 +142,7 @@ func (l *redisTenantLimiter) Check(ctx context.Context, tenantID, rpcName string
 		return nil
 	}
 
-	minuteEpoch := time.Now().Unix() / 60
+	minuteEpoch := l.now().Unix() / 60
 	key := fmt.Sprintf("ratelimit:%s:%s:%d", tenantID, rpcName, minuteEpoch)
 
 	// Pipeline INCR + EXPIRE so both are sent in a single RTT.
