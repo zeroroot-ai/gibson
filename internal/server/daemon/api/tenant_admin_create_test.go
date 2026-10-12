@@ -628,3 +628,34 @@ func TestClientCapabilityGrants_KindPolicy(t *testing.T) {
 		}
 	}
 }
+
+// TestCreateAgentIdentity_SPIFFECallerOwnerTuple: a SPIFFE caller's owner
+// tuple names the FGA user that every check reads, with no scheme.
+// "user:spiffe://..." is a tuple OpenFGA refuses as malformed, so every
+// CreateAgentIdentity of a workload caller failed (gibson#1098).
+func TestCreateAgentIdentity_SPIFFECallerOwnerTuple(t *testing.T) {
+	az := newFakeAuthorizer()
+	srv := newTestDaemonServer(t).
+		WithIdPAdminClient(&fakeIDPClient{}).
+		WithAuthorizer(az).
+		WithTenantAdminAuditWriter(&fakeAuditWriter{})
+
+	ctx := ctxWithTenantAdmin(context.Background(), "acme", "spiffe://example.org/platform/e2e-runner")
+	resp, err := srv.CreateAgentIdentity(ctx, &tenantpb.CreateAgentIdentityRequest{
+		Name: "spiffe-owned",
+		Kind: tenantpb.PrincipalKind_PRINCIPAL_KIND_AGENT,
+	})
+	if err != nil {
+		t.Fatalf("CreateAgentIdentity: %v", err)
+	}
+	var owners []string
+	for _, tup := range az.writtenTuples() {
+		if tup.Relation == "owner" && tup.Object == resp.GetPrincipalId() {
+			owners = append(owners, tup.User)
+		}
+	}
+	want := "user:example.org/platform/e2e-runner"
+	if len(owners) != 1 || owners[0] != want {
+		t.Fatalf("owner tuples = %v, want [%s]", owners, want)
+	}
+}
