@@ -266,7 +266,11 @@ func TestInvitationSender_NilMailer(t *testing.T) {
 
 func TestSMTPMailer_BuildRFC822_Multipart(t *testing.T) {
 	m := &SMTPMailer{from: "no-reply@gibson.local"}
-	raw := string(m.buildRFC822(Message{To: "a@b.com", Subject: "Hi", Text: "plain", HTML: "<p>rich</p>"}))
+	wire, err := m.buildRFC822(Message{To: "a@b.com", Subject: "Hi", Text: "plain", HTML: "<p>rich</p>"})
+	if err != nil {
+		t.Fatalf("buildRFC822: %v", err)
+	}
+	raw := string(wire)
 	for _, want := range []string{
 		"From: no-reply@gibson.local\r\n",
 		"To: a@b.com\r\n",

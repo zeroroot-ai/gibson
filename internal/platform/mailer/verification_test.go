@@ -174,13 +174,21 @@ func TestSendAccountExists_WrapsTransportError(t *testing.T) {
 // proof of identity is an email, silent delivery failure is a total outage.
 func TestSMTPConfigurationSetHeader(t *testing.T) {
 	with := &SMTPMailer{from: "no-reply@example.test", configurationSet: "gibson-transactional-prod"}
-	got := string(with.buildRFC822(Message{To: "a@b.c", Subject: "s", Text: "t"}))
+	wire, err := with.buildRFC822(Message{To: "a@b.c", Subject: "s", Text: "t"})
+	if err != nil {
+		t.Fatalf("buildRFC822: %v", err)
+	}
+	got := string(wire)
 	if !strings.Contains(got, "X-SES-CONFIGURATION-SET: gibson-transactional-prod\r\n") {
 		t.Errorf("the configuration-set header is missing:\n%s", got)
 	}
 
 	without := &SMTPMailer{from: "no-reply@example.test"}
-	got = string(without.buildRFC822(Message{To: "a@b.c", Subject: "s", Text: "t"}))
+	wire, err = without.buildRFC822(Message{To: "a@b.c", Subject: "s", Text: "t"})
+	if err != nil {
+		t.Fatalf("buildRFC822: %v", err)
+	}
+	got = string(wire)
 	if strings.Contains(got, "X-SES-CONFIGURATION-SET") {
 		t.Errorf("an unset configuration set should emit no header:\n%s", got)
 	}

@@ -4,11 +4,17 @@
 package mailer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
 	"net/smtp"
-	"strings"
+	"net/textproto"
+	"time"
 )
 
 // SMTPMailer sends mail over SMTP. When username is non-empty it authenticates
@@ -40,8 +46,12 @@ func (m *SMTPMailer) Send(ctx context.Context, msg Message) error {
 	if m.username != "" {
 		auth = smtp.PlainAuth("", m.username, m.password, m.host)
 	}
+	raw, err := m.buildRFC822(msg)
+	if err != nil {
+		return err
+	}
 	addr := net.JoinHostPort(m.host, m.port)
-	if err := smtp.SendMail(addr, auth, m.from, []string{msg.To}, m.buildRFC822(msg)); err != nil {
+	if err := smtp.SendMail(addr, auth, m.from, []string{msg.To}, raw); err != nil {
 		return fmt.Errorf("mailer(smtp): send to %s: %w", msg.To, err)
 	}
 	return nil
@@ -50,29 +60,95 @@ func (m *SMTPMailer) Send(ctx context.Context, msg Message) error {
 // Delivers reports true: this transport hands the message to an MTA.
 func (m *SMTPMailer) Delivers() bool { return true }
 
-// buildRFC822 assembles the wire-format message. CRLF line endings per RFC 5322.
-func (m *SMTPMailer) buildRFC822(msg Message) []byte {
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", m.from)
-	fmt.Fprintf(&b, "To: %s\r\n", msg.To)
-	fmt.Fprintf(&b, "Subject: %s\r\n", msg.Subject)
+// buildRFC822 renders the wire-format message into memory for smtp.SendMail.
+// writeRFC822 holds the format.
+func (m *SMTPMailer) buildRFC822(msg Message) ([]byte, error) {
+	var b bytes.Buffer
+	err := m.writeRFC822(&b, msg)
+	return b.Bytes(), err
+}
+
+// writeRFC822 writes the wire-format message to w.
+//
+// Each body part is quoted-printable. RFC 5322 section 2.1.1 limits a line to
+// 998 characters, and SMTP ends each line with CRLF. The rendered HTML of the
+// onboarding email holds a line of about 17 KB, and both parts use bare LF. A
+// relay that enforces the limit breaks a long line where it likes, which can
+// cut a tag or a style attribute, or refuses the message. Quoted-printable
+// wraps each line under the limit with soft breaks that the client removes,
+// and writes every hard line break as CRLF.
+//
+// Every write goes through w, so a test can fail the writer at any offset and
+// show that the error reaches the caller.
+func (m *SMTPMailer) writeRFC822(w io.Writer, msg Message) error {
+	headers := []string{
+		"From: " + m.from,
+		"To: " + msg.To,
+		"Subject: " + mime.QEncoding.Encode("utf-8", msg.Subject),
+		"Date: " + time.Now().UTC().Format(time.RFC1123Z),
+	}
 	if m.configurationSet != "" {
-		fmt.Fprintf(&b, "X-SES-CONFIGURATION-SET: %s\r\n", m.configurationSet)
+		headers = append(headers, "X-SES-CONFIGURATION-SET: "+m.configurationSet)
 	}
-	b.WriteString("MIME-Version: 1.0\r\n")
-	if msg.HTML != "" {
-		const boundary = "gibson-mailer-boundary-8d1f"
-		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-		b.WriteString(msg.Text + "\r\n")
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: text/html; charset=UTF-8\r\n\r\n")
-		b.WriteString(msg.HTML + "\r\n")
-		fmt.Fprintf(&b, "--%s--\r\n", boundary)
-	} else {
-		b.WriteString("Content-Type: text/plain; charset=UTF-8\r\n\r\n")
-		b.WriteString(msg.Text + "\r\n")
+	headers = append(headers, "MIME-Version: 1.0")
+	if msg.HTML == "" {
+		headers = append(headers,
+			"Content-Type: text/plain; charset=UTF-8",
+			"Content-Transfer-Encoding: quoted-printable",
+			"")
+		if err := writeLines(w, headers); err != nil {
+			return err
+		}
+		return writeQuotedPrintable(w, msg.Text)
 	}
-	return []byte(b.String())
+	parts := multipart.NewWriter(w)
+	headers = append(headers,
+		fmt.Sprintf("Content-Type: multipart/alternative; boundary=%q", parts.Boundary()),
+		"")
+	if err := writeLines(w, headers); err != nil {
+		return err
+	}
+	// The order is significant: a client shows the last part it can render,
+	// so the HTML part comes last.
+	for _, part := range []struct{ contentType, body string }{
+		{"text/plain; charset=UTF-8", msg.Text},
+		{"text/html; charset=UTF-8", msg.HTML},
+	} {
+		pw, err := parts.CreatePart(textproto.MIMEHeader{
+			"Content-Type":              {part.contentType},
+			"Content-Transfer-Encoding": {"quoted-printable"},
+		})
+		if err != nil {
+			return fmt.Errorf("mailer(smtp): create part: %w", err)
+		}
+		if err := writeQuotedPrintable(pw, part.body); err != nil {
+			return err
+		}
+	}
+	if err := parts.Close(); err != nil {
+		return fmt.Errorf("mailer(smtp): close multipart: %w", err)
+	}
+	return nil
+}
+
+// writeLines writes each line to w with a CRLF end.
+func writeLines(w io.Writer, lines []string) error {
+	for _, line := range lines {
+		if _, err := io.WriteString(w, line+"\r\n"); err != nil {
+			return fmt.Errorf("mailer(smtp): write header: %w", err)
+		}
+	}
+	return nil
+}
+
+// writeQuotedPrintable writes body to w as quoted-printable text.
+func writeQuotedPrintable(w io.Writer, body string) error {
+	qp := quotedprintable.NewWriter(w)
+	if _, err := io.WriteString(qp, body); err != nil {
+		return fmt.Errorf("mailer(smtp): encode body: %w", err)
+	}
+	if err := qp.Close(); err != nil {
+		return fmt.Errorf("mailer(smtp): encode body: %w", err)
+	}
+	return nil
 }
