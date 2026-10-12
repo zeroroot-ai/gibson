@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -36,6 +37,9 @@ func testScheme(t *testing.T) *runtime.Scheme {
 	if err := rbacv1.AddToScheme(s); err != nil {
 		t.Fatalf("rbacv1.AddToScheme: %v", err)
 	}
+	if err := batchv1.AddToScheme(s); err != nil {
+		t.Fatalf("batchv1.AddToScheme: %v", err)
+	}
 	return s
 }
 
@@ -45,19 +49,11 @@ func newWrappedClient(t *testing.T) *Client {
 }
 
 // perTenantKindSamples produces one zero-value instance of every kind the
-// wrapper guards. The test table below uses this so every kind is
-// exercised against every method.
+// wrapper guards. It is PerTenantKinds itself, so a kind added there (the
+// CronJob of gibson#1089) is exercised against every method with no second
+// list to keep in step.
 func perTenantKindSamples() []ctrlclient.Object {
-	return []ctrlclient.Object{
-		&corev1.ConfigMap{},
-		&corev1.Secret{},
-		&corev1.PersistentVolumeClaim{},
-		&corev1.Service{},
-		&appsv1.StatefulSet{},
-		&networkingv1.NetworkPolicy{},
-		&rbacv1.Role{},
-		&rbacv1.RoleBinding{},
-	}
+	return PerTenantKinds()
 }
 
 // inOperatorNS clones obj and sets a non-empty name + the operator

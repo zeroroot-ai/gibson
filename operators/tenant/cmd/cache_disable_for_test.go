@@ -8,197 +8,249 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
+	"sort"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// TestCacheDisableForParity walks every .go file under internal/dataplane/
-// looking for K8s types instantiated as struct literals (`&corev1.Service{}`,
-// `appsv1.StatefulSet{}`, etc.). Every type found that lives in a per-tenant
-// namespace MUST appear in perTenantNamespaceCacheDisableTypes().
+// apiAliases maps each import alias the operator uses for a Kubernetes API
+// package to that package's group and version. The walk judges composite
+// literals of these aliases, and it fails on a k8s.io/api import that is
+// not in this table, so a kind of a new group is not skipped in silence.
+var apiAliases = map[string]schema.GroupVersion{
+	"admissionv1":  {Group: "admission.k8s.io", Version: "v1"},
+	"corev1":       {Group: "", Version: "v1"},
+	"appsv1":       {Group: "apps", Version: "v1"},
+	"batchv1":      {Group: "batch", Version: "v1"},
+	"networkingv1": {Group: "networking.k8s.io", Version: "v1"},
+	"rbacv1":       {Group: "rbac.authorization.k8s.io", Version: "v1"},
+}
+
+// allowedNotInDisableFor holds the API kinds that the operator code
+// instantiates and that need no DisableFor entry. Each entry has a reason.
+var allowedNotInDisableFor = map[string]string{
+	"corev1.Pod":                "diagnostic-only via APIReader; cache not registered",
+	"corev1.Event":              "Create-only; cluster-wide grant in operator ClusterRole",
+	"corev1.Namespace":          "cluster-scoped resource; cache is fine",
+	"rbacv1.ClusterRole":        "cluster-scoped resource; cache is fine",
+	"rbacv1.ClusterRoleBinding": "cluster-scoped resource; cache is fine",
+}
+
+// TestCacheDisableForParity walks every non-test .go file under internal/
+// and finds each Kubernetes API kind instantiated as a composite literal
+// (`&corev1.Service{}`, `batchv1.CronJob{}`). Each such kind MUST appear in
+// perTenantNamespaceCacheDisableTypes(), or in allowedNotInDisableFor with
+// a reason. A `<Kind>List` literal counts as its kind.
 //
 // Why: controller-runtime's typed cache lazily registers a cluster-wide
 // LIST/WATCH informer the first time client.Get/List sees a kind. The
-// operator only holds those verbs at the per-tenant Role level. A type
-// touched through the manager client but missing from DisableFor causes
-// WaitForCacheSync to hang forever, the reconciler to never dispatch,
-// and every signup to time out at PROVISIONING_TIMEOUT. Three real
-// incidents traced to exactly this class — tenant-operator#49 (PVC),
-// tenant-operator#57 (Service + StatefulSet). This test locks the
-// invariant so a fourth incident isn't possible from the same root cause.
+// operator holds those verbs at the per-tenant Role level only. A kind used
+// through the manager client and missing from DisableFor makes the
+// reflector retry the cluster-scope LIST forever, and the step that uses it
+// fails on "failed waiting for Informer to sync". Incidents of this class:
+// tenant-operator#49 (PVC), tenant-operator#57 (Service and StatefulSet),
+// gibson#1089 (the belief trainer CronJob in internal/saga/flows, which the
+// earlier walk of internal/dataplane/ only did not see).
 //
-// The walk is approximate — false positives (Pod, embedded types) are
-// filtered against the allowlist below with a recorded justification.
+// Embedded types (PodSpec, CronJobSpec) are not kinds in the scheme, so the
+// walk skips them without an allowlist entry.
 func TestCacheDisableForParity(t *testing.T) {
-	// Types referenced in internal/dataplane/ that are NOT used through
-	// the manager client (embedded sub-types, diagnostic-only reads via
-	// APIReader, cluster-scoped resources whose cache is fine). Each
-	// entry needs a written justification.
-	allowedNotInDisableFor := map[string]string{
-		"corev1.Pod":                            "diagnostic-only via APIReader; cache not registered",
-		"corev1.Event":                          "Create-only; cluster-wide grant in operator ClusterRole",
-		"corev1.PodSpec":                        "embedded type, not a top-level resource",
-		"corev1.Container":                      "embedded type, not a top-level resource",
-		"corev1.VolumeSource":                   "embedded type, not a top-level resource",
-		"corev1.EmptyDirVolumeSource":           "embedded type, not a top-level resource",
-		"corev1.Volume":                         "embedded type, not a top-level resource",
-		"corev1.VolumeMount":                    "embedded type, not a top-level resource",
-		"corev1.ResourceList":                   "embedded type, not a top-level resource",
-		"corev1.ResourceRequirements":           "embedded type, not a top-level resource",
-		"corev1.VolumeResourceRequirements":     "embedded type, not a top-level resource",
-		"corev1.ConfigMapKeySelector":           "embedded type, not a top-level resource",
-		"corev1.SecretKeySelector":              "embedded type, not a top-level resource",
-		"corev1.EnvVar":                         "embedded type, not a top-level resource",
-		"corev1.EnvVarSource":                   "embedded type, not a top-level resource",
-		"corev1.EnvFromSource":                  "embedded type, not a top-level resource",
-		"corev1.SecretEnvSource":                "embedded type, not a top-level resource",
-		"corev1.ConfigMapEnvSource":             "embedded type, not a top-level resource",
-		"corev1.Probe":                          "embedded type, not a top-level resource",
-		"corev1.ProbeHandler":                   "embedded type, not a top-level resource",
-		"corev1.TCPSocketAction":                "embedded type, not a top-level resource",
-		"corev1.ExecAction":                     "embedded type, not a top-level resource",
-		"corev1.HTTPGetAction":                  "embedded type, not a top-level resource",
-		"corev1.SecurityContext":                "embedded type, not a top-level resource",
-		"corev1.PodSecurityContext":             "embedded type, not a top-level resource",
-		"corev1.Capabilities":                   "embedded type, not a top-level resource",
-		"corev1.SeccompProfile":                 "embedded type, not a top-level resource",
-		"corev1.PodTemplateSpec":                "embedded type, not a top-level resource",
-		"corev1.LocalObjectReference":           "embedded type, not a top-level resource",
-		"corev1.ObjectReference":                "embedded type, not a top-level resource",
-		"corev1.ServicePort":                    "embedded type, not a top-level resource",
-		"corev1.ServiceSpec":                    "embedded type, not a top-level resource",
-		"corev1.PersistentVolumeClaimSpec":      "embedded type, not a top-level resource",
-		"corev1.PersistentVolumeAccessMode":     "embedded type, not a top-level resource",
-		"corev1.SecretReference":                "embedded type, not a top-level resource",
-		"corev1.Namespace":                      "cluster-scoped resource; cache is fine",
-		"appsv1.StatefulSetSpec":                "embedded type, not a top-level resource",
-		"appsv1.StatefulSetUpdateStrategy":      "embedded type, not a top-level resource",
-		"networkingv1.NetworkPolicySpec":        "embedded type, not a top-level resource",
-		"networkingv1.NetworkPolicyIngressRule": "embedded type, not a top-level resource",
-		"networkingv1.NetworkPolicyPeer":        "embedded type, not a top-level resource",
-		"networkingv1.NetworkPolicyPort":        "embedded type, not a top-level resource",
-		"rbacv1.RoleRef":                        "embedded type, not a top-level resource",
-		"rbacv1.Subject":                        "embedded type, not a top-level resource",
-		"rbacv1.PolicyRule":                     "embedded type, not a top-level resource",
-	}
+	_, thisFile, _, _ := runtime.Caller(0)
+	internalDir := filepath.Join(filepath.Dir(thisFile), "..", "internal")
 
-	// Build the "got" set from the source-of-truth function.
-	got := make(map[string]bool)
-	for _, obj := range perTenantNamespaceCacheDisableTypes() {
+	used, unknown := usedAPIKinds(t, internalDir)
+	for _, u := range unknown {
+		t.Errorf("%s: add the alias to apiAliases, so the walk judges its kinds", u)
+	}
+	if len(used) == 0 {
+		t.Fatalf("no Kubernetes API kind found under %s: the walk is blind", internalDir)
+	}
+	for _, name := range missingFromDisableFor(used, perTenantNamespaceCacheDisableTypes()) {
+		t.Errorf(
+			"%s instantiated in internal/%s but missing from "+
+				"cmd/cache_disable_for.go perTenantNamespaceCacheDisableTypes(). "+
+				"Either add it to that list (and to the chart's per-tenant "+
+				"ClusterRole) OR add it to allowedNotInDisableFor with a reason. "+
+				"See tenant-operator#49 / #57 / #76, gibson#1089.",
+			name, used[name])
+	}
+}
+
+// TestCacheDisableForParity_FailsOnAMissingKind proves the check fails on the
+// shape of gibson#1089: a CronJob instantiated outside internal/dataplane/
+// with no DisableFor entry.
+func TestCacheDisableForParity_FailsOnAMissingKind(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "saga", "flows")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	src := "package flows\n\nimport batchv1 \"k8s.io/api/batch/v1\"\n\n" +
+		"func cj() *batchv1.CronJob { return &batchv1.CronJob{Spec: batchv1.CronJobSpec{}} }\n"
+	if err := os.WriteFile(filepath.Join(sub, "trainer.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	used, unknown := usedAPIKinds(t, dir)
+	if len(unknown) != 0 {
+		t.Fatalf("batchv1 is in apiAliases, got unknown imports %v", unknown)
+	}
+	if _, ok := used["batchv1.CronJobSpec"]; ok {
+		t.Fatal("an embedded type must not count as a kind")
+	}
+	without := missingFromDisableFor(used, nil)
+	if len(without) != 1 || without[0] != "batchv1.CronJob" {
+		t.Fatalf("want one finding batchv1.CronJob with an empty list, got %v", without)
+	}
+	if got := missingFromDisableFor(used, perTenantNamespaceCacheDisableTypes()); len(got) != 0 {
+		t.Fatalf("the real list must cover the CronJob, got %v", got)
+	}
+}
+
+// TestCacheDisableForParity_FailsOnAnUnknownAPIImport proves the walk is not
+// blind to a k8s.io/api package outside apiAliases, under any alias.
+func TestCacheDisableForParity_FailsOnAnUnknownAPIImport(t *testing.T) {
+	dir := t.TempDir()
+	src := "package flows\n\nimport (\n\tpolicyv1 \"k8s.io/api/policy/v1\"\n\tcore \"k8s.io/api/core/v1\"\n)\n\n" +
+		"var _ = &policyv1.PodDisruptionBudget{}\nvar _ = &core.Secret{}\n"
+	if err := os.WriteFile(filepath.Join(dir, "pdb.go"), []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, unknown := usedAPIKinds(t, dir)
+	if len(unknown) != 2 {
+		t.Fatalf("want two unknown imports (policyv1, core), got %v", unknown)
+	}
+}
+
+// usedAPIKinds returns each API kind instantiated under root, keyed by
+// "<alias>.<Kind>", with the first file (relative to root) where it occurs.
+// It also returns each k8s.io/api import whose alias and path are not a pair
+// of apiAliases.
+func usedAPIKinds(t *testing.T, root string) (used map[string]string, unknown []string) {
+	t.Helper()
+	known := clientgoscheme.Scheme.AllKnownTypes()
+	used = map[string]string{}
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		rel, _ := filepath.Rel(root, path)
+		unknown = append(unknown, unknownAPIImports(file, rel)...)
+		ast.Inspect(file, func(n ast.Node) bool {
+			cl, ok := n.(*ast.CompositeLit)
+			if !ok || cl.Type == nil {
+				return true
+			}
+			sel, ok := cl.Type.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkgIdent, ok := sel.X.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			gv, ok := apiAliases[pkgIdent.Name]
+			if !ok {
+				return true
+			}
+			kind := strings.TrimSuffix(sel.Sel.Name, "List")
+			if _, isKind := known[gv.WithKind(kind)]; !isKind {
+				return true
+			}
+			key := pkgIdent.Name + "." + kind
+			if _, already := used[key]; !already {
+				used[key] = rel
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	sort.Strings(unknown)
+	return used, unknown
+}
+
+// unknownAPIImports returns each k8s.io/api import of file whose alias is not
+// in apiAliases, or names another package there.
+func unknownAPIImports(file *ast.File, rel string) []string {
+	var out []string
+	for _, imp := range file.Imports {
+		path := strings.Trim(imp.Path.Value, `"`)
+		if !strings.HasPrefix(path, "k8s.io/api/") {
+			continue
+		}
+		alias := filepath.Base(path)
+		if imp.Name != nil {
+			alias = imp.Name.Name
+		}
+		if gv, ok := apiAliases[alias]; ok && apiPackage(gv) == path {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s imports %s as %s", rel, path, alias))
+	}
+	return out
+}
+
+// missingFromDisableFor returns, sorted, each used kind that is neither in
+// list nor in allowedNotInDisableFor.
+func missingFromDisableFor(used map[string]string, list []client.Object) []string {
+	got := map[string]bool{}
+	for _, obj := range list {
 		got[shortName(obj)] = true
 	}
-
-	// Locate internal/dataplane/ relative to this test file.
-	_, thisFile, _, _ := runtime.Caller(0)
-	dataplaneDir := filepath.Join(filepath.Dir(thisFile), "..", "internal", "dataplane")
-
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dataplaneDir, func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("parse %s: %v", dataplaneDir, err)
-	}
-
-	// Walk AST for `pkgalias.TypeName{...}` composite literals.
-	used := map[string]string{} // type → first file where seen
-	for _, pkg := range pkgs {
-		for filename, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				cl, ok := n.(*ast.CompositeLit)
-				if !ok || cl.Type == nil {
-					return true
-				}
-				sel, ok := cl.Type.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkgIdent, ok := sel.X.(*ast.Ident)
-				if !ok {
-					return true
-				}
-				switch pkgIdent.Name {
-				case "corev1", "appsv1", "networkingv1", "rbacv1", "batchv1":
-					// continue
-				default:
-					return true
-				}
-				key := pkgIdent.Name + "." + sel.Sel.Name
-				if _, already := used[key]; !already {
-					used[key] = filepath.Base(filename)
-				}
-				return true
-			})
-		}
-	}
-
-	for name, where := range used {
+	var out []string
+	for name := range used {
 		if got[name] {
 			continue
 		}
-		if reason, ok := allowedNotInDisableFor[name]; ok {
-			t.Logf("OK: %s used in %s but allowlisted (%s)", name, where, reason)
+		if _, ok := allowedNotInDisableFor[name]; ok {
 			continue
 		}
-		t.Errorf(
-			"%s instantiated in internal/dataplane/%s but missing from "+
-				"cmd/cache_disable_for.go perTenantNamespaceCacheDisableTypes(). "+
-				"Either add it to that list (and to the chart's per-tenant "+
-				"ClusterRole) OR add to the test's allowedNotInDisableFor map "+
-				"with a justification. See tenant-operator#49 / #57 / #76.",
-			name, where)
+		out = append(out, name)
 	}
+	sort.Strings(out)
+	return out
 }
 
-// shortName returns the same "corev1.Service" form the AST walker emits,
-// so the two key sets line up.
+// shortName returns the "<alias>.<Kind>" form of obj that the walk emits.
 func shortName(obj any) string {
-	t := fmt.Sprintf("%T", obj)
-	t = strings.TrimPrefix(t, "*")
-	// fmt.Sprintf renders the import path like "v1.Service" for corev1;
-	// remap by best-effort suffix.
-	switch {
-	case strings.HasPrefix(t, "v1.") && (isCoreV1(t)):
-		return "corev1." + strings.TrimPrefix(t, "v1.")
-	case strings.HasPrefix(t, "v1.") && isAppsV1(t):
-		return "appsv1." + strings.TrimPrefix(t, "v1.")
-	case strings.HasPrefix(t, "v1.") && isNetworkingV1(t):
-		return "networkingv1." + strings.TrimPrefix(t, "v1.")
-	case strings.HasPrefix(t, "v1.") && isRbacV1(t):
-		return "rbacv1." + strings.TrimPrefix(t, "v1.")
+	rt := reflect.TypeOf(obj)
+	for rt.Kind() == reflect.Pointer {
+		rt = rt.Elem()
 	}
-	return t
+	for alias, gv := range apiAliases {
+		if apiPackage(gv) == rt.PkgPath() {
+			return alias + "." + rt.Name()
+		}
+	}
+	return rt.PkgPath() + "." + rt.Name()
 }
 
-func isCoreV1(t string) bool {
-	for _, k := range []string{"ConfigMap", "Secret", "Service", "PersistentVolumeClaim", "Pod", "Namespace", "Event"} {
-		if strings.HasPrefix(t, "v1."+k) {
-			// Disambiguate against rbacv1.RoleBinding etc. — but those don't
-			// start with these core kinds.
-			return true
-		}
+// apiPackage is the Go import path of the k8s.io/api package of gv: the
+// first label of the group ("rbac.authorization.k8s.io" is "rbac"), and
+// "core" for the empty group.
+func apiPackage(gv schema.GroupVersion) string {
+	group, _, _ := strings.Cut(gv.Group, ".")
+	if group == "" {
+		group = "core"
 	}
-	return false
-}
-func isAppsV1(t string) bool {
-	for _, k := range []string{"StatefulSet", "Deployment", "DaemonSet", "ReplicaSet"} {
-		if strings.HasPrefix(t, "v1."+k) {
-			return true
-		}
-	}
-	return false
-}
-func isNetworkingV1(t string) bool {
-	return strings.HasPrefix(t, "v1.NetworkPolicy") || strings.HasPrefix(t, "v1.Ingress")
-}
-func isRbacV1(t string) bool {
-	for _, k := range []string{"Role", "RoleBinding", "ClusterRole", "ClusterRoleBinding"} {
-		if t == "v1."+k {
-			return true
-		}
-	}
-	return false
+	return "k8s.io/api/" + group + "/" + gv.Version
 }

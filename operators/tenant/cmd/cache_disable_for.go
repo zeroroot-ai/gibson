@@ -21,6 +21,7 @@ package main
 
 import (
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -36,7 +37,7 @@ import (
 // a HorizontalPodAutoscaler) requires both (a) appending to this list and
 // (b) granting verbs in the per-tenant ClusterRole at
 // deploy/helm/gibson-operators/templates/tenant-operator/tenant-namespace-cluster-role.yaml.
-// TestCacheDisableForParity enforces (a); the chart-side counterpart is
+// TestCacheDisableForParity enforces (a) for every package under internal/; the chart-side counterpart is
 // a deploy-repo CI concern (tenant-operator#76 PRD Module 7).
 func perTenantNamespaceCacheDisableTypes() []client.Object {
 	return []client.Object{
@@ -52,5 +53,8 @@ func perTenantNamespaceCacheDisableTypes() []client.Object {
 		// plugin namespaces tenant-<tenant>-plugins only.
 		&appsv1.Deployment{},
 		&corev1.ServiceAccount{},
+		// The belief trainer of each tenant (internal/saga/flows,
+		// gibson#1089) lives in the tenant namespace.
+		&batchv1.CronJob{},
 	}
 }

@@ -31,6 +31,7 @@ import (
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -104,6 +105,8 @@ func PerTenantKinds() []ctrlclient.Object {
 		// The catalog plugin loop (gibson#815): plugin namespaces only.
 		&appsv1.Deployment{},
 		&corev1.ServiceAccount{},
+		// The belief trainer of each tenant (gibson#1089).
+		&batchv1.CronJob{},
 	}
 }
 
@@ -143,6 +146,8 @@ func perTenantKind(o ctrlclient.Object) (string, bool) {
 		return "Deployment", true
 	case *corev1.ServiceAccount:
 		return "ServiceAccount", true
+	case *batchv1.CronJob:
+		return "CronJob", true
 	}
 	return "", false
 }
