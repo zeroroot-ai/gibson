@@ -335,6 +335,14 @@ jobs:
               kubectl -n tenant-connector-e2e logs "$p" --all-containers --previous --tail=60 2>/dev/null || true
             done
             kubectl -n toolhive-system logs deploy/toolhive-operator --tail=60 2>/dev/null || true
+            # The ToolHive proxy exits 2 with no reason in its log (run
+            # 38210663974), and it runs the MCP server as a StatefulSet. So
+            # the events, the StatefulSets and the MCPServer status of the
+            # namespace are printed too.
+            kubectl -n tenant-connector-e2e get statefulsets,deployments,services -o wide || true
+            kubectl -n tenant-connector-e2e get events --sort-by=.lastTimestamp | tail -40 || true
+            kubectl -n tenant-connector-e2e get mcpserver fixture-mcp-tools -o yaml | sed -n '/^status:/,$p' || true
+            kubectl -n tenant-connector-e2e get role,rolebinding -o wide || true
             exit 1
           fi
           kubectl -n tenant-connector-e2e port-forward svc/mcp-fixture-mcp-tools-proxy 18080:8080 >/tmp/pf.log 2>&1 &
