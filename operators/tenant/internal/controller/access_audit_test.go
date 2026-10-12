@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/events"
@@ -25,11 +24,13 @@ import (
 // gibson#583: each identity, access or credential change of these
 // controllers has its audit record first, and a failed record stops it.
 
-func TestTenantMember_FailedRecordStopsTheInvitationToken(t *testing.T) {
+func TestTenantMember_FailedRecordStopsTheActivation(t *testing.T) {
 	s := newMemberTestScheme(t)
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{Name: "eve", Namespace: "default", Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}},
-		Spec:       gibsonv1alpha1.TenantMemberSpec{Email: "eve@acme.com", Role: gibsonv1alpha1.MemberRoleMember, TenantRef: localRef()},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "eve@acme.com", Role: gibsonv1alpha1.MemberRoleMember, TenantRef: localRef(), AcceptedByUserID: "user-eve",
+		},
 	}
 	c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&gibsonv1alpha1.TenantMember{}).WithObjects(member).Build()
 	r := &TenantMemberReconciler{Client: c, Scheme: s, Recorder: events.NewFakeRecorder(10),
@@ -37,12 +38,12 @@ func TestTenantMember_FailedRecordStopsTheInvitationToken(t *testing.T) {
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "eve"}}); !errors.Is(err, audit.ErrNotRecorded) {
 		t.Fatalf("reconcile = %v, want ErrNotRecorded", err)
 	}
-	var secrets corev1.SecretList
-	if err := c.List(context.Background(), &secrets); err != nil {
+	var got gibsonv1alpha1.TenantMember
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "eve"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(secrets.Items) != 0 {
-		t.Fatalf("an invitation token was created with no record: %d secrets", len(secrets.Items))
+	if got.Status.Phase == gibsonv1alpha1.TenantMemberPhaseActive {
+		t.Fatal("the member became Active with no record")
 	}
 }
 

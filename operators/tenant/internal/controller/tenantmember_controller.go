@@ -5,14 +5,10 @@ package controller
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,11 +25,8 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/fga"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
-
-const invitationTTL = 7 * 24 * time.Hour
 
 // tenantRoleFromMemberRole maps a TenantMember's MemberRole to a tenantrole.Role
 // (ADR-0093): owner to Owner, admin to Admin, member to Viewer.
@@ -53,24 +46,19 @@ func tenantRoleFromMemberRole(role gibsonv1alpha1.MemberRole) (tenantrole.Role, 
 // zitadelBackoff is the requeue delay when Zitadel is unavailable.
 const zitadelBackoff = 30 * time.Second
 
-// TenantMemberReconciler owns invitation lifecycle and active membership
-// state for a tenant.
+// TenantMemberReconciler keeps the tenant role and the session tuples of a
+// member whose account exists. It issues no invitation and sends no mail.
 type TenantMemberReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
 	Recorder events.EventRecorder
 
 	FGA     fga.Client
-	Mail    mail.Sender
 	Zitadel zitadel.Client
 	// Roles is the tenant role Syncer (ADR-0093 decision 3): the one writer
 	// of tenant-role tuples. syncZitadel calls Roles.Assign for a member
 	// whose Zitadel user already exists; cleanup calls Roles.Revoke.
 	Roles *tenantrole.Syncer
-
-	// BaseAcceptURL is the dashboard base URL for invitation accept links
-	// (e.g. "https://app.zeroroot.ai").
-	BaseAcceptURL string
 
 	// Audit writes the record of each identity, access or credential change
 	// before the change (gibson#583). Required.
@@ -130,145 +118,26 @@ func (r *TenantMemberReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return result, err
 	}
 
-	// Branch on phase + spec state.
+	// The operator issues no invitation and sends no mail. The daemon owns
+	// every invitation and every onboarding email (gibson#626, gibson#520,
+	// gibson#987): its AcceptInvitation creates the account, and each writer
+	// of a TenantMember (ensureFoundingMember, bootstrap-tenant-owner) sets
+	// spec.acceptedByUserId to an account that already exists. A member with
+	// no account waits for the daemon.
 	switch {
-	case tm.Spec.AcceptedByUserID != "" && tm.Status.Phase == gibsonv1alpha1.TenantMemberPhaseInvited:
-		return r.acceptInvitation(ctx, &tm)
 	case tm.Status.Phase == gibsonv1alpha1.TenantMemberPhaseActive:
-		// Already active. ResendRequestedAt bumps are a no-op once the
-		// member is past invited (kept here as the documented behavior:
-		// there is nothing to resend). Future work might surface the
-		// resend-after-active case as an explicit Tenant condition.
 		return ctrl.Result{}, nil
-	case tm.Status.Phase == "" || tm.Status.Phase == gibsonv1alpha1.TenantMemberPhasePending:
-		return r.issueInvitation(ctx, &tm)
-	case tm.Status.Phase == gibsonv1alpha1.TenantMemberPhaseInvited:
-		// Check expiry.
-		if tm.Status.InvitationExpiresAt != nil && time.Now().After(tm.Status.InvitationExpiresAt.Time) {
-			return r.expireInvitation(ctx, &tm)
-		}
-		if tm.Spec.ResendRequestedAt != nil && (tm.Status.LastResendAt == nil || tm.Spec.ResendRequestedAt.After(tm.Status.LastResendAt.Time)) {
-			return r.resendInvitation(ctx, &tm)
-		}
-		// Nothing to do; requeue for expiry check.
-		if tm.Status.InvitationExpiresAt != nil {
-			remaining := time.Until(tm.Status.InvitationExpiresAt.Time)
-			if remaining > 0 {
-				return ctrl.Result{RequeueAfter: remaining}, nil
-			}
-		}
+	case tm.Spec.AcceptedByUserID != "":
+		return r.activateMember(ctx, &tm)
 	}
 
 	log.V(1).Info("no action", "phase", tm.Status.Phase)
 	return ctrl.Result{}, nil
 }
 
-func (r *TenantMemberReconciler) issueInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
-	token, hash, err := generateInvitationToken()
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	expiresAt := time.Now().Add(invitationTTL)
-
-	// Create Secret holding the plaintext token.
-	secretName := fmt.Sprintf("invitation-%s", shortHash(hash))
-	trueVal := true
-	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: tm.Namespace,
-			Annotations: map[string]string{
-				"gibson.zeroroot.ai/expires-at":   expiresAt.Format(time.RFC3339),
-				"gibson.zeroroot.ai/tenantmember": tm.Name,
-			},
-			Labels: map[string]string{
-				"gibson.zeroroot.ai/kind":       "invitation-token",
-				"gibson.zeroroot.ai/managed-by": "tenant-operator",
-			},
-			OwnerReferences: []metav1.OwnerReference{{
-				APIVersion:         gibsonv1alpha1.GroupVersion.String(),
-				Kind:               "TenantMember",
-				Name:               tm.Name,
-				UID:                tm.UID,
-				Controller:         &trueVal,
-				BlockOwnerDeletion: &trueVal,
-			}},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{"token": []byte(token)},
-	}
-	ev := audit.ObjectEvent(audit.ActionMemberInvitationIssue, tm, map[string]string{"secret": secretName})
-	if err := r.Audit.Change(ctx, ev, func() error {
-		if err := r.Create(ctx, secret); err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create invitation secret: %w", err)
-		}
-		return nil
-	}); err != nil {
-		return ctrl.Result{}, fmt.Errorf("record the invitation: %w", err)
-	}
-
-	// Send email.
-	if r.Mail != nil {
-		acceptURL := fmt.Sprintf("%s/invite/%s", r.BaseAcceptURL, token)
-		if err := r.Mail.SendInvitation(ctx, mail.InvitationMessage{
-			To:           tm.Spec.Email,
-			TenantName:   tm.Spec.TenantRef.Name,
-			InviterEmail: inviterDisplay(tm),
-			AcceptURL:    acceptURL,
-			ExpiresAt:    expiresAt,
-		}); err != nil {
-			// Email failure is non-blocking: record but continue.
-			// events.EventRecorder.Eventf signature: (regarding, related,
-			// eventtype, reason, action, note, args...).
-			r.Recorder.Eventf(tm, nil, corev1.EventTypeWarning, "EmailFailed", "EmailFailed", "%s", err.Error())
-		}
-	}
-
-	now := metav1.Now()
-	expMeta := metav1.NewTime(expiresAt)
-	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseInvited
-	tm.Status.InvitationExpiresAt = &expMeta
-	tm.Status.InvitationSecretRef = secretName
-	tm.Status.LastResendAt = &now
-	tm.Status.ObservedGeneration = tm.Generation
-
-	if err := r.Status().Update(ctx, tm); err != nil {
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{RequeueAfter: invitationTTL}, nil
-}
-
-func (r *TenantMemberReconciler) resendInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
-	// Simpler: just resend email with the existing token (read from Secret).
-	if tm.Status.InvitationSecretRef == "" {
-		// No existing token; treat as new issuance.
-		return r.issueInvitation(ctx, tm)
-	}
-	secret := &corev1.Secret{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: tm.Namespace, Name: tm.Status.InvitationSecretRef}, secret); err != nil {
-		if apierrors.IsNotFound(err) {
-			// Secret gone; re-issue.
-			return r.issueInvitation(ctx, tm)
-		}
-		return ctrl.Result{}, err
-	}
-	token := string(secret.Data["token"])
-	if r.Mail != nil {
-		acceptURL := fmt.Sprintf("%s/invite/%s", r.BaseAcceptURL, token)
-		_ = r.Mail.SendInvitation(ctx, mail.InvitationMessage{
-			To:           tm.Spec.Email,
-			TenantName:   tm.Spec.TenantRef.Name,
-			InviterEmail: inviterDisplay(tm),
-			AcceptURL:    acceptURL,
-			ExpiresAt:    tm.Status.InvitationExpiresAt.Time,
-		})
-	}
-	now := metav1.Now()
-	tm.Status.LastResendAt = &now
-	return ctrl.Result{}, r.Status().Update(ctx, tm)
-}
-
-func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
+// activateMember makes a member whose account exists Active and seeds its
+// session tuples.
+func (r *TenantMemberReconciler) activateMember(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
 	ev := audit.ObjectEvent(audit.ActionMemberInvitationAccept, tm, map[string]string{"user_id": tm.Spec.AcceptedByUserID})
 	if err := r.Audit.Change(ctx, ev, func() error {
 		if r.FGA != nil {
@@ -331,13 +200,6 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 			}
 		}
 
-		// Burn the invitation secret.
-		if tm.Status.InvitationSecretRef != "" {
-			secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
-			if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete the invitation secret: %w", err)
-			}
-		}
 		return nil
 	}); err != nil {
 		return ctrl.Result{}, fmt.Errorf("record the invitation acceptance: %w", err)
@@ -345,26 +207,7 @@ func (r *TenantMemberReconciler) acceptInvitation(ctx context.Context, tm *gibso
 
 	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseActive
 	tm.Status.UserID = tm.Spec.AcceptedByUserID
-	tm.Status.InvitationSecretRef = ""
 	tm.Status.ObservedGeneration = tm.Generation
-	return ctrl.Result{}, r.Status().Update(ctx, tm)
-}
-
-func (r *TenantMemberReconciler) expireInvitation(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (ctrl.Result, error) {
-	if tm.Status.InvitationSecretRef != "" {
-		secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tm.Status.InvitationSecretRef, Namespace: tm.Namespace}}
-		ev := audit.ObjectEvent(audit.ActionMemberInvitationExpire, tm, map[string]string{"secret": secret.Name})
-		if err := r.Audit.Change(ctx, ev, func() error {
-			if err := r.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
-				return fmt.Errorf("delete invitation secret: %w", err)
-			}
-			return nil
-		}); err != nil {
-			return ctrl.Result{}, fmt.Errorf("record the invitation withdrawal: %w", err)
-		}
-	}
-	tm.Status.Phase = gibsonv1alpha1.TenantMemberPhaseExpired
-	tm.Status.InvitationSecretRef = ""
 	return ctrl.Result{}, r.Status().Update(ctx, tm)
 }
 
@@ -530,34 +373,4 @@ func (r *TenantMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&gibsonv1alpha1.TenantMember{}).
 		Named("tenantmember").
 		Complete(r)
-}
-
-func generateInvitationToken() (token, hash string, err error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", "", err
-	}
-	token = hex.EncodeToString(buf)
-	sum := sha256.Sum256([]byte(token))
-	hash = hex.EncodeToString(sum[:])
-	return token, hash, nil
-}
-
-func shortHash(h string) string {
-	if len(h) > 12 {
-		return h[:12]
-	}
-	return h
-}
-
-// inviterDisplay returns the value to render as the inviter in the
-// outgoing invitation email. If the dashboard recorded the inviter's
-// email on the CR, use it verbatim; otherwise fall back to a generic
-// placeholder so the email never has a leading-whitespace artefact
-// like " has invited you to join ...".
-func inviterDisplay(tm *gibsonv1alpha1.TenantMember) string {
-	if tm != nil && tm.Spec.InvitedByEmail != "" {
-		return tm.Spec.InvitedByEmail
-	}
-	return "a Gibson admin"
 }

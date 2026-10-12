@@ -283,16 +283,6 @@ const (
 	// configuration" and the dashboard 412s on every API call.
 	// tenant-operator#189.
 	ConditionSecretsJWTAuthConfigured = "SecretsJWTAuthConfigured"
-
-	// ConditionWelcomeEmailSent is set True after the operator has sent the
-	// workspace-ready welcome email to the founding owner (spec.owner) at the
-	// Tenant's Ready transition. It IS the idempotence guard: Reconcile
-	// re-runs on every watch event, so an unguarded send would mail the owner
-	// on every requeue. It is written into status and persisted by the
-	// reconciler's Status().Patch — a mid-reconcile spec write would be
-	// silently discarded (tenant-operator#354). Left unset when the send
-	// failed, so the next reconcile retries. gibson#1447.
-	ConditionWelcomeEmailSent = "WelcomeEmailSent"
 )
 
 func init() {

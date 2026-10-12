@@ -88,11 +88,6 @@ spec:
           value: "sk_test_e2e_fake_placeholder_key_not_real"
         - name: STRIPE_API_BASE_URL
           value: "http://e2e-http-stub.tenant-operator-system.svc.cluster.local:8080"
-        # --- SMTP (required: SMTP_HOST + SMTP_FROM non-empty; no connect at startup) ---
-        - name: SMTP_HOST
-          value: "e2e-smtp.invalid"
-        - name: SMTP_FROM
-          value: "e2e@test.invalid"
         volumeMounts:
         - name: e2e-plans
           mountPath: /etc/gibson/plans
