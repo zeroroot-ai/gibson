@@ -97,6 +97,11 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.world.v1.WorldService/ListReviewQueue": true,
 			"/gibson.world.v1.WorldService/SubmitLabel":     true,
 			"/gibson.world.v1.WorldService/ListMissions":    true,
+			// The belief training test reads the World of its tenant when the
+			// review queue is empty, to tell a scan that never reached the
+			// World from one with nothing to review (run 38215671007).
+			"/gibson.world.v1.WorldService/ListHosts":    true,
+			"/gibson.world.v1.WorldService/ListFindings": true,
 			// The secrets isolation suite (tests/e2e/secrets, gibson#213):
 			// create the principals that check in at the edge, and revoke
 			// them. The secret itself is set and deleted with the two
