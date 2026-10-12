@@ -9,7 +9,10 @@ import (
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
@@ -210,5 +213,87 @@ func TestMCPServerPodTemplateMeetsRestricted(t *testing.T) {
 	}
 	if p, _, _ := unstructured.NestedString(c, "securityContext", "seccompProfile", "type"); p != "RuntimeDefault" {
 		t.Errorf("container seccomp = %q", p)
+	}
+}
+
+// selects reports whether the endpoint selector of a policy matches a pod
+// with the given labels.
+func selects(t *testing.T, u *unstructured.Unstructured, podLabels map[string]string) bool {
+	t.Helper()
+	raw, _, err := unstructured.NestedMap(u.Object, "spec", "endpointSelector")
+	if err != nil {
+		t.Fatalf("endpointSelector: %v", err)
+	}
+	var ls metav1.LabelSelector
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(raw, &ls); err != nil {
+		t.Fatalf("convert endpointSelector: %v", err)
+	}
+	sel, err := metav1.LabelSelectorAsSelector(&ls)
+	if err != nil {
+		t.Fatalf("endpointSelector as selector: %v", err)
+	}
+	return sel.Matches(labels.Set(podLabels))
+}
+
+// The API server policy selects the ToolHive proxy pod of the connector, and
+// neither its MCP server pod nor a pod of another connector. Its one egress
+// rule is the entity kube-apiserver (gibson#1119). The labels are the ones
+// ToolHive v0.12.1 sets: labelsForMCPServer and labelsForMCPRemoteProxy on
+// the proxy, and app=<name>, toolhive-name=<name> on the server pod.
+func TestDesiredProxyAPIServerPolicy(t *testing.T) {
+	u := desiredProxyAPIServerPolicy(hostedInstance("gh", "tenant-acme"))
+	if u.GetName() != "connector-gh-proxy-apiserver" || u.GetNamespace() != "tenant-acme" {
+		t.Fatalf("name = %s/%s", u.GetNamespace(), u.GetName())
+	}
+	for name, c := range map[string]struct {
+		labels map[string]string
+		want   bool
+	}{
+		"the MCPServer proxy": {map[string]string{
+			"app": "mcpserver", "app.kubernetes.io/name": "mcpserver", "app.kubernetes.io/instance": "gh",
+			"toolhive": "true", "toolhive-name": "gh",
+		}, true},
+		"the MCPRemoteProxy proxy": {map[string]string{
+			"app": "mcpremoteproxy", "app.kubernetes.io/name": "mcpremoteproxy", "app.kubernetes.io/instance": "gh",
+			"toolhive": "true", "toolhive-name": "gh",
+		}, true},
+		"the MCP server pod": {map[string]string{"app": "gh", "toolhive": "true", "toolhive-name": "gh"}, false},
+		"the proxy of another connector": {map[string]string{
+			"app.kubernetes.io/name": "mcpserver", "toolhive-name": "slack",
+		}, false},
+	} {
+		if got := selects(t, u, c.labels); got != c.want {
+			t.Errorf("%s: selected = %v, want %v", name, got, c.want)
+		}
+	}
+	egress, _, _ := unstructured.NestedSlice(u.Object, "spec", "egress")
+	if len(egress) != 1 {
+		t.Fatalf("egress = %v, want one rule", egress)
+	}
+	rule := egress[0].(map[string]interface{})
+	ents, _ := rule["toEntities"].([]interface{})
+	if len(rule) != 1 || len(ents) != 1 || ents[0] != "kube-apiserver" {
+		t.Errorf("egress rule = %v, want only toEntities [kube-apiserver]", rule)
+	}
+}
+
+// The reconcile creates the API server policy for every connector, with or
+// without a host list, and an update keeps it.
+func TestReconcileProxyAPIServerPolicy(t *testing.T) {
+	ctx := context.Background()
+	r := newReconciler(t)
+	ci := hostedInstance("gh", "tenant-acme")
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "connector-gh-proxy-apiserver"}
+	for _, step := range []string{"create", "update"} {
+		if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+		u := ciliumegress.NewPolicy()
+		if err := r.Get(ctx, key, u); err != nil {
+			t.Fatalf("%s: no policy: %v", step, err)
+		}
+		if len(u.GetOwnerReferences()) != 1 {
+			t.Errorf("%s: owner references = %v", step, u.GetOwnerReferences())
+		}
 	}
 }
