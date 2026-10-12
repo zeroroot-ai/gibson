@@ -288,6 +288,20 @@ jobs:
             'TestNonPluginDeny|TestForgedCGJWT' 15m \
             2>&1 | tee "$E2E_OUT/secrets.log"
           rc=${PIPESTATUS[0]}
+          if [ "$rc" != 0 ]; then
+            # What the daemon and the edge said about each registration: run
+            # 38215670980 got "registration returned HTTP 401: invalid
+            # enrollment credential" and kept no daemon or edge log.
+            echo "=== daemon: capability-grant lines ==="
+            kubectl -n "$NS" logs statefulset/gibson-gibson-workloads -c gibson --since=20m 2>/dev/null \
+              | grep -i 'capability-grant' | tail -40 || true
+            echo "=== ext-authz: lines about /capabilitygrant ==="
+            kubectl -n "$NS" logs deploy/gibson-ext-authz --since=20m 2>/dev/null \
+              | grep -i 'capabilitygrant' | tail -20 || true
+            echo "=== edge: requests to /capabilitygrant ==="
+            kubectl -n "$NS" logs deploy/gibson-envoy -c envoy --since=20m 2>/dev/null \
+              | grep -i 'capabilitygrant' | tail -20 || true
+          fi
           gibson/.github/scripts/e2e-suite-verdict.sh secrets "$E2E_OUT/secrets.log" "$rc" "$RESULTS"
 
       # plugin_e2e_test.go cannot run on this venue by design: it starts a
