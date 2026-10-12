@@ -99,3 +99,78 @@ func (r *ConnectorInstanceReconciler) reconcileCiliumEgressPolicy(
 	}
 	return nil
 }
+
+// The ToolHive proxy of a connector creates the MCP server StatefulSet and
+// attaches to it through the Kubernetes API (ToolHive v0.12.1, Kubernetes
+// runtime). The tenant namespace is default-deny, and the owned NetworkPolicy
+// opens no path to the kube-apiserver, so the first API call of the proxy
+// hung and the kubelet killed the proxy at its liveness window (gibson#1119).
+//
+// This policy selects the proxy pod only. ToolHive labels the proxy pod
+// app.kubernetes.io/name=mcpserver (MCPServer) or mcpremoteproxy
+// (MCPRemoteProxy). The MCP server pod, which runs the third-party code, has
+// neither label, so it gets no API access. The entity kube-apiserver names the
+// API server on every cluster, so the operator needs no address of it.
+
+// proxyAPIServerPolicyName is the name of the API server policy of a connector.
+func proxyAPIServerPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {
+	return "connector-" + ci.Name + "-proxy-apiserver"
+}
+
+// toolhiveProxyNames are the app.kubernetes.io/name values ToolHive puts on a
+// proxy pod.
+var toolhiveProxyNames = []interface{}{"mcpserver", "mcpremoteproxy"}
+
+// desiredProxyAPIServerPolicy is the policy that lets the ToolHive proxy of a
+// connector reach the Kubernetes API.
+func desiredProxyAPIServerPolicy(ci *connectorv1alpha1.ConnectorInstance) *unstructured.Unstructured {
+	u := ciliumegress.NewPolicy()
+	u.SetName(proxyAPIServerPolicyName(ci))
+	u.SetNamespace(ci.Namespace)
+	u.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by": "gibson-connector-operator",
+		"gibson.zeroroot.ai/connector": ci.Spec.Connector,
+	})
+	u.Object["spec"] = map[string]interface{}{
+		"endpointSelector": map[string]interface{}{
+			"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
+			"matchExpressions": []interface{}{map[string]interface{}{
+				"key":      "app.kubernetes.io/name",
+				"operator": "In",
+				"values":   toolhiveProxyNames,
+			}},
+		},
+		"egress": []interface{}{map[string]interface{}{
+			"toEntities": []interface{}{"kube-apiserver"},
+		}},
+	}
+	return u
+}
+
+// reconcileProxyAPIServerPolicy applies the API server policy of the
+// connector.
+func (r *ConnectorInstanceReconciler) reconcileProxyAPIServerPolicy(
+	ctx context.Context, ci *connectorv1alpha1.ConnectorInstance,
+) error {
+	desired := desiredProxyAPIServerPolicy(ci)
+	if err := controllerutil.SetControllerReference(ci, desired, r.Scheme); err != nil {
+		return fmt.Errorf("proxy api server policy owner ref: %w", err)
+	}
+	live := ciliumegress.NewPolicy()
+	err := r.Get(ctx, client.ObjectKeyFromObject(desired), live)
+	if apierrors.IsNotFound(err) {
+		if err := r.Create(ctx, desired); err != nil {
+			return fmt.Errorf("create proxy api server policy: %w", err)
+		}
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get proxy api server policy: %w", err)
+	}
+	live.Object["spec"] = desired.Object["spec"]
+	live.SetLabels(desired.GetLabels())
+	if err := r.Update(ctx, live); err != nil {
+		return fmt.Errorf("update proxy api server policy: %w", err)
+	}
+	return nil
+}

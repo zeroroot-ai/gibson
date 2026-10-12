@@ -197,6 +197,12 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		return failed("EgressPolicy", err)
 	}
 
+	// The ToolHive proxy reaches the Kubernetes API; the MCP server pod does
+	// not (gibson#1119).
+	if err := r.reconcileProxyAPIServerPolicy(ctx, &ci); err != nil {
+		return failed("ProxyAPIServerPolicy", err)
+	}
+
 	// The connector's credential is NOT reconciled here. For auth secret and
 	// auth oauth alike, the daemon reads the credential from the tenant's
 	// configured secret store and writes the <connector>-connector-cred Secret
