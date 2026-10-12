@@ -325,7 +325,16 @@ jobs:
             echo "::error::the fixture connector did not reach Ready (phase '${phase}')"
             kubectl -n tenant-connector-e2e get connectorinstance,mcpserver,pods -o wide || true
             kubectl -n tenant-connector-e2e describe connectorinstance fixture-mcp-tools || true
-            kubectl -n tenant-connector-e2e logs -l app.kubernetes.io/instance=fixture-mcp-tools --all-containers --tail=100 || true
+            # Each pod of the namespace, by name: the label selector above
+            # matched no pod in run 38201542361, where the ToolHive pod
+            # crash-looped and its log was never printed.
+            for p in $(kubectl -n tenant-connector-e2e get pods -o name); do
+              echo "--- $p"
+              kubectl -n tenant-connector-e2e describe "$p" | sed -n '/^Containers:/,/^Conditions:/p' || true
+              kubectl -n tenant-connector-e2e logs "$p" --all-containers --tail=60 || true
+              kubectl -n tenant-connector-e2e logs "$p" --all-containers --previous --tail=60 2>/dev/null || true
+            done
+            kubectl -n toolhive-system logs deploy/toolhive-operator --tail=60 2>/dev/null || true
             exit 1
           fi
           kubectl -n tenant-connector-e2e port-forward svc/mcp-fixture-mcp-tools-proxy 18080:8080 >/tmp/pf.log 2>&1 &
