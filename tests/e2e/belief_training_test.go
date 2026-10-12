@@ -70,6 +70,11 @@ func runBeliefMission(t *testing.T, ctx context.Context, clients *helpers.GRPCCl
 	require.NoError(t, err, "the %s mission must reach a terminal state", name)
 	require.Equal(t, "mission_completed", terminal.EventType,
 		"the %s mission must complete; reason: %s", name, failureReason(terminal, collected))
+	// The events of the run, so a mission that completes and leaves nothing
+	// to review shows what it did (exit-test-belief-training run 38210806140).
+	for _, ev := range collected {
+		t.Logf("%s event: %s", name, ev)
+	}
 	return defID
 }
 
@@ -94,6 +99,25 @@ func TestBeliefTraining_Seed(t *testing.T) {
 			break
 		}
 		time.Sleep(5 * time.Second)
+	}
+	if len(queue.GetItems()) == 0 {
+		// What the World of the tenant holds: the queue lists its Findings
+		// and the hosts with a surprise. A World with no host means the scan
+		// output never reached it; hosts with no surprise and no Finding mean
+		// the scan found nothing to review.
+		if hosts, herr := world.ListHosts(ctx, &worldpb.ListHostsRequest{}); herr == nil {
+			t.Logf("World hosts: %d", len(hosts.GetHosts()))
+			for _, h := range hosts.GetHosts() {
+				t.Logf("  host %s scope=%s open=%v surprise=%q", h.GetAddress(), h.GetScopeId(), h.GetOpenPorts(), h.GetSurprise())
+			}
+		} else {
+			t.Logf("ListHosts: %v", herr)
+		}
+		if findings, ferr := world.ListFindings(ctx, &worldpb.ListFindingsRequest{}); ferr == nil {
+			t.Logf("World findings: %d", len(findings.GetFindings()))
+		} else {
+			t.Logf("ListFindings: %v", ferr)
+		}
 	}
 	require.NotEmpty(t, queue.GetItems(), "the mission left nothing in the review queue to label")
 	item := queue.GetItems()[0]
