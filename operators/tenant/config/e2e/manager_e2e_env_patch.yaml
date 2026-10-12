@@ -81,6 +81,11 @@ spec:
           value: "http://e2e-http-stub.tenant-operator-system.svc.cluster.local:8080"
         - name: FGA_STORE_ID
           value: "e2e-store-id"
+        # Each OpenFGA client requires the preshared key directory
+        # (internal/infra/fgakey); the manager exits at start without it
+        # (gibson#1115). The e2e stub does not check the key.
+        - name: GIBSON_FGA_KEY_DIR
+          value: /etc/gibson/fga-key
         # --- Stripe (required: STRIPE_API_KEY non-empty; readyz probe calls GET /v1/balance) ---
         # STRIPE_API_BASE_URL redirects the stripe-go backend to the e2e-http-stub instead of
         # api.stripe.com. The stub returns a minimal valid Balance JSON on /v1/balance.
@@ -102,9 +107,15 @@ spec:
         # Mount a writable emptyDir so cert generation succeeds.
         - name: tmp-metrics-certs
           mountPath: /tmp
+        - name: e2e-fga-key
+          mountPath: /etc/gibson/fga-key
+          readOnly: true
       volumes:
       - name: e2e-plans
         configMap:
           name: e2e-plans
       - name: tmp-metrics-certs
         emptyDir: {}
+      - name: e2e-fga-key
+        secret:
+          secretName: e2e-fga-key

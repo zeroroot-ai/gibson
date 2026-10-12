@@ -404,3 +404,16 @@ spec:
   ports:
   - port: 8080
     targetPort: 8080
+---
+# The OpenFGA preshared key directory of the manager (gibson#1115). A fake
+# key for the e2e HTTP stub, which does not check it; the previous key is
+# empty, as before the first rotation.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-fga-key
+  namespace: tenant-operator-system
+type: Opaque
+stringData:
+  key: e2e-fake-fga-key
+  key_previous: ""
