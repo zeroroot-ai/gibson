@@ -207,3 +207,42 @@ func TestIsNotFoundError(t *testing.T) {
 		t.Error("expected false for nil error")
 	}
 }
+
+// tenantCheckingReader refuses a read whose context carries no tenant, as
+// secrets.Service.Resolve does, and records the tenant it saw.
+type tenantCheckingReader struct {
+	inner *mockSecretsReader
+	seen  auth.TenantID
+}
+
+func (r *tenantCheckingReader) Resolve(ctx context.Context, name string) ([]byte, error) {
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	r.seen = tenant
+	return r.inner.Resolve(ctx, name)
+}
+
+// TestInstanceResolver_BackgroundCallerGetsTheTenant: a caller with no tenant
+// in its context (the graph projector, the timeline archive) still reads the
+// credentials of the tenant it asks for. Before gibson#1117 the broker refused
+// each such read with "no tenant in context".
+func TestInstanceResolver_BackgroundCallerGetsTheTenant(t *testing.T) {
+	t.Parallel()
+
+	svc := &tenantCheckingReader{inner: vaultPayloadReader("bolt://primary-neo4j:7687", "neo4j_user", "s3cr3t")}
+	r := newInstanceResolver(svc)
+	tenant := auth.MustNewTenantID("primary")
+
+	ep, err := r.Resolve(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("Resolve with no tenant in the context: %v", err)
+	}
+	if ep.BoltURI != "bolt://primary-neo4j:7687" {
+		t.Errorf("BoltURI: got %q", ep.BoltURI)
+	}
+	if svc.seen != tenant {
+		t.Errorf("the broker read was scoped to %q, want %q", svc.seen, tenant)
+	}
+}

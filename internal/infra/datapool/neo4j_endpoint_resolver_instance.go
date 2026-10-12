@@ -119,8 +119,12 @@ func (r *instanceResolver) Resolve(ctx context.Context, tenant auth.TenantID) (*
 		return ep, nil
 	}
 
-	// Slow path: read credentials from Vault broker.
-	return r.resolveAndCache(ctx, tenantStr)
+	// Slow path: read credentials from Vault broker. The broker takes the
+	// tenant from the context only, and a background caller (the graph
+	// projector, the timeline archive) has none, so each read was refused
+	// with "no tenant in context" (gibson#1117). Scope the context to the
+	// tenant this call is for; an identity already in ctx is kept.
+	return r.resolveAndCache(auth.WithTenant(ctx, tenant), tenantStr)
 }
 
 // cachedEndpoint returns the cached endpoint if present and not expired.
