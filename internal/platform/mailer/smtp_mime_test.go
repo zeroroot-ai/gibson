@@ -16,15 +16,10 @@ import (
 	"time"
 )
 
-// TestSMTPMailer_InvitationIsAValidMultipartAlternative builds the wire bytes
-// of the real invitation email with the real SMTP transport, and reads them
-// back the way a mail client does.
-//
-// RFC 5322 section 2.1.1 limits a line to 998 characters, and SMTP ends each
-// line with CRLF. The rendered HTML of the onboarding email holds a line of
-// about 17 KB. A relay that enforces the limit breaks that line where it
-// likes, which can cut a tag or a style attribute, or it refuses the message.
-func TestSMTPMailer_InvitationIsAValidMultipartAlternative(t *testing.T) {
+// onboardingMessage renders the real invitation email through the real
+// InvitationSender and returns the Message it hands to the transport.
+func onboardingMessage(t *testing.T) Message {
+	t.Helper()
 	capture := &captureMailer{}
 	err := NewInvitationSender(capture).SendInvitation(context.Background(), InvitationEmail{
 		To:        "invitee@example.com",
@@ -38,12 +33,18 @@ func TestSMTPMailer_InvitationIsAValidMultipartAlternative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendInvitation: %v", err)
 	}
-	m := &SMTPMailer{from: "no-reply@example.com"}
-	raw, err := m.buildRFC822(capture.last)
-	if err != nil {
-		t.Fatalf("buildRFC822: %v", err)
-	}
+	return capture.last
+}
 
+// assertMultipartAlternative reads raw the way a mail client does and asserts
+// that it carries msg as a valid multipart/alternative message.
+//
+// RFC 5322 section 2.1.1 limits a line to 998 characters, and SMTP ends each
+// line with CRLF. The rendered HTML of the onboarding email holds a line of
+// about 17 KB. A relay that enforces the limit breaks that line where it
+// likes, which can cut a tag or a style attribute, or it refuses the message.
+func assertMultipartAlternative(t *testing.T, raw []byte, msg Message) {
+	t.Helper()
 	for i, line := range bytes.Split(raw, []byte("\r\n")) {
 		if len(line) > 998 {
 			t.Errorf("line %d has %d characters; RFC 5322 allows 998", i+1, len(line))
@@ -94,10 +95,23 @@ func TestSMTPMailer_InvitationIsAValidMultipartAlternative(t *testing.T) {
 	// The decoded parts are the rendered parts, byte for byte, apart from the
 	// line ends that SMTP requires.
 	crlf := func(s string) string { return strings.ReplaceAll(s, "\n", "\r\n") }
-	if parts["text/html"] != crlf(capture.last.HTML) {
+	if parts["text/html"] != crlf(msg.HTML) {
 		t.Error("the decoded text/html part differs from the rendered HTML")
 	}
-	if parts["text/plain"] != crlf(capture.last.Text) {
+	if parts["text/plain"] != crlf(msg.Text) {
 		t.Error("the decoded text/plain part differs from the rendered text")
 	}
+}
+
+// TestSMTPMailer_InvitationIsAValidMultipartAlternative builds the wire bytes
+// of the real invitation email with the real SMTP transport, and reads them
+// back the way a mail client does.
+func TestSMTPMailer_InvitationIsAValidMultipartAlternative(t *testing.T) {
+	msg := onboardingMessage(t)
+	m := &SMTPMailer{from: "no-reply@example.com"}
+	raw, err := m.buildRFC822(msg)
+	if err != nil {
+		t.Fatalf("buildRFC822: %v", err)
+	}
+	assertMultipartAlternative(t, raw, msg)
 }
