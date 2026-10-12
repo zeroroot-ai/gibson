@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.160.1](https://github.com/zeroroot-ai/gibson/compare/v0.160.0...v0.160.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **tenant-operator:** the belief trainer CronJob is read without the cache ([#1092](https://github.com/zeroroot-ai/gibson/issues/1092)) ([cbacba5](https://github.com/zeroroot-ai/gibson/commit/cbacba5775ecd2bcd8654cf48002065b56c47e94))
+
 ## [0.160.0](https://github.com/zeroroot-ai/gibson/compare/v0.159.0...v0.160.0) (2026-10-11)
 
 
