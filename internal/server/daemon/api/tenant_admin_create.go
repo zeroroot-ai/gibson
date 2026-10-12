@@ -48,6 +48,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	tenantpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -100,8 +101,11 @@ func (s *DaemonServer) CreateAgentIdentity(ctx context.Context, req *tenantpb.Cr
 		grants = append(grants, authz.Tuple{Relation: cg.Relation, Object: cg.ComponentRef})
 	}
 	provisioned, err := s.provisionIdentity(ctx, identitySpec{
-		TenantID:        tenantID,
-		OwnerUserID:     callerID.Subject,
+		TenantID: tenantID,
+		// principal.IDOf, not the raw subject: a SPIFFE caller's subject
+		// keeps its scheme, and "user:spiffe://..." is a tuple OpenFGA
+		// refuses (gibson#1098, the class of gibson#13).
+		OwnerUserID:     principal.IDOf(callerID),
 		ActorID:         callerID.Subject,
 		ActorType:       "user",
 		AuditAction:     "agent_identity.created",
