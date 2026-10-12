@@ -59,7 +59,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/finalbackup"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/grants"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/identity"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	gibsonmetrics "github.com/zeroroot-ai/gibson/operators/tenant/internal/metrics"
 	platformmigrations "github.com/zeroroot-ai/gibson/operators/tenant/internal/migrations"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/provision"
@@ -486,45 +485,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Email sender: SMTP is required infrastructure (one-code-path / tenant-operator#95).
-	// SMTP_HOST must be set; missing → exit 1. The previous NullSender default
-	// silently discarded welcome and invitation emails, masking misconfiguration
-	// as phantom delivery success. Set SMTP_HOST to require SMTP at startup.
-	smtpHost := os.Getenv("SMTP_HOST")
-	if smtpHost == "" {
-		setupLog.Error(nil, "SMTP_HOST is required (one-code-path / tenant-operator#95): "+
-			"the operator sends transactional email (welcome, invitations) via SMTP; "+
-			"set SMTP_HOST to enable email delivery")
-		os.Exit(1)
-	}
-	port := 587
-	if _, perr := fmt.Sscanf(os.Getenv("SMTP_PORT"), "%d", &port); perr != nil {
-		port = 587
-	}
-	mailer, err := mail.NewSMTPSender(mail.Config{
-		Host:     smtpHost,
-		Port:     port,
-		Username: os.Getenv("SMTP_USERNAME"),
-		Password: os.Getenv("SMTP_PASSWORD"),
-		From:     os.Getenv("SMTP_FROM"),
-		// SMTP_TLS_MODE selects starttls, implicit or plaintext. Absent means
-		// starttls, which is what port 587 and SES want — never plaintext, since
-		// not encrypting is a choice an operator makes explicitly. It replaces
-		// SMTP_TLS, whose `false` was the ENCRYPTED setting for SES and read as a
-		// downgrade (gibson#553).
-		//
-		// plaintext exists because `false` had actually meant smtp.SendMail,
-		// which upgrades only when the server offers it — so an in-cluster sink
-		// with no certificate used to work and briefly could not be reached by
-		// any mode at all. NewSMTPSender refuses an unknown value, and refuses
-		// plaintext when SMTP_USERNAME is set.
-		TLSMode: mail.TLSMode(os.Getenv("SMTP_TLS_MODE")),
-	})
-	if err != nil {
-		setupLog.Error(err, "mail sender init")
-		os.Exit(1)
-	}
-
 	// Build the Vault admin client used by the ProvisionSecretsBackend saga
 	// step (spec secrets-broker R10.3) and the Neo4j credential write step
 	// (spec per-tenant-data-plane-completion Task 19a). Vault is non-
@@ -810,12 +770,6 @@ func main() {
 		Deps:              psagaDeps,
 		MigrationEmitter:  migrationEmitter,
 		StatusReporter:    tenantStatusReporter,
-		Mail:              mailer,
-		// The product-surface origin (app.<domain>), never DASHBOARD_URL: that
-		// name named the in-cluster Service DNS address
-		// (http://gibson-dashboard:3000), which built a welcome-email link no
-		// human's browser could open (hosted#203).
-		DashboardBaseURL: os.Getenv("GIBSON_APP_URL"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "Tenant")
 		os.Exit(1)
@@ -825,12 +779,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		FGA:    fgaClient,
-		Mail:   mailer,
-		// Same product-surface origin as TenantReconciler.DashboardBaseURL
-		// above, for the same reason: the invitation accept link must reach
-		// a human's browser, not an in-cluster address (hosted#203).
-		BaseAcceptURL: os.Getenv("GIBSON_APP_URL"),
-		Audit:         sagaAudit,
+		Audit:  sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)
@@ -1485,7 +1434,7 @@ func buildWriteTenantBrokerConfigDeps(log logr.Logger) flows.WriteTenantBrokerCo
 	// on plugin JWTs (ADR-0009 / tenant-operator#147). The per-tenant
 	// Vault JWT role written by writeJWTRole carries this value in its
 	// `bound_audiences`; daemon-side JWT-bearer logins must present the
-	// same audience. Empty → operator exits 1 (mirrors SMTP_HOST /
+	// same audience. Empty → operator exits 1 (mirrors the
 	// PLATFORM_PG_DSN fail-loud). The value is operator-
 	// internal: it surfaces on the Vault role, NOT on the broker config
 	// JSON the daemon reads.

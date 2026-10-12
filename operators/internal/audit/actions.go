@@ -37,15 +37,9 @@ const (
 
 	// TenantMember (tenant-operator).
 
-	// ActionMemberInvitationIssue is the record before the operator creates
-	// the invitation token of a member.
-	ActionMemberInvitationIssue = "operator.member_invitation_issue"
 	// ActionMemberInvitationAccept is the record before the operator writes
-	// the session tuples of a member and deletes the invitation token.
+	// the session tuples of a member whose account exists.
 	ActionMemberInvitationAccept = "operator.member_invitation_accept"
-	// ActionMemberInvitationExpire is the record before the operator deletes
-	// the invitation token of an expired invitation.
-	ActionMemberInvitationExpire = "operator.member_invitation_expire"
 	// ActionMemberRoleAssign is the record before the operator creates the
 	// Zitadel user of a member and assigns the tenant role.
 	ActionMemberRoleAssign = "operator.member_role_assign"

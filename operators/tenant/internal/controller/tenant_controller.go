@@ -20,7 +20,6 @@ import (
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/mail"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/saga"
 )
 
@@ -41,8 +40,7 @@ type TenantReconciler struct {
 	// default client reads through the informer cache, which lags the
 	// reconciler's own status write by up to a second, so the very next pass
 	// could read stale status and repeat a side effect it had already
-	// recorded: the welcome email's idempotence guard reads
-	// WelcomeEmailSent off this object (gibson#535, the gibson#442 shape).
+	// recorded (gibson#535, the gibson#442 shape).
 	// SetupWithManager fills it from mgr.GetAPIReader(). Nil in tests, where
 	// the fake client has no cache and Client serves both reads.
 	APIReader client.Reader
@@ -86,18 +84,6 @@ type TenantReconciler struct {
 	// startup migration check (ADR-0023, gibson#208 S6). May be nil in
 	// tests — emission is a no-op when unset.
 	MigrationEmitter *dataplane.MigrationMetricEmitter
-
-	// Mail sends the workspace-ready welcome email to the founding owner at
-	// the Tenant's Ready transition (gibson#1447). Production always injects
-	// the SMTP sender (SMTP_HOST is a hard boot requirement — see
-	// cmd/main.go); may be nil in tests, where the send is a no-op
-	// like MigrationEmitter.
-	Mail mail.Sender
-
-	// DashboardBaseURL is the dashboard origin rendered into the welcome
-	// email's "Open the dashboard" link. Injected from DASHBOARD_URL, the
-	// same env var TenantMemberReconciler.BaseAcceptURL reads.
-	DashboardBaseURL string
 
 	// StatusReporter pushes observed Tenant status to the daemon so the
 	// dashboard can read provisioning status without Kubernetes access
@@ -253,23 +239,6 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		}
 	}
 
-	// Workspace-ready welcome email (gibson#1447). Sent exactly once, at the
-	// Ready transition, to the founding owner. This runs BEFORE the closing
-	// Status().Patch on purpose: the WelcomeEmailSent condition the send
-	// records rides that same patch, so the idempotence guard is persisted by
-	// the write that persists the Ready phase — no second API call, and no
-	// spec write to be silently discarded (tenant-operator#354). Delivery is
-	// best-effort: a failure requeues without failing the reconcile.
-	//
-	// Production always injects the mailer (SMTP_HOST is boot-required, see
-	// cmd/main.go); the positive guard keeps unit tests that omit it
-	// from dereferencing nil, matching this reconciler's other
-	// optional-collaborator gate (r.MigrationEmitter).
-	welcomeRetry := false
-	if err == nil && r.Mail != nil && tenant.Status.Phase == gibsonv1alpha1.TenantPhaseReady {
-		welcomeRetry = r.sendWelcomeEmail(ctx, &tenant)
-	}
-
 	// Always persist status, even on partial progress.
 	if updateErr := r.Status().Patch(ctx, &tenant, client.MergeFrom(statusBase)); updateErr != nil {
 		log.Error(updateErr, "status patch failed")
@@ -298,13 +267,6 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		if emitErr := r.MigrationEmitter.Emit(ctx, tenant.Name); emitErr != nil {
 			log.Info("migration-pending probe failed (metric not updated)", "err", emitErr)
 		}
-	}
-
-	// The welcome email failed to send. The tenant is already Ready, so no
-	// watch event is guaranteed to wake this reconciler again — come back
-	// explicitly so the retry happens in seconds, not at the resync window.
-	if welcomeRetry && err == nil && result.IsZero() {
-		return ctrl.Result{RequeueAfter: welcomeRetryInterval}, nil
 	}
 
 	return result, err
