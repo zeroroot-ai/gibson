@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.160.2](https://github.com/zeroroot-ai/gibson/compare/v0.160.1...v0.160.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **catalog:** pin the Claude member image 0.6.1, which accepts the launcher sandbox ([#1130](https://github.com/zeroroot-ai/gibson/issues/1130)) ([3b9531d](https://github.com/zeroroot-ai/gibson/commit/3b9531d3de0297e262eb7959b5aeae4143d3dd89)), closes [#1129](https://github.com/zeroroot-ai/gibson/issues/1129)
+* **connector:** the ToolHive proxy of a connector reaches the Kubernetes API ([#1120](https://github.com/zeroroot-ai/gibson/issues/1120)) ([779d7b9](https://github.com/zeroroot-ai/gibson/commit/779d7b97a3936a15350e05cec520799c70c2c04a))
+* **datapool:** the Neo4j endpoint resolver reads tenant credentials in the scope of that tenant ([#1118](https://github.com/zeroroot-ai/gibson/issues/1118)) ([835077d](https://github.com/zeroroot-ai/gibson/commit/835077db9a95d392910b725d677e6ca45e4f363f)), closes [#1117](https://github.com/zeroroot-ai/gibson/issues/1117)
+* **e2e:** the Redis key count reads only the keys redis-cli prints ([#1102](https://github.com/zeroroot-ai/gibson/issues/1102)) ([f6f63a1](https://github.com/zeroroot-ai/gibson/commit/f6f63a18e9374c154e2333050af04d53cbbff959)), closes [#1100](https://github.com/zeroroot-ai/gibson/issues/1100)
+* **exit:** the belief training test opens KVM for the launcher, not a gvisor label ([#1097](https://github.com/zeroroot-ai/gibson/issues/1097)) ([f6c55ed](https://github.com/zeroroot-ai/gibson/commit/f6c55edb441e9075c6bc4c66731e7b5c5cbc67d6)), closes [#1096](https://github.com/zeroroot-ai/gibson/issues/1096)
+* **exit:** the probe pods and runner Jobs meet the restricted Pod Security level ([#1106](https://github.com/zeroroot-ai/gibson/issues/1106)) ([319bc5c](https://github.com/zeroroot-ai/gibson/commit/319bc5c6d23ff26bef2866908ea3b091e72c45de)), closes [#1105](https://github.com/zeroroot-ai/gibson/issues/1105)
+* **exit:** the tenant_operator suite copies plans.yaml from gibson-operators ([#1103](https://github.com/zeroroot-ai/gibson/issues/1103)) ([353005b](https://github.com/zeroroot-ai/gibson/commit/353005b0c2a35f80f70d6454d411e4bc1fd6f24a)), closes [#1101](https://github.com/zeroroot-ai/gibson/issues/1101)
+* **exit:** the tenant-operator e2e manager gets an OpenFGA key directory ([#1116](https://github.com/zeroroot-ai/gibson/issues/1116)) ([6e9d2cb](https://github.com/zeroroot-ai/gibson/commit/6e9d2cb6f7a521c26cd93b67141b563c9c3afe2b)), closes [#1115](https://github.com/zeroroot-ai/gibson/issues/1115)
+* **identity:** the owner tuple of a SPIFFE caller names the FGA user every check reads ([#1099](https://github.com/zeroroot-ai/gibson/issues/1099)) ([fc0a51b](https://github.com/zeroroot-ai/gibson/commit/fc0a51bc341f94340a151b86646c8dd747faa0c9)), closes [#1098](https://github.com/zeroroot-ai/gibson/issues/1098)
+* **mailer:** each mail part is quoted-printable, so no line passes 998 characters ([#1125](https://github.com/zeroroot-ai/gibson/issues/1125)) ([d1bf920](https://github.com/zeroroot-ai/gibson/commit/d1bf920f23e80fb17d565eace30e56ec6c080aab))
+* **rework:** a fixture connector that never gets Ready prints the namespace events ([#1112](https://github.com/zeroroot-ai/gibson/issues/1112)) ([8edcb07](https://github.com/zeroroot-ai/gibson/commit/8edcb075eca82b784154ed6dbac6b7175d6a5ec8))
+* **rework:** the e2e runner may read the World hosts and findings of its tenant ([#1113](https://github.com/zeroroot-ai/gibson/issues/1113)) ([6391f5f](https://github.com/zeroroot-ai/gibson/commit/6391f5f3352879b031ea45501df1d80950ae14aa))
+* **rework:** the probe pod override holds the whole container ([#1108](https://github.com/zeroroot-ai/gibson/issues/1108)) ([47afdd4](https://github.com/zeroroot-ai/gibson/commit/47afdd4d1c1a71af3d06af1b0f6bd4cdda31ecb9)), closes [#1105](https://github.com/zeroroot-ai/gibson/issues/1105)
+* **sandboxed:** a tool call keeps its output when the first log attach comes too early ([#1110](https://github.com/zeroroot-ai/gibson/issues/1110)) ([1cb6094](https://github.com/zeroroot-ai/gibson/commit/1cb6094d9703b805345ae407c6bdf6f35c00c516))
+* **tenant-operator:** the operator sends no invitation or welcome mail ([#1122](https://github.com/zeroroot-ai/gibson/issues/1122)) ([362813e](https://github.com/zeroroot-ai/gibson/commit/362813e65e34b103bc4dddcae6edf8408b8bf665)), closes [#1121](https://github.com/zeroroot-ai/gibson/issues/1121)
+
 ## [0.160.1](https://github.com/zeroroot-ai/gibson/compare/v0.160.0...v0.160.1) (2026-10-12)
 
 
