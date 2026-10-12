@@ -147,20 +147,28 @@ func kubectlRedisKeyCount(t *testing.T, ctx context.Context, ns, pattern string)
 	require.NoError(t, err, "kubectlRedisKeyCount: decode the redis password")
 	require.NotEmpty(t, password, "kubectlRedisKeyCount: gibson-redis-stack has no redis-password")
 
-	cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", ns, redisPod,
+	// The pod runs redis-stack and the redis-exporter. With no -c, kubectl
+	// writes "Defaulted container ..." to stderr, and a combined read counted
+	// that notice as one key (gibson#1100). Only stdout is the answer.
+	cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", ns, redisPod, "-c", "redis-stack",
 		"--", "env", "REDISCLI_AUTH="+string(password), "redis-cli", "--no-auth-warning", "-n", "0", "KEYS", pattern,
 	)
-	keyOut, err := cmd.CombinedOutput()
-	require.NoError(t, err, "kubectlRedisKeyCount: redis-cli KEYS %s: %s", pattern, strings.TrimSpace(string(keyOut)))
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	keyOut, err := cmd.Output()
+	require.NoError(t, err, "kubectlRedisKeyCount: redis-cli KEYS %s: %s", pattern, strings.TrimSpace(stderr.String()))
 	require.NotContains(t, string(keyOut), "NOAUTH", "kubectlRedisKeyCount: redis-cli was refused")
 
-	count := 0
+	var keys []string
 	for _, l := range strings.Split(strings.TrimSpace(string(keyOut)), "\n") {
-		if strings.TrimSpace(l) != "" {
-			count++
+		if k := strings.TrimSpace(l); k != "" {
+			keys = append(keys, k)
 		}
 	}
-	return count
+	if len(keys) > 0 {
+		t.Logf("kubectlRedisKeyCount: %s matches %v", pattern, keys)
+	}
+	return len(keys)
 }
 
 // getGibsonDaemonPod returns the first gibson daemon pod name in the gibson namespace.
