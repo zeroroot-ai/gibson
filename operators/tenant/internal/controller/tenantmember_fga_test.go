@@ -86,8 +86,8 @@ func buildMemberReconcilerWithFGA(
 	}
 }
 
-// invitedMemberFixture returns a TenantMember in Invited phase with
-// AcceptedByUserID set, ready for acceptInvitation to run.
+// invitedMemberFixture returns a TenantMember with no phase and with
+// AcceptedByUserID set, ready for activateMember to run.
 func invitedMemberFixture(name, userID string) *gibsonv1alpha1.TenantMember {
 	return &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{
@@ -101,14 +101,11 @@ func invitedMemberFixture(name, userID string) *gibsonv1alpha1.TenantMember {
 			TenantRef:        corev1.LocalObjectReference{Name: "acme"},
 			AcceptedByUserID: userID,
 		},
-		Status: gibsonv1alpha1.TenantMemberStatus{
-			Phase: gibsonv1alpha1.TenantMemberPhaseInvited,
-		},
 	}
 }
 
 // TestAcceptInvitation_WriteConditional_HappyPath verifies that when
-// acceptInvitation runs with FGA set, WriteConditional is called with the
+// activateMember runs with FGA set, WriteConditional is called with the
 // correct active_session/token_not_revoked tuple (epoch revoked_at), and the
 // TM transitions to Active phase.
 func TestAcceptInvitation_WriteConditional_HappyPath(t *testing.T) {
@@ -122,7 +119,7 @@ func TestAcceptInvitation_WriteConditional_HappyPath(t *testing.T) {
 	calls := append([]fgaclient.ConditionalTuple(nil), fga.writeConditionalCalls...)
 	fga.mu.Unlock()
 
-	// gibson#1244: acceptInvitation now writes TWO active_session tuples — the
+	// gibson#1244: activateMember now writes TWO active_session tuples — the
 	// per-tenant tuple (object tenant:acme) and the user-scoped tuple (object
 	// user:<id>) that gates tenant-less requests.
 	if len(calls) != 2 {
@@ -177,7 +174,7 @@ func TestAcceptInvitation_WriteConditional_HappyPath(t *testing.T) {
 }
 
 // TestAcceptInvitation_WriteConditional_NonFatal verifies that when
-// WriteConditional returns an error, acceptInvitation logs it but still
+// WriteConditional returns an error, activateMember logs it but still
 // succeeds (non-fatal) and the TM transitions to Active.
 func TestAcceptInvitation_WriteConditional_NonFatal(t *testing.T) {
 	fga := &fakeFGAClient{
@@ -211,7 +208,7 @@ func TestAcceptInvitation_WriteConditional_NonFatal(t *testing.T) {
 // A pre-existing role tuple must read as success: the baseline first-admin
 // bootstrap writes the owner tuple directly before the pre-accepted member
 // reconciles (gibson#1510), and a reconciler that errors on its own desired
-// state retries forever — the member sat Invited crash-looping on
+// state retries forever — the member sat inactive crash-looping on
 // "fga 400: already exists" while the session tuples never got written.
 func TestAcceptInvitation_RoleTupleAlreadyExists_IsSuccess(t *testing.T) {
 	fga := &fakeFGAClient{writeErr: fmt.Errorf("fga 400: %w", clients.ErrAlreadyExists)}
@@ -232,12 +229,12 @@ func TestAcceptInvitation_RoleTupleAlreadyExists_IsSuccess(t *testing.T) {
 		t.Fatalf("get member: %v", err)
 	}
 	if got.Status.Phase != gibsonv1alpha1.TenantMemberPhaseActive {
-		t.Fatalf("phase = %q, want Active — an already-present role tuple must not strand the member Invited", got.Status.Phase)
+		t.Fatalf("phase = %q, want Active — an already-present role tuple must not leave the member inactive", got.Status.Phase)
 	}
 }
 
 // TestSyncZitadel_AssignFailure_StillErrors replaces the pre-ADR-0093
-// TestAcceptInvitation_RoleTupleOtherFailure_StillErrors: acceptInvitation no
+// TestAcceptInvitation_RoleTupleOtherFailure_StillErrors: activateMember no
 // longer writes the role tuple directly (fgaClient.Write is not called from
 // this path at all), so a plain FGA Write failure has nothing to surface
 // there any more. The role write now happens in syncZitadel via

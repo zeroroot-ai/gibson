@@ -58,25 +58,13 @@ spec:
             properties:
               acceptedByUserId:
                 description: |-
-                  AcceptedByUserID is set by the dashboard when the invited user
-                  accepts. Triggers Invited -> Active transition.
+                  AcceptedByUserID is the Zitadel id of the account of the member. Its
+                  writers (signup provisioning, bootstrap-tenant-owner) set it when the
+                  account already exists. It makes the member Active.
                 type: string
               email:
                 description: Email is the email address of the invited user.
                 format: email
-                type: string
-              invitedByEmail:
-                description: |-
-                  InvitedByEmail captures the email of the user who issued the
-                  invitation. Empty string means "system-issued" — the controller
-                  renders that as "a Gibson admin" in the outgoing email.
-                format: email
-                type: string
-              resendRequestedAt:
-                description: |-
-                  ResendRequestedAt, when set, requests a fresh invitation email.
-                  Controller deduplicates via status.lastResendAt.
-                format: date-time
                 type: string
               role:
                 description: Role is the role granted to the user within the tenant.
@@ -166,36 +154,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              invitationExpiresAt:
-                description: InvitationExpiresAt is when the pending invitation expires.
-                format: date-time
-                type: string
-              invitationSecretRef:
-                description: |-
-                  InvitationSecretRef is the name of the Secret holding the plaintext
-                  invitation token. Deleted when accepted or expired.
-                type: string
-              lastResendAt:
-                description: |-
-                  LastResendAt tracks the most recent invitation email sent for
-                  resend-request deduplication.
-                format: date-time
-                type: string
               observedGeneration:
                 description: ObservedGeneration reflects the generation most recently
                   reconciled.
                 format: int64
                 type: integer
               phase:
-                description: TenantMemberPhase represents the lifecycle phase of a
-                  TenantMember.
+                description: |-
+                  TenantMemberPhase represents the lifecycle phase of a TenantMember. The
+                  phase is empty until the member is Active. The daemon owns invitations, so
+                  a TenantMember has no invitation phase.
                 enum:
-                - Pending
-                - Invited
-                - Accepting
                 - Active
-                - Expired
-                - Revoked
                 type: string
               userId:
                 description: UserID is the Zitadel subject (sub claim) recorded after

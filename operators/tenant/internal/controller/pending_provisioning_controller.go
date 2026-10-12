@@ -169,11 +169,10 @@ func (r *PendingProvisioningRunnable) reconcileOne(ctx context.Context, p provis
 //   - namespace: tenant-<slug>                  (tenantNamespace)
 //   - name:      <slugify(owner_email)>-owner   (foundingMemberName)
 //   - spec:      { Email, Role: owner, TenantRef: {Name: slug},
-//     AcceptedByUserID: owner_user_id }          (no InvitedByEmail)
+//     AcceptedByUserID: owner_user_id }
 //
 // AcceptedByUserID pre-accepts the membership: the signup user IS the workspace
-// owner, so the TenantMember reconciler promotes Invited→Active without an emailed
-// invitation. (The invitation flow is for invitees, not the founding owner.)
+// owner, so the TenantMember reconciler makes the member Active in one pass.
 //
 // Idempotency: existence-check by name first; an existing member is a no-op, and
 // AlreadyExists on create is treated as success. If the per-tenant namespace does
