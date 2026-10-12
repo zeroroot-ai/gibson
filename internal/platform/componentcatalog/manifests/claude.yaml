@@ -14,12 +14,14 @@ description: >-
 # no "*".
 spec:
   runtime: setec
-  # Tag 0.4.3 from the zerocool-plugins release claude-member v0.4.3
-  # (zeroroot-ai/zerocool-plugins#79): Claude Code 2.1.257, the Gibson MCP
-  # server 0.3.0, uid 65532. Verify with
+  # Tag 0.6.1 from the zerocool-plugins release claude-member v0.6.1
+  # (zeroroot-ai/zerocool-plugins#135): Claude Code 2.1.289, the Gibson MCP
+  # server 0.3.0, uid 65532. 0.5.0 and later accept the launcher sandbox
+  # marker (GIBSON_SANDBOX=launcher) that the daemon sets; 0.4.3 refused it
+  # (zeroroot-ai/zerocool-plugins#133). Verify with
   #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
   #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:6ff9ea109c8a8ab4d2f3d039a670dbb5fa67ae2a87d401dfba0e47677d31f98b
+  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:ac1435930049e0d2bffaa5678de63232bd605fa5b6856849ca03c56857eddc2d
   dispatchMode: sandboxed
   # Untrusted: the agent reads content the platform does not control, so it
   # runs only in a sandbox.
