@@ -789,7 +789,7 @@ func TestExecute_LogOpenErrorRetries(t *testing.T) {
 			}
 			return &fixedLogs{chunks: [][]byte{markerLine("hello, world")}}, nil
 		},
-		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+		wait: func(_ context.Context, _ string) (WaitResponse, error) {
 			<-firstOpen
 			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
 		},
