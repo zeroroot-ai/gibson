@@ -34,12 +34,19 @@ runs:
         cleanup() { kubectl -n "$NS" delete pod "$admitted" "$denied" --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
         trap cleanup EXIT
 
+        # The gibson namespace enforces the restricted Pod Security level
+        # (hosted#599, gibson#1105), so each probe pod states a restricted
+        # security context.
+        restricted='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65532,"runAsGroup":65532,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"NAME","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+
         # The admitted pod carries the labels of the e2e runner Job.
         kubectl -n "$NS" run "$admitted" --image="$IMAGE" --restart=Never \
+          --overrides="${restricted//NAME/$admitted}" \
           --labels="app.kubernetes.io/name=gibson-workloads,app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=e2e-runner,gibson.zeroroot.ai/net-role=platform,gibson.zeroroot.ai/client-redis=true" \
           --command -- sleep 600
         # The denied pod carries no label that a policy of the chart selects.
         kubectl -n "$NS" run "$denied" --image="$IMAGE" --restart=Never \
+          --overrides="${restricted//NAME/$denied}" \
           --labels="app.kubernetes.io/component=policy-probe" \
           --command -- sleep 600
         kubectl -n "$NS" wait --for=condition=Ready "pod/$admitted" "pod/$denied" --timeout=180s

@@ -81,10 +81,23 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: ${RELEASE}-e2e-runner
+      # The gibson namespace enforces the restricted Pod Security level
+      # (hosted#599, gibson#1105). 65532 is the user of the distroless
+      # runner image.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: e2e
           image: ghcr.io/zeroroot-ai/gibson-e2e-runner:local
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
 ${COMMAND_LINE}
           args: ["-test.run", "${TEST_RUN}", "-test.v", "-test.timeout", "${TEST_TIMEOUT}"]
           # Every entry of the Secret is an environment variable: the
