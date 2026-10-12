@@ -661,3 +661,195 @@ func TestExecute_NilPublisherIsSafe(t *testing.T) {
 		t.Fatalf("outcome differs with the console wired: with=%v without=%v", wantErr, gotErr)
 	}
 }
+
+// notLoggable is a LogStream whose first Recv fails the way setec answers an
+// attach to a Pod that is not loggable yet.
+type notLoggable struct{}
+
+func (notLoggable) Recv() ([]byte, error) {
+	return nil, errors.New("rpc error: code = FailedPrecondition desc = " +
+		`timed out waiting for Pod "sbx-1-vm" to reach a loggable phase`)
+}
+func (notLoggable) Close() error { return nil }
+
+// TestExecute_LogAttachRetriesUntilLoggable: a launcher Pod that is not
+// loggable at the first attaches still yields its output. Before, one failed
+// attach lost the output and the call ended SANDBOX_OUTPUT_MALFORMED with an
+// empty tail (exit-test-belief-training run 38205635741).
+func TestExecute_LogAttachRetriesUntilLoggable(t *testing.T) {
+	var opens atomic.Int32
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			if opens.Add(1) <= 2 {
+				return notLoggable{}, nil
+			}
+			return &fixedLogs{chunks: [][]byte{markerLine("hello, world")}}, nil
+		},
+		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+			// The workload runs past the first two attaches.
+			select {
+			case <-time.After(2 * time.Second):
+			case <-ctx.Done():
+				return WaitResponse{}, ctx.Err()
+			}
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	e := newExecutor(t, client)
+	resp := &wrapperspb.StringValue{}
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.GetValue() != "hello, world" {
+		t.Fatalf("response = %q; want %q", resp.GetValue(), "hello, world")
+	}
+	if got := opens.Load(); got < 3 {
+		t.Fatalf("StreamLogs opened %d times; want at least 3 (two refused attaches, then the stream)", got)
+	}
+}
+
+// TestExecute_LogTeeReadsCapturedLogAfterWait: a tee that never attached
+// while the workload ran reads the captured log once Wait returns. setec
+// serves the captured log of a finished container (setec#263).
+func TestExecute_LogTeeReadsCapturedLogAfterWait(t *testing.T) {
+	var finished atomic.Bool
+	firstOpen := make(chan struct{})
+	var once sync.Once
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			once.Do(func() { close(firstOpen) })
+			if !finished.Load() {
+				return notLoggable{}, nil
+			}
+			return &fixedLogs{chunks: [][]byte{markerLine("hello, world")}}, nil
+		},
+		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+			// The workload ends only after the first attach was refused.
+			select {
+			case <-firstOpen:
+			case <-ctx.Done():
+				return WaitResponse{}, ctx.Err()
+			}
+			finished.Store(true)
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	e := newExecutor(t, client)
+	resp := &wrapperspb.StringValue{}
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.GetValue() != "hello, world" {
+		t.Fatalf("response = %q; want %q", resp.GetValue(), "hello, world")
+	}
+}
+
+// TestExecute_LogTeeNeverAttaches: a sandbox whose log is never loggable,
+// not even after Wait, ends SANDBOX_OUTPUT_MALFORMED, not a hang.
+func TestExecute_LogTeeNeverAttaches(t *testing.T) {
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) { return notLoggable{}, nil },
+		wait: func(context.Context, string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	e := newExecutor(t, client)
+	err := execute(t, e, context.Background(), "hello", wrapperspb.String("x"), &wrapperspb.StringValue{})
+	if ge := asGibsonError(t, err); ge.Code != types.SANDBOX_OUTPUT_MALFORMED {
+		t.Fatalf("code = %s; want SANDBOX_OUTPUT_MALFORMED", ge.Code)
+	}
+}
+
+// TestExecute_LogOpenErrorRetries: an error from opening the stream is
+// retried the same way as a refused attach.
+func TestExecute_LogOpenErrorRetries(t *testing.T) {
+	var opens atomic.Int32
+	firstOpen := make(chan struct{})
+	var once sync.Once
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			once.Do(func() { close(firstOpen) })
+			if opens.Add(1) == 1 {
+				return nil, errors.New("frontend unavailable")
+			}
+			return &fixedLogs{chunks: [][]byte{markerLine("hello, world")}}, nil
+		},
+		wait: func(_ context.Context, _ string) (WaitResponse, error) {
+			<-firstOpen
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	resp := &wrapperspb.StringValue{}
+	e := newExecutor(t, client)
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.GetValue() != "hello, world" {
+		t.Fatalf("response = %q; want %q", resp.GetValue(), "hello, world")
+	}
+}
+
+// errAfterChunk is a LogStream that sends one chunk and then fails.
+type errAfterChunk struct{ sent bool }
+
+func (s *errAfterChunk) Recv() ([]byte, error) {
+	if !s.sent {
+		s.sent = true
+		return markerLine("hello, world"), nil
+	}
+	return nil, errors.New("stream reset")
+}
+func (s *errAfterChunk) Close() error { return nil }
+
+// TestExecute_LogRecvErrorAfterAttachKeepsOutput: a stream that fails after
+// its first chunk is not re-attached (a re-attach would replay the output),
+// and what arrived is used.
+func TestExecute_LogRecvErrorAfterAttachKeepsOutput(t *testing.T) {
+	var opens atomic.Int32
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			opens.Add(1)
+			return &errAfterChunk{}, nil
+		},
+		wait: func(context.Context, string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	resp := &wrapperspb.StringValue{}
+	e := newExecutor(t, client)
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := opens.Load(); got != 1 {
+		t.Fatalf("StreamLogs opened %d times; want 1", got)
+	}
+}
+
+func TestNextLogAttachBackoff(t *testing.T) {
+	if got := nextLogAttachBackoff(logAttachBackoffStart); got != 2*logAttachBackoffStart {
+		t.Fatalf("next(%s) = %s; want %s", logAttachBackoffStart, got, 2*logAttachBackoffStart)
+	}
+	if got := nextLogAttachBackoff(logAttachBackoffCap); got != logAttachBackoffCap {
+		t.Fatalf("next(cap) = %s; want the cap %s", got, logAttachBackoffCap)
+	}
+}

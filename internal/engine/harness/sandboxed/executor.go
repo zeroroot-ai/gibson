@@ -393,7 +393,8 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	defer cancel()
 
 	ringBuf := newRing(logBufferLimit)
-	logsDone := e.streamLogsAsync(waitCtx, tenant, launchResp.SandboxID, toolName, ringBuf, publish)
+	terminal := make(chan struct{})
+	logsDone := e.streamLogsAsync(waitCtx, tenant, launchResp.SandboxID, toolName, ringBuf, publish, terminal)
 
 	// 5. Wait.
 	waitSpan := trace.SpanFromContext(waitCtx)
@@ -402,7 +403,9 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	waitSpanNested.End()
 	_ = waitSpan // keep for future attribute plumbing
 
-	// 6. Let log stream finish draining (bounded by waitCtx).
+	// 6. Let log stream finish draining (bounded by waitCtx). The workload
+	// has ended, so a tee that never attached reads the captured log now.
+	close(terminal)
 	<-logsDone
 
 	if waitErr != nil {
@@ -506,39 +509,98 @@ func (e *Executor) processDiscoveryAsync(toolName string, execCtx ingest.ExecCon
 // ring buffer AND to the harness logger (so operators see sandbox output in
 // Gibson's normal log pipeline), and returns a channel that closes when the
 // stream drains.
-func (e *Executor) streamLogsAsync(ctx context.Context, tenant, sandboxID, toolName string, rb *ring, publish func([]byte)) <-chan struct{} {
+//
+// A launcher Pod that is still pulling its image or booting its machine is
+// not loggable yet: setec answers the attach with FailedPrecondition after
+// 30 seconds, and the first chunk never comes. The tee re-attaches with
+// backoff until the first chunk arrives or the context ends, as the agent
+// launcher does. When terminal closes (Wait returned) a tee that never
+// attached makes one last attach, which reads the captured log of the
+// finished workload. Before this, one failed attach lost the whole output
+// and the call ended SANDBOX_OUTPUT_MALFORMED with an empty tail
+// (exit-test-belief-training run 38205635741).
+func (e *Executor) streamLogsAsync(
+	ctx context.Context, tenant, sandboxID, toolName string,
+	rb *ring, publish func([]byte), terminal <-chan struct{},
+) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		stream, err := e.client.StreamLogs(ctx, tenant, sandboxID)
-		if err != nil {
-			e.logger.Warn("sandbox stream logs failed",
-				"tool", toolName, "sandbox_id", sandboxID, "error", err)
-			return
-		}
-		defer stream.Close()
-		for {
-			chunk, err := stream.Recv()
-			if err == io.EOF || errors.Is(err, context.Canceled) {
+		backoff := logAttachBackoffStart
+		for attempt := 1; ; attempt++ {
+			attached, err := e.teeToolLogs(ctx, tenant, sandboxID, toolName, rb, publish)
+			if err == nil || attached || ctx.Err() != nil {
 				return
 			}
-			if err != nil {
-				e.logger.Warn("sandbox log recv error",
-					"tool", toolName, "sandbox_id", sandboxID, "error", err)
+			select {
+			case <-terminal:
+				// The workload has ended. setec serves the captured log of a
+				// finished container, so one more attach reads the whole
+				// output, the marker with it (setec#263).
+				if _, err := e.teeToolLogs(ctx, tenant, sandboxID, toolName, rb, publish); err != nil {
+					e.logger.Warn("sandbox log tee never attached; the workload ended",
+						"tool", toolName, "sandbox_id", sandboxID, "attempts", attempt+1, "error", err)
+				}
 				return
+			default:
 			}
-			rb.write(chunk)
-			if publish != nil {
-				publish(chunk)
+			e.logger.Warn("sandbox log attach failed; retrying",
+				"tool", toolName, "sandbox_id", sandboxID, "attempt", attempt,
+				"backoff", backoff.String(), "error", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-terminal:
+			case <-time.After(backoff):
 			}
-			// Forward to harness logger so sandbox output shows up in normal
-			// daemon observability. Chunks may not be line-aligned; logger
-			// consumers that care will split.
-			e.logger.Debug("sandbox log",
-				"tool", toolName, "sandbox_id", sandboxID, "chunk", string(chunk))
+			backoff = nextLogAttachBackoff(backoff)
 		}
 	}()
 	return done
+}
+
+// nextLogAttachBackoff doubles a log attach backoff up to its cap.
+func nextLogAttachBackoff(b time.Duration) time.Duration {
+	if b *= 2; b > logAttachBackoffCap {
+		return logAttachBackoffCap
+	}
+	return b
+}
+
+// teeToolLogs runs one attach-and-drain of the sandbox log stream. It
+// reports whether at least one chunk arrived and the error that ended the
+// stream, nil for a clean end (EOF or context cancel).
+func (e *Executor) teeToolLogs(
+	ctx context.Context, tenant, sandboxID, toolName string, rb *ring, publish func([]byte),
+) (attached bool, err error) {
+	stream, err := e.client.StreamLogs(ctx, tenant, sandboxID)
+	if err != nil {
+		return false, fmt.Errorf("open tool sandbox log stream: %w", err)
+	}
+	defer func() { _ = stream.Close() }()
+	for {
+		chunk, recvErr := stream.Recv()
+		if errors.Is(recvErr, io.EOF) || errors.Is(recvErr, context.Canceled) {
+			return attached, nil
+		}
+		if recvErr != nil {
+			if attached {
+				e.logger.Warn("sandbox log recv error",
+					"tool", toolName, "sandbox_id", sandboxID, "error", recvErr)
+			}
+			return attached, fmt.Errorf("recv tool sandbox log: %w", recvErr)
+		}
+		attached = true
+		rb.write(chunk)
+		if publish != nil {
+			publish(chunk)
+		}
+		// Forward to harness logger so sandbox output shows up in normal
+		// daemon observability. Chunks may not be line-aligned; logger
+		// consumers that care will split.
+		e.logger.Debug("sandbox log",
+			"tool", toolName, "sandbox_id", sandboxID, "chunk", string(chunk))
+	}
 }
 
 // extractOutputMarker scans a stdout buffer for the LAST line beginning with
