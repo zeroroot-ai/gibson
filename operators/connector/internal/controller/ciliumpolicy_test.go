@@ -6,6 +6,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,6 +15,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/zeroroot-ai/gibson/operators/internal/ciliumegress"
 )
@@ -295,5 +300,50 @@ func TestReconcileProxyAPIServerPolicy(t *testing.T) {
 		if len(u.GetOwnerReferences()) != 1 {
 			t.Errorf("%s: owner references = %v", step, u.GetOwnerReferences())
 		}
+	}
+}
+
+// A failed write of the API server policy fails the reconcile, and the
+// instance reads Failed.
+func TestReconcile_ProxyAPIServerPolicyErrorIsFailed(t *testing.T) {
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
+	ci.Finalizers = []string{finalizer}
+	r := failCreateOfKind(t, ciliumegress.Kind, ci)
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
+
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key})
+	if err == nil || !strings.Contains(err.Error(), "create proxy api server policy") {
+		t.Fatalf("err = %v, want the create error of the API server policy", err)
+	}
+	assertFailed(t, r, key)
+}
+
+// Each failure of the API server policy reconcile surfaces with its step.
+func TestReconcileProxyAPIServerPolicy_Errors(t *testing.T) {
+	ctx := context.Background()
+	ci := hostedInstance("gh", "tenant-acme")
+
+	noScheme := &ConnectorInstanceReconciler{Client: newReconciler(t).Client, Scheme: runtime.NewScheme()}
+	if err := noScheme.reconcileProxyAPIServerPolicy(ctx, ci); err == nil || !strings.Contains(err.Error(), "owner ref") {
+		t.Errorf("owner ref: err = %v", err)
+	}
+
+	if err := failGetReconciler(t).reconcileProxyAPIServerPolicy(ctx, ci); err == nil ||
+		!strings.Contains(err.Error(), "get proxy api server policy") {
+		t.Errorf("get: err = %v", err)
+	}
+
+	s := testScheme(t)
+	existing := desiredProxyAPIServerPolicy(ci)
+	cl := fake.NewClientBuilder().WithScheme(s).WithObjects(existing).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Update: func(_ context.Context, _ client.WithWatch, _ client.Object, _ ...client.UpdateOption) error {
+				return errReconcileBoom
+			},
+		}).Build()
+	r := &ConnectorInstanceReconciler{Client: cl, Scheme: s}
+	if err := r.reconcileProxyAPIServerPolicy(ctx, ci); err == nil ||
+		!strings.Contains(err.Error(), "update proxy api server policy") {
+		t.Errorf("update: err = %v", err)
 	}
 }
