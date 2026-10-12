@@ -553,13 +553,18 @@ func (e *Executor) streamLogsAsync(
 			case <-terminal:
 			case <-time.After(backoff):
 			}
-			backoff *= 2
-			if backoff > logAttachBackoffCap {
-				backoff = logAttachBackoffCap
-			}
+			backoff = nextLogAttachBackoff(backoff)
 		}
 	}()
 	return done
+}
+
+// nextLogAttachBackoff doubles a log attach backoff up to its cap.
+func nextLogAttachBackoff(b time.Duration) time.Duration {
+	if b *= 2; b > logAttachBackoffCap {
+		return logAttachBackoffCap
+	}
+	return b
 }
 
 // teeToolLogs runs one attach-and-drain of the sandbox log stream. It

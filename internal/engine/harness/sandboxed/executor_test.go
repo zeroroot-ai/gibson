@@ -751,3 +751,105 @@ func TestExecute_LogTeeReadsCapturedLogAfterWait(t *testing.T) {
 		t.Fatalf("response = %q; want %q", resp.GetValue(), "hello, world")
 	}
 }
+
+// TestExecute_LogTeeNeverAttaches: a sandbox whose log is never loggable,
+// not even after Wait, ends SANDBOX_OUTPUT_MALFORMED, not a hang.
+func TestExecute_LogTeeNeverAttaches(t *testing.T) {
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) { return notLoggable{}, nil },
+		wait: func(context.Context, string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	e := newExecutor(t, client)
+	err := execute(t, e, context.Background(), "hello", wrapperspb.String("x"), &wrapperspb.StringValue{})
+	if ge := asGibsonError(t, err); ge.Code != types.SANDBOX_OUTPUT_MALFORMED {
+		t.Fatalf("code = %s; want SANDBOX_OUTPUT_MALFORMED", ge.Code)
+	}
+}
+
+// TestExecute_LogOpenErrorRetries: an error from opening the stream is
+// retried the same way as a refused attach.
+func TestExecute_LogOpenErrorRetries(t *testing.T) {
+	var opens atomic.Int32
+	firstOpen := make(chan struct{})
+	var once sync.Once
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			once.Do(func() { close(firstOpen) })
+			if opens.Add(1) == 1 {
+				return nil, errors.New("frontend unavailable")
+			}
+			return &fixedLogs{chunks: [][]byte{markerLine("hello, world")}}, nil
+		},
+		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+			<-firstOpen
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	resp := &wrapperspb.StringValue{}
+	e := newExecutor(t, client)
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if resp.GetValue() != "hello, world" {
+		t.Fatalf("response = %q; want %q", resp.GetValue(), "hello, world")
+	}
+}
+
+// errAfterChunk is a LogStream that sends one chunk and then fails.
+type errAfterChunk struct{ sent bool }
+
+func (s *errAfterChunk) Recv() ([]byte, error) {
+	if !s.sent {
+		s.sent = true
+		return markerLine("hello, world"), nil
+	}
+	return nil, errors.New("stream reset")
+}
+func (s *errAfterChunk) Close() error { return nil }
+
+// TestExecute_LogRecvErrorAfterAttachKeepsOutput: a stream that fails after
+// its first chunk is not re-attached (a re-attach would replay the output),
+// and what arrived is used.
+func TestExecute_LogRecvErrorAfterAttachKeepsOutput(t *testing.T) {
+	var opens atomic.Int32
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-1"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			opens.Add(1)
+			return &errAfterChunk{}, nil
+		},
+		wait: func(context.Context, string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0, Reason: "Completed"}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	resp := &wrapperspb.StringValue{}
+	e := newExecutor(t, client)
+	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("world"), resp); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := opens.Load(); got != 1 {
+		t.Fatalf("StreamLogs opened %d times; want 1", got)
+	}
+}
+
+func TestNextLogAttachBackoff(t *testing.T) {
+	if got := nextLogAttachBackoff(logAttachBackoffStart); got != 2*logAttachBackoffStart {
+		t.Fatalf("next(%s) = %s; want %s", logAttachBackoffStart, got, 2*logAttachBackoffStart)
+	}
+	if got := nextLogAttachBackoff(logAttachBackoffCap); got != logAttachBackoffCap {
+		t.Fatalf("next(cap) = %s; want the cap %s", got, logAttachBackoffCap)
+	}
+}
