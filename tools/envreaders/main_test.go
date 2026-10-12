@@ -24,31 +24,70 @@ func names(src string) []string {
 	return out
 }
 
-// TestNamesInSource_OverApproximates proves the scan needs no list of
-// helpers: a name reaches the set through any function, a struct tag, a
-// "NAME=value" literal, a raw string or a selector. The measured failure was
-// cmd/ext-authz, where seven names went through durationOr and intOr.
-func TestNamesInSource_OverApproximates(t *testing.T) {
-	src := "package x\n" +
+// TestNamesInSource_RealReads proves each read form is found: a direct
+// read, a constant, a helper that passes its parameter on (cmd/ext-authz
+// reads seven names through durationOr and intOr), a getenv parameter, a
+// closure, a loop over a list, a struct field and a struct tag.
+func TestNamesInSource_RealReads(t *testing.T) {
+	src := "package main\n" +
+		"import (\n\t\"os\"\n\t\"strings\"\n)\n" +
+		"const EnvConst = \"CONST_NAME\"\n" +
 		"type cfg struct {\n\tAddr string `env:\"TAG_ADDR\" envDefault:\"x\"`\n}\n" +
+		"type knob struct{ configKnob string }\n" +
+		"var k = knob{configKnob: \"FIELD_KNOB\"}\n" +
+		"var pkgLevel = os.Getenv(\"PACKAGE_LEVEL\")\n" +
+		"func envOr(key, def string) string { if v := os.Getenv(key); v != \"\" { return v }; return def }\n" +
+		"func durationOr(key string, d int) int { _ = envOr(key, \"\"); return d }\n" +
+		"func fromEnv(getenv func(string) string) string { return getenv(\"GETENV_PARAM\") }\n" +
 		"func f() {\n" +
 		"\t_ = os.Getenv(\"PLAIN_GETENV\")\n" +
+		"\t_, _ = os.LookupEnv(\"LOOKUP_ENV\")\n" +
+		"\t_ = os.Getenv(EnvConst)\n" +
+		"\t_ = os.Getenv(k.configKnob)\n" +
+		"\t_ = strings.TrimSpace(os.Getenv(\"TRIMMED\"))\n" +
 		"\t_ = durationOr(\"EXT_AUTHZ_TIMEOUT\", 0)\n" +
-		"\t_ = intOr(\"EXT_AUTHZ_MAX\", 1)\n" +
-		"\t_ = append(env, \"CHILD_FLAG=1\")\n" +
-		"\t_ = `RAW_NAME`\n" +
-		"\t_ = keys.SELECTOR_NAME\n" +
+		"\tget := func(name string) string { return os.Getenv(name) }\n" +
+		"\t_ = get(\"CLOSURE_READ\")\n" +
+		"\tfor _, name := range []string{\"LIST_A\", EnvConst} { _ = os.Getenv(name) }\n" +
+		"\t_ = fromEnv(os.Getenv)\n" +
 		"}\n"
-	want := []string{"CHILD_FLAG", "EXT_AUTHZ_MAX", "EXT_AUTHZ_TIMEOUT", "PLAIN_GETENV", "RAW_NAME", "SELECTOR_NAME", "TAG_ADDR"}
+	want := []string{
+		"CLOSURE_READ", "CONST_NAME", "EXT_AUTHZ_TIMEOUT", "FIELD_KNOB", "GETENV_PARAM", "LIST_A",
+		"LOOKUP_ENV", "PACKAGE_LEVEL", "PLAIN_GETENV", "TAG_ADDR", "TRIMMED",
+	}
 	if got := names(src); !reflect.DeepEqual(got, want) {
 		t.Fatalf("names = %v\nwant    %v", got, want)
+	}
+}
+
+// TestNamesInSource_NotARead is the failing fixture of gibson#1128: a name
+// that no env read reaches is not a reader. gibson#1125 used time.RFC1123Z
+// in a Date header, and the guard listed RFC1123Z as an env var. An error
+// code, a child-process env entry, a Kubernetes EnvVar and a method call
+// with a string argument are not reads either.
+func TestNamesInSource_NotARead(t *testing.T) {
+	src := "package x\n" +
+		"import (\n\t\"errors\"\n\t\"os\"\n\t\"time\"\n)\n" +
+		"type store struct{}\n" +
+		"func (store) get(key string) string { return os.Getenv(key) }\n" +
+		"func f(s store, env []string) {\n" +
+		"\t_ = time.Now().Format(time.RFC1123Z)\n" +
+		"\t_ = errors.New(\"WORKSPACE_NAME_TAKEN\")\n" +
+		"\t_ = append(env, \"CHILD_FLAG=1\")\n" +
+		"\t_ = []struct{ Name, Value string }{{Name: \"POD_ENV\", Value: \"x\"}}\n" +
+		"\t_ = `RAW_NAME`\n" +
+		"\t_ = s.get(\"METHOD_ARG\")\n" +
+		"\t_ = os.Getenv(\"REAL_READ\")\n" +
+		"}\n"
+	if got := names(src); !reflect.DeepEqual(got, []string{"REAL_READ"}) {
+		t.Fatalf("names = %v, want [REAL_READ]", got)
 	}
 }
 
 // TestNamesInSource_ACommentIsNotAReader proves a name that only a comment
 // holds stays out. LOKI_URL survived one audit of the chart that way.
 func TestNamesInSource_ACommentIsNotAReader(t *testing.T) {
-	src := "package x\n// os.Getenv(\"LOKI_URL\") was removed.\n/* \"BLOCK_NAME\" */\nfunc f() { _ = \"lower_case\"; _ = \"AB\"; _ = \"xUPPER_INSIDEy\" }\n"
+	src := "package x\nimport \"os\"\n// os.Getenv(\"LOKI_URL\") was removed.\n/* os.Getenv(\"BLOCK_NAME\") */\nfunc f() { _ = os.Getenv(\"lower_case\"); _ = os.Getenv(\"xUPPER_INSIDEy\") }\n"
 	if got := names(src); len(got) != 0 {
 		t.Fatalf("names = %v, want none", got)
 	}
@@ -86,13 +125,13 @@ func repo(t *testing.T, filler int, files map[string]string) string {
 // code and an untracked file do not contribute a name.
 func TestScan_ReadsTrackedSourceOnly(t *testing.T) {
 	dir := repo(t, 0, map[string]string{
-		"cmd/svc/main.go":          "package main\nvar _ = \"LIVE_NAME\"\n",
-		"cmd/svc/main_test.go":     "package main\nvar _ = \"TEST_ONLY_NAME\"\n",
-		"cmd/svc/testdata/x.go":    "package x\nvar _ = \"TESTDATA_NAME\"\n",
-		"vendor/dep/dep.go":        "package dep\nvar _ = \"VENDORED_NAME\"\n",
-		"operators/op/cmd/main.go": "package main\nvar _ = \"OPERATOR_NAME\"\n",
+		"cmd/svc/main.go":          "package main\nimport \"os\"\nvar _ = os.Getenv(\"LIVE_NAME\")\n",
+		"cmd/svc/main_test.go":     "package main\nimport \"os\"\nvar _ = os.Getenv(\"TEST_ONLY_NAME\")\n",
+		"cmd/svc/testdata/x.go":    "package x\nimport \"os\"\nvar _ = os.Getenv(\"TESTDATA_NAME\")\n",
+		"vendor/dep/dep.go":        "package dep\nimport \"os\"\nvar _ = os.Getenv(\"VENDORED_NAME\")\n",
+		"operators/op/cmd/main.go": "package main\nimport \"os\"\nvar _ = os.Getenv(\"OPERATOR_NAME\")\n",
 	})
-	if err := os.WriteFile(filepath.Join(dir, "untracked.go"), []byte("package x\nvar _ = \"UNTRACKED_NAME\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "untracked.go"), []byte("package x\nimport \"os\"\nvar _ = os.Getenv(\"UNTRACKED_NAME\")\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := Scan(dir, 1, 1)
@@ -107,7 +146,7 @@ func TestScan_ReadsTrackedSourceOnly(t *testing.T) {
 // TestScan_RefusesASmallScan proves the floors: a tree that is not gibson
 // fails, and does not write a short set.
 func TestScan_RefusesASmallScan(t *testing.T) {
-	dir := repo(t, 0, map[string]string{"main.go": "package main\nvar _ = \"ONE_NAME\"\n"})
+	dir := repo(t, 0, map[string]string{"main.go": "package main\nimport \"os\"\nvar _ = os.Getenv(\"ONE_NAME\")\n"})
 	if _, err := Scan(dir, 200, 1); err == nil || !strings.Contains(err.Error(), "the floor is 200") {
 		t.Fatalf("file floor: err = %v, want the file floor named", err)
 	}
@@ -148,7 +187,7 @@ func gitAdd(t *testing.T, dir string) {
 // write gives a file that check accepts, a new reader makes check fail and
 // name it, and a dropped reader makes check fail and name it.
 func TestCommand_WriteThenCheckThenDrift(t *testing.T) {
-	dir := repo(t, 0, map[string]string{"cmd/svc/main.go": "package main\nvar _ = \"FIRST_NAME\"\n"})
+	dir := repo(t, 0, map[string]string{"cmd/svc/main.go": "package main\nimport \"os\"\nvar _ = os.Getenv(\"FIRST_NAME\")\n"})
 
 	if code, _, stderr := command(dir, "-check"); code != 1 || !strings.Contains(stderr, Artifact+" is missing") {
 		t.Fatalf("check with no file: exit %d, stderr %q", code, stderr)
@@ -161,7 +200,7 @@ func TestCommand_WriteThenCheckThenDrift(t *testing.T) {
 	}
 
 	added := filepath.Join(dir, "cmd", "svc", "more.go")
-	if err := os.WriteFile(added, []byte("package main\nvar _ = \"SECOND_NAME\"\n"), 0o600); err != nil {
+	if err := os.WriteFile(added, []byte("package main\nimport \"os\"\nvar _ = os.Getenv(\"SECOND_NAME\")\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	gitAdd(t, dir)
@@ -187,7 +226,7 @@ func TestCommand_WriteThenCheckThenDrift(t *testing.T) {
 // when the mode is unclear, a flag is unknown, the directory is not a git
 // tree, or the scan is under a floor.
 func TestCommand_RefusesBadUse(t *testing.T) {
-	dir := repo(t, 0, map[string]string{"main.go": "package main\nvar _ = \"ONE_NAME\"\n"})
+	dir := repo(t, 0, map[string]string{"main.go": "package main\nimport \"os\"\nvar _ = os.Getenv(\"ONE_NAME\")\n"})
 	for name, mode := range map[string][]string{
 		"no mode":      nil,
 		"both modes":   {"-write", "-check"},
