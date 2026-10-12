@@ -36,19 +36,23 @@ runs:
 
         # The gibson namespace enforces the restricted Pod Security level
         # (hosted#599, gibson#1105), so each probe pod states a restricted
-        # security context.
-        restricted='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":65532,"runAsGroup":65532,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"NAME","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+        # security context. kubectl run applies --overrides as a JSON merge,
+        # which REPLACES the containers list: an override that named only the
+        # security context dropped the image (run 38205311196, "image:
+        # Required value"). So the override holds the whole container.
+        probe_pod() { # <name> <labels>
+          local ov
+          ov="$(jq -cn --arg n "$1" --arg i "$IMAGE" '{spec:{
+            securityContext:{runAsNonRoot:true,runAsUser:65532,runAsGroup:65532,seccompProfile:{type:"RuntimeDefault"}},
+            containers:[{name:$n,image:$i,command:["sleep","600"],
+              securityContext:{allowPrivilegeEscalation:false,capabilities:{drop:["ALL"]}}}]}}')"
+          kubectl -n "$NS" run "$1" --image="$IMAGE" --restart=Never --labels="$2" --overrides="$ov"
+        }
 
         # The admitted pod carries the labels of the e2e runner Job.
-        kubectl -n "$NS" run "$admitted" --image="$IMAGE" --restart=Never \
-          --overrides="${restricted//NAME/$admitted}" \
-          --labels="app.kubernetes.io/name=gibson-workloads,app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=e2e-runner,gibson.zeroroot.ai/net-role=platform,gibson.zeroroot.ai/client-redis=true" \
-          --command -- sleep 600
+        probe_pod "$admitted" "app.kubernetes.io/name=gibson-workloads,app.kubernetes.io/instance=${RELEASE},app.kubernetes.io/component=e2e-runner,gibson.zeroroot.ai/net-role=platform,gibson.zeroroot.ai/client-redis=true"
         # The denied pod carries no label that a policy of the chart selects.
-        kubectl -n "$NS" run "$denied" --image="$IMAGE" --restart=Never \
-          --overrides="${restricted//NAME/$denied}" \
-          --labels="app.kubernetes.io/component=policy-probe" \
-          --command -- sleep 600
+        probe_pod "$denied" "app.kubernetes.io/component=policy-probe"
         kubectl -n "$NS" wait --for=condition=Ready "pod/$admitted" "pod/$denied" --timeout=180s
 
         # curl exits 28 when the connection gets no answer: a dropped packet.
