@@ -327,6 +327,8 @@ jobs:
       # other suites.
       #
       # The e2e overlay mounts plans.yaml, which is chart data by decision
+      # (charts helm/gibson-operators/files/plans.yaml, the one registry the
+      # tenant-operator ConfigMap reads, gibson#1101)
       # (internal/platform/plans: gibson ships no copy). The charts checkout
       # supplies it at the path config/e2e/kustomization.yaml reads (run
       # 35660778012 failed with "open operators/tenant/plans/plans.yaml: no
@@ -337,7 +339,7 @@ jobs:
         run: |
           set +e
           mkdir -p plans
-          cp "$CHARTS_ROOT/helm/gibson-workloads/files/plans.yaml" plans/plans.yaml || { echo "::error::charts has no helm/gibson-workloads/files/plans.yaml"; exit 1; }
+          cp "$CHARTS_ROOT/helm/gibson-operators/files/plans.yaml" plans/plans.yaml || { echo "::error::charts has no helm/gibson-operators/files/plans.yaml"; exit 1; }
           make test-e2e 2>&1 | tee "$E2E_OUT/tenant_operator.log"
           rc=${PIPESTATUS[0]}
           ../../.github/scripts/e2e-suite-verdict.sh tenant_operator "$E2E_OUT/tenant_operator.log" "$rc" "$RESULTS"
