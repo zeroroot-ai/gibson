@@ -19,17 +19,13 @@ const (
 	MemberRoleMember MemberRole = "member"
 )
 
-// TenantMemberPhase represents the lifecycle phase of a TenantMember.
+// TenantMemberPhase represents the lifecycle phase of a TenantMember. The
+// phase is empty until the member is Active. The daemon owns invitations, so
+// a TenantMember has no invitation phase.
 type TenantMemberPhase string
 
-const (
-	TenantMemberPhasePending   TenantMemberPhase = "Pending"
-	TenantMemberPhaseInvited   TenantMemberPhase = "Invited"
-	TenantMemberPhaseAccepting TenantMemberPhase = "Accepting"
-	TenantMemberPhaseActive    TenantMemberPhase = "Active"
-	TenantMemberPhaseExpired   TenantMemberPhase = "Expired"
-	TenantMemberPhaseRevoked   TenantMemberPhase = "Revoked"
-)
+// TenantMemberPhaseActive is the phase of a member whose account exists.
+const TenantMemberPhaseActive TenantMemberPhase = "Active"
 
 // TenantMemberSpec defines the desired state of a TenantMember.
 type TenantMemberSpec struct {
@@ -47,27 +43,16 @@ type TenantMemberSpec struct {
 	// +required
 	TenantRef corev1.LocalObjectReference `json:"tenantRef"`
 
-	// AcceptedByUserID is set by the dashboard when the invited user
-	// accepts. Triggers Invited -> Active transition.
+	// AcceptedByUserID is the Zitadel id of the account of the member. Its
+	// writers (signup provisioning, bootstrap-tenant-owner) set it when the
+	// account already exists. It makes the member Active.
 	// +optional
 	AcceptedByUserID string `json:"acceptedByUserId,omitempty"`
-
-	// ResendRequestedAt, when set, requests a fresh invitation email.
-	// Controller deduplicates via status.lastResendAt.
-	// +optional
-	ResendRequestedAt *metav1.Time `json:"resendRequestedAt,omitempty"`
-
-	// InvitedByEmail captures the email of the user who issued the
-	// invitation. Empty string means "system-issued" — the controller
-	// renders that as "a Gibson admin" in the outgoing email.
-	// +kubebuilder:validation:Format=email
-	// +optional
-	InvitedByEmail string `json:"invitedByEmail,omitempty"`
 }
 
 // TenantMemberStatus defines the observed state of a TenantMember.
 type TenantMemberStatus struct {
-	// +kubebuilder:validation:Enum=Pending;Invited;Accepting;Active;Expired;Revoked
+	// +kubebuilder:validation:Enum=Active
 	// +optional
 	Phase TenantMemberPhase `json:"phase,omitempty"`
 
@@ -76,23 +61,9 @@ type TenantMemberStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
-	// InvitationExpiresAt is when the pending invitation expires.
-	// +optional
-	InvitationExpiresAt *metav1.Time `json:"invitationExpiresAt,omitempty"`
-
-	// InvitationSecretRef is the name of the Secret holding the plaintext
-	// invitation token. Deleted when accepted or expired.
-	// +optional
-	InvitationSecretRef string `json:"invitationSecretRef,omitempty"`
-
 	// UserID is the Zitadel subject (sub claim) recorded after acceptance.
 	// +optional
 	UserID string `json:"userId,omitempty"`
-
-	// LastResendAt tracks the most recent invitation email sent for
-	// resend-request deduplication.
-	// +optional
-	LastResendAt *metav1.Time `json:"lastResendAt,omitempty"`
 
 	// ZitadelUserID is the Zitadel user ID for this member, set after the
 	// EnsureZitadelMember saga step creates or locates the user.

@@ -82,9 +82,6 @@ func TestDrain_CreatesFoundingOwnerMember(t *testing.T) {
 	if m.Spec.AcceptedByUserID != "zitadel-user-9" {
 		t.Errorf("acceptedByUserId: got %q (must pre-accept the founding owner)", m.Spec.AcceptedByUserID)
 	}
-	if m.Spec.InvitedByEmail != "" {
-		t.Errorf("invitedByEmail must be empty for the founding owner, got %q", m.Spec.InvitedByEmail)
-	}
 	if len(d.acked) != 1 || d.acked[0] != "acme" {
 		t.Errorf("expected acme acked, got %v", d.acked)
 	}
