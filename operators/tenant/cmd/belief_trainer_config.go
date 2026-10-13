@@ -24,9 +24,15 @@ func beliefTrainerConfigFromEnv(getenv func(string) string) (flows.BeliefTrainer
 		getenv(envDaemonGRPCAddress),
 		getenv(envDaemonSPIFFEID),
 		getenv("OPERATOR_NAMESPACE"),
+		// The SPIRE class and the trust domain of the operator's
+		// registrations: the plugin instances and the trainer of each
+		// tenant (gibson#1164).
+		getenv("PLUGIN_SPIRE_CLASS_NAME"),
+		getenv("PLUGIN_TRUST_DOMAIN"),
 	)
 	if err != nil {
-		return flows.BeliefTrainerConfig{}, fmt.Errorf("set %s, %s, %s and OPERATOR_NAMESPACE: %w",
+		return flows.BeliefTrainerConfig{}, fmt.Errorf(
+			"set %s, %s, %s, OPERATOR_NAMESPACE, PLUGIN_SPIRE_CLASS_NAME and PLUGIN_TRUST_DOMAIN: %w",
 			envBeliefTrainerImage, envDaemonGRPCAddress, envDaemonSPIFFEID, err)
 	}
 	return cfg, nil

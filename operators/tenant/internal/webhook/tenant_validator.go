@@ -83,11 +83,22 @@ type TenantValidator struct {
 // compile-time interface assertion.
 var _ admission.Validator[*gibsonv1alpha1.Tenant] = (*TenantValidator)(nil)
 
+// pluginNamespaceSuffix ends the name of the plugin namespace of a tenant.
+const pluginNamespaceSuffix = "-plugins"
+
 // ValidateCreate validates a new Tenant. All required fields are checked,
 // including the chart-managed reserved-names denylist.
 func (v *TenantValidator) ValidateCreate(ctx context.Context, obj *gibsonv1alpha1.Tenant) (admission.Warnings, error) {
 	if err := validateTenantFields(obj); err != nil {
 		return nil, err
+	}
+	// The namespace of tenant <t> is tenant-<t>, and the plugin namespace of
+	// tenant <x> is tenant-<x>-plugins. A tenant named <x>-plugins would get
+	// the plugin namespace of tenant <x>, and the chart refuses its trainer
+	// identity for that reason (gibson#1164). Refuse the name at create.
+	if strings.HasSuffix(obj.Name, pluginNamespaceSuffix) {
+		return nil, fmt.Errorf("metadata.name (slug) %q ends in %q, which names the plugin namespace of another tenant; pick a different name",
+			obj.Name, pluginNamespaceSuffix)
 	}
 	if v.ReservedNames != nil {
 		if err := v.checkReservedName(ctx, obj.Name); err != nil {

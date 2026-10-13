@@ -187,6 +187,19 @@ jobs:
       # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
       # on the daemon (charts#142). One patch means one Argo sync and one
       # daemon rollout.
+      # The tenant-operator of the checkout. It provisions the belief trainer
+      # of each tenant: the CronJob, its ServiceAccount and its SPIFFE
+      # registration (gibson#1164). The patch below points the
+      # chart-installed operator at it, the same pattern as e2e-cluster.
+      - name: Build + load the tenant-operator of the checkout
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          docker buildx build --progress=plain --load \
+            -f build/tenant-operator.Dockerfile \
+            -t ghcr.io/zeroroot-ai/tenant-operator:belief-training .
+          kind load docker-image ghcr.io/zeroroot-ai/tenant-operator:belief-training --name "$CLUSTER"
+
       - name: Point the daemon at the test-mode image with authz off + fixtures on
         working-directory: hosted
         run: |
@@ -196,7 +209,11 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"belief-training","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"belief-training","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
           for i in $(seq 1 60); do
@@ -207,6 +224,14 @@ jobs:
             sleep 20
           done
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get deployment gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}' 2>/dev/null || true)
+            case "$img" in *:belief-training) echo "tenant-operator image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the tenant-operator Deployment never took the belief-training image"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
 
       - name: Build the e2e suite into an image
         id: suite-image
@@ -249,6 +274,14 @@ jobs:
           done
           kubectl -n "$tns" get cronjob belief-trainer -o yaml > "$E2E_OUT/cronjob.yaml" || {
             echo "::error::the tenant operator created no belief-trainer CronJob in $tns"; exit 1; }
+          # The trainer identity of the tenant (gibson#1164): the operator
+          # of the checkout writes it when it reconciles the tenant.
+          for _ in $(seq 1 30); do
+            kubectl get clusterspiffeid "gibson-belief-trainer-${TENANT}" >/dev/null 2>&1 && break
+            sleep 10
+          done
+          kubectl get clusterspiffeid "gibson-belief-trainer-${TENANT}" -o yaml > "$E2E_OUT/trainer-spiffeid.yaml" || {
+            echo "::error::the tenant operator registered no trainer SPIFFE ID for ${TENANT}"; exit 1; }
           job="belief-trainer-exit-${GITHUB_RUN_ID}"
           kubectl -n "$tns" create job "$job" --from=cronjob/belief-trainer
           if ! kubectl -n "$tns" wait --for=condition=complete "job/$job" --timeout=15m; then

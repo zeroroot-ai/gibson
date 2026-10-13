@@ -12,16 +12,19 @@ import (
 // the error names the variables to set.
 func TestBeliefTrainerConfigFromEnv(t *testing.T) {
 	env := map[string]string{
-		envBeliefTrainerImage: "ghcr.io/zeroroot-ai/gibson:v1",
-		envDaemonGRPCAddress:  "gibson.gibson.svc:50051",
-		envDaemonSPIFFEID:     "spiffe://example.org/platform/daemon",
-		"OPERATOR_NAMESPACE":  "gibson",
+		envBeliefTrainerImage:     "ghcr.io/zeroroot-ai/gibson:v1",
+		envDaemonGRPCAddress:      "gibson.gibson.svc:50051",
+		envDaemonSPIFFEID:         "spiffe://example.org/platform/daemon",
+		"OPERATOR_NAMESPACE":      "gibson",
+		"PLUGIN_SPIRE_CLASS_NAME": "gibson-gibson",
+		"PLUGIN_TRUST_DOMAIN":     "example.org",
 	}
 	cfg, err := beliefTrainerConfigFromEnv(func(k string) string { return env[k] })
 	if err != nil {
 		t.Fatalf("beliefTrainerConfigFromEnv: %v", err)
 	}
-	if cfg.Image != env[envBeliefTrainerImage] || cfg.PlatformNamespace != "gibson" {
+	if cfg.Image != env[envBeliefTrainerImage] || cfg.PlatformNamespace != "gibson" ||
+		cfg.SpireClassName != "gibson-gibson" || cfg.TrustDomain != "example.org" {
 		t.Errorf("config = %+v", cfg)
 	}
 
@@ -29,5 +32,12 @@ func TestBeliefTrainerConfigFromEnv(t *testing.T) {
 	_, err = beliefTrainerConfigFromEnv(func(k string) string { return env[k] })
 	if err == nil || !strings.Contains(err.Error(), envBeliefTrainerImage) {
 		t.Fatalf("no image: err = %v, want an error that names %s", err, envBeliefTrainerImage)
+	}
+
+	env[envBeliefTrainerImage] = "ghcr.io/zeroroot-ai/gibson:v1"
+	delete(env, "PLUGIN_SPIRE_CLASS_NAME")
+	_, err = beliefTrainerConfigFromEnv(func(k string) string { return env[k] })
+	if err == nil || !strings.Contains(err.Error(), "PLUGIN_SPIRE_CLASS_NAME") {
+		t.Fatalf("no SPIRE class: err = %v, want an error that names PLUGIN_SPIRE_CLASS_NAME", err)
 	}
 }
