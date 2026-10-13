@@ -1845,6 +1845,8 @@ func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(ctx context.Context,
 		VCPU:    entry.Resources.VCPU,
 		Memory:  entry.Resources.Memory,
 		Egress:  agentEgressCeiling(h.missionCtx.CurrentAgent),
+
+		OutputProtoType: entry.OutputProtoType,
 	}
 	// A tool that runs inside a node gets the network of that node (S6).
 	if n := h.missionCtx.NodeNetwork; n != nil {

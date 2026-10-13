@@ -94,6 +94,11 @@ func TestSandboxedToolSpecFromManifest(t *testing.T) {
 	if spec.Image == "" || len(spec.Command) == 0 {
 		t.Errorf("spec must carry the executor image + command, got image=%q command=%v", spec.Image, spec.Command)
 	}
+	// The executor reads a DiscoveryResult from output_json only when the spec
+	// names it as the output type (gibson#1140).
+	if spec.OutputProtoType != "gibson.graphrag.v1.DiscoveryResult" {
+		t.Errorf("OutputProtoType = %q, want the manifest's gibson.graphrag.v1.DiscoveryResult", spec.OutputProtoType)
+	}
 	if _, ok := h.sandboxedToolSpecFromManifest(context.Background(), "does-not-exist"); ok {
 		t.Error("an unknown tool must not resolve")
 	}

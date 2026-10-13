@@ -44,6 +44,12 @@ type ToolSpec struct {
 	// the network scope of the mission node that starts the tool (gibson#865).
 	NetworkMode string
 
+	// OutputProtoType is the full name of the message the tool emits, from its
+	// kind:tool manifest. A mission tool node reads the answer as the generic
+	// tool ExecuteResponse, so a DiscoveryResult travels as JSON in its
+	// output_json; this name tells the executor to read it there (gibson#1140).
+	OutputProtoType string
+
 	// Live carries the per-call scope the running-sandbox console keys by.
 	// Like Egress it is dispatch-time scope, not catalog data: the caller
 	// fills it from the request it is serving. Its Tenant also names the
