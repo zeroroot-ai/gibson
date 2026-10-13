@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.160.3](https://github.com/zeroroot-ai/gibson/compare/v0.160.2...v0.160.3) (2026-10-13)
+
+
+### Bug Fixes
+
+* **envreaders:** count only real env reads ([cd86dde](https://github.com/zeroroot-ai/gibson/commit/cd86ddec22a7bdda45c2634174e37a08195fabf3)), closes [#1128](https://github.com/zeroroot-ai/gibson/issues/1128)
+* **harness:** a mission tool node folds the DiscoveryResult of its output_json into the World ([#1141](https://github.com/zeroroot-ai/gibson/issues/1141)) ([6507c43](https://github.com/zeroroot-ai/gibson/commit/6507c43f6dbe4dc71e05d425d54ff801ffdd881f)), closes [#1140](https://github.com/zeroroot-ai/gibson/issues/1140)
+* **rework:** count only real env reads in envreaders ([#1131](https://github.com/zeroroot-ai/gibson/issues/1131)) ([cd86dde](https://github.com/zeroroot-ai/gibson/commit/cd86ddec22a7bdda45c2634174e37a08195fabf3))
+
 ## [0.160.2](https://github.com/zeroroot-ai/gibson/compare/v0.160.1...v0.160.2) (2026-10-12)
 
 
