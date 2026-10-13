@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
@@ -458,18 +459,42 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 			pbDiscovery = e.discoveryFromOutputJSON(toolName, response)
 		}
 		if pbDiscovery != nil {
-			execCtx := ingest.ExecContext{
-				MissionRunID:    contextkeys.GetMissionRunID(ctx),
-				MissionID:       ctxStringValue(ctx, contextkeys.MissionID),
-				AgentName:       ctxStringValue(ctx, contextkeys.AgentName),
-				AgentRunID:      contextkeys.GetAgentRunID(ctx),
-				ToolExecutionID: contextkeys.GetToolExecutionID(ctx),
-			}
+			execCtx := discoveryExecContext(ctx, spec.Live, spec.MissionTenant)
 			go e.processDiscoveryAsync(toolName, execCtx, pbDiscovery)
 		}
 	}
 
 	return nil
+}
+
+// discoveryExecContext is the scope of a discovery: the context keys of the
+// call, then the mission ids of the spec and the tenant that owns the mission
+// where a key is empty. The brain execution context of a mission tool node
+// carries no tenant and no mission ids, and an empty tenant made the ingest
+// sink fold the discovery into the daemon's registry tenant, not the
+// mission's (gibson#1145).
+func discoveryExecContext(ctx context.Context, live LiveScope, missionTenant string) ingest.ExecContext {
+	ec := ingest.ExecContext{
+		MissionRunID:    contextkeys.GetMissionRunID(ctx),
+		MissionID:       ctxStringValue(ctx, contextkeys.MissionID),
+		AgentName:       ctxStringValue(ctx, contextkeys.AgentName),
+		AgentRunID:      contextkeys.GetAgentRunID(ctx),
+		ToolExecutionID: contextkeys.GetToolExecutionID(ctx),
+	}
+	if ec.MissionRunID == "" {
+		ec.MissionRunID = live.MissionRunID
+	}
+	if ec.MissionID == "" {
+		ec.MissionID = live.MissionID
+	}
+	if tenant, ok := auth.TenantFromContext(ctx); ok {
+		ec.TenantID = tenant
+	} else if missionTenant != "" {
+		if tenant, err := auth.NewTenantID(missionTenant); err == nil {
+			ec.TenantID = tenant
+		}
+	}
+	return ec
 }
 
 // discoveryResultType is the full name of the DiscoveryResult message.

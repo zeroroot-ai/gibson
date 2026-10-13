@@ -22,6 +22,7 @@ import (
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	testpb "github.com/zeroroot-ai/sdk/api/gen/gibson/test/v1"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
@@ -940,5 +941,31 @@ func TestExecute_OutputJSONNotADiscovery(t *testing.T) {
 			t.Errorf("%s: DiscoveryProcessor.Process was called", name)
 		case <-time.After(200 * time.Millisecond):
 		}
+	}
+}
+
+// The scope of a discovery comes from the context keys of the call, and from
+// the per-call scope of the spec where a key is empty. A mission tool node runs
+// in a brain execution context with no tenant and no mission ids, and its
+// discovery fell into the daemon's registry tenant (gibson#1145).
+func TestDiscoveryExecContext(t *testing.T) {
+	live := LiveScope{MissionID: "m-live", MissionRunID: "r-live"}
+
+	ec := discoveryExecContext(context.Background(), live, "primary")
+	if ec.TenantID.String() != "primary" || ec.MissionID != "m-live" || ec.MissionRunID != "r-live" {
+		t.Errorf("empty context: got tenant=%q mission=%q run=%q, want the mission scope", ec.TenantID, ec.MissionID, ec.MissionRunID)
+	}
+
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("other"))
+	ctx = contextkeys.WithMissionRunID(ctx, "r-ctx")
+	ctx = context.WithValue(ctx, contextkeys.MissionID, "m-ctx")
+	ec = discoveryExecContext(ctx, live, "primary")
+	if ec.TenantID.String() != "other" || ec.MissionID != "m-ctx" || ec.MissionRunID != "r-ctx" {
+		t.Errorf("context keys: got tenant=%q mission=%q run=%q, want the context scope", ec.TenantID, ec.MissionID, ec.MissionRunID)
+	}
+
+	ec = discoveryExecContext(context.Background(), LiveScope{}, "not a tenant id!")
+	if !ec.TenantID.IsZero() {
+		t.Errorf("an invalid mission tenant: got %q, want zero", ec.TenantID)
 	}
 }

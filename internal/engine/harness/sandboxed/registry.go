@@ -50,6 +50,12 @@ type ToolSpec struct {
 	// output_json; this name tells the executor to read it there (gibson#1140).
 	OutputProtoType string
 
+	// MissionTenant is the tenant that owns the mission of the call. It scopes
+	// the discovery of the call when the context carries no tenant, as the
+	// brain execution context of a mission tool node does not (gibson#1145).
+	// It is not a console scope: Live.Tenant stays the caller's tenant.
+	MissionTenant string
+
 	// Live carries the per-call scope the running-sandbox console keys by.
 	// Like Egress it is dispatch-time scope, not catalog data: the caller
 	// fills it from the request it is serving. Its Tenant also names the

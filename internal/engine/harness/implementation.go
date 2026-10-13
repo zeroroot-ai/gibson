@@ -774,6 +774,9 @@ func (h *DefaultAgentHarness) CallToolProto(ctx context.Context, name string, re
 				fmt.Sprintf("tool %q is a sandboxed manifest tool but no sandboxed executor is wired", name), nil)
 		}
 		spec.Live = h.liveScope(ctx)
+		// The tenant that owns the mission scopes the discovery of the call
+		// (gibson#1145). The console scope above stays the caller's tenant.
+		spec.MissionTenant = h.missionCtx.TenantID
 		h.addTargetFacts(ctx, &spec)
 		if err := h.addDeclaredSecrets(ctx, name, &spec); err != nil {
 			return err
