@@ -14,7 +14,6 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 )
 
@@ -219,9 +218,5 @@ func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.List
 		tokens, cost, _ := usage.TenantPeriodUsage(ctx, t)
 		resp.Tenants = append(resp.Tenants, &connectionv1.TenantUsage{TenantId: t, Tokens: tokens, CostUsdCents: cost})
 	}
-	now := s.signupNow()
-	end := budget.PeriodResetAt(now)
-	start := time.Date(end.Year(), end.Month()-1, 1, 0, 0, 0, 0, time.UTC)
-	resp.PeriodStartUnix, resp.PeriodEndUnix = start.Unix(), end.Unix()
 	return resp, nil
 }
