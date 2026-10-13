@@ -132,19 +132,25 @@ func desiredProxyAPIServerPolicy(ci *connectorv1alpha1.ConnectorInstance) *unstr
 		"gibson.zeroroot.ai/connector": ci.Spec.Connector,
 	})
 	u.Object["spec"] = map[string]interface{}{
-		"endpointSelector": map[string]interface{}{
-			"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
-			"matchExpressions": []interface{}{map[string]interface{}{
-				"key":      "app.kubernetes.io/name",
-				"operator": "In",
-				"values":   toolhiveProxyNames,
-			}},
-		},
+		"endpointSelector": proxyPodSelector(ci),
 		"egress": []interface{}{map[string]interface{}{
 			"toEntities": []interface{}{"kube-apiserver"},
 		}},
 	}
 	return u
+}
+
+// proxyPodSelector selects the ToolHive proxy pod of a connector, and not its
+// MCP server pod.
+func proxyPodSelector(ci *connectorv1alpha1.ConnectorInstance) map[string]interface{} {
+	return map[string]interface{}{
+		"matchLabels": map[string]interface{}{"toolhive-name": ci.Name},
+		"matchExpressions": []interface{}{map[string]interface{}{
+			"key":      "app.kubernetes.io/name",
+			"operator": "In",
+			"values":   toolhiveProxyNames,
+		}},
+	}
 }
 
 // reconcileProxyAPIServerPolicy applies the API server policy of the

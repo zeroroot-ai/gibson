@@ -96,6 +96,9 @@ env:
   # The namespace of the GitHub plugin instance of the tenant "primary"
   # (gibson#815): the tenant operator names it tenant-<tenant>-plugins.
   PLUGIN_NS: tenant-primary-plugins
+  # The namespace of the tenant "primary", where the fixture connector runs
+  # (tests/fixtures/mcp-tools/connector.yaml).
+  CONNECTOR_NS: tenant-primary
 
 jobs:
   tool-dispatch:
@@ -236,6 +239,20 @@ jobs:
       # catalog plugin through CatalogPluginService, and the tenant operator
       # runs one instance for that tenant in tenant-<tenant>-plugins
       # (gibson#815). The revocation suite enables it for its tenant.
+      # The connector-operator of the checkout. The connector proxy path
+      # (its egress policies, the SPIRE trust bundle copy, the oidcConfig) is
+      # operator code, so the test must run the operator of the change, not
+      # the one charts pins (gibson#1151). The patch below points the
+      # chart-installed operator at it.
+      - name: Build + load the connector-operator of the checkout
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          docker buildx build --progress=plain --load \
+            -f build/connector-operator.Dockerfile \
+            -t ghcr.io/zeroroot-ai/connector-operator:e2e-tool .
+          kind load docker-image ghcr.io/zeroroot-ai/connector-operator:e2e-tool --name "$CLUSTER"
+
       - name: Point the daemon at the test-mode image with authz off + fixtures on
         working-directory: hosted
         run: |
@@ -254,7 +271,11 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-tool","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.repository","value":"ghcr.io/zeroroot-ai/connector-operator","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.tag","value":"e2e-tool","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.digest","value":"","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
           for i in $(seq 1 60); do
@@ -265,6 +286,14 @@ jobs:
             sleep 20
           done
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get deployment gibson-connector-operator \
+                    -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}' 2>/dev/null || true)
+            case "$img" in *connector-operator:e2e-tool) echo "connector-operator image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the connector-operator Deployment never took the e2e-tool image (got '$img')"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status deployment/gibson-connector-operator --timeout=15m
           # Confirm the daemon wired the sandboxed TOOL executor — the linchpin
           # for this test, the way the agent launcher is for the agent one.
           #
@@ -313,39 +342,54 @@ jobs:
           IMG=ghcr.io/zeroroot-ai/gibson-fixture-mcp-tools:e2e
           docker build -f tests/fixtures/mcp-tools/Dockerfile -t "$IMG" .
           kind load docker-image "$IMG" --name "$CLUSTER"
-          kubectl create namespace tenant-connector-e2e --dry-run=client -o yaml | kubectl apply -f -
+          # The connector runs in the namespace of its tenant, as in a real
+          # install. The first-admin Job of the bringup makes the tenant
+          # "primary", and the tenant-operator makes its namespace with the
+          # tenant label. The SPIRE OIDC provider admits the connector proxy
+          # only from a namespace with that label (gibson#1151).
+          label=""
+          for _ in $(seq 1 60); do
+            label=$(kubectl get namespace "$CONNECTOR_NS" -o jsonpath='{.metadata.labels.gibson\.zeroroot\.ai/managed-by}' 2>/dev/null || true)
+            [ "$label" = "tenant-operator" ] && break
+            sleep 5
+          done
+          if [ "$label" != "tenant-operator" ]; then
+            echo "::error::the tenant namespace $CONNECTOR_NS has no tenant label (got '$label')"
+            kubectl get namespaces --show-labels || true
+            exit 1
+          fi
           kubectl apply -f tests/fixtures/mcp-tools/connector.yaml
           phase=""
           for _ in $(seq 1 60); do
-            phase=$(kubectl -n tenant-connector-e2e get connectorinstance fixture-mcp-tools -o jsonpath='{.status.phase}' 2>/dev/null || true)
+            phase=$(kubectl -n "$CONNECTOR_NS" get connectorinstance fixture-mcp-tools -o jsonpath='{.status.phase}' 2>/dev/null || true)
             [ "$phase" = Ready ] && break
             sleep 10
           done
           if [ "$phase" != Ready ]; then
             echo "::error::the fixture connector did not reach Ready (phase '${phase}')"
-            kubectl -n tenant-connector-e2e get connectorinstance,mcpserver,pods -o wide || true
-            kubectl -n tenant-connector-e2e describe connectorinstance fixture-mcp-tools || true
+            kubectl -n "$CONNECTOR_NS" get connectorinstance,mcpserver,pods -o wide || true
+            kubectl -n "$CONNECTOR_NS" describe connectorinstance fixture-mcp-tools || true
             # Each pod of the namespace, by name: the label selector above
             # matched no pod in run 38201542361, where the ToolHive pod
             # crash-looped and its log was never printed.
-            for p in $(kubectl -n tenant-connector-e2e get pods -o name); do
+            for p in $(kubectl -n "$CONNECTOR_NS" get pods -o name); do
               echo "--- $p"
-              kubectl -n tenant-connector-e2e describe "$p" | sed -n '/^Containers:/,/^Conditions:/p' || true
-              kubectl -n tenant-connector-e2e logs "$p" --all-containers --tail=60 || true
-              kubectl -n tenant-connector-e2e logs "$p" --all-containers --previous --tail=60 2>/dev/null || true
+              kubectl -n "$CONNECTOR_NS" describe "$p" | sed -n '/^Containers:/,/^Conditions:/p' || true
+              kubectl -n "$CONNECTOR_NS" logs "$p" --all-containers --tail=60 || true
+              kubectl -n "$CONNECTOR_NS" logs "$p" --all-containers --previous --tail=60 2>/dev/null || true
             done
             kubectl -n toolhive-system logs deploy/toolhive-operator --tail=60 2>/dev/null || true
             # The ToolHive proxy exits 2 with no reason in its log (run
             # 38210663974), and it runs the MCP server as a StatefulSet. So
             # the events, the StatefulSets and the MCPServer status of the
             # namespace are printed too.
-            kubectl -n tenant-connector-e2e get statefulsets,deployments,services -o wide || true
-            kubectl -n tenant-connector-e2e get events --sort-by=.lastTimestamp | tail -40 || true
-            kubectl -n tenant-connector-e2e get mcpserver fixture-mcp-tools -o yaml | sed -n '/^status:/,$p' || true
-            kubectl -n tenant-connector-e2e get role,rolebinding -o wide || true
+            kubectl -n "$CONNECTOR_NS" get statefulsets,deployments,services -o wide || true
+            kubectl -n "$CONNECTOR_NS" get events --sort-by=.lastTimestamp | tail -40 || true
+            kubectl -n "$CONNECTOR_NS" get mcpserver fixture-mcp-tools -o yaml | sed -n '/^status:/,$p' || true
+            kubectl -n "$CONNECTOR_NS" get role,rolebinding -o wide || true
             exit 1
           fi
-          kubectl -n tenant-connector-e2e port-forward svc/mcp-fixture-mcp-tools-proxy 18080:8080 >/tmp/pf.log 2>&1 &
+          kubectl -n "$CONNECTOR_NS" port-forward svc/mcp-fixture-mcp-tools-proxy 18080:8080 >/tmp/pf.log 2>&1 &
           pf=$!
           for _ in $(seq 1 30); do
             curl -s -o /dev/null http://127.0.0.1:18080/ && break
@@ -379,7 +423,7 @@ jobs:
           # gibson#758): the operator wrote its CiliumNetworkPolicy, the listed
           # host opens, and a public host outside the list does not.
           if [ "$status" -eq 0 ]; then
-            kubectl -n tenant-connector-e2e get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
+            kubectl -n "$CONNECTOR_NS" get ciliumnetworkpolicy connector-fixture-mcp-tools-egress -o yaml || status=1
             bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
             bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
           fi
@@ -390,13 +434,13 @@ jobs:
             # CONNECTOR_PROXY_JWKS_URL. Its log and the policies of the
             # connector say whether the token or the key fetch failed.
             echo "=== the ToolHive proxy of the fixture connector, last 80 lines ==="
-            kubectl -n tenant-connector-e2e logs deploy/fixture-mcp-tools -c toolhive --tail=80 || true
+            kubectl -n "$CONNECTOR_NS" logs deploy/fixture-mcp-tools -c toolhive --tail=80 || true
             echo "=== the proxy oidcConfig and authzConfig ==="
-            kubectl -n tenant-connector-e2e get mcpserver fixture-mcp-tools -o jsonpath='{.spec.oidcConfig}{"\n"}{.spec.authzConfig}{"\n"}' || true
+            kubectl -n "$CONNECTOR_NS" get mcpserver fixture-mcp-tools -o jsonpath='{.spec.oidcConfig}{"\n"}{.spec.authzConfig}{"\n"}' || true
             echo "=== the policies of the connector namespace ==="
-            kubectl -n tenant-connector-e2e get networkpolicy,ciliumnetworkpolicy -o yaml | grep -vE '^\s+(uid|resourceVersion|creationTimestamp|generation):' | head -120 || true
+            kubectl -n "$CONNECTOR_NS" get networkpolicy,ciliumnetworkpolicy -o yaml | grep -vE '^\s+(uid|resourceVersion|creationTimestamp|generation):' | head -120 || true
             echo "=== Hubble drops from the connector namespace ==="
-            kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --from-namespace tenant-connector-e2e --verdict DROPPED --last 30 -o compact 2>/dev/null || true
+            kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --from-namespace "$CONNECTOR_NS" --verdict DROPPED --last 30 -o compact 2>/dev/null || true
           fi
           kill "$pf" || true
           exit "$status"
@@ -411,12 +455,12 @@ jobs:
         run: |
           set -euo pipefail
           bash tests/fixtures/mcp-tools/check-proxy-drops.sh --selftest
-          ip=$(kubectl -n tenant-connector-e2e get endpointslices \
+          ip=$(kubectl -n "$CONNECTOR_NS" get endpointslices \
                  -l kubernetes.io/service-name=mcp-fixture-mcp-tools-proxy \
                  -o jsonpath='{.items[0].endpoints[0].addresses[0]}')
           if [ -z "$ip" ]; then
             echo "::error::the proxy Service of the fixture connector has no endpoint address"
-            kubectl -n tenant-connector-e2e get svc,endpointslices -o wide || true
+            kubectl -n "$CONNECTOR_NS" get svc,endpointslices -o wide || true
             exit 1
           fi
           echo "CONNECTOR_PROXY_IP=$ip" >> "$GITHUB_ENV"

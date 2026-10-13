@@ -5,7 +5,10 @@ package controller
 
 import (
 	"errors"
+	"fmt"
+	"net/url"
 	"strconv"
+	"strings"
 
 	connectorv1alpha1 "github.com/zeroroot-ai/gibson/operators/connector/api/v1alpha1"
 )
@@ -33,18 +36,40 @@ type ProxyAuth struct {
 var errProxyAuthIncomplete = errors.New(
 	"the proxy caller authentication needs the OIDC issuer, the JWKS URL and the daemon SPIFFE ID")
 
-// validate reports errProxyAuthIncomplete when a value is empty.
+// validate reports errProxyAuthIncomplete when a value is empty, and an
+// error when the JWKS URL names no service of the cluster.
 func (a ProxyAuth) validate() error {
 	if a.Issuer == "" || a.JWKSURL == "" || a.DaemonSPIFFEID == "" {
 		return errProxyAuthIncomplete
 	}
-	return nil
+	_, err := a.IssuerNamespace()
+	return err
 }
 
-// oidcConfig is the ToolHive oidcConfig of the proxy: an inline issuer,
-// JWKS and audience. The JWKS of the issuer is served inside the cluster, so
-// a private address is permitted.
-func (a ProxyAuth) oidcConfig() map[string]interface{} {
+// IssuerNamespace is the namespace of the SPIRE OIDC provider. The JWKS URL
+// names its Service as <service>.<namespace>.svc, with or without the
+// cluster domain. The proxy egress rule and the trust bundle copy both need
+// this namespace, so a JWKS URL in another form is refused.
+func (a ProxyAuth) IssuerNamespace() (string, error) {
+	u, err := url.Parse(a.JWKSURL)
+	if err != nil {
+		return "", fmt.Errorf("the JWKS URL %q does not parse: %w", a.JWKSURL, err)
+	}
+	labels := strings.Split(u.Hostname(), ".")
+	if len(labels) < 3 || labels[0] == "" || labels[1] == "" || labels[2] != "svc" {
+		return "", fmt.Errorf(
+			"the JWKS URL %q must name the SPIRE OIDC provider as <service>.<namespace>.svc", a.JWKSURL)
+	}
+	return labels[1], nil
+}
+
+// oidcConfig is the ToolHive oidcConfig of the proxy of ci: an inline
+// issuer, JWKS and audience. The JWKS of the issuer is served inside the
+// cluster, so a private address is permitted. The provider serves its SPIRE
+// X.509-SVID, which no public root signs, so the proxy verifies it with the
+// SPIRE trust bundle that the operator copies beside the connector
+// (issuertrust.go).
+func (a ProxyAuth) oidcConfig(ci *connectorv1alpha1.ConnectorInstance) map[string]interface{} {
 	return map[string]interface{}{
 		"type": "inline",
 		"inline": map[string]interface{}{
@@ -52,6 +77,12 @@ func (a ProxyAuth) oidcConfig() map[string]interface{} {
 			"jwksUrl":            a.JWKSURL,
 			"audience":           connectorv1alpha1.ProxyAudience,
 			"jwksAllowPrivateIP": true,
+			"caBundleRef": map[string]interface{}{
+				"configMapRef": map[string]interface{}{
+					"name": issuerCAName(ci),
+					"key":  issuerCAKey,
+				},
+			},
 		},
 	}
 }

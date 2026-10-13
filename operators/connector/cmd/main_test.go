@@ -52,7 +52,7 @@ func TestDaemonSettings(t *testing.T) {
 func TestProxyAuthSettings(t *testing.T) {
 	full := map[string]string{
 		"CONNECTOR_PROXY_OIDC_ISSUER": "https://oidc.example.org",
-		"CONNECTOR_PROXY_JWKS_URL":    "https://oidc.example.org/keys",
+		"CONNECTOR_PROXY_JWKS_URL":    "https://oidc.spire-test.svc.cluster.local/keys",
 		"GIBSON_DAEMON_SPIFFE_ID":     "spiffe://example.org/platform/daemon",
 	}
 	for missing := range full {
@@ -65,6 +65,14 @@ func TestProxyAuthSettings(t *testing.T) {
 		if _, err := proxyAuthSettings(func(k string) string { return env[k] }); err == nil {
 			t.Errorf("a missing %s must be refused", missing)
 		}
+	}
+	outside := map[string]string{}
+	for k, v := range full {
+		outside[k] = v
+	}
+	outside["CONNECTOR_PROXY_JWKS_URL"] = "https://oidc.example.org/keys"
+	if _, err := proxyAuthSettings(func(k string) string { return outside[k] }); err == nil {
+		t.Error("a JWKS URL that names no service of the cluster must be refused")
 	}
 	got, err := proxyAuthSettings(func(k string) string { return full[k] })
 	if err != nil {
