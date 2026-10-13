@@ -47,3 +47,23 @@ func TestE2EPeerPolicy_CoversTheSecretsSuite(t *testing.T) {
 		}
 	}
 }
+
+// The plugin secret revocation suite calls these RPCs with the runner SVID
+// (tests/e2e/plugin_secret_revocation_test.go). It enables the catalog plugin
+// through the API (gibson#1062), so the policy must name that call too
+// (gibson#1159).
+func TestE2EPeerPolicy_CoversThePluginRevocationSuite(t *testing.T) {
+	policy := e2ePeerMethodPolicies(testTD)[e2eRunnerSVID(testTD)]
+	for _, m := range []string{
+		"/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin",
+		"/gibson.secrets.v1.SecretsService/SetSecret",
+		"/gibson.tenant.v1.GrantsService/WriteSecretGrants",
+		"/gibson.secrets.v1.SecretsService/DeleteSecret",
+		"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls",
+		"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding",
+	} {
+		if !policy[m] {
+			t.Errorf("the runner policy does not allow %s, which tests/e2e/plugin_secret_revocation_test.go calls", m)
+		}
+	}
+}
