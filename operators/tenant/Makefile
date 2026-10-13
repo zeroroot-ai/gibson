@@ -61,37 +61,12 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# CertManager is installed by default; skip with:
-# - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= tenant-operator-test-e2e
-
-.PHONY: setup-test-e2e
-setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
-	@command -v $(KIND) >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@case "$$($(KIND) get clusters)" in \
-		*"$(KIND_CLUSTER)"*) \
-			echo "Kind cluster '$(KIND_CLUSTER)' already exists. Skipping creation." ;; \
-		*) \
-			echo "Creating Kind cluster '$(KIND_CLUSTER)'..."; \
-			$(KIND) create cluster --name $(KIND_CLUSTER) ;; \
-	esac
-
+# The e2e suite runs against the current kube context: an installed platform
+# whose tenant-operator runs the checkout build (exit-test-e2e-cluster). It
+# deploys nothing; the chart is the one way the operator runs (gibson#1142).
 .PHONY: test-e2e
-test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
-	# Timeout set to 30m: docker-build (pulls private GHCR base images) +
-	# kind cluster bootstrap + cert-manager readiness + controller deploy
-	# + metrics test can comfortably exceed the default 10m (#108).
-	KIND=$(KIND) KIND_CLUSTER=$(KIND_CLUSTER) go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 30m
-	$(MAKE) cleanup-test-e2e
-
-.PHONY: cleanup-test-e2e
-cleanup-test-e2e: ## Tear down the Kind cluster used for e2e tests
-	@$(KIND) delete cluster --name $(KIND_CLUSTER)
+test-e2e: ## Run the e2e suite against the installed platform of the current context. Needs TENANT_OPERATOR_IMAGE.
+	go test -tags=e2e ./test/e2e/ -v -ginkgo.v -timeout 20m
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter (uses custom binary with plugins when present)
@@ -201,15 +176,6 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	"$(KUSTOMIZE)" build config/default | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
 
-.PHONY: deploy-e2e
-deploy-e2e: manifests kustomize ## Deploy controller + e2e dep stubs (Postgres, Redis, mock-Vault) for the kind E2E job.
-	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
-	"$(KUSTOMIZE)" build --load-restrictor LoadRestrictionsNone config/e2e | "$(KUBECTL)" apply -f -
-
-.PHONY: undeploy-e2e
-undeploy-e2e: kustomize ## Tear down the e2e deployment (controller + dep stubs).
-	"$(KUSTOMIZE)" build --load-restrictor LoadRestrictionsNone config/e2e | "$(KUBECTL)" delete --ignore-not-found=$(ignore-not-found) -f -
-
 .PHONY: repair-quota-missions
 repair-quota-missions: ## Re-reconcile all tenant quotas to fix concurrent_missions=0
 	kubectl annotate tenant --all --overwrite \
@@ -225,7 +191,6 @@ $(LOCALBIN):
 
 ## Tool Binaries
 KUBECTL ?= kubectl
-KIND ?= kind
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest

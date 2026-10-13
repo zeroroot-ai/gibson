@@ -75,8 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     # The kind bring-up alone took 45 minutes on 2026-09-18 (run 35399104370),
     # the builds need 15 more, and the suites follow: run 35660778012 reached
-    # the tenant operator suite at 87 minutes, and that suite builds its own
-    # image and cluster inside a 30-minute budget.
+    # the tenant operator suite at 87 minutes. That suite now checks the
+    # chart-installed operator and builds no cluster of its own (gibson#1142).
     timeout-minutes: 180
     steps:
       - name: Checkout gibson
@@ -194,6 +194,19 @@ jobs:
           docker build -t ghcr.io/zeroroot-ai/gibson:e2e-cluster /tmp/dctx
           kind load docker-image ghcr.io/zeroroot-ai/gibson:e2e-cluster --name "$CLUSTER"
 
+      # The tenant-operator of the checkout. The chart-installed operator is
+      # pointed at it in the patch below, and the tenant_operator suite checks
+      # it there: with the chart's env, its SPIRE identity and the daemon
+      # (gibson#1142). There is no second deploy path.
+      - name: Build + load the tenant-operator of the checkout
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          docker buildx build --progress=plain --load \
+            -f build/tenant-operator.Dockerfile \
+            -t ghcr.io/zeroroot-ai/tenant-operator:e2e-cluster .
+          kind load docker-image ghcr.io/zeroroot-ai/tenant-operator:e2e-cluster --name "$CLUSTER"
+
       # The e2eRunner values register the runner's ClusterSPIFFEID, allow-list
       # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
       # on the daemon (charts#142). One patch means one Argo sync and one
@@ -207,7 +220,11 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"e2e-cluster","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"e2e-cluster","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
           for i in $(seq 1 60); do
@@ -218,6 +235,14 @@ jobs:
             sleep 20
           done
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get deployment gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}' 2>/dev/null || true)
+            case "$img" in *:e2e-cluster) echo "tenant-operator image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the tenant-operator Deployment never took the e2e-cluster image"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
 
       # Cilium enforces each network policy of the chart on this cluster
       # (hosted#436). Prove it for the daemon before the tests run, so a
@@ -330,30 +355,21 @@ jobs:
           rc=${PIPESTATUS[0]}
           .github/scripts/e2e-suite-verdict.sh mission_finding_per_tenant "$E2E_OUT/mission_finding_per_tenant.log" "$rc" "$RESULTS"
 
-      # operators/tenant/test/e2e (Ginkgo), through its own entrypoint,
-      # `make test-e2e`: it creates a kind cluster of its own
-      # (tenant-operator-test-e2e), builds the operator image from
-      # build/tenant-operator.Dockerfile (gibson#1395), installs cert-manager
-      # and the CRDs, and deploys the controller with stub Postgres, Redis and
-      # mock-Vault. Its own cluster, because the suite's AfterAll runs
-      # `make uninstall`, which deletes the Tenant CRD and every Tenant with
-      # it; on the gibson cluster that would destroy the venue under the
-      # other suites.
-      #
-      # The e2e overlay mounts plans.yaml, which is chart data by decision
-      # (charts helm/gibson-operators/files/plans.yaml, the one registry the
-      # tenant-operator ConfigMap reads, gibson#1101)
-      # (internal/platform/plans: gibson ships no copy). The charts checkout
-      # supplies it at the path config/e2e/kustomization.yaml reads (run
-      # 35660778012 failed with "open operators/tenant/plans/plans.yaml: no
-      # such file or directory").
-      - name: "Suite: tenant_operator (own kind cluster)"
+      # operators/tenant/test/e2e (Ginkgo) checks the chart-installed
+      # tenant-operator, which the patch above pointed at the checkout build:
+      # it runs that image, every pod is Ready, and the manager serves its
+      # controller metrics. The suite deploys nothing. The old suite deployed
+      # its own manager with stub env into a cluster of its own; that manager
+      # had no SPIRE identity, could not dial the daemon and never started, and
+      # each run showed only the first missing value (gibson#1142).
+      - name: "Suite: tenant_operator"
         if: ${{ !cancelled() && steps.suite-image.outcome == 'success' }}
         working-directory: gibson/operators/tenant
+        env:
+          TENANT_OPERATOR_IMAGE: ghcr.io/zeroroot-ai/tenant-operator:e2e-cluster
+          TENANT_OPERATOR_NAMESPACE: ${{ env.NS }}
         run: |
           set +e
-          mkdir -p plans
-          cp "$CHARTS_ROOT/helm/gibson-operators/files/plans.yaml" plans/plans.yaml || { echo "::error::charts has no helm/gibson-operators/files/plans.yaml"; exit 1; }
           make test-e2e 2>&1 | tee "$E2E_OUT/tenant_operator.log"
           rc=${PIPESTATUS[0]}
           ../../.github/scripts/e2e-suite-verdict.sh tenant_operator "$E2E_OUT/tenant_operator.log" "$rc" "$RESULTS"
@@ -431,6 +447,7 @@ jobs:
           done
           echo "=== Argo application conditions ==="
           kubectl -n argocd get app gibson -o jsonpath='{range .status.conditions[*]}{.type}: {.message}{"\n"}{end}' 2>/dev/null || true
-          echo "=== tenant operator e2e namespace ==="
-          kubectl -n tenant-operator-system get pods 2>/dev/null || true
+          echo "=== the tenant-operator (checkout build) ==="
+          kubectl -n "$NS" get pods -l app.kubernetes.io/name=gibson-tenant-operator -o wide 2>/dev/null || true
+          kubectl -n "$NS" logs deployment/gibson-tenant-operator -c manager --tail=120 2>/dev/null || true
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=800 || true
