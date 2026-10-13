@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -28,6 +29,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -201,6 +203,16 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// not (gibson#1119).
 	if err := r.reconcileProxyAPIServerPolicy(ctx, &ci); err != nil {
 		return failed("ProxyAPIServerPolicy", err)
+	}
+
+	// The ToolHive proxy reads the keys of the SPIRE OIDC provider and
+	// verifies its certificate with the SPIRE trust bundle. Without both, it
+	// refuses the token of the daemon.
+	if err := r.reconcileProxyIssuerPolicy(ctx, &ci); err != nil {
+		return failed("ProxyIssuerPolicy", err)
+	}
+	if err := r.reconcileIssuerCA(ctx, &ci); err != nil {
+		return failed("IssuerCA", err)
 	}
 
 	// The connector's credential is NOT reconciled here. For auth secret and
@@ -526,7 +538,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort":         int64(proxyPort),
 			"permissionProfile": permProfile,
 			"podTemplateSpec":   mcpServerPodTemplate(),
-			"oidcConfig":        r.ProxyAuth.oidcConfig(),
+			"oidcConfig":        r.ProxyAuth.oidcConfig(ci),
 			"authzConfig":       r.ProxyAuth.authzConfig(),
 		}
 		// The declared vendor credentials (spec.credentials, gibson#597): the
@@ -562,7 +574,7 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 			"proxyPort": int64(proxyPort),
 			// The daemon is the only caller of the proxy (ADR-0114): its
 			// JWT-SVID, for the proxy audience, and its SPIFFE ID only.
-			"oidcConfig":  r.ProxyAuth.oidcConfig(),
+			"oidcConfig":  r.ProxyAuth.oidcConfig(ci),
 			"authzConfig": r.ProxyAuth.authzConfig(),
 		}
 		// A vendor connector presents a bearer token as the Authorization
@@ -668,6 +680,9 @@ func (r *ConnectorInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&connectorv1alpha1.ConnectorInstance{}).
 		Owns(mcpServer).
 		Owns(&networkingv1.NetworkPolicy{}).
+		// A change of the SPIRE trust bundle reconciles each connector, so
+		// the bundle copy of each proxy follows it (issuertrust.go).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.trustBundleRequests)).
 		Complete(r); err != nil {
 		return fmt.Errorf("build connectorinstance controller: %w", err)
 	}

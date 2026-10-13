@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// jwks_to_pem.go: convert SPIRE k8s_configmap BundlePublisher JWKS output
-// into a PEM bundle Vault accepts as `jwks_ca_pem`. Mirrors the awk/jq
-// dance in deploy/helm/gibson-workloads/templates/auth/openbao-jwt-auth-init/job.yaml
-// but in pure Go so the operator doesn't shell out at saga time.
-
-package vault
+// Package spirebundle converts the trust bundle that the SPIRE
+// k8s_configmap BundlePublisher writes (JWKS form) into a PEM bundle. The
+// tenant operator gives the PEM to OpenBao as jwks_ca_pem. The connector
+// operator gives it to each connector proxy as the CA of the SPIRE OIDC
+// provider. Both read the same bundle, so both use this one converter.
+package spirebundle
 
 import (
 	"crypto/x509"
@@ -16,8 +16,8 @@ import (
 	"fmt"
 )
 
-// jwksToPEM extracts x509-svid x5c entries from a SPIRE JWKS document and
-// returns a concatenated PEM bundle suitable for Vault's `jwks_ca_pem`.
+// ToPEM extracts the x509-svid x5c entries from a SPIRE JWKS document and
+// returns them as one concatenated PEM bundle.
 // Returns an empty string (no error) when the JWKS contains no x509-svid
 // entries — the caller decides whether that's fatal.
 //
@@ -29,7 +29,7 @@ import (
 //	    {"use":"jwt-svid","kty":"RSA","kid":"...","n":"...","e":"AQAB"}
 //	  ]
 //	}
-func jwksToPEM(raw string) (string, error) {
+func ToPEM(raw string) (string, error) {
 	var bundle struct {
 		Keys []struct {
 			Use string   `json:"use"`

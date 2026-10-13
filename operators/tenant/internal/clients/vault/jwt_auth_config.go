@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/zeroroot-ai/gibson/operators/internal/spirebundle"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
 
@@ -110,7 +111,7 @@ func (c *httpClient) resolveJWKSCAPEM() (string, error) {
 	}
 	// Otherwise assume JWKS form (the SPIRE k8s_configmap BundlePublisher
 	// output) and extract x509-svid x5c entries → PEM.
-	pem, err := jwksToPEM(content)
+	pem, err := spirebundle.ToPEM(content)
 	if err != nil {
 		return "", fmt.Errorf("vault: convert JWKS at %q to PEM: %w", c.cfg.JWKSCAPEMPath, err)
 	}

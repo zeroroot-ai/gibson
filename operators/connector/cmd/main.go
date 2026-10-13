@@ -90,6 +90,9 @@ func proxyAuthSettings(getenv func(string) string) (controller.ProxyAuth, error)
 	case auth.DaemonSPIFFEID == "":
 		return auth, errors.New("GIBSON_DAEMON_SPIFFE_ID is required: the connector proxy permits only this caller")
 	}
+	if _, err := auth.IssuerNamespace(); err != nil {
+		return auth, fmt.Errorf("CONNECTOR_PROXY_JWKS_URL: %w", err)
+	}
 	return auth, nil
 }
 

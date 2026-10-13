@@ -95,7 +95,7 @@ func (f *fakeAuthReader) AuthStatus(_ context.Context, tenantID, connector strin
 // testProxyAuth is the caller authentication of the proxy in these tests.
 var testProxyAuth = ProxyAuth{
 	Issuer:         "https://oidc-discovery.example.org",
-	JWKSURL:        "https://oidc-discovery.example.org/keys",
+	JWKSURL:        "https://oidc-discovery.spire-test.svc.cluster.local/keys",
 	DaemonSPIFFEID: "spiffe://example.org/platform/daemon",
 }
 
@@ -110,7 +110,7 @@ func newReconcilerWithAuth(t *testing.T, reader ConnectorAuthReader, seed ...cli
 	cl := fake.NewClientBuilder().
 		WithScheme(s).
 		WithStatusSubresource(&connectorv1alpha1.ConnectorInstance{}).
-		WithObjects(seed...).
+		WithObjects(append([]client.Object{trustBundle(t, testCertDER(t))}, seed...)...).
 		Build()
 	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, Revoker: &fakeRevoker{}, AuthReader: reader, ProxyAuth: testProxyAuth}
 }
@@ -226,6 +226,10 @@ func assertProxyAcceptsOnlyTheDaemon(t *testing.T, th *unstructured.Unstructured
 		if got, _, _ := unstructured.NestedString(th.Object, path...); got != value {
 			t.Errorf("%v = %q, want %q", path, got, value)
 		}
+	}
+	caRef, _, _ := unstructured.NestedStringMap(th.Object, "spec", "oidcConfig", "inline", "caBundleRef", "configMapRef")
+	if caRef["name"] != "connector-"+th.GetName()+"-issuer-ca" || caRef["key"] != "ca.crt" {
+		t.Errorf("oidcConfig caBundleRef = %v, want the issuer CA ConfigMap of the connector", caRef)
 	}
 	policies, _, _ := unstructured.NestedStringSlice(th.Object, "spec", "authzConfig", "inline", "policies")
 	wantPolicy := `permit(principal == Client::"spiffe://example.org/platform/daemon", action, resource);`
