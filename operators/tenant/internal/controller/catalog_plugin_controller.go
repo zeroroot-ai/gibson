@@ -641,6 +641,34 @@ func (r *CatalogPluginRunnable) ensurePluginNetworkPolicy(ctx context.Context, p
 	return nil
 }
 
+// The edge pods of the platform: the chart labels each one
+// gibson.zeroroot.ai/ingress-edge=true, and their listener is port 10000.
+// The edge network policy of the chart admits each source on that port.
+const (
+	labelIngressEdge = "gibson.zeroroot.ai/ingress-edge"
+	edgeListenerPort = "10000"
+)
+
+// edgeEndpointRule lets a plugin reach the edge pods of the platform
+// namespace on their listener, and nothing else in that namespace. On an
+// install whose edge host resolves inside the cluster (kind, split DNS), the
+// host name points at the ClusterIP of the edge Service. Cilium translates a
+// ClusterIP to the edge pod before it applies policy, so the host name rule
+// never matches that connection, and the plugin could not enrol (gibson#1172).
+func edgeEndpointRule(platformNamespace string) map[string]interface{} {
+	return map[string]interface{}{
+		"toEndpoints": []interface{}{map[string]interface{}{
+			"matchLabels": map[string]interface{}{
+				"k8s:io.kubernetes.pod.namespace": platformNamespace,
+				labelIngressEdge:                  "true",
+			},
+		}},
+		"toPorts": []interface{}{map[string]interface{}{
+			"ports": []interface{}{map[string]interface{}{"port": edgeListenerPort, "protocol": "TCP"}},
+		}},
+	}
+}
+
 // egressPolicyName is the name of the CiliumNetworkPolicy of the plugin
 // instance whose other objects have the name objectName.
 func egressPolicyName(objectName string) string { return objectName + "-egress" }
@@ -662,9 +690,11 @@ func (r *CatalogPluginRunnable) pluginEgressHosts(p provision.DesiredCatalogPlug
 
 // ensurePluginEgressPolicy confines the egress of a plugin instance to its
 // host list (ADR-0136, D76): DNS to kube-dns, each host of the catalog entry,
-// and the edge of the platform. A Kubernetes NetworkPolicy cannot name a
-// host, so this is a CiliumNetworkPolicy. A host that the list does not name
-// is refused at the network, whatever the code in the plugin does.
+// and the edge of the platform, by host name and, for an edge that resolves
+// inside the cluster, by its pods on the listener port (edgeEndpointRule).
+// A Kubernetes NetworkPolicy cannot name a host, so this is a
+// CiliumNetworkPolicy. A host that the list does not name is refused at the
+// network, whatever the code in the plugin does.
 func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p provision.DesiredCatalogPlugin) error {
 	hosts, err := r.pluginEgressHosts(p)
 	if err != nil {
@@ -674,6 +704,7 @@ func (r *CatalogPluginRunnable) ensurePluginEgressPolicy(ctx context.Context, p 
 	if err != nil {
 		return fmt.Errorf("plugin %s: %w", p.PluginID, err)
 	}
+	rules = append(rules, edgeEndpointRule(r.Config.OperatorNamespace))
 	cnp := ciliumegress.NewPolicy()
 	cnp.SetName(egressPolicyName(pluginObjectName(p.PluginID)))
 	cnp.SetNamespace(pluginNamespace(p.TenantID))
