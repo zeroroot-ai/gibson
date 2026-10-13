@@ -27,8 +27,13 @@ check() {
     return 1
   fi
   for log in "$@"; do
-    if ! grep -q 'Listening for events' "$log"; then
-      echo "::error::the Cilium monitor of ${log} did not start, so the check looked at nothing"
+    # cilium-dbg monitor writes "Press Ctrl-C to quit" to stderr each time it
+    # starts. It writes "Listening for events ..." before it only when the
+    # agent health reports a node monitor (cilium-dbg/cmd/monitor.go,
+    # runMonitor), so that line alone cannot prove a start (gibson#1173).
+    if ! grep -q -e 'Listening for events' -e 'Press Ctrl-C to quit' "$log"; then
+      echo "::error::the Cilium monitor of ${log} did not start, so the check looked at nothing. Its first lines:"
+      head -n 5 "$log" | sed 's/^/    /'
       return 1
     fi
     # A line looks like:
@@ -52,12 +57,14 @@ selftest() {
   dir=$(mktemp -d)
   trap 'rm -rf "$dir"' RETURN
   local start='Listening for events on 4 CPUs with 64x4096 of shared memory'
+  local quit='Press Ctrl-C to quit'
   local drop='xx drop (Policy denied) flow 0x0 to endpoint 812, ifindex 9, file bpf_lxc.c:2069, , identity 4932->21071: 10.244.0.84:51618 -> 10.244.0.30:8080 tcp SYN'
   printf 'launcher-abc 10.244.0.84\nlauncher-abc\n' > "$dir/pods.txt"
   printf 'launcher-xyz 10.244.0.99\n' > "$dir/other-pods.txt"
   : > "$dir/no-pods.txt"
   printf '%s\n%s\n' "$start" "$drop" > "$dir/drop.log"
   printf '%s\n' "$start" > "$dir/quiet.log"
+  printf '%s\n%s\n' "$quit" "$drop" > "$dir/quitonly.log"
   printf '%s\n' "$drop" > "$dir/nostart.log"
   printf '%s\n%s\n' "$start" "${drop/8080/9090}" > "$dir/otherport.log"
   printf '%s\n%s\n' "$start" "${drop/Policy denied/CT: Unknown L4 protocol}" > "$dir/otherreason.log"
@@ -66,6 +73,9 @@ selftest() {
 
   check 10.244.0.30 8080 "$dir/pods.txt" "$dir/drop.log" "$dir/quiet.log" >/dev/null ||
     { echo "selftest: a drop from the sandbox Pod was not found"; return 1; }
+  # A monitor whose agent reports no node monitor writes only the quit line.
+  check 10.244.0.30 8080 "$dir/pods.txt" "$dir/quitonly.log" >/dev/null ||
+    { echo "selftest: a monitor that wrote only its quit line was not read as started"; return 1; }
   for bad in quiet nostart otherport otherreason othersource prefixsource; do
     rc=0
     check 10.244.0.30 8080 "$dir/pods.txt" "$dir/$bad.log" >/dev/null 2>&1 || rc=$?
