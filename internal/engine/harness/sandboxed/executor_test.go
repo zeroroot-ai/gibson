@@ -21,6 +21,7 @@ import (
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	testpb "github.com/zeroroot-ai/sdk/api/gen/gibson/test/v1"
+	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
@@ -851,5 +852,93 @@ func TestNextLogAttachBackoff(t *testing.T) {
 	}
 	if got := nextLogAttachBackoff(logAttachBackoffCap); got != logAttachBackoffCap {
 		t.Fatalf("next(cap) = %s; want the cap %s", got, logAttachBackoffCap)
+	}
+}
+
+// outputJSONMarker builds the stdout marker of gibson-runner for a mission
+// tool node: protojson of the generic tool ExecuteResponse, whose output_json
+// holds protojson(DiscoveryResult).
+func outputJSONMarker(t *testing.T, outputJSON string) []byte {
+	t.Helper()
+	enc, err := protojson.Marshal(&toolpb.ExecuteResponse{OutputJson: outputJSON})
+	if err != nil {
+		t.Fatalf("marshal ExecuteResponse: %v", err)
+	}
+	return []byte(markerOutputPrefix + base64.StdEncoding.EncodeToString(enc) + "\n")
+}
+
+// runOutputJSON runs one tool call whose answer is the given output_json, with
+// the given manifest output type, and reports the fake processor.
+func runOutputJSON(t *testing.T, outputType, outputJSON string) *fakeDiscoveryProcessor {
+	t.Helper()
+	fake := newFakeDiscoveryProcessor()
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-oj"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			return &fixedLogs{chunks: [][]byte{outputJSONMarker(t, outputJSON)}}, nil
+		},
+		wait: func(context.Context, string) (WaitResponse, error) {
+			return WaitResponse{ExitCode: 0}, nil
+		},
+		kill: func(context.Context, string) error { return nil },
+	}
+	e, err := New(Config{Client: client, SandboxClass: "tool", CallTimeout: 2 * time.Second, DiscoveryProcessor: fake})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	spec := helloSpec
+	spec.OutputProtoType = outputType
+	resp := &toolpb.ExecuteResponse{}
+	req := &toolpb.ExecuteRequest{InputJson: "{}"}
+	if err := e.ExecuteWithSpec(context.Background(), "nmap", spec, req, resp); err != nil {
+		t.Fatalf("ExecuteWithSpec: %v", err)
+	}
+	return fake
+}
+
+// A mission tool node reads the answer as the generic tool ExecuteResponse,
+// and gibson-runner puts the DiscoveryResult in its output_json. The executor
+// reads it there when the manifest names DiscoveryResult as the output type
+// (gibson#1140). Before, ExtractDiscovery found no field 100 and no discovery
+// of a mission tool node reached the World.
+func TestExecute_DiscoveryFromOutputJSON(t *testing.T) {
+	disc, err := protojson.Marshal(&graphragpb.DiscoveryResult{Hosts: []*graphragpb.Host{{Ip: "127.0.0.1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := runOutputJSON(t, discoveryResultType, string(disc))
+	select {
+	case <-fake.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DiscoveryProcessor.Process was never called for a DiscoveryResult in output_json")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.lastDisc == nil || len(fake.lastDisc.GetHosts()) != 1 || fake.lastDisc.GetHosts()[0].GetIp() != "127.0.0.1" {
+		t.Fatalf("forwarded discovery = %v, want one host 127.0.0.1", fake.lastDisc)
+	}
+}
+
+// The output_json is read as a DiscoveryResult only when the manifest says so,
+// and JSON that is not a DiscoveryResult folds nothing.
+func TestExecute_OutputJSONNotADiscovery(t *testing.T) {
+	disc, err := protojson.Marshal(&graphragpb.DiscoveryResult{Hosts: []*graphragpb.Host{{Ip: "127.0.0.1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct{ outputType, outputJSON string }{
+		"another output type":       {"gibson.test.v1.Other", string(disc)},
+		"no output type":            {"", string(disc)},
+		"json that is no discovery": {discoveryResultType, `{"not_a_field": 1}`},
+		"empty output_json":         {discoveryResultType, ""},
+	} {
+		fake := runOutputJSON(t, c.outputType, c.outputJSON)
+		select {
+		case <-fake.done:
+			t.Errorf("%s: DiscoveryProcessor.Process was called", name)
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 }

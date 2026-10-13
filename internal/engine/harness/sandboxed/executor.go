@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
@@ -452,7 +453,11 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	// caller returns immediately; processing errors are logged, never
 	// propagated. Skipped when no DiscoveryProcessor is wired (GraphRAG off).
 	if e.discoveryProcessor != nil {
-		if pbDiscovery := sdkgraphrag.ExtractDiscovery(response); pbDiscovery != nil {
+		pbDiscovery := sdkgraphrag.ExtractDiscovery(response)
+		if pbDiscovery == nil && spec.OutputProtoType == discoveryResultType {
+			pbDiscovery = e.discoveryFromOutputJSON(toolName, response)
+		}
+		if pbDiscovery != nil {
 			execCtx := ingest.ExecContext{
 				MissionRunID:    contextkeys.GetMissionRunID(ctx),
 				MissionID:       ctxStringValue(ctx, contextkeys.MissionID),
@@ -465,6 +470,34 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	}
 
 	return nil
+}
+
+// discoveryResultType is the full name of the DiscoveryResult message.
+var discoveryResultType = string((&graphragpb.DiscoveryResult{}).ProtoReflect().Descriptor().FullName())
+
+// discoveryFromOutputJSON reads a DiscoveryResult from the output_json string
+// field of a generic tool response. A mission tool node calls the tool with the
+// generic tool ExecuteRequest and ExecuteResponse, and gibson-runner answers
+// with output_json = protojson(DiscoveryResult). ExtractDiscovery reads only the
+// message itself or its field 100, so without this no discovery of a mission
+// tool node reached the World (gibson#1140). It returns nil when the response
+// has no output_json or the JSON is not a DiscoveryResult.
+func (e *Executor) discoveryFromOutputJSON(toolName string, response proto.Message) *graphragpb.DiscoveryResult {
+	field := response.ProtoReflect().Descriptor().Fields().ByName("output_json")
+	if field == nil || field.Kind() != protoreflect.StringKind {
+		return nil
+	}
+	raw := response.ProtoReflect().Get(field).String()
+	if raw == "" {
+		return nil
+	}
+	var disc graphragpb.DiscoveryResult
+	if err := protojson.Unmarshal([]byte(raw), &disc); err != nil {
+		e.logger.Warn("tool output_json is not a DiscoveryResult; nothing folded into the World",
+			"tool", toolName, "error", err)
+		return nil
+	}
+	return &disc
 }
 
 // processDiscoveryAsync runs DiscoveryProcessor.Process in a detached context
