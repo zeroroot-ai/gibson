@@ -51,6 +51,8 @@ import (
 	"github.com/stretchr/testify/require"
 	pluginadminv1 "github.com/zeroroot-ai/sdk/api/gen/gibson/pluginadmin/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -141,11 +143,25 @@ func TestPluginSecretRevocation(t *testing.T) {
 		})
 		require.NoError(t, err, "SetSecret(%s) for %q", revocationDeclaredName, revocationTenant)
 	})
+	// The daemon makes the plugin principal when the plugin pod first enrols
+	// with its SVID (plugin_svid_verify.go, ProvisionPluginPrincipal), and
+	// the pod starts after the enable above. Until then the grant target
+	// does not exist and the write answers NotFound, so the suite waits for
+	// the principal and retries only that answer (gibson#1159).
 	t.Run("a tenant admin grants the plugin its secret", func(t *testing.T) {
-		_, err := grants.WriteSecretGrants(ctx, &tenantv1.WriteSecretGrantsRequest{
-			TargetPrincipalId: revocationPrincipal,
-			SecretNames:       []string{revocationDeclaredName},
-		})
+		deadline := time.Now().Add(pluginReadyBudget)
+		var err error
+		for attempt := 1; ; attempt++ {
+			_, err = grants.WriteSecretGrants(ctx, &tenantv1.WriteSecretGrantsRequest{
+				TargetPrincipalId: revocationPrincipal,
+				SecretNames:       []string{revocationDeclaredName},
+			})
+			if status.Code(err) != codes.NotFound || time.Now().After(deadline) {
+				t.Logf("WriteSecretGrants attempt %d: %v", attempt, err)
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
 		require.NoError(t, err, "WriteSecretGrants(%s, %s)", revocationPrincipal, revocationDeclaredName)
 	})
 	t.Cleanup(func() {
