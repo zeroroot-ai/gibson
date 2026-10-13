@@ -383,6 +383,21 @@ jobs:
             bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.com:443 reachable || status=$?
             bash tests/fixtures/mcp-tools/probe-egress.sh http://127.0.0.1:18080/mcp example.org:443 unreachable || status=$?
           fi
+          if [ "$status" -ne 0 ]; then
+            # Run 38415221782: the proxy answered the daemon token with 401 and
+            # the run kept no proxy log. The proxy validates the JWT-SVID
+            # against the SPIRE OIDC issuer and fetches its keys from
+            # CONNECTOR_PROXY_JWKS_URL. Its log and the policies of the
+            # connector say whether the token or the key fetch failed.
+            echo "=== the ToolHive proxy of the fixture connector, last 80 lines ==="
+            kubectl -n tenant-connector-e2e logs deploy/fixture-mcp-tools -c toolhive --tail=80 || true
+            echo "=== the proxy oidcConfig and authzConfig ==="
+            kubectl -n tenant-connector-e2e get mcpserver fixture-mcp-tools -o jsonpath='{.spec.oidcConfig}{"\n"}{.spec.authzConfig}{"\n"}' || true
+            echo "=== the policies of the connector namespace ==="
+            kubectl -n tenant-connector-e2e get networkpolicy,ciliumnetworkpolicy -o yaml | grep -vE '^\s+(uid|resourceVersion|creationTimestamp|generation):' | head -120 || true
+            echo "=== Hubble drops from the connector namespace ==="
+            kubectl -n kube-system exec ds/cilium -c cilium-agent -- hubble observe --from-namespace tenant-connector-e2e --verdict DROPPED --last 30 -o compact 2>/dev/null || true
+          fi
           kill "$pf" || true
           exit "$status"
 
