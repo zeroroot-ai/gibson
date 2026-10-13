@@ -460,6 +460,14 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 		}
 		if pbDiscovery != nil {
 			execCtx := discoveryExecContext(ctx, spec.Live, spec.MissionTenant)
+			if execCtx.TenantID.IsZero() {
+				// No tenant resolved: the ingest sink would choose one by
+				// itself, and the discovery of one tenant could land in the
+				// World of another. It folds nowhere (gibson#1145).
+				e.logger.Warn("discovery dropped: no tenant resolved for the tool call",
+					"tool", toolName, "mission_id", execCtx.MissionID)
+				return nil
+			}
 			go e.processDiscoveryAsync(toolName, execCtx, pbDiscovery)
 		}
 	}

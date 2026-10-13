@@ -385,7 +385,9 @@ func TestExecute_DiscoveryProcessor_FieldHundredFires(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	ctx := contextkeys.WithMissionRunID(context.Background(), "mr-abc")
+	// A discovery folds only with a resolved tenant (gibson#1145).
+	ctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("primary"))
+	ctx = contextkeys.WithMissionRunID(ctx, "mr-abc")
 	ctx = contextkeys.WithAgentRunID(ctx, "ar-xyz")
 	ctx = contextkeys.WithToolExecutionID(ctx, "te-123")
 	ctx = context.WithValue(ctx, contextkeys.MissionID, "mission-m1")
@@ -459,7 +461,8 @@ func TestExecute_DiscoveryProcessor_ErrorLoggedNotReturned(t *testing.T) {
 	// Tool execution must succeed even though DiscoveryProcessor.Process
 	// returns an error: graph persistence failures are logged, not propagated.
 	resp := &testpb.GenericDiscoveryResponse{}
-	if err := execute(t, e, context.Background(), "hello", wrapperspb.String("x"), resp); err != nil {
+	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("primary"))
+	if err := execute(t, e, tctx, "hello", wrapperspb.String("x"), resp); err != nil {
 		t.Fatalf("Execute returned error despite processor-only failure: %v", err)
 	}
 
@@ -891,6 +894,7 @@ func runOutputJSON(t *testing.T, outputType, outputJSON string) *fakeDiscoveryPr
 	}
 	spec := helloSpec
 	spec.OutputProtoType = outputType
+	spec.MissionTenant = "primary"
 	resp := &toolpb.ExecuteResponse{}
 	req := &toolpb.ExecuteRequest{InputJson: "{}"}
 	if err := e.ExecuteWithSpec(context.Background(), "nmap", spec, req, resp); err != nil {
@@ -969,5 +973,43 @@ func TestDiscoveryExecContext(t *testing.T) {
 	ec = discoveryExecContext(context.Background(), LiveScope{}, "not a tenant id!")
 	if !ec.TenantID.IsZero() {
 		t.Errorf("an invalid mission tenant: got %q, want zero", ec.TenantID)
+	}
+}
+
+// A discovery whose call resolves no tenant folds nowhere: the ingest sink
+// would choose a tenant by itself (gibson#1145).
+func TestExecute_DiscoveryWithNoTenantFoldsNowhere(t *testing.T) {
+	disc, err := protojson.Marshal(&graphragpb.DiscoveryResult{Hosts: []*graphragpb.Host{{Ip: "127.0.0.1"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, tenant := range map[string]string{"no mission tenant": "", "an invalid mission tenant": "not a tenant id!"} {
+		fake := newFakeDiscoveryProcessor()
+		client := &mockClient{
+			launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+				return LaunchResponse{SandboxID: "sbx-nt"}, nil
+			},
+			streamLog: func(context.Context, string) (LogStream, error) {
+				return &fixedLogs{chunks: [][]byte{outputJSONMarker(t, string(disc))}}, nil
+			},
+			wait: func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 0}, nil },
+			kill: func(context.Context, string) error { return nil },
+		}
+		e, err := New(Config{Client: client, SandboxClass: "tool", CallTimeout: 2 * time.Second, DiscoveryProcessor: fake})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		spec := helloSpec
+		spec.OutputProtoType = discoveryResultType
+		spec.MissionTenant = tenant
+		req := &toolpb.ExecuteRequest{InputJson: "{}"}
+		if err := e.ExecuteWithSpec(context.Background(), "nmap", spec, req, &toolpb.ExecuteResponse{}); err != nil {
+			t.Fatalf("%s: ExecuteWithSpec: %v", name, err)
+		}
+		select {
+		case <-fake.done:
+			t.Errorf("%s: the discovery reached the DiscoveryProcessor", name)
+		case <-time.After(200 * time.Millisecond):
+		}
 	}
 }
