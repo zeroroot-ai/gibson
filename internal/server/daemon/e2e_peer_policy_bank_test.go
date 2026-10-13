@@ -58,6 +58,7 @@ func TestE2EPeerPolicy_CoversThePluginRevocationSuite(t *testing.T) {
 		"/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin",
 		"/gibson.secrets.v1.SecretsService/SetSecret",
 		"/gibson.tenant.v1.GrantsService/WriteSecretGrants",
+		"/gibson.secrets.v1.SecretsService/DeleteSecret",
 		"/gibson.pluginadmin.v1.PluginAdminService/ListPluginInstalls",
 		"/gibson.pluginadmin.v1.PluginAdminService/RevokePluginSecretBinding",
 	} {
