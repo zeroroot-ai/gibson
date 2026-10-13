@@ -96,7 +96,7 @@ func TestDelegateToAgent_RunsInTheWaitingFork(t *testing.T) {
 	if err := ledger.ReserveForkSeat(context.Background(), seat, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	task := agent.NewTask("exploit", "exploit the host", nil)
+	task := agent.NewTask("exploit", "exploit the host")
 	task.NodeID = "exploit"
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -134,7 +134,7 @@ func TestDelegateToAgent_WaitingForkOfAnotherAgent(t *testing.T) {
 	}, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	task := agent.NewTask("exploit", "x", nil)
+	task := agent.NewTask("exploit", "x")
 	task.NodeID = "exploit"
 	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task); err == nil {
 		t.Fatal("a waiting fork of another agent must be refused")

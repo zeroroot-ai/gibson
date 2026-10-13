@@ -95,7 +95,7 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	task := agent.NewTask("probe", "Fetch https://google.com", nil)
+	task := agent.NewTask("probe", "Fetch https://google.com")
 	task.Goal = "Fetch https://google.com"
 	res, err := h.DelegateToAgent(ctx, "zerocool", task)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestDelegateToAgent_RemoteErrorFailsTheDelegation(t *testing.T) {
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil {
 		t.Fatal("expected an error when the remote agent reports one")
 	}
@@ -149,7 +149,7 @@ func TestDelegateToAgent_QueueFailureIsReported(t *testing.T) {
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err == nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err == nil {
 		t.Fatal("expected an error when the work queue never answers")
 	}
 }
@@ -284,7 +284,7 @@ func TestDelegateToAgent_CountsAgainstTheQuota(t *testing.T) {
 	h.quotaCounter = spy
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("DelegateToAgent: %v", err)
 	}
 	if spy.inc != 1 || spy.dec != 1 {
@@ -299,7 +299,7 @@ func TestDelegateToAgent_MalformedResultIsReported(t *testing.T) {
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err == nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err == nil {
 		t.Fatal("expected an error for an undecodable result")
 	}
 }
@@ -351,7 +351,7 @@ func TestDelegateToAgent_QueueDispatchRegistersTheCallbackHarness(t *testing.T) 
 		return h, nil
 	}
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("DelegateToAgent: %v", err)
 	}
 	want := h.missionCtx.ID.String() + "|zerocool"
@@ -373,7 +373,7 @@ func TestDelegateToAgent_QueueDispatchWithoutRegistrarStillDispatches(t *testing
 		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
 	})}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
-	if _, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("DelegateToAgent: %v", err)
 	}
 }
@@ -392,7 +392,7 @@ func TestDelegateToAgent_QueueDispatchChildHarnessFailureIsReported(t *testing.T
 	h.factory = func(context.Context, MissionContext, TargetInfo) (AgentHarness, error) {
 		return nil, errors.New("factory down")
 	}
-	_, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil || !strings.Contains(err.Error(), "child harness") {
 		t.Fatalf("err = %v, want a child-harness failure", err)
 	}

@@ -69,7 +69,7 @@ func successQueue(t *testing.T) *chainQueue {
 // delegation produces caller_chain = [A_run_id, B_run_id] on the dispatch
 // to C.
 func TestDelegateToAgent_CallerChainPropagation(t *testing.T) {
-	task := agent.NewTask("test", "test task", nil)
+	task := agent.NewTask("test", "test task")
 
 	// A delegates to B. The dispatch to B sees caller_chain=["run-a"].
 	qB := successQueue(t)
@@ -100,7 +100,7 @@ func TestDelegateToAgent_DepthCapReturnsError(t *testing.T) {
 	q := successQueue(t)
 	harnessAtCap := newDelegationHarness(t, q, "run-x", maxDepth, maxDepth)
 
-	_, err := harnessAtCap.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := harnessAtCap.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task"))
 
 	require.Error(t, err, "expected delegation_depth_exceeded error")
 	assert.True(t,
@@ -115,7 +115,7 @@ func TestDelegateToAgent_DepthCapReturnsError(t *testing.T) {
 func TestDelegateToAgent_DepthCapDefault(t *testing.T) {
 	h := newDelegationHarness(t, successQueue(t), "run-x", defaultMaxDelegationDepth, 0 /* use default */)
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task"))
 
 	require.Error(t, err, "expected depth-exceeded error with default cap")
 	assert.Contains(t, err.Error(), "delegation_depth_exceeded")
@@ -133,7 +133,7 @@ func TestDelegateToAgent_DepthBelowCap(t *testing.T) {
 		return h, nil
 	}
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task"))
 
 	require.NoError(t, err, "delegation at depth 7 (max=8) should succeed")
 	assert.Equal(t, 8, childDepth, "the child harness gets the next delegation depth")
@@ -161,7 +161,7 @@ func TestDelegateToAgent_DELEGATEDTORelationship(t *testing.T) {
 		return &DefaultAgentHarness{missionCtx: mc, targetInfo: ti, logger: discardLogger()}, nil
 	}
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-parent", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-parent", "acme"), "zerocool", agent.NewTask("test", "test task"))
 	require.NoError(t, err)
 
 	require.Len(t, captured, 1, "expected exactly one delegation observation")
@@ -177,7 +177,7 @@ func TestDelegateToAgent_UnknownAgentIsNotFound(t *testing.T) {
 	q := successQueue(t)
 	h := newRemoteAgentHarness(t, q, nil)
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "no-such-agent", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "no-such-agent", agent.NewTask("test", "test task"))
 
 	require.Error(t, err)
 	assert.Equal(t, ErrHarnessAgentNotFound, gibsonCode(t, err))
@@ -193,7 +193,7 @@ func TestDelegateToAgent_PlatformAgentWithNoLauncherIsDenied(t *testing.T) {
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.agentDispatchMode = func(string) (string, bool) { return componentcatalog.DispatchModeSandboxed, true }
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task"))
 
 	require.Error(t, err)
 	assert.Equal(t, types.SANDBOX_POLICY_DENIED, gibsonCode(t, err))
@@ -206,7 +206,7 @@ func TestDelegateToAgent_PlatformAgentWithNoLauncherIsDenied(t *testing.T) {
 func TestDelegateToAgent_RegisteredAgentWithNoWorkQueueIsNotFound(t *testing.T) {
 	h := newRemoteAgentHarness(t, nil, remoteAgentInstances())
 
-	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-x", "acme"), "zerocool", agent.NewTask("test", "test task"))
 
 	require.Error(t, err)
 	assert.Equal(t, ErrHarnessAgentNotFound, gibsonCode(t, err))

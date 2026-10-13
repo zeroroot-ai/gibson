@@ -65,10 +65,6 @@ type AuthConfig struct {
 	// Default: "tenant_id"
 	TenantClaim string `mapstructure:"tenant_claim" yaml:"tenant_claim"`
 
-	// Enabled is deprecated. Use Mode instead.
-	// Ignored when Mode is set. Removed in a future release.
-	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
-
 	// ClockSkew is the maximum allowed time difference when validating token expiry.
 	// Accommodates clock drift between Gibson and identity providers.
 	// Default: 30s
@@ -88,16 +84,6 @@ type AuthConfig struct {
 	// when a token contains a tenant claim value that doesn't match any existing tenant.
 	// Default: true for "enterprise" mode, false for "saas" mode.
 	AutoProvisionTenants *bool `mapstructure:"auto_provision_tenants" yaml:"auto_provision_tenants,omitempty"`
-}
-
-// IsAuthEnabled returns true if authentication should be enforced.
-// Auth is always enabled when a valid mode is configured.
-// The deprecated Enabled field is checked as a fallback when Mode is empty.
-func (c *AuthConfig) IsAuthEnabled() bool {
-	if c.Mode != "" {
-		return true
-	}
-	return c.Enabled
 }
 
 // ShouldAutoProvision returns whether auto-provisioning is enabled for the current mode.

@@ -474,7 +474,7 @@ type Delegator interface {
 	//   - Its own token usage tracking (aggregated to mission level)
 	//
 	// Example:
-	//   task := agent.NewTask("subdomain_enum", "Enumerate subdomains for target", input)
+	//   task := agent.NewTask("subdomain_enum", "Enumerate subdomains for target")
 	//   result, err := harness.DelegateToAgent(ctx, "recon_agent", task)
 	//   parentResult.Findings = append(parentResult.Findings, result.Findings...)
 	DelegateToAgent(ctx context.Context, name string, task agent.Task) (agent.Result, error)

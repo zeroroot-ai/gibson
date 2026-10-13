@@ -34,7 +34,7 @@ func TestDelegateToAgent_ForkableNodeParks(t *testing.T) {
 		SandboxID: "ns/src-1/u0", Parked: true, Result: &sandboxed.AgentTerminalResult{Success: true, Output: "mapped"},
 	}}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("recon", "map the host", nil)
+	task := agent.NewTask("recon", "map the host")
 	task.NodeID, task.Forkable = "recon", true
 
 	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task); err != nil {
@@ -63,7 +63,7 @@ func TestDelegateToAgent_StartsFromForksTheParkedSource(t *testing.T) {
 	h, ledger := forkHarness(t, launcher)
 	h.forks.Parked.Park("run-xyz", "recon", ParkedSource{Tenant: "zerocool-lab", AgentName: "zerocool", SandboxID: "ns/src-1/u0", GrantJTI: "jti-src"})
 
-	task := agent.NewTask("exploit", "exploit the host", nil)
+	task := agent.NewTask("exploit", "exploit the host")
 	task.NodeID, task.StartsFrom = "exploit", "recon"
 	task.Network = &agent.NodeNetwork{Targets: []string{"10.0.0.5:443"}}
 
@@ -93,7 +93,7 @@ func TestDelegateToAgent_StartsFromForksTheParkedSource(t *testing.T) {
 func TestDelegateToAgent_StartsFromWithNoParkedSourceFails(t *testing.T) {
 	launcher := &recordingLauncher{}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("exploit", "x", nil)
+	task := agent.NewTask("exploit", "x")
 	task.NodeID, task.StartsFrom = "exploit", "recon"
 
 	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -107,7 +107,7 @@ func TestDelegateToAgent_StartsFromWithNoParkedSourceFails(t *testing.T) {
 
 // Each other refusal of the fork path.
 func TestDelegateToAgent_StartsFromRefusals(t *testing.T) {
-	task := agent.NewTask("exploit", "x", nil)
+	task := agent.NewTask("exploit", "x")
 	task.NodeID, task.StartsFrom = "exploit", "recon"
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
 

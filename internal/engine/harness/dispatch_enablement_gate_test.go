@@ -56,7 +56,7 @@ func TestDispatchGate_AgentEnabled_Dispatches(t *testing.T) {
 	h := newEnablementGateHarness(authorizer, q)
 
 	ctx := callerCtx(t, "user-42", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("enabled agent must dispatch: %v", err)
 	}
 
@@ -82,7 +82,7 @@ func TestDispatchGate_AgentNotEnabled_DeniedNoEnqueue(t *testing.T) {
 	h := newEnablementGateHarness(&recordingAuthorizer{allow: false}, q)
 
 	ctx := callerCtx(t, "user-42", "zerocool-lab")
-	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil {
 		t.Fatal("a disabled agent must be denied")
 	}
@@ -104,7 +104,7 @@ func TestDispatchGate_CheckError_DeniedNoEnqueue(t *testing.T) {
 	h := newEnablementGateHarness(&recordingAuthorizer{err: errors.New("fga: connection refused")}, q)
 
 	ctx := callerCtx(t, "user-42", "zerocool-lab")
-	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil {
 		t.Fatal("an FGA check error must fail closed")
 	}
@@ -124,7 +124,7 @@ func TestDispatchGate_NilAuthorizer_DeniedNoEnqueue(t *testing.T) {
 	h := newEnablementGateHarness(nil, q)
 
 	ctx := callerCtx(t, "user-42", "zerocool-lab")
-	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil {
 		t.Fatal("an unwired authorizer must fail closed")
 	}

@@ -76,7 +76,6 @@ func DefaultConfig() *Config {
 			AgentTimeout:      15 * time.Second,
 		},
 		Auth: AuthConfig{
-			Enabled:   false, // Deprecated: use Mode instead
 			ClockSkew: 30 * time.Second,
 		},
 		Checkpoint: *DefaultCheckpointConfig(),

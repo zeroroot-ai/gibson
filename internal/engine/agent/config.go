@@ -6,7 +6,6 @@ package agent
 import (
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
@@ -21,20 +20,6 @@ type AgentConfig struct {
 	Settings      map[string]any        `json:"settings"`       // Agent-specific settings
 	SlotOverrides map[string]SlotConfig `json:"slot_overrides"` // Override default slot configs
 	Timeout       time.Duration         `json:"timeout"`        // Default task timeout
-}
-
-// AgentDescriptor contains agent metadata.
-// This describes an agent's capabilities and requirements without instantiating it.
-type AgentDescriptor struct {
-	Name           string                `json:"name"`
-	Version        string                `json:"version"`
-	Description    string                `json:"description"`
-	Capabilities   []string              `json:"capabilities"`
-	TargetTypes    []types.TargetType    `json:"target_types"`   // Deprecated: use TargetSchemas
-	TargetSchemas  []TargetSchema        `json:"target_schemas"` // New: schema-based target definitions
-	TechniqueTypes []taxonomy.CategoryID `json:"technique_types"`
-	Slots          []SlotDefinition      `json:"slots"`
-	IsExternal     bool                  `json:"is_external"` // True if agent runs via gRPC
 }
 
 // AgentRuntime tracks a running agent instance.

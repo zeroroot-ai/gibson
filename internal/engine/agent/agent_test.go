@@ -141,50 +141,48 @@ func TestSlotDefinition(t *testing.T) {
 // TestTask tests task creation and manipulation
 func TestTask(t *testing.T) {
 	t.Run("NewTask", func(t *testing.T) {
-		input := map[string]any{"key": "value"}
-		task := NewTask("test-task", "Test description", input)
+		task := NewTask("test-task", "Test description")
 
 		assert.NotEmpty(t, task.ID)
 		assert.Equal(t, "test-task", task.Name)
 		assert.Equal(t, "Test description", task.Description)
-		assert.Equal(t, input, task.Input)
 		assert.Equal(t, 30*time.Minute, task.Timeout)
 		assert.Equal(t, 0, task.Priority)
 	})
 
 	t.Run("WithMission", func(t *testing.T) {
 		missionID := types.NewID()
-		task := NewTask("test", "test", nil).WithMission(missionID)
+		task := NewTask("test", "test").WithMission(missionID)
 		require.NotNil(t, task.MissionID)
 		assert.Equal(t, missionID, *task.MissionID)
 	})
 
 	t.Run("WithParent", func(t *testing.T) {
 		parentID := types.NewID()
-		task := NewTask("test", "test", nil).WithParent(parentID)
+		task := NewTask("test", "test").WithParent(parentID)
 		require.NotNil(t, task.ParentTaskID)
 		assert.Equal(t, parentID, *task.ParentTaskID)
 	})
 
 	t.Run("WithTarget", func(t *testing.T) {
 		targetID := types.NewID()
-		task := NewTask("test", "test", nil).WithTarget(targetID)
+		task := NewTask("test", "test").WithTarget(targetID)
 		require.NotNil(t, task.TargetID)
 		assert.Equal(t, targetID, *task.TargetID)
 	})
 
 	t.Run("WithTimeout", func(t *testing.T) {
-		task := NewTask("test", "test", nil).WithTimeout(1 * time.Hour)
+		task := NewTask("test", "test").WithTimeout(1 * time.Hour)
 		assert.Equal(t, 1*time.Hour, task.Timeout)
 	})
 
 	t.Run("WithPriority", func(t *testing.T) {
-		task := NewTask("test", "test", nil).WithPriority(10)
+		task := NewTask("test", "test").WithPriority(10)
 		assert.Equal(t, 10, task.Priority)
 	})
 
 	t.Run("WithTags", func(t *testing.T) {
-		task := NewTask("test", "test", nil).WithTags("tag1", "tag2")
+		task := NewTask("test", "test").WithTags("tag1", "tag2")
 		assert.Equal(t, []string{"tag1", "tag2"}, task.Tags)
 	})
 }

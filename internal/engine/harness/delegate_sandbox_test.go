@@ -217,7 +217,7 @@ func TestDelegateToAgent_UntrustedWithLauncher_Launches(t *testing.T) {
 	h := newSandboxDelegateHarness(launcher, resolver, q, untrustedAgentInstances(), testMinter(t))
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	task := agent.NewTask("probe", "Fetch https://example.com", nil)
+	task := agent.NewTask("probe", "Fetch https://example.com")
 	res, err := h.DelegateToAgent(ctx, "zerocool", task)
 	if err != nil {
 		t.Fatalf("untrusted agent with a launcher must launch, not error: %v", err)
@@ -267,7 +267,7 @@ func TestDelegateToAgent_UntrustedNoLauncher_Denied(t *testing.T) {
 	h := newSandboxDelegateHarness(nil, nil, q, untrustedAgentInstances(), testMinter(t))
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	_, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err == nil {
 		t.Fatal("untrusted agent with no launcher must be denied")
 	}
@@ -291,7 +291,7 @@ func TestDelegateToAgent_Trusted_Unchanged(t *testing.T) {
 	h := newSandboxDelegateHarness(launcher, &stubSpecResolver{}, q, remoteAgentInstances(), testMinter(t))
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("trusted agent must dispatch on the unchanged path: %v", err)
 	}
 	if launcher.calls != 0 {
@@ -308,7 +308,7 @@ func TestDelegateToAgent_ResolverError(t *testing.T) {
 	launcher := &recordingLauncher{}
 	resolver := &stubSpecResolver{err: errStubResolve}
 	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
-	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g"))
 	if err == nil {
 		t.Fatal("resolver error must deny the dispatch")
 	}
@@ -322,7 +322,7 @@ func TestDelegateToAgent_ResolverError(t *testing.T) {
 func TestDelegateToAgent_NilResolver(t *testing.T) {
 	launcher := &recordingLauncher{}
 	h := newSandboxDelegateHarness(launcher, nil, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
-	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g", nil)); err == nil {
+	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g")); err == nil {
 		t.Fatal("a nil launch-spec resolver must deny the dispatch")
 	}
 	if launcher.calls != 0 {
@@ -336,7 +336,7 @@ func TestDelegateToAgent_LaunchError(t *testing.T) {
 	launcher := &recordingLauncher{err: errStubLaunch}
 	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "img@sha256:x", SandboxClass: "agent"}}
 	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
-	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g", nil)); err == nil {
+	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g")); err == nil {
 		t.Fatal("a launch failure must surface as an error")
 	}
 }
@@ -347,7 +347,7 @@ func TestDelegateToAgent_NonZeroExit(t *testing.T) {
 	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-9", ExitCode: 2, Reason: "Error", LogTail: "boom"}}
 	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "img@sha256:x", SandboxClass: "agent"}}
 	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
-	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g", nil))
+	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g"))
 	if err == nil {
 		t.Fatal("a non-zero sandbox exit must be a failed delegation")
 	}
@@ -387,7 +387,7 @@ func sandboxedDelegation(t *testing.T, outcome sandboxed.AgentRunResult) (agent.
 	launcher := &recordingLauncher{outcome: outcome}
 	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent"}}
 	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
-	return h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal", nil))
+	return h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal"))
 }
 
 // TestDelegateToAgent_SandboxResultReturnsInOutput proves that the structured

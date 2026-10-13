@@ -17,7 +17,6 @@ type Task struct {
 	Description  string         `json:"description"`
 	Goal         string         `json:"goal,omitempty"`    // Primary objective for this task
 	Context      map[string]any `json:"context,omitempty"` // Additional context metadata (phase, previous findings, etc.)
-	Input        map[string]any `json:"input"`             // Deprecated: Use Context instead for new code
 	Timeout      time.Duration  `json:"timeout"`
 	MissionID    *types.ID      `json:"mission_id,omitempty"`
 	ParentTaskID *types.ID      `json:"parent_task_id,omitempty"`
@@ -79,12 +78,11 @@ type NodeNetwork struct {
 }
 
 // NewTask creates a new task with the given parameters
-func NewTask(name, description string, input map[string]any) Task {
+func NewTask(name, description string) Task {
 	return Task{
 		ID:          types.NewID(),
 		Name:        name,
 		Description: description,
-		Input:       input,
 		Timeout:     30 * time.Minute, // Default timeout
 		CreatedAt:   time.Now(),
 		Priority:    0,

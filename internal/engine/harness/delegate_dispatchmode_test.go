@@ -35,7 +35,7 @@ func TestDelegateToAgent_ManifestSandboxed_ForcesSandbox(t *testing.T) {
 	}
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	res, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil))
+	res, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal"))
 	if err != nil {
 		t.Fatalf("a manifest-sandboxed agent must launch, not error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestDelegateToAgent_ManifestNotSandboxed_Passthrough(t *testing.T) {
 	h.agentDispatchMode = func(string) (string, bool) { return "", false }
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("a not-sandboxed trusted agent must dispatch on the unchanged path: %v", err)
 	}
 	if launcher.calls != 0 {
@@ -82,7 +82,7 @@ func TestDelegateToAgent_ManifestListedNonSandbox_Passthrough(t *testing.T) {
 	h.agentDispatchMode = func(string) (string, bool) { return "", true }
 
 	ctx := callerCtx(t, "user-1", "zerocool-lab")
-	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal", nil)); err != nil {
+	if _, err := h.DelegateToAgent(ctx, "zerocool", agent.NewTask("probe", "goal")); err != nil {
 		t.Fatalf("a listed non-sandbox trusted agent must dispatch on the unchanged path: %v", err)
 	}
 	if launcher.calls != 0 {
