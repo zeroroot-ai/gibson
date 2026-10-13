@@ -25,6 +25,9 @@ const (
 	// metricsPort is the plain metrics listener the chart sets
 	// (--metrics-bind-address=:8080 --metrics-secure=false).
 	metricsPort = 8080
+	// leaseName is the leader election Lease the chart sets
+	// (--leader-election-id=gibson-tenant-operator).
+	leaseName = "gibson-tenant-operator"
 )
 
 // kubectl runs kubectl with the arguments and returns its stdout. stderr is
@@ -94,17 +97,25 @@ var _ = Describe("The tenant-operator of the checkout on the installed platform"
 		}, 5*time.Minute, 5*time.Second).Should(Succeed())
 	})
 
-	It("serves the controller metrics", func() {
-		pod, err := kubectl("-n", namespace, "get", "pods", "-l", podLabel,
-			"-o", "jsonpath={.items[0].metadata.name}")
-		Expect(err).NotTo(HaveOccurred())
-		Expect(pod).NotTo(BeEmpty())
+	// The chart runs two replicas with leader election. Only the leader
+	// starts the controllers, so only the leader serves the reconcile
+	// metrics. The spec reads the leader from the Lease and asks that pod.
+	It("serves the controller metrics on the leader", func() {
 		Eventually(func(g Gomega) {
+			holder, err := kubectl("-n", namespace, "get", "lease", leaseName,
+				"-o", "jsonpath={.spec.holderIdentity}")
+			g.Expect(err).NotTo(HaveOccurred())
+			leader, _, _ := strings.Cut(strings.TrimSpace(holder), "_")
+			g.Expect(leader).NotTo(BeEmpty(), "the Lease %s has no holder", leaseName)
+			got, err := kubectl("-n", namespace, "get", "pod", leader,
+				"-o", `jsonpath={.spec.containers[?(@.name=="manager")].image}`)
+			g.Expect(err).NotTo(HaveOccurred(), "the leader %s is not a pod of the Deployment", leader)
+			g.Expect(got).To(Equal(image), "the leader %s runs another image", leader)
 			out, err := kubectl("get", "--raw",
-				fmt.Sprintf("/api/v1/namespaces/%s/pods/%s:%d/proxy/metrics", namespace, pod, metricsPort))
+				fmt.Sprintf("/api/v1/namespaces/%s/pods/%s:%d/proxy/metrics", namespace, leader, metricsPort))
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(out).To(ContainSubstring("controller_runtime_reconcile_total"),
-				"the manager runs no controller")
+				"the leader %s runs no controller", leader)
 		}, 3*time.Minute, 5*time.Second).Should(Succeed())
 	})
 })
