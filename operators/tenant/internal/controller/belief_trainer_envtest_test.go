@@ -41,7 +41,7 @@ var _ = ginkgo.Describe("belief trainer provisioning", func() {
 		tenant.Status.Namespace = ns.Name
 
 		cfg, err := flows.NewBeliefTrainerConfig("ghcr.io/zeroroot-ai/gibson:test",
-			"gibson.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson")
+			"gibson.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson", "example.org")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		var ran bool
 		for _, step := range flows.ProvisionSteps(flows.ProvisionDeps{K8sClient: k8sClient, BeliefTrainer: cfg}) {

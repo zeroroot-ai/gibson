@@ -30,7 +30,7 @@ import (
 func testTrainerConfig(t *testing.T) BeliefTrainerConfig {
 	t.Helper()
 	cfg, err := NewBeliefTrainerConfig("ghcr.io/zeroroot-ai/gibson:v1.2.3",
-		"gibson-gibson-workloads.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson")
+		"gibson-gibson-workloads.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson", "example.org")
 	if err != nil {
 		t.Fatalf("NewBeliefTrainerConfig: %v", err)
 	}
@@ -56,17 +56,19 @@ func trainerTenant() *gibsonv1alpha1.Tenant {
 }
 
 func TestNewBeliefTrainerConfig_RequiresEachValue(t *testing.T) {
-	for name, args := range map[string][5]string{
-		"no image":          {"", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "c"},
-		"no daemon address": {"img", "", "spiffe://example.org/platform/daemon", "gibson", "c"},
-		"no daemon SVID":    {"img", "d:50051", "", "gibson", "c"},
-		"bad daemon SVID":   {"img", "d:50051", "not-a-spiffe-id", "gibson", "c"},
-		"no namespace":      {"img", "d:50051", "spiffe://example.org/platform/daemon", "", "c"},
-		"no SPIRE class":    {"img", "d:50051", "spiffe://example.org/platform/daemon", "gibson", ""},
-		"no port":           {"img", "daemon", "spiffe://example.org/platform/daemon", "gibson", "c"},
-		"bad port":          {"img", "daemon:http", "spiffe://example.org/platform/daemon", "gibson", "c"},
+	for name, args := range map[string][6]string{
+		"no image":           {"", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "c", "example.org"},
+		"no daemon address":  {"img", "", "spiffe://example.org/platform/daemon", "gibson", "c", "example.org"},
+		"no daemon SVID":     {"img", "d:50051", "", "gibson", "c", "example.org"},
+		"bad daemon SVID":    {"img", "d:50051", "not-a-spiffe-id", "gibson", "c", "example.org"},
+		"no namespace":       {"img", "d:50051", "spiffe://example.org/platform/daemon", "", "c", "example.org"},
+		"no SPIRE class":     {"img", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "", "example.org"},
+		"no trust domain":    {"img", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "c", ""},
+		"other trust domain": {"img", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "c", "other.org"},
+		"no port":            {"img", "daemon", "spiffe://example.org/platform/daemon", "gibson", "c", "example.org"},
+		"bad port":           {"img", "daemon:http", "spiffe://example.org/platform/daemon", "gibson", "c", "example.org"},
 	} {
-		if _, err := NewBeliefTrainerConfig(args[0], args[1], args[2], args[3], args[4]); !errors.Is(err, errBeliefTrainerConfig) {
+		if _, err := NewBeliefTrainerConfig(args[0], args[1], args[2], args[3], args[4], args[5]); !errors.Is(err, errBeliefTrainerConfig) {
 			t.Errorf("%s: err = %v, want errBeliefTrainerConfig", name, err)
 		}
 	}

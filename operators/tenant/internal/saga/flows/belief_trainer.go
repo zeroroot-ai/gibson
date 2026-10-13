@@ -85,8 +85,9 @@ type BeliefTrainerConfig struct {
 	// SpireClassName is the className of the SPIRE controller-manager that
 	// serves the ClusterSPIFFEIDs of the operator.
 	SpireClassName string
-	// TrustDomain is the trust domain of the install, read from
-	// DaemonSPIFFEID. The trainer ID is spiffe://<TrustDomain>/trainer/<t>.
+	// TrustDomain is the trust domain of the install (PLUGIN_TRUST_DOMAIN,
+	// the one value the operator holds it in). The trainer ID is
+	// spiffe://<TrustDomain>/trainer/<t>.
 	TrustDomain string
 
 	// daemonPort is the port of DaemonAddr.
@@ -96,28 +97,36 @@ type BeliefTrainerConfig struct {
 // NewBeliefTrainerConfig validates the trainer config. The daemon port comes
 // from the address, so the NetworkPolicy opens exactly the port the trainer
 // dials.
-func NewBeliefTrainerConfig(image, daemonAddr, daemonSPIFFEID, platformNamespace, spireClassName string) (BeliefTrainerConfig, error) {
+func NewBeliefTrainerConfig(
+	image, daemonAddr, daemonSPIFFEID, platformNamespace, spireClassName, trustDomain string,
+) (BeliefTrainerConfig, error) {
 	c := BeliefTrainerConfig{
 		Image:             strings.TrimSpace(image),
 		DaemonAddr:        strings.TrimSpace(daemonAddr),
 		DaemonSPIFFEID:    strings.TrimSpace(daemonSPIFFEID),
 		PlatformNamespace: strings.TrimSpace(platformNamespace),
 		SpireClassName:    strings.TrimSpace(spireClassName),
+		TrustDomain:       strings.TrimSpace(trustDomain),
 	}
 	for name, v := range map[string]string{
 		"image": c.Image, "daemon address": c.DaemonAddr,
 		"daemon SPIFFE ID": c.DaemonSPIFFEID, "platform namespace": c.PlatformNamespace,
-		"SPIRE class name": c.SpireClassName,
+		"SPIRE class name": c.SpireClassName, "trust domain": c.TrustDomain,
 	} {
 		if v == "" {
 			return BeliefTrainerConfig{}, fmt.Errorf("%w: the %s is required", errBeliefTrainerConfig, name)
 		}
 	}
+	// The daemon the trainer dials lives in the same trust domain. A
+	// mismatch is a wrong install, so the operator refuses to start.
 	daemonID, err := spiffeid.FromString(c.DaemonSPIFFEID)
 	if err != nil {
 		return BeliefTrainerConfig{}, fmt.Errorf("%w: daemon SPIFFE ID %q: %w", errBeliefTrainerConfig, c.DaemonSPIFFEID, err)
 	}
-	c.TrustDomain = daemonID.TrustDomain().Name()
+	if got := daemonID.TrustDomain().Name(); got != c.TrustDomain {
+		return BeliefTrainerConfig{}, fmt.Errorf("%w: the daemon SPIFFE ID is in trust domain %q, not %q",
+			errBeliefTrainerConfig, got, c.TrustDomain)
+	}
 	_, portStr, err := net.SplitHostPort(c.DaemonAddr)
 	if err != nil {
 		return BeliefTrainerConfig{}, fmt.Errorf("%w: daemon address %q: %w", errBeliefTrainerConfig, c.DaemonAddr, err)

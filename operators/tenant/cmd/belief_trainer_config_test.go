@@ -17,6 +17,7 @@ func TestBeliefTrainerConfigFromEnv(t *testing.T) {
 		envDaemonSPIFFEID:         "spiffe://example.org/platform/daemon",
 		"OPERATOR_NAMESPACE":      "gibson",
 		"PLUGIN_SPIRE_CLASS_NAME": "gibson-gibson",
+		"PLUGIN_TRUST_DOMAIN":     "example.org",
 	}
 	cfg, err := beliefTrainerConfigFromEnv(func(k string) string { return env[k] })
 	if err != nil {
