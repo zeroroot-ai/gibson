@@ -75,6 +75,23 @@ spec:
           value: "https://e2e-zitadel.invalid"
         - name: ZITADEL_EXTERNAL_DOMAIN
           value: "e2e-zitadel.invalid"
+        # ZITADEL_PROJECT_ID (ADR-0093): required at start; a stub id (gibson#1142).
+        - name: ZITADEL_PROJECT_ID
+          value: "e2e-project-id"
+        # --- The rest of the start-up values, in startup order (gibson#1142) ---
+        # buildVaultAdminClient requires the bound issuer of the root JWT auth.
+        - name: GIBSON_VAULT_JWT_BOUND_ISSUER
+          value: "https://e2e-spire-oidc.invalid"
+        # The startup gate and the reconciler read the platform namespace.
+        - name: OPERATOR_NAMESPACE
+          value: "tenant-operator-system"
+        # The tenant delete flow takes a last Velero backup; no switch turns it off.
+        - name: VELERO_NAMESPACE
+          value: "velero"
+        # The Neo4j provisioner refuses an image with no digest. The metrics
+        # e2e provisions no tenant, so the image is never pulled.
+        - name: TENANT_NEO4J_IMAGE
+          value: "ghcr.io/zeroroot-ai/mirror/neo4j:5.26.0-community@sha256:5a015e53de1895e7eee1574ae0325cf8c4b89587222778108c594bdd45a474b5"
         # --- FGA (required: FGA_URL + FGA_STORE_ID non-empty; readyz probe calls /healthz) ---
         # Points at the e2e-http-stub nginx that returns 200 {"status":"SERVING"} on /healthz.
         - name: FGA_URL
