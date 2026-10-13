@@ -30,6 +30,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -135,6 +136,19 @@ func TestBeliefTraining_NextMissionPins(t *testing.T) {
 	for _, m := range list.GetMissions() {
 		before[m.GetId()] = true
 	}
+	// The juicy belief of each seed host, by address, scored by the model
+	// before the training.
+	seedJuicy := map[string]float64{}
+	seedScopes := map[string]bool{}
+	hosts, err := world.ListHosts(ctx, &worldpb.ListHostsRequest{})
+	require.NoError(t, err, "ListHosts")
+	for _, h := range hosts.GetHosts() {
+		if len(h.GetOpenPorts()) > 0 {
+			seedJuicy[h.GetAddress()] = h.GetJuicy()
+			seedScopes[h.GetScopeId()] = true
+		}
+	}
+	require.NotEmpty(t, seedJuicy, "the World holds no seed host: the seed step did not run")
 
 	runBeliefMission(t, ctx, clients, "belief-training-pin")
 
@@ -152,4 +166,34 @@ func TestBeliefTraining_NextMissionPins(t *testing.T) {
 			"the next mission pinned %q, want a stored version of the tenant: the trainer stored nothing current", v)
 	}
 	t.Logf("the next mission pinned %v", pinned)
+
+	// The trained model changed the belief. The new mission scans the same
+	// address in its own scope. Its host has the same evidence as the seed
+	// host, so another juicy value can come only from another model.
+	deadline := time.Now().Add(2 * time.Minute)
+	var changed, rescored []string
+	for {
+		changed, rescored = changed[:0], rescored[:0]
+		hosts, err := world.ListHosts(ctx, &worldpb.ListHostsRequest{})
+		require.NoError(t, err, "ListHosts")
+		for _, h := range hosts.GetHosts() {
+			seed, ok := seedJuicy[h.GetAddress()]
+			if !ok || seedScopes[h.GetScopeId()] || len(h.GetOpenPorts()) == 0 {
+				continue
+			}
+			line := fmt.Sprintf("%s scope=%s juicy %.6f -> %.6f", h.GetAddress(), h.GetScopeId(), seed, h.GetJuicy())
+			rescored = append(rescored, line)
+			if h.GetJuicy() != seed {
+				changed = append(changed, line)
+			}
+		}
+		if len(changed) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Logf("rescored hosts: %v", rescored)
+	require.NotEmpty(t, rescored, "the next mission scanned no seed address again")
+	require.NotEmpty(t, changed,
+		"the juicy belief of the seed address did not change: the trained model did not change the belief")
 }

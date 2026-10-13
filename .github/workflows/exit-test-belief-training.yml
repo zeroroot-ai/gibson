@@ -14,10 +14,13 @@
 #      in the tenant namespace runs once and must complete.
 #   2b. assert-run-nodes.sh reads the tenant graph: the mission wrote one
 #      MissionRun and one AgentRun node (gibson#1021).
+#   3b. The trainer log must show at least one fitted row: the seed host.
 #   4. After one reload interval of the daemon, TestBeliefTraining_NextMissionPins
 #      runs one more mission and asserts that it pins a stored version of the
 #      tenant (tenant-<id>-v<n>). The daemon pins a stored version only when
-#      tenant_belief_artifacts holds a current row for the tenant.
+#      tenant_belief_artifacts holds a current row for the tenant. It also
+#      asserts that the new scan of the seed address carries another juicy
+#      belief than the seed host: the trained model changed the belief.
 #
 # ADR-0080: NEVER on pull_request. It needs a live cluster. It runs on main and
 # daily.
@@ -255,6 +258,15 @@ jobs:
           kubectl -n "$tns" logs "job/$job" --tail=200 | tee "$E2E_OUT/trainer.log"
           grep -q 'stored a new belief artifact version' "$E2E_OUT/trainer.log" || {
             echo "::error::the trainer completed but stored no version"; exit 1; }
+          # The trainer must fit on the row of the seed host (gibson#1153).
+          # The kind cluster is new, so the seed mission made the only
+          # scanned host of the tenant. A version with no row is the base
+          # model again, and proves no training.
+          rows=$(grep 'stored a new belief artifact version' "$E2E_OUT/trainer.log" \
+            | sed -n 's/.*"rows":\([0-9][0-9]*\).*/\1/p' | tail -1)
+          echo "the trainer fitted ${rows:-0} row(s)"
+          [ "${rows:-0}" -ge 1 ] || {
+            echo "::error::the trainer stored a version with no training row: the seed host gave it nothing to learn"; exit 1; }
 
       # The daemon reads the current versions every belief.reload_interval
       # (60s by default). The next mission must start after one read.
