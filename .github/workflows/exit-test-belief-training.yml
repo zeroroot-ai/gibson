@@ -8,7 +8,8 @@
 #   1. The kind bring-up and the test-mode daemon of exit-test-e2e-cluster.yml,
 #      copied. ONE bring-up path.
 #   2. TestBeliefTraining_Seed (in-cluster, runner SVID) runs one nmap mission
-#      for the tenant and labels an item of its review queue.
+#      for the tenant and asserts that the World holds a scanned host with
+#      open ports: a training row (braintrain.RowsFromWorld).
 #   3. A Job from the belief-trainer CronJob that the tenant operator created
 #      in the tenant namespace runs once and must complete.
 #   2b. assert-run-nodes.sh reads the tenant graph: the mission wrote one
