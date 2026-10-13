@@ -6,7 +6,7 @@ apiVersion: gibson.zeroroot.ai/v1alpha1
 kind: ConnectorInstance
 metadata:
   name: fixture-mcp-tools
-  namespace: tenant-connector-e2e
+  namespace: tenant-primary
 spec:
   connector: fixture-mcp-tools
   shape: Hosted
