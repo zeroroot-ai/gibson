@@ -310,9 +310,22 @@ func (s *IdentityServer) collectPluginGrants(ctx context.Context, target Princip
 }
 
 // FGALookup is a PrincipalLookup implementation backed by the daemon's
-// FGA Authorizer. It resolves a principal to its tenant by querying
-// the `belongs_to` relation written at agent-identity creation time
-// (see internal/server/daemon/api/tenant_admin_create.go).
+// FGA Authorizer. It resolves a principal to its tenant from the tuples the
+// daemon writes:
+//
+//   - A typed machine principal (agent_principal:, tool_principal:,
+//     plugin_principal:) holds tenant:<id> as the user of its belongs_to
+//     relation: (tenant:<id>, belongs_to, <type>:<id>), written at identity
+//     creation (internal/server/daemon/api/tenant_admin_create.go) and at
+//     plugin check-in (internal/platform/capabilitygrant/plugin_svid.go).
+//     The lookup lists the tenants on that relation of the principal.
+//   - A human (a bare OIDC subject) is a member of each tenant it belongs
+//     to: (user:<sub>, member, tenant:<id>). The lookup lists those tenants.
+//
+// The lookup used to ask ListObjects(<principal>, belongs_to, tenant), which
+// reads the tuple in the wrong direction. The type tenant has no belongs_to
+// relation, so FGA refused every call, and every grant write and every admin
+// WhoAmI failed with "principal lookup failed" (gibson#1162).
 //
 // This avoids coupling the identity service to the IdP-side service-
 // account store; the FGA tuple is the daemon's source of truth for
@@ -328,14 +341,22 @@ func (f *FGALookup) Resolve(ctx context.Context, principalID string) (PrincipalR
 	if f.Authorizer == nil {
 		return PrincipalRecord{}, errors.New("identity: FGALookup.Authorizer is nil")
 	}
-	objects, err := f.Authorizer.ListObjects(ctx, fgaUserRef(principalID), "belongs_to", "tenant")
-	if err != nil {
-		return PrincipalRecord{}, fmt.Errorf("identity: FGALookup ListObjects: %w", err)
+	var (
+		tenants []string
+		err     error
+	)
+	if principalType, _, typed := strings.Cut(principalID, ":"); typed {
+		tenants, err = f.Authorizer.ListUsersOfType(ctx, principalType, principalID, "belongs_to", "tenant")
+	} else {
+		tenants, err = f.Authorizer.ListObjects(ctx, fgaUserRef(principalID), "member", "tenant")
 	}
-	if len(objects) == 0 {
+	if err != nil {
+		return PrincipalRecord{}, fmt.Errorf("identity: FGALookup: %w", err)
+	}
+	if len(tenants) == 0 {
 		return PrincipalRecord{}, ErrPrincipalNotFound
 	}
-	tenantID := strings.TrimPrefix(objects[0], "tenant:")
+	tenantID := strings.TrimPrefix(tenants[0], "tenant:")
 	return PrincipalRecord{
 		PrincipalID: principalID,
 		TenantID:    tenantID,
