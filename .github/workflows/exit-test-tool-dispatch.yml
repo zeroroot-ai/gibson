@@ -428,21 +428,19 @@ jobs:
           done
           # The address of each sandbox Pod of the run, so the check ties a
           # drop to a sandbox (gibson#1088). A launcher Pod lives only as
-          # long as its Sandbox, so the watch records each Pod event.
+          # long as its Sandbox, so the watch records each Pod event. setec
+          # makes one namespace for each client and tenant pair (sbx-...) on
+          # the first sandbox of the pair, after this step. So the watch
+          # covers all namespaces and selects the Pods by the label setec
+          # puts on each sandbox Pod (setec podspec.SandboxLabelKey,
+          # gibson#1158).
           mkdir -p /tmp/sandbox-pods
-          sandbox_ns=$(kubectl get namespaces -l setec.zeroroot.ai/sandbox-namespace=true -o jsonpath='{.items[*].metadata.name}')
-          if [ -z "$sandbox_ns" ]; then
-            echo "::error::no namespace has the label setec.zeroroot.ai/sandbox-namespace=true"
-            exit 1
-          fi
-          for ns in $sandbox_ns; do
-            nohup kubectl -n "$ns" get pods --watch \
-              -o jsonpath='{.metadata.name}{" "}{.status.podIP}{"\n"}' \
-              > "/tmp/sandbox-pods/${ns}.txt" 2>&1 &
-          done
+          nohup kubectl get pods -A --watch -l setec.zeroroot.ai/sandbox \
+            -o jsonpath='{.metadata.name}{" "}{.status.podIP}{" "}{.metadata.namespace}{"\n"}' \
+            > /tmp/sandbox-pods/all.txt 2>&1 &
           sleep 5
           ls /tmp/cilium-drops/*.log >/dev/null
-          echo "the suite scans the connector proxy at ${ip}:8080 from a sandbox in: ${sandbox_ns}"
+          echo "the suite scans the connector proxy at ${ip}:8080 from a sandbox Pod with the label setec.zeroroot.ai/sandbox"
 
       # Cilium enforces each network policy of the chart on this cluster
       # (hosted#436). Prove it for the daemon before the tests run, so a
