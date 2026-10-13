@@ -36,15 +36,15 @@ concurrency:
 
 jobs:
   brand-guard:
-    uses: zeroroot-ai/.github/.github/workflows/brand-guard.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
+    uses: zeroroot-ai/.github/.github/workflows/brand-guard.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
 
   link-check:
-    uses: zeroroot-ai/.github/.github/workflows/link-check.yml@eaa991cb73a79080f5ce1223b2f5332c47e02c70 # v0.10.5
+    uses: zeroroot-ai/.github/.github/workflows/link-check.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
 
   exit-tests-off-pr:
-    uses: zeroroot-ai/.github/.github/workflows/exit-tests-off-pr.yml@53a2406de391869c35d5cf5b851a21b80185ff48 # v0.14.0
+    uses: zeroroot-ai/.github/.github/workflows/exit-tests-off-pr.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
 
   # Each ADR citation names a live ADR of the public index docs/adr-index.md,
   # a copy of the file in zeroroot-ai/gibson (gibson#740, ADR-0068).
   adr-citations:
-    uses: zeroroot-ai/.github/.github/workflows/adr-citations.yml@5d38e1f714d47b502cf18709a7d5e63430155f62 # v0.16.0
+    uses: zeroroot-ai/.github/.github/workflows/adr-citations.yml@534026f4a8ed977a3c04ad1a69e572fd7d92e7a2 # v0.18.0
