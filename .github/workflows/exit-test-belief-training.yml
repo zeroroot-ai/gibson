@@ -285,3 +285,13 @@ jobs:
           kubectl -n "$NS" get pods || true
           kubectl -n "tenant-${TENANT}" get cronjobs,jobs,pods || true
           kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=400 | grep -i belief || true
+          # Run 38366143731: setec refused the nmap sandbox with
+          # 'SandboxClass "tool" not found', while the bank run of the same
+          # night launched in class "agent". Which classes exist, and the
+          # state of the Argo Application that renders them.
+          echo "=== SandboxClasses ==="
+          kubectl get sandboxclasses.setec.zeroroot.ai -o wide 2>&1 || true
+          echo "=== the gibson Application: sync, health, and resources not Synced ==="
+          kubectl -n argocd get application gibson -o jsonpath='{.status.sync.status}/{.status.health.status}{"\n"}' 2>&1 || true
+          kubectl -n argocd get application gibson -o json 2>/dev/null \
+            | jq -r '.status.resources[]? | select(.status != "Synced" or (.kind == "SandboxClass")) | "\(.kind)/\(.name) \(.status) \(.health.status // "-")"' || true
