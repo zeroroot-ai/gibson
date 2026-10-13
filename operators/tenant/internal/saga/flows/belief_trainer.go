@@ -13,11 +13,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,14 +35,25 @@ import (
 // `belief-trainer -tenant <id>` on the gibson image every night. The pod talks
 // only to the daemon, over SPIFFE mTLS, with the SVID
 // spiffe://<td>/trainer/<tenant>. It holds no database credential.
+//
+// The operator registers that SVID itself (gibson#1164): one ClusterSPIFFEID
+// for each tenant, with the literal ID, pinned to the tenant namespace by its
+// name and to the trainer ServiceAccount. The tenant never comes from a pod
+// label, because a pod label is a claim that any pod writer can make. The
+// chart's admission policy gibson-tenant-operator-clusterspiffeid-scope
+// admits exactly this shape.
 const (
 	// BeliefTrainerName names the CronJob and its NetworkPolicy.
 	BeliefTrainerName = "belief-trainer"
 
 	// ComponentBeliefTrainer is the app.kubernetes.io/component value of the
-	// trainer pods. The chart ClusterSPIFFEID that issues the trainer SVID
-	// selects on it, and so does the NetworkPolicy.
+	// trainer pods. The trainer ClusterSPIFFEID of the tenant and the
+	// NetworkPolicy select on it.
 	ComponentBeliefTrainer = "belief-trainer"
+
+	// BeliefTrainerServiceAccount is the ServiceAccount of the trainer pods.
+	// The trainer ClusterSPIFFEID pins it with a k8s:sa: selector.
+	BeliefTrainerServiceAccount = "gibson-belief-trainer"
 
 	// labelComponent and labelTenant are the labels that the trainer pod
 	// carries.
@@ -68,6 +82,12 @@ type BeliefTrainerConfig struct {
 	DaemonSPIFFEID string
 	// PlatformNamespace is the namespace of the daemon pods.
 	PlatformNamespace string
+	// SpireClassName is the className of the SPIRE controller-manager that
+	// serves the ClusterSPIFFEIDs of the operator.
+	SpireClassName string
+	// TrustDomain is the trust domain of the install, read from
+	// DaemonSPIFFEID. The trainer ID is spiffe://<TrustDomain>/trainer/<t>.
+	TrustDomain string
 
 	// daemonPort is the port of DaemonAddr.
 	daemonPort int32
@@ -76,21 +96,28 @@ type BeliefTrainerConfig struct {
 // NewBeliefTrainerConfig validates the trainer config. The daemon port comes
 // from the address, so the NetworkPolicy opens exactly the port the trainer
 // dials.
-func NewBeliefTrainerConfig(image, daemonAddr, daemonSPIFFEID, platformNamespace string) (BeliefTrainerConfig, error) {
+func NewBeliefTrainerConfig(image, daemonAddr, daemonSPIFFEID, platformNamespace, spireClassName string) (BeliefTrainerConfig, error) {
 	c := BeliefTrainerConfig{
 		Image:             strings.TrimSpace(image),
 		DaemonAddr:        strings.TrimSpace(daemonAddr),
 		DaemonSPIFFEID:    strings.TrimSpace(daemonSPIFFEID),
 		PlatformNamespace: strings.TrimSpace(platformNamespace),
+		SpireClassName:    strings.TrimSpace(spireClassName),
 	}
 	for name, v := range map[string]string{
 		"image": c.Image, "daemon address": c.DaemonAddr,
 		"daemon SPIFFE ID": c.DaemonSPIFFEID, "platform namespace": c.PlatformNamespace,
+		"SPIRE class name": c.SpireClassName,
 	} {
 		if v == "" {
 			return BeliefTrainerConfig{}, fmt.Errorf("%w: the %s is required", errBeliefTrainerConfig, name)
 		}
 	}
+	daemonID, err := spiffeid.FromString(c.DaemonSPIFFEID)
+	if err != nil {
+		return BeliefTrainerConfig{}, fmt.Errorf("%w: daemon SPIFFE ID %q: %w", errBeliefTrainerConfig, c.DaemonSPIFFEID, err)
+	}
+	c.TrustDomain = daemonID.TrustDomain().Name()
 	_, portStr, err := net.SplitHostPort(c.DaemonAddr)
 	if err != nil {
 		return BeliefTrainerConfig{}, fmt.Errorf("%w: daemon address %q: %w", errBeliefTrainerConfig, c.DaemonAddr, err)
@@ -172,6 +199,7 @@ func buildBeliefTrainerCronJob(t *gibsonv1alpha1.Tenant, ns string, cfg BeliefTr
 func beliefTrainerPodSpec(tenant string, cfg BeliefTrainerConfig) corev1.PodSpec {
 	return corev1.PodSpec{
 		RestartPolicy:                corev1.RestartPolicyNever,
+		ServiceAccountName:           BeliefTrainerServiceAccount,
 		AutomountServiceAccountToken: ptr.To(false),
 		EnableServiceLinks:           ptr.To(false),
 		SecurityContext: &corev1.PodSecurityContext{
@@ -268,6 +296,63 @@ func buildBeliefTrainerNetworkPolicy(t *gibsonv1alpha1.Tenant, ns string, cfg Be
 	}
 }
 
+// buildBeliefTrainerServiceAccount is the ServiceAccount of the trainer pods.
+// It mounts no token: the trainer talks only to the daemon, with its SVID.
+func buildBeliefTrainerServiceAccount(t *gibsonv1alpha1.Tenant, ns string) *corev1.ServiceAccount {
+	return &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:            BeliefTrainerServiceAccount,
+			Namespace:       ns,
+			Labels:          beliefTrainerLabels(t.Name),
+			OwnerReferences: []metav1.OwnerReference{tenantOwnerRef(t)},
+		},
+		AutomountServiceAccountToken: ptr.To(false),
+	}
+}
+
+// clusterSPIFFEIDGVK is the kind of a SPIRE controller-manager registration.
+var clusterSPIFFEIDGVK = schema.GroupVersionKind{Group: "spire.spiffe.io", Version: "v1alpha1", Kind: "ClusterSPIFFEID"}
+
+// beliefTrainerSPIFFEIDName is the name of the trainer registration of a
+// tenant.
+func beliefTrainerSPIFFEIDName(tenant string) string {
+	return "gibson-belief-trainer-" + tenant
+}
+
+// buildBeliefTrainerSPIFFEID is the registration that issues
+// spiffe://<td>/trainer/<tenant> to the trainer pods of the tenant, and to
+// no other pod: the namespace by its name, the trainer component label and
+// the trainer ServiceAccount. The Tenant owns it, so a tenant delete removes
+// it.
+func buildBeliefTrainerSPIFFEID(t *gibsonv1alpha1.Tenant, ns string, cfg BeliefTrainerConfig) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(clusterSPIFFEIDGVK)
+	u.SetName(beliefTrainerSPIFFEIDName(t.Name))
+	u.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by": "gibson-tenant-operator",
+		labelComponent:                 ComponentBeliefTrainer,
+		labelTenant:                    t.Name,
+	})
+	u.SetOwnerReferences([]metav1.OwnerReference{tenantOwnerRef(t)})
+	u.Object["spec"] = beliefTrainerSPIFFEIDSpec(t.Name, ns, cfg)
+	return u
+}
+
+// beliefTrainerSPIFFEIDSpec is the spec of the trainer registration.
+func beliefTrainerSPIFFEIDSpec(tenant, ns string, cfg BeliefTrainerConfig) map[string]any {
+	return map[string]any{
+		"className":        cfg.SpireClassName,
+		"spiffeIDTemplate": "spiffe://" + cfg.TrustDomain + "/trainer/" + tenant,
+		"namespaceSelector": map[string]any{
+			"matchLabels": map[string]any{"kubernetes.io/metadata.name": ns},
+		},
+		"podSelector": map[string]any{
+			"matchLabels": map[string]any{labelComponent: ComponentBeliefTrainer},
+		},
+		"workloadSelectorTemplates": []any{"k8s:ns:" + ns, "k8s:sa:" + BeliefTrainerServiceAccount},
+	}
+}
+
 // ---------------------------------------------------------------------------
 // EnsureBeliefTrainer
 // ---------------------------------------------------------------------------
@@ -292,9 +377,9 @@ func newBeliefTrainerStep(deps ProvisionDeps) *beliefTrainerStep {
 	}
 }
 
-// Provision creates or updates the trainer CronJob and its NetworkPolicy in
-// the tenant namespace. It waits until the namespace step has recorded the
-// namespace.
+// Provision creates or updates the trainer ServiceAccount, its SPIFFE
+// registration, its NetworkPolicy and its CronJob in the tenant namespace.
+// It waits until the namespace step has recorded the namespace.
 func (s *beliefTrainerStep) Provision(ctx context.Context, obj saga.ConditionedObject, _ *saga.Deps) (bool, error) {
 	t, err := tenantOf(obj)
 	if err != nil {
@@ -303,6 +388,22 @@ func (s *beliefTrainerStep) Provision(ctx context.Context, obj saga.ConditionedO
 	ns := t.Status.Namespace
 	if ns == "" {
 		return false, nil
+	}
+	sa := buildBeliefTrainerServiceAccount(t, ns)
+	if err := s.apply(ctx, sa, func(existing client.Object) {
+		e := existing.(*corev1.ServiceAccount) //nolint:forcetypeassert // apply passes the type it was given
+		e.Labels, e.OwnerReferences, e.AutomountServiceAccountToken = sa.Labels, sa.OwnerReferences, sa.AutomountServiceAccountToken
+	}); err != nil {
+		return false, fmt.Errorf("ensure the belief trainer ServiceAccount of tenant %s: %w", t.Name, err)
+	}
+	id := buildBeliefTrainerSPIFFEID(t, ns, s.cfg)
+	if err := s.apply(ctx, id, func(existing client.Object) {
+		e := existing.(*unstructured.Unstructured) //nolint:forcetypeassert // apply passes the type it was given
+		e.SetLabels(id.GetLabels())
+		e.SetOwnerReferences(id.GetOwnerReferences())
+		e.Object["spec"] = id.Object["spec"]
+	}); err != nil {
+		return false, fmt.Errorf("ensure the belief trainer SPIFFE ID of tenant %s: %w", t.Name, err)
 	}
 	np := buildBeliefTrainerNetworkPolicy(t, ns, s.cfg)
 	if err := s.apply(ctx, np, func(existing client.Object) {

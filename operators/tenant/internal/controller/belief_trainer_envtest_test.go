@@ -11,6 +11,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
@@ -24,7 +26,7 @@ import (
 // deletes a dependent whose owner is gone. envtest runs no garbage
 // collector, so this spec proves the owner reference, not the collection.
 var _ = ginkgo.Describe("belief trainer provisioning", func() {
-	ginkgo.It("creates the CronJob and its NetworkPolicy, owned by the Tenant", func() {
+	ginkgo.It("creates the CronJob, its NetworkPolicy and its SPIFFE identity, owned by the Tenant", func() {
 		tenant := &gibsonv1alpha1.Tenant{
 			ObjectMeta: metav1.ObjectMeta{Name: "trainer-envtest"},
 			Spec: gibsonv1alpha1.TenantSpec{
@@ -39,7 +41,7 @@ var _ = ginkgo.Describe("belief trainer provisioning", func() {
 		tenant.Status.Namespace = ns.Name
 
 		cfg, err := flows.NewBeliefTrainerConfig("ghcr.io/zeroroot-ai/gibson:test",
-			"gibson.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson")
+			"gibson.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson")
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		var ran bool
 		for _, step := range flows.ProvisionSteps(flows.ProvisionDeps{K8sClient: k8sClient, BeliefTrainer: cfg}) {
@@ -65,5 +67,19 @@ var _ = ginkgo.Describe("belief trainer provisioning", func() {
 		gomega.Expect(k8sClient.Get(ctx, key, &np)).To(gomega.Succeed())
 		gomega.Expect(np.OwnerReferences).To(gomega.HaveLen(1))
 		gomega.Expect(np.OwnerReferences[0].UID).To(gomega.Equal(tenant.UID))
+
+		// The trainer identity (gibson#1164): its ServiceAccount, and the
+		// registration that issues spiffe://<td>/trainer/<tenant>.
+		var sa corev1.ServiceAccount
+		gomega.Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: ns.Name, Name: flows.BeliefTrainerServiceAccount}, &sa)).
+			To(gomega.Succeed())
+		gomega.Expect(cj.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName).To(gomega.Equal(flows.BeliefTrainerServiceAccount))
+		id := &unstructured.Unstructured{}
+		id.SetGroupVersionKind(schema.GroupVersionKind{Group: "spire.spiffe.io", Version: "v1alpha1", Kind: "ClusterSPIFFEID"})
+		gomega.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "gibson-belief-trainer-" + tenant.Name}, id)).To(gomega.Succeed())
+		got, _, _ := unstructured.NestedString(id.Object, "spec", "spiffeIDTemplate")
+		gomega.Expect(got).To(gomega.Equal("spiffe://example.org/trainer/" + tenant.Name))
+		gomega.Expect(id.GetOwnerReferences()).To(gomega.HaveLen(1))
+		gomega.Expect(id.GetOwnerReferences()[0].UID).To(gomega.Equal(tenant.UID))
 	})
 })

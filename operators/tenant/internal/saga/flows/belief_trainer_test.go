@@ -6,11 +6,13 @@ package flows
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -21,13 +23,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/trainerid"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
 )
 
 func testTrainerConfig(t *testing.T) BeliefTrainerConfig {
 	t.Helper()
 	cfg, err := NewBeliefTrainerConfig("ghcr.io/zeroroot-ai/gibson:v1.2.3",
-		"gibson-gibson-workloads.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson")
+		"gibson-gibson-workloads.gibson.svc:50051", "spiffe://example.org/platform/daemon", "gibson", "gibson-gibson")
 	if err != nil {
 		t.Fatalf("NewBeliefTrainerConfig: %v", err)
 	}
@@ -53,15 +56,17 @@ func trainerTenant() *gibsonv1alpha1.Tenant {
 }
 
 func TestNewBeliefTrainerConfig_RequiresEachValue(t *testing.T) {
-	for name, args := range map[string][4]string{
-		"no image":          {"", "d:50051", "spiffe://example.org/platform/daemon", "gibson"},
-		"no daemon address": {"img", "", "spiffe://example.org/platform/daemon", "gibson"},
-		"no daemon SVID":    {"img", "d:50051", "", "gibson"},
-		"no namespace":      {"img", "d:50051", "spiffe://example.org/platform/daemon", ""},
-		"no port":           {"img", "daemon", "spiffe://example.org/platform/daemon", "gibson"},
-		"bad port":          {"img", "daemon:http", "spiffe://example.org/platform/daemon", "gibson"},
+	for name, args := range map[string][5]string{
+		"no image":          {"", "d:50051", "spiffe://example.org/platform/daemon", "gibson", "c"},
+		"no daemon address": {"img", "", "spiffe://example.org/platform/daemon", "gibson", "c"},
+		"no daemon SVID":    {"img", "d:50051", "", "gibson", "c"},
+		"bad daemon SVID":   {"img", "d:50051", "not-a-spiffe-id", "gibson", "c"},
+		"no namespace":      {"img", "d:50051", "spiffe://example.org/platform/daemon", "", "c"},
+		"no SPIRE class":    {"img", "d:50051", "spiffe://example.org/platform/daemon", "gibson", ""},
+		"no port":           {"img", "daemon", "spiffe://example.org/platform/daemon", "gibson", "c"},
+		"bad port":          {"img", "daemon:http", "spiffe://example.org/platform/daemon", "gibson", "c"},
 	} {
-		if _, err := NewBeliefTrainerConfig(args[0], args[1], args[2], args[3]); !errors.Is(err, errBeliefTrainerConfig) {
+		if _, err := NewBeliefTrainerConfig(args[0], args[1], args[2], args[3], args[4]); !errors.Is(err, errBeliefTrainerConfig) {
 			t.Errorf("%s: err = %v, want errBeliefTrainerConfig", name, err)
 		}
 	}
@@ -209,5 +214,64 @@ func assertTrainerPolicy(t *testing.T, c client.Client) {
 	if peer := daemon.To[0]; peer.NamespaceSelector == nil || peer.PodSelector == nil ||
 		peer.PodSelector.MatchLabels[labelComponent] != "daemon" {
 		t.Errorf("daemon peer = %+v, want the daemon pods of the platform namespace", peer)
+	}
+}
+
+// The trainer registration issues the literal ID of the tenant, in the
+// tenant namespace by its name, to the trainer pods on the trainer
+// ServiceAccount only. The daemon reads the tenant back from that ID with
+// trainerid.Tenant, so the round trip proves the daemon admits it for this
+// tenant and no other (gibson#1164).
+func TestBuildBeliefTrainerSPIFFEID(t *testing.T) {
+	cfg := testTrainerConfig(t)
+	tn := trainerTenant()
+	u := buildBeliefTrainerSPIFFEID(tn, tn.Status.Namespace, cfg)
+	if u.GroupVersionKind() != clusterSPIFFEIDGVK || u.GetName() != "gibson-belief-trainer-acme" || u.GetNamespace() != "" {
+		t.Fatalf("object = %s %s/%s", u.GroupVersionKind(), u.GetNamespace(), u.GetName())
+	}
+	wantLabels := map[string]string{
+		"app.kubernetes.io/managed-by": "gibson-tenant-operator",
+		"app.kubernetes.io/component":  "belief-trainer",
+		"gibson.zeroroot.ai/tenant":    "acme",
+	}
+	if !reflect.DeepEqual(u.GetLabels(), wantLabels) {
+		t.Errorf("labels = %v, want %v", u.GetLabels(), wantLabels)
+	}
+	if refs := u.GetOwnerReferences(); len(refs) != 1 || refs[0].Kind != "Tenant" || refs[0].UID != tn.UID {
+		t.Errorf("owner = %v, want the Tenant", refs)
+	}
+	want := map[string]any{
+		"className":                 "gibson-gibson",
+		"spiffeIDTemplate":          "spiffe://example.org/trainer/acme",
+		"namespaceSelector":         map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "tenant-acme"}},
+		"podSelector":               map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/component": "belief-trainer"}},
+		"workloadSelectorTemplates": []any{"k8s:ns:tenant-acme", "k8s:sa:gibson-belief-trainer"},
+	}
+	if !reflect.DeepEqual(u.Object["spec"], want) {
+		t.Errorf("spec = %v\nwant   %v", u.Object["spec"], want)
+	}
+	id, err := spiffeid.FromString(want["spiffeIDTemplate"].(string))
+	if err != nil {
+		t.Fatalf("the ID does not parse: %v", err)
+	}
+	td := spiffeid.RequireTrustDomainFromString("example.org")
+	if got, ok := trainerid.Tenant(id, td); !ok || got != "acme" {
+		t.Errorf("trainerid.Tenant = (%q, %v), want acme", got, ok)
+	}
+	if _, ok := trainerid.Tenant(id, spiffeid.RequireTrustDomainFromString("other.org")); ok {
+		t.Error("the trainer ID was admitted in another trust domain")
+	}
+}
+
+// The trainer pod runs on the trainer ServiceAccount, which mounts no token.
+func TestBeliefTrainerRunsOnItsServiceAccount(t *testing.T) {
+	tn := trainerTenant()
+	if got := beliefTrainerPodSpec(tn.Name, testTrainerConfig(t)).ServiceAccountName; got != BeliefTrainerServiceAccount {
+		t.Errorf("pod ServiceAccount = %q, want %q", got, BeliefTrainerServiceAccount)
+	}
+	sa := buildBeliefTrainerServiceAccount(tn, tn.Status.Namespace)
+	if sa.Name != BeliefTrainerServiceAccount || sa.Namespace != "tenant-acme" ||
+		sa.AutomountServiceAccountToken == nil || *sa.AutomountServiceAccountToken {
+		t.Errorf("ServiceAccount = %s/%s automount %v", sa.Namespace, sa.Name, sa.AutomountServiceAccountToken)
 	}
 }
