@@ -81,10 +81,12 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			"/gibson.job.v1.JobService/GetJob":                 true,
 			"/gibson.job.v1.JobService/CloseJob":               true,
 			// The plugin secret revocation exit test (gibson#154,
-			// tests/e2e/plugin_secret_revocation_test.go): seed the secret
-			// the GitHub plugin resolves, grant it to the plugin as a tenant
-			// admin, read the install's status, revoke the binding, and clean
-			// the secret up (ADR-0097).
+			// tests/e2e/plugin_secret_revocation_test.go): enable the GitHub
+			// catalog plugin for the tenant (gibson#1062, gibson#1159), seed
+			// the secret the plugin resolves, grant it to the plugin as a
+			// tenant admin, read the install's status, revoke the binding, and
+			// clean the secret up (ADR-0097).
+			"/gibson.tenant.v1.CatalogPluginService/EnableCatalogPlugin":          true,
 			"/gibson.secrets.v1.SecretsService/SetSecret":                         true,
 			"/gibson.tenant.v1.GrantsService/WriteSecretGrants":                   true,
 			"/gibson.secrets.v1.SecretsService/DeleteSecret":                      true,
