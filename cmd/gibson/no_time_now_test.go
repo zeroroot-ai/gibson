@@ -111,5 +111,33 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 			astchecks.RenderFindings(findings))
 	}
 
+	// An entry covers every time.Now() of its file, so a new call in an
+	// allowlisted file would pass unseen. Each file's count is recorded, and
+	// a different count fails (gibson#807 condition 7).
+	calls := map[string]int{
+		"internal/server/daemon/api/credentials.go":                 4,
+		"internal/server/daemon/api/export_findings.go":             2,
+		"internal/server/daemon/api/llm_config.go":                  4,
+		"internal/server/daemon/api/server.go":                      3,
+		"internal/server/daemon/api/server_chat.go":                 2,
+		"internal/server/daemon/api/server_entitlements_audit.go":   1,
+		"internal/server/daemon/api/server_model_access.go":         1,
+		"internal/server/daemon/api/server_provider_config.go":      4,
+		"internal/server/daemon/api/server_provider_exec.go":        1,
+		"internal/server/daemon/api/server_usage.go":                2,
+		"internal/server/daemon/api/server_connector_credential.go": 1,
+		"internal/server/daemon/api/signup_verification_store.go":   1,
+		"internal/server/daemon/api/signup_wiring.go":               1,
+		"internal/server/daemon/api/platform_health.go":             1,
+		"internal/server/daemon/api/produced_component.go":          1,
+		"internal/server/daemon/api/user_state.go":                  4,
+	}
+	if len(calls) != len(allowlist) {
+		t.Fatalf("the allowlist has %d entries and the call counts %d: each entry needs a count", len(allowlist), len(calls))
+	}
+	for _, p := range countProblems(repoRoot, calls, "time", "Now") {
+		t.Error(p)
+	}
+
 	t.Log(astchecks.FormatAllowlistLog(allowlist))
 }
