@@ -775,11 +775,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Zitadel and Roles make syncZitadel live: the founding owner of a
+	// self-serve tenant gets its Owner grant and the FGA copy from here
+	// (gibson#1188). Without them every TenantMember reached Active with no
+	// role, and the owner could not open the workspace.
 	if err := (&controller.TenantMemberReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		FGA:    fgaClient,
-		Audit:  sagaAudit,
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		FGA:     fgaClient,
+		Zitadel: zitadelClient,
+		Roles:   tenantRoleSyncer,
+		Audit:   sagaAudit,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TenantMember")
 		os.Exit(1)

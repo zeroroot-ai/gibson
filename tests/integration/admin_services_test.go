@@ -274,6 +274,11 @@ func (f *fakeUserIdPClient) SetHumanPassword(context.Context, idp.SetHumanPasswo
 func (f *fakeUserIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 	return idp.CreateHumanUserResult{UserID: "user-1"}, nil
 }
+func (f *fakeUserIdPClient) CreateOrganization(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+func (f *fakeUserIdPClient) DeleteOrganization(_ context.Context, _ string) error  { return nil }
+func (f *fakeUserIdPClient) OrgOfUser(_ context.Context, _ string) (string, error) { return "", nil }
 func (f *fakeUserIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }

@@ -703,6 +703,14 @@ func (*membersIdPClient) DeactivateHumanUser(context.Context, idp.HumanUserState
 func (*membersIdPClient) ReactivateHumanUser(context.Context, idp.HumanUserStateRequest) error {
 	return nil
 }
+func (*membersIdPClient) CreateOrganization(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
+func (*membersIdPClient) DeleteOrganization(_ context.Context, _ string) error { return nil }
+
+func (*membersIdPClient) OrgOfUser(_ context.Context, _ string) (string, error) { return "", nil }
+
 func (c *membersIdPClient) DeleteHumanUser(_ context.Context, req idp.HumanUserStateRequest) error {
 	c.deletedHumanUsers = append(c.deletedHumanUsers, req)
 	return c.deleteHumanUserErr

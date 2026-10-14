@@ -450,10 +450,9 @@ func (c *Client) CreateSetupLink(ctx context.Context, orgID, userID, appURL stri
 // duplicate address is disclosed only to the mailbox that owns it, never in the
 // RPC response.
 //
-// The Management (v1) user API is used, not the v2 resource API: it is the
-// surface the platform's in-cluster Zitadel proxy exposes to the daemon
-// (gibson#1560). The target org is selected by the x-zitadel-orgid header, so
-// no `organization` block goes in the body.
+// The Management (v1) user API is used because it takes an initial password.
+// The target org is selected by the x-zitadel-orgid header, so no
+// `organization` block goes in the body.
 func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
 	if req.Email == "" {
 		return idp.CreateHumanUserResult{}, fmt.Errorf("%w: CreateHumanUser requires email", idp.ErrUpstream)
@@ -490,6 +489,72 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	// conflict maps to idp.ErrAlreadyExists; no lookup and no credential write
 	// follow it.
 	return idp.CreateHumanUserResult{}, mapError(err, "CreateHumanUser:create")
+}
+
+// CreateOrganization makes the tenant org through Zitadel v2
+// (POST /v2/organizations), the same call the tenant-operator makes. Zitadel
+// keeps org names unique, so a 409 maps to idp.ErrAlreadyExists and the
+// caller refuses the workspace name. Create-only: no lookup follows a
+// conflict, because an org this signup did not make is not its org to adopt.
+func (c *Client) CreateOrganization(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("%w: CreateOrganization requires a name", idp.ErrUpstream)
+	}
+	var resp struct {
+		OrganizationID string `json:"organizationId"`
+	}
+	body := map[string]interface{}{"name": name}
+	if err := c.doRequest(ctx, http.MethodPost, "/v2/organizations", body, "", &resp); err != nil {
+		return "", mapError(err, "CreateOrganization")
+	}
+	if resp.OrganizationID == "" {
+		return "", fmt.Errorf("%w: CreateOrganization: response missing organizationId", idp.ErrUpstream)
+	}
+	return resp.OrganizationID, nil
+}
+
+// orgForUser returns orgID when the caller named one, and the org that owns
+// userID otherwise. The v1 Management calls select the org by header, so a
+// user in a tenant org is unreachable through the platform org (gibson#1188).
+func (c *Client) orgForUser(ctx context.Context, orgID, userID string) (string, error) {
+	if orgID != "" {
+		return orgID, nil
+	}
+	return c.userOrgID(ctx, userID)
+}
+
+// OrgOfUser returns the id of the org that owns userID.
+func (c *Client) OrgOfUser(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "", fmt.Errorf("%w: OrgOfUser requires a user id", idp.ErrUpstream)
+	}
+	orgID, err := c.userOrgID(ctx, userID)
+	if err != nil {
+		return "", mapError(err, "OrgOfUser")
+	}
+	return orgID, nil
+}
+
+// DeleteOrganization removes an org through Zitadel v2
+// (DELETE /v2/organizations/{id}). Not found is success. The platform org,
+// the one the admin client itself lives in, is refused: it holds the
+// Platform owner and every service account.
+func (c *Client) DeleteOrganization(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return fmt.Errorf("%w: DeleteOrganization requires an org id", idp.ErrUpstream)
+	}
+	if c.cfg.OrgID != "" && orgID == c.cfg.OrgID {
+		return fmt.Errorf("%w: DeleteOrganization refuses the platform org %s", idp.ErrPermission, orgID)
+	}
+	err := c.doRequest(ctx, http.MethodDelete, "/v2/organizations/"+url.PathEscape(orgID), nil, "", nil)
+	if err == nil {
+		return nil
+	}
+	mapped := mapError(err, "DeleteOrganization")
+	if errors.Is(mapped, idp.ErrNotFound) {
+		return nil
+	}
+	return mapped
 }
 
 // userServiceV2 is Zitadel v2's UserService, reached over the same
@@ -614,12 +679,12 @@ func (c *Client) setHumanUserState(ctx context.Context, req idp.HumanUserStateRe
 	if req.UserID == "" {
 		return fmt.Errorf("%w: %s requires userId", idp.ErrUpstream, operation)
 	}
-	orgID := req.OrgID
-	if orgID == "" {
-		orgID = c.cfg.OrgID
+	orgID, err := c.orgForUser(ctx, req.OrgID, req.UserID)
+	if err != nil {
+		return mapError(err, operation)
 	}
 	path := "/management/v1/users/" + req.UserID + "/" + verb
-	err := c.doRequest(ctx, http.MethodPost, path, map[string]interface{}{}, orgID, nil)
+	err = c.doRequest(ctx, http.MethodPost, path, map[string]interface{}{}, orgID, nil)
 	if err == nil {
 		return nil
 	}
@@ -639,11 +704,15 @@ func (c *Client) DeleteHumanUser(ctx context.Context, req idp.HumanUserStateRequ
 	if req.UserID == "" {
 		return fmt.Errorf("%w: DeleteHumanUser requires userId", idp.ErrUpstream)
 	}
-	orgID := req.OrgID
-	if orgID == "" {
-		orgID = c.cfg.OrgID
+	orgID, err := c.orgForUser(ctx, req.OrgID, req.UserID)
+	if err != nil {
+		mapped := mapError(err, "DeleteHumanUser")
+		if errors.Is(mapped, idp.ErrNotFound) {
+			return nil
+		}
+		return mapped
 	}
-	err := c.doRequest(ctx, http.MethodDelete, "/management/v1/users/"+req.UserID, nil, orgID, nil)
+	err = c.doRequest(ctx, http.MethodDelete, "/management/v1/users/"+req.UserID, nil, orgID, nil)
 	if err == nil {
 		return nil
 	}

@@ -24,7 +24,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit/audittest"
 	gibsonv1alpha1 "github.com/zeroroot-ai/gibson/operators/tenant/api/v1alpha1"
-	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients/zitadel"
 )
 
@@ -36,30 +35,6 @@ func isNotFoundErr(err error) bool {
 // fakeZitadelClient is a test double for zitadel.Client.
 type fakeZitadelClient struct {
 	mu sync.Mutex
-
-	ensureHumanUserCalls []ensureHumanUserCall
-
-	ensureHumanUserErr error
-	ensureHumanUserID  string
-}
-
-type ensureHumanUserCall struct {
-	OrgID string
-	Email string
-}
-
-func (f *fakeZitadelClient) EnsureHumanUser(_ context.Context, orgID, email string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ensureHumanUserCalls = append(f.ensureHumanUserCalls, ensureHumanUserCall{OrgID: orgID, Email: email})
-	if f.ensureHumanUserErr != nil {
-		return "", f.ensureHumanUserErr
-	}
-	id := f.ensureHumanUserID
-	if id == "" {
-		id = "fake-invitation-user-id"
-	}
-	return id, nil
 }
 
 func (f *fakeZitadelClient) CreateOrganization(_ context.Context, _, _ string) (string, error) {
@@ -94,9 +69,9 @@ func newMemberTestScheme(t *testing.T) *runtime.Scheme {
 }
 
 // buildMemberReconciler wires a Roles Syncer over fresh in-memory fakes
-// (grants, tuples) alongside the fz Zitadel client (used for EnsureHumanUser,
-// the no-ZitadelUserID-yet path). Tests that need to inspect or fail the
-// role-grant side call buildMemberReconcilerWithRoles directly.
+// (grants, tuples) alongside the fz Zitadel client. Tests that need to
+// inspect or fail the role-grant side call buildMemberReconcilerWithRoles
+// directly.
 func buildMemberReconciler(
 	t *testing.T,
 	fz *fakeZitadelClient,
@@ -204,9 +179,6 @@ func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 	r, fc, grants, tuples := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, tuples)
 	doReconcile(t, r, "alice")
 
-	if len(fz.ensureHumanUserCalls) != 0 {
-		t.Errorf("expected 0 EnsureHumanUser calls (ZitadelUserID already set), got %d", len(fz.ensureHumanUserCalls))
-	}
 	if len(grants.grants) != 1 || grants.grants[0].UserID != "zuser-alice" || grants.grants[0].OrgID != "org-111" {
 		t.Fatalf("grants = %+v, want one grant for zuser-alice in org-111", grants.grants)
 	}
@@ -226,173 +198,45 @@ func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 	}
 }
 
-// TestSyncZitadel_EnsureHumanUser: no ZitadelUserID, email set →
-// EnsureHumanUser called (never SendInvitation/AddMember — hosted#203
-// deleted the org-member API write this branch used to make), the tenant
-// role is assigned through the Syncer, and ZitadelUserID/ZitadelMembershipID
-// are persisted.
-func TestSyncZitadel_EnsureHumanUser(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserID: "invited-user-777"}
-	grants := &fakeRoleGrants{}
-	member := &gibsonv1alpha1.TenantMember{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       "bob",
-			Namespace:  "default",
-			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
-		},
-		Spec: gibsonv1alpha1.TenantMemberSpec{
-			Email:     "bob@acme.com",
-			Role:      gibsonv1alpha1.MemberRoleAdmin,
-			TenantRef: localRef(),
-		},
-	}
-
-	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
-	doReconcile(t, r, "bob")
-
-	fz.mu.Lock()
-	ensured := append([]ensureHumanUserCall(nil), fz.ensureHumanUserCalls...)
-	fz.mu.Unlock()
-
-	if len(ensured) != 1 {
-		t.Fatalf("expected 1 EnsureHumanUser call, got %d", len(ensured))
-	}
-	if ensured[0].Email != "bob@acme.com" {
-		t.Errorf("EnsureHumanUser email=%q", ensured[0].Email)
-	}
-	if ensured[0].OrgID != "org-111" {
-		t.Errorf("EnsureHumanUser orgID=%q want org-111", ensured[0].OrgID)
-	}
-	if len(grants.grants) != 1 || grants.grants[0].UserID != "invited-user-777" || grants.grants[0].RoleKeys[0] != string(tenantrole.Admin) {
-		t.Fatalf("grants = %+v, want one admin grant for invited-user-777", grants.grants)
-	}
-
-	var got gibsonv1alpha1.TenantMember
-	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "bob"}, &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Status.ZitadelUserID != "invited-user-777" {
-		t.Errorf("ZitadelUserID=%q want invited-user-777", got.Status.ZitadelUserID)
-	}
-	if got.Status.ZitadelMembershipID == "" {
-		t.Error("ZitadelMembershipID not persisted after EnsureHumanUser + Roles.Assign")
-	}
-}
-
-// noRoleSyncerMember builds the fixture the next several tests share: an
-// email-only TenantMember (no ZitadelUserID yet), used to exercise the
-// no-ZitadelUserID-yet branch's non-happy-path returns.
-func noRoleSyncerMember(name string) *gibsonv1alpha1.TenantMember {
-	return &gibsonv1alpha1.TenantMember{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       name,
-			Namespace:  "default",
-			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
-		},
-		Spec: gibsonv1alpha1.TenantMemberSpec{
-			Email:     name + "@acme.com",
-			Role:      gibsonv1alpha1.MemberRoleAdmin,
-			TenantRef: localRef(),
-		},
-	}
-}
-
-// TestSyncZitadel_EnsureHumanUser_RolesNilIsAnError: no Syncer configured →
-// the role write has nowhere to land, so this must fail loudly rather than
-// silently skip creating the account's tenant role.
-func TestSyncZitadel_EnsureHumanUser_RolesNilIsAnError(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
-	tenant := tenantWithOrgID()
-	s := newMemberTestScheme(t)
-	fc := fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&gibsonv1alpha1.Tenant{}, &gibsonv1alpha1.TenantMember{}).
-		WithObjects(tenant, noRoleSyncerMember("dana")).
-		Build()
-	if err := fc.Status().Update(context.Background(), tenant); err != nil {
-		t.Fatalf("seed tenant status: %v", err)
-	}
-	r := &TenantMemberReconciler{
-		Audit:    (&audittest.Sink{}).Emitter(t),
-		Client:   fc,
-		Scheme:   s,
-		Recorder: events.NewFakeRecorder(20),
-		Zitadel:  fz,
-		// Roles deliberately left nil.
-	}
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "dana"},
-	})
-	if err == nil {
-		t.Fatal("expected an error when Roles is not configured")
-	}
-}
-
-// TestSyncZitadel_EnsureHumanUser_Unreachable: a transient Zitadel failure
-// creating the account must requeue with backoff, not fail the reconcile.
-func TestSyncZitadel_EnsureHumanUser_Unreachable(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserErr: fmt.Errorf("connect: %w", clients.ErrUnreachable)}
-	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), noRoleSyncerMember("erin"))
-
-	res, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "erin"},
-	})
-	if err != nil {
-		t.Fatalf("expected no error, a soft requeue instead: %v", err)
-	}
-	if res.RequeueAfter == 0 {
-		t.Error("expected RequeueAfter on an unreachable Zitadel")
-	}
-}
-
-// TestSyncZitadel_EnsureHumanUser_PermanentErrorSurfaces: a non-transient
-// EnsureHumanUser failure must fail the reconcile (controller-runtime's own
-// error backoff), not be swallowed.
-func TestSyncZitadel_EnsureHumanUser_PermanentErrorSurfaces(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserErr: errors.New("permanently rejected")}
-	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), noRoleSyncerMember("frank"))
-
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "frank"},
-	})
-	if err == nil {
-		t.Fatal("expected the permanent EnsureHumanUser error to surface")
-	}
-}
-
-// TestSyncZitadel_EnsureHumanUser_InvalidRoleMapping: a MemberRole with no
-// tenant-role mapping must fail rather than assign a made-up default.
-func TestSyncZitadel_EnsureHumanUser_InvalidRoleMapping(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
-	member := noRoleSyncerMember("grace")
-	member.Spec.Role = "not-a-real-role"
-
-	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "grace"},
-	})
-	if err == nil {
-		t.Fatal("expected an error for an unmapped MemberRole")
-	}
-}
-
-// TestSyncZitadel_EnsureHumanUser_AssignErrorSurfaces: a role-write failure
-// after EnsureHumanUser succeeded must fail the reconcile.
-func TestSyncZitadel_EnsureHumanUser_AssignErrorSurfaces(t *testing.T) {
-	fz := &fakeZitadelClient{ensureHumanUserID: "user-x"}
-	grants := &fakeRoleGrants{createErr: errors.New("create boom")}
-
-	r, _, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), noRoleSyncerMember("henry"), grants, &fakeRoleTuples{})
-	_, err := r.Reconcile(context.Background(), ctrl.Request{
-		NamespacedName: types.NamespacedName{Namespace: "default", Name: "henry"},
-	})
-	if err == nil {
-		t.Fatal("expected the Roles.Assign error to surface")
-	}
-}
-
 // TestSyncZitadel_AlreadyInZitadel_Idempotent: ZitadelMembershipID already
 // set → no Zitadel calls, no error.
+// TestSyncZitadel_MemberWithNoAccountWaits: the operator creates no user
+// (gibson#1188). A member with an email and no account waits for the daemon:
+// no Zitadel grant, no FGA tuple, no error, not Active.
+func TestSyncZitadel_MemberWithNoAccountWaits(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "carol",
+			Namespace:  "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     "carol@acme.com",
+			Role:      gibsonv1alpha1.MemberRoleAdmin,
+			TenantRef: localRef(),
+		},
+	}
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(
+		t, fz, tenantWithOrgID(), member, &fakeRoleGrants{}, &fakeRoleTuples{})
+	res, err := r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "carol"}})
+	if err != nil || res.RequeueAfter != 0 {
+		t.Fatalf("reconcile = (%+v, %v), want a quiet wait", res, err)
+	}
+	if len(grants.grants) != 0 {
+		t.Fatalf("a member with no account got grants %+v", grants.grants)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "carol"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	active := got.Status.Phase == gibsonv1alpha1.TenantMemberPhaseActive
+	if got.Status.ZitadelUserID != "" || got.Status.ZitadelMembershipID != "" || active {
+		t.Fatalf("status = %+v, want no user, no membership and not Active", got.Status)
+	}
+}
+
 func TestSyncZitadel_AlreadyInZitadel_Idempotent(t *testing.T) {
 	fz := &fakeZitadelClient{}
 	member := &gibsonv1alpha1.TenantMember{
@@ -415,13 +259,6 @@ func TestSyncZitadel_AlreadyInZitadel_Idempotent(t *testing.T) {
 	r, _ := buildMemberReconciler(t, fz, tenantWithOrgID(), member)
 	doReconcile(t, r, "carol")
 
-	fz.mu.Lock()
-	ensures := len(fz.ensureHumanUserCalls)
-	fz.mu.Unlock()
-
-	if ensures != 0 {
-		t.Errorf("expected 0 Zitadel calls on idempotent reconcile, got ensures=%d", ensures)
-	}
 }
 
 // TestSyncZitadel_RemoveMember_HappyPath: deletion with MembershipID set →
@@ -552,9 +389,6 @@ func TestSyncZitadel_PreAccepted_BootstrapsFromSpec(t *testing.T) {
 	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
 	doReconcile(t, r, "founder")
 
-	if len(fz.ensureHumanUserCalls) != 0 {
-		t.Errorf("expected 0 EnsureHumanUser calls, got %d — duplicate account would be created", len(fz.ensureHumanUserCalls))
-	}
 	if len(grants.grants) != 1 || grants.grants[0].UserID != "12345" {
 		t.Fatalf("grants = %+v, want one grant for user 12345", grants.grants)
 	}
@@ -666,5 +500,53 @@ func TestSyncZitadel_RemoveMember_Unavailable(t *testing.T) {
 	found := slices.Contains(got.Finalizers, gibsonv1alpha1.TenantMemberFinalizer)
 	if !found {
 		t.Error("finalizer must remain when Zitadel is unavailable on remove")
+	}
+}
+
+// TestSyncZitadel_RoleWriteFailureSurfaces: a failed Zitadel grant write on a
+// pre-accepted member fails the reconcile, it is not a wait.
+func TestSyncZitadel_RoleWriteFailureSurfaces(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{createErr: errors.New("zitadel refused the grant")}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: "default", Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "stale@acme.com", Role: gibsonv1alpha1.MemberRoleOwner, TenantRef: localRef(), AcceptedByUserID: "zuser-stale",
+		},
+	}
+	r, _, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "stale"}})
+	if err == nil || res.RequeueAfter != 0 {
+		t.Fatalf("reconcile = (%+v, %v), want the role write failure to surface as an error", res, err)
+	}
+}
+
+// TestCleanup_MemberOfAMissingTenantFinishes: the tenant is gone, so there is
+// no org to revoke in. The finalizer completes.
+func TestCleanup_MemberOfAMissingTenantFinishes(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	now := metav1.Now()
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "orphan", Namespace: "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}, DeletionTimestamp: &now,
+		},
+		Spec:   gibsonv1alpha1.TenantMemberSpec{Email: "o@acme.com", Role: gibsonv1alpha1.MemberRoleMember, TenantRef: localRef()},
+		Status: gibsonv1alpha1.TenantMemberStatus{ZitadelUserID: "zuser-o", ZitadelMembershipID: "org-111/zuser-o"},
+	}
+	tenant := tenantWithOrgID()
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenant, member, &fakeRoleGrants{}, &fakeRoleTuples{})
+	if err := fc.Delete(context.Background(), tenant); err != nil {
+		t.Fatalf("delete tenant: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orphan"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(grants.grants) != 0 {
+		t.Fatalf("grants = %+v, want none touched", grants.grants)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "orphan"}, &got); err == nil {
+		t.Fatalf("member still exists with finalizers %v", got.Finalizers)
 	}
 }
