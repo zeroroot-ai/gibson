@@ -114,7 +114,6 @@ Do not edit the tables by hand.
 | ADR-0137 | The schema declares which variable an edge feeds, and the trainer learns each strength |
 | ADR-0141 | The setec sandbox substrate is x86 with KVM |
 | ADR-0142 | A Gibson cluster dials one named setec fleet over mTLS, and the fleet enrolls each cluster |
-| ADR-0143 | Until the cutover, setec uses stock runtimes and a node installer |
 | ADR-0144 | Warm start is a pool of base snapshots that setec builds |
 | ADR-0145 | A restored sandbox must pass five isolation invariants |
 | ADR-0146 | A Sandbox is ephemeral or a session, and a session survives a suspend and a node loss |
@@ -183,3 +182,4 @@ Do not edit the tables by hand.
 | ADR-0082 | A recreate restores only a named backup | ADR-0083 |
 | ADR-0085 | The chart is Apache-2.0, the images are not | ADR-0089 |
 | ADR-0091 | Staging is one EC2 instance with k3s | ADR-0095 |
+| ADR-0143 | Until the cutover, setec used stock runtimes and a node installer | ADR-0166 |
