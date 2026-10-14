@@ -509,6 +509,27 @@ func TestCatalogPlugins_PruneLeavesForeignObjects(t *testing.T) {
 	}
 }
 
+// The belief trainer step of the tenant-operator labels its ClusterSPIFFEID
+// with the same managed-by value as this loop, and with no plugin label
+// (gibson#1164). The prune must leave it. Before gibson#1169 it deleted the
+// registration on each pass, so no trainer pod got its identity.
+func TestCatalogPlugins_PruneLeavesTheTrainerIdentity(t *testing.T) {
+	trainerID := cpIdentity("gibson-belief-trainer-" + cpTenant)
+	trainerID.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by": "gibson-tenant-operator",
+		"app.kubernetes.io/component":  "belief-trainer",
+		"gibson.zeroroot.ai/tenant":    cpTenant,
+	})
+	d := &fakeCatalogPluginDaemon{}
+	r, c := newCatalogPluginLoop(t, d, cpTenantObject(cpTenant), trainerID)
+	if err := r.converge(context.Background()); err != nil {
+		t.Fatalf("converge: %v", err)
+	}
+	if !cpExists(t, c, client.ObjectKey{Name: trainerID.GetName()}, cpIdentity(trainerID.GetName())) {
+		t.Error("the prune deleted the belief trainer identity, which the loop did not make")
+	}
+}
+
 // The namespace tenant-<a>-plugins is also the namespace of a tenant with the
 // name <a>-plugins. The loop never takes over a namespace that is not its own.
 func TestCatalogPlugins_RefusesAForeignNamespace(t *testing.T) {
