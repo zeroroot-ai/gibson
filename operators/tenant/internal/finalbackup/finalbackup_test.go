@@ -6,6 +6,8 @@ package finalbackup
 import (
 	"context"
 	"errors"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -54,10 +56,40 @@ func tenantNamespace() *corev1.Namespace {
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: TenantNamespace(testTenant)}}
 }
 
+// testTemplate is the backup template of the shipped Schedule, in the shape
+// the chart renders (helm/gibson-velero templates/schedule.yaml).
+func testTemplate() map[string]any {
+	return map[string]any{
+		"includedNamespaces":               []any{"gibson", "tenant-*"},
+		"includedNamespaceScopedResources": []any{"*"},
+		"excludedNamespaceScopedResources": []any{
+			"secrets", "*.generators.external-secrets.io", "*.helm.cattle.io", "*.k3s.cattle.io",
+			"ciliumendpoints.cilium.io",
+		},
+		"includedClusterScopedResources": []any{"tenants.gibson.zeroroot.ai"},
+		"defaultVolumesToFsBackup":       true,
+		"storageLocation":                "default",
+		"ttl":                            "4320h0m0s",
+		"hooks": map[string]any{"resources": []any{map[string]any{
+			"name": "tenant-neo4j-checkpoint",
+		}}},
+	}
+}
+
+// scheduleFixture is the Schedule the chart ships in the Velero namespace.
+func scheduleFixture() *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(scheduleGVK)
+	u.SetNamespace(testVeleroNS)
+	u.SetName(ScheduleName)
+	u.Object["spec"] = map[string]any{"schedule": "0 * * * *", "template": testTemplate()}
+	return u
+}
+
 // backupWithPhase is a Backup as Velero leaves it, with the given phase and
 // age.
 func backupWithPhase(phase string, age time.Duration) *unstructured.Unstructured {
-	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture())
+	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), testTemplate())
 	b.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-age)))
 	if phase != "" {
 		_ = unstructured.SetNestedField(b.Object, phase, "status", "phase")
@@ -112,7 +144,7 @@ func TestNew_RequiresEachArgument(t *testing.T) {
 // The audit record of the backup is written before the Backup exists
 // (gibson#583).
 func TestEnsure_RecordsBeforeTheBackup(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).Build()
 	existedAtRecord := true
 	sink := &audittest.Sink{OnEmit: func(audit.Event) { _, existedAtRecord = getBackup(t, c) }}
 	if _, err := newTakerWithSink(t, c, sink).Ensure(context.Background(), tenantFixture()); err != nil {
@@ -133,7 +165,7 @@ func TestEnsure_RecordsBeforeTheBackup(t *testing.T) {
 
 // With no audit record there is no Backup, and the delete flow stops.
 func TestEnsure_NoRecordNoBackup(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).Build()
 	sink := &audittest.Sink{Err: errors.New("daemon down")}
 	done, err := newTakerWithSink(t, c, sink).Ensure(context.Background(), tenantFixture())
 	if done || err == nil {
@@ -146,7 +178,7 @@ func TestEnsure_NoRecordNoBackup(t *testing.T) {
 
 // A create that fails after its record gets a second record with the reason.
 func TestEnsure_FailedCreateIsRecorded(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).
 		WithInterceptorFuncs(interceptor.Funcs{
 			Create: func(context.Context, client.WithWatch, client.Object, ...client.CreateOption) error {
 				return errors.New("the API server is not reachable")
@@ -164,7 +196,7 @@ func TestEnsure_FailedCreateIsRecorded(t *testing.T) {
 
 // The first pass creates the Backup and reports that the flow must wait.
 func TestEnsure_CreatesTheBackupAndWaits(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).Build()
 	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
 	if err != nil {
 		t.Fatalf("Ensure: %v", err)
@@ -205,7 +237,7 @@ func TestEnsure_CreatesTheBackupAndWaits(t *testing.T) {
 
 // A second pass does not create a second backup.
 func TestEnsure_OneBackupForEachDelete(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).Build()
 	taker := newTaker(t, c)
 	for i := range 3 {
 		if done, err := taker.Ensure(context.Background(), tenantFixture()); err != nil || done {
@@ -225,7 +257,7 @@ func TestEnsure_OneBackupForEachDelete(t *testing.T) {
 // Case 1 of the issue: the backup is complete, so the flow goes on.
 func TestEnsure_BackupComplete(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
-		WithObjects(tenantNamespace(), backupWithPhase("Completed", time.Minute)).Build()
+		WithObjects(tenantNamespace(), scheduleFixture(), backupWithPhase("Completed", time.Minute)).Build()
 	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
 	if err != nil || !done {
 		t.Fatalf("done=%v err=%v, want done with no error", done, err)
@@ -238,7 +270,7 @@ func TestEnsure_BackupFailed(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			before := testutil.ToFloat64(metrics.FinalBackupFailures.WithLabelValues("backup_failed"))
 			c := fake.NewClientBuilder().WithScheme(testScheme(t)).
-				WithObjects(tenantNamespace(), backupWithPhase(phase, time.Minute)).Build()
+				WithObjects(tenantNamespace(), scheduleFixture(), backupWithPhase(phase, time.Minute)).Build()
 			done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
 			if done {
 				t.Fatal("Ensure reported done for a failed backup")
@@ -277,7 +309,7 @@ func TestEnsure_VeleroNotReachable(t *testing.T) {
 	for name, funcs := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := fake.NewClientBuilder().WithScheme(testScheme(t)).
-				WithObjects(tenantNamespace()).WithInterceptorFuncs(funcs).Build()
+				WithObjects(tenantNamespace(), scheduleFixture()).WithInterceptorFuncs(funcs).Build()
 			done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
 			if done || err == nil {
 				t.Fatalf("done=%v err=%v, want an error and not done", done, err)
@@ -290,13 +322,13 @@ func TestEnsure_VeleroNotReachable(t *testing.T) {
 func TestEnsure_UnfinishedBackup(t *testing.T) {
 	for _, phase := range []string{"", "New", "InProgress", "Finalizing"} {
 		c := fake.NewClientBuilder().WithScheme(testScheme(t)).
-			WithObjects(tenantNamespace(), backupWithPhase(phase, time.Minute)).Build()
+			WithObjects(tenantNamespace(), scheduleFixture(), backupWithPhase(phase, time.Minute)).Build()
 		if done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture()); done || err != nil {
 			t.Errorf("phase %q after one minute: done=%v err=%v, want waiting", phase, done, err)
 		}
 	}
 	c := fake.NewClientBuilder().WithScheme(testScheme(t)).
-		WithObjects(tenantNamespace(), backupWithPhase("InProgress", Timeout+time.Minute)).Build()
+		WithObjects(tenantNamespace(), scheduleFixture(), backupWithPhase("InProgress", Timeout+time.Minute)).Build()
 	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
 	if done || !errors.Is(err, ErrBackupFailed) {
 		t.Fatalf("after the time limit: done=%v err=%v, want ErrBackupFailed", done, err)
@@ -329,10 +361,62 @@ func TestEnsure_NothingToBackUp(t *testing.T) {
 }
 
 func TestEnsure_RefusesATenantWithNoUID(t *testing.T) {
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace()).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture()).Build()
 	tenant := tenantFixture()
 	tenant.UID = ""
 	if done, err := newTaker(t, c).Ensure(context.Background(), tenant); done || err == nil {
 		t.Fatalf("done=%v err=%v, want an error", done, err)
+	}
+}
+
+// The last backup is the template of the shipped Schedule with only the
+// namespace and the retention changed (C67, gibson#1177). The exact
+// comparison fails when the build drops or changes any field of the
+// template: an exclusion, a hook, the volume rule or the storage location.
+func TestBuild_IsTheScheduleTemplate(t *testing.T) {
+	template := testTemplate()
+	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), template)
+	want := testTemplate()
+	want["includedNamespaces"] = []any{"tenant-" + testTenant}
+	want["ttl"] = "720h0m0s"
+	if !reflect.DeepEqual(b.Object["spec"], want) {
+		t.Errorf("spec = %v\nwant   %v", b.Object["spec"], want)
+	}
+	// The build does not write into the template it was given.
+	if !reflect.DeepEqual(template, testTemplate()) {
+		t.Error("Build changed the template of the Schedule")
+	}
+}
+
+// An exclusion that the Schedule gains later reaches the last backup with no
+// change in the operator: the one list is the Schedule.
+func TestBuild_KeepsAnExclusionTheTemplateAdds(t *testing.T) {
+	template := testTemplate()
+	template["excludedNamespaceScopedResources"] = append(
+		template["excludedNamespaceScopedResources"].([]any), "new.kind.example.io")
+	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), template)
+	got, _, _ := unstructured.NestedStringSlice(b.Object, "spec", "excludedNamespaceScopedResources")
+	if !slices.Contains(got, "new.kind.example.io") || !slices.Contains(got, "ciliumendpoints.cilium.io") {
+		t.Errorf("excludedNamespaceScopedResources = %v, want each exclusion of the template", got)
+	}
+}
+
+// With no Schedule, or a Schedule with no template, no Backup is created and
+// the delete flow stops: a backup without the exclusions ends PartiallyFailed.
+func TestEnsure_NoScheduleNoBackup(t *testing.T) {
+	empty := scheduleFixture()
+	empty.Object["spec"] = map[string]any{"schedule": "0 * * * *"}
+	for name, objs := range map[string][]client.Object{
+		"no Schedule":           {tenantNamespace()},
+		"Schedule, no template": {tenantNamespace(), empty},
+	} {
+		c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objs...).Build()
+		done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+		if done || err == nil {
+			t.Errorf("%s: done=%v err=%v, want an error and not done", name, done, err)
+		}
+		if _, found := getBackup(t, c); found {
+			t.Errorf("%s: a Backup was created with no Schedule template", name)
+		}
 	}
 }

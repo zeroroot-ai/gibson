@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -70,7 +71,18 @@ var failedPhases = map[string]bool{
 	"FailedValidation": true,
 }
 
-var backupGVK = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "Backup"}
+var (
+	backupGVK   = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "Backup"}
+	scheduleGVK = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "Schedule"}
+)
+
+// ScheduleName is the Schedule that the chart ships in the Velero namespace
+// (charts helm/gibson-velero, platform-hourly). The last backup of a tenant is
+// built from its template, so the last backup and the hourly backups exclude
+// the same kinds from one list: secrets, the ESO generators, the k3s kinds and
+// CiliumEndpoints (C67, gibson#1177). The chart grants the operator get on
+// this one Schedule by name.
+const ScheduleName = "platform-hourly"
 
 // ErrBackupFailed reports a last backup that Velero did not complete. To try
 // again, an operator deletes the failed Backup object. The next delete pass
@@ -177,10 +189,15 @@ func (t *Taker) create(ctx context.Context, name string, tenant *gibsonv1alpha1.
 		"tenant_namespace": TenantNamespace(tenant.Name),
 		"tenant_uid":       string(tenant.UID),
 	})
+	template, err := t.scheduleTemplate(ctx)
+	if err != nil {
+		return t.fail("read_schedule", err)
+	}
+	backup := Build(name, t.namespace, tenant, template)
 	created := false
-	err := t.audit.Change(ctx, ev, func() error {
+	err = t.audit.Change(ctx, ev, func() error {
 		created = true
-		if cErr := t.client.Create(ctx, Build(name, t.namespace, tenant)); cErr != nil {
+		if cErr := t.client.Create(ctx, backup); cErr != nil {
 			return fmt.Errorf("finalbackup: create Backup %s/%s: %w", t.namespace, name, cErr)
 		}
 		return nil
@@ -195,16 +212,39 @@ func (t *Taker) create(ctx context.Context, name string, tenant *gibsonv1alpha1.
 	}
 }
 
+// scheduleTemplate reads the backup template of the shipped Schedule. With
+// no Schedule or no template there is no last backup, so the delete flow
+// stops: a backup without the exclusions of the Schedule ends
+// PartiallyFailed and holds kinds that a restore cannot create.
+func (t *Taker) scheduleTemplate(ctx context.Context) (map[string]any, error) {
+	sched := &unstructured.Unstructured{}
+	sched.SetGroupVersionKind(scheduleGVK)
+	if err := t.client.Get(ctx, client.ObjectKey{Namespace: t.namespace, Name: ScheduleName}, sched); err != nil {
+		return nil, fmt.Errorf("finalbackup: read Schedule %s/%s, the template of the last backup: %w",
+			t.namespace, ScheduleName, err)
+	}
+	template, found, err := unstructured.NestedMap(sched.Object, "spec", "template")
+	if err != nil {
+		return nil, fmt.Errorf("finalbackup: Schedule %s/%s: read spec.template: %w", t.namespace, ScheduleName, err)
+	}
+	if !found || len(template) == 0 {
+		return nil, fmt.Errorf("finalbackup: Schedule %s/%s has no spec.template", t.namespace, ScheduleName)
+	}
+	return template, nil
+}
+
 // fail counts one failure and returns err unchanged.
 func (t *Taker) fail(reason string, err error) error {
 	metrics.FinalBackupFailures.WithLabelValues(reason).Inc()
 	return err
 }
 
-// Build returns the Backup object for the last backup of a tenant. The backup
-// holds each object of the tenant namespace and the files of each pod volume
-// in it.
-func Build(name, veleroNamespace string, tenant *gibsonv1alpha1.Tenant) *unstructured.Unstructured {
+// Build returns the Backup object for the last backup of a tenant: the
+// template of the shipped Schedule, with the tenant namespace as the only
+// included namespace and the retention of the last backup. Every other field
+// of the template stays as it is, so each exclusion, hook and volume rule of
+// the hourly backups holds for the last backup too.
+func Build(name, veleroNamespace string, tenant *gibsonv1alpha1.Tenant, template map[string]any) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(backupGVK)
 	u.SetName(name)
@@ -217,11 +257,9 @@ func Build(name, veleroNamespace string, tenant *gibsonv1alpha1.Tenant) *unstruc
 	u.SetAnnotations(map[string]string{
 		AnnotationTenantUID: string(tenant.UID),
 	})
-	_ = unstructured.SetNestedMap(u.Object, map[string]any{
-		"includedNamespaces":       []any{TenantNamespace(tenant.Name)},
-		"defaultVolumesToFsBackup": true,
-		"storageLocation":          "default",
-		"ttl":                      fmt.Sprintf("%dh0m0s", RetentionDays*24),
-	}, "spec")
+	spec := runtime.DeepCopyJSON(template)
+	spec["includedNamespaces"] = []any{TenantNamespace(tenant.Name)}
+	spec["ttl"] = fmt.Sprintf("%dh0m0s", RetentionDays*24)
+	u.Object["spec"] = spec
 	return u
 }
