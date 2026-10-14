@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.161.0](https://github.com/zeroroot-ai/gibson/compare/v0.160.4...v0.161.0) (2026-10-14)
+
+
+### Features
+
+* **providers:** the connection test needs no model, and the model lists come from the provider ([#1194](https://github.com/zeroroot-ai/gibson/issues/1194)) ([d0b2ec5](https://github.com/zeroroot-ai/gibson/commit/d0b2ec59efb3f5e995792d09a0fdccb23252cf3b))
+
 ## [0.160.4](https://github.com/zeroroot-ai/gibson/compare/v0.160.3...v0.160.4) (2026-10-14)
 
 
