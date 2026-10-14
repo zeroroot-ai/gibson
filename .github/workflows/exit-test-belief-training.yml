@@ -297,7 +297,14 @@ jobs:
             exit 1
           fi
           job="belief-trainer-exit-${GITHUB_RUN_ID}"
-          kubectl -n "$tns" create job "$job" --from=cronjob/belief-trainer
+          # The trainer admission policy (charts#700, gibson#1170) admits a
+          # manual trainer Job only from cronjob-controller or a principal in
+          # system:masters. The kind admin is kubernetes-admin in the group
+          # kubeadm:cluster-admins (kubeadm 1.29+), so it runs the Job as a
+          # cluster admin does: it impersonates system:masters.
+          me="$(kubectl auth whoami -o jsonpath='{.status.userInfo.username}')"
+          kubectl -n "$tns" create job "$job" --from=cronjob/belief-trainer \
+            --as "$me" --as-group system:masters
           if ! kubectl -n "$tns" wait --for=condition=complete "job/$job" --timeout=15m; then
             kubectl -n "$tns" describe job "$job" || true
             kubectl -n "$tns" logs "job/$job" --tail=200 || true
