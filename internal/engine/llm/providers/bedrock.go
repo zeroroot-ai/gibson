@@ -547,3 +547,7 @@ func firstNonEmpty(values ...string) string {
 // DefaultModel returns the model ID the provider completes against when the
 // request names none: the saved default model, else the built-in fallback.
 func (p *BedrockProvider) DefaultModel() string { return p.modelID }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *BedrockProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }

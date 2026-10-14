@@ -271,10 +271,10 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 	}
 
 	// The model is the saved choice of the tenant. A mission never asks the
-	// provider for a model list: the list can be slow or down, and it reports
-	// no context window or feature set that this check could rely on. The
-	// provider rejects an unknown model when it completes.
-	model := unlistedModel(config.Model)
+	// provider for a model list: the list can be slow or down. The window comes
+	// from the value stored with the saved provider. The provider rejects an
+	// unknown model when it completes.
+	model := savedModelInfo(provider, config.Model)
 	if err := m.validateConstraints(slot, model); err != nil {
 		return nil, llm.ModelInfo{}, types.WrapError(
 			llm.ErrNoMatchingProvider,
@@ -289,10 +289,20 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 	return provider, model, nil
 }
 
-// unlistedModel describes a model by its name only. Its context window and
-// feature set are unreported, so no slot constraint can reject it.
-func unlistedModel(name string) llm.ModelInfo {
-	return llm.ModelInfo{Name: name, ContextWindowUnreported: true, FeaturesUnreported: true}
+// savedModelInfo describes a model for a slot check. The saved default model of
+// the provider carries the context window that was stored with it at save time,
+// so its window is known. Any other model, and a provider saved before the
+// window was stored, has an unknown window. A feature set is never known: no
+// provider reports a complete one.
+func savedModelInfo(provider llm.LLMProvider, name string) llm.ModelInfo {
+	info := llm.ModelInfo{Name: name, ContextWindowUnreported: true, FeaturesUnreported: true}
+	if name == llm.SavedModel(provider) {
+		if w := llm.SavedModelWindow(provider); w > 0 {
+			info.ContextWindow = w
+			info.ContextWindowUnreported = false
+		}
+	}
+	return info
 }
 
 // resolveByConstraints searches all available providers to find a model matching the slot constraints
@@ -391,7 +401,7 @@ func (m *DaemonSlotManager) tryProvider(ctx context.Context, providerName string
 		)
 	}
 
-	model := unlistedModel(name)
+	model := savedModelInfo(provider, name)
 	if err := m.validateConstraints(slot, model); err != nil {
 		return nil, llm.ModelInfo{}, err
 	}

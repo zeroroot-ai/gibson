@@ -374,6 +374,12 @@ func (r *CatalogAgentResolver) resolveModelMeetingFloor(
 			"%q requires a model with at least %d tokens of context: %w",
 			agentName, entry.MinContextWindow, err)
 	}
+	if window <= 0 {
+		return "", fmt.Errorf(
+			"%q requires a model with at least %d tokens of context, but no context window is stored for %q of tenant %q. "+
+				"Save the provider again in Settings, Providers so the window is stored: %w",
+			agentName, entry.MinContextWindow, model, tenant, ErrModelBelowFloor)
+	}
 	if window < entry.MinContextWindow {
 		return "", fmt.Errorf(
 			"%q requires a model with at least %d tokens of context, but %q for tenant %q has %d: %w",

@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -34,7 +35,7 @@ func (m *mockClassifier) Classify(ctx context.Context, proposed, description str
 func TestSubmitFinding_ClassifierDisabled(t *testing.T) {
 	// Create a minimal harness config with no classifier
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 	}
 	config.ApplyDefaults()
@@ -95,7 +96,7 @@ func TestSubmitFinding_ClassifierNormalizes(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
@@ -157,7 +158,7 @@ func TestSubmitFinding_ClassifierUnchanged(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
@@ -219,7 +220,7 @@ func TestSubmitFinding_ClassifierGracefulDegradation(t *testing.T) {
 
 	// Create harness config with classifier enabled
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
@@ -274,7 +275,7 @@ func TestSubmitFinding_ClassifierGracefulDegradation(t *testing.T) {
 func TestSubmitFinding_ClassifierEnabledButNotProvided(t *testing.T) {
 	// Create harness config with classifier enabled but no classifier instance
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		ClassifierConfig: &ClassifierConfig{
 			Enabled:      true,
@@ -338,7 +339,7 @@ func TestDefaultClassifierConfig(t *testing.T) {
 // TestClassifierConfig_ApplyDefaults tests that ApplyDefaults sets classifier config.
 func TestClassifierConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		// ClassifierConfig not set
 	}

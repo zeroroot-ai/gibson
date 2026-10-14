@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	sdktypes "github.com/zeroroot-ai/sdk/types"
@@ -50,7 +51,7 @@ func TestHarness_GetToolCapabilities_Integration(t *testing.T) {
 
 	// Create factory and harness
 	config := HarnessConfig{
-		SlotManager:     llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:     llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts:     testTargetFacts,
 		RegistryAdapter: mockAdapter,
 	}
@@ -85,7 +86,7 @@ func TestHarness_GetToolCapabilities_Integration(t *testing.T) {
 func TestHarness_GetAllToolCapabilities_EmptyRegistry(t *testing.T) {
 	// Create factory without any tools registered
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -113,7 +114,7 @@ func TestHarness_GetAllToolCapabilities_EmptyRegistry(t *testing.T) {
 func TestHarness_GetToolCapabilities_NoRegistryAdapter(t *testing.T) {
 	// Create factory without registry adapter
 	config := HarnessConfig{
-		SlotManager:     llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:     llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts:     testTargetFacts,
 		RegistryAdapter: nil,
 	}

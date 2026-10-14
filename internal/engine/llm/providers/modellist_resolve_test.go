@@ -5,9 +5,15 @@ package providers
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -264,42 +270,112 @@ func TestGetJSON_FollowsASameHostRedirect(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestVertex_ListsPublisherModelsWithAMintedToken(t *testing.T) {
-	var gotAuth atomic.Value
-	var gotPath atomic.Value
-	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, r *http.Request) {
+// fakeServiceAccountJSON returns a service-account key whose token endpoint is
+// tokenURL, so the Google library mints a token from the fake and not from
+// Google.
+func fakeServiceAccountJSON(t *testing.T, tokenURL string) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	require.NoError(t, err)
+	doc, err := json.Marshal(map[string]string{ //nolint:gosec // a generated throwaway key for a test
+		"type":           "service_account",
+		"project_id":     "proj",
+		"private_key_id": "k1",
+		"private_key":    string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})),
+		"client_email":   "sa@proj.iam.gserviceaccount.com",
+		"client_id":      "1",
+		"token_uri":      tokenURL,
+	})
+	require.NoError(t, err)
+	return string(doc)
+}
+
+// poisonedADC points the Application Default Credentials at a file that a read
+// would fail on and records nothing else: a test that passes with it proves the
+// daemon credential was not used.
+func poisonedADC(t *testing.T) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "adc.json")
+	require.NoError(t, os.WriteFile(path, []byte("not json: the daemon credential must never be read"), 0o600))
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
+}
+
+func vertexCfg(base, saJSON string) llm.ProviderConfig {
+	return llm.ProviderConfig{
+		BaseURL: base, AllowPrivateEndpoint: true,
+		Extra: map[string]string{
+			"vertex_project_id": "proj", "vertex_region": "us-east5",
+			"google_application_credentials_json": saJSON,
+		},
+	}
+}
+
+func TestVertex_ListsWithATokenMintedFromTheTenantJSON(t *testing.T) {
+	poisonedADC(t)
+	var mints atomic.Int32
+	tokenSrv := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		mints.Add(1)
+		reply(w, 200, `{"access_token":"tenant-token","token_type":"Bearer","expires_in":3600}`)
+	})
+	var gotAuth, gotProject, gotPath atomic.Value
+	api := newFakeProviderAPI(t, func(w http.ResponseWriter, r *http.Request) {
 		gotAuth.Store(r.Header.Get("Authorization"))
+		gotProject.Store(r.Header.Get("x-goog-user-project"))
 		gotPath.Store(r.URL.Path)
 		if r.URL.Query().Get("pageToken") == "" {
-			reply(w, 200, `{"publisherModels":[{"name":"publishers/anthropic/models/claude-a"}],"nextPageToken":"p2"}`)
+			reply(w, 200, `{"publisherModels":[{"name":"publishers/anthropic/models/claude-a","versionId":"20250929"}],"nextPageToken":"p2"}`)
 			return
 		}
 		reply(w, 200, `{"publisherModels":[{"name":"publishers/anthropic/models/claude-b"}]}`)
 	})
-	mint := func(context.Context, *http.Client) (string, error) { return "tok-123", nil }
-	p, err := newVertexProvider(context.Background(), llm.ProviderConfig{
-		BaseURL: fake.URL, AllowPrivateEndpoint: true,
-		Extra: map[string]string{"vertex_project_id": "proj", "vertex_region": "us-east5"},
-	}, mint)
-	require.NoError(t, err, "a Vertex test names no model and needs no Google credential to build")
+
+	p, err := NewVertexProvider(context.Background(), vertexCfg(api.URL, fakeServiceAccountJSON(t, tokenSrv.URL)))
+	require.NoError(t, err, "a Vertex test names no model and builds without a Google credential")
 
 	models, err := p.Models(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, []string{"claude-a", "claude-b"}, names(models))
-	assert.Equal(t, "Bearer tok-123", gotAuth.Load())
+	assert.Equal(t, []string{"claude-a@20250929", "claude-b"}, names(models), "a versioned model is listed as model@version")
+	assert.EqualValues(t, 1, mints.Load(), "the token comes from the tenant JSON")
+	assert.Equal(t, "Bearer tenant-token", gotAuth.Load())
+	assert.Equal(t, "proj", gotProject.Load(), "the call is scoped to the tenant project")
 	assert.Equal(t, "/v1beta1/publishers/anthropic/models", gotPath.Load())
-	assert.EqualValues(t, 2, fake.requests.Load())
 }
 
-func TestVertex_TokenFailureIsACredentialError(t *testing.T) {
-	mint := func(context.Context, *http.Client) (string, error) { return "", assert.AnError }
-	p, err := newVertexProvider(context.Background(), llm.ProviderConfig{
-		Extra: map[string]string{"vertex_project_id": "proj", "vertex_region": "global"},
-	}, mint)
+func TestVertex_BadTenantJSONFailsAndTheDaemonCredentialIsNeverRead(t *testing.T) {
+	poisonedADC(t)
+	api := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, `{"publisherModels":[]}`) })
+
+	for name, js := range map[string]string{
+		"not json":        "{{{",
+		"empty":           "",
+		"wrong type":      `{"type":"external_account","audience":"x","credential_source":{"url":"http://169.254.169.254/"}}`,
+		"authorized user": `{"type":"authorized_user","client_id":"a","client_secret":"b","refresh_token":"c"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := NewVertexProvider(context.Background(), vertexCfg(api.URL, js))
+			require.NoError(t, err)
+			_, err = p.Models(context.Background())
+			require.Error(t, err)
+			assert.Equal(t, llm.ErrProviderUnauthorized, gibsonCode(t, err))
+			assert.NotContains(t, err.Error(), "adc.json", "the daemon credential must not be consulted")
+			assert.Zero(t, api.requests.Load(), "no API call is made without a minted token")
+		})
+	}
+}
+
+func TestVertex_TokenEndpointRefusalIsACredentialError(t *testing.T) {
+	poisonedADC(t)
+	tokenSrv := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 400, `{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`)
+	})
+	p, err := NewVertexProvider(context.Background(), vertexCfg("http://127.0.0.1:1", fakeServiceAccountJSON(t, tokenSrv.URL)))
 	require.NoError(t, err)
 	_, err = p.Models(context.Background())
 	require.Error(t, err)
 	assert.Equal(t, llm.ErrProviderUnauthorized, gibsonCode(t, err))
+	assert.Contains(t, err.Error(), "Invalid JWT Signature")
 }
 
 func TestVertex_HostFollowsTheRegion(t *testing.T) {
@@ -307,6 +383,15 @@ func TestVertex_HostFollowsTheRegion(t *testing.T) {
 	assert.Equal(t, "https://aiplatform.googleapis.com", vertexListBase("", "global"))
 	assert.Equal(t, "https://aiplatform.googleapis.com", vertexListBase("", ""))
 	assert.Equal(t, "http://x:1", vertexListBase("http://x:1/", "us-east5"))
+}
+
+func TestVertexModelID_MapsToTheDocumentedForm(t *testing.T) {
+	// Google documents Claude on Vertex as model@version.
+	assert.Equal(t, "claude-sonnet-4-5@20250929", vertexModelID("publishers/anthropic/models/claude-sonnet-4-5", "20250929"))
+	assert.Equal(t, "claude-opus-4-1", vertexModelID("publishers/anthropic/models/claude-opus-4-1", ""))
+	assert.Equal(t, "claude-x", vertexModelID("publishers/anthropic/models/claude-x", "default"))
+	assert.Equal(t, "claude-y@1", vertexModelID("publishers/anthropic/models/claude-y@1", "2"), "an ID that has a version keeps it")
+	assert.Empty(t, vertexModelID("", "1"))
 }
 
 func TestVertex_ConstructWithoutAGoogleCredentialRefusesOnlyWithASavedModel(t *testing.T) {
@@ -318,12 +403,6 @@ func TestVertex_ConstructWithoutAGoogleCredentialRefusesOnlyWithASavedModel(t *t
 	cfg.DefaultModel = "claude-x"
 	_, err = NewVertexProvider(context.Background(), cfg)
 	require.Error(t, err, "a saved model builds the client at once, as before")
-}
-
-func TestGoogleAccessToken_NoCredentialIsAnError(t *testing.T) {
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/creds.json")
-	_, err := googleAccessToken(context.Background(), http.DefaultClient)
-	require.Error(t, err)
 }
 
 func TestCohere_FollowsNextPageToken(t *testing.T) {

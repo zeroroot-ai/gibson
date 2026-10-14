@@ -153,3 +153,7 @@ func (p *OllamaProvider) Health(ctx context.Context) types.HealthStatus {
 
 // DefaultModel returns the default model saved for this provider, or "".
 func (p *OllamaProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *OllamaProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }

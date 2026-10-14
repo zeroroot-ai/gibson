@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     name                    TEXT        PRIMARY KEY,
     type                    TEXT        NOT NULL,
     default_model           TEXT        NOT NULL DEFAULT '',
+    default_model_context_window INTEGER NOT NULL DEFAULT 0,
     is_default              BOOLEAN     NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN     NOT NULL DEFAULT TRUE,
     capabilities            TEXT[]      NOT NULL DEFAULT '{}',

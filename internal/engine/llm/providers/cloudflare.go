@@ -194,3 +194,9 @@ func translateCloudflareError(err error) error {
 
 // DefaultModel returns the default model saved for this provider, or "".
 func (p *CloudflareProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *CloudflareProvider) DefaultModelContextWindow() int {
+	return p.config.DefaultModelContextWindow
+}

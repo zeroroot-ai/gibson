@@ -119,7 +119,7 @@ func (p *AnthropicProvider) seedDefaultChat(ctx context.Context, label string) e
 // neither is refused rather than constructed on whatever the pod happens to
 // carry.
 func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
-	return newVertexProvider(ctx, cfg, googleAccessToken)
+	return newVertexProvider(ctx, cfg, serviceAccountToken)
 }
 
 // newVertexProvider is NewVertexProvider with the token source injected, so a
@@ -143,7 +143,8 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 		return newVertexChatModel(ctx, project, region, model, client)
 	}
 	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
-		return listVertexModels(ctx, client, vertexListBase(cfg.BaseURL, region), token)
+		return listVertexModels(ctx, client, vertexListBase(cfg.BaseURL, region), project,
+			cfg.Extra["google_application_credentials_json"], token)
 	}
 	if err := p.seedDefaultChat(ctx, "vertex"); err != nil {
 		return nil, err
@@ -468,4 +469,10 @@ func (p *AnthropicProvider) CompleteStructured(ctx context.Context, req llm.Comp
 	resp.StructuredData = structuredData
 	resp.Message.Content = rawJSON
 	return resp, nil
+}
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *AnthropicProvider) DefaultModelContextWindow() int {
+	return p.config.DefaultModelContextWindow
 }

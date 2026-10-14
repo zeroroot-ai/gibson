@@ -95,6 +95,21 @@ type DefaultModeler interface {
 	DefaultModel() string
 }
 
+// DefaultModelWindower is implemented by a provider that knows the context
+// window stored with the saved default model. Zero means none is stored.
+type DefaultModelWindower interface {
+	DefaultModelContextWindow() int
+}
+
+// SavedModelWindow returns the context window stored with the saved default
+// model of a provider, or 0 when none is stored.
+func SavedModelWindow(p LLMProvider) int {
+	if w, ok := p.(DefaultModelWindower); ok {
+		return w.DefaultModelContextWindow()
+	}
+	return 0
+}
+
 // SavedModel returns the saved default model of a provider, or "" when the
 // provider keeps none.
 func SavedModel(p LLMProvider) string {

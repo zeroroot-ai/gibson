@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -157,7 +158,7 @@ func testTargetFacts() TargetFactsLookup { return &stubTargetFacts{} }
 // with no provider, and Create refuses a provider that answers nil. The daemon
 // sets its target store during start, so either case is a wiring defect.
 func TestHarnessFactory_RequiresTheTargetLookup(t *testing.T) {
-	slots := llm.NewSlotManager(llm.NewLLMRegistry())
+	slots := llmtest.NewSlotManager(llm.NewLLMRegistry())
 
 	if f, err := NewHarnessFactory(HarnessConfig{SlotManager: slots}); err == nil {
 		t.Fatalf("NewHarnessFactory with no TargetFacts = %v, nil; want an error", f)

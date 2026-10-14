@@ -80,17 +80,18 @@ func toProtoProviderRecord(cfg *providerconfig.ProviderConfig) *tenantv1.Provide
 		return nil
 	}
 	return &tenantv1.ProviderRecord{
-		Id:                    cfg.ID.String(),
-		Name:                  cfg.Name,
-		Type:                  string(cfg.Type),
-		DefaultModel:          cfg.DefaultModel,
-		IsDefault:             cfg.IsDefault,
-		Enabled:               cfg.Enabled,
-		Capabilities:          capabilitiesToProto(cfg.Capabilities),
-		DefaultEmbeddingModel: cfg.DefaultEmbeddingModel,
-		CredentialsMasked:     cfg.CredentialsMasked,
-		CreatedAt:             cfg.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:             cfg.UpdatedAt.UTC().Format(time.RFC3339),
+		Id:                        cfg.ID.String(),
+		Name:                      cfg.Name,
+		Type:                      string(cfg.Type),
+		DefaultModel:              cfg.DefaultModel,
+		DefaultModelContextWindow: int32(cfg.DefaultModelContextWindow), //nolint:gosec // a context window is at most ~10M tokens
+		IsDefault:                 cfg.IsDefault,
+		Enabled:                   cfg.Enabled,
+		Capabilities:              capabilitiesToProto(cfg.Capabilities),
+		DefaultEmbeddingModel:     cfg.DefaultEmbeddingModel,
+		CredentialsMasked:         cfg.CredentialsMasked,
+		CreatedAt:                 cfg.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:                 cfg.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 }
 
@@ -169,14 +170,15 @@ func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderCo
 		creds[k] = v
 	}
 	return &providerconfig.ProviderConfigInput{
-		Name:                  in.Name,
-		Type:                  llm.ProviderType(in.Type),
-		DefaultModel:          in.DefaultModel,
-		Capabilities:          capabilitiesFromProto(in.Capabilities),
-		DefaultEmbeddingModel: in.DefaultEmbeddingModel,
-		Credentials:           creds,
-		SetAsDefault:          in.SetAsDefault,
-		Enabled:               true, // new providers default to enabled
+		Name:                      in.Name,
+		Type:                      llm.ProviderType(in.Type),
+		DefaultModel:              in.DefaultModel,
+		DefaultModelContextWindow: int(in.DefaultModelContextWindow),
+		Capabilities:              capabilitiesFromProto(in.Capabilities),
+		DefaultEmbeddingModel:     in.DefaultEmbeddingModel,
+		Credentials:               creds,
+		SetAsDefault:              in.SetAsDefault,
+		Enabled:                   true, // new providers default to enabled
 	}
 }
 
@@ -353,6 +355,9 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err := validateProviderInput(req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.fillDefaultModelWindow(ctx, req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderCreated, req.GetInput().GetName()); err != nil {
 		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
@@ -396,6 +401,9 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	}
 	if err := validateProviderInput(req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+	if err := s.fillDefaultModelWindow(ctx, req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderUpdated, req.GetName()); err != nil {
@@ -443,6 +451,97 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 // TestProvider
 // ---------------------------------------------------------------------------
 
+// providerFromInput builds a transient provider from the credentials and the
+// default model of a proposed config. Nothing is persisted and no network call
+// is made.
+func (s *DaemonServer) providerFromInput(input *tenantv1.ProviderConfigInput) (llm.LLMProvider, error) {
+	creds := input.GetCredentials()
+	provCfg := s.withEgressPolicy(llm.ProviderConfig{
+		Type:         llm.ProviderType(input.GetType()),
+		DefaultModel: input.GetDefaultModel(),
+		APIKey:       creds["api_key"],
+		BaseURL:      creds["base_url"],
+	})
+	// Forward the remaining credential keys as Extra so provider-specific
+	// fields (aws_access_key_id, cloudflare_account_id, ...) reach the provider.
+	extra := make(map[string]string, len(creds))
+	for k, v := range creds {
+		if k != "api_key" && k != "base_url" {
+			extra[k] = v
+		}
+	}
+	if len(extra) > 0 {
+		provCfg.Extra = extra
+	}
+	factory := s.providerFactory
+	if factory == nil {
+		factory = providers.NewProvider
+	}
+	return factory(provCfg)
+}
+
+// isEmbeddingOnlyType reports whether the provider type serves embeddings only.
+func isEmbeddingOnlyType(t llm.ProviderType) bool {
+	return t == llm.ProviderVoyage || t == llm.ProviderOpenAICompatible || t == llm.ProviderTEI
+}
+
+// servesChat reports whether a proposed config serves chat: it declares the
+// chat capability, or it declares none (the legacy chat-only default) and is
+// not an embedding-only type.
+func servesChat(input *tenantv1.ProviderConfigInput) bool {
+	if isEmbeddingOnlyType(llm.ProviderType(input.GetType())) {
+		return false
+	}
+	if len(input.GetCapabilities()) == 0 {
+		return true
+	}
+	for _, c := range input.GetCapabilities() {
+		if c == tenantv1.Capability_CAPABILITY_CHAT {
+			return true
+		}
+	}
+	return false
+}
+
+// fillDefaultModelWindow stores the context window with the saved model. The
+// daemon never guesses a window and no mission reads a model list, so the
+// window is fixed here, at save time:
+//  1. a window the caller states in default_model_context_window is used;
+//  2. else the window that the live model list of the provider reports for
+//     default_model is used;
+//  3. else the save is refused, and the message tells the caller to state it.
+//
+// A config that serves no chat, or names no default model, has no window to fix.
+func (s *DaemonServer) fillDefaultModelWindow(ctx context.Context, input *tenantv1.ProviderConfigInput) error {
+	model := strings.TrimSpace(input.GetDefaultModel())
+	if model == "" || !servesChat(input) || input.GetDefaultModelContextWindow() > 0 {
+		return nil
+	}
+	refuse := func(cause string) error {
+		return fmt.Errorf("the context window of model %q is unknown: %s. State it in default_model_context_window", model, cause)
+	}
+	prov, err := s.providerFromInput(input)
+	if err != nil {
+		return refuse(fmt.Sprintf("the provider could not be built (%v)", err))
+	}
+	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
+	defer cancel()
+	models, err := prov.Models(listCtx)
+	if err != nil {
+		return refuse(fmt.Sprintf("the model list of the provider failed (%v)", err))
+	}
+	for _, m := range models {
+		if m.Name == model {
+			if m.ContextWindow > 0 && !m.ContextWindowUnreported {
+				input.DefaultModelContextWindow = int32(m.ContextWindow) //nolint:gosec // a context window is at most ~10M tokens
+				return nil
+			}
+			return refuse("the provider does not report a context window for it")
+		}
+	}
+	return refuse("the provider does not list it")
+}
+
 // TestProvider validates a proposed provider config by calling the model list
 // endpoint of the provider with the proposed credentials. The call needs no
 // model ID and sends no completion. The proposed config is NOT persisted.
@@ -475,7 +574,6 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
-	creds := input.GetCredentials()
 	provType := llm.ProviderType(input.GetType())
 	embeddingOnly := provType == llm.ProviderVoyage ||
 		provType == llm.ProviderOpenAICompatible ||
@@ -490,34 +588,11 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 	)
 
 	if !embeddingOnly {
-		// Build ephemeral llm.ProviderConfig from the proposed input.
-		// Credential material stays in this stack frame only.
-		provCfg := s.withEgressPolicy(llm.ProviderConfig{
-			Type:         provType,
-			DefaultModel: input.GetDefaultModel(),
-			APIKey:       creds["api_key"],
-			BaseURL:      creds["base_url"],
-		})
-		// Forward remaining credential keys as Extra so provider-specific fields
-		// (e.g. aws_access_key_id, cloudflare_account_id) are available.
-		extra := make(map[string]string, len(creds))
-		for k, v := range creds {
-			if k != "api_key" && k != "base_url" {
-				extra[k] = v
-			}
-		}
-		if len(extra) > 0 {
-			provCfg.Extra = extra
-		}
-
-		// Construct the provider. This validates type and config without network.
-		// Route through s.providerFactory so tests can inject a stub without
-		// hitting the real network.
-		chatFactory := s.providerFactory
-		if chatFactory == nil {
-			chatFactory = providers.NewProvider
-		}
-		prov, err := chatFactory(provCfg)
+		// Build the ephemeral provider from the proposed input. Credential
+		// material stays in this stack frame only. This validates type and
+		// config without network, and routes through s.providerFactory so
+		// tests can inject a stub.
+		prov, err := s.providerFromInput(input)
 		if err != nil {
 			return &tenantv1.TestProviderResponse{
 				Ok:    false,
@@ -772,6 +847,9 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 // and returns the live model catalogue + (when requested) an embedding probe
 // result. Used by the wizard's "Test connection" step.
 //
+// A provider with no list call (Foundry) is tested with a one-token completion
+// against request.default_model, which that provider then requires.
+//
 // SECURITY: credentials transit memory only — they are passed to the transient
 // provider client and embedding client, the calls are made, and the values are
 // dropped when the request returns. They are never logged, never persisted, and
@@ -850,7 +928,7 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 
 	// Chat-capable provider: delegate to probeChatProvider which handles
 	// health + fallback Complete under appropriate deadlines.
-	chatOK, chatErr, modelList, latencyMS := s.probeChatProvider(ctx, pt, creds, start)
+	chatOK, chatErr, modelList, latencyMS := s.probeChatProvider(ctx, pt, creds, req.GetDefaultModel(), start)
 	if !chatOK {
 		return &tenantv1.ProbeProviderResponse{
 			Ok:           false,
@@ -878,11 +956,12 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 // probeChatProvider constructs a chat provider from credentials and checks it
 // with the model list call of the provider. Returns
 // (ok, errMsg, modelList, latencyMs). A non-empty errMsg implies ok=false.
-func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
+func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, model string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
 	provCfg := s.withEgressPolicy(llm.ProviderConfig{
-		Type:    pt,
-		APIKey:  creds["api_key"],
-		BaseURL: creds["base_url"],
+		Type:         pt,
+		DefaultModel: model,
+		APIKey:       creds["api_key"],
+		BaseURL:      creds["base_url"],
 	})
 	extra := make(map[string]string)
 	for k, v := range creds {
@@ -903,7 +982,7 @@ func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderTyp
 		return false, fmt.Sprintf("invalid provider configuration: %v", err), nil, time.Since(start).Milliseconds()
 	}
 
-	models, listErr := checkProviderCredentials(ctx, prov, "")
+	models, listErr := checkProviderCredentials(ctx, prov, model)
 	latencyMS = time.Since(start).Milliseconds()
 	if listErr != nil {
 		return false, listErr.Error(), nil, latencyMS
@@ -1166,10 +1245,11 @@ func containsAny(s string, substrs ...string) bool {
 // expected by providers.NewProvider. Credential material never escapes to logs.
 func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig) llm.ProviderConfig {
 	cfg := llm.ProviderConfig{
-		Type:         dec.Type,
-		DefaultModel: dec.DefaultModel,
-		APIKey:       dec.Credentials["api_key"],
-		BaseURL:      dec.Credentials["base_url"],
+		Type:                      dec.Type,
+		DefaultModel:              dec.DefaultModel,
+		DefaultModelContextWindow: dec.DefaultModelContextWindow,
+		APIKey:                    dec.Credentials["api_key"],
+		BaseURL:                   dec.Credentials["base_url"],
 	}
 	extra := make(map[string]string)
 	for k, v := range dec.Credentials {

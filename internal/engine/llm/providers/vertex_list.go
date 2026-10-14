@@ -5,6 +5,7 @@ package providers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -17,18 +18,26 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
-// vertexTokenFunc mints an OAuth access token for the Vertex API. The client
-// carries the token request, so it goes through the same SSRF guard.
-type vertexTokenFunc func(ctx context.Context, client *http.Client) (string, error)
+// vertexTokenFunc mints an OAuth access token for the Vertex API from the
+// service-account JSON that the tenant entered. The client carries the token
+// request, so it goes through the same SSRF guard.
+type vertexTokenFunc func(ctx context.Context, client *http.Client, serviceAccountJSON string) (string, error)
 
-// googleAccessToken mints a cloud-platform access token from the Application
-// Default Credentials, the way the Vertex Claude client reads them (see
-// NewVertexProvider).
-func googleAccessToken(ctx context.Context, client *http.Client) (string, error) {
+// serviceAccountToken mints a cloud-platform access token from the tenant's
+// service-account JSON. It reads nothing else: the Application Default
+// Credentials of the daemon are never used, so the result says whether THIS
+// tenant credential works. Only a service-account key is accepted. Other
+// credential types (external account, authorized user) can make the Google
+// library fetch a URL that the key names.
+func serviceAccountToken(ctx context.Context, client *http.Client, serviceAccountJSON string) (string, error) {
+	if strings.TrimSpace(serviceAccountJSON) == "" {
+		return "", errors.New("google_application_credentials_json is empty")
+	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
-	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	creds, err := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccountJSON), google.ServiceAccount,
+		"https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		return "", fmt.Errorf("find the google application default credentials: %w", err)
+		return "", fmt.Errorf("read the service-account JSON: %w", err)
 	}
 	tok, err := creds.TokenSource.Token()
 	if err != nil {
@@ -56,15 +65,20 @@ func vertexListBase(override, region string) string {
 // https://docs.cloud.google.com/vertex-ai/docs/reference/rest/v1beta1/publishers.models/list
 // The response is {"publisherModels":[{"name":"publishers/anthropic/models/<id>"}],
 // "nextPageToken":".."}. The list names the models of the publisher. It does not
-// show which models the project has enabled in Model Garden.
-func listVertexModels(ctx context.Context, client *http.Client, base string, token vertexTokenFunc) ([]llm.ModelInfo, error) {
+// show which models the project has enabled in Model Garden. The tenant's project
+// goes in x-goog-user-project, so the call succeeds only for a credential that
+// may use that project.
+func listVertexModels(ctx context.Context, client *http.Client, base, project, serviceAccountJSON string, token vertexTokenFunc) ([]llm.ModelInfo, error) {
 	provider := string(llm.ProviderVertex)
-	access, err := token(ctx, client)
+	access, err := token(ctx, client, serviceAccountJSON)
 	if err != nil {
 		return nil, fmt.Errorf("vertex credential: %w", llm.NewAuthError(provider, err))
 	}
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+access)
+	// The call is billed to the tenant's project. It therefore fails unless the
+	// credential may use that project and the Vertex API is on there.
+	header.Set("x-goog-user-project", project)
 
 	var models []llm.ModelInfo
 	pageToken := ""
@@ -75,7 +89,8 @@ func listVertexModels(ctx context.Context, client *http.Client, base string, tok
 		}
 		var page struct {
 			PublisherModels []struct {
-				Name string `json:"name"`
+				Name      string `json:"name"`
+				VersionID string `json:"versionId"`
 			} `json:"publisherModels"`
 			NextPageToken string `json:"nextPageToken"`
 		}
@@ -83,7 +98,7 @@ func listVertexModels(ctx context.Context, client *http.Client, base string, tok
 			return nil, err
 		}
 		for _, m := range page.PublisherModels {
-			if id := path.Base(m.Name); id != "" && id != "." && id != "/" {
+			if id := vertexModelID(m.Name, m.VersionID); id != "" {
 				models = append(models, llm.ModelInfo{Name: id, Features: []string{"chat"}})
 			}
 		}
@@ -93,4 +108,20 @@ func listVertexModels(ctx context.Context, client *http.Client, base string, tok
 		pageToken = page.NextPageToken
 	}
 	return models, nil
+}
+
+// vertexModelID turns a publisher model name and version into the ID that a
+// completion call takes: model@version, the form that Google documents for
+// Claude on Vertex (see
+// https://docs.cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude/use-claude).
+// A model with no version is returned bare.
+func vertexModelID(name, versionID string) string {
+	id := path.Base(name)
+	if id == "" || id == "." || id == "/" {
+		return ""
+	}
+	if versionID == "" || versionID == "default" || strings.Contains(id, "@") {
+		return id
+	}
+	return id + "@" + versionID
 }

@@ -74,3 +74,44 @@ func TestMockEmbedder_ModelDerivesDimension(t *testing.T) {
 	require.True(t, ok, "mock model %q must be in the dimension table", m.Model())
 	assert.Equal(t, m.Dimensions(), dim)
 }
+
+// builtinRows is the table as the package declares it, copied before any test
+// registers a model at runtime.
+var builtinRows = func() map[string]embeddingModel {
+	out := make(map[string]embeddingModel, len(embeddingModels))
+	for k, v := range embeddingModels {
+		out[k] = v
+	}
+	return out
+}()
+
+// TestEveryTableRowHasAKindAndAnEmbeddingKindOffersOnlyKnownModels keeps the
+// kinds and the dimensions in step: they live in one row, so a model offered
+// for a kind always has a dimension, and a built-in model is offered somewhere.
+func TestEveryTableRowHasAKindAndAnEmbeddingKindOffersOnlyKnownModels(t *testing.T) {
+	for model, row := range builtinRows {
+		assert.Positive(t, row.dim, "model %q has no dimension", model)
+		assert.NotEmpty(t, row.kinds, "built-in model %q is offered for no provider kind", model)
+	}
+	for _, kind := range []Kind{KindOpenAI, KindOpenAICompatible, KindTEI, KindBedrock, KindCohere, KindVoyage} {
+		models := ModelsForKind(kind)
+		assert.NotEmpty(t, models, "kind %q offers no model", kind)
+		for _, m := range models {
+			_, ok := DimensionForModel(m)
+			assert.True(t, ok, "model %q offered for %q has no dimension", m, kind)
+		}
+	}
+	assert.Empty(t, ModelsForKind(Kind("anthropic")))
+}
+
+// A model registered at runtime has a dimension and no kind, so it is accepted
+// by the save path and not offered in a picker.
+func TestRegisteredModelHasADimensionAndNoKind(t *testing.T) {
+	RegisterModelDimension("kindless-embed-model", 64)
+	dim, ok := DimensionForModel("kindless-embed-model")
+	assert.True(t, ok)
+	assert.Equal(t, 64, dim)
+	for _, k := range []Kind{KindOpenAI, KindTEI, KindBedrock, KindCohere, KindVoyage, KindOpenAICompatible} {
+		assert.NotContains(t, ModelsForKind(k), "kindless-embed-model")
+	}
+}

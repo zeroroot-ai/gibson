@@ -215,11 +215,12 @@ func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig, allowPrivate bool
 		}
 	}
 	return llm.ProviderConfig{
-		Type:         dec.Type,
-		APIKey:       dec.Credentials["api_key"],
-		BaseURL:      dec.Credentials["base_url"],
-		DefaultModel: dec.DefaultModel,
-		Extra:        extra,
+		Type:                      dec.Type,
+		APIKey:                    dec.Credentials["api_key"],
+		BaseURL:                   dec.Credentials["base_url"],
+		DefaultModel:              dec.DefaultModel,
+		DefaultModelContextWindow: dec.DefaultModelContextWindow,
+		Extra:                     extra,
 		// base_url is tenant-supplied: keep the connect-time SSRF egress guard
 		// on unless the operator opted out.
 		AllowPrivateEndpoint: allowPrivate,

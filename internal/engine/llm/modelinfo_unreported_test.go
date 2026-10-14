@@ -7,9 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 func TestModelInfo_ContextWindowAtLeast(t *testing.T) {
@@ -41,18 +38,6 @@ func TestModelInfo_MissingFeatures(t *testing.T) {
 
 	unreported := ModelInfo{Features: []string{"chat"}, FeaturesUnreported: true}
 	assert.Empty(t, unreported.MissingFeatures([]string{"vision", "streaming", "json_mode"}))
-}
-
-func TestDefaultSlotManager_UnreportedPassesAndReportedFails(t *testing.T) {
-	m := &DefaultSlotManager{}
-	slot := agent.SlotDefinition{Constraints: agent.SlotConstraints{
-		MinContextWindow: 100000,
-		RequiredFeatures: []string{agent.FeatureVision},
-	}}
-
-	require.NoError(t, m.validateConstraints(slot, ModelInfo{Name: "gpt", ContextWindowUnreported: true, FeaturesUnreported: true}))
-	require.Error(t, m.validateConstraints(slot, ModelInfo{Name: "small", ContextWindow: 8192, FeaturesUnreported: true}))
-	require.Error(t, m.validateConstraints(slot, ModelInfo{Name: "novision", ContextWindow: 200000, Features: []string{"chat"}}))
 }
 
 type savedModelStub struct{ LLMProvider }

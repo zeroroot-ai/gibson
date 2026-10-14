@@ -76,12 +76,13 @@ func TestCreateProvider_RoundTripsEmbeddingFields(t *testing.T) {
 
 	resp, err := s.CreateProvider(tenantCtx("acme"), &tenantv1.CreateProviderRequest{
 		Input: &tenantv1.ProviderConfigInput{
-			Name:                  "openai-embed",
-			Type:                  "openai",
-			DefaultModel:          "gpt-4o-mini",
-			Capabilities:          []tenantv1.Capability{tenantv1.Capability_CAPABILITY_CHAT, tenantv1.Capability_CAPABILITY_EMBEDDING},
-			DefaultEmbeddingModel: "text-embedding-3-small",
-			Credentials:           map[string]string{"api_key": "sk-test-key"},
+			Name:                      "openai-embed",
+			Type:                      "openai",
+			DefaultModel:              "gpt-4o-mini",
+			DefaultModelContextWindow: 128000,
+			Capabilities:              []tenantv1.Capability{tenantv1.Capability_CAPABILITY_CHAT, tenantv1.Capability_CAPABILITY_EMBEDDING},
+			DefaultEmbeddingModel:     "text-embedding-3-small",
+			Credentials:               map[string]string{"api_key": "sk-test-key"},
 		},
 	})
 	require.NoError(t, err)
@@ -140,7 +141,7 @@ func TestCreateProvider_ChatOnly_NoEmbeddingValidation(t *testing.T) {
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         "anthropic",
 			Type:         "anthropic",
-			DefaultModel: "claude-3-5-sonnet",
+			DefaultModel: "claude-3-5-sonnet", DefaultModelContextWindow: 200000,
 			Capabilities: []tenantv1.Capability{tenantv1.Capability_CAPABILITY_CHAT},
 		},
 	})
