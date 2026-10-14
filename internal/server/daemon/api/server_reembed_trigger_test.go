@@ -80,8 +80,8 @@ func TestCreateProvider_NonEmbeddingProvider_DoesNotFireReembed(t *testing.T) {
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         "openai",
 			Type:         "openai",
-			DefaultModel: "gpt-4o-mini",
-			Credentials:  map[string]string{"api_key": "sk-test"},
+			DefaultModel: "gpt-4o-mini", DefaultModelContextWindow: 128000,
+			Credentials: map[string]string{"api_key": "sk-test"},
 			// No embedding capability.
 		},
 	})

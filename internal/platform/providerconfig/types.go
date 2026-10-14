@@ -44,8 +44,11 @@ type ProviderConfig struct {
 	Name         string
 	Type         llm.ProviderType
 	DefaultModel string
-	IsDefault    bool
-	Enabled      bool
+	// DefaultModelContextWindow is the context window, in tokens, stored with
+	// DefaultModel at save time. 0 means none is stored: unknown.
+	DefaultModelContextWindow int
+	IsDefault                 bool
+	Enabled                   bool
 	// Capabilities declares which services this provider fulfils — "chat"
 	// and/or "embedding" (E11 BYO-embedder, gibson#810). Empty implies the
 	// legacy chat-only default. Values are the lower-cased capability strings
@@ -105,6 +108,9 @@ type ProviderConfigInput struct {
 	Name         string
 	Type         llm.ProviderType
 	DefaultModel string
+	// DefaultModelContextWindow is the context window of DefaultModel, filled
+	// by the save handler before the store sees it. 0 stores none.
+	DefaultModelContextWindow int
 	// Capabilities declares which services this provider fulfils — "chat"
 	// and/or "embedding". Empty implies the legacy chat-only default.
 	Capabilities []string

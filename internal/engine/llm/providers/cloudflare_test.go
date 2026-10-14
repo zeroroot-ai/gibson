@@ -53,21 +53,6 @@ func TestNewCloudflareProvider_HappyPath(t *testing.T) {
 	require.NotNil(t, p.model)
 }
 
-func TestCloudflareProvider_Models(t *testing.T) {
-	p := &CloudflareProvider{}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	assert.NotEmpty(t, models)
-	names := make([]string, 0, len(models))
-	for _, m := range models {
-		names = append(names, m.Name)
-	}
-	// Spot-check: the Workers AI catalogue uses the @cf/ prefix.
-	for _, n := range names {
-		assert.True(t, strings.HasPrefix(n, "@cf/"), "cloudflare model name %q should start with @cf/", n)
-	}
-}
-
 func TestCloudflareCredentialSchema(t *testing.T) {
 	schema := CloudflareCredentialSchema()
 	keys := make(map[string]llm.CredentialField, len(schema))

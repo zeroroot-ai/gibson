@@ -5,6 +5,8 @@ package providers
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"strings"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -19,6 +21,7 @@ import (
 type CohereProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *cohereListEndpoint
 }
 
 // newCohereProviderWithContext constructs a Cohere provider, resolving the credential from cfg (see resolveCredential).
@@ -37,28 +40,85 @@ func newCohereProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("cohere", err)
 	}
-	return &CohereProvider{model: m, config: cfg}, nil
+	return &CohereProvider{
+		model:  m,
+		config: cfg,
+		lister: &cohereListEndpoint{client: client, listURL: cohereModelsURL(baseURL), token: token},
+	}, nil
 }
 
 func (p *CohereProvider) Name() string { return "cohere" }
 
-func (p *CohereProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "command-r-plus", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "command-r", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "command", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: "command-light", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-	}, nil
+// Models asks the native Cohere list endpoint (see
+// https://docs.cohere.com/reference/list-models) for the chat models of the
+// account. The OpenAI compatibility route has no list call.
+func (p *CohereProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
+}
+
+// cohereModelsURL returns the native list URL for a compatibility base URL:
+// GET {origin}/v1/models. The compatibility path (/compatibility/v1) is dropped.
+func cohereModelsURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(baseURL, "/") + "/v1/models"
+	}
+	return u.Scheme + "://" + u.Host + "/v1/models"
+}
+
+// cohereListEndpoint lists Cohere models with GET /v1/models. The response is
+// {"models":[{"name","context_length","endpoints"}],"next_page_token"}.
+type cohereListEndpoint struct {
+	client  *http.Client
+	listURL string
+	token   string
+	cache   modelCache
+}
+
+// Models returns the chat models that Cohere reports and follows next_page_token.
+func (e *cohereListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return e.cache.get(ctx, "cohere", func(ctx context.Context) ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		header.Set("Authorization", "Bearer "+e.token)
+		var models []llm.ModelInfo
+		pageToken := ""
+		for range maxModelListPages {
+			q := url.Values{"page_size": {"1000"}, "endpoint": {"chat"}}
+			if pageToken != "" {
+				q.Set("page_token", pageToken)
+			}
+			var page struct {
+				Models []struct {
+					Name          string  `json:"name"`
+					ContextLength float64 `json:"context_length"`
+				} `json:"models"`
+				NextPageToken string `json:"next_page_token"`
+			}
+			if err := getJSON(ctx, e.client, "cohere", e.listURL+"?"+q.Encode(), header, &page); err != nil {
+				return nil, err
+			}
+			for _, m := range page.Models {
+				if m.Name != "" {
+					models = append(models, llm.ModelInfo{Name: m.Name, ContextWindow: int(m.ContextLength)})
+				}
+			}
+			if page.NextPageToken == "" || page.NextPageToken == pageToken {
+				return models, nil
+			}
+			pageToken = page.NextPageToken
+		}
+		return models, nil
+	})
 }
 
 func (p *CohereProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -118,3 +178,10 @@ func translateCohereError(err error) error {
 		return llm.TranslateError("cohere", err)
 	}
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *CohereProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *CohereProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }

@@ -24,7 +24,7 @@ import (
 // common slot names:
 //   - "primary": MinContextWindow 100k (high-capability model for main agent reasoning)
 //   - "fast": MinContextWindow 8k (low-latency model for quick operations)
-//   - "vision": MinContextWindow 50k + vision feature required
+//   - "vision": MinContextWindow 50k
 //   - "reasoning": MinContextWindow 150k (large context window for complex reasoning)
 //
 // The manager queries the LLM registry to find available providers that match
@@ -144,7 +144,7 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 // 2. Apply slot name-based defaults if no explicit config is provided
 // 3. Merge slot default config with any override
 // 4. Query registry for available providers
-// 5. Find a model that meets all constraints (context window, features)
+// 5. Find a model that meets all constraints (context window)
 // 6. Return the provider and model info
 //
 // Returns ErrNoMatchingProvider if:
@@ -231,17 +231,6 @@ func (m *DaemonSlotManager) applySlotNameDefaults(slot agent.SlotDefinition) age
 		if slot.Constraints.MinContextWindow == 0 {
 			slot.Constraints.MinContextWindow = 50000
 		}
-		// Ensure vision feature is required
-		hasVision := false
-		for _, feature := range slot.Constraints.RequiredFeatures {
-			if feature == agent.FeatureVision {
-				hasVision = true
-				break
-			}
-		}
-		if !hasVision {
-			slot.Constraints.RequiredFeatures = append(slot.Constraints.RequiredFeatures, agent.FeatureVision)
-		}
 
 	case "reasoning":
 		// High context window model for complex reasoning
@@ -270,39 +259,39 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 		)
 	}
 
-	// Get models from provider
-	models, err := provider.Models(ctx)
-	if err != nil {
+	// The model is the saved choice of the tenant. A mission never asks the
+	// provider for a model list: the list can be slow or down. The window comes
+	// from the value stored with the saved provider. The provider rejects an
+	// unknown model when it completes.
+	model := savedModelInfo(provider, config.Model)
+	if err := m.validateConstraints(slot, model); err != nil {
 		return nil, llm.ModelInfo{}, types.WrapError(
 			llm.ErrNoMatchingProvider,
-			fmt.Sprintf("failed to get models from provider %q for slot %q", config.Provider, slot.Name),
+			fmt.Sprintf("model %q from provider %q does not meet constraints for slot %q",
+				config.Model, config.Provider, slot.Name),
 			err,
 		)
 	}
+	if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
+		return nil, llm.ModelInfo{}, err
+	}
+	return provider, model, nil
+}
 
-	// Find the specified model
-	for _, model := range models {
-		if model.Name == config.Model {
-			// Validate constraints
-			if err := m.validateConstraints(slot, model); err != nil {
-				return nil, llm.ModelInfo{}, types.WrapError(
-					llm.ErrNoMatchingProvider,
-					fmt.Sprintf("model %q from provider %q does not meet constraints for slot %q",
-						config.Model, config.Provider, slot.Name),
-					err,
-				)
-			}
-			if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
-				return nil, llm.ModelInfo{}, err
-			}
-			return provider, model, nil
+// savedModelInfo describes a model for a slot check. The saved default model of
+// the provider carries the context window that was stored with it at save time,
+// so its window is known. Any other model, and a provider saved before the
+// window was stored, has an unknown window. A feature set is never known: no
+// provider reports a complete one.
+func savedModelInfo(provider llm.LLMProvider, name string) llm.ModelInfo {
+	info := llm.ModelInfo{Name: name, ContextWindowUnreported: true}
+	if name == llm.SavedModel(provider) {
+		if w := llm.SavedModelWindow(provider); w > 0 {
+			info.ContextWindow = w
+			info.ContextWindowUnreported = false
 		}
 	}
-
-	return nil, llm.ModelInfo{}, types.NewError(
-		llm.ErrNoMatchingProvider,
-		fmt.Sprintf("model %q not found in provider %q for slot %q", config.Model, config.Provider, slot.Name),
-	)
+	return info
 }
 
 // resolveByConstraints searches all available providers to find a model matching the slot constraints
@@ -325,12 +314,17 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 		preferredProviders = append(preferredProviders, m.defaultProvider)
 	}
 
+	// lastErr keeps the reason the last provider failed, so the final error
+	// tells the person what to fix.
+	var lastErr error
+
 	// Try preferred providers first
 	for _, providerName := range preferredProviders {
-		provider, model, err := m.tryProvider(ctx, providerName, slot, config.Model)
+		provider, model, err := m.tryProvider(ctx, providerName, slot, m.modelFor(providerName, config, len(providerNames)))
 		if err == nil {
 			return provider, model, nil
 		}
+		lastErr = err
 	}
 
 	// Deterministic fallback: scan remaining providers in a stable (sorted)
@@ -352,7 +346,7 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 			continue
 		}
 
-		provider, model, err := m.tryProvider(ctx, providerName, slot, config.Model)
+		provider, model, err := m.tryProvider(ctx, providerName, slot, m.modelFor(providerName, config, len(providerNames)))
 		if err == nil {
 			// Log when using fallback (no explicit provider configured)
 			if config.Provider == "" && m.logger != nil {
@@ -364,64 +358,62 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 			}
 			return provider, model, nil
 		}
+		lastErr = err
 	}
 
-	return nil, llm.ModelInfo{}, types.NewError(
+	return nil, llm.ModelInfo{}, types.WrapError(
 		llm.ErrNoMatchingProvider,
-		fmt.Sprintf("no provider found with model meeting constraints for slot %q (min_context: %d, features: %v)",
-			slot.Name, slot.Constraints.MinContextWindow, slot.Constraints.RequiredFeatures),
+		fmt.Sprintf("no provider found with model meeting constraints for slot %q (min_context: %d)",
+			slot.Name, slot.Constraints.MinContextWindow),
+		lastErr,
 	)
 }
 
-// tryProvider attempts to find a matching model from a specific provider
+// tryProvider resolves a slot on one provider. The model is the preferred
+// model when the slot names one for this provider, else the default model that
+// the tenant saved for the provider. It never calls the network. A provider
+// with neither fails with a clear error.
 func (m *DaemonSlotManager) tryProvider(ctx context.Context, providerName string, slot agent.SlotDefinition, preferredModel string) (llm.LLMProvider, llm.ModelInfo, error) {
 	provider, err := m.registry.GetProvider(providerName)
 	if err != nil {
 		return nil, llm.ModelInfo{}, err
 	}
 
-	models, err := provider.Models(ctx)
-	if err != nil {
+	name := preferredModel
+	if name == "" {
+		name = llm.SavedModel(provider)
+	}
+	if name == "" {
+		return nil, llm.ModelInfo{}, types.NewError(
+			llm.ErrNoMatchingProvider,
+			fmt.Sprintf("provider %q has no saved default model. Set one in Settings → Providers", providerName),
+		)
+	}
+
+	model := savedModelInfo(provider, name)
+	if err := m.validateConstraints(slot, model); err != nil {
 		return nil, llm.ModelInfo{}, err
 	}
-
-	// If a specific model is requested, try it first
-	if preferredModel != "" {
-		for _, model := range models {
-			if model.Name == preferredModel {
-				if err := m.validateConstraints(slot, model); err == nil {
-					if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
-						return nil, llm.ModelInfo{}, err
-					}
-					return provider, model, nil
-				}
-			}
-		}
+	if err := m.applyModelGate(ctx, slot, provider, model); err != nil {
+		return nil, llm.ModelInfo{}, err
 	}
+	return provider, model, nil
+}
 
-	// Otherwise, find any model that meets constraints
-	// Prefer models with higher capability (more features, larger context window)
-	var bestModel *llm.ModelInfo
-	for _, model := range models {
-		if err := m.validateConstraints(slot, model); err == nil {
-			if bestModel == nil || model.ContextWindow > bestModel.ContextWindow {
-				modelCopy := model
-				bestModel = &modelCopy
-			}
-		}
+// modelFor returns the model that config names for the provider, or "". An
+// explicit provider owns the model. With no provider named, the model goes to
+// the tenant default provider, or to the only provider.
+func (m *DaemonSlotManager) modelFor(providerName string, config agent.SlotConfig, providerCount int) string {
+	switch {
+	case config.Model == "":
+		return ""
+	case config.Provider == providerName:
+		return config.Model
+	case config.Provider == "" && (providerName == m.defaultProvider || providerCount == 1):
+		return config.Model
+	default:
+		return ""
 	}
-
-	if bestModel != nil {
-		if err := m.applyModelGate(ctx, slot, provider, *bestModel); err != nil {
-			return nil, llm.ModelInfo{}, err
-		}
-		return provider, *bestModel, nil
-	}
-
-	return nil, llm.ModelInfo{}, types.NewError(
-		llm.ErrNoMatchingProvider,
-		fmt.Sprintf("no matching model in provider %q", providerName),
-	)
 }
 
 // isProviderNotFoundError checks if an error or its cause chain contains a provider not found error
@@ -444,33 +436,14 @@ func isProviderNotFoundError(err error) bool {
 func (m *DaemonSlotManager) validateConstraints(slot agent.SlotDefinition, model llm.ModelInfo) error {
 	constraints := slot.Constraints
 
-	// Check MinContextWindow constraint
-	if constraints.MinContextWindow > 0 {
-		if model.ContextWindow < constraints.MinContextWindow {
-			return types.NewError(
-				llm.ErrInvalidSlotConfig,
-				fmt.Sprintf("model %q context window %d is less than required %d for slot %q",
-					model.Name, model.ContextWindow, constraints.MinContextWindow, slot.Name),
-			)
-		}
-	}
-
-	// Check RequiredFeatures constraint
-	if len(constraints.RequiredFeatures) > 0 {
-		missingFeatures := []string{}
-		for _, required := range constraints.RequiredFeatures {
-			if !model.SupportsFeature(required) {
-				missingFeatures = append(missingFeatures, required)
-			}
-		}
-
-		if len(missingFeatures) > 0 {
-			return types.NewError(
-				llm.ErrInvalidSlotConfig,
-				fmt.Sprintf("model %q missing required features for slot %q: %v",
-					model.Name, slot.Name, missingFeatures),
-			)
-		}
+	// An unreported context window or feature set passes: unknown is not too
+	// small and not absent. A reported value that falls short still fails.
+	if !model.ContextWindowAtLeast(constraints.MinContextWindow) {
+		return types.NewError(
+			llm.ErrInvalidSlotConfig,
+			fmt.Sprintf("model %q context window %d is less than required %d for slot %q",
+				model.Name, model.ContextWindow, constraints.MinContextWindow, slot.Name),
+		)
 	}
 
 	return nil

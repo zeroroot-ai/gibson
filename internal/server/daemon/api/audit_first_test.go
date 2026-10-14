@@ -106,7 +106,7 @@ func auditLoggerOver(t *testing.T, d audit.DurableWriter) *audit.AuditLogger {
 // store is not called, and a store failure gets a failure record.
 func TestProviderChanges_WriteTheirRecordFirst(t *testing.T) {
 	ctx := ctxWithTenantAdmin(context.Background(), "acme", "admin1")
-	input := &tenantv1.ProviderConfigInput{Name: "p1", Type: "openai", DefaultModel: "gpt-4o-mini", Credentials: map[string]string{"api_key": "k"}}
+	input := &tenantv1.ProviderConfigInput{Name: "p1", Type: "openai", DefaultModel: "gpt-4o-mini", DefaultModelContextWindow: 128000, Credentials: map[string]string{"api_key": "k"}}
 
 	rec := &audittest.Recorder{}
 	store := &mockProviderStore{createOut: fakeProviderRecord("p1"), getOut: fakeProviderRecord("p1")}

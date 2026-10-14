@@ -5,6 +5,10 @@ package providers
 
 import (
 	"context"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
 
 	einogemini "github.com/cloudwego/eino-ext/components/model/gemini"
 	"google.golang.org/genai"
@@ -23,7 +27,15 @@ import (
 type GoogleProvider struct {
 	model  *einogemini.ChatModel
 	config llm.ProviderConfig
+
+	listClient *http.Client
+	listBase   string
+	listKey    string
+	cache      modelCache
 }
+
+// defaultGoogleBaseURL is the Gemini API root when the config sets no base URL.
+const defaultGoogleBaseURL = "https://generativelanguage.googleapis.com"
 
 // NewGoogleProvider creates a new Google provider backed by the Eino Gemini component.
 //
@@ -37,11 +49,21 @@ func NewGoogleProvider(cfg llm.ProviderConfig) (*GoogleProvider, error) {
 		return nil, llm.NewAuthError("google", nil)
 	}
 
-	genaiClient, err := genai.NewClient(context.Background(), &genai.ClientConfig{
-		APIKey:     apiKey,
-		Backend:    genai.BackendGeminiAPI,
-		HTTPClient: guardedHTTPClient(cfg),
-	})
+	baseURL := defaultGoogleBaseURL
+	clientCfg := &genai.ClientConfig{
+		APIKey:  apiKey,
+		Backend: genai.BackendGeminiAPI,
+	}
+	if cfg.BaseURL != "" {
+		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
+			return nil, err
+		}
+		baseURL = cfg.BaseURL
+		clientCfg.HTTPOptions = genai.HTTPOptions{BaseURL: baseURL}
+	}
+	httpClient := guardedHTTPClient(cfg)
+	clientCfg.HTTPClient = httpClient
+	genaiClient, err := genai.NewClient(context.Background(), clientCfg)
 	if err != nil {
 		return nil, llm.TranslateError("google", err)
 	}
@@ -56,8 +78,11 @@ func NewGoogleProvider(cfg llm.ProviderConfig) (*GoogleProvider, error) {
 	}
 
 	return &GoogleProvider{
-		model:  m,
-		config: cfg,
+		model:      m,
+		config:     cfg,
+		listClient: httpClient,
+		listBase:   baseURL,
+		listKey:    apiKey,
 	}, nil
 }
 
@@ -66,29 +91,58 @@ func (p *GoogleProvider) Name() string {
 	return "google"
 }
 
-// Models returns information about available models
-func (p *GoogleProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	models := []llm.ModelInfo{
-		{
-			Name:          "gemini-1.5-pro",
-			ContextWindow: 1048576,
-			MaxOutput:     8192,
-			Features:      []string{"chat", "streaming", "tools", "vision"},
-		},
-		{
-			Name:          "gemini-1.5-flash",
-			ContextWindow: 1048576,
-			MaxOutput:     8192,
-			Features:      []string{"chat", "streaming", "tools", "vision"},
-		},
-		{
-			Name:          "gemini-pro",
-			ContextWindow: 32768,
-			MaxOutput:     8192,
-			Features:      []string{"chat", "streaming", "tools"},
-		},
-	}
-	return models, nil
+// Models asks the Gemini list endpoint (GET {base}/v1beta/models) for the
+// models of the configured key. It follows nextPageToken until the list ends.
+// It keeps the models that support generateContent, which are the chat models.
+// The key goes in the x-goog-api-key header, so it never appears in a URL or in
+// an error text.
+func (p *GoogleProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.cache.get(ctx, "google", func(ctx context.Context) ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		header.Set("x-goog-api-key", p.listKey)
+
+		var models []llm.ModelInfo
+		pageToken := ""
+		for range maxModelListPages {
+			q := url.Values{"pageSize": {"1000"}}
+			if pageToken != "" {
+				q.Set("pageToken", pageToken)
+			}
+			var page struct {
+				Models []struct {
+					Name                       string   `json:"name"`
+					InputTokenLimit            int      `json:"inputTokenLimit"`
+					OutputTokenLimit           int      `json:"outputTokenLimit"`
+					SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+				} `json:"models"`
+				NextPageToken string `json:"nextPageToken"`
+			}
+			endpoint := strings.TrimRight(p.listBase, "/") + "/v1beta/models?" + q.Encode()
+			if err := getJSON(ctx, p.listClient, "google", endpoint, header, &page); err != nil {
+				return nil, err
+			}
+			for _, m := range page.Models {
+				if !slices.Contains(m.SupportedGenerationMethods, "generateContent") {
+					continue
+				}
+				name := strings.TrimPrefix(m.Name, "models/")
+				if name == "" {
+					continue
+				}
+				models = append(models, llm.ModelInfo{
+					Name:          name,
+					ContextWindow: m.InputTokenLimit,
+					MaxOutput:     m.OutputTokenLimit,
+					Features:      []string{"chat"},
+				})
+			}
+			if page.NextPageToken == "" || page.NextPageToken == pageToken {
+				return models, nil
+			}
+			pageToken = page.NextPageToken
+		}
+		return models, nil
+	})
 }
 
 // Complete sends a completion request
@@ -150,3 +204,10 @@ func (p *GoogleProvider) Health(ctx context.Context) types.HealthStatus {
 
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *GoogleProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *GoogleProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }

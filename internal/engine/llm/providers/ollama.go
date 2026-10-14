@@ -5,6 +5,8 @@ package providers
 
 import (
 	"context"
+	"net/http"
+	"strings"
 
 	einoollama "github.com/cloudwego/eino-ext/components/model/ollama"
 
@@ -21,6 +23,10 @@ import (
 type OllamaProvider struct {
 	model  *einoollama.ChatModel
 	config llm.ProviderConfig
+
+	listClient *http.Client
+	listBase   string
+	cache      modelCache
 }
 
 // NewOllamaProvider creates a new Ollama provider backed by the Eino Ollama component.
@@ -34,10 +40,11 @@ func NewOllamaProvider(cfg llm.ProviderConfig) (*OllamaProvider, error) {
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	einoConfig := &einoollama.ChatModelConfig{
 		BaseURL:    serverURL,
 		Model:      cfg.DefaultModel,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	}
 	m, err := einoollama.NewChatModel(context.Background(), einoConfig)
 	if err != nil {
@@ -45,8 +52,10 @@ func NewOllamaProvider(cfg llm.ProviderConfig) (*OllamaProvider, error) {
 	}
 
 	return &OllamaProvider{
-		model:  m,
-		config: cfg,
+		model:      m,
+		config:     cfg,
+		listClient: client,
+		listBase:   serverURL,
 	}, nil
 }
 
@@ -55,18 +64,31 @@ func (p *OllamaProvider) Name() string {
 	return "ollama"
 }
 
-// Models returns information about available models
-func (p *OllamaProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	// Return default local models - actual models would need to be queried from Ollama
-	models := []llm.ModelInfo{
-		{
-			Name:          "llama2",
-			ContextWindow: 4096,
-			MaxOutput:     2048,
-			Features:      []string{"chat", "streaming"},
-		},
-	}
-	return models, nil
+// Models asks the Ollama server (GET {base}/api/tags) for the models that are
+// pulled on it. Ollama reports no context window here, so the field stays zero.
+func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.cache.get(ctx, "ollama", func(ctx context.Context) ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		if p.config.APIKey != "" {
+			header.Set("Authorization", "Bearer "+p.config.APIKey)
+		}
+		var tags struct {
+			Models []struct {
+				Name string `json:"name"`
+			} `json:"models"`
+		}
+		if err := getJSON(ctx, p.listClient, "ollama", strings.TrimRight(p.listBase, "/")+"/api/tags", header, &tags); err != nil {
+			return nil, err
+		}
+		models := make([]llm.ModelInfo, 0, len(tags.Models))
+		for _, m := range tags.Models {
+			if m.Name == "" {
+				continue
+			}
+			models = append(models, llm.ModelInfo{Name: m.Name, Features: []string{"chat"}})
+		}
+		return models, nil
+	})
 }
 
 // Complete sends a completion request
@@ -128,3 +150,10 @@ func (p *OllamaProvider) Health(ctx context.Context) types.HealthStatus {
 
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *OllamaProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *OllamaProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }

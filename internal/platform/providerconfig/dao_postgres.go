@@ -32,20 +32,72 @@ type pgQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// windowColumnMinVersion is the first tenant migration that has the
+// default_model_context_window column (016). The tenant operator applies tenant
+// migrations, and the daemon can roll ahead of it. The daemon therefore reads
+// and writes the column only on a tenant database at this version or later. On
+// an earlier one the window is unreported and the rest of the config works.
+const windowColumnMinVersion = 16
+
 func newProviderConfigDAO(pg pgQuerier) *providerConfigDAO {
 	return &providerConfigDAO{pg: pg}
+}
+
+// windowColumn reports whether this tenant database has the window column. It
+// reads the row golang-migrate records, the same row the tenant operator reads.
+// A missing schema_migrations table (42P01) counts as not yet migrated, so the
+// daemon never asks for a column it cannot see. A dirty version N counts as
+// N-1 applied. Any other read error fails the operation: guessing "not
+// migrated" there would store a window under the wrong model.
+func (d *providerConfigDAO) windowColumn(ctx context.Context) (bool, error) {
+	var (
+		version int64
+		dirty   bool
+	)
+	err := d.pg.QueryRow(ctx,
+		`SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1`,
+	).Scan(&version, &dirty)
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case errors.As(err, &pgErr) && pgErr.Code == "42P01":
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("read the tenant schema version: %w", err)
+	}
+	if dirty {
+		version--
+	}
+	return version >= windowColumnMinVersion, nil
 }
 
 func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error) {
 	now := time.Now().UTC()
 	id := types.NewID()
 
-	_, err := d.pg.Exec(ctx,
-		`INSERT INTO provider_configs (id, name, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-		string(id), input.Name, string(input.Type), input.DefaultModel,
-		input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
-	)
+	window := input.DefaultModelContextWindow
+	var err error
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
+		_, err = d.pg.Exec(ctx,
+			`INSERT INTO provider_configs (id, name, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			string(id), input.Name, string(input.Type), input.DefaultModel, input.DefaultModelContextWindow,
+			input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
+		)
+	} else {
+		window = 0
+		_, err = d.pg.Exec(ctx,
+			`INSERT INTO provider_configs (id, name, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			string(id), input.Name, string(input.Type), input.DefaultModel,
+			input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
+		)
+	}
 	if err != nil {
 		if isPgUniqueViolation(err) {
 			return nil, ErrAlreadyExists
@@ -54,30 +106,44 @@ func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *
 	}
 
 	return &ProviderConfig{
-		ID:                    id,
-		TenantID:              tenantID,
-		Name:                  input.Name,
-		Type:                  input.Type,
-		DefaultModel:          input.DefaultModel,
-		IsDefault:             input.SetAsDefault,
-		Enabled:               input.Enabled,
-		Capabilities:          normalizeCapabilities(input.Capabilities),
-		DefaultEmbeddingModel: input.DefaultEmbeddingModel,
-		CreatedAt:             now,
-		UpdatedAt:             now,
+		ID:                        id,
+		TenantID:                  tenantID,
+		Name:                      input.Name,
+		Type:                      input.Type,
+		DefaultModel:              input.DefaultModel,
+		DefaultModelContextWindow: window,
+		IsDefault:                 input.SetAsDefault,
+		Enabled:                   input.Enabled,
+		Capabilities:              normalizeCapabilities(input.Capabilities),
+		DefaultEmbeddingModel:     input.DefaultEmbeddingModel,
+		CreatedAt:                 now,
+		UpdatedAt:                 now,
 	}, nil
 }
 
 func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*ProviderConfig, error) {
 	var id, typ, defaultModel, defaultEmbeddingModel string
+	var window int
 	var isDefault, enabled bool
 	var capabilities []string
 	var createdAt, updatedAt time.Time
 
-	err := d.pg.QueryRow(ctx,
-		`SELECT id, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
-		 FROM provider_configs WHERE name = $1`, name,
-	).Scan(&id, &typ, &defaultModel, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	var err error
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
+		err = d.pg.QueryRow(ctx,
+			`SELECT id, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+			 FROM provider_configs WHERE name = $1`, name,
+		).Scan(&id, &typ, &defaultModel, &window, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	} else {
+		err = d.pg.QueryRow(ctx,
+			`SELECT id, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+			 FROM provider_configs WHERE name = $1`, name,
+		).Scan(&id, &typ, &defaultModel, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -87,23 +153,32 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 
 	parsedID, _ := types.ParseID(id)
 	return &ProviderConfig{
-		ID:                    parsedID,
-		TenantID:              tenantID,
-		Name:                  name,
-		Type:                  llm.ProviderType(typ),
-		DefaultModel:          defaultModel,
-		IsDefault:             isDefault,
-		Enabled:               enabled,
-		Capabilities:          normalizeCapabilities(capabilities),
-		DefaultEmbeddingModel: defaultEmbeddingModel,
-		CreatedAt:             createdAt,
-		UpdatedAt:             updatedAt,
+		ID:                        parsedID,
+		TenantID:                  tenantID,
+		Name:                      name,
+		Type:                      llm.ProviderType(typ),
+		DefaultModel:              defaultModel,
+		DefaultModelContextWindow: window,
+		IsDefault:                 isDefault,
+		Enabled:                   enabled,
+		Capabilities:              normalizeCapabilities(capabilities),
+		DefaultEmbeddingModel:     defaultEmbeddingModel,
+		CreatedAt:                 createdAt,
+		UpdatedAt:                 updatedAt,
 	}, nil
 }
 
 func (d *providerConfigDAO) list(ctx context.Context, tenantID string) ([]*ProviderConfig, error) {
+	windowSelect := "0"
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
+		windowSelect = "default_model_context_window"
+	}
 	rows, err := d.pg.Query(ctx,
-		`SELECT id, name, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+		`SELECT id, name, type, default_model, `+windowSelect+`, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
 		 FROM provider_configs ORDER BY name`,
 	)
 	if err != nil {
@@ -114,25 +189,27 @@ func (d *providerConfigDAO) list(ctx context.Context, tenantID string) ([]*Provi
 	var configs []*ProviderConfig
 	for rows.Next() {
 		var id, name, typ, defaultModel, defaultEmbeddingModel string
+		var window int
 		var isDefault, enabled bool
 		var capabilities []string
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&id, &name, &typ, &defaultModel, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&id, &name, &typ, &defaultModel, &window, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("dao: scan provider config row: %w", err)
 		}
 		parsedID, _ := types.ParseID(id)
 		configs = append(configs, &ProviderConfig{
-			ID:                    parsedID,
-			TenantID:              tenantID,
-			Name:                  name,
-			Type:                  llm.ProviderType(typ),
-			DefaultModel:          defaultModel,
-			IsDefault:             isDefault,
-			Enabled:               enabled,
-			Capabilities:          normalizeCapabilities(capabilities),
-			DefaultEmbeddingModel: defaultEmbeddingModel,
-			CreatedAt:             createdAt,
-			UpdatedAt:             updatedAt,
+			ID:                        parsedID,
+			TenantID:                  tenantID,
+			Name:                      name,
+			Type:                      llm.ProviderType(typ),
+			DefaultModel:              defaultModel,
+			DefaultModelContextWindow: window,
+			IsDefault:                 isDefault,
+			Enabled:                   enabled,
+			Capabilities:              normalizeCapabilities(capabilities),
+			DefaultEmbeddingModel:     defaultEmbeddingModel,
+			CreatedAt:                 createdAt,
+			UpdatedAt:                 updatedAt,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -146,14 +223,32 @@ func (d *providerConfigDAO) update(ctx context.Context, tenantID, name string, i
 
 	var id string
 	var createdAt time.Time
-	err := d.pg.QueryRow(ctx,
-		`UPDATE provider_configs
-		 SET type = $1, default_model = $2, is_default = $3, enabled = $4, capabilities = $5, default_embedding_model = $6, updated_at = $7
-		 WHERE name = $8
-		 RETURNING id, created_at`,
-		string(input.Type), input.DefaultModel, input.SetAsDefault, input.Enabled,
-		capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
-	).Scan(&id, &createdAt)
+	var err error
+	window := input.DefaultModelContextWindow
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
+		err = d.pg.QueryRow(ctx,
+			`UPDATE provider_configs
+			 SET type = $1, default_model = $2, default_model_context_window = $3, is_default = $4, enabled = $5, capabilities = $6, default_embedding_model = $7, updated_at = $8
+			 WHERE name = $9
+			 RETURNING id, created_at`,
+			string(input.Type), input.DefaultModel, input.DefaultModelContextWindow, input.SetAsDefault, input.Enabled,
+			capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
+		).Scan(&id, &createdAt)
+	} else {
+		window = 0
+		err = d.pg.QueryRow(ctx,
+			`UPDATE provider_configs
+			 SET type = $1, default_model = $2, is_default = $3, enabled = $4, capabilities = $5, default_embedding_model = $6, updated_at = $7
+			 WHERE name = $8
+			 RETURNING id, created_at`,
+			string(input.Type), input.DefaultModel, input.SetAsDefault, input.Enabled,
+			capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
+		).Scan(&id, &createdAt)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -163,17 +258,18 @@ func (d *providerConfigDAO) update(ctx context.Context, tenantID, name string, i
 
 	parsedID, _ := types.ParseID(id)
 	return &ProviderConfig{
-		ID:                    parsedID,
-		TenantID:              tenantID,
-		Name:                  name,
-		Type:                  input.Type,
-		DefaultModel:          input.DefaultModel,
-		IsDefault:             input.SetAsDefault,
-		Enabled:               input.Enabled,
-		Capabilities:          normalizeCapabilities(input.Capabilities),
-		DefaultEmbeddingModel: input.DefaultEmbeddingModel,
-		CreatedAt:             createdAt,
-		UpdatedAt:             now,
+		ID:                        parsedID,
+		TenantID:                  tenantID,
+		Name:                      name,
+		Type:                      input.Type,
+		DefaultModel:              input.DefaultModel,
+		DefaultModelContextWindow: window,
+		IsDefault:                 input.SetAsDefault,
+		Enabled:                   input.Enabled,
+		Capabilities:              normalizeCapabilities(input.Capabilities),
+		DefaultEmbeddingModel:     input.DefaultEmbeddingModel,
+		CreatedAt:                 createdAt,
+		UpdatedAt:                 now,
 	}, nil
 }
 

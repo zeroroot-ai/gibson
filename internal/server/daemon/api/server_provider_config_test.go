@@ -56,6 +56,7 @@ type mockProviderStore struct {
 	// captured inputs for mutation verification
 	capturedCreateInput *providerconfig.ProviderConfigInput
 	capturedUpdateName  string
+	capturedUpdateInput *providerconfig.ProviderConfigInput
 	capturedDeleteName  string
 	capturedDefaultName string
 }
@@ -73,8 +74,9 @@ func (m *mockProviderStore) Create(_ context.Context, _ string, input *providerc
 	return m.createOut, m.createErr
 }
 
-func (m *mockProviderStore) Update(_ context.Context, _ string, name string, _ *providerconfig.ProviderConfigInput) (*providerconfig.ProviderConfig, error) {
+func (m *mockProviderStore) Update(_ context.Context, _, name string, input *providerconfig.ProviderConfigInput) (*providerconfig.ProviderConfig, error) {
 	m.capturedUpdateName = name
+	m.capturedUpdateInput = input
 	return m.updateOut, m.updateErr
 }
 
@@ -273,8 +275,8 @@ func TestCreateProvider_Success_ReturnsRecordAndEmitsAudit(t *testing.T) {
 		Input: &tenantv1.ProviderConfigInput{
 			Name:         "openai-new",
 			Type:         "openai",
-			DefaultModel: "gpt-4o-mini",
-			Credentials:  map[string]string{"api_key": "sk-test-key"},
+			DefaultModel: "gpt-4o-mini", DefaultModelContextWindow: 128000,
+			Credentials: map[string]string{"api_key": "sk-test-key"},
 		},
 	})
 	require.NoError(t, err)
@@ -334,7 +336,7 @@ func TestUpdateProvider_Success_PassesNameToStore(t *testing.T) {
 	s := serverWithStore(t, store)
 	resp, err := s.UpdateProvider(tenantCtx("acme"), &tenantv1.UpdateProviderRequest{
 		Name:  "openai-updated",
-		Input: &tenantv1.ProviderConfigInput{Type: "openai", DefaultModel: "gpt-4o"},
+		Input: &tenantv1.ProviderConfigInput{Type: "openai", DefaultModel: "gpt-4o", DefaultModelContextWindow: 128000},
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "openai-updated", store.capturedUpdateName)

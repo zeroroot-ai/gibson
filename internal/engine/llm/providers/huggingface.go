@@ -21,6 +21,7 @@ import (
 type HuggingFaceProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // newHuggingFaceProviderWithContext constructs a HuggingFace provider, resolving the credential from cfg (see resolveCredential).
@@ -32,37 +33,41 @@ func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConf
 
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api-inference.huggingface.co/v1"
+		baseURL = huggingFaceRouterURL
 	}
 
 	if err := validateLLMEndpoint(baseURL, cfg.AllowPrivateEndpoint); err != nil {
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("huggingface", err)
 	}
-	return &HuggingFaceProvider{model: m, config: cfg}, nil
+	return &HuggingFaceProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "huggingface", listURL: openAIModelsURL(baseURL), token: token},
+	}, nil
 }
 
 func (p *HuggingFaceProvider) Name() string { return "huggingface" }
 
-func (p *HuggingFaceProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "meta-llama/Llama-3.1-70B-Instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "meta-llama/Llama-3.1-8B-Instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "meta-llama/Llama-3-70B-Instruct", ContextWindow: 8192, MaxOutput: 4096, Features: chat},
-		{Name: "mistralai/Mixtral-8x7B-Instruct-v0.1", ContextWindow: 32768, MaxOutput: 4096, Features: chat},
-		{Name: "HuggingFaceH4/zephyr-7b-beta", ContextWindow: 32768, MaxOutput: 4096, Features: chat},
-		{Name: "google/gemma-2-9b-it", ContextWindow: 8192, MaxOutput: 4096, Features: chat},
-	}, nil
+// huggingFaceRouterURL is the OpenAI-compatible root of Hugging Face Inference
+// Providers. GET {root}/models lists the models of all providers, and
+// POST {root}/chat/completions runs a chat. See
+// https://huggingface.co/docs/inference-providers/index
+const huggingFaceRouterURL = "https://router.huggingface.co/v1"
+
+// Models asks the Inference Providers router (GET {base}/models) for its models.
+func (p *HuggingFaceProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *HuggingFaceProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -122,4 +127,13 @@ func translateHuggingFaceError(err error) error {
 	default:
 		return llm.TranslateError("huggingface", err)
 	}
+}
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *HuggingFaceProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *HuggingFaceProvider) DefaultModelContextWindow() int {
+	return p.config.DefaultModelContextWindow
 }

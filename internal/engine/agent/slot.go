@@ -26,17 +26,8 @@ type SlotConfig struct {
 // SlotConstraints defines requirements for a slot.
 // These constraints ensure the assigned LLM meets the agent's needs.
 type SlotConstraints struct {
-	MinContextWindow int      `json:"min_context_window"` // Minimum context window size
-	RequiredFeatures []string `json:"required_features"`  // Required LLM features
+	MinContextWindow int `json:"min_context_window"` // Minimum context window size
 }
-
-// Feature constants define capabilities that LLMs may support
-const (
-	FeatureToolUse   = "tool_use"  // Function/tool calling
-	FeatureVision    = "vision"    // Image understanding
-	FeatureStreaming = "streaming" // Streaming responses
-	FeatureJSONMode  = "json_mode" // Structured JSON output
-)
 
 // NewSlotDefinition creates a new slot definition with basic properties
 func NewSlotDefinition(name, description string, required bool) SlotDefinition {
@@ -52,7 +43,6 @@ func NewSlotDefinition(name, description string, required bool) SlotDefinition {
 		},
 		Constraints: SlotConstraints{
 			MinContextWindow: 8192,
-			RequiredFeatures: []string{},
 		},
 	}
 }

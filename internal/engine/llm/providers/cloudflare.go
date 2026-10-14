@@ -6,6 +6,9 @@ package providers
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -21,6 +24,7 @@ import (
 type CloudflareProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *cloudflareListEndpoint
 }
 
 // newCloudflareProviderWithContext constructs a Cloudflare provider, resolving the credential from cfg (see resolveCredential).
@@ -43,30 +47,80 @@ func newCloudflareProviderWithContext(ctx context.Context, cfg llm.ProviderConfi
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("cloudflare", err)
 	}
-	return &CloudflareProvider{model: m, config: cfg}, nil
+	return &CloudflareProvider{
+		model:  m,
+		config: cfg,
+		lister: &cloudflareListEndpoint{client: client, listURL: cloudflareModelsURL(baseURL), token: token},
+	}, nil
 }
 
 func (p *CloudflareProvider) Name() string { return "cloudflare" }
 
-func (p *CloudflareProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "@cf/meta/llama-3.1-8b-instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "@cf/meta/llama-3-8b-instruct", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/meta/llama-2-7b-chat-int8", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/mistral/mistral-7b-instruct-v0.1", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/google/gemma-7b-it", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/qwen/qwen1.5-14b-chat-awq", ContextWindow: 32768, MaxOutput: 2048, Features: chat},
-	}, nil
+// Models asks the Cloudflare model search endpoint (see
+// https://developers.cloudflare.com/api/resources/ai/subresources/models/) for
+// the text generation models. The OpenAI compatibility route has no list call.
+func (p *CloudflareProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
+}
+
+// cloudflareModelsURL turns the compatibility base URL
+// (.../accounts/{id}/ai/v1) into the search URL (.../accounts/{id}/ai/models/search).
+func cloudflareModelsURL(baseURL string) string {
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1") + "/models/search"
+}
+
+// cloudflareListEndpoint lists Workers AI models with
+// GET /accounts/{id}/ai/models/search?task=Text Generation. The response is the
+// Cloudflare envelope {"result":[{"name","task":{"name"}}],"result_info":{...}}.
+type cloudflareListEndpoint struct {
+	client  *http.Client
+	listURL string
+	token   string
+	cache   modelCache
+}
+
+// Models returns the text generation models and follows the result pages.
+func (e *cloudflareListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return e.cache.get(ctx, "cloudflare", func(ctx context.Context) ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		header.Set("Authorization", "Bearer "+e.token)
+		var models []llm.ModelInfo
+		for pageNo := 1; pageNo <= maxModelListPages; pageNo++ {
+			q := url.Values{"task": {"Text Generation"}, "per_page": {"100"}, "page": {strconv.Itoa(pageNo)}}
+			var page struct {
+				Result []struct {
+					Name string `json:"name"`
+				} `json:"result"`
+				ResultInfo struct {
+					Page       int `json:"page"`
+					PerPage    int `json:"per_page"`
+					TotalCount int `json:"total_count"`
+				} `json:"result_info"`
+			}
+			if err := getJSON(ctx, e.client, "cloudflare", e.listURL+"?"+q.Encode(), header, &page); err != nil {
+				return nil, err
+			}
+			for _, m := range page.Result {
+				if m.Name != "" {
+					models = append(models, llm.ModelInfo{Name: m.Name})
+				}
+			}
+			if len(page.Result) == 0 || pageNo*100 >= page.ResultInfo.TotalCount {
+				return models, nil
+			}
+		}
+		return models, nil
+	})
 }
 
 func (p *CloudflareProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -136,4 +190,13 @@ func translateCloudflareError(err error) error {
 	default:
 		return llm.TranslateError("cloudflare", err)
 	}
+}
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *CloudflareProvider) DefaultModel() string { return p.config.DefaultModel }
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *CloudflareProvider) DefaultModelContextWindow() int {
+	return p.config.DefaultModelContextWindow
 }

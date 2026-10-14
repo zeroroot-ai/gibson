@@ -146,12 +146,16 @@ func (c *LLMConfig) Validate() error {
 // It includes authentication credentials, API endpoints, available models,
 // and provider-specific options.
 type ProviderConfig struct {
-	Type         ProviderType           `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere huggingface llamafile mistral vertex foundry custom voyage openai-compatible tei"`
-	APIKey       string                 `mapstructure:"api_key" yaml:"api_key"`
-	BaseURL      string                 `mapstructure:"base_url" yaml:"base_url"`
-	DefaultModel string                 `mapstructure:"default_model" yaml:"default_model" validate:"required"`
-	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models" validate:"dive"`
-	Options      map[string]interface{} `mapstructure:"options" yaml:"options"`
+	Type         ProviderType `mapstructure:"type" yaml:"type" validate:"required,oneof=anthropic openai google ollama bedrock cloudflare cohere huggingface llamafile mistral vertex foundry custom voyage openai-compatible tei"`
+	APIKey       string       `mapstructure:"api_key" yaml:"api_key"`
+	BaseURL      string       `mapstructure:"base_url" yaml:"base_url"`
+	DefaultModel string       `mapstructure:"default_model" yaml:"default_model" validate:"required"`
+	// DefaultModelContextWindow is the context window, in tokens, of
+	// DefaultModel. The tenant's saved provider config stores it at save time.
+	// Zero means no window is stored: it is unknown, never "no room".
+	DefaultModelContextWindow int                    `mapstructure:"default_model_context_window" yaml:"default_model_context_window"`
+	Models                    map[string]ModelConfig `mapstructure:"models" yaml:"models" validate:"dive"`
+	Options                   map[string]interface{} `mapstructure:"options" yaml:"options"`
 	// Extra carries provider-specific credentials (e.g. aws_access_key_id,
 	// watsonx_project_id, ernie_secret_key) that do not fit the typed fields
 	// above. Keys are provider-defined; values are treated as secrets and

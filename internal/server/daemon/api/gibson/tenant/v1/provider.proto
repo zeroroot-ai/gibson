@@ -228,6 +228,11 @@ message ProviderConfigInput {
   // independent of default_model (the chat model). Empty when the provider
   // does not serve embeddings.
   string default_embedding_model = 7;
+  // default_model_context_window is the context window, in tokens, of
+  // default_model. Optional. When it is 0 the daemon reads the window from the
+  // live model list of the provider. A provider that does not report one needs
+  // the caller to state it here, and the save is refused without it.
+  int32 default_model_context_window = 8 [(buf.validate.field).int32 = { gte: 0, lte: 10000000 }];
 }
 
 // CredentialFieldType classifies the UI widget and validation semantics for a
@@ -283,14 +288,14 @@ message SupportedProvider {
   string docs_url = 3;
   bool self_hosted = 4;
   repeated CredentialField credentials = 5;
-  // default_models is the static catalog of CHAT models this provider
-  // exposes when the daemon can enumerate them without a live API call.
-  // Empty for providers where the model list requires a live probe.
+  // default_models is always empty. The daemon keeps no fixed model list. The
+  // models of an account come from the provider through TestProvider,
+  // ProbeProvider and ListProviderModels. The field stays until the dashboard
+  // stops reading it, then it is reserved.
   repeated ModelDescriptor default_models = 6;
-  // embedding_models is the static catalog of EMBEDDING models this
-  // provider supports. Empty for providers that serve chat only (e.g.
-  // Anthropic, Google). The dashboard uses this list to populate the
-  // embedding-model picker in Settings > Providers.
+  // embedding_models lists the embedding models that the save path accepts for
+  // this provider type: the embedder dimension table. Empty for a chat-only
+  // provider.
   repeated ModelDescriptor embedding_models = 7;
 }
 
@@ -397,8 +402,8 @@ message TestProviderResponse {
   int64 latency_ms = 2;
   string model = 3;
   string error = 4;
-  // Live model catalog returned by the provider's API for these credentials.
-  // Empty when ok=false.
+  // Live models that the provider's list endpoint reports for these
+  // credentials. Empty when ok=false.
   repeated ModelDescriptor models = 5;
   // embedding_ok is true when an embedding probe was attempted and succeeded.
   // False when no embedding probe was run (provider is chat-only or
@@ -433,6 +438,10 @@ message ProbeProviderRequest {
   // embedding probe (e.g. voyage, openai-compatible, tei). Optional for
   // chat-only providers — if supplied, an embedding probe is also run.
   string default_embedding_model = 3 [(buf.validate.field).string = { max_len: 4096 }];
+  // default_model is the chat model to test. Optional. Only a provider with no
+  // model list call (Foundry) needs it: the test completes one token against
+  // this model. A provider with a list call ignores it.
+  string default_model = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // ProbeProviderResponse carries the structured probe outcome.

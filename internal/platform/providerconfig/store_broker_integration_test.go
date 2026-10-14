@@ -129,6 +129,7 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     name                    TEXT        PRIMARY KEY,
     type                    TEXT        NOT NULL,
     default_model           TEXT        NOT NULL DEFAULT '',
+    default_model_context_window INTEGER NOT NULL DEFAULT 0,
     is_default              BOOLEAN     NOT NULL DEFAULT FALSE,
     enabled                 BOOLEAN     NOT NULL DEFAULT TRUE,
     capabilities            TEXT[]      NOT NULL DEFAULT '{}',
@@ -136,6 +137,8 @@ CREATE TABLE IF NOT EXISTS provider_configs (
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS schema_migrations (version BIGINT PRIMARY KEY, dirty BOOLEAN NOT NULL);
+INSERT INTO schema_migrations (version, dirty) VALUES (16, false) ON CONFLICT DO NOTHING;
 CREATE TABLE IF NOT EXISTS tenant_secrets (
     name       TEXT        PRIMARY KEY,
     envelope   BYTEA       NOT NULL,

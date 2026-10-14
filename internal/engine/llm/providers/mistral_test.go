@@ -28,24 +28,6 @@ func TestNewMistralProvider_MissingAPIKey(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestMistralProvider_Models_ToolCapability(t *testing.T) {
-	p := &MistralProvider{}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	foundLargeWithTools := false
-	for _, m := range models {
-		if m.Name != "mistral-large-latest" {
-			continue
-		}
-		for _, f := range m.Features {
-			if f == "tools" {
-				foundLargeWithTools = true
-			}
-		}
-	}
-	assert.True(t, foundLargeWithTools, "mistral-large-latest should advertise tool_use")
-}
-
 func TestMistralCredentialSchema(t *testing.T) {
 	schema := MistralCredentialSchema()
 	require.NotEmpty(t, schema)

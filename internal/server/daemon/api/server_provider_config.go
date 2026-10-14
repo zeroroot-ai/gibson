@@ -24,7 +24,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -170,14 +169,15 @@ func fromProtoInput(in *tenantv1.ProviderConfigInput) *providerconfig.ProviderCo
 		creds[k] = v
 	}
 	return &providerconfig.ProviderConfigInput{
-		Name:                  in.Name,
-		Type:                  llm.ProviderType(in.Type),
-		DefaultModel:          in.DefaultModel,
-		Capabilities:          capabilitiesFromProto(in.Capabilities),
-		DefaultEmbeddingModel: in.DefaultEmbeddingModel,
-		Credentials:           creds,
-		SetAsDefault:          in.SetAsDefault,
-		Enabled:               true, // new providers default to enabled
+		Name:                      in.Name,
+		Type:                      llm.ProviderType(in.Type),
+		DefaultModel:              in.DefaultModel,
+		DefaultModelContextWindow: int(in.DefaultModelContextWindow),
+		Capabilities:              capabilitiesFromProto(in.Capabilities),
+		DefaultEmbeddingModel:     in.DefaultEmbeddingModel,
+		Credentials:               creds,
+		SetAsDefault:              in.SetAsDefault,
+		Enabled:                   true, // new providers default to enabled
 	}
 }
 
@@ -354,6 +354,9 @@ func (s *DaemonServer) CreateProvider(ctx context.Context, req *tenantv1.CreateP
 	if err := validateProviderInput(req.GetInput()); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
+	if err := s.fillDefaultModelWindow(ctx, req.GetInput(), nil); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderCreated, req.GetInput().GetName()); err != nil {
 		return nil, status_grpc.Error(codes.Unavailable, "the audit record of the provider change could not be written; nothing changed")
 	}
@@ -397,6 +400,13 @@ func (s *DaemonServer) UpdateProvider(ctx context.Context, req *tenantv1.UpdateP
 			"daemon `security.key_provider` not configured — provider storage is disabled")
 	}
 	if err := validateProviderInput(req.GetInput()); err != nil {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	}
+	existing, err := s.providerConfig.Get(ctx, tenantID, req.GetName())
+	if err != nil {
+		return nil, toGRPCProviderError("update provider", err)
+	}
+	if err := s.fillDefaultModelWindow(ctx, req.GetInput(), existing); err != nil {
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 	if err := s.recordProviderAudit(ctx, tenantID, auditProviderUpdated, req.GetName()); err != nil {
@@ -444,26 +454,165 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 // TestProvider
 // ---------------------------------------------------------------------------
 
-// TestProvider validates a proposed provider config by attempting a live health
-// or completion check against the upstream API. The proposed config is NOT
-// persisted. Credentials are used for the duration of this call only and are
-// never logged.
+// providerFromInput builds a transient provider from the credentials and the
+// default model of a proposed config. Nothing is persisted and no network call
+// is made.
+func (s *DaemonServer) providerFromInput(input *tenantv1.ProviderConfigInput) (llm.LLMProvider, error) {
+	creds := input.GetCredentials()
+	provCfg := s.withEgressPolicy(llm.ProviderConfig{
+		Type:         llm.ProviderType(input.GetType()),
+		DefaultModel: input.GetDefaultModel(),
+		APIKey:       creds["api_key"],
+		BaseURL:      creds["base_url"],
+	})
+	// Forward the remaining credential keys as Extra so provider-specific
+	// fields (aws_access_key_id, cloudflare_account_id, ...) reach the provider.
+	extra := make(map[string]string, len(creds))
+	for k, v := range creds {
+		if k != "api_key" && k != "base_url" {
+			extra[k] = v
+		}
+	}
+	if len(extra) > 0 {
+		provCfg.Extra = extra
+	}
+	factory := s.providerFactory
+	if factory == nil {
+		factory = providers.NewProvider
+	}
+	return factory(provCfg)
+}
+
+// isEmbeddingOnlyType reports whether the provider type serves embeddings only.
+func isEmbeddingOnlyType(t llm.ProviderType) bool {
+	return t == llm.ProviderVoyage || t == llm.ProviderOpenAICompatible || t == llm.ProviderTEI
+}
+
+// servesChat reports whether a proposed config serves chat: it declares the
+// chat capability, or it declares none (the legacy chat-only default) and is
+// not an embedding-only type.
+func servesChat(input *tenantv1.ProviderConfigInput) bool {
+	if isEmbeddingOnlyType(llm.ProviderType(input.GetType())) {
+		return false
+	}
+	if len(input.GetCapabilities()) == 0 {
+		return true
+	}
+	for _, c := range input.GetCapabilities() {
+		if c == tenantv1.Capability_CAPABILITY_CHAT {
+			return true
+		}
+	}
+	return false
+}
+
+// maxContextWindow bounds a stated context window, in tokens.
+const maxContextWindow = 10_000_000
+
+// listedWindow asks the live model list of the provider for the window of the
+// model. It reports the window (0 when the list names the model but reports no
+// window), whether the list named the model, and the error of the list call.
+func (s *DaemonServer) listedWindow(ctx context.Context, input *tenantv1.ProviderConfigInput, model string) (window int, named bool, err error) {
+	prov, err := s.providerFromInput(input)
+	if err != nil {
+		return 0, false, fmt.Errorf("the provider could not be built (%w)", err)
+	}
+	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
+	defer cancel()
+	models, err := prov.Models(listCtx)
+	if err != nil {
+		return 0, false, fmt.Errorf("the model list of the provider failed (%w)", err)
+	}
+	for _, m := range models {
+		if m.Name == model {
+			if m.ContextWindowUnreported {
+				return 0, true, nil
+			}
+			return m.ContextWindow, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
+// fillDefaultModelWindow stores the context window with the saved model. The
+// daemon never guesses a window and no mission reads a model list, so the
+// window is fixed here, at save time:
+//  1. a window the caller states must be in 1..maxContextWindow. When the live
+//     list reports a window for the model, the stated one must equal it;
+//  2. else an update that keeps the same model keeps the stored window and makes
+//     no list call, so a rename or a key rotation works during a list outage;
+//  3. else the window that the live list reports for default_model is used;
+//  4. else the save is refused, and the message tells the caller to state it.
+//
+// existing is the stored config on an update, and nil on a create. A config that
+// serves no chat, or names no default model, has no window to fix.
+func (s *DaemonServer) fillDefaultModelWindow(ctx context.Context, input *tenantv1.ProviderConfigInput, existing *providerconfig.ProviderConfig) error {
+	model := strings.TrimSpace(input.GetDefaultModel())
+	if model == "" || !servesChat(input) {
+		return nil
+	}
+	refuse := func(cause string) error {
+		return fmt.Errorf("the context window of model %q is unknown: %s. State it in default_model_context_window", model, cause)
+	}
+
+	if stated := input.GetDefaultModelContextWindow(); stated != 0 {
+		if stated < 1 || stated > maxContextWindow {
+			return fmt.Errorf("default_model_context_window %d is out of range: it must be 1 to %d tokens", stated, maxContextWindow)
+		}
+		if listed, named, err := s.listedWindow(ctx, input, model); err == nil && named && listed > 0 && listed != int(stated) {
+			return fmt.Errorf("default_model_context_window %d does not match the %d tokens that the provider reports for model %q",
+				stated, listed, model)
+		}
+		return nil
+	}
+
+	unchanged := existing != nil && existing.DefaultModel == model && string(existing.Type) == input.GetType()
+	if unchanged && existing.DefaultModelContextWindow > 0 {
+		input.DefaultModelContextWindow = int32(existing.DefaultModelContextWindow) //nolint:gosec // bounded by maxContextWindow at save
+		return nil
+	}
+
+	listed, named, err := s.listedWindow(ctx, input, model)
+	switch {
+	case err == nil && listed > 0:
+		input.DefaultModelContextWindow = int32(listed) //nolint:gosec // a context window is at most ~10M tokens
+		return nil
+	case unchanged:
+		// A provider saved before the window was stored: fill it when the list
+		// can, and keep saving when it cannot. Nothing is refused for an edit
+		// that does not touch the model.
+		return nil
+	case err != nil:
+		return refuse(err.Error())
+	case named:
+		return refuse("the provider does not report a context window for it")
+	default:
+		return refuse("the provider does not list it")
+	}
+}
+
+// TestProvider validates a proposed provider config by calling the model list
+// endpoint of the provider with the proposed credentials. The call needs no
+// model ID and sends no completion. The proposed config is NOT persisted.
+// Credentials are used for the duration of this call only and are never
+// logged. A provider with no list call is checked with a one-token completion
+// against default_model.
 //
 // Flow:
 //  1. Build a temporary llm.ProviderConfig from the proposed input.
 //  2. For embedding-only providers (voyage, openai-compatible, tei): skip the
 //     chat probe and run only the embedding probe (step 5).
 //  3. For chat-capable providers: construct a provider via providers.NewProvider
-//     and call provider.Health under a 5s deadline.
-//  4. If Health is a pass-through noop (unconditionally healthy), fall back to
-//     a minimal Complete call under a 15s deadline.
+//     and call provider.Models under a 10s deadline.
+//  4. A success gives ok=true and the live models. A failure gives ok=false and
+//     the error text of the provider.
 //  5. If the input declares CAPABILITY_EMBEDDING and default_embedding_model is
 //     set, call embedder.NewFromProvider and EmbedBatch(["ping"]) under a 10s
 //     deadline. The embedding result (ok + dimension + error) is attached to the
 //     response; a failure does not negate a successful chat probe.
 //  6. Return TestProviderResponse {ok, latency_ms, model, error, embedding_ok,
 //     embedding_dimension, embedding_error}.
-//     Timeout → {ok: false, error: "timeout"} — never a gRPC-level error.
+//     A failure is never a gRPC-level error.
 func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProviderRequest) (*tenantv1.TestProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
@@ -474,7 +623,6 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 		return nil, status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	}
 
-	creds := input.GetCredentials()
 	provType := llm.ProviderType(input.GetType())
 	embeddingOnly := provType == llm.ProviderVoyage ||
 		provType == llm.ProviderOpenAICompatible ||
@@ -489,34 +637,11 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 	)
 
 	if !embeddingOnly {
-		// Build ephemeral llm.ProviderConfig from the proposed input.
-		// Credential material stays in this stack frame only.
-		provCfg := s.withEgressPolicy(llm.ProviderConfig{
-			Type:         provType,
-			DefaultModel: input.GetDefaultModel(),
-			APIKey:       creds["api_key"],
-			BaseURL:      creds["base_url"],
-		})
-		// Forward remaining credential keys as Extra so provider-specific fields
-		// (e.g. aws_access_key_id, cloudflare_account_id) are available.
-		extra := make(map[string]string, len(creds))
-		for k, v := range creds {
-			if k != "api_key" && k != "base_url" {
-				extra[k] = v
-			}
-		}
-		if len(extra) > 0 {
-			provCfg.Extra = extra
-		}
-
-		// Construct the provider. This validates type and config without network.
-		// Route through s.providerFactory so tests can inject a stub without
-		// hitting the real network.
-		chatFactory := s.providerFactory
-		if chatFactory == nil {
-			chatFactory = providers.NewProvider
-		}
-		prov, err := chatFactory(provCfg)
+		// Build the ephemeral provider from the proposed input. Credential
+		// material stays in this stack frame only. This validates type and
+		// config without network, and routes through s.providerFactory so
+		// tests can inject a stub.
+		prov, err := s.providerFromInput(input)
 		if err != nil {
 			return &tenantv1.TestProviderResponse{
 				Ok:    false,
@@ -524,72 +649,20 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 			}, nil
 		}
 
-		// Step 1: Health check under 5s deadline.
-		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-		healthStatus := prov.Health(healthCtx)
-		healthCancel()
+		// The credential check is the model list call of the provider. It
+		// sends no completion and needs no model ID.
+		models, listErr := checkProviderCredentials(ctx, prov, input.GetDefaultModel())
 		latencyMS = time.Since(start).Milliseconds()
-
-		// Check if the deadline was exceeded.
-		if healthCtx.Err() == context.DeadlineExceeded {
+		if listErr != nil {
 			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
 			return &tenantv1.TestProviderResponse{
 				Ok:        false,
 				LatencyMs: latencyMS,
-				Error:     "timeout",
+				Error:     listErr.Error(),
 			}, nil
 		}
-
-		switch {
-		case healthStatus.IsHealthy():
-			chatOK = true
-			// Best-effort live model fetch.
-			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-			modelList, _ = prov.Models(modelsCtx)
-			modelsCancel()
-		case latencyMS >= 10:
-			// Non-trivial latency + unhealthy = genuine failure from upstream.
-			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-			return &tenantv1.TestProviderResponse{
-				Ok:        false,
-				LatencyMs: latencyMS,
-				Error:     healthStatus.Message,
-			}, nil
-		default:
-			// Health noop: fall back to a minimal Complete call under a 15s deadline.
-			completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
-			_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
-				Model: input.GetDefaultModel(),
-				Messages: []llm.Message{
-					{Role: llm.RoleUser, Content: "Hello"},
-				},
-				MaxTokens: 1,
-			})
-			completeCancel()
-			latencyMS = time.Since(start).Milliseconds()
-
-			if completeCtx.Err() == context.DeadlineExceeded {
-				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-				return &tenantv1.TestProviderResponse{
-					Ok:        false,
-					LatencyMs: latencyMS,
-					Error:     "timeout",
-				}, nil
-			}
-			if completeErr != nil {
-				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-				return &tenantv1.TestProviderResponse{ //nolint:nilerr // complete errors are surfaced in the response body, not as a gRPC error
-					Ok:        false,
-					LatencyMs: latencyMS,
-					Error:     completeErr.Error(),
-				}, nil
-			}
-			chatOK = true
-			// Best-effort live model fetch on the Complete-fallback success path.
-			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-			modelList, _ = prov.Models(modelsCtx)
-			modelsCancel()
-		}
+		chatOK = true
+		modelList = models
 	}
 
 	// Embedding probe: run when the provider declares CAPABILITY_EMBEDDING and
@@ -807,10 +880,7 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 	if auth.TenantStringFromContext(ctx) == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
-	if s.providerCatalogue == nil {
-		return nil, status_grpc.Error(codes.Internal, "provider catalogue is not wired")
-	}
-	descriptors := providers.SupportedProviderDescriptors(s.providerCatalogue)
+	descriptors := providers.SupportedProviderDescriptors()
 	out := make([]*tenantv1.SupportedProvider, 0, len(descriptors))
 	for _, d := range descriptors {
 		out = append(out, descriptorToProto(d))
@@ -826,6 +896,9 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 // and returns the live model catalogue + (when requested) an embedding probe
 // result. Used by the wizard's "Test connection" step.
 //
+// A provider with no list call (Foundry) is tested with a one-token completion
+// against request.default_model, which that provider then requires.
+//
 // SECURITY: credentials transit memory only — they are passed to the transient
 // provider client and embedding client, the calls are made, and the values are
 // dropped when the request returns. They are never logged, never persisted, and
@@ -835,8 +908,8 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 //  1. Build ephemeral configs from type + credentials.
 //  2. For embedding-only providers (voyage, openai-compatible, tei): only run
 //     the embedding probe (if default_embedding_model is set).
-//  3. For chat-capable providers: attempt a minimal Complete call under a 15s
-//     deadline; on success, fetch the live model catalogue.
+//  3. For chat-capable providers: call the model list endpoint of the provider
+//     under a 10s deadline. It needs no model ID and sends no completion.
 //  4. If default_embedding_model is set (on any provider type): also run the
 //     embedding probe and attach embedding_dimension to the response.
 //  5. Return ProbeProviderResponse {ok, error_message, error_class, models,
@@ -904,7 +977,7 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 
 	// Chat-capable provider: delegate to probeChatProvider which handles
 	// health + fallback Complete under appropriate deadlines.
-	chatOK, chatErr, modelList, latencyMS := s.probeChatProvider(ctx, pt, creds, start)
+	chatOK, chatErr, modelList, latencyMS := s.probeChatProvider(ctx, pt, creds, req.GetDefaultModel(), start)
 	if !chatOK {
 		return &tenantv1.ProbeProviderResponse{
 			Ok:           false,
@@ -929,14 +1002,15 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 	}, nil
 }
 
-// probeChatProvider constructs a chat provider from credentials and probes it
-// with a health check and, if needed, a minimal Complete call. Returns
+// probeChatProvider constructs a chat provider from credentials and checks it
+// with the model list call of the provider. Returns
 // (ok, errMsg, modelList, latencyMs). A non-empty errMsg implies ok=false.
-func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
+func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, model string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
 	provCfg := s.withEgressPolicy(llm.ProviderConfig{
-		Type:    pt,
-		APIKey:  creds["api_key"],
-		BaseURL: creds["base_url"],
+		Type:         pt,
+		DefaultModel: model,
+		APIKey:       creds["api_key"],
+		BaseURL:      creds["base_url"],
 	})
 	extra := make(map[string]string)
 	for k, v := range creds {
@@ -957,44 +1031,47 @@ func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderTyp
 		return false, fmt.Sprintf("invalid provider configuration: %v", err), nil, time.Since(start).Milliseconds()
 	}
 
-	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-	healthStatus := prov.Health(healthCtx)
-	healthCancel()
+	models, listErr := checkProviderCredentials(ctx, prov, model)
 	latencyMS = time.Since(start).Milliseconds()
-
-	if healthCtx.Err() == context.DeadlineExceeded {
-		return false, "timeout", nil, latencyMS
+	if listErr != nil {
+		return false, listErr.Error(), nil, latencyMS
 	}
-
-	switch {
-	case healthStatus.IsHealthy():
-		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-		modelList, _ = prov.Models(modelsCtx)
-		modelsCancel()
-		return true, "", modelList, time.Since(start).Milliseconds()
-	case latencyMS >= 10:
-		return false, healthStatus.Message, nil, latencyMS
-	default:
-		// Health noop: fall back to minimal Complete.
-		completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
-		_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
-			Messages:  []llm.Message{{Role: llm.RoleUser, Content: "Hello"}},
-			MaxTokens: 1,
-		})
-		completeCancel()
-		latencyMS = time.Since(start).Milliseconds()
-		if completeCtx.Err() == context.DeadlineExceeded {
-			return false, "timeout", nil, latencyMS
-		}
-		if completeErr != nil {
-			return false, completeErr.Error(), nil, latencyMS
-		}
-		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-		modelList, _ = prov.Models(modelsCtx)
-		modelsCancel()
-		return true, "", modelList, time.Since(start).Milliseconds()
-	}
+	return true, "", models, latencyMS
 }
+
+// checkProviderCredentials checks the credentials of a provider with its model
+// list call and returns the models that the provider reports. The call sends no
+// completion and needs no model ID. A failure carries the text of the provider.
+//
+// A provider with no list call (Foundry) is checked with a one-token completion
+// against the model that the person typed. It then needs that model, and the
+// result holds that one model.
+func checkProviderCredentials(ctx context.Context, prov llm.LLMProvider, typedModel string) ([]llm.ModelInfo, error) {
+	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
+	defer cancel()
+	models, err := prov.Models(listCtx)
+	if err == nil {
+		return models, nil
+	}
+	if !errors.Is(err, llm.ErrModelListUnsupported) {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
+	}
+	prober, ok := prov.(llm.ModelProber)
+	if !ok {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
+	}
+	typedModel = strings.TrimSpace(typedModel)
+	if typedModel == "" {
+		return nil, fmt.Errorf("provider %s has no model list call. Enter a model name to test the connection", prov.Name())
+	}
+	if err := prober.ProbeModel(listCtx, typedModel); err != nil {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
+	}
+	return []llm.ModelInfo{{Name: typedModel, ContextWindowUnreported: true}}, nil
+}
+
+// providerCheckTimeout bounds the credential check.
+const providerCheckTimeout = 10 * time.Second
 
 // probeEmbeddingFromCreds builds an embedder from raw credentials and probes
 // it with a single-element batch. Returns (ok, dimension, errorMessage).
@@ -1120,10 +1197,8 @@ func credentialFieldTypeToProto(t llm.CredentialFieldType) tenantv1.CredentialFi
 }
 
 // descriptorToProto translates the in-Go ProviderDescriptor to its proto
-// equivalent. Chat models go to default_models; embedding models (those whose
-// Features contain "embedding") go to embedding_models. A model may appear in
-// only one list — the capabilities field on ModelDescriptor lets the dashboard
-// filter further if needed.
+// equivalent. It carries provider metadata only. The model lists come from the
+// provider through TestProvider, ProbeProvider and ListProviderModels.
 func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvider {
 	creds := make([]*tenantv1.CredentialField, 0, len(d.Credentials))
 	for _, c := range d.Credentials {
@@ -1138,21 +1213,15 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 		})
 	}
 
-	var chatModels, embModels []*tenantv1.ModelDescriptor
-	for _, m := range d.DefaultModels {
-		md := modelToProto(m)
-		isEmb := false
-		for _, f := range m.Features {
-			if f == "embedding" {
-				isEmb = true
-				break
-			}
-		}
-		if isEmb {
-			embModels = append(embModels, md)
-		} else {
-			chatModels = append(chatModels, md)
-		}
+	// The embedding models are the ones the save path accepts for the provider
+	// kind: the embedder dimension table. It is not a second list.
+	kindModels := embedder.ModelsForKind(embedder.Kind(string(d.Type)))
+	embeddingModels := make([]*tenantv1.ModelDescriptor, 0, len(kindModels))
+	for _, name := range kindModels {
+		embeddingModels = append(embeddingModels, &tenantv1.ModelDescriptor{
+			Name:         name,
+			Capabilities: []tenantv1.Capability{tenantv1.Capability_CAPABILITY_EMBEDDING},
+		})
 	}
 
 	return &tenantv1.SupportedProvider{
@@ -1161,8 +1230,7 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 		DocsUrl:         d.DocsURL,
 		SelfHosted:      d.SelfHosted,
 		Credentials:     creds,
-		DefaultModels:   chatModels,
-		EmbeddingModels: embModels,
+		EmbeddingModels: embeddingModels,
 	}
 }
 
@@ -1226,10 +1294,11 @@ func containsAny(s string, substrs ...string) bool {
 // expected by providers.NewProvider. Credential material never escapes to logs.
 func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig) llm.ProviderConfig {
 	cfg := llm.ProviderConfig{
-		Type:         dec.Type,
-		DefaultModel: dec.DefaultModel,
-		APIKey:       dec.Credentials["api_key"],
-		BaseURL:      dec.Credentials["base_url"],
+		Type:                      dec.Type,
+		DefaultModel:              dec.DefaultModel,
+		DefaultModelContextWindow: dec.DefaultModelContextWindow,
+		APIKey:                    dec.Credentials["api_key"],
+		BaseURL:                   dec.Credentials["base_url"],
 	}
 	extra := make(map[string]string)
 	for k, v := range dec.Credentials {
@@ -1241,11 +1310,4 @@ func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig) llm.ProviderConfi
 		cfg.Extra = extra
 	}
 	return cfg
-}
-
-// WithProviderCatalogue gives the server the daemon's model catalogue.
-// GetSupportedProviders reads the default model list of each provider from it.
-func (s *DaemonServer) WithProviderCatalogue(cat *catalogue.Loader) *DaemonServer {
-	s.providerCatalogue = cat
-	return s
 }

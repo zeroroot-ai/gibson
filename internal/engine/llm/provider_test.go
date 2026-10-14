@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 func TestModelInfo_SupportsFeature(t *testing.T) {
@@ -20,17 +19,17 @@ func TestModelInfo_SupportsFeature(t *testing.T) {
 		{
 			name: "has feature",
 			model: ModelInfo{
-				Features: []string{agent.FeatureToolUse, agent.FeatureVision},
+				Features: []string{"tool_use", "vision"},
 			},
-			feature:  agent.FeatureToolUse,
+			feature:  "tool_use",
 			expected: true,
 		},
 		{
 			name: "does not have feature",
 			model: ModelInfo{
-				Features: []string{agent.FeatureToolUse},
+				Features: []string{"tool_use"},
 			},
-			feature:  agent.FeatureVision,
+			feature:  "vision",
 			expected: false,
 		},
 		{
@@ -38,7 +37,7 @@ func TestModelInfo_SupportsFeature(t *testing.T) {
 			model: ModelInfo{
 				Features: []string{},
 			},
-			feature:  agent.FeatureToolUse,
+			feature:  "tool_use",
 			expected: false,
 		},
 	}
@@ -60,14 +59,14 @@ func TestModelInfo_SupportsToolUse(t *testing.T) {
 		{
 			name: "supports tool use",
 			model: ModelInfo{
-				Features: []string{agent.FeatureToolUse, agent.FeatureStreaming},
+				Features: []string{"tool_use", "streaming"},
 			},
 			expected: true,
 		},
 		{
 			name: "does not support tool use",
 			model: ModelInfo{
-				Features: []string{agent.FeatureStreaming},
+				Features: []string{"streaming"},
 			},
 			expected: false,
 		},
@@ -90,14 +89,14 @@ func TestModelInfo_SupportsVision(t *testing.T) {
 		{
 			name: "supports vision",
 			model: ModelInfo{
-				Features: []string{agent.FeatureVision, agent.FeatureStreaming},
+				Features: []string{"vision", "streaming"},
 			},
 			expected: true,
 		},
 		{
 			name: "does not support vision",
 			model: ModelInfo{
-				Features: []string{agent.FeatureStreaming},
+				Features: []string{"streaming"},
 			},
 			expected: false,
 		},
@@ -120,14 +119,14 @@ func TestModelInfo_SupportsStreaming(t *testing.T) {
 		{
 			name: "supports streaming",
 			model: ModelInfo{
-				Features: []string{agent.FeatureStreaming, agent.FeatureToolUse},
+				Features: []string{"streaming", "tool_use"},
 			},
 			expected: true,
 		},
 		{
 			name: "does not support streaming",
 			model: ModelInfo{
-				Features: []string{agent.FeatureToolUse},
+				Features: []string{"tool_use"},
 			},
 			expected: false,
 		},
@@ -150,14 +149,14 @@ func TestModelInfo_SupportsJSONMode(t *testing.T) {
 		{
 			name: "supports JSON mode",
 			model: ModelInfo{
-				Features: []string{agent.FeatureJSONMode, agent.FeatureToolUse},
+				Features: []string{"json_mode", "tool_use"},
 			},
 			expected: true,
 		},
 		{
 			name: "does not support JSON mode",
 			model: ModelInfo{
-				Features: []string{agent.FeatureToolUse},
+				Features: []string{"tool_use"},
 			},
 			expected: false,
 		},

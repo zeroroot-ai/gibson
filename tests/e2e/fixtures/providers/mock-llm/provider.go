@@ -92,6 +92,15 @@ func (p *e2EMockProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 	}, nil
 }
 
+// DefaultModel and DefaultModelContextWindow are the saved model of the mock and
+// its stored window. A mission uses the saved model and never lists models, so
+// a slot that names the mock and no model resolves to mock-model with a known
+// window.
+func (p *e2EMockProvider) DefaultModel() string { return "mock-model" }
+
+// DefaultModelContextWindow returns the window that Models reports for the mock.
+func (p *e2EMockProvider) DefaultModelContextWindow() int { return 200_000 }
+
 // Complete returns DeterministicResponse for any prompt, or the configured error mode.
 //
 // Negative-test modes:

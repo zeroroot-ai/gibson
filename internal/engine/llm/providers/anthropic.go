@@ -8,6 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
 
 	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -20,7 +24,6 @@ import (
 // AnthropicProvider implements LLMProvider for Anthropic's Claude models
 // using the Eino framework.
 type AnthropicProvider struct {
-	model  *einoclaude.ChatModel
 	config llm.ProviderConfig
 	// name is the provider name reported to the registry and to error
 	// translation. Anthropic's models reach a tenant through four routes —
@@ -30,7 +33,26 @@ type AnthropicProvider struct {
 	// constructors, not three copies of the completion path. Empty means
 	// "anthropic".
 	name string
+
+	// buildChat makes the Claude client for one model. The client library
+	// refuses to build without a model, so a client exists per model: the
+	// request model, else the saved default model.
+	buildChat func(ctx context.Context, model string) (*einoclaude.ChatModel, error)
+	chatMu    sync.Mutex
+	chats     map[string]*einoclaude.ChatModel
+
+	// list makes the model list call of the route. It is nil on a route with
+	// no list call (Foundry).
+	list  func(ctx context.Context) ([]llm.ModelInfo, error)
+	cache modelCache
 }
+
+// anthropicVersionHeader is the API version that the list call sends.
+const anthropicVersionHeader = "2023-06-01"
+
+// defaultAnthropicBaseURL is the Anthropic API root when the config sets no
+// base URL.
+const defaultAnthropicBaseURL = "https://api.anthropic.com"
 
 // NewAnthropicProvider creates a new Anthropic provider.
 //
@@ -44,21 +66,44 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 		return nil, llm.NewAuthError("anthropic", nil)
 	}
 
-	ctx := context.Background()
-	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		APIKey:     apiKey,
-		Model:      cfg.DefaultModel,
-		HTTPClient: guardedHTTPClient(cfg),
-	})
-	if err != nil {
-		return nil, llm.TranslateError("anthropic", err)
+	baseURL := defaultAnthropicBaseURL
+	if cfg.BaseURL != "" {
+		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
+			return nil, err
+		}
+		baseURL = cfg.BaseURL
 	}
+	client := guardedHTTPClient(cfg)
 
-	return &AnthropicProvider{
-		model:  model,
-		config: cfg,
-		name:   string(llm.ProviderAnthropic),
-	}, nil
+	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderAnthropic)}
+	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
+		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client}
+		if cfg.BaseURL != "" {
+			claudeCfg.BaseURL = &baseURL
+		}
+		return einoclaude.NewChatModel(ctx, claudeCfg)
+	}
+	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
+		return listAnthropicModels(ctx, client, p.Name(), baseURL, apiKey)
+	}
+	if err := p.seedDefaultChat(context.Background(), "anthropic"); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// seedDefaultChat builds the client for the saved default model at
+// construction, so a bad config is refused when it is built and not on the
+// first request. With no saved model nothing is built: the credential test
+// names none, and a request names its own.
+func (p *AnthropicProvider) seedDefaultChat(ctx context.Context, label string) error {
+	if p.config.DefaultModel == "" {
+		return nil
+	}
+	if _, err := p.chatModel(ctx, ""); err != nil {
+		return fmt.Errorf("construct the %s provider: %w", label, err)
+	}
+	return nil
 }
 
 // NewVertexProvider creates a Claude provider that reaches the models through
@@ -74,18 +119,37 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 // neither is refused rather than constructed on whatever the pod happens to
 // carry.
 func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
+	return newVertexProvider(ctx, cfg, serviceAccountToken)
+}
+
+// newVertexProvider is NewVertexProvider with the token source injected, so a
+// test can mint a fixed token.
+func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertexTokenFunc) (*AnthropicProvider, error) {
 	project := cfg.Extra["vertex_project_id"]
 	region := cfg.Extra["vertex_region"]
 	if project == "" || region == "" {
 		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			errors.New("vertex_project_id and vertex_region are both required")))
 	}
+	if cfg.BaseURL != "" {
+		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
+			return nil, err
+		}
+	}
+	client := guardedHTTPClient(cfg)
 
-	model, err := newVertexChatModel(ctx, project, region, cfg)
-	if err != nil {
+	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderVertex)}
+	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
+		return newVertexChatModel(ctx, project, region, model, client)
+	}
+	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
+		return listVertexModels(ctx, client, vertexListBase(cfg.BaseURL, region), project,
+			cfg.Extra["google_application_credentials_json"], token)
+	}
+	if err := p.seedDefaultChat(ctx, "vertex"); err != nil {
 		return nil, err
 	}
-	return &AnthropicProvider{model: model, config: cfg, name: string(llm.ProviderVertex)}, nil
+	return p, nil
 }
 
 // newVertexChatModel builds the Vertex-backed Claude client.
@@ -96,24 +160,23 @@ func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicP
 // would take the process down rather than have its launch refused. The recover
 // is at this one boundary and turns the panic into the same auth error every
 // other provider returns.
-func newVertexChatModel(ctx context.Context, project, region string, cfg llm.ProviderConfig) (model *einoclaude.ChatModel, err error) {
+func newVertexChatModel(ctx context.Context, project, region, modelID string, client *http.Client) (model *einoclaude.ChatModel, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			model = nil
-			err = fmt.Errorf("construct the vertex provider: %w",
-				llm.NewAuthError(string(llm.ProviderVertex),
-					fmt.Errorf("google application default credentials are not available: %v", r)))
+			err = llm.NewAuthError(string(llm.ProviderVertex),
+				fmt.Errorf("google application default credentials are not available: %v", r))
 		}
 	}()
 	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
 		ByVertex:        true,
 		VertexProjectID: project,
 		VertexRegion:    region,
-		Model:           cfg.DefaultModel,
-		HTTPClient:      guardedHTTPClient(cfg),
+		Model:           modelID,
+		HTTPClient:      client,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("construct the vertex provider: %w", llm.TranslateError(string(llm.ProviderVertex), err))
+		return nil, fmt.Errorf("build the vertex client: %w", llm.TranslateError(string(llm.ProviderVertex), err))
 	}
 	return model, nil
 }
@@ -122,6 +185,11 @@ func newVertexChatModel(ctx context.Context, project, region string, cfg llm.Pro
 // Microsoft Foundry (ADR-0119). Foundry serves the Anthropic API
 // shape at a per-resource endpoint, so it is the Anthropic client pointed at
 // that endpoint with the tenant's Foundry key.
+//
+// Foundry has no model list call: its Models API is not supported (see
+// https://platform.claude.com/docs/en/build-with-claude/claude-in-microsoft-foundry,
+// "Claude features not supported"). The model name is the deployment name that
+// the person typed, so the credential test completes one token against it.
 func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	apiKey := firstNonEmpty(cfg.Extra["foundry_api_key"], cfg.APIKey)
 	if apiKey == "" {
@@ -137,16 +205,20 @@ func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*Anthropic
 		baseURL = "https://" + resource + ".services.ai.azure.com/anthropic"
 	}
 
-	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		APIKey:     apiKey,
-		BaseURL:    &baseURL,
-		Model:      cfg.DefaultModel,
-		HTTPClient: guardedHTTPClient(cfg),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("construct the foundry provider: %w", llm.TranslateError(string(llm.ProviderFoundry), err))
+	client := guardedHTTPClient(cfg)
+	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderFoundry)}
+	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
+		return einoclaude.NewChatModel(ctx, &einoclaude.Config{
+			APIKey:     apiKey,
+			BaseURL:    &baseURL,
+			Model:      model,
+			HTTPClient: client,
+		})
 	}
-	return &AnthropicProvider{model: model, config: cfg, name: string(llm.ProviderFoundry)}, nil
+	if err := p.seedDefaultChat(ctx, "foundry"); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // VertexCredentialSchema is the form schema for a Google Vertex provider.
@@ -166,6 +238,33 @@ func FoundryCredentialSchema() []llm.CredentialField {
 	}
 }
 
+// chatModel returns the Claude client for the model. The request model wins,
+// then the saved default model. With neither it fails with a clear error.
+func (p *AnthropicProvider) chatModel(ctx context.Context, requestModel string) (*einoclaude.ChatModel, error) {
+	model := firstNonEmpty(requestModel, p.config.DefaultModel)
+	if model == "" {
+		return nil, fmt.Errorf("choose a model: %w", llm.NewInvalidInputError(p.Name(),
+			"no model: the request names none and no default model is saved for this provider"))
+	}
+	p.chatMu.Lock()
+	defer p.chatMu.Unlock()
+	if m, ok := p.chats[model]; ok {
+		return m, nil
+	}
+	m, err := p.buildChat(ctx, model)
+	if err != nil {
+		return nil, fmt.Errorf("build the claude client: %w", llm.TranslateError(p.Name(), err))
+	}
+	if p.chats == nil {
+		p.chats = make(map[string]*einoclaude.ChatModel)
+	}
+	p.chats[model] = m
+	return m, nil
+}
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *AnthropicProvider) DefaultModel() string { return p.config.DefaultModel }
+
 // Name returns the provider name.
 func (p *AnthropicProvider) Name() string {
 	if p.name == "" {
@@ -174,42 +273,86 @@ func (p *AnthropicProvider) Name() string {
 	return p.name
 }
 
-// Models returns information about available models
+// Models returns the models of the account from the list call of the route.
+// A route with no list call returns llm.ErrModelListUnsupported.
 func (p *AnthropicProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	models := []llm.ModelInfo{
-		{
-			Name:          "claude-sonnet-4-5-20250929",
-			ContextWindow: 200000,
-			MaxOutput:     8192,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-opus-4-20250514",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-sonnet-4-20250514",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-3-haiku-20240307",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
+	if p.list == nil {
+		return nil, fmt.Errorf("list models: %w", llm.ErrModelListUnsupported)
+	}
+	return p.cache.get(ctx, p.Name(), p.list)
+}
+
+// ProbeModel checks the credentials with a one-token completion against the
+// named model. The credential test uses it on a route with no list call.
+func (p *AnthropicProvider) ProbeModel(ctx context.Context, model string) error {
+	_, err := p.Complete(ctx, llm.CompletionRequest{
+		Model:     model,
+		Messages:  []llm.Message{llm.NewUserMessage("ping")},
+		MaxTokens: 1,
+	})
+	return err
+}
+
+// listAnthropicModels calls GET {base}/v1/models (see
+// https://docs.anthropic.com/en/api/models-list). It follows has_more and
+// last_id until the list ends.
+func listAnthropicModels(ctx context.Context, client *http.Client, provider, base, key string) ([]llm.ModelInfo, error) {
+	header := http.Header{}
+	header.Set("x-api-key", key)
+	header.Set("anthropic-version", anthropicVersionHeader)
+
+	var models []llm.ModelInfo
+	afterID := ""
+	for range maxModelListPages {
+		q := url.Values{"limit": {"1000"}}
+		if afterID != "" {
+			q.Set("after_id", afterID)
+		}
+		var page struct {
+			Data []struct {
+				ID             string `json:"id"`
+				MaxInputTokens int    `json:"max_input_tokens"`
+				MaxTokens      int    `json:"max_tokens"`
+				Capabilities   *struct {
+					ImageInput *struct {
+						Supported bool `json:"supported"`
+					} `json:"image_input"`
+				} `json:"capabilities"`
+			} `json:"data"`
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
+		}
+		endpoint := strings.TrimRight(base, "/") + "/v1/models?" + q.Encode()
+		if err := getJSON(ctx, client, provider, endpoint, header, &page); err != nil {
+			return nil, err
+		}
+		for _, m := range page.Data {
+			if m.ID == "" {
+				continue
+			}
+			info := llm.ModelInfo{Name: m.ID, ContextWindow: m.MaxInputTokens, MaxOutput: m.MaxTokens, Features: []string{"chat"}}
+			if c := m.Capabilities; c != nil && c.ImageInput != nil && c.ImageInput.Supported {
+				info.Features = append(info.Features, "vision")
+			}
+			models = append(models, info)
+		}
+		if !page.HasMore || page.LastID == "" || page.LastID == afterID {
+			return models, nil
+		}
+		afterID = page.LastID
 	}
 	return models, nil
 }
 
 // Complete sends a completion request
 func (p *AnthropicProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	chat, chatErr := p.chatModel(ctx, req.Model)
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -218,12 +361,16 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req llm.CompletionRequ
 
 // CompleteWithTools sends a completion request with tool definitions
 func (p *AnthropicProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
+	chat, chatErr := p.chatModel(ctx, req.Model)
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -232,9 +379,13 @@ func (p *AnthropicProvider) CompleteWithTools(ctx context.Context, req llm.Compl
 
 // Stream sends a streaming completion request
 func (p *AnthropicProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+	chat, chatErr := p.chatModel(ctx, req.Model)
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
-	sr, err := p.model.Stream(ctx, msgs, opts...)
+	sr, err := chat.Stream(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -289,13 +440,17 @@ func (p *AnthropicProvider) CompleteStructured(ctx context.Context, req llm.Comp
 		return nil, llm.NewStructuredOutputError("complete", "anthropic", "", err)
 	}
 
+	chat, chatErr := p.chatModel(ctx, req.Model)
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
 	opts = append(opts,
 		einomodel.WithTools([]*einoschema.ToolInfo{toolInfo}),
 		einomodel.WithToolChoice(einoschema.ToolChoiceForced, toolDef.Name),
 	)
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.NewStructuredOutputError("complete", "anthropic", "", err)
 	}
@@ -314,4 +469,10 @@ func (p *AnthropicProvider) CompleteStructured(ctx context.Context, req llm.Comp
 	resp.StructuredData = structuredData
 	resp.Message.Content = rawJSON
 	return resp, nil
+}
+
+// DefaultModelContextWindow returns the context window stored with the saved
+// default model, or 0 when none is stored.
+func (p *AnthropicProvider) DefaultModelContextWindow() int {
+	return p.config.DefaultModelContextWindow
 }

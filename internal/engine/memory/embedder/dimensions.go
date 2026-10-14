@@ -3,7 +3,10 @@
 
 package embedder
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // This file is the single source of truth mapping an embedding model to its
 // output vector dimension. The vector store index and KNN search derive their
@@ -28,39 +31,62 @@ const DefaultEmbeddingModel = "all-MiniLM-L6-v2"
 // literal, so the table stays the only place a dimension is declared.
 var DefaultEmbeddingDimension = mustDimensionForModel(DefaultEmbeddingModel)
 
-// modelDimensions maps a normalised embedding-model name to its output
-// dimension. Keys are lower-cased; lookups go through normalizeModel.
+// embeddingModel is one row of the table: the output dimension of the model and
+// the provider kinds that serve it. One table holds both, so a model cannot
+// have a dimension without kinds or kinds without a dimension.
+type embeddingModel struct {
+	dim   int
+	kinds []Kind
+}
+
+// embeddingModels maps a normalised embedding-model name to its row. Keys are
+// lower-cased; lookups go through normalizeModel.
 //
 // Keep this table minimal but correct. gibson#808's provider-backed embedder
 // factory (OpenAI, Bedrock/Titan, Cohere, Voyage, generic OpenAI-compatible/TEI)
 // registers any additional models it serves via RegisterModelDimension at init
-// time, or extends this literal table directly — either way this remains the
-// single source of truth.
-var modelDimensions = map[string]int{
+// time, or extends this literal table directly. Either way this remains the
+// single source of truth for dimensions and for the picker offered per kind.
+var embeddingModels = map[string]embeddingModel{
 	// Sentence-transformers (e.g. served via a self-hosted TEI / OpenAI-compatible
 	// endpoint). Also the test-fixture default (DefaultEmbeddingModel).
-	"all-minilm-l6-v2":  384,
-	"all-minilm-l12-v2": 384,
+	"all-minilm-l6-v2":  {384, []Kind{KindTEI, KindOpenAICompatible}},
+	"all-minilm-l12-v2": {384, []Kind{KindTEI, KindOpenAICompatible}},
 
 	// OpenAI.
-	"text-embedding-3-small": 1536,
-	"text-embedding-3-large": 3072,
-	"text-embedding-ada-002": 1536,
+	"text-embedding-3-small": {1536, []Kind{KindOpenAI, KindOpenAICompatible}},
+	"text-embedding-3-large": {3072, []Kind{KindOpenAI, KindOpenAICompatible}},
+	"text-embedding-ada-002": {1536, []Kind{KindOpenAI, KindOpenAICompatible}},
 
 	// AWS Bedrock — Amazon Titan Text Embeddings.
-	"amazon.titan-embed-text-v1":   1536,
-	"amazon.titan-embed-text-v2:0": 1024,
+	"amazon.titan-embed-text-v1":   {1536, []Kind{KindBedrock}},
+	"amazon.titan-embed-text-v2:0": {1024, []Kind{KindBedrock}},
 
 	// Cohere (Bedrock + native).
-	"cohere.embed-english-v3":      1024,
-	"cohere.embed-multilingual-v3": 1024,
-	"embed-english-v3.0":           1024,
-	"embed-multilingual-v3.0":      1024,
+	"cohere.embed-english-v3":      {1024, []Kind{KindBedrock}},
+	"cohere.embed-multilingual-v3": {1024, []Kind{KindBedrock}},
+	"embed-english-v3.0":           {1024, []Kind{KindCohere}},
+	"embed-multilingual-v3.0":      {1024, []Kind{KindCohere}},
 
 	// Voyage AI.
-	"voyage-3":       1024,
-	"voyage-3-lite":  512,
-	"voyage-large-2": 1536,
+	"voyage-3":       {1024, []Kind{KindVoyage}},
+	"voyage-3-lite":  {512, []Kind{KindVoyage}},
+	"voyage-large-2": {1536, []Kind{KindVoyage}},
+}
+
+// ModelsForKind returns, in sorted order, the embedding models in the table that
+// the provider kind serves. It returns nil for a kind that serves none. The save
+// path accepts a model only when it is in the table, so this is the list a
+// picker can offer.
+func ModelsForKind(kind Kind) []string {
+	var out []string
+	for model, row := range embeddingModels {
+		if slices.Contains(row.kinds, kind) {
+			out = append(out, model)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // normalizeModel lower-cases and trims a model name for table lookup so callers
@@ -82,8 +108,8 @@ func SameModel(a, b string) bool {
 // caller must fail closed rather than guess a dimension, because a wrong VECTOR
 // field dimension silently fails RediSearch indexing of the whole document.
 func DimensionForModel(model string) (int, bool) {
-	dim, ok := modelDimensions[normalizeModel(model)]
-	return dim, ok
+	row, ok := embeddingModels[normalizeModel(model)]
+	return row.dim, ok
 }
 
 // RegisterModelDimension records the output dimension for an embedding model.
@@ -94,10 +120,13 @@ func DimensionForModel(model string) (int, bool) {
 // startup rather than corrupting an index at runtime.
 func RegisterModelDimension(model string, dim int) {
 	key := normalizeModel(model)
-	if existing, ok := modelDimensions[key]; ok && existing != dim {
-		panic("embedder: conflicting dimension registered for model " + model)
+	if existing, ok := embeddingModels[key]; ok {
+		if existing.dim != dim {
+			panic("embedder: conflicting dimension registered for model " + model)
+		}
+		return
 	}
-	modelDimensions[key] = dim
+	embeddingModels[key] = embeddingModel{dim: dim}
 }
 
 // mustDimensionForModel returns the dimension for a model that is expected to be

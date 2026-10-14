@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -81,7 +82,7 @@ func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
 	// Create minimal infrastructure manually
 	d.infrastructure = &Infrastructure{
 		llmRegistry: llm.NewLLMRegistry(),
-		slotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		slotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 	}
 
 	// Create harness factory - should still work even without registry adapter
@@ -176,7 +177,7 @@ func TestNewHarnessFactory_RequiresTheSetecAddress(t *testing.T) {
 			logger: logger,
 			infrastructure: &Infrastructure{
 				llmRegistry: llm.NewLLMRegistry(),
-				slotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+				slotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 			},
 		}
 	}

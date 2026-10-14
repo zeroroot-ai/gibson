@@ -67,39 +67,6 @@ func TestNewBedrockProvider_DefaultsToUSEast1(t *testing.T) {
 	assert.Equal(t, "us-east-1", p.region)
 }
 
-func TestBedrockProvider_Models_NonEmpty(t *testing.T) {
-	p := &BedrockProvider{}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	require.NotEmpty(t, models)
-
-	// Spot-check feature flags for Claude (must carry tool_use) vs Titan (chat only).
-	foundClaudeWithTools := false
-	foundTitanWithoutTools := false
-	for _, m := range models {
-		if strings.HasPrefix(m.Name, "anthropic.claude-3") {
-			for _, f := range m.Features {
-				if f == "tools" {
-					foundClaudeWithTools = true
-				}
-			}
-		}
-		if strings.HasPrefix(m.Name, "amazon.titan-text") {
-			hasTools := false
-			for _, f := range m.Features {
-				if f == "tools" {
-					hasTools = true
-				}
-			}
-			if !hasTools {
-				foundTitanWithoutTools = true
-			}
-		}
-	}
-	assert.True(t, foundClaudeWithTools, "expected at least one Claude model with tool_use feature")
-	assert.True(t, foundTitanWithoutTools, "expected Titan entries to NOT declare tool_use")
-}
-
 func TestBedrockCredentialSchema(t *testing.T) {
 	schema := BedrockCredentialSchema()
 	keys := make(map[string]llm.CredentialField, len(schema))

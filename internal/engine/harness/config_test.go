@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 )
 
 // TestHarnessConfig_Validate tests configuration validation
@@ -19,7 +20,7 @@ func TestHarnessConfig_Validate(t *testing.T) {
 		{
 			name: "valid config with SlotManager",
 			config: HarnessConfig{
-				SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+				SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 				TargetFacts: testTargetFacts,
 			},
 			expectErr: false,
@@ -47,7 +48,7 @@ func TestHarnessConfig_Validate(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults tests that defaults are applied correctly
 func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 		// All other fields are nil
 	}
@@ -89,7 +90,7 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults_Idempotent tests that ApplyDefaults is idempotent
 func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -116,7 +117,7 @@ func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 func TestHarnessFactoryConfig_Alias(t *testing.T) {
 	// Test that HarnessFactoryConfig is an alias for HarnessConfig
 	var factoryConfig HarnessFactoryConfig
-	factoryConfig.SlotManager = llm.NewSlotManager(llm.NewLLMRegistry())
+	factoryConfig.SlotManager = llmtest.NewSlotManager(llm.NewLLMRegistry())
 
 	// Should be assignable to HarnessConfig without conversion
 	var harnessConfig HarnessConfig = factoryConfig
@@ -129,7 +130,7 @@ func TestHarnessFactoryConfig_Alias(t *testing.T) {
 // TestNewDefaultHarnessFactory_Alias tests that NewDefaultHarnessFactory function alias works
 func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 	config := HarnessFactoryConfig{
-		SlotManager: llm.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
 		TargetFacts: testTargetFacts,
 	}
 
