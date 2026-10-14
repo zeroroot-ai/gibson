@@ -24,7 +24,7 @@ import (
 // common slot names:
 //   - "primary": MinContextWindow 100k (high-capability model for main agent reasoning)
 //   - "fast": MinContextWindow 8k (low-latency model for quick operations)
-//   - "vision": MinContextWindow 50k + vision feature required
+//   - "vision": MinContextWindow 50k
 //   - "reasoning": MinContextWindow 150k (large context window for complex reasoning)
 //
 // The manager queries the LLM registry to find available providers that match
@@ -144,7 +144,7 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 // 2. Apply slot name-based defaults if no explicit config is provided
 // 3. Merge slot default config with any override
 // 4. Query registry for available providers
-// 5. Find a model that meets all constraints (context window, features)
+// 5. Find a model that meets all constraints (context window)
 // 6. Return the provider and model info
 //
 // Returns ErrNoMatchingProvider if:
@@ -231,17 +231,6 @@ func (m *DaemonSlotManager) applySlotNameDefaults(slot agent.SlotDefinition) age
 		if slot.Constraints.MinContextWindow == 0 {
 			slot.Constraints.MinContextWindow = 50000
 		}
-		// Ensure vision feature is required
-		hasVision := false
-		for _, feature := range slot.Constraints.RequiredFeatures {
-			if feature == agent.FeatureVision {
-				hasVision = true
-				break
-			}
-		}
-		if !hasVision {
-			slot.Constraints.RequiredFeatures = append(slot.Constraints.RequiredFeatures, agent.FeatureVision)
-		}
 
 	case "reasoning":
 		// High context window model for complex reasoning
@@ -295,7 +284,7 @@ func (m *DaemonSlotManager) resolveExplicitConfig(ctx context.Context, slot agen
 // window was stored, has an unknown window. A feature set is never known: no
 // provider reports a complete one.
 func savedModelInfo(provider llm.LLMProvider, name string) llm.ModelInfo {
-	info := llm.ModelInfo{Name: name, ContextWindowUnreported: true, FeaturesUnreported: true}
+	info := llm.ModelInfo{Name: name, ContextWindowUnreported: true}
 	if name == llm.SavedModel(provider) {
 		if w := llm.SavedModelWindow(provider); w > 0 {
 			info.ContextWindow = w
@@ -374,8 +363,8 @@ func (m *DaemonSlotManager) resolveByConstraints(ctx context.Context, slot agent
 
 	return nil, llm.ModelInfo{}, types.WrapError(
 		llm.ErrNoMatchingProvider,
-		fmt.Sprintf("no provider found with model meeting constraints for slot %q (min_context: %d, features: %v)",
-			slot.Name, slot.Constraints.MinContextWindow, slot.Constraints.RequiredFeatures),
+		fmt.Sprintf("no provider found with model meeting constraints for slot %q (min_context: %d)",
+			slot.Name, slot.Constraints.MinContextWindow),
 		lastErr,
 	)
 }
@@ -454,14 +443,6 @@ func (m *DaemonSlotManager) validateConstraints(slot agent.SlotDefinition, model
 			llm.ErrInvalidSlotConfig,
 			fmt.Sprintf("model %q context window %d is less than required %d for slot %q",
 				model.Name, model.ContextWindow, constraints.MinContextWindow, slot.Name),
-		)
-	}
-
-	if missing := model.MissingFeatures(constraints.RequiredFeatures); len(missing) > 0 {
-		return types.NewError(
-			llm.ErrInvalidSlotConfig,
-			fmt.Sprintf("model %q missing required features for slot %q: %v",
-				model.Name, slot.Name, missing),
 		)
 	}
 

@@ -107,11 +107,8 @@ func TestSlotDefinition(t *testing.T) {
 		slot := NewSlotDefinition("test", "Test slot", true).
 			WithConstraints(SlotConstraints{
 				MinContextWindow: 32000,
-				RequiredFeatures: []string{FeatureToolUse, FeatureVision},
 			})
 		assert.Equal(t, 32000, slot.Constraints.MinContextWindow)
-		assert.Contains(t, slot.Constraints.RequiredFeatures, FeatureToolUse)
-		assert.Contains(t, slot.Constraints.RequiredFeatures, FeatureVision)
 	})
 
 	t.Run("MergeConfig", func(t *testing.T) {

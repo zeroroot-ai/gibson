@@ -55,12 +55,6 @@ type ModelInfo struct {
 	// context window. ContextWindow is then zero and means "unknown", not
 	// "no room". A slot constraint cannot reject an unknown window.
 	ContextWindowUnreported bool `json:"context_window_unreported,omitempty"`
-
-	// FeaturesUnreported is true when the provider did not report a complete
-	// feature set. Features then holds only what the provider did report, and
-	// a missing entry means "unknown", not "absent". A slot constraint cannot
-	// reject an unknown feature.
-	FeaturesUnreported bool `json:"features_unreported,omitempty"`
 }
 
 // ContextWindowAtLeast reports whether the model meets a minimum context
@@ -70,22 +64,6 @@ func (m ModelInfo) ContextWindowAtLeast(minimum int) bool {
 		return true
 	}
 	return m.ContextWindow >= minimum
-}
-
-// MissingFeatures returns the required features that the model lacks. It
-// returns nil when the feature set is unreported, because an unknown feature
-// is not a missing one.
-func (m ModelInfo) MissingFeatures(required []string) []string {
-	if m.FeaturesUnreported {
-		return nil
-	}
-	var missing []string
-	for _, f := range required {
-		if !m.SupportsFeature(f) {
-			missing = append(missing, f)
-		}
-	}
-	return missing
 }
 
 // DefaultModeler is implemented by a provider that knows the default model

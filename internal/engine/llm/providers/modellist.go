@@ -104,15 +104,13 @@ func (c *modelCache) get(ctx context.Context, provider string, fetch func(ctx co
 }
 
 // finalizeModelList marks what the provider did not report. A window of zero is
-// unreported. No provider reports a complete feature set, so the features are
-// always unreported and hold only the entries the provider did report.
+// unreported.
 func finalizeModelList(models []llm.ModelInfo) []llm.ModelInfo {
 	if models == nil {
 		models = []llm.ModelInfo{}
 	}
 	for i := range models {
 		models[i].ContextWindowUnreported = models[i].ContextWindow == 0
-		models[i].FeaturesUnreported = true
 	}
 	return models
 }

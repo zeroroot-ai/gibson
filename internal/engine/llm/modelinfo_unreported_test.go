@@ -30,16 +30,6 @@ func TestModelInfo_ContextWindowAtLeast(t *testing.T) {
 	}
 }
 
-func TestModelInfo_MissingFeatures(t *testing.T) {
-	reported := ModelInfo{Features: []string{"chat", "vision"}}
-	assert.Empty(t, reported.MissingFeatures([]string{"vision"}))
-	assert.Equal(t, []string{"streaming"}, reported.MissingFeatures([]string{"vision", "streaming"}))
-	assert.Equal(t, []string{"vision"}, ModelInfo{}.MissingFeatures([]string{"vision"}), "an empty reported set lacks the feature")
-
-	unreported := ModelInfo{Features: []string{"chat"}, FeaturesUnreported: true}
-	assert.Empty(t, unreported.MissingFeatures([]string{"vision", "streaming", "json_mode"}))
-}
-
 type savedModelStub struct{ LLMProvider }
 
 func (savedModelStub) DefaultModel() string { return "saved" }

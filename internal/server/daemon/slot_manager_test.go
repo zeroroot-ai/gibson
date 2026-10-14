@@ -139,7 +139,6 @@ func TestDaemonSlotManager_ResolveSlot_PrimarySlot(t *testing.T) {
 		Required:    true,
 		Constraints: agent.SlotConstraints{
 			MinContextWindow: 100000,
-			RequiredFeatures: []string{agent.FeatureToolUse},
 		},
 	}
 
@@ -153,7 +152,6 @@ func TestDaemonSlotManager_ResolveSlot_PrimarySlot(t *testing.T) {
 	// models, and the window and features of the model are unknown.
 	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
 	assert.True(t, model.ContextWindowUnreported)
-	assert.True(t, model.FeaturesUnreported)
 	assert.Zero(t, mockProvider.listCalls.Load(), "a mission must not call Models")
 }
 
@@ -290,7 +288,7 @@ func openAIWithoutWindows() *mockLLMProvider {
 	return &mockLLMProvider{
 		name:   "openai",
 		saved:  "gpt-5",
-		models: []llm.ModelInfo{{Name: "gpt-5", ContextWindowUnreported: true, FeaturesUnreported: true}},
+		models: []llm.ModelInfo{{Name: "gpt-5", ContextWindowUnreported: true}},
 		health: types.Healthy("mock provider healthy"),
 	}
 }
@@ -328,31 +326,27 @@ func TestDaemonSlotManager_ExplicitModelNeedsNoList(t *testing.T) {
 	assert.Zero(t, p.listCalls.Load())
 }
 
-func TestDaemonSlotManager_ValidateConstraints_ReportedValuesStillFail(t *testing.T) {
+func TestDaemonSlotManager_ValidateConstraints_ReportedWindowStillFails(t *testing.T) {
 	manager := NewDaemonSlotManager(llm.NewLLMRegistry(), slog.New(slog.DiscardHandler))
-	slot := agent.SlotDefinition{
-		Name: "primary",
-		Constraints: agent.SlotConstraints{
-			MinContextWindow: 100000,
-			RequiredFeatures: []string{agent.FeatureVision},
-		},
-	}
+	slot := agent.SlotDefinition{Name: "primary", Constraints: agent.SlotConstraints{MinContextWindow: 100000}}
 
-	// An Anthropic model that reports a window below the minimum fails.
-	err := manager.validateConstraints(slot, llm.ModelInfo{Name: "claude-small", ContextWindow: 8192, FeaturesUnreported: true})
+	// A model that reports a window below the minimum fails.
+	err := manager.validateConstraints(slot, llm.ModelInfo{Name: "claude-small", ContextWindow: 8192})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "context window")
 
-	// A reported feature list that lacks a required feature fails.
-	err = manager.validateConstraints(slot, llm.ModelInfo{Name: "novision", ContextWindow: 200000, Features: []string{"chat"}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required features")
+	// Reported and large enough passes. Unreported passes. A reported zero fails.
+	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "ok", ContextWindow: 200000}))
+	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "gpt", ContextWindowUnreported: true}))
+	require.Error(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "zero"}))
+}
 
-	// Reported and large enough passes. Unreported passes.
-	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "ok", ContextWindow: 200000, Features: []string{agent.FeatureVision}}))
-	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "gpt", ContextWindowUnreported: true, FeaturesUnreported: true}))
-	// A reported zero is not unknown.
-	require.Error(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "zero", Features: []string{agent.FeatureVision}}))
+// The vision slot name sets a context floor and no feature requirement: no
+// provider reports a complete feature set, so a feature check could not fail.
+func TestApplySlotNameDefaults_VisionHasNoFeatureRequirement(t *testing.T) {
+	mgr := NewDaemonSlotManager(llm.NewLLMRegistry(), slog.New(slog.DiscardHandler))
+	result := mgr.applySlotNameDefaults(agent.SlotDefinition{Name: "vision"})
+	assert.Equal(t, 50000, result.Constraints.MinContextWindow)
 }
 
 func TestDaemonSlotManager_ResolveSlot_NoProvidersRegistered(t *testing.T) {
@@ -420,7 +414,6 @@ func TestDaemonSlotManager_ResolveSlot_FallbackToAlternativeProvider(t *testing.
 		Name: "primary",
 		Constraints: agent.SlotConstraints{
 			MinContextWindow: 100000,
-			RequiredFeatures: []string{agent.FeatureToolUse},
 		},
 	}
 
@@ -535,48 +528,20 @@ func TestDaemonSlotManager_ApplySlotNameDefaults_UnknownSlot(t *testing.T) {
 	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name, "the saved default model")
 }
 
-func TestDaemonSlotManager_ResolveSlot_MultipleFeatures(t *testing.T) {
-	ctx := context.Background()
-
-	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(createMockAnthropicProvider()))
-
-	manager := NewDaemonSlotManager(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	slot := agent.SlotDefinition{
-		Name: "multi-feature",
-		Constraints: agent.SlotConstraints{
-			MinContextWindow: 150000,
-			RequiredFeatures: []string{
-				agent.FeatureToolUse,
-				agent.FeatureVision,
-				agent.FeatureStreaming,
-			},
-		},
-	}
-
-	provider, model, err := manager.ResolveSlot(ctx, slot, nil)
-	require.NoError(t, err)
-	assert.NotNil(t, provider)
-
-	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
-}
-
 func TestApplySlotNameDefaults_OnlyConstraints(t *testing.T) {
 	registry := llm.NewLLMRegistry()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mgr := NewDaemonSlotManager(registry, logger)
 
 	tests := []struct {
-		name                string
-		slotName            string
-		expectedMinContext  int
-		expectVisionFeature bool
+		name               string
+		slotName           string
+		expectedMinContext int
 	}{
-		{"primary", "primary", 100000, false},
-		{"fast", "fast", 8192, false},
-		{"vision", "vision", 50000, true},
-		{"reasoning", "reasoning", 150000, false},
+		{"primary", "primary", 100000},
+		{"fast", "fast", 8192},
+		{"vision", "vision", 50000},
+		{"reasoning", "reasoning", 150000},
 	}
 
 	for _, tt := range tests {
@@ -595,7 +560,6 @@ func TestApplySlotNameDefaults_OnlyConstraints(t *testing.T) {
 				},
 				Constraints: agent.SlotConstraints{
 					MinContextWindow: 0, // Not set, so defaults will apply
-					RequiredFeatures: []string{},
 				},
 			}
 
@@ -608,9 +572,6 @@ func TestApplySlotNameDefaults_OnlyConstraints(t *testing.T) {
 			// Should set constraints
 			assert.Equal(t, tt.expectedMinContext, result.Constraints.MinContextWindow)
 
-			if tt.expectVisionFeature {
-				assert.Contains(t, result.Constraints.RequiredFeatures, agent.FeatureVision)
-			}
 		})
 	}
 }
@@ -629,7 +590,6 @@ func TestApplySlotNameDefaults_UnknownSlot(t *testing.T) {
 
 	// Should keep original constraints (from NewSlotDefinition defaults)
 	assert.Equal(t, 8192, result.Constraints.MinContextWindow, "Should keep NewSlotDefinition default")
-	assert.Empty(t, result.Constraints.RequiredFeatures, "RequiredFeatures should remain empty")
 }
 
 func TestApplySlotNameDefaults_ExplicitConfigPreserved(t *testing.T) {
@@ -667,7 +627,7 @@ func TestResolveByConstraints_NoPreferenceOrder(t *testing.T) {
 			{
 				Name:          "zebra-model-1",
 				ContextWindow: 100000,
-				Features:      []string{agent.FeatureToolUse},
+				Features:      []string{"tool_use"},
 				MaxOutput:     4096,
 			},
 		},
@@ -682,7 +642,7 @@ func TestResolveByConstraints_NoPreferenceOrder(t *testing.T) {
 			{
 				Name:          "alpha-model-1",
 				ContextWindow: 100000,
-				Features:      []string{agent.FeatureToolUse},
+				Features:      []string{"tool_use"},
 				MaxOutput:     4096,
 			},
 		},

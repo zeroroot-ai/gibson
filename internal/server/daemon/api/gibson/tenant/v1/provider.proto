@@ -210,11 +210,6 @@ message ProviderRecord {
   // independent of default_model (the chat model). Empty when the provider
   // does not serve embeddings.
   string default_embedding_model = 11;
-  // default_model_context_window is the context window, in tokens, stored with
-  // default_model at save time. 0 means none is stored (a provider saved before
-  // this field existed): the window is unknown, and an agent with a context
-  // floor is refused until the provider is saved again.
-  int32 default_model_context_window = 12;
 }
 
 // ProviderConfigInput is the write-side shape for CreateProvider and
@@ -237,7 +232,7 @@ message ProviderConfigInput {
   // default_model. Optional. When it is 0 the daemon reads the window from the
   // live model list of the provider. A provider that does not report one needs
   // the caller to state it here, and the save is refused without it.
-  int32 default_model_context_window = 8 [(buf.validate.field).int32 = { gte: 0 }];
+  int32 default_model_context_window = 8 [(buf.validate.field).int32 = { gte: 0, lte: 10000000 }];
 }
 
 // CredentialFieldType classifies the UI widget and validation semantics for a

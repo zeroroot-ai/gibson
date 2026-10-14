@@ -22,7 +22,6 @@ func TestNewSlotDefinition_NoHardcodedDefaults(t *testing.T) {
 
 	// Constraints should have minimal defaults
 	assert.Equal(t, 8192, slot.Constraints.MinContextWindow, "MinContextWindow should default to 8192")
-	assert.Empty(t, slot.Constraints.RequiredFeatures, "RequiredFeatures should be empty")
 }
 
 func TestNewSlotDefinition_Properties(t *testing.T) {
@@ -56,15 +55,11 @@ func TestSlotDefinition_WithConstraints(t *testing.T) {
 
 	customConstraints := SlotConstraints{
 		MinContextWindow: 100000,
-		RequiredFeatures: []string{FeatureToolUse, FeatureVision},
 	}
 
 	slot = slot.WithConstraints(customConstraints)
 
 	assert.Equal(t, 100000, slot.Constraints.MinContextWindow)
-	assert.Contains(t, slot.Constraints.RequiredFeatures, FeatureToolUse)
-	assert.Contains(t, slot.Constraints.RequiredFeatures, FeatureVision)
-	assert.Len(t, slot.Constraints.RequiredFeatures, 2)
 }
 
 func TestSlotDefinition_MergeConfig_NoOverride(t *testing.T) {

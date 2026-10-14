@@ -50,7 +50,7 @@ func (m *SlotManager) ResolveSlot(_ context.Context, slot agent.SlotDefinition, 
 	if model == "" {
 		model = llm.SavedModel(p)
 	}
-	return p, llm.ModelInfo{Name: model, ContextWindowUnreported: true, FeaturesUnreported: true}, nil
+	return p, llm.ModelInfo{Name: model, ContextWindowUnreported: true}, nil
 }
 
 // ValidateSlot resolves the slot and reports the error.

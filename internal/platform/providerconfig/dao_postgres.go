@@ -32,20 +32,54 @@ type pgQuerier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// windowColumnMinVersion is the first tenant migration that has the
+// default_model_context_window column (016). The tenant operator applies tenant
+// migrations, and the daemon can roll ahead of it. The daemon therefore reads
+// and writes the column only on a tenant database at this version or later. On
+// an earlier one the window is unreported and the rest of the config works.
+const windowColumnMinVersion = 16
+
 func newProviderConfigDAO(pg pgQuerier) *providerConfigDAO {
 	return &providerConfigDAO{pg: pg}
+}
+
+// windowColumn reports whether this tenant database has the window column. It
+// reads the version that golang-migrate records, the same row the tenant
+// operator reads (SELECT COALESCE(MAX(version), 0) FROM schema_migrations). A
+// missing table or a failed read counts as not yet migrated, so the daemon
+// never asks for a column it cannot see.
+func (d *providerConfigDAO) windowColumn(ctx context.Context) bool {
+	var version int64
+	if err := d.pg.QueryRow(ctx,
+		`SELECT COALESCE(MAX(version), 0) FROM schema_migrations WHERE NOT dirty`,
+	).Scan(&version); err != nil {
+		return false
+	}
+	return version >= windowColumnMinVersion
 }
 
 func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error) {
 	now := time.Now().UTC()
 	id := types.NewID()
 
-	_, err := d.pg.Exec(ctx,
-		`INSERT INTO provider_configs (id, name, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		string(id), input.Name, string(input.Type), input.DefaultModel, input.DefaultModelContextWindow,
-		input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
-	)
+	window := input.DefaultModelContextWindow
+	var err error
+	if d.windowColumn(ctx) {
+		_, err = d.pg.Exec(ctx,
+			`INSERT INTO provider_configs (id, name, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+			string(id), input.Name, string(input.Type), input.DefaultModel, input.DefaultModelContextWindow,
+			input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
+		)
+	} else {
+		window = 0
+		_, err = d.pg.Exec(ctx,
+			`INSERT INTO provider_configs (id, name, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			string(id), input.Name, string(input.Type), input.DefaultModel,
+			input.SetAsDefault, input.Enabled, capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, now,
+		)
+	}
 	if err != nil {
 		if isPgUniqueViolation(err) {
 			return nil, ErrAlreadyExists
@@ -59,7 +93,7 @@ func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *
 		Name:                      input.Name,
 		Type:                      input.Type,
 		DefaultModel:              input.DefaultModel,
-		DefaultModelContextWindow: input.DefaultModelContextWindow,
+		DefaultModelContextWindow: window,
 		IsDefault:                 input.SetAsDefault,
 		Enabled:                   input.Enabled,
 		Capabilities:              normalizeCapabilities(input.Capabilities),
@@ -76,10 +110,18 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 	var capabilities []string
 	var createdAt, updatedAt time.Time
 
-	err := d.pg.QueryRow(ctx,
-		`SELECT id, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
-		 FROM provider_configs WHERE name = $1`, name,
-	).Scan(&id, &typ, &defaultModel, &window, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	var err error
+	if d.windowColumn(ctx) {
+		err = d.pg.QueryRow(ctx,
+			`SELECT id, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+			 FROM provider_configs WHERE name = $1`, name,
+		).Scan(&id, &typ, &defaultModel, &window, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	} else {
+		err = d.pg.QueryRow(ctx,
+			`SELECT id, type, default_model, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+			 FROM provider_configs WHERE name = $1`, name,
+		).Scan(&id, &typ, &defaultModel, &isDefault, &enabled, &capabilities, &defaultEmbeddingModel, &createdAt, &updatedAt)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -105,8 +147,12 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 }
 
 func (d *providerConfigDAO) list(ctx context.Context, tenantID string) ([]*ProviderConfig, error) {
+	windowSelect := "0"
+	if d.windowColumn(ctx) {
+		windowSelect = "default_model_context_window"
+	}
 	rows, err := d.pg.Query(ctx,
-		`SELECT id, name, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
+		`SELECT id, name, type, default_model, `+windowSelect+`, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
 		 FROM provider_configs ORDER BY name`,
 	)
 	if err != nil {
@@ -151,14 +197,28 @@ func (d *providerConfigDAO) update(ctx context.Context, tenantID, name string, i
 
 	var id string
 	var createdAt time.Time
-	err := d.pg.QueryRow(ctx,
-		`UPDATE provider_configs
-		 SET type = $1, default_model = $2, default_model_context_window = $3, is_default = $4, enabled = $5, capabilities = $6, default_embedding_model = $7, updated_at = $8
-		 WHERE name = $9
-		 RETURNING id, created_at`,
-		string(input.Type), input.DefaultModel, input.DefaultModelContextWindow, input.SetAsDefault, input.Enabled,
-		capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
-	).Scan(&id, &createdAt)
+	var err error
+	window := input.DefaultModelContextWindow
+	if d.windowColumn(ctx) {
+		err = d.pg.QueryRow(ctx,
+			`UPDATE provider_configs
+			 SET type = $1, default_model = $2, default_model_context_window = $3, is_default = $4, enabled = $5, capabilities = $6, default_embedding_model = $7, updated_at = $8
+			 WHERE name = $9
+			 RETURNING id, created_at`,
+			string(input.Type), input.DefaultModel, input.DefaultModelContextWindow, input.SetAsDefault, input.Enabled,
+			capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
+		).Scan(&id, &createdAt)
+	} else {
+		window = 0
+		err = d.pg.QueryRow(ctx,
+			`UPDATE provider_configs
+			 SET type = $1, default_model = $2, is_default = $3, enabled = $4, capabilities = $5, default_embedding_model = $6, updated_at = $7
+			 WHERE name = $8
+			 RETURNING id, created_at`,
+			string(input.Type), input.DefaultModel, input.SetAsDefault, input.Enabled,
+			capabilitiesParam(input.Capabilities), input.DefaultEmbeddingModel, now, name,
+		).Scan(&id, &createdAt)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
@@ -173,7 +233,7 @@ func (d *providerConfigDAO) update(ctx context.Context, tenantID, name string, i
 		Name:                      name,
 		Type:                      input.Type,
 		DefaultModel:              input.DefaultModel,
-		DefaultModelContextWindow: input.DefaultModelContextWindow,
+		DefaultModelContextWindow: window,
 		IsDefault:                 input.SetAsDefault,
 		Enabled:                   input.Enabled,
 		Capabilities:              normalizeCapabilities(input.Capabilities),

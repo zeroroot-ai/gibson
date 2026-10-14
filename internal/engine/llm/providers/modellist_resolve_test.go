@@ -160,8 +160,6 @@ func TestUnreportedFieldsAreMarkedOnEveryList(t *testing.T) {
 	require.Len(t, models, 2)
 	assert.False(t, models[0].ContextWindowUnreported)
 	assert.True(t, models[1].ContextWindowUnreported, "a window the API did not report is unknown, not zero")
-	assert.True(t, models[0].FeaturesUnreported)
-	assert.True(t, models[1].FeaturesUnreported)
 	assert.True(t, models[0].ContextWindowAtLeast(100000))
 	assert.False(t, models[0].ContextWindowAtLeast(300000), "a reported window below the minimum fails")
 	assert.True(t, models[1].ContextWindowAtLeast(300000))
