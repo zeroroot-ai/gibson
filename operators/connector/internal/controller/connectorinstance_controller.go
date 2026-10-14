@@ -698,6 +698,11 @@ func mcpServerPodTemplate() map[string]interface{} {
 	seccomp := map[string]interface{}{"type": "RuntimeDefault"}
 	return map[string]interface{}{
 		"spec": map[string]interface{}{
+			// The MCP server runs third-party code and calls no Kubernetes
+			// API. Its ServiceAccount holds no Role today, but a mounted token
+			// is a credential that a later RoleBinding could give rights to,
+			// so the pod mounts none (gibson#1170).
+			"automountServiceAccountToken": false,
 			"securityContext": map[string]interface{}{
 				"runAsNonRoot":   true,
 				"seccompProfile": seccomp,

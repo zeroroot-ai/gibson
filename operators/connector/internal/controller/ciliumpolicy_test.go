@@ -198,6 +198,10 @@ func TestMCPServerPodTemplateMeetsRestricted(t *testing.T) {
 	if nonRoot, _, _ := unstructured.NestedBool(podSpec, "securityContext", "runAsNonRoot"); !nonRoot {
 		t.Error("runAsNonRoot is not true")
 	}
+	// The pod of third-party code mounts no API token (gibson#1170).
+	if mount, found, _ := unstructured.NestedBool(podSpec, "automountServiceAccountToken"); !found || mount {
+		t.Errorf("automountServiceAccountToken = %v (set %v), want false", mount, found)
+	}
 	if p, _, _ := unstructured.NestedString(podSpec, "securityContext", "seccompProfile", "type"); p != "RuntimeDefault" {
 		t.Errorf("pod seccomp = %q", p)
 	}
