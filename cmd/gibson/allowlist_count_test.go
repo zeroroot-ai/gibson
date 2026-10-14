@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
+// Package main holds the gibson daemon command. This file holds the call
+// counts that keep a whole-file allowlist entry from covering a new call.
 package main
 
 import (
