@@ -26,7 +26,6 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -46,114 +45,21 @@ func stubErrorEmbedderFactory(_ embedder.Config) (embedder.Embedder, error) {
 }
 
 // ---------------------------------------------------------------------------
-// GetSupportedProviders — embedding_models shape (gibson#1012)
+// GetSupportedProviders — provider metadata only (gibson#1193)
 // ---------------------------------------------------------------------------
 
-// TestGetSupportedProviders_OpenAI_HasEmbeddingModels verifies the openai
-// descriptor surfaces embedding models in the new embedding_models field.
-func TestGetSupportedProviders_OpenAI_HasEmbeddingModels(t *testing.T) {
+// TestGetSupportedProviders_CarriesNoModels verifies that no descriptor carries
+// a model list. The models come from the provider through TestProvider,
+// ProbeProvider and ListProviderModels.
+func TestGetSupportedProviders_CarriesNoModels(t *testing.T) {
 	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	var openai *tenantv1.SupportedProvider
+	require.NotEmpty(t, resp.Providers)
 	for _, p := range resp.Providers {
-		if p.Type == "openai" {
-			openai = p
-			break
-		}
-	}
-	require.NotNil(t, openai, "openai provider must be present in catalogue")
-	assert.NotEmpty(t, openai.EmbeddingModels, "openai must advertise embedding models")
-	assert.NotEmpty(t, openai.DefaultModels, "openai must still advertise chat models")
-
-	// All embedding models must carry CAPABILITY_EMBEDDING.
-	for _, m := range openai.EmbeddingModels {
-		assert.Contains(t, m.Capabilities, tenantv1.Capability_CAPABILITY_EMBEDDING,
-			"embedding model %q must carry CAPABILITY_EMBEDDING", m.Name)
-		assert.NotContains(t, m.Capabilities, tenantv1.Capability_CAPABILITY_CHAT,
-			"embedding model %q must not carry CAPABILITY_CHAT", m.Name)
-	}
-}
-
-// TestGetSupportedProviders_Bedrock_HasEmbeddingModels verifies bedrock
-// advertises its Titan/Cohere embedding models.
-func TestGetSupportedProviders_Bedrock_HasEmbeddingModels(t *testing.T) {
-	s := auditedServer(t)
-	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
-	require.NoError(t, err)
-
-	var bedrock *tenantv1.SupportedProvider
-	for _, p := range resp.Providers {
-		if p.Type == "bedrock" {
-			bedrock = p
-			break
-		}
-	}
-	require.NotNil(t, bedrock, "bedrock provider must be present in catalogue")
-	assert.NotEmpty(t, bedrock.EmbeddingModels, "bedrock must advertise embedding models")
-
-	names := make([]string, 0, len(bedrock.EmbeddingModels))
-	for _, m := range bedrock.EmbeddingModels {
-		names = append(names, m.Name)
-	}
-	assert.Contains(t, names, "amazon.titan-embed-text-v2:0")
-	assert.Contains(t, names, "cohere.embed-english-v3")
-}
-
-// TestGetSupportedProviders_Anthropic_NoEmbeddingModels verifies that
-// Anthropic (chat-only) has no embedding_models entry.
-func TestGetSupportedProviders_Anthropic_NoEmbeddingModels(t *testing.T) {
-	s := auditedServer(t)
-	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
-	require.NoError(t, err)
-
-	for _, p := range resp.Providers {
-		if p.Type == "anthropic" {
-			assert.Empty(t, p.EmbeddingModels, "anthropic is chat-only and must not advertise embedding models")
-			return
-		}
-	}
-	t.Fatal("anthropic provider not found in catalogue")
-}
-
-// TestGetSupportedProviders_Voyage_EmbeddingOnly verifies voyage appears in
-// the catalogue as an embedding-only provider with no default_models but with
-// embedding_models.
-func TestGetSupportedProviders_Voyage_EmbeddingOnly(t *testing.T) {
-	s := auditedServer(t)
-	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
-	require.NoError(t, err)
-
-	var voyage *tenantv1.SupportedProvider
-	for _, p := range resp.Providers {
-		if p.Type == "voyage" {
-			voyage = p
-			break
-		}
-	}
-	require.NotNil(t, voyage, "voyage provider must be present in catalogue")
-	assert.Empty(t, voyage.DefaultModels, "voyage is embedding-only and must have no chat models")
-	assert.NotEmpty(t, voyage.EmbeddingModels, "voyage must advertise embedding models")
-}
-
-// TestGetSupportedProviders_ModelDescriptorCapabilities verifies that chat
-// models in the catalogue carry CAPABILITY_CHAT on their descriptor.
-func TestGetSupportedProviders_ModelDescriptorCapabilities(t *testing.T) {
-	s := auditedServer(t)
-	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
-	require.NoError(t, err)
-
-	for _, p := range resp.Providers {
-		for _, m := range p.DefaultModels {
-			// default_models are chat models — they should carry CAPABILITY_CHAT
-			// when the catalogue populates capabilities.
-			if len(m.Capabilities) > 0 {
-				assert.Contains(t, m.Capabilities, tenantv1.Capability_CAPABILITY_CHAT,
-					"chat model %q in provider %q must carry CAPABILITY_CHAT", m.Name, p.Type)
-			}
-		}
+		assert.NotEmpty(t, p.DisplayName, "provider %q must keep its display name", p.Type)
+		assert.Empty(t, p.DefaultModels, "provider %q must not carry a fixed chat model list", p.Type)
+		assert.Empty(t, p.EmbeddingModels, "provider %q must not carry a fixed embedding model list", p.Type)
 	}
 }
 
@@ -424,23 +330,4 @@ func TestProbeProvider_UnauthenticatedContext_Unauthenticated(t *testing.T) {
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.Unauthenticated, grpcCode(err))
-}
-
-// TestGetSupportedProviders_NoCatalogue: a server with no catalogue reports
-// Internal rather than an empty model list (gibson#691).
-func TestGetSupportedProviders_NoCatalogue(t *testing.T) {
-	s := auditedServer(t)
-	s.providerCatalogue = nil
-	_, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
-	require.Equal(t, codes.Internal, grpcCode(err))
-}
-
-// TestWithProviderCatalogue_SetsTheCatalogue: the builder gives the server
-// the catalogue that GetSupportedProviders reads.
-func TestWithProviderCatalogue_SetsTheCatalogue(t *testing.T) {
-	s := auditedServer(t)
-	s.providerCatalogue = nil
-	cat := catalogue.NewLoader("")
-	require.Same(t, s, s.WithProviderCatalogue(cat))
-	require.Same(t, cat, s.providerCatalogue)
 }

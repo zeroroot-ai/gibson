@@ -22,7 +22,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -117,10 +116,6 @@ type DaemonServer struct {
 	// (gibson#788).
 	beliefWorlds       BeliefWorlds
 	trainerTrustDomain spiffeid.TrustDomain
-
-	// providerCatalogue is the daemon's model catalogue. GetSupportedProviders
-	// reads the model list of each provider from it.
-	providerCatalogue *catalogue.Loader
 
 	// connectorCredStore and connectorCredPeer back GetConnectorCredential
 	// (gibson#663): the tenant secret store, and the one SPIFFE ID that may

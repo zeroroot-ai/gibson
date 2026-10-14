@@ -28,13 +28,6 @@ func TestNewHuggingFaceProvider_MissingToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestHuggingFaceProvider_Models(t *testing.T) {
-	p := &HuggingFaceProvider{}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	assert.NotEmpty(t, models)
-}
-
 func TestHuggingFaceCredentialSchema(t *testing.T) {
 	schema := HuggingFaceCredentialSchema()
 	found := false

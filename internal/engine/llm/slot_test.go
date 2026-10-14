@@ -422,6 +422,12 @@ func TestValidateConstraints_ContextWindow(t *testing.T) {
 			modelContextWindow: 8192,
 			expectError:        false,
 		},
+		{
+			name:               "window not reported by the provider (0)",
+			minContextWindow:   16384,
+			modelContextWindow: 0,
+			expectError:        false,
+		},
 	}
 
 	for _, tt := range tests {

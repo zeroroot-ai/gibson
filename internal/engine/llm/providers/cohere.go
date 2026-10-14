@@ -19,6 +19,7 @@ import (
 type CohereProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // newCohereProviderWithContext constructs a Cohere provider, resolving the credential from cfg (see resolveCredential).
@@ -37,28 +38,29 @@ func newCohereProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("cohere", err)
 	}
-	return &CohereProvider{model: m, config: cfg}, nil
+	return &CohereProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "cohere", baseURL: baseURL, token: token},
+	}, nil
 }
 
 func (p *CohereProvider) Name() string { return "cohere" }
 
-func (p *CohereProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "command-r-plus", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "command-r", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "command", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: "command-light", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-	}, nil
+// Models asks the list endpoint of the provider (GET {base}/models) for its
+// models.
+func (p *CohereProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *CohereProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {

@@ -24,7 +24,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -444,9 +443,9 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 // TestProvider
 // ---------------------------------------------------------------------------
 
-// TestProvider validates a proposed provider config by attempting a live health
-// or completion check against the upstream API. The proposed config is NOT
-// persisted. Credentials are used for the duration of this call only and are
+// TestProvider validates a proposed provider config by calling the model list
+// endpoint of the provider with the proposed credentials. The call needs no
+// model ID and sends no completion. The proposed config is NOT persisted. Credentials are used for the duration of this call only and are
 // never logged.
 //
 // Flow:
@@ -454,16 +453,16 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 //  2. For embedding-only providers (voyage, openai-compatible, tei): skip the
 //     chat probe and run only the embedding probe (step 5).
 //  3. For chat-capable providers: construct a provider via providers.NewProvider
-//     and call provider.Health under a 5s deadline.
-//  4. If Health is a pass-through noop (unconditionally healthy), fall back to
-//     a minimal Complete call under a 15s deadline.
+//     and call provider.Models under a 10s deadline.
+//  4. A success gives ok=true and the live models. A failure gives ok=false and
+//     the error text of the provider.
 //  5. If the input declares CAPABILITY_EMBEDDING and default_embedding_model is
 //     set, call embedder.NewFromProvider and EmbedBatch(["ping"]) under a 10s
 //     deadline. The embedding result (ok + dimension + error) is attached to the
 //     response; a failure does not negate a successful chat probe.
 //  6. Return TestProviderResponse {ok, latency_ms, model, error, embedding_ok,
 //     embedding_dimension, embedding_error}.
-//     Timeout → {ok: false, error: "timeout"} — never a gRPC-level error.
+//     A failure is never a gRPC-level error.
 func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProviderRequest) (*tenantv1.TestProviderResponse, error) {
 	tenantID := auth.TenantStringFromContext(ctx)
 	if tenantID == "" {
@@ -524,72 +523,20 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 			}, nil
 		}
 
-		// Step 1: Health check under 5s deadline.
-		healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-		healthStatus := prov.Health(healthCtx)
-		healthCancel()
+		// The credential check is the model list call of the provider. It
+		// sends no completion and needs no model ID.
+		models, listErr := checkProviderCredentials(ctx, prov)
 		latencyMS = time.Since(start).Milliseconds()
-
-		// Check if the deadline was exceeded.
-		if healthCtx.Err() == context.DeadlineExceeded {
+		if listErr != nil {
 			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
 			return &tenantv1.TestProviderResponse{
 				Ok:        false,
 				LatencyMs: latencyMS,
-				Error:     "timeout",
+				Error:     listErr.Error(),
 			}, nil
 		}
-
-		switch {
-		case healthStatus.IsHealthy():
-			chatOK = true
-			// Best-effort live model fetch.
-			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-			modelList, _ = prov.Models(modelsCtx)
-			modelsCancel()
-		case latencyMS >= 10:
-			// Non-trivial latency + unhealthy = genuine failure from upstream.
-			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-			return &tenantv1.TestProviderResponse{
-				Ok:        false,
-				LatencyMs: latencyMS,
-				Error:     healthStatus.Message,
-			}, nil
-		default:
-			// Health noop: fall back to a minimal Complete call under a 15s deadline.
-			completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
-			_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
-				Model: input.GetDefaultModel(),
-				Messages: []llm.Message{
-					{Role: llm.RoleUser, Content: "Hello"},
-				},
-				MaxTokens: 1,
-			})
-			completeCancel()
-			latencyMS = time.Since(start).Milliseconds()
-
-			if completeCtx.Err() == context.DeadlineExceeded {
-				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-				return &tenantv1.TestProviderResponse{
-					Ok:        false,
-					LatencyMs: latencyMS,
-					Error:     "timeout",
-				}, nil
-			}
-			if completeErr != nil {
-				s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
-				return &tenantv1.TestProviderResponse{ //nolint:nilerr // complete errors are surfaced in the response body, not as a gRPC error
-					Ok:        false,
-					LatencyMs: latencyMS,
-					Error:     completeErr.Error(),
-				}, nil
-			}
-			chatOK = true
-			// Best-effort live model fetch on the Complete-fallback success path.
-			modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-			modelList, _ = prov.Models(modelsCtx)
-			modelsCancel()
-		}
+		chatOK = true
+		modelList = models
 	}
 
 	// Embedding probe: run when the provider declares CAPABILITY_EMBEDDING and
@@ -807,10 +754,7 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 	if auth.TenantStringFromContext(ctx) == "" {
 		return nil, status_grpc.Errorf(codes.Unauthenticated, "tenant context required")
 	}
-	if s.providerCatalogue == nil {
-		return nil, status_grpc.Error(codes.Internal, "provider catalogue is not wired")
-	}
-	descriptors := providers.SupportedProviderDescriptors(s.providerCatalogue)
+	descriptors := providers.SupportedProviderDescriptors()
 	out := make([]*tenantv1.SupportedProvider, 0, len(descriptors))
 	for _, d := range descriptors {
 		out = append(out, descriptorToProto(d))
@@ -835,8 +779,8 @@ func (s *DaemonServer) GetSupportedProviders(ctx context.Context, _ *tenantv1.Ge
 //  1. Build ephemeral configs from type + credentials.
 //  2. For embedding-only providers (voyage, openai-compatible, tei): only run
 //     the embedding probe (if default_embedding_model is set).
-//  3. For chat-capable providers: attempt a minimal Complete call under a 15s
-//     deadline; on success, fetch the live model catalogue.
+//  3. For chat-capable providers: call the model list endpoint of the provider
+//     under a 10s deadline. It needs no model ID and sends no completion.
 //  4. If default_embedding_model is set (on any provider type): also run the
 //     embedding probe and attach embedding_dimension to the response.
 //  5. Return ProbeProviderResponse {ok, error_message, error_class, models,
@@ -929,8 +873,8 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 	}, nil
 }
 
-// probeChatProvider constructs a chat provider from credentials and probes it
-// with a health check and, if needed, a minimal Complete call. Returns
+// probeChatProvider constructs a chat provider from credentials and checks it
+// with the model list call of the provider. Returns
 // (ok, errMsg, modelList, latencyMs). A non-empty errMsg implies ok=false.
 func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderType, creds map[string]string, start time.Time) (ok bool, errMsg string, modelList []llm.ModelInfo, latencyMS int64) {
 	provCfg := s.withEgressPolicy(llm.ProviderConfig{
@@ -957,43 +901,28 @@ func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderTyp
 		return false, fmt.Sprintf("invalid provider configuration: %v", err), nil, time.Since(start).Milliseconds()
 	}
 
-	healthCtx, healthCancel := context.WithTimeout(ctx, 5*time.Second)
-	healthStatus := prov.Health(healthCtx)
-	healthCancel()
+	models, listErr := checkProviderCredentials(ctx, prov)
 	latencyMS = time.Since(start).Milliseconds()
-
-	if healthCtx.Err() == context.DeadlineExceeded {
-		return false, "timeout", nil, latencyMS
+	if listErr != nil {
+		return false, listErr.Error(), nil, latencyMS
 	}
+	return true, "", models, latencyMS
+}
 
-	switch {
-	case healthStatus.IsHealthy():
-		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-		modelList, _ = prov.Models(modelsCtx)
-		modelsCancel()
-		return true, "", modelList, time.Since(start).Milliseconds()
-	case latencyMS >= 10:
-		return false, healthStatus.Message, nil, latencyMS
-	default:
-		// Health noop: fall back to minimal Complete.
-		completeCtx, completeCancel := context.WithTimeout(ctx, 15*time.Second)
-		_, completeErr := prov.Complete(completeCtx, llm.CompletionRequest{
-			Messages:  []llm.Message{{Role: llm.RoleUser, Content: "Hello"}},
-			MaxTokens: 1,
-		})
-		completeCancel()
-		latencyMS = time.Since(start).Milliseconds()
-		if completeCtx.Err() == context.DeadlineExceeded {
-			return false, "timeout", nil, latencyMS
-		}
-		if completeErr != nil {
-			return false, completeErr.Error(), nil, latencyMS
-		}
-		modelsCtx, modelsCancel := context.WithTimeout(ctx, 10*time.Second)
-		modelList, _ = prov.Models(modelsCtx)
-		modelsCancel()
-		return true, "", modelList, time.Since(start).Milliseconds()
+// providerCheckTimeout bounds the model list call that checks credentials.
+const providerCheckTimeout = 10 * time.Second
+
+// checkProviderCredentials checks the credentials of a provider with its model
+// list call and returns the models that the provider reports. The call sends no
+// completion and needs no model ID. A failure carries the text of the provider.
+func checkProviderCredentials(ctx context.Context, prov llm.LLMProvider) ([]llm.ModelInfo, error) {
+	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
+	defer cancel()
+	models, err := prov.Models(listCtx)
+	if err != nil {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
 	}
+	return models, nil
 }
 
 // probeEmbeddingFromCreds builds an embedder from raw credentials and probes
@@ -1120,10 +1049,8 @@ func credentialFieldTypeToProto(t llm.CredentialFieldType) tenantv1.CredentialFi
 }
 
 // descriptorToProto translates the in-Go ProviderDescriptor to its proto
-// equivalent. Chat models go to default_models; embedding models (those whose
-// Features contain "embedding") go to embedding_models. A model may appear in
-// only one list — the capabilities field on ModelDescriptor lets the dashboard
-// filter further if needed.
+// equivalent. It carries provider metadata only. The model lists come from the
+// provider through TestProvider, ProbeProvider and ListProviderModels.
 func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvider {
 	creds := make([]*tenantv1.CredentialField, 0, len(d.Credentials))
 	for _, c := range d.Credentials {
@@ -1138,31 +1065,12 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 		})
 	}
 
-	var chatModels, embModels []*tenantv1.ModelDescriptor
-	for _, m := range d.DefaultModels {
-		md := modelToProto(m)
-		isEmb := false
-		for _, f := range m.Features {
-			if f == "embedding" {
-				isEmb = true
-				break
-			}
-		}
-		if isEmb {
-			embModels = append(embModels, md)
-		} else {
-			chatModels = append(chatModels, md)
-		}
-	}
-
 	return &tenantv1.SupportedProvider{
-		Type:            string(d.Type),
-		DisplayName:     d.DisplayName,
-		DocsUrl:         d.DocsURL,
-		SelfHosted:      d.SelfHosted,
-		Credentials:     creds,
-		DefaultModels:   chatModels,
-		EmbeddingModels: embModels,
+		Type:        string(d.Type),
+		DisplayName: d.DisplayName,
+		DocsUrl:     d.DocsURL,
+		SelfHosted:  d.SelfHosted,
+		Credentials: creds,
 	}
 }
 
@@ -1241,11 +1149,4 @@ func decryptedToLLMConfig(dec *providerconfig.DecryptedConfig) llm.ProviderConfi
 		cfg.Extra = extra
 	}
 	return cfg
-}
-
-// WithProviderCatalogue gives the server the daemon's model catalogue.
-// GetSupportedProviders reads the default model list of each provider from it.
-func (s *DaemonServer) WithProviderCatalogue(cat *catalogue.Loader) *DaemonServer {
-	s.providerCatalogue = cat
-	return s
 }

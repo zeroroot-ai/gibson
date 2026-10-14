@@ -15,6 +15,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
+// defaultOpenAIBaseURL is the OpenAI API root when the config sets no base URL.
+const defaultOpenAIBaseURL = "https://api.openai.com/v1"
+
 // OpenAIProvider implements LLMProvider for OpenAI's GPT models using the
 // Eino framework. Every code path — including structured output — goes through
 // the single Eino ChatModel; structured output injects OpenAI's native
@@ -23,6 +26,7 @@ import (
 type OpenAIProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // NewOpenAIProvider creates a new OpenAI provider.
@@ -44,11 +48,12 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 	}
 
 	ctx := context.Background()
+	client := guardedHTTPClient(cfg)
 	model, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     apiKey,
 		Model:      cfg.DefaultModel,
 		BaseURL:    cfg.BaseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("openai", err)
@@ -57,6 +62,12 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 	return &OpenAIProvider{
 		model:  model,
 		config: cfg,
+		lister: &openAIListEndpoint{
+			client:   client,
+			provider: string(llm.ProviderOpenAI),
+			baseURL:  firstNonEmpty(cfg.BaseURL, defaultOpenAIBaseURL),
+			token:    apiKey,
+		},
 	}, nil
 }
 
@@ -65,29 +76,10 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-// Models returns information about available models
+// Models asks the OpenAI list endpoint (GET {base}/models) for the models of
+// the configured account.
 func (p *OpenAIProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	models := []llm.ModelInfo{
-		{
-			Name:          "gpt-4-turbo",
-			ContextWindow: 128000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "gpt-4",
-			ContextWindow: 8192,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools"},
-		},
-		{
-			Name:          "gpt-3.5-turbo",
-			ContextWindow: 16385,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "json_mode"},
-		},
-	}
-	return models, nil
+	return p.lister.Models(ctx)
 }
 
 // Complete sends a completion request

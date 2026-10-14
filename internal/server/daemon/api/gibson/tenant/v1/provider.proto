@@ -283,14 +283,12 @@ message SupportedProvider {
   string docs_url = 3;
   bool self_hosted = 4;
   repeated CredentialField credentials = 5;
-  // default_models is the static catalog of CHAT models this provider
-  // exposes when the daemon can enumerate them without a live API call.
-  // Empty for providers where the model list requires a live probe.
+  // default_models is always empty. The daemon keeps no fixed model list. The
+  // models of an account come from the provider through TestProvider,
+  // ProbeProvider and ListProviderModels. The field stays until the dashboard
+  // stops reading it, then it is reserved.
   repeated ModelDescriptor default_models = 6;
-  // embedding_models is the static catalog of EMBEDDING models this
-  // provider supports. Empty for providers that serve chat only (e.g.
-  // Anthropic, Google). The dashboard uses this list to populate the
-  // embedding-model picker in Settings > Providers.
+  // embedding_models is always empty, for the same reason as default_models.
   repeated ModelDescriptor embedding_models = 7;
 }
 
@@ -397,8 +395,8 @@ message TestProviderResponse {
   int64 latency_ms = 2;
   string model = 3;
   string error = 4;
-  // Live model catalog returned by the provider's API for these credentials.
-  // Empty when ok=false.
+  // Live models that the provider's list endpoint reports for these
+  // credentials. Empty when ok=false.
   repeated ModelDescriptor models = 5;
   // embedding_ok is true when an embedding probe was attempted and succeeded.
   // False when no embedding probe was run (provider is chat-only or

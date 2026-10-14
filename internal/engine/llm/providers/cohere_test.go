@@ -28,18 +28,6 @@ func TestNewCohereProvider_MissingToken(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCohereProvider_Models(t *testing.T) {
-	p := &CohereProvider{}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	names := make([]string, 0, len(models))
-	for _, m := range models {
-		names = append(names, m.Name)
-	}
-	assert.Contains(t, names, "command-r-plus")
-	assert.Contains(t, names, "command-r")
-}
-
 func TestCohereCredentialSchema(t *testing.T) {
 	schema := CohereCredentialSchema()
 	require.NotEmpty(t, schema)

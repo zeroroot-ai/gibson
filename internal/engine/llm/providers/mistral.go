@@ -19,6 +19,7 @@ import (
 type MistralProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // newMistralProviderWithContext constructs a Mistral provider, resolving the credential from cfg (see resolveCredential).
@@ -37,32 +38,29 @@ func newMistralProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) 
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     apiKey,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("mistral", err)
 	}
-	return &MistralProvider{model: m, config: cfg}, nil
+	return &MistralProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "mistral", baseURL: baseURL, token: apiKey},
+	}, nil
 }
 
 func (p *MistralProvider) Name() string { return "mistral" }
 
-func (p *MistralProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	tools := []string{"chat", "streaming", "tools"}
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "mistral-large-latest", ContextWindow: 128000, MaxOutput: 8192, Features: tools},
-		{Name: "mistral-medium-latest", ContextWindow: 32000, MaxOutput: 8192, Features: chat},
-		{Name: "mistral-small-latest", ContextWindow: 32000, MaxOutput: 8192, Features: tools},
-		{Name: "codestral-latest", ContextWindow: 32000, MaxOutput: 8192, Features: chat},
-		{Name: "open-mistral-7b", ContextWindow: 32000, MaxOutput: 8192, Features: chat},
-		{Name: "open-mixtral-8x7b", ContextWindow: 32000, MaxOutput: 8192, Features: chat},
-		{Name: "open-mixtral-8x22b", ContextWindow: 64000, MaxOutput: 8192, Features: chat},
-	}, nil
+// Models asks the list endpoint of the provider (GET {base}/models) for its
+// models.
+func (p *MistralProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *MistralProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {

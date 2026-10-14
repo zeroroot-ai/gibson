@@ -21,6 +21,7 @@ import (
 type HuggingFaceProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // newHuggingFaceProviderWithContext constructs a HuggingFace provider, resolving the credential from cfg (see resolveCredential).
@@ -39,30 +40,29 @@ func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConf
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("huggingface", err)
 	}
-	return &HuggingFaceProvider{model: m, config: cfg}, nil
+	return &HuggingFaceProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "huggingface", baseURL: baseURL, token: token},
+	}, nil
 }
 
 func (p *HuggingFaceProvider) Name() string { return "huggingface" }
 
-func (p *HuggingFaceProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "meta-llama/Llama-3.1-70B-Instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "meta-llama/Llama-3.1-8B-Instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "meta-llama/Llama-3-70B-Instruct", ContextWindow: 8192, MaxOutput: 4096, Features: chat},
-		{Name: "mistralai/Mixtral-8x7B-Instruct-v0.1", ContextWindow: 32768, MaxOutput: 4096, Features: chat},
-		{Name: "HuggingFaceH4/zephyr-7b-beta", ContextWindow: 32768, MaxOutput: 4096, Features: chat},
-		{Name: "google/gemma-2-9b-it", ContextWindow: 8192, MaxOutput: 4096, Features: chat},
-	}, nil
+// Models asks the list endpoint of the provider (GET {base}/models) for its
+// models.
+func (p *HuggingFaceProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *HuggingFaceProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {

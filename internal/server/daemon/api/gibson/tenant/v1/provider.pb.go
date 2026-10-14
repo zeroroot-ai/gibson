@@ -584,14 +584,12 @@ type SupportedProvider struct {
 	DocsUrl     string             `protobuf:"bytes,3,opt,name=docs_url,json=docsUrl,proto3" json:"docs_url,omitempty"`
 	SelfHosted  bool               `protobuf:"varint,4,opt,name=self_hosted,json=selfHosted,proto3" json:"self_hosted,omitempty"`
 	Credentials []*CredentialField `protobuf:"bytes,5,rep,name=credentials,proto3" json:"credentials,omitempty"`
-	// default_models is the static catalog of CHAT models this provider
-	// exposes when the daemon can enumerate them without a live API call.
-	// Empty for providers where the model list requires a live probe.
+	// default_models is always empty. The daemon keeps no fixed model list. The
+	// models of an account come from the provider through TestProvider,
+	// ProbeProvider and ListProviderModels. The field stays until the dashboard
+	// stops reading it, then it is reserved.
 	DefaultModels []*ModelDescriptor `protobuf:"bytes,6,rep,name=default_models,json=defaultModels,proto3" json:"default_models,omitempty"`
-	// embedding_models is the static catalog of EMBEDDING models this
-	// provider supports. Empty for providers that serve chat only (e.g.
-	// Anthropic, Google). The dashboard uses this list to populate the
-	// embedding-model picker in Settings > Providers.
+	// embedding_models is always empty, for the same reason as default_models.
 	EmbeddingModels []*ModelDescriptor `protobuf:"bytes,7,rep,name=embedding_models,json=embeddingModels,proto3" json:"embedding_models,omitempty"`
 }
 
@@ -1611,8 +1609,8 @@ type TestProviderResponse struct {
 	LatencyMs int64  `protobuf:"varint,2,opt,name=latency_ms,json=latencyMs,proto3" json:"latency_ms,omitempty"`
 	Model     string `protobuf:"bytes,3,opt,name=model,proto3" json:"model,omitempty"`
 	Error     string `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`
-	// Live model catalog returned by the provider's API for these credentials.
-	// Empty when ok=false.
+	// Live models that the provider's list endpoint reports for these
+	// credentials. Empty when ok=false.
 	Models []*ModelDescriptor `protobuf:"bytes,5,rep,name=models,proto3" json:"models,omitempty"`
 	// embedding_ok is true when an embedding probe was attempted and succeeded.
 	// False when no embedding probe was run (provider is chat-only or

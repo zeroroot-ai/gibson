@@ -9,12 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	bedrockcontrol "github.com/aws/aws-sdk-go-v2/service/bedrock"
+	controltypes "github.com/aws/aws-sdk-go-v2/service/bedrock/types"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	bedrocktypes "github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -51,10 +53,17 @@ const defaultBedrockModelID = "anthropic.claude-3-sonnet-20240229-v1:0"
 // Region is not a credential, so it is read from the environment unguarded.
 type BedrockProvider struct {
 	client        *bedrockruntime.Client
-	controlClient *bedrockcontrol.Client
+	controlClient bedrockModelLister
 	config        llm.ProviderConfig
 	region        string
 	modelID       string
+	cache         modelCache
+}
+
+// bedrockModelLister is the part of the Bedrock control-plane client that the
+// provider uses. *bedrockcontrol.Client satisfies it.
+type bedrockModelLister interface {
+	ListFoundationModels(ctx context.Context, in *bedrockcontrol.ListFoundationModelsInput, opts ...func(*bedrockcontrol.Options)) (*bedrockcontrol.ListFoundationModelsOutput, error)
 }
 
 // NewBedrockProvider constructs a Bedrock-backed LLMProvider.
@@ -128,9 +137,48 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 // Name returns the provider name.
 func (p *BedrockProvider) Name() string { return "bedrock" }
 
-// Models returns the curated Bedrock foundation-model catalogue.
-func (p *BedrockProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	return bedrockModelCatalogue(), nil
+// Models asks bedrock:ListFoundationModels for the foundation models of the
+// region. It keeps the models that output text (chat) or embeddings. Bedrock
+// reports no context window here, so the field stays zero.
+func (p *BedrockProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	if p.controlClient == nil {
+		return nil, fmt.Errorf("list models: %w", llm.NewProviderError("bedrock", errors.New("bedrock client not initialised")))
+	}
+	return p.cache.get(func() ([]llm.ModelInfo, error) {
+		out, err := p.controlClient.ListFoundationModels(ctx, &bedrockcontrol.ListFoundationModelsInput{})
+		if err != nil {
+			return nil, translateBedrockError(err)
+		}
+		models := make([]llm.ModelInfo, 0, len(out.ModelSummaries))
+		for _, m := range out.ModelSummaries {
+			id := aws.ToString(m.ModelId)
+			if id == "" {
+				continue
+			}
+			var features []string
+			for _, mod := range m.OutputModalities {
+				switch mod {
+				case controltypes.ModelModalityText:
+					features = append(features, "chat")
+				case controltypes.ModelModalityEmbedding:
+					features = append(features, "embedding")
+				case controltypes.ModelModalityImage:
+					// Image output is not a chat or embedding model.
+				}
+			}
+			if len(features) == 0 {
+				continue
+			}
+			if aws.ToBool(m.ResponseStreamingSupported) {
+				features = append(features, "streaming")
+			}
+			if slices.Contains(m.InputModalities, controltypes.ModelModalityImage) {
+				features = append(features, "vision")
+			}
+			models = append(models, llm.ModelInfo{Name: id, Features: features})
+		}
+		return models, nil
+	})
 }
 
 // Complete performs a non-tool completion.
@@ -483,52 +531,6 @@ func translateBedrockError(err error) error {
 		return llm.NewInvalidInputError("bedrock", msg)
 	default:
 		return llm.TranslateError("bedrock", err)
-	}
-}
-
-// bedrockModelCatalogue returns the curated set of Bedrock foundation models
-// Gibson exposes. Feature flags reflect the *provider-side* model's capability
-// so the slot resolver can match agent requirements correctly.
-//
-// Model IDs are the raw Bedrock model IDs. Newer models (Claude 3 Opus,
-// Claude 3.5 Sonnet, Llama 3.1/3.2) work at runtime as long as the operator's
-// AWS account has access; the Converse API addresses every family uniformly.
-func bedrockModelCatalogue() []llm.ModelInfo {
-	chat := []string{"chat", "streaming"}
-	claude := []string{"chat", "streaming", "tools"}
-	return []llm.ModelInfo{
-		// Anthropic Claude family — full tool_use on Bedrock's Anthropic adapter.
-		{Name: "anthropic.claude-3-opus-20240229-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
-		{Name: "anthropic.claude-3-sonnet-20240229-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
-		{Name: "anthropic.claude-3-haiku-20240307-v1:0", ContextWindow: 200000, MaxOutput: 4096, Features: claude},
-		{Name: "anthropic.claude-3-5-sonnet-20241022-v2:0", ContextWindow: 200000, MaxOutput: 8192, Features: claude},
-		{Name: "anthropic.claude-3-5-haiku-20241022-v1:0", ContextWindow: 200000, MaxOutput: 8192, Features: claude},
-		{Name: "anthropic.claude-v2:1", ContextWindow: 200000, MaxOutput: 4096, Features: chat},
-
-		// Amazon Titan / Nova
-		{Name: "amazon.titan-text-lite-v1", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: "amazon.titan-text-express-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
-		{Name: "us.amazon.nova-micro-v1:0", ContextWindow: 128000, MaxOutput: 5000, Features: chat},
-		{Name: "us.amazon.nova-lite-v1:0", ContextWindow: 300000, MaxOutput: 5000, Features: chat},
-		{Name: "us.amazon.nova-pro-v1:0", ContextWindow: 300000, MaxOutput: 5000, Features: chat},
-
-		// Meta Llama
-		{Name: "meta.llama2-13b-chat-v1", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: "meta.llama2-70b-chat-v1", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: "meta.llama3-8b-instruct-v1:0", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "meta.llama3-70b-instruct-v1:0", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-
-		// Cohere Command
-		{Name: "cohere.command-text-v14", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-		{Name: "cohere.command-light-text-v14", ContextWindow: 4096, MaxOutput: 4096, Features: chat},
-
-		// AI21 Jurassic-2
-		{Name: "ai21.j2-ultra-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
-		{Name: "ai21.j2-mid-v1", ContextWindow: 8192, MaxOutput: 8192, Features: chat},
-
-		// Mistral
-		{Name: "mistral.mistral-large-2407-v1:0", ContextWindow: 128000, MaxOutput: 8192, Features: chat},
-		{Name: "mistral.mistral-7b-instruct-v0:2", ContextWindow: 32768, MaxOutput: 8192, Features: chat},
 	}
 }
 

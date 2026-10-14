@@ -22,6 +22,7 @@ import (
 type LlamafileProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // NewLlamafileProvider constructs a Llamafile-backed provider.
@@ -37,30 +38,29 @@ func NewLlamafileProvider(cfg llm.ProviderConfig) (*LlamafileProvider, error) {
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(context.Background(), &einoopenai.ChatModelConfig{
 		APIKey:     "llamafile", // dummy key; llamafile doesn't require auth
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("llamafile", err)
 	}
-	return &LlamafileProvider{model: m, config: cfg}, nil
+	return &LlamafileProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "llamafile", baseURL: baseURL, token: ""},
+	}, nil
 }
 
 func (p *LlamafileProvider) Name() string { return "llamafile" }
 
-func (p *LlamafileProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	// Llamafile is a single-binary server; Models() reports one synthetic
-	// entry identified by the configured DefaultModel.
-	name := p.config.DefaultModel
-	if name == "" {
-		name = "llamafile-local"
-	}
-	return []llm.ModelInfo{
-		{Name: name, ContextWindow: 4096, MaxOutput: 2048, Features: []string{"chat", "streaming"}},
-	}, nil
+// Models asks the list endpoint of the provider (GET {base}/models) for its
+// models.
+func (p *LlamafileProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *LlamafileProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {

@@ -177,8 +177,9 @@ func (m *DefaultSlotManager) ValidateSlot(ctx context.Context, slot agent.SlotDe
 func (m *DefaultSlotManager) validateConstraints(slot agent.SlotDefinition, model ModelInfo) error {
 	constraints := slot.Constraints
 
-	// Check MinContextWindow constraint
-	if constraints.MinContextWindow > 0 {
+	// Check MinContextWindow constraint. A zero window means the provider did
+	// not report one, so the constraint cannot reject the model.
+	if constraints.MinContextWindow > 0 && model.ContextWindow > 0 {
 		if model.ContextWindow < constraints.MinContextWindow {
 			return types.NewError(
 				ErrInvalidSlotConfig,

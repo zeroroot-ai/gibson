@@ -9,11 +9,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers/catalogue"
 )
 
 func TestSupportedProviderDescriptors_Coverage(t *testing.T) {
-	descs := SupportedProviderDescriptors(catalogue.NewLoader(""))
+	descs := SupportedProviderDescriptors()
 	got := make(map[llm.ProviderType]bool, len(descs))
 	for _, d := range descs {
 		got[d.Type] = true
@@ -30,7 +29,7 @@ func TestSupportedProviderDescriptors_Coverage(t *testing.T) {
 }
 
 func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
-	descs := SupportedProviderDescriptors(catalogue.NewLoader(""))
+	descs := SupportedProviderDescriptors()
 	byType := make(map[llm.ProviderType]ProviderDescriptor, len(descs))
 	for _, d := range descs {
 		byType[d.Type] = d
@@ -50,7 +49,7 @@ func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
 }
 
 func TestBedrockDescriptor_IncludesAWSFields(t *testing.T) {
-	d, ok := providerDescriptor(catalogue.NewLoader(""), llm.ProviderBedrock)
+	d, ok := providerDescriptor(llm.ProviderBedrock)
 	require.True(t, ok)
 	keys := make(map[string]bool)
 	for _, f := range d.Credentials {
@@ -59,5 +58,4 @@ func TestBedrockDescriptor_IncludesAWSFields(t *testing.T) {
 	assert.True(t, keys["aws_access_key_id"])
 	assert.True(t, keys["aws_secret_access_key"])
 	assert.True(t, keys["aws_region"])
-	assert.NotEmpty(t, d.DefaultModels)
 }

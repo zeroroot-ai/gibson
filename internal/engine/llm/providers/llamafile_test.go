@@ -41,22 +41,6 @@ func TestNewLlamafileProvider_LocalhostBlockedWithoutOptIn(t *testing.T) {
 	assert.Contains(t, err.Error(), "blocked address class")
 }
 
-func TestLlamafileProvider_Models_SyntheticEntry(t *testing.T) {
-	p := &LlamafileProvider{config: llm.ProviderConfig{DefaultModel: "my-model"}}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	require.Len(t, models, 1)
-	assert.Equal(t, "my-model", models[0].Name)
-}
-
-func TestLlamafileProvider_Models_DefaultName(t *testing.T) {
-	p := &LlamafileProvider{config: llm.ProviderConfig{}}
-	models, err := p.Models(nil)
-	require.NoError(t, err)
-	require.Len(t, models, 1)
-	assert.Equal(t, "llamafile-local", models[0].Name)
-}
-
 func TestLlamafileCredentialSchema(t *testing.T) {
 	// Llamafile is creds-free; schema is intentionally empty.
 	assert.Empty(t, LlamafileCredentialSchema())

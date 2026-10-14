@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strings"
 
 	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -30,7 +33,22 @@ type AnthropicProvider struct {
 	// constructors, not three copies of the completion path. Empty means
 	// "anthropic".
 	name string
+
+	// listClient, listBase and listKey drive the model list call
+	// (GET {listBase}/v1/models). listBase is empty on the Vertex route,
+	// which has no such call.
+	listClient *http.Client
+	listBase   string
+	listKey    string
+	cache      modelCache
 }
+
+// anthropicVersionHeader is the API version that the list call sends.
+const anthropicVersionHeader = "2023-06-01"
+
+// defaultAnthropicBaseURL is the Anthropic API root when the config sets no
+// base URL.
+const defaultAnthropicBaseURL = "https://api.anthropic.com"
 
 // NewAnthropicProvider creates a new Anthropic provider.
 //
@@ -44,20 +62,39 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 		return nil, llm.NewAuthError("anthropic", nil)
 	}
 
-	ctx := context.Background()
-	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		APIKey:     apiKey,
-		Model:      cfg.DefaultModel,
-		HTTPClient: guardedHTTPClient(cfg),
-	})
-	if err != nil {
-		return nil, llm.TranslateError("anthropic", err)
+	baseURL := defaultAnthropicBaseURL
+	claudeCfg := &einoclaude.Config{
+		APIKey: apiKey,
+		Model:  cfg.DefaultModel,
+	}
+	if cfg.BaseURL != "" {
+		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
+			return nil, err
+		}
+		baseURL = cfg.BaseURL
+		claudeCfg.BaseURL = &baseURL
+	}
+	client := guardedHTTPClient(cfg)
+	claudeCfg.HTTPClient = client
+
+	// The client library refuses to build without a model. The credential test
+	// names none, so the client stays nil and only the model list call works.
+	var model *einoclaude.ChatModel
+	if claudeCfg.Model != "" {
+		var err error
+		model, err = einoclaude.NewChatModel(context.Background(), claudeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("construct the anthropic provider: %w", llm.TranslateError("anthropic", err))
+		}
 	}
 
 	return &AnthropicProvider{
-		model:  model,
-		config: cfg,
-		name:   string(llm.ProviderAnthropic),
+		model:      model,
+		config:     cfg,
+		name:       string(llm.ProviderAnthropic),
+		listClient: client,
+		listBase:   baseURL,
+		listKey:    apiKey,
 	}, nil
 }
 
@@ -137,16 +174,28 @@ func NewFoundryProvider(ctx context.Context, cfg llm.ProviderConfig) (*Anthropic
 		baseURL = "https://" + resource + ".services.ai.azure.com/anthropic"
 	}
 
-	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		APIKey:     apiKey,
-		BaseURL:    &baseURL,
-		Model:      cfg.DefaultModel,
-		HTTPClient: guardedHTTPClient(cfg),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("construct the foundry provider: %w", llm.TranslateError(string(llm.ProviderFoundry), err))
+	client := guardedHTTPClient(cfg)
+	var model *einoclaude.ChatModel
+	if cfg.DefaultModel != "" {
+		var err error
+		model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
+			APIKey:     apiKey,
+			BaseURL:    &baseURL,
+			Model:      cfg.DefaultModel,
+			HTTPClient: client,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("construct the foundry provider: %w", llm.TranslateError(string(llm.ProviderFoundry), err))
+		}
 	}
-	return &AnthropicProvider{model: model, config: cfg, name: string(llm.ProviderFoundry)}, nil
+	return &AnthropicProvider{
+		model:      model,
+		config:     cfg,
+		name:       string(llm.ProviderFoundry),
+		listClient: client,
+		listBase:   baseURL,
+		listKey:    apiKey,
+	}, nil
 }
 
 // VertexCredentialSchema is the form schema for a Google Vertex provider.
@@ -167,6 +216,17 @@ func FoundryCredentialSchema() []llm.CredentialField {
 }
 
 // Name returns the provider name.
+// chatModel returns the Claude client. It is nil when the config names no
+// default model: the credential test builds such a provider, because the model
+// list call needs no model.
+func (p *AnthropicProvider) chatModel() (*einoclaude.ChatModel, error) {
+	if p.model == nil {
+		return nil, fmt.Errorf("complete: %w", llm.NewInvalidInputError(p.Name(), "no model is configured for this provider"))
+	}
+	return p.model, nil
+}
+
+// Name returns the provider name.
 func (p *AnthropicProvider) Name() string {
 	if p.name == "" {
 		return string(llm.ProviderAnthropic)
@@ -174,42 +234,71 @@ func (p *AnthropicProvider) Name() string {
 	return p.name
 }
 
-// Models returns information about available models
+// Models asks the Anthropic list endpoint (GET {base}/v1/models) for the models
+// of the configured account. It follows has_more and last_id until the list
+// ends. The Vertex route has no such call, so it returns an error.
 func (p *AnthropicProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	models := []llm.ModelInfo{
-		{
-			Name:          "claude-sonnet-4-5-20250929",
-			ContextWindow: 200000,
-			MaxOutput:     8192,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-opus-4-20250514",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-sonnet-4-20250514",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
-		{
-			Name:          "claude-3-haiku-20240307",
-			ContextWindow: 200000,
-			MaxOutput:     4096,
-			Features:      []string{"chat", "streaming", "tools", "vision", "json_mode"},
-		},
+	if p.listBase == "" {
+		return nil, fmt.Errorf("list models: %w", llm.NewProviderError(p.Name(), errors.New("this provider route has no model list call")))
 	}
-	return models, nil
+	return p.cache.get(func() ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		header.Set("x-api-key", p.listKey)
+		header.Set("anthropic-version", anthropicVersionHeader)
+
+		var models []llm.ModelInfo
+		afterID := ""
+		for range maxModelListPages {
+			q := url.Values{"limit": {"1000"}}
+			if afterID != "" {
+				q.Set("after_id", afterID)
+			}
+			var page struct {
+				Data []struct {
+					ID             string `json:"id"`
+					MaxInputTokens int    `json:"max_input_tokens"`
+					MaxTokens      int    `json:"max_tokens"`
+					Capabilities   *struct {
+						ImageInput *struct {
+							Supported bool `json:"supported"`
+						} `json:"image_input"`
+					} `json:"capabilities"`
+				} `json:"data"`
+				HasMore bool   `json:"has_more"`
+				LastID  string `json:"last_id"`
+			}
+			endpoint := strings.TrimRight(p.listBase, "/") + "/v1/models?" + q.Encode()
+			if err := getJSON(ctx, p.listClient, p.Name(), endpoint, header, &page); err != nil {
+				return nil, err
+			}
+			for _, m := range page.Data {
+				if m.ID == "" {
+					continue
+				}
+				info := llm.ModelInfo{Name: m.ID, ContextWindow: m.MaxInputTokens, MaxOutput: m.MaxTokens, Features: []string{"chat"}}
+				if c := m.Capabilities; c != nil && c.ImageInput != nil && c.ImageInput.Supported {
+					info.Features = append(info.Features, "vision")
+				}
+				models = append(models, info)
+			}
+			if !page.HasMore || page.LastID == "" || page.LastID == afterID {
+				return models, nil
+			}
+			afterID = page.LastID
+		}
+		return models, nil
+	})
 }
 
 // Complete sends a completion request
 func (p *AnthropicProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
+	chat, chatErr := p.chatModel()
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -218,12 +307,16 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req llm.CompletionRequ
 
 // CompleteWithTools sends a completion request with tool definitions
 func (p *AnthropicProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, tools []llm.ToolDef) (*llm.CompletionResponse, error) {
+	chat, chatErr := p.chatModel()
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts, err := buildEinoOptionsWithTools(req, tools)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -232,9 +325,13 @@ func (p *AnthropicProvider) CompleteWithTools(ctx context.Context, req llm.Compl
 
 // Stream sends a streaming completion request
 func (p *AnthropicProvider) Stream(ctx context.Context, req llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
+	chat, chatErr := p.chatModel()
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
-	sr, err := p.model.Stream(ctx, msgs, opts...)
+	sr, err := chat.Stream(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.TranslateError("anthropic", err)
 	}
@@ -289,13 +386,17 @@ func (p *AnthropicProvider) CompleteStructured(ctx context.Context, req llm.Comp
 		return nil, llm.NewStructuredOutputError("complete", "anthropic", "", err)
 	}
 
+	chat, chatErr := p.chatModel()
+	if chatErr != nil {
+		return nil, chatErr
+	}
 	msgs := toEinoMessages(req.Messages)
 	opts := buildEinoOptions(req)
 	opts = append(opts,
 		einomodel.WithTools([]*einoschema.ToolInfo{toolInfo}),
 		einomodel.WithToolChoice(einoschema.ToolChoiceForced, toolDef.Name),
 	)
-	out, err := p.model.Generate(ctx, msgs, opts...)
+	out, err := chat.Generate(ctx, msgs, opts...)
 	if err != nil {
 		return nil, llm.NewStructuredOutputError("complete", "anthropic", "", err)
 	}

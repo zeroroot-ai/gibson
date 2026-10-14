@@ -21,6 +21,7 @@ import (
 type CloudflareProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
+	lister *openAIListEndpoint
 }
 
 // newCloudflareProviderWithContext constructs a Cloudflare provider, resolving the credential from cfg (see resolveCredential).
@@ -43,30 +44,29 @@ func newCloudflareProviderWithContext(ctx context.Context, cfg llm.ProviderConfi
 		return nil, err
 	}
 
+	client := guardedHTTPClient(cfg)
 	m, err := einoopenai.NewChatModel(ctx, &einoopenai.ChatModelConfig{
 		APIKey:     token,
 		Model:      cfg.DefaultModel,
 		BaseURL:    baseURL,
-		HTTPClient: guardedHTTPClient(cfg),
+		HTTPClient: client,
 	})
 	if err != nil {
 		return nil, llm.TranslateError("cloudflare", err)
 	}
-	return &CloudflareProvider{model: m, config: cfg}, nil
+	return &CloudflareProvider{
+		model:  m,
+		config: cfg,
+		lister: &openAIListEndpoint{client: client, provider: "cloudflare", baseURL: baseURL, token: token},
+	}, nil
 }
 
 func (p *CloudflareProvider) Name() string { return "cloudflare" }
 
-func (p *CloudflareProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
-	chat := []string{"chat", "streaming"}
-	return []llm.ModelInfo{
-		{Name: "@cf/meta/llama-3.1-8b-instruct", ContextWindow: 128000, MaxOutput: 4096, Features: chat},
-		{Name: "@cf/meta/llama-3-8b-instruct", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/meta/llama-2-7b-chat-int8", ContextWindow: 4096, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/mistral/mistral-7b-instruct-v0.1", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/google/gemma-7b-it", ContextWindow: 8192, MaxOutput: 2048, Features: chat},
-		{Name: "@cf/qwen/qwen1.5-14b-chat-awq", ContextWindow: 32768, MaxOutput: 2048, Features: chat},
-	}, nil
+// Models asks the list endpoint of the provider (GET {base}/models) for its
+// models.
+func (p *CloudflareProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return p.lister.Models(ctx)
 }
 
 func (p *CloudflareProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
