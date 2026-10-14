@@ -486,7 +486,9 @@ func (p *Provider) Probe(ctx context.Context) error {
 		return fmt.Errorf("vault probe read failed: %w", err)
 	}
 	if string(got) != string(probeValue) {
-		return fmt.Errorf("vault probe value mismatch: wrote %q, got %q", probeValue, got)
+		// The values stay out of the error: an error reaches the logs, and a
+		// value read from the store never does (secretsnolog).
+		return fmt.Errorf("vault probe value mismatch: the canary read back %d bytes, want %d", len(got), len(probeValue))
 	}
 
 	return nil
