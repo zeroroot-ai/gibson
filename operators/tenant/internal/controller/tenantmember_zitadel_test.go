@@ -68,9 +68,9 @@ func newMemberTestScheme(t *testing.T) *runtime.Scheme {
 }
 
 // buildMemberReconciler wires a Roles Syncer over fresh in-memory fakes
-// (grants, tuples) alongside the fz Zitadel client (used for EnsureHumanUser,
-// the no-ZitadelUserID-yet path). Tests that need to inspect or fail the
-// role-grant side call buildMemberReconcilerWithRoles directly.
+// (grants, tuples) alongside the fz Zitadel client. Tests that need to
+// inspect or fail the role-grant side call buildMemberReconcilerWithRoles
+// directly.
 func buildMemberReconciler(
 	t *testing.T,
 	fz *fakeZitadelClient,

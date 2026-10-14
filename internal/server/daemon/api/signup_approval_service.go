@@ -152,14 +152,10 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	if derr := s.idpAdminClient.DeactivateHumanUser(ctx, ownerRef(orgID, created.UserID)); derr != nil {
 		s.logger.ErrorContext(ctx, "Register: deactivating the new owner failed; deleting the account",
 			"attempt_id", req.GetAttemptId(), "error", derr.Error())
-		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, created.UserID)); xerr != nil {
-			// An account that can sign in and that nobody approved is the one
-			// outcome this rung must not produce. Say so at error level and
-			// name the account, so an operator can remove it by hand.
-			s.logger.ErrorContext(ctx, "Register: could not remove an owner account that stayed active; deactivate or delete it by hand",
-				"owner_user_id", created.UserID, "error", xerr.Error())
-		}
-		s.dropSignupOrg(ctx, "Register", req.GetAttemptId(), orgID)
+		// An account that can sign in and that nobody approved is the one
+		// outcome this rung must not produce. The owner and the org go, and
+		// a failure of that removal is logged so an operator removes it.
+		s.dropSignupOwner(ctx, "Register", req.GetAttemptId(), orgID, created.UserID)
 		return nil, status.Error(codes.Internal, "failed to register")
 	}
 
@@ -430,9 +426,6 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 	return &tenantv1.AdminRejectRegistrationResponse{}, nil
 }
 
-// signupDeciderID returns the acting administrator's subject. A decision with
-// no name attached is not attributable, which ADR-0074 requires it to be, so
-// an unattributable caller is refused rather than recorded as nobody.
 // dropRejectedWorkspace removes the tenant org of a refused registration, and
 // with it the owner account that lives inside (gibson#1188). The workspace
 // name and the address are free again. A registration from before the org
@@ -460,6 +453,9 @@ func (s *DaemonServer) dropRejectedWorkspace(ctx context.Context, row SignupVeri
 	}
 }
 
+// signupDeciderID returns the acting administrator's subject. A decision with
+// no name attached is not attributable, which ADR-0074 requires it to be, so
+// an unattributable caller is refused rather than recorded as nobody.
 func signupDeciderID(ctx context.Context) (string, error) {
 	identity, err := auth.IdentityFromContext(ctx)
 	if err != nil || identity.Subject == "" {

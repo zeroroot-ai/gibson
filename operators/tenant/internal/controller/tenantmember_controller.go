@@ -229,15 +229,17 @@ func (r *TenantMemberReconciler) cleanup(ctx context.Context, tm *gibsonv1alpha1
 			return fmt.Errorf("cleanup: resolve zitadel org: %w", err)
 		}
 		// The org goes with the tenant, and every grant in it. A revoke on
-		// a tenant that is leaving has nothing to keep consistent, and a
-		// revoke of the only Owner is refused by design (ADR-0093), which
-		// would hold the finalizer for ever (gibson#1188).
-		if orgID != "" && !deleting {
+		// a tenant that is leaving has nothing to keep consistent. No one
+		// removes the Owner (ADR-0093): a revoke would drop the Zitadel
+		// grant and then refuse the FGA copy, which leaves the two apart
+		// and holds the finalizer for ever (gibson#1188). The Owner leaves
+		// with the tenant, or through a transfer, never through this path.
+		isOwner := tm.Spec.Role == gibsonv1alpha1.MemberRoleOwner
+		if orgID != "" && !deleting && !isOwner {
 			t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
 			ev := audit.ObjectEvent(audit.ActionMemberRoleRevoke, tm, map[string]string{"user_id": userID, "org_id": orgID})
 			if err := r.Audit.Change(ctx, ev, func() error {
-				err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID)
-				if err != nil && !errors.Is(err, tenantrole.ErrOwnerConflict) {
+				if err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID); err != nil {
 					return fmt.Errorf("cleanup: revoke tenant role: %w", err)
 				}
 				return nil
