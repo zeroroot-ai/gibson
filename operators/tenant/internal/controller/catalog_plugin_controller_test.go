@@ -283,8 +283,10 @@ func cpEgressPolicy(namespace, name string) *unstructured.Unstructured {
 
 // TestCatalogPlugins_EgressIsTheHostList: the plugin NetworkPolicy has no
 // egress rule, and the CiliumNetworkPolicy of the instance permits DNS, each
-// host of the catalog entry and the edge of the platform, and nothing else
-// (ADR-0136, D76).
+// host of the catalog entry, the edge of the platform by host name and by
+// its pods on the listener port, and nothing else (ADR-0136, D76). The exact
+// comparison fails on a wider rule: another namespace, another label, a
+// second port or any other peer.
 func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
 	_, c, _ := convergedInstance(t)
 
@@ -305,6 +307,19 @@ func TestCatalogPlugins_EgressIsTheHostList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The edge pods of the platform namespace on their listener only, for an
+	// edge host that resolves inside the cluster (gibson#1172).
+	want = append(want, map[string]interface{}{
+		"toEndpoints": []interface{}{map[string]interface{}{
+			"matchLabels": map[string]interface{}{
+				"k8s:io.kubernetes.pod.namespace": cpConfig().OperatorNamespace,
+				"gibson.zeroroot.ai/ingress-edge": "true",
+			},
+		}},
+		"toPorts": []interface{}{map[string]interface{}{
+			"ports": []interface{}{map[string]interface{}{"port": "10000", "protocol": "TCP"}},
+		}},
+	})
 	if !reflect.DeepEqual(egress, want) {
 		t.Errorf("egress = %v, want %v", egress, want)
 	}

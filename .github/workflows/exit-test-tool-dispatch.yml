@@ -244,6 +244,18 @@ jobs:
       # operator code, so the test must run the operator of the change, not
       # the one charts pins (gibson#1151). The patch below points the
       # chart-installed operator at it.
+      # The tenant-operator of the checkout. It runs the catalog plugin of
+      # each tenant and writes its egress policy (gibson#1172), so the
+      # plugin revocation suite must run the operator of the change.
+      - name: Build + load the tenant-operator of the checkout
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          docker buildx build --progress=plain --load \
+            -f build/tenant-operator.Dockerfile \
+            -t ghcr.io/zeroroot-ai/tenant-operator:e2e-tool .
+          kind load docker-image ghcr.io/zeroroot-ai/tenant-operator:e2e-tool --name "$CLUSTER"
+
       - name: Build + load the connector-operator of the checkout
         working-directory: gibson
         run: |
@@ -275,7 +287,11 @@ jobs:
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.repository","value":"ghcr.io/zeroroot-ai/connector-operator","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.tag","value":"e2e-tool","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.digest","value":"","forceString":true}},
-              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.connectorOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"e2e-tool","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
             ]'
 
           for i in $(seq 1 60); do
@@ -294,6 +310,14 @@ jobs:
             sleep 20
           done
           kubectl -n "$NS" rollout status deployment/gibson-connector-operator --timeout=15m
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get deployment gibson-tenant-operator \
+                    -o jsonpath='{.spec.template.spec.containers[?(@.name=="manager")].image}' 2>/dev/null || true)
+            case "$img" in *tenant-operator:e2e-tool) echo "tenant-operator image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the tenant-operator Deployment never took the e2e-tool image (got '$img')"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
           # Confirm the daemon wired the sandboxed TOOL executor — the linchpin
           # for this test, the way the agent launcher is for the agent one.
           #
