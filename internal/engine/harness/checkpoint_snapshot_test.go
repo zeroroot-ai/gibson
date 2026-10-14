@@ -22,7 +22,7 @@ func parkedOutcome(id string) sandboxed.AgentRunResult {
 func TestCheckpointMode_TheNodeLeavesASnapshot(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
 	h, ledger := forkHarness(t, launcher)
-	task := agent.NewTask("recon", "map the host", nil)
+	task := agent.NewTask("recon", "map the host")
 	task.NodeID, task.Checkpoint = "recon", true
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -54,7 +54,7 @@ func TestCheckpointMode_TheNodeLeavesASnapshot(t *testing.T) {
 func TestCheckpointMode_TheStateModeLeavesNone(t *testing.T) {
 	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "ns/n1/u1", Result: &sandboxed.AgentTerminalResult{Success: true}}}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("recon", "map the host", nil)
+	task := agent.NewTask("recon", "map the host")
 	task.NodeID = "recon"
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -80,7 +80,7 @@ func TestCheckpointMode_NoMarkMeansNoSnapshot(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
 	h, ledger := forkHarness(t, launcher)
 	h.forks.Ledger = markFailsLedger{memForkLedger: ledger}
-	task := agent.NewTask("recon", "x", nil)
+	task := agent.NewTask("recon", "x")
 	task.NodeID, task.Checkpoint = "recon", true
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -104,7 +104,7 @@ func TestCheckpointMode_AGrantWithNoIDMeansNoSnapshot(t *testing.T) {
 func TestCheckpointMode_ACheckpointNodeThatIsAlsoForkable(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshot: "snap-1"}
 	h, ledger := forkHarness(t, launcher)
-	task := agent.NewTask("recon", "x", nil)
+	task := agent.NewTask("recon", "x")
 	task.NodeID, task.Checkpoint, task.Forkable = "recon", true, true
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -120,7 +120,7 @@ func TestCheckpointMode_ACheckpointNodeThatIsAlsoForkable(t *testing.T) {
 func TestCheckpointMode_AFailedSnapshotKeepsTheNode(t *testing.T) {
 	launcher := &recordingLauncher{outcome: parkedOutcome("ns/n1/u1"), snapshotErr: errors.New("disk full")}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("recon", "x", nil)
+	task := agent.NewTask("recon", "x")
 	task.NodeID, task.Checkpoint = "recon", true
 
 	res, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
@@ -138,7 +138,7 @@ func TestRewind_TheNodeStartsFromTheSnapshot(t *testing.T) {
 		restored:  sandboxed.AgentRunResult{SandboxID: "ns/restored-1/u9", Result: &sandboxed.AgentTerminalResult{Success: true, Output: "again"}},
 	}
 	h, ledger := forkHarness(t, launcher)
-	task := agent.NewTask("exploit", "try again", nil)
+	task := agent.NewTask("exploit", "try again")
 	task.NodeID, task.FromSnapshot = "exploit", "snap-1"
 	task.Network = &agent.NodeNetwork{Targets: []string{"10.0.0.5:443"}}
 
@@ -169,7 +169,7 @@ func TestRewind_AGoneSnapshotStartsFresh(t *testing.T) {
 		outcome:    sandboxed.AgentRunResult{SandboxID: "ns/fresh/u1", Result: &sandboxed.AgentTerminalResult{Success: true}},
 	}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("exploit", "x", nil)
+	task := agent.NewTask("exploit", "x")
 	task.NodeID, task.FromSnapshot = "exploit", "snap-old"
 
 	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task); err != nil {
@@ -184,7 +184,7 @@ func TestRewind_AGoneSnapshotStartsFresh(t *testing.T) {
 func TestRewind_ARestoreErrorFailsTheNode(t *testing.T) {
 	launcher := &recordingLauncher{restoreErr: errors.New("quota")}
 	h, _ := forkHarness(t, launcher)
-	task := agent.NewTask("exploit", "x", nil)
+	task := agent.NewTask("exploit", "x")
 	task.NodeID, task.FromSnapshot = "exploit", "snap-1"
 	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task); err == nil || launcher.calls != 0 {
 		t.Fatalf("err = %v, launches = %d; want an error and no fresh launch", err, launcher.calls)

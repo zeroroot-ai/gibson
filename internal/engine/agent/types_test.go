@@ -31,9 +31,6 @@ func TestTaskJSONSerialization(t *testing.T) {
 			"priority": 1,
 			"data":     "test-value",
 		},
-		Input: map[string]any{
-			"legacy": "input",
-		},
 		Timeout:   30 * time.Minute,
 		MissionID: &missionID,
 		TargetID:  &targetID,
@@ -63,11 +60,8 @@ func TestTaskJSONSerialization(t *testing.T) {
 	assert.Equal(t, float64(1), contextMap["priority"], "Context priority should be serialized correctly")
 	assert.Equal(t, "test-value", contextMap["data"], "Context data should be serialized correctly")
 
-	// Verify input is still at top level (backward compatibility)
-	assert.Contains(t, jsonMap, "input", "JSON should contain top-level 'input' field for backward compatibility")
-	inputMap, ok := jsonMap["input"].(map[string]any)
-	require.True(t, ok, "Input should be a map")
-	assert.Equal(t, "input", inputMap["legacy"], "Input should be serialized correctly")
+	// The deprecated `input` field is gone (ADR-0027): Context carries the task data.
+	assert.NotContains(t, jsonMap, "input", "a Task has no `input` field")
 
 	// Verify other fields
 	assert.Equal(t, taskID.String(), jsonMap["id"], "ID should be serialized correctly")
@@ -97,10 +91,6 @@ func TestTaskJSONRoundTrip(t *testing.T) {
 			"findings": []string{"finding1", "finding2"},
 			"nested":   map[string]any{"key": "value"},
 		},
-		Input: map[string]any{
-			"param1": "value1",
-			"param2": 42,
-		},
 		Timeout:   15 * time.Minute,
 		CreatedAt: time.Now().UTC().Truncate(time.Second), // Truncate to second for comparison
 		Priority:  3,
@@ -129,11 +119,6 @@ func TestTaskJSONRoundTrip(t *testing.T) {
 	unmarshaledContextJSON, _ := json.Marshal(unmarshaledTask.Context)
 	assert.JSONEq(t, string(originalContextJSON), string(unmarshaledContextJSON), "Context should match")
 
-	// Compare Input
-	originalInputJSON, _ := json.Marshal(originalTask.Input)
-	unmarshaledInputJSON, _ := json.Marshal(unmarshaledTask.Input)
-	assert.JSONEq(t, string(originalInputJSON), string(unmarshaledInputJSON), "Input should match")
-
 	// Compare time (truncated to seconds for JSON precision)
 	assert.True(t, originalTask.CreatedAt.Equal(unmarshaledTask.CreatedAt), "CreatedAt should match")
 }
@@ -148,13 +133,10 @@ func TestTaskJSONWithEmptyGoalAndContext(t *testing.T) {
 		Description: "Task with no goal or context",
 		Goal:        "",  // Empty goal - will be omitted due to omitempty tag
 		Context:     nil, // Nil context - will be omitted due to omitempty tag
-		Input: map[string]any{
-			"test": "value",
-		},
-		Timeout:   10 * time.Minute,
-		CreatedAt: time.Now().UTC(),
-		Priority:  0,
-		Tags:      []string{},
+		Timeout:     10 * time.Minute,
+		CreatedAt:   time.Now().UTC(),
+		Priority:    0,
+		Tags:        []string{},
 	}
 
 	// Marshal to JSON
@@ -173,9 +155,6 @@ func TestTaskJSONWithEmptyGoalAndContext(t *testing.T) {
 	// Verify context is omitted when nil (due to omitempty tag)
 	_, hasContext := jsonMap["context"]
 	assert.False(t, hasContext, "Nil context should be omitted from JSON (omitempty tag)")
-
-	// Verify input is still present
-	assert.Contains(t, jsonMap, "input", "JSON should contain 'input' field")
 }
 
 // TestTaskJSONWithComplexContext verifies that Task serialization handles
@@ -203,7 +182,6 @@ func TestTaskJSONWithComplexContext(t *testing.T) {
 				},
 			},
 		},
-		Input:     map[string]any{},
 		Timeout:   20 * time.Minute,
 		CreatedAt: time.Now().UTC(),
 		Priority:  1,

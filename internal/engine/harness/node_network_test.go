@@ -135,7 +135,7 @@ func TestDelegateToAgent_SandboxGetsTheScopeOfItsNode(t *testing.T) {
 		return h, nil
 	}
 
-	task := agent.NewTask("probe", "goal", nil)
+	task := agent.NewTask("probe", "goal")
 	task.Network = &agent.NodeNetwork{Targets: []string{"10.9.9.9"}}
 	_, _ = h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
 
@@ -170,7 +170,7 @@ func TestDelegateToAgent_SandboxChildHarnessFailureIsReported(t *testing.T) {
 	h.factory = func(context.Context, MissionContext, TargetInfo) (AgentHarness, error) {
 		return nil, context.Canceled
 	}
-	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g", nil)); err == nil {
+	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("p", "g")); err == nil {
 		t.Fatal("want an error when the child harness cannot be built")
 	}
 	if launcher.calls != 0 {
