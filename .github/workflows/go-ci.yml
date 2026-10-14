@@ -413,12 +413,24 @@ jobs:
         # gibson#501, ADR-0094 layer 1. The fixture runs first inside the make
         # target, offline.
         run: make check-config-field-readers
-      - name: The proto field consumer gate can fail
-        # gibson#502, ADR-0094 layer 5. The measurement needs six other
-        # checkouts and runs nightly (proto-field-consumers.yml); this is the
-        # offline fixture that proves each rule of the decision half is red
-        # for its stated reason.
-        run: make check-proto-field-consumers-fixture
+      - name: Every served proto field has a consumer or a recorded verdict
+        # gibson#502, ADR-0094 layer 5, in the merge gate since gibson#1166.
+        # The scan reads six other repos at their main, so a field that loses
+        # its last reader fails the next PR here, not a nightly run nobody
+        # watches (it was red on main for five days before gibson#1166). The
+        # make target runs the offline fixture first. Every consumer is
+        # public, so the default token reads them all. About one minute.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          c="$RUNNER_TEMP/consumers"
+          for r in sdk adk gibson-executor setec dashboard sdk-ts; do
+            git clone --quiet --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/zeroroot-ai/${r}.git" "$c/$r"
+            echo "${r} $(git -C "$c/$r" rev-parse --short HEAD)"
+          done
+          CONSUMER_ROOTS=". $c/sdk $c/adk $c/gibson-executor $c/setec $c/dashboard $c/sdk-ts" \
+            make check-proto-field-consumers
       - name: Guard gofmt cleanliness
         # gibson#1415: no lane ever CHECKED formatting -- `make fmt` rewrites
         # instead of failing, and .golangci.yml enables no formatter -- so

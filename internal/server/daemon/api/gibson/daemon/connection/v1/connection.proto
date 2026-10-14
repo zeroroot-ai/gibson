@@ -158,7 +158,7 @@ message TenantUsage {
 // ListTenantUsageResponse carries one row for each tenant.
 message ListTenantUsageResponse {
   repeated TenantUsage tenants = 1;
-  // period_start_unix and period_end_unix bound the budget period, in seconds.
-  int64 period_start_unix = 2;
-  int64 period_end_unix = 3;
+  // The budget period bounds had no consumer (ADR-0094, gibson#1166).
+  reserved 2, 3;
+  reserved "period_start_unix", "period_end_unix";
 }

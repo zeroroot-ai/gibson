@@ -323,9 +323,6 @@ func TestListTenantUsage(t *testing.T) {
 		rows[1].GetTenantId() != "globex" || rows[1].GetTokens() != 0 {
 		t.Fatalf("tenants = %v", rows)
 	}
-	if resp.GetPeriodStartUnix() >= resp.GetPeriodEndUnix() {
-		t.Errorf("period %d..%d is empty", resp.GetPeriodStartUnix(), resp.GetPeriodEndUnix())
-	}
 
 	expectEnsureTenantStatusTable(mock)
 	mock.ExpectQuery("SELECT tenant_id FROM tenant_status").WillReturnError(errors.New("db down"))

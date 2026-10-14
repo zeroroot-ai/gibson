@@ -1,11 +1,10 @@
 # ----------------------------------------------------------------------------
 # proto-field-consumers — every daemon-owned proto field has a consumer.
 #
-# ADR-0094 layer 5 (gibson#502). The consumer set spans seven repositories,
-# so this runs on main and daily, never on a pull request. The decision half
-# of the gate is proven on every PR by scripts/__tests__/
-# check-proto-field-consumers.test.sh (go-ci); this workflow is the
-# measurement half, against checked-out consumers at their main.
+# ADR-0094 layer 5 (gibson#502). The merge gate runs the same scan in go-ci
+# (critical-paths job, gibson#1166). This workflow keeps the daily run,
+# because a consumer that drops its last read of a field changes nothing in
+# this repo, so only a schedule sees it between gibson PRs.
 #
 # Every consumer is public, so the default token reads them all. A private
 # consumer would need GH_PAT_PLATFORM_RO like the exit tests use for hosted.
