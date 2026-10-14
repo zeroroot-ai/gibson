@@ -277,7 +277,8 @@ func (f *fakeUserIdPClient) CreateHumanUser(_ context.Context, _ idp.CreateHuman
 func (f *fakeUserIdPClient) CreateOrganization(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
-func (f *fakeUserIdPClient) DeleteOrganization(_ context.Context, _ string) error { return nil }
+func (f *fakeUserIdPClient) DeleteOrganization(_ context.Context, _ string) error  { return nil }
+func (f *fakeUserIdPClient) OrgOfUser(_ context.Context, _ string) (string, error) { return "", nil }
 func (f *fakeUserIdPClient) FindUserIDByEmail(_ context.Context, _ string) (string, error) {
 	return "", idp.ErrNotFound
 }

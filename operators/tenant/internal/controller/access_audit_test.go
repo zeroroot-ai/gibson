@@ -51,15 +51,17 @@ func TestTenantMember_FailedRecordStopsTheRoleAssign(t *testing.T) {
 	fz := &fakeZitadelClient{}
 	member := &gibsonv1alpha1.TenantMember{
 		ObjectMeta: metav1.ObjectMeta{Name: "bob", Namespace: "default", Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}},
-		Spec:       gibsonv1alpha1.TenantMemberSpec{Email: "bob@acme.com", Role: gibsonv1alpha1.MemberRoleAdmin, TenantRef: localRef()},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "bob@acme.com", Role: gibsonv1alpha1.MemberRoleAdmin, TenantRef: localRef(), AcceptedByUserID: "user-bob",
+		},
 	}
 	r, _, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, &fakeRoleGrants{}, &fakeRoleTuples{})
 	r.Audit = (&audittest.Sink{Err: errDaemonDown}).Emitter(t)
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "bob"}}); !errors.Is(err, audit.ErrNotRecorded) {
 		t.Fatalf("reconcile = %v, want ErrNotRecorded", err)
 	}
-	if len(fz.ensureHumanUserCalls) != 0 || len(grants.grants) != 0 {
-		t.Fatalf("Zitadel changed with no record: users %v, grants %v", fz.ensureHumanUserCalls, grants.grants)
+	if len(grants.grants) != 0 {
+		t.Fatalf("Zitadel changed with no record: grants %v", grants.grants)
 	}
 }
 

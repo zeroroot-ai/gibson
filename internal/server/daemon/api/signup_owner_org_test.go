@@ -9,6 +9,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
 )
 
@@ -120,5 +121,38 @@ func TestRegister_RemovesTheOrgWhenTheOwnerCannotBeMade(t *testing.T) {
 	}
 	if len(h.idp.createdOrgs) != 1 || len(h.idp.deletedOrgs) != 1 {
 		t.Fatalf("created %v, deleted %v; want the one org removed", h.idp.createdOrgs, h.idp.deletedOrgs)
+	}
+}
+
+func TestSignup_RemovesTheOwnerAndTheOrgWhenTheQueueRefuses(t *testing.T) {
+	t.Setenv(entitlements.RequiredKnob, "")
+	h := newSignupHarness(t)
+	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		return idp.CreateHumanUserResult{UserID: "user-owner"}, nil
+	}
+	h.queue.insertErr = errors.New("postgres down")
+	session := requestVerifiedSession(t, h, "team")
+
+	if _, err := signupWithSession(t, h, session); err == nil {
+		t.Fatal("Signup must fail when the tenant cannot be queued")
+	}
+	if len(h.idp.deletedUsers) != 1 || h.idp.deletedUsers[0] != "user-owner" {
+		t.Fatalf("deleted users = %v, want the owner of the failed signup", h.idp.deletedUsers)
+	}
+	if len(h.idp.deletedOrgs) != 1 || h.idp.deletedOrgs[0] != "org-1" {
+		t.Fatalf("deleted orgs = %v, want the org of the failed signup", h.idp.deletedOrgs)
+	}
+}
+
+func TestAdminRejectRegistration_RemovesTheWorkspaceOrg(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	if _, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID, Reason: "not a colleague"}); err != nil {
+		t.Fatalf("AdminRejectRegistration: %v", err)
+	}
+	if len(h.idp.createdOrgs) != 1 || len(h.idp.deletedOrgs) != 1 || h.idp.deletedOrgs[0] != "org-1" {
+		t.Fatalf("created %v, deleted %v; want the org of the refused registration removed",
+			h.idp.createdOrgs, h.idp.deletedOrgs)
 	}
 }

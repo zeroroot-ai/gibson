@@ -20,7 +20,6 @@ import (
 
 	"golang.org/x/oauth2"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 	"github.com/zeroroot-ai/gibson/internal/platform/zitadelconn"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
 )
@@ -40,22 +39,6 @@ type Client interface {
 	// DeleteOrganization removes the Zitadel organization. Idempotent: 404 is
 	// treated as success (already gone).
 	DeleteOrganization(ctx context.Context, orgID string) error
-
-	// EnsureHumanUser finds the human user with the given email in orgID, or
-	// creates one with no password and no verified email. Returns the user
-	// id. Idempotent: an existing user is found and returned rather than
-	// duplicated.
-	//
-	// This, plus a tenant-role grant, is the ENTIRE mechanism by which a
-	// human joins a tenant (ADR-0093, hosted#203). There is no separate
-	// org-membership write: a tenant role IS the membership, and Zitadel's
-	// org-member API (`/orgs/me/members`) plays no part in it — that API
-	// grants ORG_-prefixed administrator roles, which no tenant user ever
-	// holds. The created user's unverified email triggers Zitadel's own
-	// credential-setup email (matching internal/platform/idp.AdminClient.
-	// EnsureHumanUser's documented behavior); this client mints no separate
-	// setup link.
-	EnsureHumanUser(ctx context.Context, orgID, email string) (userID string, err error)
 
 	// CreateServiceAccount creates a Zitadel machine user (service account)
 	// scoped to orgID with the given display name. Returns the stable
@@ -183,49 +166,6 @@ func (c *httpClient) DeleteOrganization(ctx context.Context, orgID string) error
 		return fmt.Errorf("DeleteOrganization %s: %w", orgID, err)
 	}
 	return nil
-}
-
-// EnsureHumanUser implements Client. Creates a human user scoped to the org
-// with no password and no verified email, or finds the existing one on a
-// conflict. Never grants org membership: a tenant role (a project grant, ADR-
-// 0093) is the membership, and there is no separate org-member write here —
-// see the interface doc for why (hosted#203).
-//
-// v4: user creation is `/v2/users/human` with org scoping via the
-// `organization.orgId` body field. The v1
-// `/management/v1/orgs/{id}/users/human` path is gone.
-func (c *httpClient) EnsureHumanUser(ctx context.Context, orgID, email string) (string, error) {
-	body := map[string]any{
-		"organization": map[string]any{
-			"orgId": orgID,
-		},
-		"username": idp.UsernameForEmail(email),
-		"profile": map[string]any{
-			"givenName":  "Invited",
-			"familyName": "User",
-		},
-		"email": map[string]any{
-			"email":      email,
-			"isVerified": false,
-		},
-	}
-	var resp struct {
-		UserID string `json:"userId"`
-	}
-	err := c.doJSON(ctx, http.MethodPost, "/v2/users/human", body, &resp)
-	if err != nil && !isConflict(err) {
-		return "", fmt.Errorf("EnsureHumanUser org=%s email=%s: create user: %w", orgID, email, err)
-	}
-	userID := resp.UserID
-	if isConflict(err) || userID == "" {
-		// User exists; look up by login name to get their ID.
-		uid, lerr := c.getUserIDByEmail(ctx, orgID, email)
-		if lerr != nil {
-			return "", fmt.Errorf("EnsureHumanUser: existing user lookup: %w", lerr)
-		}
-		userID = uid
-	}
-	return userID, nil
 }
 
 // CreateServiceAccount implements Client.
@@ -426,41 +366,6 @@ func (c *httpClient) getOrgByName(ctx context.Context, name string) (*Organizati
 		return nil, fmt.Errorf("getOrgByName %q: %w", name, clients.ErrNotFound)
 	}
 	return &Organization{ID: resp.Result[0].ID, Name: resp.Result[0].Name}, nil
-}
-
-// getUserIDByEmail looks up a user's Zitadel ID by email within an org
-// (used for 409 conflict resolution in SendInvitation).
-//
-// v4: the per-org user search path `/management/v1/orgs/{id}/users/_search`
-// is gone. The v2 user search replaces it; scope is supplied by the
-// `organization.orgId` field in the request body.
-func (c *httpClient) getUserIDByEmail(ctx context.Context, orgID, email string) (string, error) {
-	body := map[string]any{
-		"organization": map[string]any{
-			"orgId": orgID,
-		},
-		"queries": []map[string]any{
-			{
-				"emailQuery": map[string]any{
-					"emailAddress": email,
-					"method":       "TEXT_QUERY_METHOD_EQUALS",
-				},
-			},
-		},
-	}
-	var resp struct {
-		Result []struct {
-			// v2 uses userId, not id.
-			UserID string `json:"userId"`
-		} `json:"result"`
-	}
-	if err := c.doJSON(ctx, http.MethodPost, "/v2/users", body, &resp); err != nil {
-		return "", fmt.Errorf("getUserIDByEmail org=%s email=%s: %w", orgID, email, err)
-	}
-	if len(resp.Result) == 0 {
-		return "", fmt.Errorf("getUserIDByEmail org=%s email=%s: %w", orgID, email, clients.ErrNotFound)
-	}
-	return resp.Result[0].UserID, nil
 }
 
 // doJSON wraps doJSONWithOrg for callers that do not need org-scoped routing

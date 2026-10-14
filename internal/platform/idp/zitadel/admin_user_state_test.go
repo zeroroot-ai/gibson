@@ -84,11 +84,11 @@ func TestHumanUserState_AlreadyInTheRequestedStateIsSuccess(t *testing.T) {
 	})
 
 	if err := client.DeactivateHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err != nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err != nil {
 		t.Errorf("deactivating an already-inactive user must succeed, got: %v", err)
 	}
 	if err := client.ReactivateHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err != nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err != nil {
 		t.Errorf("reactivating an already-active user must succeed, got: %v", err)
 	}
 }
@@ -101,11 +101,11 @@ func TestHumanUserState_OtherFailuresAreErrors(t *testing.T) {
 	})
 
 	if err := client.DeactivateHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err == nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err == nil {
 		t.Error("a refused deactivation must be an error")
 	}
 	if err := client.ReactivateHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err == nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err == nil {
 		t.Error("a refused reactivation must be an error")
 	}
 }
@@ -137,7 +137,7 @@ func TestDeleteHumanUser_AbsentUserIsSuccess(t *testing.T) {
 	})
 
 	if err := client.DeleteHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err != nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err != nil {
 		t.Errorf("deleting an absent user must succeed, got: %v", err)
 	}
 }
@@ -150,7 +150,7 @@ func TestDeleteHumanUser_HitsTheDeleteEndpoint(t *testing.T) {
 	})
 
 	if err := client.DeleteHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err != nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err != nil {
 		t.Fatalf("DeleteHumanUser: %v", err)
 	}
 	if gotMethod != http.MethodDelete || gotPath != "/management/v1/users/user-1" {
@@ -166,7 +166,7 @@ func TestDeleteHumanUser_OtherFailuresAreErrors(t *testing.T) {
 	})
 
 	if err := client.DeleteHumanUser(context.Background(),
-		idp.HumanUserStateRequest{UserID: "user-1"}); err == nil {
+		idp.HumanUserStateRequest{UserID: "user-1", OrgID: "tenant-org"}); err == nil {
 		t.Error("a refused delete must be an error")
 	}
 }

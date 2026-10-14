@@ -45,6 +45,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -119,7 +120,8 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	// a lie told to the identity provider.
 	// The owner is born inside the tenant org (gibson#1188), the same as in
 	// Signup. The tenant-operator adopts the org by its name at approval.
-	orgID, err := s.createSignupOrg(ctx, "Register", req.GetAttemptId(), req.GetWorkspaceName())
+	workspaceName := strings.TrimSpace(req.GetWorkspaceName())
+	orgID, err := s.createSignupOrg(ctx, "Register", req.GetAttemptId(), workspaceName)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +166,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	row, err := s.signupVerifications.IssuePendingApproval(ctx, IssueParams{
 		AttemptID:      req.GetAttemptId(),
 		Email:          email,
-		WorkspaceName:  req.GetWorkspaceName(),
+		WorkspaceName:  workspaceName,
 		Tier:           req.GetTier(),
 		OwnerFirstName: req.GetOwnerFirstName(),
 		OwnerLastName:  req.GetOwnerLastName(),
@@ -175,11 +177,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 			"attempt_id", req.GetAttemptId(), "error", err.Error())
 		// The account exists and cannot sign in, but no queue entry names it,
 		// so no administrator will ever decide it. Remove it.
-		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, created.UserID)); xerr != nil {
-			s.logger.ErrorContext(ctx, "Register: could not remove the account of a registration that was never recorded",
-				"owner_user_id", created.UserID, "error", xerr.Error())
-		}
-		s.dropSignupOrg(ctx, "Register", req.GetAttemptId(), orgID)
+		s.dropSignupOwner(ctx, "Register", req.GetAttemptId(), orgID, created.UserID)
 		return nil, status.Error(codes.Unavailable, "registration is temporarily unavailable; please try again shortly")
 	}
 
@@ -426,6 +424,7 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 	if err := s.recordRegistrationDecision(ctx, decidedBy, row, "signup_registration.rejected", req.GetReason(), uuid.NewString()); err != nil {
 		return nil, status.Error(codes.Unavailable, "the audit record of the decision could not be written")
 	}
+	s.dropRejectedWorkspace(ctx, row)
 	s.logger.InfoContext(ctx, "AdminRejectRegistration: registration refused",
 		"registration_id", row.ID)
 	return &tenantv1.AdminRejectRegistrationResponse{}, nil
@@ -434,6 +433,33 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 // signupDeciderID returns the acting administrator's subject. A decision with
 // no name attached is not attributable, which ADR-0074 requires it to be, so
 // an unattributable caller is refused rather than recorded as nobody.
+// dropRejectedWorkspace removes the tenant org of a refused registration, and
+// with it the owner account that lives inside (gibson#1188). The workspace
+// name and the address are free again. A registration from before the org
+// existed has its account in the platform org: that org stays, and the
+// account stays deactivated, as before.
+func (s *DaemonServer) dropRejectedWorkspace(ctx context.Context, row SignupVerification) {
+	if s.idpAdminClient == nil || row.OwnerUserID == "" {
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	orgID, err := s.idpAdminClient.OrgOfUser(ctx, row.OwnerUserID)
+	if err != nil {
+		s.logger.ErrorContext(ctx,
+			"AdminRejectRegistration: could not resolve the org of the refused owner; remove the workspace by hand",
+			"registration_id", row.ID, "owner_user_id", row.OwnerUserID, "error", err.Error())
+		return
+	}
+	if orgID == "" || orgID == os.Getenv(envIDPZitadelOrgID) {
+		return
+	}
+	if err := s.idpAdminClient.DeleteOrganization(ctx, orgID); err != nil {
+		s.logger.ErrorContext(ctx,
+			"AdminRejectRegistration: could not remove the workspace org of the refused registration; remove it by hand",
+			"registration_id", row.ID, "org_id", orgID, "error", err.Error())
+	}
+}
+
 func signupDeciderID(ctx context.Context) (string, error) {
 	identity, err := auth.IdentityFromContext(ctx)
 	if err != nil || identity.Subject == "" {

@@ -459,7 +459,10 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// reaches the workspace. Zitadel keeps org names unique, so a taken name
 	// stops here, before any account exists. The tenant-operator adopts the
 	// org by this name when it provisions the tenant (identity.EnsureOrg).
-	orgID, err := s.createSignupOrg(ctx, "Signup", req.GetAttemptId(), row.WorkspaceName)
+	// The name is trimmed once here, and the same value names the org and
+	// the queued tenant, so the operator finds the org by the exact name.
+	workspaceName := strings.TrimSpace(row.WorkspaceName)
+	orgID, err := s.createSignupOrg(ctx, "Signup", req.GetAttemptId(), workspaceName)
 	if err != nil {
 		return nil, err
 	}
@@ -510,6 +513,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	if herr != nil {
 		s.logger.ErrorContext(ctx, "Signup: create step token failed",
 			"attempt_id", req.GetAttemptId(), "error", herr.Error())
+		s.dropSignupOwner(ctx, "Signup", req.GetAttemptId(), orgID, result.UserID)
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
 
@@ -529,17 +533,18 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 	// who proved the mailbox as its actor. The queue entry carries the record
 	// id, so the operator records of the new tenant name this owner
 	// (gibson#583). With no record, nothing is queued.
-	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, row.WorkspaceName, plan.ID)
+	recordID, rerr := s.recordSignupRequest(ctx, result.UserID, slug, workspaceName, plan.ID)
 	if rerr != nil {
 		s.logger.ErrorContext(ctx, "Signup: durable audit write failed",
 			"attempt_id", req.GetAttemptId(), "tenant_id", slug, "error", rerr.Error())
+		s.dropSignupOwner(ctx, "Signup", req.GetAttemptId(), orgID, result.UserID)
 		return nil, status.Error(codes.Unavailable, "failed to complete signup; try again")
 	}
 	if eerr := s.enqueueOwnedTenant(ctx, &daemonoperatorv1.PendingTenant{
 		TenantId:      slug,
 		OwnerUserId:   result.UserID,
 		OwnerEmail:    row.Email,
-		WorkspaceName: row.WorkspaceName,
+		WorkspaceName: workspaceName,
 		// Enqueue the RESOLVED canonical plan id, not the raw verification-row
 		// string, so nothing downstream sees an id the plan gate did not accept.
 		Tier:          plan.ID,
@@ -554,13 +559,10 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			// Another signup took the name after the check above. The owner
 			// account of this call has no workspace, so delete it: the person
 			// can then start again with the same address.
-			if derr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, result.UserID)); derr != nil {
-				s.logger.ErrorContext(ctx, "Signup: could not delete the owner of a workspace name that was taken",
-					"attempt_id", req.GetAttemptId(), "error", derr.Error())
-			}
-			s.dropSignupOrg(ctx, "Signup", req.GetAttemptId(), orgID)
+			s.dropSignupOwner(ctx, "Signup", req.GetAttemptId(), orgID, result.UserID)
 			return nil, workspaceNameTaken(signupNameTakenMessage)
 		}
+		s.dropSignupOwner(ctx, "Signup", req.GetAttemptId(), orgID, result.UserID)
 		return nil, status.Error(codes.Internal, "failed to complete signup")
 	}
 
@@ -627,12 +629,26 @@ func ownerRef(orgID, userID string) idp.HumanUserStateRequest {
 
 // dropSignupOrg removes the tenant org of a signup that failed after the org
 // was made, so the workspace name is free again. A failure here is logged:
-// the signup already failed, and the org is removed by hand.
+// the signup already failed, and the org is removed by hand. The cleanup
+// outlives a client that hangs up, so it runs on a context with no cancel.
 func (s *DaemonServer) dropSignupOrg(ctx context.Context, rpc, attemptID, orgID string) {
+	ctx = context.WithoutCancel(ctx)
 	if err := s.idpAdminClient.DeleteOrganization(ctx, orgID); err != nil {
 		s.logger.ErrorContext(ctx, rpc+": could not remove the tenant org of a failed signup; remove it by hand",
 			"attempt_id", attemptID, "org_id", orgID, "error", err.Error())
 	}
+}
+
+// dropSignupOwner removes the owner account and then the tenant org of a
+// signup that failed after both existed. The person starts again with the
+// same address and the same workspace name.
+func (s *DaemonServer) dropSignupOwner(ctx context.Context, rpc, attemptID, orgID, userID string) {
+	ctx = context.WithoutCancel(ctx)
+	if err := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, userID)); err != nil {
+		s.logger.ErrorContext(ctx, rpc+": could not remove the owner of a failed signup; remove it by hand",
+			"attempt_id", attemptID, "org_id", orgID, "owner_user_id", userID, "error", err.Error())
+	}
+	s.dropSignupOrg(ctx, rpc, attemptID, orgID)
 }
 
 // stepURLFor returns the step URL when the signup waits for the step.

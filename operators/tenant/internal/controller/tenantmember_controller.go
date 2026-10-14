@@ -223,16 +223,21 @@ func (r *TenantMemberReconciler) cleanup(ctx context.Context, tm *gibsonv1alpha1
 		userID = tm.Status.UserID
 	}
 	if r.Roles != nil && userID != "" {
-		orgID, err := r.zitadelOrgID(context.WithoutCancel(ctx), tm)
+		orgID, deleting, err := r.tenantOrg(context.WithoutCancel(ctx), tm)
 		if err != nil {
 			// Zitadel unreachable — surface so the caller requeueues with backoff.
 			return fmt.Errorf("cleanup: resolve zitadel org: %w", err)
 		}
-		if orgID != "" {
+		// The org goes with the tenant, and every grant in it. A revoke on
+		// a tenant that is leaving has nothing to keep consistent, and a
+		// revoke of the only Owner is refused by design (ADR-0093), which
+		// would hold the finalizer for ever (gibson#1188).
+		if orgID != "" && !deleting {
 			t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
 			ev := audit.ObjectEvent(audit.ActionMemberRoleRevoke, tm, map[string]string{"user_id": userID, "org_id": orgID})
 			if err := r.Audit.Change(ctx, ev, func() error {
-				if err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID); err != nil {
+				err := r.Roles.Revoke(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID)
+				if err != nil && !errors.Is(err, tenantrole.ErrOwnerConflict) {
 					return fmt.Errorf("cleanup: revoke tenant role: %w", err)
 				}
 				return nil
@@ -282,8 +287,11 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
 	}
 
-	// A member with no email and no Zitadel user has nothing to sync yet.
-	if tm.Status.ZitadelUserID == "" && tm.Spec.Email == "" {
+	// A member with no account waits for the daemon, which owns every
+	// account and every invitation (gibson#626, gibson#987). The operator
+	// never creates a user: on the first tenant it raced the first-admin
+	// Job, which then found an Owner and sent no setup link (gibson#1188).
+	if tm.Status.ZitadelUserID == "" {
 		return ctrl.Result{}, nil
 	}
 
@@ -300,9 +308,15 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	case err == nil:
 	case errors.Is(err, audit.ErrNotRecorded):
 		return ctrl.Result{}, fmt.Errorf("record the Zitadel role sync: %w", err)
-	case errors.Is(err, clients.ErrUnreachable), errors.Is(err, tenantrole.ErrOwnerConflict):
+	case errors.Is(err, clients.ErrUnreachable):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
+	case errors.Is(err, tenantrole.ErrOwnerConflict):
+		// Another user holds Owner. A record that names a second Owner is
+		// stale (the daemon transfers ownership and does not rewrite this
+		// record), so this is not a wait. The error surfaces, and the
+		// controller retries with backoff until the record changes.
+		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	default:
 		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
@@ -314,16 +328,12 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	return ctrl.Result{}, nil
 }
 
-// assignMembership creates the Zitadel user of a member when it has none, then
-// assigns the tenant role through the Syncer (ADR-0093), which writes the
-// Zitadel grant and copies it into FGA in the same call. It returns the
-// membership id "<org>/<user>".
-//
-// A member that already has a Zitadel user (self-signup, pre-accepted) gets
-// only the role. A member with an email and no user gets a new Zitadel user:
-// Zitadel's own unverified-email flow emails the invitee a way to set a
-// credential. hosted#203 deleted the org-member API write this path used to
-// make: a tenant role IS the membership.
+// assignMembership assigns the tenant role of a member that has a Zitadel
+// user, through the Syncer (ADR-0093), which writes the Zitadel grant and
+// copies it into FGA in the same call. It returns the membership id
+// "<org>/<user>". hosted#203 deleted the org-member API write this path used
+// to make: a tenant role IS the membership. The operator creates no user
+// (gibson#1188): the daemon owns every account.
 func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibsonv1alpha1.TenantMember, orgID string) (string, error) {
 	if r.Roles == nil {
 		return "", errors.New("syncZitadel: role sync not configured")
@@ -334,12 +344,7 @@ func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibso
 	}
 	userID := tm.Status.ZitadelUserID
 	if userID == "" {
-		created, err := r.Zitadel.EnsureHumanUser(ctx, orgID, tm.Spec.Email)
-		if err != nil {
-			return "", fmt.Errorf("syncZitadel: ensure human user: %w", err)
-		}
-		userID = created
-		tm.Status.ZitadelUserID = userID
+		return "", errors.New("syncZitadel: the member has no Zitadel user")
 	}
 	t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
 	if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
@@ -352,14 +357,21 @@ func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibso
 // status. The TenantMember's TenantRef.Name identifies the cluster-scoped
 // Tenant resource.
 func (r *TenantMemberReconciler) zitadelOrgID(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (string, error) {
+	orgID, _, err := r.tenantOrg(ctx, tm)
+	return orgID, err
+}
+
+// tenantOrg returns the Zitadel org of the parent Tenant and whether that
+// Tenant is gone or on its way out. A missing Tenant reads as ("", true, nil).
+func (r *TenantMemberReconciler) tenantOrg(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (string, bool, error) {
 	var tenant gibsonv1alpha1.Tenant
 	if err := r.Get(ctx, types.NamespacedName{Name: tm.Spec.TenantRef.Name}, &tenant); err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", nil
+			return "", true, nil
 		}
-		return "", fmt.Errorf("get tenant %q: %w", tm.Spec.TenantRef.Name, err)
+		return "", false, fmt.Errorf("get tenant %q: %w", tm.Spec.TenantRef.Name, err)
 	}
-	return tenant.Status.ZitadelOrgID, nil
+	return tenant.Status.ZitadelOrgID, !tenant.DeletionTimestamp.IsZero(), nil
 }
 
 func (r *TenantMemberReconciler) SetupWithManager(mgr ctrl.Manager) error {

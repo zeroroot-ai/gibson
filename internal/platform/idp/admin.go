@@ -101,8 +101,12 @@ type AdminClient interface {
 
 	// DeleteOrganization removes an organization that CreateOrganization made
 	// and that no tenant will use, because a later step of the same signup
-	// failed. An org that is already gone is success.
+	// failed or an administrator refused the registration. An org that is
+	// already gone is success. The platform org is refused.
 	DeleteOrganization(ctx context.Context, orgID string) error
+
+	// OrgOfUser returns the id of the organization that owns userID.
+	OrgOfUser(ctx context.Context, userID string) (orgID string, err error)
 
 	// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
 	// password (ADR-0093 decisions 6/8). The one setup-link mechanism this
