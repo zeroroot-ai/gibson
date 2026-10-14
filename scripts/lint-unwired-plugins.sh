@@ -55,8 +55,9 @@ selftest() {
   printf 'package main\n\n// NotReadAnywhere is the fixture of the self-test.\nvar NotReadAnywhere = 1\n' > "$tmp/unread/selftest_unread.go"
   if check_module "$tmp/unread" >/dev/null; then echo "selftest: an unread declaration passed"; fails=1; fi
   # 2. A baseline entry with no consumer line.
+  # The fixture plants its own entry: the real baselines may hold none.
   cp -r plugins/github "$tmp/noreason"
-  sed -i '/^# consumer: /d' "$tmp/noreason/.unwired-baseline.txt"
+  printf 'field main.SelftestFixture.Value\n' >> "$tmp/noreason/.unwired-baseline.txt"
   if check_module "$tmp/noreason" >/dev/null; then echo "selftest: an entry with no consumer line passed"; fails=1; fi
   # 3. A module with no baseline.
   cp -r plugins/github "$tmp/nobaseline"
