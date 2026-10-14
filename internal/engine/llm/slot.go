@@ -177,34 +177,26 @@ func (m *DefaultSlotManager) ValidateSlot(ctx context.Context, slot agent.SlotDe
 func (m *DefaultSlotManager) validateConstraints(slot agent.SlotDefinition, model ModelInfo) error {
 	constraints := slot.Constraints
 
-	// Check MinContextWindow constraint. A zero window means the provider did
-	// not report one, so the constraint cannot reject the model.
-	if constraints.MinContextWindow > 0 && model.ContextWindow > 0 {
-		if model.ContextWindow < constraints.MinContextWindow {
-			return types.NewError(
-				ErrInvalidSlotConfig,
-				fmt.Sprintf("model context window %d is less than required %d",
-					model.ContextWindow, constraints.MinContextWindow),
-			)
-		}
+	// Check MinContextWindow constraint. An unreported window passes.
+	if !model.ContextWindowAtLeast(constraints.MinContextWindow) {
+		return types.NewError(
+			ErrInvalidSlotConfig,
+			fmt.Sprintf("model context window %d is less than required %d",
+				model.ContextWindow, constraints.MinContextWindow),
+		)
 	}
 
-	// Check RequiredFeatures constraint
+	// Check RequiredFeatures constraint. An unreported feature set passes.
 	if len(constraints.RequiredFeatures) > 0 {
-		missingFeatures := []string{}
-		for _, required := range constraints.RequiredFeatures {
-			// Convert agent feature constants to model feature format
-			modelFeature := convertAgentFeatureToModelFeature(required)
-			if !model.SupportsFeature(modelFeature) {
-				missingFeatures = append(missingFeatures, required)
-			}
+		required := make([]string, len(constraints.RequiredFeatures))
+		for i, f := range constraints.RequiredFeatures {
+			required[i] = convertAgentFeatureToModelFeature(f)
 		}
-
-		if len(missingFeatures) > 0 {
+		if missing := model.MissingFeatures(required); len(missing) > 0 {
 			return types.NewError(
 				ErrInvalidSlotConfig,
 				fmt.Sprintf("model missing required features: %s",
-					strings.Join(missingFeatures, ", ")),
+					strings.Join(missing, ", ")),
 			)
 		}
 	}

@@ -5,6 +5,8 @@ package providers
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"strings"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
@@ -19,7 +21,7 @@ import (
 type CohereProvider struct {
 	model  *einoopenai.ChatModel
 	config llm.ProviderConfig
-	lister *openAIListEndpoint
+	lister *cohereListEndpoint
 }
 
 // newCohereProviderWithContext constructs a Cohere provider, resolving the credential from cfg (see resolveCredential).
@@ -51,16 +53,72 @@ func newCohereProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (
 	return &CohereProvider{
 		model:  m,
 		config: cfg,
-		lister: &openAIListEndpoint{client: client, provider: "cohere", baseURL: baseURL, token: token},
+		lister: &cohereListEndpoint{client: client, listURL: cohereModelsURL(baseURL), token: token},
 	}, nil
 }
 
 func (p *CohereProvider) Name() string { return "cohere" }
 
-// Models asks the list endpoint of the provider (GET {base}/models) for its
-// models.
+// Models asks the native Cohere list endpoint (see
+// https://docs.cohere.com/reference/list-models) for the chat models of the
+// account. The OpenAI compatibility route has no list call.
 func (p *CohereProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	return p.lister.Models(ctx)
+}
+
+// cohereModelsURL returns the native list URL for a compatibility base URL:
+// GET {origin}/v1/models. The compatibility path (/compatibility/v1) is dropped.
+func cohereModelsURL(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Host == "" {
+		return strings.TrimRight(baseURL, "/") + "/v1/models"
+	}
+	return u.Scheme + "://" + u.Host + "/v1/models"
+}
+
+// cohereListEndpoint lists Cohere models with GET /v1/models. The response is
+// {"models":[{"name","context_length","endpoints"}],"next_page_token"}.
+type cohereListEndpoint struct {
+	client  *http.Client
+	listURL string
+	token   string
+	cache   modelCache
+}
+
+// Models returns the chat models that Cohere reports and follows next_page_token.
+func (e *cohereListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	return e.cache.get(ctx, "cohere", func(ctx context.Context) ([]llm.ModelInfo, error) {
+		header := http.Header{}
+		header.Set("Authorization", "Bearer "+e.token)
+		var models []llm.ModelInfo
+		pageToken := ""
+		for range maxModelListPages {
+			q := url.Values{"page_size": {"1000"}, "endpoint": {"chat"}}
+			if pageToken != "" {
+				q.Set("page_token", pageToken)
+			}
+			var page struct {
+				Models []struct {
+					Name          string  `json:"name"`
+					ContextLength float64 `json:"context_length"`
+				} `json:"models"`
+				NextPageToken string `json:"next_page_token"`
+			}
+			if err := getJSON(ctx, e.client, "cohere", e.listURL+"?"+q.Encode(), header, &page); err != nil {
+				return nil, err
+			}
+			for _, m := range page.Models {
+				if m.Name != "" {
+					models = append(models, llm.ModelInfo{Name: m.Name, ContextWindow: int(m.ContextLength)})
+				}
+			}
+			if page.NextPageToken == "" || page.NextPageToken == pageToken {
+				return models, nil
+			}
+			pageToken = page.NextPageToken
+		}
+		return models, nil
+	})
 }
 
 func (p *CohereProvider) Complete(ctx context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
@@ -120,3 +178,6 @@ func translateCohereError(err error) error {
 		return llm.TranslateError("cohere", err)
 	}
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *CohereProvider) DefaultModel() string { return p.config.DefaultModel }

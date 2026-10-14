@@ -51,14 +51,15 @@ func NewLlamafileProvider(cfg llm.ProviderConfig) (*LlamafileProvider, error) {
 	return &LlamafileProvider{
 		model:  m,
 		config: cfg,
-		lister: &openAIListEndpoint{client: client, provider: "llamafile", baseURL: baseURL, token: ""},
+		lister: &openAIListEndpoint{client: client, provider: "llamafile", listURL: openAIModelsURL(baseURL), token: ""},
 	}, nil
 }
 
 func (p *LlamafileProvider) Name() string { return "llamafile" }
 
-// Models asks the list endpoint of the provider (GET {base}/models) for its
-// models.
+// Models asks the llama.cpp server (GET {base}/models on the OpenAI-compatible
+// route, see https://github.com/ggml-org/llama.cpp/tree/master/tools/server)
+// for its models.
 func (p *LlamafileProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	return p.lister.Models(ctx)
 }
@@ -104,3 +105,6 @@ func LlamafileCredentialSchema() []llm.CredentialField {
 		// we surface is default_model so operators can label their deployment.
 	}
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *LlamafileProvider) DefaultModel() string { return p.config.DefaultModel }

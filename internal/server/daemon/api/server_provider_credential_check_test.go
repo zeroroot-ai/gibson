@@ -192,3 +192,80 @@ func TestProbeProvider_FactoryErrorIsAResponse(t *testing.T) {
 	assert.False(t, resp.Ok)
 	assert.Contains(t, resp.ErrorMessage, "invalid provider configuration")
 }
+
+// foundryFake answers POST /anthropic/v1/messages and fails the test on any
+// GET: Foundry has no Models API.
+func newFoundryFake(t *testing.T, status int, body string) *fakeAnthropic {
+	t.Helper()
+	f := &fakeAnthropic{}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			f.listCalls.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		f.otherCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(f.Close)
+	return f
+}
+
+func withFakeFoundry(s *DaemonServer, f *fakeAnthropic) *DaemonServer {
+	return s.WithProviderFactory(func(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
+		return providers.NewFoundryProvider(context.Background(), llm.ProviderConfig{
+			APIKey: cfg.APIKey, DefaultModel: cfg.DefaultModel,
+			BaseURL: f.URL + "/anthropic", AllowPrivateEndpoint: true,
+		})
+	})
+}
+
+func foundryTestInput(model string) *tenantv1.ProviderConfigInput {
+	return &tenantv1.ProviderConfigInput{
+		Name: "foundry", Type: "foundry", DefaultModel: model,
+		Credentials: map[string]string{"api_key": "k", "foundry_resource": "r"},
+	}
+}
+
+func TestTestProvider_FoundryNeedsATypedModelAndProbesIt(t *testing.T) {
+	ok := newFoundryFake(t, http.StatusOK,
+		`{"id":"m","type":"message","role":"assistant","model":"x","content":[{"type":"text","text":"p"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	s := withFakeFoundry(auditedServer(t), ok)
+
+	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: foundryTestInput("my-deployment")})
+	require.NoError(t, err)
+	require.True(t, resp.Ok, "error: %s", resp.Error)
+	require.Len(t, resp.Models, 1)
+	assert.Equal(t, "my-deployment", resp.Models[0].Name)
+	assert.EqualValues(t, 1, ok.otherCalls.Load())
+	assert.Zero(t, ok.listCalls.Load(), "Foundry has no Models API, so no list call is sent")
+
+	resp, err = s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: foundryTestInput("")})
+	require.NoError(t, err)
+	assert.False(t, resp.Ok)
+	assert.Contains(t, resp.Error, "Enter a model name")
+	assert.EqualValues(t, 1, ok.otherCalls.Load(), "no completion is sent without a typed model")
+}
+
+func TestTestProvider_FoundryBadKeyShowsTheProviderMessage(t *testing.T) {
+	bad := newFoundryFake(t, http.StatusUnauthorized, `{"error":{"message":"Access denied due to invalid subscription key"}}`)
+	s := withFakeFoundry(auditedServer(t), bad)
+	resp, err := s.TestProvider(tenantCtx("acme"), &tenantv1.TestProviderRequest{Input: foundryTestInput("dep")})
+	require.NoError(t, err)
+	assert.False(t, resp.Ok)
+	assert.Contains(t, resp.Error, "Access denied due to invalid subscription key")
+}
+
+// noProbeNoList has neither a list call nor a probe.
+type noProbeNoList struct{ stubMockProvider }
+
+func (*noProbeNoList) Models(context.Context) ([]llm.ModelInfo, error) {
+	return nil, llm.ErrModelListUnsupported
+}
+
+func TestCheckProviderCredentials_UnsupportedListWithoutProbeIsAnError(t *testing.T) {
+	_, err := checkProviderCredentials(context.Background(), &noProbeNoList{}, "m")
+	require.ErrorIs(t, err, llm.ErrModelListUnsupported)
+}

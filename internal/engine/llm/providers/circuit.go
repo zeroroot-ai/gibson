@@ -97,6 +97,17 @@ func (c *circuitLLMProvider) Models(ctx context.Context) ([]llm.ModelInfo, error
 	return c.inner.Models(ctx)
 }
 
+// DefaultModel returns the saved default model of the inner provider.
+func (c *circuitLLMProvider) DefaultModel() string { return llm.SavedModel(c.inner) }
+
+// ProbeModel delegates to the inner provider when it has no model list call.
+func (c *circuitLLMProvider) ProbeModel(ctx context.Context, model string) error {
+	if p, ok := c.inner.(llm.ModelProber); ok {
+		return p.ProbeModel(ctx, model) //nolint:wrapcheck // the inner provider error is returned as is
+	}
+	return llm.ErrModelListUnsupported
+}
+
 // Complete routes the completion call through the circuit breaker. When the
 // circuit is open, gobreaker.ErrOpenState is wrapped and returned immediately
 // without making an outbound request.

@@ -144,7 +144,7 @@ func (p *BedrockProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	if p.controlClient == nil {
 		return nil, fmt.Errorf("list models: %w", llm.NewProviderError("bedrock", errors.New("bedrock client not initialised")))
 	}
-	return p.cache.get(func() ([]llm.ModelInfo, error) {
+	return p.cache.get(ctx, "bedrock", func(ctx context.Context) ([]llm.ModelInfo, error) {
 		out, err := p.controlClient.ListFoundationModels(ctx, &bedrockcontrol.ListFoundationModelsInput{})
 		if err != nil {
 			return nil, translateBedrockError(err)
@@ -543,3 +543,7 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+// DefaultModel returns the model ID the provider completes against when the
+// request names none: the saved default model, else the built-in fallback.
+func (p *BedrockProvider) DefaultModel() string { return p.modelID }

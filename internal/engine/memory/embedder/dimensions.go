@@ -3,7 +3,10 @@
 
 package embedder
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // This file is the single source of truth mapping an embedding model to its
 // output vector dimension. The vector store index and KNN search derive their
@@ -61,6 +64,44 @@ var modelDimensions = map[string]int{
 	"voyage-3":       1024,
 	"voyage-3-lite":  512,
 	"voyage-large-2": 1536,
+}
+
+// modelKinds names the provider kinds that serve each model in modelDimensions.
+// The save path accepts a model for a kind only when it is in this table, so
+// ModelsForKind is the list a picker can offer.
+var modelKinds = map[string][]Kind{
+	"all-minilm-l6-v2":  {KindTEI, KindOpenAICompatible},
+	"all-minilm-l12-v2": {KindTEI, KindOpenAICompatible},
+
+	"text-embedding-3-small": {KindOpenAI, KindOpenAICompatible},
+	"text-embedding-3-large": {KindOpenAI, KindOpenAICompatible},
+	"text-embedding-ada-002": {KindOpenAI, KindOpenAICompatible},
+
+	"amazon.titan-embed-text-v1":   {KindBedrock},
+	"amazon.titan-embed-text-v2:0": {KindBedrock},
+
+	"cohere.embed-english-v3":      {KindBedrock},
+	"cohere.embed-multilingual-v3": {KindBedrock},
+	"embed-english-v3.0":           {KindCohere},
+	"embed-multilingual-v3.0":      {KindCohere},
+
+	"voyage-3":       {KindVoyage},
+	"voyage-3-lite":  {KindVoyage},
+	"voyage-large-2": {KindVoyage},
+}
+
+// ModelsForKind returns, in sorted order, the embedding models in the dimension
+// table that the provider kind serves. It returns nil for a kind that serves
+// none.
+func ModelsForKind(kind Kind) []string {
+	var out []string
+	for model, kinds := range modelKinds {
+		if slices.Contains(kinds, kind) {
+			out = append(out, model)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // normalizeModel lower-cases and trims a model name for table lookup so callers

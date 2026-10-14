@@ -122,21 +122,15 @@ func (a *LLMRegistryAdapter) resolveProvider(ctx context.Context, tenant, slotNa
 
 	slotDef := agent.NewSlotDefinition(slotName, "component runtime slot", true)
 
-	// Pin explicitly only when the slot names one of THIS tenant's providers.
+	// Pin the provider when the slot names one of THIS tenant's providers. The
+	// model is not picked here: the slot manager uses the default model that
+	// the tenant saved for the provider. A model list is never read.
 	if pinned, getErr := registry.GetProvider(slotName); getErr == nil && pinned != nil {
-		models, modelsErr := pinned.Models(ctx)
-		if modelsErr != nil {
-			return nil, llm.ModelInfo{}, status.Errorf(codes.Unavailable,
-				"slot %q: listing models from provider %q failed: %v", slotName, slotName, modelsErr)
-		}
-		if len(models) > 0 {
-			slotDef = slotDef.WithDefault(agent.SlotConfig{
-				Provider:    slotName,
-				Model:       models[0].Name,
-				Temperature: 0.7,
-				MaxTokens:   4096,
-			})
-		}
+		slotDef = slotDef.WithDefault(agent.SlotConfig{
+			Provider:    slotName,
+			Temperature: 0.7,
+			MaxTokens:   4096,
+		})
 	}
 
 	resolvedProvider, resolvedModel, resolveErr := slots.ResolveSlot(ctx, slotDef, nil)

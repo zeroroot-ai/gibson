@@ -65,7 +65,7 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 		lister: &openAIListEndpoint{
 			client:   client,
 			provider: string(llm.ProviderOpenAI),
-			baseURL:  firstNonEmpty(cfg.BaseURL, defaultOpenAIBaseURL),
+			listURL:  openAIModelsURL(firstNonEmpty(cfg.BaseURL, defaultOpenAIBaseURL)),
 			token:    apiKey,
 		},
 	}, nil
@@ -76,7 +76,8 @@ func (p *OpenAIProvider) Name() string {
 	return "openai"
 }
 
-// Models asks the OpenAI list endpoint (GET {base}/models) for the models of
+// Models asks the OpenAI list endpoint (GET {base}/models, see
+// https://platform.openai.com/docs/api-reference/models/list) for the models of
 // the configured account.
 func (p *OpenAIProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	return p.lister.Models(ctx)
@@ -256,3 +257,6 @@ func jsonSchemaToMap(schema *types.JSONSchema) (map[string]interface{}, error) {
 
 	return result, nil
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *OpenAIProvider) DefaultModel() string { return p.config.DefaultModel }

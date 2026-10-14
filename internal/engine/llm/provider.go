@@ -5,6 +5,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
@@ -49,6 +50,68 @@ type ModelInfo struct {
 
 	// MaxOutput is the maximum number of tokens the model can generate
 	MaxOutput int `json:"max_output"`
+
+	// ContextWindowUnreported is true when the provider did not report a
+	// context window. ContextWindow is then zero and means "unknown", not
+	// "no room". A slot constraint cannot reject an unknown window.
+	ContextWindowUnreported bool `json:"context_window_unreported,omitempty"`
+
+	// FeaturesUnreported is true when the provider did not report a complete
+	// feature set. Features then holds only what the provider did report, and
+	// a missing entry means "unknown", not "absent". A slot constraint cannot
+	// reject an unknown feature.
+	FeaturesUnreported bool `json:"features_unreported,omitempty"`
+}
+
+// ContextWindowAtLeast reports whether the model meets a minimum context
+// window. A minimum of zero or less, and an unreported window, always pass.
+func (m ModelInfo) ContextWindowAtLeast(minimum int) bool {
+	if minimum <= 0 || m.ContextWindowUnreported {
+		return true
+	}
+	return m.ContextWindow >= minimum
+}
+
+// MissingFeatures returns the required features that the model lacks. It
+// returns nil when the feature set is unreported, because an unknown feature
+// is not a missing one.
+func (m ModelInfo) MissingFeatures(required []string) []string {
+	if m.FeaturesUnreported {
+		return nil
+	}
+	var missing []string
+	for _, f := range required {
+		if !m.SupportsFeature(f) {
+			missing = append(missing, f)
+		}
+	}
+	return missing
+}
+
+// DefaultModeler is implemented by a provider that knows the default model
+// the tenant saved for it. A mission uses this model when the request names
+// none. It never calls the network.
+type DefaultModeler interface {
+	DefaultModel() string
+}
+
+// SavedModel returns the saved default model of a provider, or "" when the
+// provider keeps none.
+func SavedModel(p LLMProvider) string {
+	if d, ok := p.(DefaultModeler); ok {
+		return d.DefaultModel()
+	}
+	return ""
+}
+
+// ErrModelListUnsupported marks a provider that has no model list call. The
+// credential check then uses ModelProber with a model the person typed.
+var ErrModelListUnsupported = errors.New("the provider has no model list call")
+
+// ModelProber is implemented by a provider that has no model list call. It
+// checks the credentials with a one-token completion against a named model.
+type ModelProber interface {
+	ProbeModel(ctx context.Context, model string) error
 }
 
 // SupportsFeature checks if the model supports a given feature

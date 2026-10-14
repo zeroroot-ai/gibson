@@ -67,7 +67,7 @@ func (p *OllamaProvider) Name() string {
 // Models asks the Ollama server (GET {base}/api/tags) for the models that are
 // pulled on it. Ollama reports no context window here, so the field stays zero.
 func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	return p.cache.get(func() ([]llm.ModelInfo, error) {
+	return p.cache.get(ctx, "ollama", func(ctx context.Context) ([]llm.ModelInfo, error) {
 		header := http.Header{}
 		if p.config.APIKey != "" {
 			header.Set("Authorization", "Bearer "+p.config.APIKey)
@@ -150,3 +150,6 @@ func (p *OllamaProvider) Health(ctx context.Context) types.HealthStatus {
 
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *OllamaProvider) DefaultModel() string { return p.config.DefaultModel }

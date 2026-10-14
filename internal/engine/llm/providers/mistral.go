@@ -51,14 +51,14 @@ func newMistralProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) 
 	return &MistralProvider{
 		model:  m,
 		config: cfg,
-		lister: &openAIListEndpoint{client: client, provider: "mistral", baseURL: baseURL, token: apiKey},
+		lister: &openAIListEndpoint{client: client, provider: "mistral", listURL: openAIModelsURL(baseURL), token: apiKey},
 	}, nil
 }
 
 func (p *MistralProvider) Name() string { return "mistral" }
 
-// Models asks the list endpoint of the provider (GET {base}/models) for its
-// models.
+// Models asks the Mistral list endpoint (GET {base}/models, see
+// https://docs.mistral.ai/api/endpoint/models) for its models.
 func (p *MistralProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	return p.lister.Models(ctx)
 }
@@ -128,3 +128,6 @@ func translateMistralError(err error) error {
 		return llm.TranslateError("mistral", err)
 	}
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *MistralProvider) DefaultModel() string { return p.config.DefaultModel }

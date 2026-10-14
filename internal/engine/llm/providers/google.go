@@ -97,7 +97,7 @@ func (p *GoogleProvider) Name() string {
 // The key goes in the x-goog-api-key header, so it never appears in a URL or in
 // an error text.
 func (p *GoogleProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	return p.cache.get(func() ([]llm.ModelInfo, error) {
+	return p.cache.get(ctx, "google", func(ctx context.Context) ([]llm.ModelInfo, error) {
 		header := http.Header{}
 		header.Set("x-goog-api-key", p.listKey)
 
@@ -204,3 +204,6 @@ func (p *GoogleProvider) Health(ctx context.Context) types.HealthStatus {
 
 	return types.NewHealthStatus(types.HealthStateHealthy, "")
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *GoogleProvider) DefaultModel() string { return p.config.DefaultModel }

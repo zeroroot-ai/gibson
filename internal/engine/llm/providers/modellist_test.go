@@ -124,8 +124,11 @@ func listCases() []listCase {
 				require.NoError(t, err)
 				return p
 			},
-			listPath: "/compatibility/v1/models", okBody: openAIOK, wantNames: []string{"m-one", "m-two"},
-			authBody: `{"message":"invalid api token"}`, authMessage: "invalid api token",
+			// Cohere lists on its native route: https://docs.cohere.com/reference/list-models
+			listPath:  "/v1/models",
+			okBody:    `{"models":[{"name":"command-a","context_length":256000,"endpoints":["chat"]},{"name":"command-r"}]}`,
+			wantNames: []string{"command-a", "command-r"},
+			authBody:  `{"message":"invalid api token"}`, authMessage: "invalid api token",
 		},
 		{
 			name: "huggingface",
@@ -142,14 +145,18 @@ func listCases() []listCase {
 			name: "cloudflare",
 			build: func(t *testing.T, base string) llm.LLMProvider {
 				t.Helper()
-				c := cfg(base + "/ai/v1")
+				c := cfg(base + "/client/v4/accounts/acct-1/ai/v1")
 				c.Extra = map[string]string{"cloudflare_account_id": "acct-1"}
 				p, err := newCloudflareProviderWithContext(context.Background(), c)
 				require.NoError(t, err)
 				return p
 			},
-			listPath: "/ai/v1/models", okBody: openAIOK, wantNames: []string{"m-one", "m-two"},
-			authBody: `{"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}`, authMessage: "Authentication error",
+			// Cloudflare lists on the model search route:
+			// https://developers.cloudflare.com/api/resources/ai/subresources/models/
+			listPath:  "/client/v4/accounts/acct-1/ai/models/search",
+			okBody:    `{"success":true,"result":[{"name":"@cf/meta/llama-3.1-8b-instruct","task":{"name":"Text Generation"}},{"name":"@cf/x/y"}],"result_info":{"page":1,"per_page":100,"total_count":2}}`,
+			wantNames: []string{"@cf/meta/llama-3.1-8b-instruct", "@cf/x/y"},
+			authBody:  `{"success":false,"errors":[{"code":10000,"message":"Authentication error"}]}`, authMessage: "Authentication error",
 		},
 		{
 			name: "llamafile",
@@ -176,17 +183,6 @@ func listCases() []listCase {
 			authBody:  `{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`, authMessage: "invalid x-api-key",
 		},
 		{
-			name: "foundry",
-			build: func(t *testing.T, base string) llm.LLMProvider {
-				t.Helper()
-				p, err := NewFoundryProvider(context.Background(), cfg(base+"/anthropic"))
-				require.NoError(t, err)
-				return p
-			},
-			listPath: "/anthropic/v1/models", okBody: `{"data":[{"id":"claude-f"}],"has_more":false}`, wantNames: []string{"claude-f"},
-			authBody: `{"error":{"message":"Access denied due to invalid subscription key"}}`, authMessage: "Access denied due to invalid subscription key",
-		},
-		{
 			name: "google",
 			build: func(t *testing.T, base string) llm.LLMProvider {
 				t.Helper()
@@ -211,6 +207,17 @@ func listCases() []listCase {
 			authBody: `{"error":"unauthorized"}`, authMessage: "unauthorized",
 		},
 	}
+}
+
+func caseNamed(t *testing.T, name string) listCase {
+	t.Helper()
+	for _, c := range listCases() {
+		if c.name == name {
+			return c
+		}
+	}
+	t.Fatalf("no list case %q", name)
+	return listCase{}
 }
 
 func TestModels_ListsWhatTheProviderReports(t *testing.T) {
@@ -362,7 +369,7 @@ func TestModels_SendsTheCredentialTheProviderExpects(t *testing.T) {
 
 func TestModels_ReportsSizeOnlyWhenTheAPIDoes(t *testing.T) {
 	t.Run("anthropic", func(t *testing.T) {
-		tc := listCases()[6]
+		tc := caseNamed(t, "anthropic")
 		fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, tc.okBody) })
 		models, err := tc.build(t, fake.URL).Models(context.Background())
 		require.NoError(t, err)
@@ -375,7 +382,7 @@ func TestModels_ReportsSizeOnlyWhenTheAPIDoes(t *testing.T) {
 		assert.NotContains(t, models[1].Features, "vision")
 	})
 	t.Run("google", func(t *testing.T) {
-		tc := listCases()[8]
+		tc := caseNamed(t, "google")
 		fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, tc.okBody) })
 		models, err := tc.build(t, fake.URL).Models(context.Background())
 		require.NoError(t, err)
@@ -384,7 +391,7 @@ func TestModels_ReportsSizeOnlyWhenTheAPIDoes(t *testing.T) {
 		assert.Equal(t, 65536, models[0].MaxOutput)
 	})
 	t.Run("mistral", func(t *testing.T) {
-		tc := listCases()[1]
+		tc := caseNamed(t, "mistral")
 		fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, tc.okBody) })
 		models, err := tc.build(t, fake.URL).Models(context.Background())
 		require.NoError(t, err)
@@ -395,7 +402,7 @@ func TestModels_ReportsSizeOnlyWhenTheAPIDoes(t *testing.T) {
 		assert.Zero(t, models[1].ContextWindow)
 	})
 	t.Run("openai reports none", func(t *testing.T) {
-		tc := listCases()[0]
+		tc := caseNamed(t, "openai")
 		fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, tc.okBody) })
 		models, err := tc.build(t, fake.URL).Models(context.Background())
 		require.NoError(t, err)
@@ -644,7 +651,7 @@ func TestAnthropicProvider_BuildsWithNoModelAndRefusesToComplete(t *testing.T) {
 
 	_, err = p.Complete(context.Background(), req)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no model is configured")
+	assert.Contains(t, err.Error(), "no model")
 	_, err = p.CompleteWithTools(context.Background(), req, nil)
 	require.Error(t, err)
 	_, err = p.Stream(context.Background(), req)

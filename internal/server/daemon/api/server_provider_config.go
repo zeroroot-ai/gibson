@@ -445,8 +445,10 @@ func (s *DaemonServer) DeleteProvider(ctx context.Context, req *tenantv1.DeleteP
 
 // TestProvider validates a proposed provider config by calling the model list
 // endpoint of the provider with the proposed credentials. The call needs no
-// model ID and sends no completion. The proposed config is NOT persisted. Credentials are used for the duration of this call only and are
-// never logged.
+// model ID and sends no completion. The proposed config is NOT persisted.
+// Credentials are used for the duration of this call only and are never
+// logged. A provider with no list call is checked with a one-token completion
+// against default_model.
 //
 // Flow:
 //  1. Build a temporary llm.ProviderConfig from the proposed input.
@@ -525,7 +527,7 @@ func (s *DaemonServer) TestProvider(ctx context.Context, req *tenantv1.TestProvi
 
 		// The credential check is the model list call of the provider. It
 		// sends no completion and needs no model ID.
-		models, listErr := checkProviderCredentials(ctx, prov)
+		models, listErr := checkProviderCredentials(ctx, prov, input.GetDefaultModel())
 		latencyMS = time.Since(start).Milliseconds()
 		if listErr != nil {
 			s.emitProviderAudit(ctx, tenantID, auditProviderTested, input.GetName())
@@ -901,7 +903,7 @@ func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderTyp
 		return false, fmt.Sprintf("invalid provider configuration: %v", err), nil, time.Since(start).Milliseconds()
 	}
 
-	models, listErr := checkProviderCredentials(ctx, prov)
+	models, listErr := checkProviderCredentials(ctx, prov, "")
 	latencyMS = time.Since(start).Milliseconds()
 	if listErr != nil {
 		return false, listErr.Error(), nil, latencyMS
@@ -909,21 +911,39 @@ func (s *DaemonServer) probeChatProvider(ctx context.Context, pt llm.ProviderTyp
 	return true, "", models, latencyMS
 }
 
-// providerCheckTimeout bounds the model list call that checks credentials.
-const providerCheckTimeout = 10 * time.Second
-
 // checkProviderCredentials checks the credentials of a provider with its model
 // list call and returns the models that the provider reports. The call sends no
 // completion and needs no model ID. A failure carries the text of the provider.
-func checkProviderCredentials(ctx context.Context, prov llm.LLMProvider) ([]llm.ModelInfo, error) {
+//
+// A provider with no list call (Foundry) is checked with a one-token completion
+// against the model that the person typed. It then needs that model, and the
+// result holds that one model.
+func checkProviderCredentials(ctx context.Context, prov llm.LLMProvider, typedModel string) ([]llm.ModelInfo, error) {
 	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
 	defer cancel()
 	models, err := prov.Models(listCtx)
-	if err != nil {
+	if err == nil {
+		return models, nil
+	}
+	if !errors.Is(err, llm.ErrModelListUnsupported) {
 		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
 	}
-	return models, nil
+	prober, ok := prov.(llm.ModelProber)
+	if !ok {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
+	}
+	typedModel = strings.TrimSpace(typedModel)
+	if typedModel == "" {
+		return nil, fmt.Errorf("provider %s has no model list call. Enter a model name to test the connection", prov.Name())
+	}
+	if err := prober.ProbeModel(listCtx, typedModel); err != nil {
+		return nil, err //nolint:wrapcheck // the provider error text is shown to the caller as is
+	}
+	return []llm.ModelInfo{{Name: typedModel, ContextWindowUnreported: true, FeaturesUnreported: true}}, nil
 }
+
+// providerCheckTimeout bounds the credential check.
+const providerCheckTimeout = 10 * time.Second
 
 // probeEmbeddingFromCreds builds an embedder from raw credentials and probes
 // it with a single-element batch. Returns (ok, dimension, errorMessage).
@@ -1065,12 +1085,24 @@ func descriptorToProto(d providers.ProviderDescriptor) *tenantv1.SupportedProvid
 		})
 	}
 
+	// The embedding models are the ones the save path accepts for the provider
+	// kind: the embedder dimension table. It is not a second list.
+	kindModels := embedder.ModelsForKind(embedder.Kind(string(d.Type)))
+	embeddingModels := make([]*tenantv1.ModelDescriptor, 0, len(kindModels))
+	for _, name := range kindModels {
+		embeddingModels = append(embeddingModels, &tenantv1.ModelDescriptor{
+			Name:         name,
+			Capabilities: []tenantv1.Capability{tenantv1.Capability_CAPABILITY_EMBEDDING},
+		})
+	}
+
 	return &tenantv1.SupportedProvider{
-		Type:        string(d.Type),
-		DisplayName: d.DisplayName,
-		DocsUrl:     d.DocsURL,
-		SelfHosted:  d.SelfHosted,
-		Credentials: creds,
+		Type:            string(d.Type),
+		DisplayName:     d.DisplayName,
+		DocsUrl:         d.DocsURL,
+		SelfHosted:      d.SelfHosted,
+		Credentials:     creds,
+		EmbeddingModels: embeddingModels,
 	}
 }
 

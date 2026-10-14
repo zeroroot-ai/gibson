@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
@@ -33,36 +36,85 @@ const (
 	// maxModelListPages bounds the pages that one list call follows.
 	maxModelListPages = 20
 
+	// providerListTimeout bounds one refresh of a model list.
+	providerListTimeout = 10 * time.Second
+
 	// modelListCacheTTL is how long a successful list stays valid for one
 	// provider instance. Slot resolution calls Models on a request path.
 	modelListCacheTTL = 5 * time.Minute
 )
 
 // modelCache keeps the last successful model list of one provider instance.
-// Only a success is cached. A failure always reaches the provider again.
+//
+// A fresh list is served from memory. When the list is stale the cache calls
+// the provider, outside any lock and once for all concurrent callers. When that
+// call fails, the cache serves the last good list and logs the failure. A
+// failure with no earlier list is returned.
 type modelCache struct {
 	mu     sync.Mutex
 	loaded time.Time
 	models []llm.ModelInfo
+	group  singleflight.Group
 }
 
-// get returns the cached list while it is fresh and calls fetch otherwise.
-func (c *modelCache) get(fetch func() ([]llm.ModelInfo, error)) ([]llm.ModelInfo, error) {
+// get returns the model list. fetch gets a context that outlives the caller
+// but not providerListTimeout, so one cancelled caller cannot fail the rest.
+func (c *modelCache) get(ctx context.Context, provider string, fetch func(ctx context.Context) ([]llm.ModelInfo, error)) ([]llm.ModelInfo, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.models != nil && time.Since(c.loaded) < modelListCacheTTL {
-		return slices.Clone(c.models), nil
+	stale := c.models
+	if stale != nil && time.Since(c.loaded) < modelListCacheTTL {
+		c.mu.Unlock()
+		return slices.Clone(stale), nil
 	}
-	models, err := fetch()
-	if err != nil {
-		return nil, err
+	c.mu.Unlock()
+
+	ch := c.group.DoChan("list", func() (any, error) {
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerListTimeout)
+		defer cancel()
+		models, err := fetch(fetchCtx)
+		if err != nil {
+			return nil, err
+		}
+		models = finalizeModelList(models)
+		c.mu.Lock()
+		c.models = models
+		c.loaded = time.Now()
+		c.mu.Unlock()
+		return models, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, llm.NewTimeoutError(fmt.Sprintf("the model list call to provider %s timed out", provider))
+		}
+		return nil, fmt.Errorf("the model list call to provider %s was cancelled: %w", provider, ctx.Err())
+	case res := <-ch:
+		if res.Err != nil {
+			if stale != nil {
+				slog.Warn("model list refresh failed; serving the last good list",
+					"provider", provider, "error", res.Err)
+				return slices.Clone(stale), nil
+			}
+			return nil, res.Err //nolint:wrapcheck // the typed llm error is the contract
+		}
+		models, _ := res.Val.([]llm.ModelInfo)
+		return slices.Clone(models), nil
 	}
+}
+
+// finalizeModelList marks what the provider did not report. A window of zero is
+// unreported. No provider reports a complete feature set, so the features are
+// always unreported and hold only the entries the provider did report.
+func finalizeModelList(models []llm.ModelInfo) []llm.ModelInfo {
 	if models == nil {
 		models = []llm.ModelInfo{}
 	}
-	c.models = models
-	c.loaded = time.Now()
-	return slices.Clone(models), nil
+	for i := range models {
+		models[i].ContextWindowUnreported = models[i].ContextWindow == 0
+		models[i].FeaturesUnreported = true
+	}
+	return models
 }
 
 // getJSON sends one GET request through the guarded client and decodes a 2xx
@@ -87,7 +139,20 @@ func getJSON(ctx context.Context, client *http.Client, provider, rawURL string, 
 	}
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := client.Do(req)
+	// Copy the client so the redirect rule applies to list calls only. The copy
+	// keeps the guarded transport. A redirect to another host would carry the
+	// key header along, so the call stops at the first such redirect.
+	listClient := *client
+	listClient.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if next.URL.Host != via[0].URL.Host {
+			return http.ErrUseLastResponse
+		}
+		if len(via) >= 5 {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}
+	resp, err := listClient.Do(req)
 	if err != nil {
 		return modelListTransportError(provider, err)
 	}
@@ -195,14 +260,15 @@ func providerMessage(body []byte) string {
 type openAIListEndpoint struct {
 	client   *http.Client
 	provider string
-	baseURL  string
-	token    string
-	cache    modelCache
+	// listURL is the full URL of the list call.
+	listURL string
+	token   string
+	cache   modelCache
 }
 
 // Models returns the models that the endpoint reports.
 func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error) {
-	return e.cache.get(func() ([]llm.ModelInfo, error) {
+	return e.cache.get(ctx, e.provider, func(ctx context.Context) ([]llm.ModelInfo, error) {
 		header := http.Header{}
 		if e.token != "" {
 			header.Set("Authorization", "Bearer "+e.token)
@@ -223,7 +289,7 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 				} `json:"capabilities"`
 			} `json:"data"`
 		}
-		if err := getJSON(ctx, e.client, e.provider, strings.TrimRight(e.baseURL, "/")+"/models", header, &page); err != nil {
+		if err := getJSON(ctx, e.client, e.provider, e.listURL, header, &page); err != nil {
 			return nil, err
 		}
 		models := make([]llm.ModelInfo, 0, len(page.Data))
@@ -247,6 +313,11 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 		}
 		return models, nil
 	})
+}
+
+// openAIModelsURL returns the list URL for an OpenAI-shaped base URL.
+func openAIModelsURL(baseURL string) string {
+	return strings.TrimRight(baseURL, "/") + "/models"
 }
 
 // firstPositive returns the first value above zero, or zero.

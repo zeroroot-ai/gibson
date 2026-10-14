@@ -48,10 +48,10 @@ func stubErrorEmbedderFactory(_ embedder.Config) (embedder.Embedder, error) {
 // GetSupportedProviders — provider metadata only (gibson#1193)
 // ---------------------------------------------------------------------------
 
-// TestGetSupportedProviders_CarriesNoModels verifies that no descriptor carries
-// a model list. The models come from the provider through TestProvider,
-// ProbeProvider and ListProviderModels.
-func TestGetSupportedProviders_CarriesNoModels(t *testing.T) {
+// TestGetSupportedProviders_CarriesNoChatModels verifies that no descriptor
+// carries a chat model list. The chat models come from the provider through
+// TestProvider, ProbeProvider and ListProviderModels.
+func TestGetSupportedProviders_CarriesNoChatModels(t *testing.T) {
 	s := auditedServer(t)
 	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
 	require.NoError(t, err)
@@ -59,8 +59,36 @@ func TestGetSupportedProviders_CarriesNoModels(t *testing.T) {
 	for _, p := range resp.Providers {
 		assert.NotEmpty(t, p.DisplayName, "provider %q must keep its display name", p.Type)
 		assert.Empty(t, p.DefaultModels, "provider %q must not carry a fixed chat model list", p.Type)
-		assert.Empty(t, p.EmbeddingModels, "provider %q must not carry a fixed embedding model list", p.Type)
 	}
+}
+
+// TestGetSupportedProviders_EmbeddingModelsComeFromTheDimensionTable verifies
+// that the embedding picker has a source: the models the save path accepts for
+// the provider kind.
+func TestGetSupportedProviders_EmbeddingModelsComeFromTheDimensionTable(t *testing.T) {
+	s := auditedServer(t)
+	resp, err := s.GetSupportedProviders(tenantCtx("acme"), &tenantv1.GetSupportedProvidersRequest{})
+	require.NoError(t, err)
+
+	byType := map[string]*tenantv1.SupportedProvider{}
+	for _, p := range resp.Providers {
+		byType[p.Type] = p
+	}
+	nameSet := func(typ string) []string {
+		out := make([]string, 0, len(byType[typ].EmbeddingModels))
+		for _, m := range byType[typ].EmbeddingModels {
+			out = append(out, m.Name)
+			assert.Equal(t, []tenantv1.Capability{tenantv1.Capability_CAPABILITY_EMBEDDING}, m.Capabilities)
+			_, known := embedder.DimensionForModel(m.Name)
+			assert.True(t, known, "model %q must be in the dimension table", m.Name)
+		}
+		return out
+	}
+	assert.ElementsMatch(t, []string{"text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"}, nameSet("openai"))
+	assert.Contains(t, nameSet("bedrock"), "amazon.titan-embed-text-v2:0")
+	assert.Contains(t, nameSet("cohere"), "embed-english-v3.0")
+	assert.Contains(t, nameSet("voyage"), "voyage-3")
+	assert.Empty(t, byType["anthropic"].EmbeddingModels, "a chat-only provider has no embedding models")
 }
 
 // ---------------------------------------------------------------------------

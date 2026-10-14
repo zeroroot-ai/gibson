@@ -20,6 +20,7 @@ import (
 func provWithModel(name, model string) *mockLLMProvider {
 	return &mockLLMProvider{
 		name:   name,
+		saved:  model,
 		models: []llm.ModelInfo{{Name: model, ContextWindow: 200000, Features: []string{agent.FeatureToolUse}, MaxOutput: 4096}},
 		health: types.Healthy("ok"),
 	}

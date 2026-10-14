@@ -396,6 +396,7 @@ func TestValidateConstraints_ContextWindow(t *testing.T) {
 		name               string
 		minContextWindow   int
 		modelContextWindow int
+		unreported         bool
 		expectError        bool
 	}{
 		{
@@ -423,10 +424,17 @@ func TestValidateConstraints_ContextWindow(t *testing.T) {
 			expectError:        false,
 		},
 		{
-			name:               "window not reported by the provider (0)",
+			name:               "window not reported by the provider",
 			minContextWindow:   16384,
 			modelContextWindow: 0,
+			unreported:         true,
 			expectError:        false,
+		},
+		{
+			name:               "window reported as zero is too small",
+			minContextWindow:   16384,
+			modelContextWindow: 0,
+			expectError:        true,
 		},
 	}
 
@@ -443,6 +451,8 @@ func TestValidateConstraints_ContextWindow(t *testing.T) {
 				Name:          "test-model",
 				ContextWindow: tt.modelContextWindow,
 				Features:      []string{},
+
+				ContextWindowUnreported: tt.unreported,
 			}
 
 			err := manager.validateConstraints(slot, model)

@@ -589,7 +589,9 @@ type SupportedProvider struct {
 	// ProbeProvider and ListProviderModels. The field stays until the dashboard
 	// stops reading it, then it is reserved.
 	DefaultModels []*ModelDescriptor `protobuf:"bytes,6,rep,name=default_models,json=defaultModels,proto3" json:"default_models,omitempty"`
-	// embedding_models is always empty, for the same reason as default_models.
+	// embedding_models lists the embedding models that the save path accepts for
+	// this provider type: the embedder dimension table. Empty for a chat-only
+	// provider.
 	EmbeddingModels []*ModelDescriptor `protobuf:"bytes,7,rep,name=embedding_models,json=embeddingModels,proto3" json:"embedding_models,omitempty"`
 }
 

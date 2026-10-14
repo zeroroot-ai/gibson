@@ -183,3 +183,6 @@ func (p *MockProvider) SetResponses(responses []string) {
 	p.responses = responses
 	p.responseIndex = 0
 }
+
+// DefaultModel returns the model that Models reports.
+func (p *MockProvider) DefaultModel() string { return "mock-model" }

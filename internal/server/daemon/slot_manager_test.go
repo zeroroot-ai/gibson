@@ -7,6 +7,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -22,13 +23,21 @@ type mockLLMProvider struct {
 	name   string
 	models []llm.ModelInfo
 	health types.HealthStatus
+	// saved is the default model the tenant saved for the provider.
+	saved string
+	// listCalls counts Models calls. A mission must make none.
+	listCalls atomic.Int32
 }
+
+// DefaultModel returns the saved default model of the mock.
+func (m *mockLLMProvider) DefaultModel() string { return m.saved }
 
 func (m *mockLLMProvider) Name() string {
 	return m.name
 }
 
 func (m *mockLLMProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
+	m.listCalls.Add(1)
 	return m.models, nil
 }
 
@@ -51,7 +60,8 @@ func (m *mockLLMProvider) Health(ctx context.Context) types.HealthStatus {
 // Test helper to create a mock Anthropic provider
 func createMockAnthropicProvider() *mockLLMProvider {
 	return &mockLLMProvider{
-		name: "anthropic",
+		name:  "anthropic",
+		saved: "claude-3-5-sonnet-20241022",
 		models: []llm.ModelInfo{
 			{
 				Name:          "claude-3-5-sonnet-20241022",
@@ -85,7 +95,8 @@ func createMockAnthropicProvider() *mockLLMProvider {
 // Test helper to create a mock OpenAI provider
 func createMockOpenAIProvider() *mockLLMProvider {
 	return &mockLLMProvider{
-		name: "openai",
+		name:  "openai",
+		saved: "gpt-4-turbo",
 		models: []llm.ModelInfo{
 			{
 				Name:          "gpt-4-turbo",
@@ -138,10 +149,12 @@ func TestDaemonSlotManager_ResolveSlot_PrimarySlot(t *testing.T) {
 	assert.NotNil(t, provider)
 	assert.Equal(t, "anthropic", provider.Name())
 
-	// Should resolve to Claude 3.5 Sonnet (highest capability)
+	// The model is the default that the tenant saved. A mission never lists
+	// models, and the window and features of the model are unknown.
 	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
-	assert.GreaterOrEqual(t, model.ContextWindow, 100000)
-	assert.True(t, model.SupportsFeature(agent.FeatureToolUse))
+	assert.True(t, model.ContextWindowUnreported)
+	assert.True(t, model.FeaturesUnreported)
+	assert.Zero(t, mockProvider.listCalls.Load(), "a mission must not call Models")
 }
 
 func TestDaemonSlotManager_ResolveSlot_FastSlot(t *testing.T) {
@@ -163,8 +176,8 @@ func TestDaemonSlotManager_ResolveSlot_FastSlot(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Should resolve to a model meeting the 8k context window constraint
-	assert.GreaterOrEqual(t, model.ContextWindow, 8192)
+	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
+	assert.Zero(t, mockProvider.listCalls.Load())
 }
 
 func TestDaemonSlotManager_ResolveSlot_VisionSlot(t *testing.T) {
@@ -186,9 +199,8 @@ func TestDaemonSlotManager_ResolveSlot_VisionSlot(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Should resolve to a model with vision support
-	assert.True(t, model.SupportsFeature(agent.FeatureVision))
-	assert.Contains(t, []string{"claude-3-5-sonnet-20241022", "claude-3-opus-20240229"}, model.Name)
+	// The feature set of the saved model is unknown, so the vision slot passes.
+	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
 }
 
 func TestDaemonSlotManager_ResolveSlot_ReasoningSlot(t *testing.T) {
@@ -210,8 +222,7 @@ func TestDaemonSlotManager_ResolveSlot_ReasoningSlot(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Should resolve to a model meeting the 150k context window constraint
-	assert.GreaterOrEqual(t, model.ContextWindow, 150000)
+	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
 }
 
 func TestDaemonSlotManager_ResolveSlot_ExplicitConfig(t *testing.T) {
@@ -242,7 +253,6 @@ func TestDaemonSlotManager_ResolveSlot_ExplicitConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "openai", provider.Name())
 	assert.Equal(t, "gpt-4-turbo", model.Name)
-	assert.GreaterOrEqual(t, model.ContextWindow, 100000)
 }
 
 func TestDaemonSlotManager_ResolveSlot_WithOverride(t *testing.T) {
@@ -274,54 +284,75 @@ func TestDaemonSlotManager_ResolveSlot_WithOverride(t *testing.T) {
 	assert.Equal(t, "gpt-4", model.Name)
 }
 
-func TestDaemonSlotManager_ResolveSlot_ConstraintValidation_ContextWindow(t *testing.T) {
-	ctx := context.Background()
-
-	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(createMockOpenAIProvider()))
-
-	manager := NewDaemonSlotManager(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
-
-	// Slot requiring very large context window
-	slot := agent.SlotDefinition{
-		Name: "large-context",
-		Default: agent.SlotConfig{
-			Provider: "openai",
-			Model:    "gpt-4", // Only has 8192 context
-		},
-		Constraints: agent.SlotConstraints{
-			MinContextWindow: 100000, // Requires 100k+
-		},
+// openAIWithoutWindows mimics a live OpenAI list: no context window and no
+// feature set is reported for any model.
+func openAIWithoutWindows() *mockLLMProvider {
+	return &mockLLMProvider{
+		name:   "openai",
+		saved:  "gpt-5",
+		models: []llm.ModelInfo{{Name: "gpt-5", ContextWindowUnreported: true, FeaturesUnreported: true}},
+		health: types.Healthy("mock provider healthy"),
 	}
-
-	_, _, err := manager.ResolveSlot(ctx, slot, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "context window")
 }
 
-func TestDaemonSlotManager_ResolveSlot_ConstraintValidation_Features(t *testing.T) {
-	ctx := context.Background()
+func TestDaemonSlotManager_UnknownWindowAndFeaturesPassEveryDefaultSlot(t *testing.T) {
+	for _, slotName := range []string{"primary", "fast", "vision", "reasoning"} {
+		t.Run(slotName, func(t *testing.T) {
+			registry := llm.NewLLMRegistry()
+			p := openAIWithoutWindows()
+			require.NoError(t, registry.RegisterProvider(p))
+			manager := NewDaemonSlotManager(registry, slog.New(slog.DiscardHandler))
 
+			provider, model, err := manager.ResolveSlot(context.Background(), agent.SlotDefinition{Name: slotName}, nil)
+			require.NoError(t, err)
+			assert.Equal(t, "openai", provider.Name())
+			assert.Equal(t, "gpt-5", model.Name)
+			assert.Zero(t, p.listCalls.Load(), "a mission must not call Models")
+		})
+	}
+}
+
+func TestDaemonSlotManager_ExplicitModelNeedsNoList(t *testing.T) {
 	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(createMockAnthropicProvider()))
-
+	p := openAIWithoutWindows()
+	require.NoError(t, registry.RegisterProvider(p))
 	manager := NewDaemonSlotManager(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	// Slot requiring vision but selecting a model without it
 	slot := agent.SlotDefinition{
-		Name: "vision-test",
-		Default: agent.SlotConfig{
-			Provider: "anthropic",
-			Model:    "claude-3-haiku-20240307", // No vision support
-		},
+		Name:    "primary",
+		Default: agent.SlotConfig{Provider: "openai", Model: "any-typed-model"},
+	}
+	_, model, err := manager.ResolveSlot(context.Background(), slot, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "any-typed-model", model.Name, "the saved choice is used as given")
+	assert.Zero(t, p.listCalls.Load())
+}
+
+func TestDaemonSlotManager_ValidateConstraints_ReportedValuesStillFail(t *testing.T) {
+	manager := NewDaemonSlotManager(llm.NewLLMRegistry(), slog.New(slog.DiscardHandler))
+	slot := agent.SlotDefinition{
+		Name: "primary",
 		Constraints: agent.SlotConstraints{
+			MinContextWindow: 100000,
 			RequiredFeatures: []string{agent.FeatureVision},
 		},
 	}
 
-	_, _, err := manager.ResolveSlot(ctx, slot, nil)
+	// An Anthropic model that reports a window below the minimum fails.
+	err := manager.validateConstraints(slot, llm.ModelInfo{Name: "claude-small", ContextWindow: 8192, FeaturesUnreported: true})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "context window")
+
+	// A reported feature list that lacks a required feature fails.
+	err = manager.validateConstraints(slot, llm.ModelInfo{Name: "novision", ContextWindow: 200000, Features: []string{"chat"}})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing required features")
+
+	// Reported and large enough passes. Unreported passes.
+	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "ok", ContextWindow: 200000, Features: []string{agent.FeatureVision}}))
+	require.NoError(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "gpt", ContextWindowUnreported: true, FeaturesUnreported: true}))
+	// A reported zero is not unknown.
+	require.Error(t, manager.validateConstraints(slot, llm.ModelInfo{Name: "zero", Features: []string{agent.FeatureVision}}))
 }
 
 func TestDaemonSlotManager_ResolveSlot_NoProvidersRegistered(t *testing.T) {
@@ -364,25 +395,15 @@ func TestDaemonSlotManager_ResolveSlot_ProviderNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found")
 }
 
-func TestDaemonSlotManager_ResolveSlot_ModelNotFound(t *testing.T) {
-	ctx := context.Background()
-
+func TestDaemonSlotManager_ResolveSlot_NoSavedModelFailsClearly(t *testing.T) {
 	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(createMockAnthropicProvider()))
-
+	require.NoError(t, registry.RegisterProvider(&mockLLMProvider{name: "anthropic", health: types.Healthy("ok")}))
 	manager := NewDaemonSlotManager(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	slot := agent.SlotDefinition{
-		Name: "custom",
-		Default: agent.SlotConfig{
-			Provider: "anthropic",
-			Model:    "nonexistent-model",
-		},
-	}
-
-	_, _, err := manager.ResolveSlot(ctx, slot, nil)
+	_, _, err := manager.ResolveSlot(context.Background(), agent.SlotDefinition{Name: "primary"}, nil)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
+	assert.Contains(t, err.Error(), "no saved default model")
+	assert.Contains(t, err.Error(), "Settings → Providers")
 }
 
 func TestDaemonSlotManager_ResolveSlot_FallbackToAlternativeProvider(t *testing.T) {
@@ -409,8 +430,6 @@ func TestDaemonSlotManager_ResolveSlot_FallbackToAlternativeProvider(t *testing.
 	// Should fall back to OpenAI GPT-4 Turbo (meets constraints)
 	assert.Equal(t, "openai", provider.Name())
 	assert.Equal(t, "gpt-4-turbo", model.Name)
-	assert.GreaterOrEqual(t, model.ContextWindow, 100000)
-	assert.True(t, model.SupportsFeature(agent.FeatureToolUse))
 }
 
 func TestDaemonSlotManager_ValidateSlot_Valid(t *testing.T) {
@@ -444,14 +463,12 @@ func TestDaemonSlotManager_ValidateSlot_Invalid(t *testing.T) {
 
 	manager := NewDaemonSlotManager(registry, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
+	// A slot that names a provider the tenant has not configured is invalid.
 	slot := agent.SlotDefinition{
 		Name: "invalid",
 		Default: agent.SlotConfig{
-			Provider: "openai",
-			Model:    "gpt-4", // 8k context
-		},
-		Constraints: agent.SlotConstraints{
-			MinContextWindow: 500000, // Impossible requirement
+			Provider: "ghost",
+			Model:    "gpt-4",
 		},
 	}
 
@@ -515,8 +532,7 @@ func TestDaemonSlotManager_ApplySlotNameDefaults_UnknownSlot(t *testing.T) {
 
 	// Should resolve to any available model from Anthropic (constraint-based search)
 	assert.Equal(t, "anthropic", provider.Name())
-	// Should pick a model with highest context window (3.5 Sonnet or Opus)
-	assert.Contains(t, []string{"claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"}, model.Name)
+	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name, "the saved default model")
 }
 
 func TestDaemonSlotManager_ResolveSlot_MultipleFeatures(t *testing.T) {
@@ -543,11 +559,7 @@ func TestDaemonSlotManager_ResolveSlot_MultipleFeatures(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, provider)
 
-	// Should resolve to a model with all features
-	assert.True(t, model.SupportsFeature(agent.FeatureToolUse))
-	assert.True(t, model.SupportsFeature(agent.FeatureVision))
-	assert.True(t, model.SupportsFeature(agent.FeatureStreaming))
-	assert.GreaterOrEqual(t, model.ContextWindow, 150000)
+	assert.Equal(t, "claude-3-5-sonnet-20241022", model.Name)
 }
 
 func TestApplySlotNameDefaults_OnlyConstraints(t *testing.T) {
@@ -649,7 +661,8 @@ func TestResolveByConstraints_NoPreferenceOrder(t *testing.T) {
 	// Register providers in a specific order - NOT alphabetical
 	// "zebra" provider first, then "alpha"
 	zebraProvider := &mockLLMProvider{
-		name: "zebra",
+		name:  "zebra",
+		saved: "zebra-model-1",
 		models: []llm.ModelInfo{
 			{
 				Name:          "zebra-model-1",
@@ -663,7 +676,8 @@ func TestResolveByConstraints_NoPreferenceOrder(t *testing.T) {
 	require.NoError(t, registry.RegisterProvider(zebraProvider))
 
 	alphaProvider := &mockLLMProvider{
-		name: "alpha",
+		name:  "alpha",
+		saved: "alpha-model-1",
 		models: []llm.ModelInfo{
 			{
 				Name:          "alpha-model-1",

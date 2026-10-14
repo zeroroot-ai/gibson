@@ -33,7 +33,7 @@ func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConf
 
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api-inference.huggingface.co/v1"
+		baseURL = huggingFaceRouterURL
 	}
 
 	if err := validateLLMEndpoint(baseURL, cfg.AllowPrivateEndpoint); err != nil {
@@ -53,14 +53,19 @@ func newHuggingFaceProviderWithContext(ctx context.Context, cfg llm.ProviderConf
 	return &HuggingFaceProvider{
 		model:  m,
 		config: cfg,
-		lister: &openAIListEndpoint{client: client, provider: "huggingface", baseURL: baseURL, token: token},
+		lister: &openAIListEndpoint{client: client, provider: "huggingface", listURL: openAIModelsURL(baseURL), token: token},
 	}, nil
 }
 
 func (p *HuggingFaceProvider) Name() string { return "huggingface" }
 
-// Models asks the list endpoint of the provider (GET {base}/models) for its
-// models.
+// huggingFaceRouterURL is the OpenAI-compatible root of Hugging Face Inference
+// Providers. GET {root}/models lists the models of all providers, and
+// POST {root}/chat/completions runs a chat. See
+// https://huggingface.co/docs/inference-providers/index
+const huggingFaceRouterURL = "https://router.huggingface.co/v1"
+
+// Models asks the Inference Providers router (GET {base}/models) for its models.
 func (p *HuggingFaceProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	return p.lister.Models(ctx)
 }
@@ -123,3 +128,6 @@ func translateHuggingFaceError(err error) error {
 		return llm.TranslateError("huggingface", err)
 	}
 }
+
+// DefaultModel returns the default model saved for this provider, or "".
+func (p *HuggingFaceProvider) DefaultModel() string { return p.config.DefaultModel }
