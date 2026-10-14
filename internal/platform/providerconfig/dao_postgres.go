@@ -44,18 +44,32 @@ func newProviderConfigDAO(pg pgQuerier) *providerConfigDAO {
 }
 
 // windowColumn reports whether this tenant database has the window column. It
-// reads the version that golang-migrate records, the same row the tenant
-// operator reads (SELECT COALESCE(MAX(version), 0) FROM schema_migrations). A
-// missing table or a failed read counts as not yet migrated, so the daemon
-// never asks for a column it cannot see.
-func (d *providerConfigDAO) windowColumn(ctx context.Context) bool {
-	var version int64
-	if err := d.pg.QueryRow(ctx,
-		`SELECT COALESCE(MAX(version), 0) FROM schema_migrations WHERE NOT dirty`,
-	).Scan(&version); err != nil {
-		return false
+// reads the row golang-migrate records, the same row the tenant operator reads.
+// A missing schema_migrations table (42P01) counts as not yet migrated, so the
+// daemon never asks for a column it cannot see. A dirty version N counts as
+// N-1 applied. Any other read error fails the operation: guessing "not
+// migrated" there would store a window under the wrong model.
+func (d *providerConfigDAO) windowColumn(ctx context.Context) (bool, error) {
+	var (
+		version int64
+		dirty   bool
+	)
+	err := d.pg.QueryRow(ctx,
+		`SELECT version, dirty FROM schema_migrations ORDER BY version DESC LIMIT 1`,
+	).Scan(&version, &dirty)
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return false, nil
+	case errors.As(err, &pgErr) && pgErr.Code == "42P01":
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("read the tenant schema version: %w", err)
 	}
-	return version >= windowColumnMinVersion
+	if dirty {
+		version--
+	}
+	return version >= windowColumnMinVersion, nil
 }
 
 func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *ProviderConfigInput) (*ProviderConfig, error) {
@@ -64,7 +78,11 @@ func (d *providerConfigDAO) insert(ctx context.Context, tenantID string, input *
 
 	window := input.DefaultModelContextWindow
 	var err error
-	if d.windowColumn(ctx) {
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
 		_, err = d.pg.Exec(ctx,
 			`INSERT INTO provider_configs (id, name, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
@@ -111,7 +129,11 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 	var createdAt, updatedAt time.Time
 
 	var err error
-	if d.windowColumn(ctx) {
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
 		err = d.pg.QueryRow(ctx,
 			`SELECT id, type, default_model, default_model_context_window, is_default, enabled, capabilities, default_embedding_model, created_at, updated_at
 			 FROM provider_configs WHERE name = $1`, name,
@@ -148,7 +170,11 @@ func (d *providerConfigDAO) get(ctx context.Context, tenantID, name string) (*Pr
 
 func (d *providerConfigDAO) list(ctx context.Context, tenantID string) ([]*ProviderConfig, error) {
 	windowSelect := "0"
-	if d.windowColumn(ctx) {
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
 		windowSelect = "default_model_context_window"
 	}
 	rows, err := d.pg.Query(ctx,
@@ -199,7 +225,11 @@ func (d *providerConfigDAO) update(ctx context.Context, tenantID, name string, i
 	var createdAt time.Time
 	var err error
 	window := input.DefaultModelContextWindow
-	if d.windowColumn(ctx) {
+	hasWindow, verr := d.windowColumn(ctx)
+	if verr != nil {
+		return nil, verr
+	}
+	if hasWindow {
 		err = d.pg.QueryRow(ctx,
 			`UPDATE provider_configs
 			 SET type = $1, default_model = $2, default_model_context_window = $3, is_default = $4, enabled = $5, capabilities = $6, default_embedding_model = $7, updated_at = $8

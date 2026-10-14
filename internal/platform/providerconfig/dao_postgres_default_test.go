@@ -82,6 +82,7 @@ func TestDAO_SetDefault_WritesTheColumnOnly(t *testing.T) {
 // shaped by the columns that the statement names.
 type versionQuerier struct {
 	version    int64
+	dirty      bool
 	versionErr error
 	queries    []string
 	execs      []string
@@ -111,6 +112,7 @@ func (q *versionQuerier) QueryRow(_ context.Context, sql string, _ ...any) pgx.R
 				return q.versionErr
 			}
 			*(dest[0].(*int64)) = q.version
+			*(dest[1].(*bool)) = q.dirty
 			return nil
 		}}
 	}
@@ -151,7 +153,8 @@ func TestDAO_WindowColumnIsReadOnlyFromMigration016(t *testing.T) {
 		{"version 15 has no column", 15, nil, false, 0},
 		{"version 16 has the column", 16, nil, true, 200000},
 		{"a later version has the column", 17, nil, true, 200000},
-		{"no schema_migrations table counts as not migrated", 0, errors.New(`relation "schema_migrations" does not exist`), false, 0},
+		{"no schema_migrations table counts as not migrated", 0, &pgconn.PgError{Code: "42P01"}, false, 0},
+		{"an empty schema_migrations table counts as not migrated", 0, pgx.ErrNoRows, false, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,5 +196,31 @@ func TestDAO_WindowColumnIsReadOnlyFromMigration016(t *testing.T) {
 				t.Errorf("insert reports window %d, want %d", created.DefaultModelContextWindow, wantStored)
 			}
 		})
+	}
+}
+
+// m1 of the fourth review: a dirty version N counts as N-1 applied, and any
+// read error other than a missing table fails the operation. Guessing "not
+// migrated" on an error would store a window under the wrong model.
+func TestDAO_WindowColumnDirtyAndReadErrors(t *testing.T) {
+	dirty := &versionQuerier{version: 16, dirty: true, rowWindow: 200000}
+	if _, err := newProviderConfigDAO(dirty).get(context.Background(), "acme", "p"); err != nil {
+		t.Fatalf("get on a dirty 16: %v", err)
+	}
+	if strings.Contains(dirty.queries[0], "default_model_context_window") {
+		t.Errorf("a dirty 16 is 15 applied, so the window column must not be named:\n%s", dirty.queries[0])
+	}
+
+	broken := &versionQuerier{versionErr: errors.New("connection reset")}
+	d := newProviderConfigDAO(broken)
+	if _, err := d.get(context.Background(), "acme", "p"); err == nil {
+		t.Fatal("get must fail when the schema version cannot be read")
+	}
+	in := &ProviderConfigInput{Name: "p", Type: "anthropic", DefaultModel: "claude-x", DefaultModelContextWindow: 200000}
+	if _, err := d.insert(context.Background(), "acme", in); err == nil {
+		t.Fatal("insert must fail when the schema version cannot be read")
+	}
+	if len(broken.execs) != 0 {
+		t.Fatalf("no write may run after a failed version read, got %v", broken.execs)
 	}
 }
