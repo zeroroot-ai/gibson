@@ -403,6 +403,9 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 	if err != nil {
 		return nil, err
 	}
+	if s.idpAdminClient == nil {
+		return nil, status.Error(codes.Unavailable, "identity provider not configured")
+	}
 
 	row, err := s.signupVerifications.RejectRegistration(ctx, req.GetRegistrationId(), decidedBy)
 	switch {
@@ -432,7 +435,7 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 // existed has its account in the platform org: that org stays, and the
 // account stays deactivated, as before.
 func (s *DaemonServer) dropRejectedWorkspace(ctx context.Context, row SignupVerification) {
-	if s.idpAdminClient == nil || row.OwnerUserID == "" {
+	if row.OwnerUserID == "" {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)

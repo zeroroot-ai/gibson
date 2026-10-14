@@ -197,24 +197,6 @@ func TestSyncZitadel_AddMember_HappyPath(t *testing.T) {
 	}
 }
 
-// noRoleSyncerMember builds the fixture the next several tests share: an
-// email-only TenantMember (no ZitadelUserID yet), used to exercise the
-// no-ZitadelUserID-yet branch's non-happy-path returns.
-func noRoleSyncerMember(name string) *gibsonv1alpha1.TenantMember {
-	return &gibsonv1alpha1.TenantMember{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:       name,
-			Namespace:  "default",
-			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
-		},
-		Spec: gibsonv1alpha1.TenantMemberSpec{
-			Email:     name + "@acme.com",
-			Role:      gibsonv1alpha1.MemberRoleAdmin,
-			TenantRef: localRef(),
-		},
-	}
-}
-
 // TestSyncZitadel_AlreadyInZitadel_Idempotent: ZitadelMembershipID already
 // set → no Zitadel calls, no error.
 // TestSyncZitadel_MemberWithNoAccountWaits: the operator creates no user

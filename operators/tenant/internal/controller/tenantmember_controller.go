@@ -365,7 +365,9 @@ func (r *TenantMemberReconciler) zitadelOrgID(ctx context.Context, tm *gibsonv1a
 
 // tenantOrg returns the Zitadel org of the parent Tenant and whether that
 // Tenant is gone or on its way out. A missing Tenant reads as ("", true, nil).
-func (r *TenantMemberReconciler) tenantOrg(ctx context.Context, tm *gibsonv1alpha1.TenantMember) (string, bool, error) {
+func (r *TenantMemberReconciler) tenantOrg(
+	ctx context.Context, tm *gibsonv1alpha1.TenantMember,
+) (orgID string, deleting bool, err error) {
 	var tenant gibsonv1alpha1.Tenant
 	if err := r.Get(ctx, types.NamespacedName{Name: tm.Spec.TenantRef.Name}, &tenant); err != nil {
 		if apierrors.IsNotFound(err) {
