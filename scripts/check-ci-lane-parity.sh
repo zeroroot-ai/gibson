@@ -40,6 +40,12 @@
 #     queue branch nobody looks at. A new queue gate cannot be added without
 #     also being reported on.
 #
+#  4. Baseline gates run in both lanes. A declared exception does not cover a
+#     job that runs one of BOTH_LANES (the dead-code and unwired baselines). A
+#     one-lane job is skipped in the other lane, and the aggregator reads the
+#     skip as a pass, so the merged commit was never measured (gibson#807
+#     condition 7).
+#
 # HOW TO DECLARE AN EXCEPTION
 # ---------------------------
 # Put a `# lane-exception: <reason>` comment in the contiguous comment block
@@ -66,6 +72,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 WORKFLOW_DIR="${LANE_PARITY_WORKFLOW_DIR:-${REPO_ROOT}/.github/workflows}"
 
 GUARD_NAME="check-ci-lane-parity"
+# rule 4: commands that must run in a both-lanes job, exception or not.
+BOTH_LANES=("make lint-deadcode" "make lint-unwired")
 MARKER="lane-exception:"
 REPORTER="${WORKFLOW_DIR}/merge-queue-eviction-report.yml"
 
@@ -195,7 +203,49 @@ on:
 EOF
     expect_fail "rule 3"
 
-    log_info "SELFTEST PASSED (rules 1, 2 and 3)."
+    log_info "Self-test: rule 4 — a declared one-lane job that runs a baseline gate must fail..."
+    write_clean_tree
+    cat >"${TMPDIR_SELFTEST}/dual-lane.yml" <<'EOF'
+name: dual-lane
+on:
+  pull_request:
+  merge_group:
+jobs:
+  lint:
+    # lane-exception: synthetic fixture.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: make lint-deadcode
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+EOF
+    expect_fail "rule 4"
+
+    log_info "Self-test: rule 4 — the same gate in a both-lanes job must pass..."
+    write_clean_tree
+    cat >"${TMPDIR_SELFTEST}/dual-lane.yml" <<'EOF'
+name: dual-lane
+on:
+  pull_request:
+  merge_group:
+jobs:
+  lint:
+    # lane-exception: synthetic fixture.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - run: make lint
+  deadcode:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make lint-deadcode
+EOF
+    expect_pass "rule 4 both lanes"
+
+    log_info "SELFTEST PASSED (rules 1, 2, 3 and 4)."
     exit 0
 fi
 
@@ -293,6 +343,16 @@ for wf in "${WORKFLOWS[@]}"; do
         fi
 
         if has_marker_above "${wf}" "${lineno}"; then
+            # --- rule 4: a declared one-lane job may not run a baseline gate
+            job_end="$(awk -v s="${lineno}" 'NR>s && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {print NR; exit}' "${wf}")"
+            job_end="${job_end:-$(wc -l <"${wf}")}"
+            for cmd in "${BOTH_LANES[@]}"; do
+                if sed -n "${lineno},${job_end}p" "${wf}" | grep -qF -- "${cmd}"; then
+                    log_err "${rel}:${lineno}: this one-lane job runs '${cmd}'. A baseline gate"
+                    log_err "  must run in both lanes: the other lane skips it, and a skip reads as a pass."
+                    VIOLATIONS=$((VIOLATIONS + 1))
+                fi
+            done
             continue
         fi
 

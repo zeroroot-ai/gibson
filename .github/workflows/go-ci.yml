@@ -304,6 +304,26 @@ jobs:
       - name: Lint (blocking, new-from-merge-base)
         run: make lint LINT_BASE=origin/${{ github.base_ref || 'main' }}
 
+  # ---- dead-code baseline (both lanes) ----
+  # gibson#807 condition 7: this gate ran inside the pull_request-only `lint`
+  # job, so the merge queue skipped it and `queue-gate` read the skip as a
+  # pass. It measures the whole module against .deadcode-baseline, not a
+  # diff, so the queue run checks the commit that lands.
+  deadcode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Restore the pinned lint tool binaries
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bin/tools
+          key: lint-tools-${{ runner.os }}-${{ hashFiles('Makefile', 'go.mod') }}
+
       - name: Dead-code gate (blocking, baselined)
         run: make lint-deadcode
 
@@ -559,6 +579,7 @@ jobs:
       - heavy
       - vet-tags
       - lint
+      - deadcode
       - coverage
       - critical-paths
       - integration
