@@ -117,7 +117,14 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 	// this address. The approval rung's proof is the administrator, not the
 	// mailbox, so claiming a verification the daemon did not perform would be
 	// a lie told to the identity provider.
+	// The owner is born inside the tenant org (gibson#1188), the same as in
+	// Signup. The tenant-operator adopts the org by its name at approval.
+	orgID, err := s.createSignupOrg(ctx, "Register", req.GetAttemptId(), req.GetWorkspaceName())
+	if err != nil {
+		return nil, err
+	}
 	created, err := s.idpAdminClient.CreateHumanUser(ctx, idp.CreateHumanUserRequest{
+		OrgID:         orgID,
 		Email:         email,
 		GivenName:     req.GetOwnerFirstName(),
 		FamilyName:    req.GetOwnerLastName(),
@@ -128,6 +135,7 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 		// NEVER log req.Password.
 		s.logger.ErrorContext(ctx, "Register: create owner user failed",
 			"attempt_id", req.GetAttemptId(), "error", err.Error())
+		s.dropSignupOrg(ctx, "Register", req.GetAttemptId(), orgID)
 		switch {
 		case errors.Is(err, idp.ErrAlreadyExists):
 			return nil, status.Error(codes.AlreadyExists,
@@ -139,16 +147,17 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 		}
 	}
 
-	if derr := s.idpAdminClient.DeactivateHumanUser(ctx, idp.HumanUserStateRequest{UserID: created.UserID}); derr != nil {
+	if derr := s.idpAdminClient.DeactivateHumanUser(ctx, ownerRef(orgID, created.UserID)); derr != nil {
 		s.logger.ErrorContext(ctx, "Register: deactivating the new owner failed; deleting the account",
 			"attempt_id", req.GetAttemptId(), "error", derr.Error())
-		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, idp.HumanUserStateRequest{UserID: created.UserID}); xerr != nil {
+		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, created.UserID)); xerr != nil {
 			// An account that can sign in and that nobody approved is the one
 			// outcome this rung must not produce. Say so at error level and
 			// name the account, so an operator can remove it by hand.
 			s.logger.ErrorContext(ctx, "Register: could not remove an owner account that stayed active; deactivate or delete it by hand",
 				"owner_user_id", created.UserID, "error", xerr.Error())
 		}
+		s.dropSignupOrg(ctx, "Register", req.GetAttemptId(), orgID)
 		return nil, status.Error(codes.Internal, "failed to register")
 	}
 
@@ -166,10 +175,11 @@ func (s *DaemonServer) Register(ctx context.Context, req *tenantv1.RegisterReque
 			"attempt_id", req.GetAttemptId(), "error", err.Error())
 		// The account exists and cannot sign in, but no queue entry names it,
 		// so no administrator will ever decide it. Remove it.
-		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, idp.HumanUserStateRequest{UserID: created.UserID}); xerr != nil {
+		if xerr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, created.UserID)); xerr != nil {
 			s.logger.ErrorContext(ctx, "Register: could not remove the account of a registration that was never recorded",
 				"owner_user_id", created.UserID, "error", xerr.Error())
 		}
+		s.dropSignupOrg(ctx, "Register", req.GetAttemptId(), orgID)
 		return nil, status.Error(codes.Unavailable, "registration is temporarily unavailable; please try again shortly")
 	}
 

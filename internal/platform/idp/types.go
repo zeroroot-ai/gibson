@@ -86,10 +86,10 @@ type ServiceAccount struct {
 // SECURITY: Password is forwarded to the IdP request body only and is NEVER
 // logged or included in error messages.
 type CreateHumanUserRequest struct {
-	// OrgID is the IdP organization id the user is created in. Empty selects
-	// the admin client's default (platform) org — the founding-owner user is
-	// provisioned in the platform org; per-tenant org membership is added later
-	// by the operator once the tenant's org exists.
+	// OrgID is the IdP organization id the user is created in: the tenant org
+	// that CreateOrganization returned. Required. A person belongs to one org
+	// for life and the token names that org, so a founding owner created in
+	// the platform org can never reach the workspace (gibson#1188).
 	OrgID string
 
 	// Email is the user's email address (also the login name). Required.
@@ -129,10 +129,10 @@ type SetHumanPasswordRequest struct {
 
 // HumanUserStateRequest names one human user whose sign-in state changes.
 //
-// OrgID selects the IdP organization the user lives in; empty means the admin
-// client's configured org. A founding owner created during registration lives
-// in the daemon's admin org until the tenant-operator provisions the tenant's
-// own org, so the caller passes what it knows.
+// OrgID selects the IdP organization the user lives in; empty means the
+// implementation looks the org up from the user id. A founding owner lives in
+// the tenant org from the start (gibson#1188), so the caller passes what it
+// knows.
 type HumanUserStateRequest struct {
 	OrgID  string
 	UserID string

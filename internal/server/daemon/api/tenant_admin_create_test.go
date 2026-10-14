@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -94,6 +95,13 @@ type fakeIDPClient struct {
 	// address never reaches a credential write.
 	createHumanFn   func(ctx context.Context, req idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error)
 	createHumanReqs []idp.CreateHumanUserRequest
+	// Tenant org recording (gibson#1188). createOrgFn, when set, drives
+	// CreateOrganization; otherwise each call returns "org-<n>". createdOrgs
+	// records the names in call order and deletedOrgs the ids removed, so a
+	// test proves the org is made before the owner and removed on a failure.
+	createOrgFn func(ctx context.Context, name string) (string, error)
+	createdOrgs []string
+	deletedOrgs []string
 
 	// findUserFn drives FindUserIDByEmail (the read-only directory lookup that
 	// selects which signup email to send). Nil means "no such user".
@@ -197,6 +205,19 @@ func (f *fakeIDPClient) CreateHumanUser(ctx context.Context, req idp.CreateHuman
 	}
 	return idp.CreateHumanUserResult{UserID: "user-1"}, nil
 }
+func (f *fakeIDPClient) CreateOrganization(ctx context.Context, name string) (string, error) {
+	f.createdOrgs = append(f.createdOrgs, name)
+	if f.createOrgFn != nil {
+		return f.createOrgFn(ctx, name)
+	}
+	return fmt.Sprintf("org-%d", len(f.createdOrgs)), nil
+}
+
+func (f *fakeIDPClient) DeleteOrganization(_ context.Context, orgID string) error {
+	f.deletedOrgs = append(f.deletedOrgs, orgID)
+	return nil
+}
+
 func (f *fakeIDPClient) FindUserIDByEmail(ctx context.Context, email string) (string, error) {
 	f.findUserCalls = append(f.findUserCalls, email)
 	if f.findUserFn != nil {

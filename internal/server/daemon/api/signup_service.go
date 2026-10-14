@@ -452,11 +452,24 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 		return nil, workspaceNameTaken(signupNameTakenMessage)
 	}
 
+	// ---- the tenant org ----
+	// The owner is born inside the tenant org (gibson#1188). A person belongs
+	// to one Zitadel org for life, and ext-authz reads the tenant from the org
+	// in the token (ADR-0093 decision 4), so an owner made anywhere else never
+	// reaches the workspace. Zitadel keeps org names unique, so a taken name
+	// stops here, before any account exists. The tenant-operator adopts the
+	// org by this name when it provisions the tenant (identity.EnsureOrg).
+	orgID, err := s.createSignupOrg(ctx, "Signup", req.GetAttemptId(), row.WorkspaceName)
+	if err != nil {
+		return nil, err
+	}
+
 	// ---- create the founding-owner user ----
 	// EmailVerified is true because the daemon verified it: this call is only
 	// reachable after the address redeemed a token the daemon sent to it. The
 	// claim made to the IdP is one we can back.
 	result, err := s.idpAdminClient.CreateHumanUser(ctx, idp.CreateHumanUserRequest{
+		OrgID:         orgID,
 		Email:         row.Email,
 		GivenName:     row.OwnerFirstName,
 		FamilyName:    row.OwnerLastName,
@@ -470,6 +483,7 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			"attempt_id", req.GetAttemptId(),
 			"error", err.Error(),
 		)
+		s.dropSignupOrg(ctx, "Signup", req.GetAttemptId(), orgID)
 		switch {
 		case errors.Is(err, idp.ErrAlreadyExists):
 			// The address acquired an account between the verification email
@@ -540,10 +554,11 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 			// Another signup took the name after the check above. The owner
 			// account of this call has no workspace, so delete it: the person
 			// can then start again with the same address.
-			if derr := s.idpAdminClient.DeleteHumanUser(ctx, idp.HumanUserStateRequest{UserID: result.UserID}); derr != nil {
+			if derr := s.idpAdminClient.DeleteHumanUser(ctx, ownerRef(orgID, result.UserID)); derr != nil {
 				s.logger.ErrorContext(ctx, "Signup: could not delete the owner of a workspace name that was taken",
 					"attempt_id", req.GetAttemptId(), "error", derr.Error())
 			}
+			s.dropSignupOrg(ctx, "Signup", req.GetAttemptId(), orgID)
 			return nil, workspaceNameTaken(signupNameTakenMessage)
 		}
 		return nil, status.Error(codes.Internal, "failed to complete signup")
@@ -583,6 +598,42 @@ func (s *DaemonServer) Signup(ctx context.Context, req *tenantv1.SignupRequest) 
 // in use. The name comes from the verification row, so the person starts
 // again with another name.
 const signupNameTakenMessage = "another workspace already has this name; start the signup again with another name"
+
+// createSignupOrg makes the tenant org that the founding owner is created in
+// (gibson#1188). A name the IdP already holds is a taken workspace name. The
+// caller passes its RPC name for the log line.
+func (s *DaemonServer) createSignupOrg(ctx context.Context, rpc, attemptID, workspaceName string) (string, error) {
+	orgID, err := s.idpAdminClient.CreateOrganization(ctx, workspaceName)
+	if err == nil {
+		return orgID, nil
+	}
+	s.logger.ErrorContext(ctx, rpc+": create tenant org failed",
+		"attempt_id", attemptID, "error", err.Error())
+	switch {
+	case errors.Is(err, idp.ErrAlreadyExists):
+		return "", workspaceNameTaken(signupNameTakenMessage)
+	case errors.Is(err, idp.ErrUnreachable):
+		return "", status.Error(codes.Unavailable, "identity provider unreachable")
+	default:
+		return "", status.Error(codes.Internal, "failed to create the workspace")
+	}
+}
+
+// ownerRef names the founding owner for a sign-in-state call, scoped to the
+// tenant org it lives in.
+func ownerRef(orgID, userID string) idp.HumanUserStateRequest {
+	return idp.HumanUserStateRequest{OrgID: orgID, UserID: userID}
+}
+
+// dropSignupOrg removes the tenant org of a signup that failed after the org
+// was made, so the workspace name is free again. A failure here is logged:
+// the signup already failed, and the org is removed by hand.
+func (s *DaemonServer) dropSignupOrg(ctx context.Context, rpc, attemptID, orgID string) {
+	if err := s.idpAdminClient.DeleteOrganization(ctx, orgID); err != nil {
+		s.logger.ErrorContext(ctx, rpc+": could not remove the tenant org of a failed signup; remove it by hand",
+			"attempt_id", attemptID, "org_id", orgID, "error", err.Error())
+	}
+}
 
 // stepURLFor returns the step URL when the signup waits for the step.
 func stepURLFor(hold *signupStepHold, u string) string {

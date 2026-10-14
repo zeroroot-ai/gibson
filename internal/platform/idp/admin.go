@@ -86,6 +86,24 @@ type AdminClient interface {
 	// address has been verified.
 	CreateHumanUser(ctx context.Context, req CreateHumanUserRequest) (CreateHumanUserResult, error)
 
+	// CreateOrganization creates the IdP organization of a new tenant and
+	// returns its id. The self-serve signup and the registration by approval
+	// call it BEFORE CreateHumanUser, so the founding owner is born inside the
+	// tenant org (gibson#1188). A person belongs to one org for life, and the
+	// tenant of a signed-in person is the org in the token (ADR-0093), so an
+	// owner made anywhere else can never reach the workspace.
+	//
+	// CREATE-ONLY. The org name is the workspace name, and the IdP keeps org
+	// names unique, so a name that is already taken returns ErrAlreadyExists.
+	// The tenant-operator adopts the org by that name when it provisions the
+	// tenant (operators/tenant/internal/identity.EnsureOrg).
+	CreateOrganization(ctx context.Context, name string) (orgID string, err error)
+
+	// DeleteOrganization removes an organization that CreateOrganization made
+	// and that no tenant will use, because a later step of the same signup
+	// failed. An org that is already gone is success.
+	DeleteOrganization(ctx context.Context, orgID string) error
+
 	// EnsureHumanUserNoPassword finds or creates a human user in orgID with NO
 	// password (ADR-0093 decisions 6/8). The one setup-link mechanism this
 	// interface offers — CreateSetupInviteCode — is how the person ever gets

@@ -492,6 +492,45 @@ func (c *Client) CreateHumanUser(ctx context.Context, req idp.CreateHumanUserReq
 	return idp.CreateHumanUserResult{}, mapError(err, "CreateHumanUser:create")
 }
 
+// CreateOrganization makes the tenant org through Zitadel v2
+// (POST /v2/organizations), the same call the tenant-operator makes. Zitadel
+// keeps org names unique, so a 409 maps to idp.ErrAlreadyExists and the
+// caller refuses the workspace name. Create-only: no lookup follows a
+// conflict, because an org this signup did not make is not its org to adopt.
+func (c *Client) CreateOrganization(ctx context.Context, name string) (string, error) {
+	if name == "" {
+		return "", fmt.Errorf("%w: CreateOrganization requires a name", idp.ErrUpstream)
+	}
+	var resp struct {
+		OrganizationID string `json:"organizationId"`
+	}
+	body := map[string]interface{}{"name": name}
+	if err := c.doRequest(ctx, http.MethodPost, "/v2/organizations", body, "", &resp); err != nil {
+		return "", mapError(err, "CreateOrganization")
+	}
+	if resp.OrganizationID == "" {
+		return "", fmt.Errorf("%w: CreateOrganization: response missing organizationId", idp.ErrUpstream)
+	}
+	return resp.OrganizationID, nil
+}
+
+// DeleteOrganization removes an org through Zitadel v2
+// (DELETE /v2/organizations/{id}). Not found is success.
+func (c *Client) DeleteOrganization(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return fmt.Errorf("%w: DeleteOrganization requires an org id", idp.ErrUpstream)
+	}
+	err := c.doRequest(ctx, http.MethodDelete, "/v2/organizations/"+url.PathEscape(orgID), nil, "", nil)
+	if err == nil {
+		return nil
+	}
+	mapped := mapError(err, "DeleteOrganization")
+	if errors.Is(mapped, idp.ErrNotFound) {
+		return nil
+	}
+	return mapped
+}
+
 // userServiceV2 is Zitadel v2's UserService, reached over the same
 // Connect-unary-over-HTTP convention as every other call in this file
 // (doRequest): a POST whose path is "/<package>.<Service>/<Method>" and
