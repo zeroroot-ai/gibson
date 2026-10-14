@@ -5,6 +5,7 @@ package identity
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -26,6 +27,8 @@ type fakeAuthorizer struct {
 	// capability tests (gibson#628). When nil, Check returns the legacy
 	// "not implemented" error so existing tests keep their behaviour.
 	checkFn func(user, relation, object string) (bool, error)
+	// listUsersOfTypeFn backs ListUsersOfType, the typed principal lookup.
+	listUsersOfTypeFn func(objectType, object, relation, userType string) ([]string, error)
 }
 
 func (f *fakeAuthorizer) Check(_ context.Context, user, relation, object string) (bool, error) {
@@ -260,11 +263,14 @@ func TestWhoAmI_TargetNotFound(t *testing.T) {
 	}
 }
 
-// ListUsersOfType is unused by this package's tests. It exists because the
-// method is on authz.Authorizer — a gate reached by type assertion was
-// silently skipped by every double that did not implement it.
-func (f *fakeAuthorizer) ListUsersOfType(context.Context, string, string, string, string) ([]string, error) {
-	return nil, nil
+// ListUsersOfType backs the typed principal lookup. It is on authz.Authorizer
+// because a gate reached by type assertion was silently skipped by every
+// double that did not implement it. With no function set it lists nothing.
+func (f *fakeAuthorizer) ListUsersOfType(_ context.Context, objectType, object, relation, userType string) ([]string, error) {
+	if f.listUsersOfTypeFn == nil {
+		return nil, nil
+	}
+	return f.listUsersOfTypeFn(objectType, object, relation, userType)
 }
 
 // strictFGA mimics OpenFGA's request validation: a user that is not
@@ -429,5 +435,111 @@ func TestNewServer_RefusesAMissingDependency(t *testing.T) {
 				t.Fatalf("NewServer(%s) = %v, %v; want nil and an error", name, srv, err)
 			}
 		})
+	}
+}
+
+// TestFGALookup_TypedPrincipalReadsItsTenant: a machine principal holds its
+// tenant as the user of its belongs_to relation, (tenant:<id>, belongs_to,
+// <type>:<id>). The lookup lists the tenants on that relation of the
+// principal (gibson#1162). The old query asked for tenant#belongs_to, which
+// the model does not have, and FGA refused it.
+func TestFGALookup_TypedPrincipalReadsItsTenant(t *testing.T) {
+	for _, tc := range []struct {
+		id   string
+		typ  string
+		kind identitypb.PrincipalKind
+	}{
+		{"plugin_principal:github.primary", "plugin_principal", identitypb.PrincipalKind_PRINCIPAL_KIND_PLUGIN},
+		{"agent_principal:a1", "agent_principal", identitypb.PrincipalKind_PRINCIPAL_KIND_AGENT},
+		{"tool_principal:t1", "tool_principal", identitypb.PrincipalKind_PRINCIPAL_KIND_TOOL},
+	} {
+		var got [4]string
+		lk := &FGALookup{Authorizer: &fakeAuthorizer{
+			listObjectsFn: func(_, _, _ string) ([]string, error) {
+				return nil, errors.New("a typed principal must not be read with ListObjects")
+			},
+			listUsersOfTypeFn: func(objectType, object, relation, userType string) ([]string, error) {
+				got = [4]string{objectType, object, relation, userType}
+				return []string{"tenant:primary"}, nil
+			},
+		}}
+		rec, err := lk.Resolve(context.Background(), tc.id)
+		if err != nil {
+			t.Fatalf("%s: Resolve: %v", tc.id, err)
+		}
+		if want := [4]string{tc.typ, tc.id, "belongs_to", "tenant"}; got != want {
+			t.Errorf("%s: ListUsersOfType%v, want %v", tc.id, got, want)
+		}
+		if rec.TenantID != "primary" || rec.PrincipalID != tc.id || rec.Kind != tc.kind {
+			t.Errorf("%s: record = %+v", tc.id, rec)
+		}
+	}
+}
+
+// TestFGALookup_NoTenantIsNotFound: a principal with no tenant tuple is
+// not found, and an FGA error is an error.
+func TestFGALookup_NoTenantIsNotFound(t *testing.T) {
+	empty := &FGALookup{Authorizer: &fakeAuthorizer{}}
+	if _, err := empty.Resolve(context.Background(), "plugin_principal:gone.primary"); !errors.Is(err, ErrPrincipalNotFound) {
+		t.Errorf("err = %v, want ErrPrincipalNotFound", err)
+	}
+	broken := &FGALookup{Authorizer: &fakeAuthorizer{
+		listUsersOfTypeFn: func(_, _, _, _ string) ([]string, error) { return nil, errors.New("fga down") },
+	}}
+	if _, err := broken.Resolve(context.Background(), "plugin_principal:x.primary"); err == nil ||
+		errors.Is(err, ErrPrincipalNotFound) {
+		t.Errorf("err = %v, want the FGA error", err)
+	}
+}
+
+// TestFGALookup_QueriesExistInTheModel reads the embedded model: each
+// relation the lookup asks for exists on its type and admits the user type
+// the lookup asks for. FGA refuses a query on a relation the model does not
+// have, which is how the old query failed on every call (gibson#1162).
+func TestFGALookup_QueriesExistInTheModel(t *testing.T) {
+	raw, err := authz.ModelJSON()
+	if err != nil {
+		t.Fatalf("ModelJSON: %v", err)
+	}
+	var model struct {
+		TypeDefinitions []struct {
+			Type     string `json:"type"`
+			Metadata struct {
+				Relations map[string]struct {
+					DirectlyRelatedUserTypes []struct {
+						Type string `json:"type"`
+					} `json:"directly_related_user_types"`
+				} `json:"relations"`
+			} `json:"metadata"`
+		} `json:"type_definitions"`
+	}
+	if err := json.Unmarshal([]byte(raw), &model); err != nil {
+		t.Fatalf("parse model: %v", err)
+	}
+	if len(model.TypeDefinitions) == 0 {
+		t.Fatal("the model parsed to no type definitions: this check would pass on nothing")
+	}
+	admits := func(objectType, relation, userType string) bool {
+		for _, td := range model.TypeDefinitions {
+			if td.Type != objectType {
+				continue
+			}
+			for _, u := range td.Metadata.Relations[relation].DirectlyRelatedUserTypes {
+				if u.Type == userType {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for _, q := range [][3]string{
+		{"agent_principal", "belongs_to", "tenant"},
+		{"tool_principal", "belongs_to", "tenant"},
+		{"plugin_principal", "belongs_to", "tenant"},
+		{"tenant", "member", "user"},
+	} {
+		if !admits(q[0], q[1], q[2]) {
+			t.Errorf("the model has no %s#%s that admits %s, which FGALookup asks for", q[0], q[1], q[2])
+		}
 	}
 }
