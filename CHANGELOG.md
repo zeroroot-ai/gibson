@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.160.4](https://github.com/zeroroot-ai/gibson/compare/v0.160.3...v0.160.4) (2026-10-14)
+
+
+### Bug Fixes
+
+* **belief:** move urllib3 in the dev lock to 2.8.0 ([#1146](https://github.com/zeroroot-ai/gibson/issues/1146)) ([f314f17](https://github.com/zeroroot-ai/gibson/commit/f314f17a5f5d69b1818c0cf5f0d77fe761e00edb))
+* **ci:** a failed change filter fails the gate instead of skipping it ([#1179](https://github.com/zeroroot-ai/gibson/issues/1179)) ([54d6d76](https://github.com/zeroroot-ai/gibson/commit/54d6d760ce967c03787255ef78f2b6272a71d86a))
+* **ci:** the dead-code baseline gate runs in the merge queue too ([#1182](https://github.com/zeroroot-ai/gibson/issues/1182)) ([27283a0](https://github.com/zeroroot-ai/gibson/commit/27283a0e1ec48fdcb6fb0b7b94357102b9347453))
+* **ci:** the proto field consumer scan runs in the merge gate, and two dead fields are deleted (ADR-0094) ([#1171](https://github.com/zeroroot-ai/gibson/issues/1171)) ([8ee9655](https://github.com/zeroroot-ai/gibson/commit/8ee96553300cdeac65b98617077b7e9b8690a299)), closes [#1166](https://github.com/zeroroot-ai/gibson/issues/1166)
+* **connector-operator:** let the proxy fetch and trust the issuer keys ([#1152](https://github.com/zeroroot-ai/gibson/issues/1152)) ([277b708](https://github.com/zeroroot-ai/gibson/commit/277b7088a529fc643c2d8a6d0e3514b0b50a50cf))
+* **connector-operator:** the MCP server pod mounts no API token ([#1181](https://github.com/zeroroot-ai/gibson/issues/1181)) ([cc49956](https://github.com/zeroroot-ai/gibson/commit/cc49956ea62b5a6ac4a1fc728477a857b01c593d))
+* **e2e:** the runner may enable a catalog plugin for its tenant ([#1161](https://github.com/zeroroot-ai/gibson/issues/1161)) ([90d8b6c](https://github.com/zeroroot-ai/gibson/commit/90d8b6c9f2b9720c94afdab8589c35b6e6ceb578))
+* **engine:** delete the three deprecated fields and their dead paths (ADR-0027) ([#1168](https://github.com/zeroroot-ai/gibson/issues/1168)) ([a3a9870](https://github.com/zeroroot-ai/gibson/commit/a3a9870c915ac2894ac2e4b3faaf28b527d22015))
+* **exit:** the tenant_operator suite checks the chart-installed operator running the checkout build ([#1148](https://github.com/zeroroot-ai/gibson/issues/1148)) ([73c6578](https://github.com/zeroroot-ai/gibson/commit/73c65785078635f79b3c39256c073bc234d12595))
+* **gibsoncheck:** every registered analyzer runs in CI ([#1183](https://github.com/zeroroot-ai/gibson/issues/1183)) ([31c82e2](https://github.com/zeroroot-ai/gibson/commit/31c82e27366d2b1a5eb29123442a776a15aedb64))
+* **guards:** four fail-open gibson guards can fail now ([#1186](https://github.com/zeroroot-ai/gibson/issues/1186)) ([f5b7007](https://github.com/zeroroot-ai/gibson/commit/f5b70070589775882871f8103fffa935d9417c26))
+* **harness:** the discovery of a mission tool node lands in the World of the mission's tenant ([#1147](https://github.com/zeroroot-ai/gibson/issues/1147)) ([495e659](https://github.com/zeroroot-ai/gibson/commit/495e6593f5558009cb0f2c6eab608a521955b5de))
+* **identity:** read a principal's tenant from its belongs_to tuple ([#1163](https://github.com/zeroroot-ai/gibson/issues/1163)) ([6227805](https://github.com/zeroroot-ai/gibson/commit/622780533a80829f098aaab27274c47b5ca6948e)), closes [#1162](https://github.com/zeroroot-ai/gibson/issues/1162)
+* **signup:** the founding owner is born inside the tenant org, and gets its role ([#1189](https://github.com/zeroroot-ai/gibson/issues/1189)) ([95bd9cc](https://github.com/zeroroot-ai/gibson/commit/95bd9cc159b7129037de883c488f90fd70e3d031))
+* **tenant-operator:** a catalog plugin reaches an in-cluster edge ([#1175](https://github.com/zeroroot-ai/gibson/issues/1175)) ([df94452](https://github.com/zeroroot-ai/gibson/commit/df9445210903a567d4d298c1ad57cde7a8bf64ab)), closes [#1172](https://github.com/zeroroot-ai/gibson/issues/1172)
+* **tenant-operator:** build the last tenant backup from the Schedule ([#1178](https://github.com/zeroroot-ai/gibson/issues/1178)) ([ebf3e7c](https://github.com/zeroroot-ai/gibson/commit/ebf3e7c6fc30aa8a2802e9ee3156c35963c2d6dc)), closes [#1177](https://github.com/zeroroot-ai/gibson/issues/1177)
+
 ## [0.160.3](https://github.com/zeroroot-ai/gibson/compare/v0.160.2...v0.160.3) (2026-10-13)
 
 
