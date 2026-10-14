@@ -313,13 +313,12 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	case errors.Is(err, clients.ErrUnreachable):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
-	case errors.Is(err, tenantrole.ErrOwnerConflict):
-		// Another user holds Owner. A record that names a second Owner is
-		// stale (the daemon transfers ownership and does not rewrite this
-		// record), so this is not a wait. The error surfaces, and the
-		// controller retries with backoff until the record changes.
-		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	default:
+		// This includes tenantrole.ErrOwnerConflict: another user holds
+		// Owner, and a record that names a second Owner is stale (the daemon
+		// transfers ownership and does not rewrite this record). That is
+		// not a wait. The error surfaces, and the controller retries with
+		// backoff until the record changes (gibson#1190).
 		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
 
@@ -345,9 +344,6 @@ func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibso
 		return "", fmt.Errorf("syncZitadel: role %q has no tenant-role mapping", tm.Spec.Role)
 	}
 	userID := tm.Status.ZitadelUserID
-	if userID == "" {
-		return "", errors.New("syncZitadel: the member has no Zitadel user")
-	}
 	t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
 	if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
 		return "", fmt.Errorf("syncZitadel: assign role: %w", err)

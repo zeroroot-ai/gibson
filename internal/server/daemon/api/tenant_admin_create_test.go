@@ -105,6 +105,10 @@ type fakeIDPClient struct {
 	// orgByUser records the org each created human user was born in, so
 	// OrgOfUser answers the way Zitadel does.
 	orgByUser map[string]string
+	// orgOfUserErr and deleteOrgErr drive the failure branches of the
+	// cleanup paths.
+	orgOfUserErr error
+	deleteOrgErr error
 
 	// findUserFn drives FindUserIDByEmail (the read-only directory lookup that
 	// selects which signup email to send). Nil means "no such user".
@@ -218,6 +222,9 @@ func (f *fakeIDPClient) CreateHumanUser(ctx context.Context, req idp.CreateHuman
 }
 
 func (f *fakeIDPClient) OrgOfUser(_ context.Context, userID string) (string, error) {
+	if f.orgOfUserErr != nil {
+		return "", f.orgOfUserErr
+	}
 	if org, ok := f.orgByUser[userID]; ok {
 		return org, nil
 	}
@@ -233,7 +240,7 @@ func (f *fakeIDPClient) CreateOrganization(ctx context.Context, name string) (st
 
 func (f *fakeIDPClient) DeleteOrganization(_ context.Context, orgID string) error {
 	f.deletedOrgs = append(f.deletedOrgs, orgID)
-	return nil
+	return f.deleteOrgErr
 }
 
 func (f *fakeIDPClient) FindUserIDByEmail(ctx context.Context, email string) (string, error) {

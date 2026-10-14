@@ -150,3 +150,40 @@ func TestHumanUserState_NoOrgLooksTheOwningOrgUp(t *testing.T) {
 		t.Errorf("org header = %q, want the org that owns the user", gotOrg)
 	}
 }
+
+func TestCreateOrganization_RefusesAnAnswerWithNoID(t *testing.T) {
+	client := newOrgClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		jsonResp(w, http.StatusCreated, map[string]string{})
+	})
+	if _, err := client.CreateOrganization(context.Background(), "Acme"); err == nil {
+		t.Fatal("an answer with no organizationId must be an error")
+	}
+}
+
+func TestDeleteOrganization_RequiresAnID(t *testing.T) {
+	client := newOrgClient(t, func(w http.ResponseWriter, _ *http.Request) { jsonResp(w, http.StatusOK, nil) })
+	if err := client.DeleteOrganization(context.Background(), ""); err == nil {
+		t.Fatal("an empty org id must be refused")
+	}
+}
+
+func TestOrgOfUser_Errors(t *testing.T) {
+	client := newOrgClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		jsonResp(w, http.StatusInternalServerError, map[string]string{"code": "13", "message": "boom"})
+	})
+	if _, err := client.OrgOfUser(context.Background(), ""); err == nil {
+		t.Fatal("an empty user id must be refused")
+	}
+	if _, err := client.OrgOfUser(context.Background(), "user-7"); !errors.Is(err, idp.ErrUpstream) {
+		t.Fatalf("err = %v, want ErrUpstream on a 500", err)
+	}
+}
+
+func TestDeleteHumanUser_NoOrgAndALookupFailureIsAnError(t *testing.T) {
+	client := newOrgClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		jsonResp(w, http.StatusInternalServerError, map[string]string{"code": "13", "message": "boom"})
+	})
+	if err := client.DeleteHumanUser(context.Background(), idp.HumanUserStateRequest{UserID: "user-7"}); err == nil {
+		t.Fatal("a failed org lookup must fail the delete, not pass as absent")
+	}
+}

@@ -5,6 +5,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -499,5 +500,53 @@ func TestSyncZitadel_RemoveMember_Unavailable(t *testing.T) {
 	found := slices.Contains(got.Finalizers, gibsonv1alpha1.TenantMemberFinalizer)
 	if !found {
 		t.Error("finalizer must remain when Zitadel is unavailable on remove")
+	}
+}
+
+// TestSyncZitadel_RoleWriteFailureSurfaces: a failed Zitadel grant write on a
+// pre-accepted member fails the reconcile, it is not a wait.
+func TestSyncZitadel_RoleWriteFailureSurfaces(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{createErr: errors.New("zitadel refused the grant")}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{Name: "stale", Namespace: "default", Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email: "stale@acme.com", Role: gibsonv1alpha1.MemberRoleOwner, TenantRef: localRef(), AcceptedByUserID: "zuser-stale",
+		},
+	}
+	r, _, _, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
+	res, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "stale"}})
+	if err == nil || res.RequeueAfter != 0 {
+		t.Fatalf("reconcile = (%+v, %v), want the role write failure to surface as an error", res, err)
+	}
+}
+
+// TestCleanup_MemberOfAMissingTenantFinishes: the tenant is gone, so there is
+// no org to revoke in. The finalizer completes.
+func TestCleanup_MemberOfAMissingTenantFinishes(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	now := metav1.Now()
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "orphan", Namespace: "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer}, DeletionTimestamp: &now,
+		},
+		Spec:   gibsonv1alpha1.TenantMemberSpec{Email: "o@acme.com", Role: gibsonv1alpha1.MemberRoleMember, TenantRef: localRef()},
+		Status: gibsonv1alpha1.TenantMemberStatus{ZitadelUserID: "zuser-o", ZitadelMembershipID: "org-111/zuser-o"},
+	}
+	tenant := tenantWithOrgID()
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenant, member, &fakeRoleGrants{}, &fakeRoleTuples{})
+	if err := fc.Delete(context.Background(), tenant); err != nil {
+		t.Fatalf("delete tenant: %v", err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "orphan"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(grants.grants) != 0 {
+		t.Fatalf("grants = %+v, want none touched", grants.grants)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "orphan"}, &got); err == nil {
+		t.Fatalf("member still exists with finalizers %v", got.Finalizers)
 	}
 }

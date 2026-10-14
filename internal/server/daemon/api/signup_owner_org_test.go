@@ -156,3 +156,99 @@ func TestAdminRejectRegistration_RemovesTheWorkspaceOrg(t *testing.T) {
 			h.idp.createdOrgs, h.idp.deletedOrgs)
 	}
 }
+
+func TestSignup_OrgCreateFailuresMapToCodes(t *testing.T) {
+	t.Setenv(entitlements.RequiredKnob, "")
+	for _, tc := range []struct {
+		name string
+		err  error
+		want codes.Code
+	}{
+		{"unreachable", idp.ErrUnreachable, codes.Unavailable},
+		{"other", errors.New("boom"), codes.Internal},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newSignupHarness(t)
+			h.idp.createOrgFn = func(_ context.Context, _ string) (string, error) { return "", tc.err }
+			session := requestVerifiedSession(t, h, "team")
+			_, err := signupWithSession(t, h, session)
+			if got := status.Code(err); got != tc.want {
+				t.Fatalf("code = %v (%v), want %v", got, err, tc.want)
+			}
+			if len(h.idp.createHumanReqs) != 0 {
+				t.Fatal("an owner was created with no org")
+			}
+		})
+	}
+}
+
+func TestSignup_AFailedOrgCleanupStillFailsTheSignup(t *testing.T) {
+	t.Setenv(entitlements.RequiredKnob, "")
+	h := newSignupHarness(t)
+	h.idp.createHumanFn = func(_ context.Context, _ idp.CreateHumanUserRequest) (idp.CreateHumanUserResult, error) {
+		return idp.CreateHumanUserResult{}, errors.New("boom")
+	}
+	h.idp.deleteOrgErr = errors.New("zitadel down")
+	session := requestVerifiedSession(t, h, "team")
+	if _, err := signupWithSession(t, h, session); status.Code(err) != codes.Internal {
+		t.Fatalf("code = %v, want Internal", status.Code(err))
+	}
+	if len(h.idp.deletedOrgs) != 1 {
+		t.Fatalf("deleted orgs = %v, want one attempt", h.idp.deletedOrgs)
+	}
+}
+
+func TestRegister_TakenOrgNameIsRefusedBeforeAnyAccount(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	h.idp.createOrgFn = func(_ context.Context, _ string) (string, error) { return "", idp.ErrAlreadyExists }
+	_, err := h.srv.Register(context.Background(), registerRequest())
+	if got := status.Code(err); got != codes.AlreadyExists {
+		t.Fatalf("code = %v (%v), want AlreadyExists", got, err)
+	}
+	if len(h.idp.createHumanReqs) != 0 {
+		t.Fatal("an account was created for a taken workspace name")
+	}
+}
+
+func TestAdminRejectRegistration_NeedsTheIdentityProvider(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.srv.idpAdminClient = nil
+	_, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID, Reason: "x"})
+	if status.Code(err) != codes.Unavailable {
+		t.Fatalf("code = %v, want Unavailable: a reject with no IdP cannot free the workspace", status.Code(err))
+	}
+}
+
+func TestAdminRejectRegistration_KeepsAnAccountOfThePlatformOrg(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	// The fake made org-1 for this registration. When that is the platform
+	// org, the account predates the tenant org and nothing is deleted.
+	t.Setenv(envIDPZitadelOrgID, "org-1")
+	if _, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+		&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID, Reason: "x"}); err != nil {
+		t.Fatalf("AdminRejectRegistration: %v", err)
+	}
+	if len(h.idp.deletedOrgs) != 0 {
+		t.Fatalf("the platform org was deleted: %v", h.idp.deletedOrgs)
+	}
+}
+
+func TestAdminRejectRegistration_ToleratesCleanupFailures(t *testing.T) {
+	for name, set := range map[string]func(f *fakeIDPClient){
+		"org lookup fails": func(f *fakeIDPClient) { f.orgOfUserErr = idp.ErrNotFound },
+		"org delete fails": func(f *fakeIDPClient) { f.deleteOrgErr = errors.New("zitadel down") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newApprovalHarness(t)
+			regID := registerPending(t, h)
+			set(h.idp)
+			if _, err := h.srv.AdminRejectRegistration(adminCtx("admin-1"),
+				&tenantv1.AdminRejectRegistrationRequest{RegistrationId: regID, Reason: "x"}); err != nil {
+				t.Fatalf("the rejection is recorded even when the cleanup fails: %v", err)
+			}
+		})
+	}
+}
