@@ -92,5 +92,19 @@ func TestNoContextBackgroundInRPCHandlers(t *testing.T) {
 			astchecks.RenderFindings(findings))
 	}
 
+	// An entry covers every context.Background() of its file, so a new call
+	// in an allowlisted file would pass unseen. Each file's count is
+	// recorded, and a different count fails (gibson#807 condition 7).
+	calls := map[string]int{
+		"internal/server/daemon/api/tenant_admin_create.go":    1,
+		"internal/server/daemon/api/server_reembed_trigger.go": 1,
+	}
+	if len(calls) != len(allowlist) {
+		t.Fatalf("the allowlist has %d entries and the call counts %d: each entry needs a count", len(allowlist), len(calls))
+	}
+	for _, p := range countProblems(repoRoot, calls, "context", "Background") {
+		t.Error(p)
+	}
+
 	t.Log(astchecks.FormatAllowlistLog(allowlist))
 }

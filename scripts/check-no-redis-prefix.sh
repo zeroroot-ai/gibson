@@ -16,13 +16,43 @@
 #
 # Allowlisted paths are excluded by glob pattern (same as the analyzer).
 #
+# A scan that finds no redis-importing file fails: a guard that read nothing
+# proves nothing (gibson#807 condition 7).
+#
+#   check-no-redis-prefix.sh              scan the repo
+#   check-no-redis-prefix.sh --selftest   prove the guard can fail
+#
 # Exit codes:
 #   0  No violations found.
-#   1  One or more violations found.
+#   1  One or more violations found, or nothing to scan, or a selftest failure.
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SELF="${BASH_SOURCE[0]}"
+REPO_ROOT="${REDIS_PREFIX_ROOT:-$(cd "$(dirname "${SELF}")/.." && pwd)}"
+
+if [[ "${1:-}" == "--selftest" ]]; then
+    tmp="$(mktemp -d)"; trap 'rm -rf "${tmp}"' EXIT
+    fails=0
+    plant() { # plant <dir> <body>
+        mkdir -p "${tmp}/$1"
+        printf 'package x\n\nimport (\n\t"fmt"\n\n\t"github.com/redis/go-redis/v9"\n)\n\nvar _ = redis.Nil\n\n%s\n' "$2" >"${tmp}/$1/keys.go"
+    }
+    expect() { # expect <pass|fail> <desc>
+        if REDIS_PREFIX_ROOT="${tmp}" bash "${SELF}" >/dev/null 2>&1; then got=pass; else got=fail; fi
+        if [[ "${got}" == "$1" ]]; then echo "  ok    $2 -> ${got}"; else echo "  FAIL  $2 -> ${got}, want $1"; fails=$((fails + 1)); fi
+    }
+    expect fail "nothing to scan"
+    plant internal/engine/clean 'func k(id string) string { return fmt.Sprintf("mission:%s", id) }'
+    expect pass "a plain key"
+    plant internal/engine/bad 'func k(id string) string { return fmt.Sprintf("tenant:%s:mission", id) }'
+    expect fail "MUTATION a tenant-prefix key"
+    rm -rf "${tmp}/internal/engine/bad"
+    plant internal/server/daemon 'func k(id string) string { return fmt.Sprintf("tenant:%s:events", id) }'
+    expect pass "a tenant-prefix key in an allowlisted package"
+    echo "[check-no-redis-prefix] selftest: ${fails} failure(s)"
+    exit $(( fails > 0 ))
+fi
 
 log_info()  { echo "[check-no-redis-prefix] INFO:  $*"; }
 log_error() { echo "[check-no-redis-prefix] ERROR: $*" >&2; }
@@ -84,8 +114,9 @@ done < <(grep --recursive --files-with-matches \
              "${REPO_ROOT}" 2>/dev/null || true)
 
 if [[ ${#REDIS_FILES[@]} -eq 0 ]]; then
-    log_info "No non-allowlisted files import go-redis. Guard passed trivially."
-    exit 0
+    log_error "No non-allowlisted file imports go-redis, so this guard read nothing."
+    log_error "A guard that read nothing proves nothing: check the scan root and the allowlist."
+    exit 1
 fi
 
 log_info "Checking ${#REDIS_FILES[@]} redis-importing file(s) for tenant-prefix patterns..."
