@@ -280,8 +280,28 @@ jobs:
             kubectl get clusterspiffeid "gibson-belief-trainer-${TENANT}" >/dev/null 2>&1 && break
             sleep 10
           done
-          kubectl get clusterspiffeid "gibson-belief-trainer-${TENANT}" -o yaml > "$E2E_OUT/trainer-spiffeid.yaml" || {
-            echo "::error::the tenant operator registered no trainer SPIFFE ID for ${TENANT}"; exit 1; }
+          if ! kubectl get clusterspiffeid "gibson-belief-trainer-${TENANT}" -o yaml > "$E2E_OUT/trainer-spiffeid.yaml"; then
+            echo "::error::the tenant operator registered no trainer SPIFFE ID for ${TENANT}"
+            # What the operator saw (gibson#1164): the step condition of the
+            # tenant, the operator log of the step, the events of the tenant
+            # namespace, and whether its ServiceAccount may write the two
+            # objects the step makes.
+            echo "=== Tenant ${TENANT} conditions ==="
+            kubectl get tenant "$TENANT" -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.reason}: {.message}{"\n"}{end}' || true
+            echo "=== tenant-operator log lines of the trainer step ==="
+            for p in $(kubectl -n "$NS" get pods -l app.kubernetes.io/name=gibson-tenant-operator -o name); do
+              kubectl -n "$NS" logs "$p" -c manager --tail=2000 2>/dev/null | grep -iE 'belief|trainer|clusterspiffeid|EnsureBeliefTrainer|"tenant": "'"$TENANT"'"' | tail -40 || true
+            done
+            echo "=== events of ${tns} ==="
+            kubectl -n "$tns" get events --sort-by=.lastTimestamp | tail -30 || true
+            echo "=== may the tenant-operator write them? ==="
+            as="system:serviceaccount:${NS}:gibson-tenant-operator"
+            echo "serviceaccounts in ${tns}: $(kubectl auth can-i create serviceaccounts -n "$tns" --as "$as" 2>&1)"
+            echo "clusterspiffeids: $(kubectl auth can-i create clusterspiffeids.spire.spiffe.io --as "$as" 2>&1)"
+            kubectl -n "$tns" get serviceaccount gibson-belief-trainer -o name 2>&1 || true
+            kubectl get validatingadmissionpolicy gibson-tenant-operator-clusterspiffeid-scope -o jsonpath='{.metadata.name} generation {.metadata.generation}{"\n"}' || true
+            exit 1
+          fi
           job="belief-trainer-exit-${GITHUB_RUN_ID}"
           kubectl -n "$tns" create job "$job" --from=cronjob/belief-trainer
           if ! kubectl -n "$tns" wait --for=condition=complete "job/$job" --timeout=15m; then
