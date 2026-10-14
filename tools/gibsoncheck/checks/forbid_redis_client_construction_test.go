@@ -4,6 +4,7 @@
 package checks_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/tools/go/analysis/analysistest"
@@ -26,4 +27,12 @@ func TestForbidRedisClientConstruction_TestFileExempt(t *testing.T) {
 	// The fixture has no // want comments, so zero diagnostics are expected.
 	analysistest.Run(t, testdata, checks.ForbidRedisClientConstructionAnalyzer,
 		"github.com/zeroroot-ai/gibson/internal/redisclientallowed")
+}
+
+// TestForbidRedisClientConstruction_FileAllowlist proves the file allowlist:
+// queue_redis_adapter.go of the daemon package may construct a client, and
+// another file of the same package may not.
+func TestForbidRedisClientConstruction_FileAllowlist(t *testing.T) {
+	analysistest.Run(t, filepath.Join(analysistest.TestData(), "redisfile"), checks.ForbidRedisClientConstructionAnalyzer,
+		"github.com/zeroroot-ai/gibson/internal/server/daemon")
 }

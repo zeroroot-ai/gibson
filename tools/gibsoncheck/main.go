@@ -122,31 +122,6 @@ import (
 	"github.com/zeroroot-ai/gibson/tools/gibsoncheck/checks"
 )
 
-// analyzers is every analyzer of gibsoncheck. Each one must run in CI:
-// TestEveryAnalyzerRunsInCI fails when .github/workflows/gibsoncheck.yml
-// never invokes one (gibson#807 condition 7).
-var analyzers = []*analysis.Analyzer{
-	checks.ForbiddenImportsAnalyzer,
-	checks.NoTrustLocalhostAnalyzer,
-	checks.TenantFromContextAnalyzer,
-	checks.AdminPoolAcquireAnalyzer,
-	checks.ForbidRawStoreImportsAnalyzer,
-	checks.ForbidRedisKeyPrefixAnalyzer,
-	checks.ForbidRedisClientConstructionAnalyzer,
-	checks.SecretsNoLogAnalyzer,
-	checks.PluginLegacyAnalyzer,
-	checks.NoK8sAPIInDaemonAnalyzer,
-	checks.FailOpenAuthorizerAnalyzer,
-	checks.PrivilegedFallbackAnalyzer,
-	checks.FGAListUsersAnalyzer,
-	checks.ConstantVerdictDoubleAnalyzer,
-	checks.GraphWriteAnalyzer,
-	checks.CypherIdentifierAnalyzer,
-	checks.ProjectorCypherAnalyzer,
-	checks.TenantRoleWriteAnalyzer,
-	checks.OrgMemberWriteAnalyzer,
-}
-
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
@@ -154,5 +129,27 @@ func main() {
 			os.Exit(2)
 		}
 	}()
-	multichecker.Main(analyzers...)
+	multichecker.Main(
+		[]*analysis.Analyzer{
+			checks.ForbiddenImportsAnalyzer,
+			checks.NoTrustLocalhostAnalyzer,
+			checks.TenantFromContextAnalyzer,
+			checks.AdminPoolAcquireAnalyzer,
+			checks.ForbidRawStoreImportsAnalyzer,
+			checks.ForbidRedisKeyPrefixAnalyzer,
+			checks.ForbidRedisClientConstructionAnalyzer,
+			checks.SecretsNoLogAnalyzer,
+			checks.PluginLegacyAnalyzer,
+			checks.NoK8sAPIInDaemonAnalyzer,
+			checks.FailOpenAuthorizerAnalyzer,
+			checks.PrivilegedFallbackAnalyzer,
+			checks.FGAListUsersAnalyzer,
+			checks.ConstantVerdictDoubleAnalyzer,
+			checks.GraphWriteAnalyzer,
+			checks.CypherIdentifierAnalyzer,
+			checks.ProjectorCypherAnalyzer,
+			checks.TenantRoleWriteAnalyzer,
+			checks.OrgMemberWriteAnalyzer,
+		}...,
+	)
 }

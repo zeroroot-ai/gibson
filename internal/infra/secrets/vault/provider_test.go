@@ -585,6 +585,54 @@ func TestProbe_Success(t *testing.T) {
 	}
 }
 
+// TestProbe_ValueMismatch proves that a canary read back with other content
+// fails the probe, and that the error holds the byte counts and never the
+// values, because an error reaches the logs (secretsnolog).
+func TestProbe_ValueMismatch(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("tampered-canary-value"))
+	mock := newVaultMock()
+	mock.override = func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/sys/internal/ui/mounts/secret" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, mountInfoResponseKV2())
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/v1/secret/data/tenant/probe-tenant/__probe.") {
+			switch r.Method {
+			case http.MethodGet:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, kvv2Response(encoded))
+			case http.MethodPost, http.MethodPut:
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"request_id":"x","data":{"version":1}}`)
+			case http.MethodDelete:
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
+		}
+		http.NotFound(w, r)
+	}
+	srv := httptest.NewServer(mock)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p, err := New(ctx, Config{Address: srv.URL, KVMount: "secret", Auth: AuthConfig{Method: AuthMethodToken, Token: "test-token"}})
+	if err != nil {
+		t.Fatalf("New() unexpected error: %v", err)
+	}
+	err = p.Probe(ctx)
+	if err == nil {
+		t.Fatal("Probe() accepted a canary read back with other content")
+	}
+	if strings.Contains(err.Error(), "tampered-canary-value") || strings.Contains(err.Error(), "__probe__") {
+		t.Fatalf("Probe() error holds a stored value: %v", err)
+	}
+	if !strings.Contains(err.Error(), "21 bytes, want 9") {
+		t.Fatalf("Probe() error = %v, want the byte counts", err)
+	}
+}
+
 func TestAppRoleAuth_MockedLogin(t *testing.T) {
 	mock := newVaultMock()
 
