@@ -581,6 +581,14 @@ check-ci-lane-parity:
 	@bash scripts/check-ci-lane-parity.sh --selftest
 	@bash scripts/check-ci-lane-parity.sh
 
+# check-filter-failure-fails: a failed change filter fails the gate, never
+# skips it. GitHub skips a job whose dependency failed, and a skipped required
+# check reads as a pass (gibson#807 condition 7).
+.PHONY: check-filter-failure-fails
+check-filter-failure-fails:
+	@python3 scripts/check-filter-failure-fails.py --selftest
+	@python3 scripts/check-filter-failure-fails.py
+
 # check-build-tags: every `//go:build <tag>` in the module must be selected by a
 # leg of the vet-tags matrix in .github/workflows/go-ci.yml, so no suite can sit
 # there uncompiled the way tests/e2e did (gibson#1280).
@@ -713,7 +721,7 @@ test-merge-queue:
 # CI runs both directly (`.github/workflows/go-ci.yml` calls `make lint
 # LINT_BASE=…` and `make lint-deadcode`), so nothing is lost by keeping them out
 # of the local aggregate. Run `make lint` by hand when you actually want it.
-check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-no-trust-domain-literal check-plugin-modules lint-unwired-plugins check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-build-tags check-release-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules check-proto-breaking
+check: fmt check-fmt vet test-race check-no-tenant-id check-fga-headers check-no-tracked-binaries check-no-payment-vendor check-no-trust-domain-literal check-plugin-modules lint-unwired-plugins check-no-skipped-tests check-no-mcp-bridge check-signin-policy-callers check-test-images-mirrored check-noun-contract check-rpc-test-walker check-critical-paths check-ci-lane-parity check-filter-failure-fails check-build-tags check-release-build-tags check-queue-gate check-bringup-diagnostics check-comment-paths check-adr-index check-operator-rbac-scope check-service-names check-proto-rules check-proto-breaking
 	@echo "All checks passed! (golangci-lint not included — run 'make lint' separately)"
 
 # check-comment-paths asserts that a repo-relative path named in a comment exists.

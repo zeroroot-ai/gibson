@@ -122,7 +122,9 @@ jobs:
     # those paths can be evicted by a CodeQL failure it never ran
     # (gibson#1236). Accepted: a full CodeQL Go analysis is about 20 minutes.
     # merge-queue-eviction-report.yml comments the failing job onto the PR.
-    if: always() && needs.changes.result != 'failure'
+    # A failed filter runs the full scan, never a skip: a skipped required
+    # check reads as a pass (gibson#807 condition 7).
+    if: always()
     permissions:
       actions: read
       contents: read
@@ -130,7 +132,7 @@ jobs:
     uses: zeroroot-ai/.github/.github/workflows/reusable-codeql.yml@7ca10753e23be732df39f4db48af0b9edcfea2b5 # v0.19.2
     with:
       languages: '["go"]'
-      scan: ${{ github.event_name != 'pull_request' || needs.changes.outputs.security_paths == 'true' }}
+      scan: ${{ github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.security_paths == 'true' }}
       go-build-command: go build ./...
       paths-ignore: |
         **/zz_generated*.go

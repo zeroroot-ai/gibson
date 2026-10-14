@@ -114,9 +114,19 @@ jobs:
 
   analyze:
     needs: changes
-    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')) }}
     runs-on: ubuntu-latest
     steps:
+      - name: The change filter succeeded
+        # gibson#807 condition 7: when the filter fails, GitHub would skip this
+        # gate, and a skipped required check reads as a pass. So this gate runs
+        # and fails instead.
+        if: needs.changes.result != 'success'
+        env:
+          FILTER_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::the change filter ended '${FILTER_RESULT}'. A failed filter fails this gate, never skips it."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -229,10 +239,20 @@ jobs:
 
   migration-guards:
     needs: changes
-    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')) }}
     runs-on: ubuntu-latest
     name: Migration build guards
     steps:
+      - name: The change filter succeeded
+        # gibson#807 condition 7: when the filter fails, GitHub would skip this
+        # gate, and a skipped required check reads as a pass. So this gate runs
+        # and fails instead.
+        if: needs.changes.result != 'success'
+        env:
+          FILTER_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::the change filter ended '${FILTER_RESULT}'. A failed filter fails this gate, never skips it."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check no tenant_id in migrations
@@ -332,7 +352,7 @@ jobs:
 
   rpc-test-walker:
     needs: changes
-    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')) }}
     runs-on: ubuntu-latest
     name: per-RPC test walker
     # Spec: gibson#793 (E3 / QUALITY-BARS §4). Fails if any registered gRPC RPC
@@ -341,6 +361,16 @@ jobs:
     # pure unit test — only stdlib + the in-module registry package — so it
     # needs no Docker.
     steps:
+      - name: The change filter succeeded
+        # gibson#807 condition 7: when the filter fails, GitHub would skip this
+        # gate, and a skipped required check reads as a pass. So this gate runs
+        # and fails instead.
+        if: needs.changes.result != 'success'
+        env:
+          FILTER_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::the change filter ended '${FILTER_RESULT}'. A failed filter fails this gate, never skips it."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -355,7 +385,7 @@ jobs:
 
   authz-registry-drift:
     needs: changes
-    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')) }}
     runs-on: ubuntu-latest
     name: authz-registry drift gate
     # Spec: private-authz-registry NFR Reliability.
@@ -364,6 +394,16 @@ jobs:
     #   - Hand-edits to registry.go instead of running regen.
     #   - SDK version bumps where `make authz-registry` was not re-run.
     steps:
+      - name: The change filter succeeded
+        # gibson#807 condition 7: when the filter fails, GitHub would skip this
+        # gate, and a skipped required check reads as a pass. So this gate runs
+        # and fails instead.
+        if: needs.changes.result != 'success'
+        env:
+          FILTER_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::the change filter ended '${FILTER_RESULT}'. A failed filter fails this gate, never skips it."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -402,7 +442,7 @@ jobs:
 
   tool-manifest-drift:
     needs: changes
-    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.relevant == 'true')) }}
     runs-on: ubuntu-latest
     name: tool-manifest drift gate
     # ADR-0117: a kind:tool manifest is generated from the executor image's own
@@ -422,6 +462,16 @@ jobs:
     # is the capture still current — is a question about the outside world, so it
     # is asked on a schedule by executor-catalog-staleness.yml, never here.
     steps:
+      - name: The change filter succeeded
+        # gibson#807 condition 7: when the filter fails, GitHub would skip this
+        # gate, and a skipped required check reads as a pass. So this gate runs
+        # and fails instead.
+        if: needs.changes.result != 'success'
+        env:
+          FILTER_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::the change filter ended '${FILTER_RESULT}'. A failed filter fails this gate, never skips it."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

@@ -393,6 +393,7 @@ jobs:
       - name: Guard CI lane parity + build-tag selection + queue-gate coverage
         run: |
           make check-ci-lane-parity
+          make check-filter-failure-fails
           make check-build-tags
           make check-release-build-tags
           make check-queue-gate
@@ -539,6 +540,9 @@ jobs:
     # job, so it cannot silently fall behind again. Add a gate -> add it here,
     # same PR.
     needs:
+      # `changes` is here so a failed filter fails the gate. Its failure skips
+      # every job below that needs it, and a skipped job reads as a pass.
+      - changes
       - fast
       - heavy
       - vet-tags
@@ -559,7 +563,7 @@ jobs:
       - name: Evaluate every gate result
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
-        run: bash scripts/queue-gate-eval.sh --needs-json "$NEEDS_JSON"
+        run: bash scripts/queue-gate-eval.sh --needs-json "$NEEDS_JSON" --must-succeed changes
 
       # gibson#1236: make the residual PR/queue asymmetry visible instead of
       # silent. This is the only place a reader of the PR learns that the queue

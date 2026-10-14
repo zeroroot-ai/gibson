@@ -34,11 +34,12 @@
 #
 # EXEMPTIONS
 # ----------
-# Only `changes` (and `queue-gate` itself). `changes` is change detection, not
-# a gate: every job it feeds already `needs:` it, so a failure there fails them
-# and reaches `queue-gate` that way. Keep the list this short — every entry is
-# a hole, and the reason `critical-paths` went unnoticed for as long as it did
-# is that nothing forced anyone to justify its absence.
+# Only `queue-gate` itself. `changes` was exempt on the claim that its failure
+# fails the jobs it feeds. It does not: GitHub SKIPS a job whose dependency
+# failed, and the aggregator reads skipped as a pass, so a failed filter made
+# the whole gate green. So `changes` is now in `needs:`, and the aggregator
+# must hold it to success with `--must-succeed` (gibson#807 condition 7). Keep
+# the exemption list empty: every entry is a hole.
 #
 # Usage:
 #   check-queue-gate-coverage.sh [workflow.yml ...]   (default: go-ci.yml)
@@ -50,11 +51,11 @@ set -uo pipefail
 
 WORKFLOW_DEFAULT=".github/workflows/go-ci.yml"
 AGG="queue-gate"
-EXEMPT_CSV="changes"
+EXEMPT_CSV=""
 
 _check_one() {
   python3 - "$1" "$AGG" "$EXEMPT_CSV" <<'PY'
-import sys, yaml
+import re, sys, yaml
 
 path, agg, exempt_csv = sys.argv[1], sys.argv[2], sys.argv[3]
 exempt = {e for e in exempt_csv.split(",") if e} | {agg}
@@ -94,6 +95,19 @@ missing = sorted(gates - needs)
 phantom = sorted(needs - set(jobs))
 
 rc = 0
+# A job that other gates need, such as the change filter, skips them all when
+# it fails. Skipped reads as a pass, so the aggregator must hold each such job
+# to success with `--must-succeed`.
+fed = sorted({n for j, d in jobs.items() if j != agg
+              for n in ([d.get("needs")] if isinstance(d.get("needs"), str) else (d.get("needs") or []))})
+runs = " ".join(str(st.get("run", "")) for st in (jobs[agg].get("steps") or []))
+held = {j for m in re.findall(r"--must-succeed\s+(\S+)", runs) for j in m.split(",")}
+unheld = [f for f in fed if f not in held]
+if unheld:
+    print(f"::error::{path}: `{agg}` does not hold {', '.join(unheld)} to success. Other gates need "
+          f"them, so their failure skips those gates, and a skip reads as a pass. Pass "
+          f"`--must-succeed {','.join(unheld)}` to queue-gate-eval.sh.")
+    rc = 1
 if missing:
     print(f"::error::{path}: `{agg}` does not depend on: {', '.join(missing)}")
     print(f"::error::Those jobs run, can report red, and would not block a merge.")
@@ -136,13 +150,31 @@ _selftest() {
 
   echo "check-queue-gate-coverage --selftest"
 
-  _case "every gate covered (changes exempt)" pass '
+  _case "every gate covered, the filter held to success" pass '
 on: {pull_request: null, merge_group: null}
 jobs:
   changes: {runs-on: ubuntu-latest}
-  fast: {runs-on: ubuntu-latest}
+  fast: {needs: changes, runs-on: ubuntu-latest}
   lint: {runs-on: ubuntu-latest}
-  queue-gate: {if: "always()", needs: [fast, lint], runs-on: ubuntu-latest}
+  queue-gate: {if: "always()", needs: [changes, fast, lint], runs-on: ubuntu-latest, steps: [{run: "bash scripts/queue-gate-eval.sh --needs-json x --must-succeed changes"}]}
+'
+
+  # gibson#807 condition 7: a failed filter skipped every gate behind it, and
+  # the aggregator read the skips as a pass.
+  _case "MUTATION the filter missing from needs" fail '
+on: {pull_request: null, merge_group: null}
+jobs:
+  changes: {runs-on: ubuntu-latest}
+  fast: {needs: changes, runs-on: ubuntu-latest}
+  queue-gate: {if: "always()", needs: [fast], runs-on: ubuntu-latest, steps: [{run: "bash scripts/queue-gate-eval.sh --needs-json x --must-succeed changes"}]}
+'
+
+  _case "MUTATION the filter not held to success" fail '
+on: {pull_request: null, merge_group: null}
+jobs:
+  changes: {runs-on: ubuntu-latest}
+  fast: {needs: changes, runs-on: ubuntu-latest}
+  queue-gate: {if: "always()", needs: [changes, fast], runs-on: ubuntu-latest, steps: [{run: "bash scripts/queue-gate-eval.sh --needs-json x"}]}
 '
 
   # THE regression: this is exactly the shape go-ci.yml was in.

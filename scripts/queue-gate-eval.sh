@@ -44,8 +44,13 @@
 #   an empty result set == fail. An aggregator with nothing to aggregate
 #   reporting green is the purest form of this whole defect class.
 #
+#   a MUST-SUCCEED job that did not succeed == fail, skipped included. The
+#   change filter `changes` runs in both lanes. When it fails, GitHub skips
+#   every job that needs it, and "skipped == pass" would read the whole gate
+#   as green. So `--must-succeed changes` holds the filter to `success`.
+#
 # Usage:
-#   queue-gate-eval.sh --needs-json '<toJSON(needs)>'
+#   queue-gate-eval.sh --needs-json '<toJSON(needs)>' [--must-succeed job[,job]]
 #   queue-gate-eval.sh --selftest
 #
 # Exit 0 = every gate passed or was skipped. Exit 1 = at least one did not.
@@ -53,7 +58,7 @@
 set -uo pipefail
 
 evaluate() {
-  local json="$1"
+  local json="$1" must="${2:-}"
 
   if [ -z "$json" ] || ! jq -e 'type == "object"' >/dev/null 2>&1 <<<"$json"; then
     echo "  not a JSON object -- expected \${{ toJSON(needs) }}"
@@ -67,8 +72,16 @@ evaluate() {
     return 1
   fi
 
-  local failed=0
+  local failed=0 m r
+  for m in ${must//,/ }; do
+    r="$(jq -r --arg j "$m" '.[$j].result // "absent"' <<<"$json")"
+    if [ "$r" != "success" ]; then
+      printf '  FAIL  %-42s %s (must succeed: the gates that need it did not run)\n' "$m" "$r"
+      failed=$((failed + 1))
+    fi
+  done
   while IFS=$'\t' read -r job result; do
+    case ",${must}," in *",${job},"*) continue ;; esac
     case "$result" in
       success|skipped)
         printf '  pass  %-42s %s\n' "$job" "$result" ;;
@@ -105,9 +118,9 @@ selftest() {
     printf '%s' "$out"
   }
 
-  _case() { # _case <desc> <pass|fail> <json>
-    local desc="$1" want="$2" json="$3" got
-    if evaluate "$json" >/dev/null 2>&1; then got="pass"; else got="fail"; fi
+  _case() { # _case <desc> <pass|fail> <json> [must-succeed]
+    local desc="$1" want="$2" json="$3" must="${4:-}" got
+    if evaluate "$json" "$must" >/dev/null 2>&1; then got="pass"; else got="fail"; fi
     if [ "$got" = "$want" ]; then
       echo "  ok    ${desc} -> ${got}"
       pass=$((pass + 1))
@@ -133,6 +146,12 @@ selftest() {
   _case "MUTATION not an object"          fail "not-json"
   _case "MUTATION unrecognised result"    fail "$(_mk fast:success lint:borked)"
 
+  # The change filter must succeed: its failure skips every gate behind it.
+  _case "filter success, gates skipped"   pass "$(_mk changes:success fast:skipped heavy:skipped)" changes
+  _case "MUTATION filter failed, gates skipped" fail "$(_mk changes:failure fast:skipped coverage:skipped)" changes
+  _case "MUTATION filter skipped"         fail "$(_mk changes:skipped fast:skipped)" changes
+  _case "MUTATION filter missing"         fail "$(_mk fast:success)" changes
+
   echo "  ${pass} passed, ${fail} failed"
   [ "$fail" -eq 0 ]
 }
@@ -143,7 +162,9 @@ case "${1:-}" in
     ;;
   --needs-json)
     echo "queue-gate: evaluating every dependency's result"
-    evaluate "${2:-}"
+    must=""
+    [ "${3:-}" = "--must-succeed" ] && must="${4:-}"
+    evaluate "${2:-}" "$must"
     ;;
   *)
     echo "usage: $0 --needs-json '<toJSON(needs)>' | --selftest" >&2
