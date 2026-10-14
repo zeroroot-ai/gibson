@@ -399,9 +399,23 @@ type httpClient struct {
 
 // EnsureProject implements Client.
 //
+// It looks the project up first and creates it only when the lookup finds
+// none. The platform-operator calls it on every drift re-check, every five
+// minutes. A create of a project that exists makes Zitadel insert the name
+// again, and Postgres logs a duplicate key ERROR each time. A conflict on
+// the create still resolves by name, for a project made between the lookup
+// and the create.
+//
 // Zitadel v4: POST /management/v1/projects (self-scoped via
 // x-zitadel-orgid header — caller's PAT is IAM_OWNER).
 func (c *httpClient) EnsureProject(ctx context.Context, name string) (string, error) {
+	id, err := c.GetProjectIDByName(ctx, name)
+	if err == nil {
+		return id, nil
+	}
+	if !IsNotFound(err) {
+		return "", fmt.Errorf("EnsureProject: lookup: %w", err)
+	}
 	body := map[string]any{"name": name}
 	var resp struct {
 		ID string `json:"id"`
@@ -1557,6 +1571,14 @@ func (c *httpClient) EnsureHumanUserNoPassword(ctx context.Context, orgID, email
 		// CreateSetupInviteCode is the one setup-link mechanism this client
 		// uses. No "password" field at all: Zitadel mints none (ADR-0093).
 		"email": map[string]any{"email": email, "isVerified": true},
+	}
+	// Look the user up first and create it only when the lookup finds none,
+	// so a pass after a restore, where the user exists and the status is
+	// new, sends no create that Zitadel refuses with a duplicate username.
+	if id, err := c.FindHumanUserByEmail(ctx, email); err == nil {
+		return id, nil
+	} else if !IsNotFound(err) {
+		return "", fmt.Errorf("EnsureHumanUserNoPassword: lookup: %w", err)
 	}
 	var resp struct {
 		UserID string `json:"userId"`
