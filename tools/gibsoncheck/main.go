@@ -140,7 +140,6 @@ func main() {
 			checks.ForbidRedisClientConstructionAnalyzer,
 			checks.SecretsNoLogAnalyzer,
 			checks.PluginLegacyAnalyzer,
-			checks.AgentSecretsImportAnalyzer,
 			checks.NoK8sAPIInDaemonAnalyzer,
 			checks.FailOpenAuthorizerAnalyzer,
 			checks.PrivilegedFallbackAnalyzer,

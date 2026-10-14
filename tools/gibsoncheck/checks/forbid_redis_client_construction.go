@@ -6,6 +6,7 @@ package checks
 import (
 	"go/ast"
 	"go/types"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/tools/go/analysis"
@@ -43,12 +44,31 @@ var ForbidRedisClientConstructionAnalyzer = &analysis.Analyzer{
 //   - internal/engine/state/ — foundational StateClient wrapper (global shared Redis).
 //     Higher-level packages must go through StateClient, not bypass it.
 //   - tools/gibsoncheck/ — the analyzer itself (imports go-redis for type info).
+//   - internal/infra/pools/ — the shared pool constructors (NewRedis) that
+//     datapool and the other callers build their clients through.
+//   - operators/tenant/internal/dataplane/ — the tenant-operator creates and
+//     seeds each tenant's Redis and vector store. It provisions the store;
+//     it does not serve tenant requests from it.
+//   - operators/tenant/cmd/gibson-backup/ — the backup tool reads each store
+//     raw to copy it. A datapool Conn would add tenant routing it must not have.
 var redisClientConstructionAllowlist = []string{
+	"github.com/zeroroot-ai/gibson/internal/infra/pools",
+	"github.com/zeroroot-ai/gibson/operators/tenant/internal/dataplane",
+	"github.com/zeroroot-ai/gibson/operators/tenant/cmd/gibson-backup",
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool",
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool/admin",
 	"github.com/zeroroot-ai/gibson/internal/server/admin",
 	"github.com/zeroroot-ai/gibson/internal/engine/state",
 	"github.com/zeroroot-ai/gibson/tools/gibsoncheck",
+}
+
+// redisClientConstructionFiles names single files, by package path and base
+// name, that may construct a client in a package that may not. Each holds one
+// process-wide client of shared, not per-tenant, Redis.
+//   - internal/server/daemon queue_redis_adapter.go — the daemon work queue,
+//     one queue for the process, like the StateClient of internal/engine/state.
+var redisClientConstructionFiles = map[string]string{
+	"github.com/zeroroot-ai/gibson/internal/server/daemon": "queue_redis_adapter.go",
 }
 
 func runForbidRedisClientConstruction(pass *analysis.Pass) (any, error) {
@@ -101,6 +121,9 @@ func runForbidRedisClientConstruction(pass *analysis.Pass) (any, error) {
 		// Exempt test files.
 		pos := pass.Fset.Position(call.Pos())
 		if strings.HasSuffix(pos.Filename, "_test.go") {
+			return
+		}
+		if f, ok := redisClientConstructionFiles[pkgPath]; ok && filepath.Base(pos.Filename) == f {
 			return
 		}
 
