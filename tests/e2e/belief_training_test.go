@@ -12,8 +12,11 @@
 // exit-test-belief-training.yml runs the two tests below in order, with the
 // trainer Job between them:
 //
-//  1. TestBeliefTraining_Seed runs one nmap mission for the tenant and labels
-//     an item of its review queue, so the World holds a training row.
+//  1. TestBeliefTraining_Seed runs one nmap mission for the tenant and asserts
+//     that the World holds a scanned host with open ports. That host is a
+//     training row with an automatic outcome (braintrain.RowsFromWorld,
+//     ADR-0106). A plain scan raises no Finding and no surprise, so the
+//     review queue stays empty, and the test does not need a label.
 //  2. The workflow starts a Job from the belief-trainer CronJob of the tenant
 //     and waits for it to complete.
 //  3. TestBeliefTraining_NextMissionPins runs one more mission and asserts
@@ -27,6 +30,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"testing"
 	"time"
@@ -78,8 +82,12 @@ func runBeliefMission(t *testing.T, ctx context.Context, clients *helpers.GRPCCl
 	return defID
 }
 
-// TestBeliefTraining_Seed gives the tenant a training row: a mission, then a
-// label on an item of the review queue.
+// TestBeliefTraining_Seed gives the tenant a training row: a mission that
+// leaves a scanned host with open ports in the World. RowsFromWorld makes a
+// row from each such host, with the automatic outcome "no Finding raised"
+// (gibson#1153). A HITL label only overrides that outcome, so the seed does
+// not need one. The label path has its own tests (world_service_label_test.go,
+// braintrain).
 func TestBeliefTraining_Seed(t *testing.T) {
 	checkTestFixturesEnabled(t)
 	clients, err := helpers.NewGRPCClients()
@@ -90,42 +98,26 @@ func TestBeliefTraining_Seed(t *testing.T) {
 	runBeliefMission(t, ctx, clients, "belief-training-seed")
 
 	world := worldpb.NewWorldServiceClient(clients.Conn())
-	var queue *worldpb.ListReviewQueueResponse
+	var scanned []*worldpb.HostView
 	deadline := time.Now().Add(2 * time.Minute)
 	for {
-		queue, err = world.ListReviewQueue(ctx, &worldpb.ListReviewQueueRequest{})
-		require.NoError(t, err, "ListReviewQueue")
-		if len(queue.GetItems()) > 0 || time.Now().After(deadline) {
+		hosts, err := world.ListHosts(ctx, &worldpb.ListHostsRequest{})
+		require.NoError(t, err, "ListHosts")
+		scanned = scanned[:0]
+		for _, h := range hosts.GetHosts() {
+			t.Logf("host %s scope=%s open=%v", h.GetAddress(), h.GetScopeId(), h.GetOpenPorts())
+			if len(h.GetOpenPorts()) > 0 {
+				scanned = append(scanned, h)
+			}
+		}
+		if len(scanned) > 0 || time.Now().After(deadline) {
 			break
 		}
 		time.Sleep(5 * time.Second)
 	}
-	if len(queue.GetItems()) == 0 {
-		// What the World of the tenant holds: the queue lists its Findings
-		// and the hosts with a surprise. A World with no host means the scan
-		// output never reached it; hosts with no surprise and no Finding mean
-		// the scan found nothing to review.
-		if hosts, herr := world.ListHosts(ctx, &worldpb.ListHostsRequest{}); herr == nil {
-			t.Logf("World hosts: %d", len(hosts.GetHosts()))
-			for _, h := range hosts.GetHosts() {
-				t.Logf("  host %s scope=%s open=%v surprise=%q", h.GetAddress(), h.GetScopeId(), h.GetOpenPorts(), h.GetSurprise())
-			}
-		} else {
-			t.Logf("ListHosts: %v", herr)
-		}
-		if findings, ferr := world.ListFindings(ctx, &worldpb.ListFindingsRequest{}); ferr == nil {
-			t.Logf("World findings: %d", len(findings.GetFindings()))
-		} else {
-			t.Logf("ListFindings: %v", ferr)
-		}
-	}
-	require.NotEmpty(t, queue.GetItems(), "the mission left nothing in the review queue to label")
-	item := queue.GetItems()[0]
-	_, err = world.SubmitLabel(ctx, &worldpb.SubmitLabelRequest{
-		TargetId: item.GetTargetId(), Verdict: "true_positive", IdempotencyKey: "belief-training-seed-" + item.GetTargetId(),
-	})
-	require.NoError(t, err, "label %s %s", item.GetKind(), item.GetTargetId())
-	t.Logf("labelled %s %s as a true positive", item.GetKind(), item.GetTargetId())
+	require.NotEmpty(t, scanned,
+		"the World of the tenant holds no scanned host with open ports: the trainer has no row to learn from")
+	t.Logf("the World holds %d training host(s)", len(scanned))
 }
 
 // TestBeliefTraining_NextMissionPins runs after the trainer Job: the next
@@ -144,6 +136,19 @@ func TestBeliefTraining_NextMissionPins(t *testing.T) {
 	for _, m := range list.GetMissions() {
 		before[m.GetId()] = true
 	}
+	// The juicy belief of each seed host, by address, scored by the model
+	// before the training.
+	seedJuicy := map[string]float64{}
+	seedScopes := map[string]bool{}
+	hosts, err := world.ListHosts(ctx, &worldpb.ListHostsRequest{})
+	require.NoError(t, err, "ListHosts")
+	for _, h := range hosts.GetHosts() {
+		if len(h.GetOpenPorts()) > 0 {
+			seedJuicy[h.GetAddress()] = h.GetJuicy()
+			seedScopes[h.GetScopeId()] = true
+		}
+	}
+	require.NotEmpty(t, seedJuicy, "the World holds no seed host: the seed step did not run")
 
 	runBeliefMission(t, ctx, clients, "belief-training-pin")
 
@@ -161,4 +166,34 @@ func TestBeliefTraining_NextMissionPins(t *testing.T) {
 			"the next mission pinned %q, want a stored version of the tenant: the trainer stored nothing current", v)
 	}
 	t.Logf("the next mission pinned %v", pinned)
+
+	// The trained model changed the belief. The new mission scans the same
+	// address in its own scope. Its host has the same evidence as the seed
+	// host, so another juicy value can come only from another model.
+	deadline := time.Now().Add(2 * time.Minute)
+	var changed, rescored []string
+	for {
+		changed, rescored = changed[:0], rescored[:0]
+		hosts, err := world.ListHosts(ctx, &worldpb.ListHostsRequest{})
+		require.NoError(t, err, "ListHosts")
+		for _, h := range hosts.GetHosts() {
+			seed, ok := seedJuicy[h.GetAddress()]
+			if !ok || seedScopes[h.GetScopeId()] || len(h.GetOpenPorts()) == 0 {
+				continue
+			}
+			line := fmt.Sprintf("%s scope=%s juicy %.6f -> %.6f", h.GetAddress(), h.GetScopeId(), seed, h.GetJuicy())
+			rescored = append(rescored, line)
+			if h.GetJuicy() != seed {
+				changed = append(changed, line)
+			}
+		}
+		if len(changed) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(5 * time.Second)
+	}
+	t.Logf("rescored hosts: %v", rescored)
+	require.NotEmpty(t, rescored, "the next mission scanned no seed address again")
+	require.NotEmpty(t, changed,
+		"the juicy belief of the seed address did not change: the trained model did not change the belief")
 }
