@@ -50,7 +50,9 @@ const (
 	defaultCatalogPluginInterval = 30 * time.Second
 
 	// catalogPluginManagedBy is the label value every object of this loop
-	// carries. The loop deletes only objects with this label.
+	// carries. Other parts of the tenant-operator use the same value, for
+	// example the belief trainer registration (gibson#1164), so the loop
+	// deletes only objects that also carry labelPlugin.
 	catalogPluginManagedBy = "gibson-tenant-operator"
 
 	labelManagedBy         = "app.kubernetes.io/managed-by"
@@ -854,9 +856,11 @@ func (r *CatalogPluginRunnable) waitForSpireSocket(security *corev1.SecurityCont
 }
 
 // prune removes what no tenant wants any more. It deletes only objects that
-// carry the managed-by label of this loop.
+// carry the managed-by label of this loop and a plugin label. The managed-by
+// value alone also selects objects of other tenant-operator steps.
 func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map[string]struct{}) error {
 	managed := client.MatchingLabels{labelManagedBy: catalogPluginManagedBy}
+	ownPlugin := client.HasLabels{labelPlugin}
 	isWanted := func(labels map[string]string) bool {
 		_, ok := wanted[labels[labelPluginTenant]][labels[labelPlugin]]
 		return ok
@@ -864,7 +868,7 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 
 	ids := &unstructured.UnstructuredList{}
 	ids.SetGroupVersionKind(schema.GroupVersionKind{Group: clusterSPIFFEIDGVK.Group, Version: clusterSPIFFEIDGVK.Version, Kind: "ClusterSPIFFEIDList"})
-	if err := r.Client.List(ctx, ids, managed); err != nil {
+	if err := r.Client.List(ctx, ids, managed, ownPlugin); err != nil {
 		return fmt.Errorf("list ClusterSPIFFEIDs: %w", err)
 	}
 	for i := range ids.Items {
@@ -901,7 +905,7 @@ func (r *CatalogPluginRunnable) prune(ctx context.Context, wanted map[string]map
 			continue
 		}
 		var deps appsv1.DeploymentList
-		if err := r.Client.List(ctx, &deps, client.InNamespace(ns.Name), managed); err != nil {
+		if err := r.Client.List(ctx, &deps, client.InNamespace(ns.Name), managed, ownPlugin); err != nil {
 			return fmt.Errorf("list plugin Deployments in %s: %w", ns.Name, err)
 		}
 		for d := range deps.Items {

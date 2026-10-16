@@ -213,6 +213,23 @@ func TestTenantValidator_ValidateCreate_MissingSlug(t *testing.T) {
 	}
 }
 
+// A tenant named <x>-plugins would get the plugin namespace of tenant <x>
+// (gibson#1164), so the create is refused. A name that only contains the
+// word passes.
+func TestTenantValidator_ValidateCreate_PluginsSuffix(t *testing.T) {
+	v := &TenantValidator{}
+	tn := validTenant()
+	tn.Name = "acme-plugins"
+	_, err := v.ValidateCreate(context.Background(), tn)
+	if err == nil || !strings.Contains(err.Error(), "-plugins") {
+		t.Fatalf("err = %v, want a refusal that names -plugins", err)
+	}
+	tn.Name = "plugins-acme"
+	if _, err := v.ValidateCreate(context.Background(), tn); err != nil {
+		t.Errorf("plugins-acme: err = %v, want no refusal", err)
+	}
+}
+
 func TestTenantValidator_ValidateCreate_InvalidSlug(t *testing.T) {
 	v := &TenantValidator{}
 	tn := validTenant()
