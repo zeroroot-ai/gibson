@@ -474,6 +474,64 @@ jobs:
       # port from a sandbox (TestToolDispatch). Here the workflow gives the
       # suite the proxy address and starts the Cilium drop monitor of each
       # node. The step after the suite reads the drops.
+      # Only the ToolHive proxy of a connector reaches the Kubernetes API
+      # (gibson#1119): the operator selects the proxy by the labels ToolHive
+      # sets on it. The MCP server pod runs third-party code and must get no
+      # path to the API. A ToolHive release that moved those labels onto the
+      # server pod would open one, so this step proves it from both sides
+      # (gibson#1123): a probe in the proxy pod reaches the API (the probe
+      # works), and the same probe in the MCP server pod times out.
+      - name: A connector MCP server pod cannot reach the Kubernetes API
+        env:
+          # kubectl debug --custom needs this before kubectl 1.31.
+          KUBECTL_DEBUG_CUSTOM_PROFILE: "true"
+        run: |
+          set -euo pipefail
+          proxy=$(kubectl -n "$CONNECTOR_NS" get pods \
+                    -l 'toolhive-name=fixture-mcp-tools,app.kubernetes.io/name in (mcpserver,mcpremoteproxy)' \
+                    --field-selector=status.phase=Running -o name | head -n1)
+          server=$(kubectl -n "$CONNECTOR_NS" get pods \
+                    -l 'toolhive-name=fixture-mcp-tools,!app.kubernetes.io/name' \
+                    --field-selector=status.phase=Running -o name | head -n1)
+          if [ -z "$proxy" ] || [ -z "$server" ]; then
+            echo "::error::the fixture connector needs a running proxy pod and a running MCP server pod (proxy '${proxy}', server '${server}')"
+            kubectl -n "$CONNECTOR_NS" get pods --show-labels || true
+            exit 1
+          fi
+          # The tenant namespace enforces the restricted Pod Security
+          # Standard, so the probe runs as a numeric user that is not root.
+          cat > /tmp/api-probe.json <<'JSON'
+          {"securityContext":{"runAsNonRoot":true,"runAsUser":100,"allowPrivilegeEscalation":false,
+            "capabilities":{"drop":["ALL"]},"seccompProfile":{"type":"RuntimeDefault"}}}
+          JSON
+          # probe prints the curl exit code of one TLS connection to the API
+          # server from the pod. -k: the probe tests the network path, not
+          # the serving certificate.
+          probe() {
+            local pod=$1 name=$2 rc=""
+            kubectl -n "$CONNECTOR_NS" debug "$pod" -c "$name" --image=ghcr.io/zeroroot-ai/mirror/curl:8.10.1 \
+              --profile=restricted --custom=/tmp/api-probe.json -- \
+              sh -c "curl -sk -o /dev/null --connect-timeout 8 --max-time 12 https://kubernetes.default.svc/version >/dev/null 2>&1; echo rc=\$?" >/dev/null
+            for _ in $(seq 1 30); do
+              rc=$(kubectl -n "$CONNECTOR_NS" logs "${pod#pod/}" -c "$name" 2>/dev/null | sed -n 's/^rc=//p' | tail -n1)
+              [ -n "$rc" ] && break
+              sleep 2
+            done
+            echo "${rc:-none}"
+          }
+          rc=$(probe "$proxy" api-from-proxy)
+          if [ "$rc" != "0" ]; then
+            echo "::error::the connector proxy could not reach the API server (curl exit ${rc}); the probe looked at nothing"
+            exit 1
+          fi
+          echo "the connector proxy ${proxy#pod/} reached the API server (curl exit 0)"
+          rc=$(probe "$server" api-from-server)
+          if [ "$rc" != "28" ]; then
+            echo "::error::the MCP server pod ${server#pod/} reached the API server or failed otherwise (curl exit ${rc}, want 28)"
+            exit 1
+          fi
+          echo "the MCP server pod ${server#pod/} got no connection to the API server (curl exit 28)"
+
       - name: Give the suite the connector proxy address and watch for drops
         working-directory: gibson
         run: |
