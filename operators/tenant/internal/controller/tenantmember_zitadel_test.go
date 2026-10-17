@@ -409,13 +409,11 @@ func TestSyncZitadel_PreAccepted_BootstrapsFromSpec(t *testing.T) {
 	}
 }
 
-// TestSyncZitadel_RoleChange_UpdatesExistingGrant replaces the pre-ADR-0093
-// TestSyncZitadel_AddMember_AlreadyExists: Assign no longer blindly creates
-// and catches a conflict — it looks up the user's existing active grant
-// first (Roles.activeGrant) and calls Update when one exists, so a role
-// change (e.g. promoted from Member to Admin in spec) converges to exactly
-// one grant rather than a rejected duplicate create.
-func TestSyncZitadel_RoleChange_UpdatesExistingGrant(t *testing.T) {
+// TestSyncZitadel_ExistingGrantIsKept: a member whose user already holds a
+// grant keeps it. The daemon owns every role change (ADR-0093), so a record
+// whose role differs from the grant assigns nothing. It only records the
+// membership id (gibson#1190).
+func TestSyncZitadel_ExistingGrantIsKept(t *testing.T) {
 	fz := &fakeZitadelClient{}
 	grants := &fakeRoleGrants{grants: []tenantrole.Grant{
 		{ID: "g1", UserID: "zuser-henry", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Viewer)}, Active: true},
@@ -440,19 +438,159 @@ func TestSyncZitadel_RoleChange_UpdatesExistingGrant(t *testing.T) {
 	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
 	doReconcile(t, r, "henry")
 
-	if len(grants.grants) != 1 {
-		t.Fatalf("grants = %+v, want exactly 1 (updated, not duplicated)", grants.grants)
+	if len(grants.grants) != 1 || grants.grants[0].ID != "g1" || grants.grants[0].RoleKeys[0] != string(tenantrole.Viewer) {
+		t.Fatalf("grants = %+v, want g1 unchanged with role %s", grants.grants, tenantrole.Viewer)
 	}
-	if grants.grants[0].ID != "g1" || grants.grants[0].RoleKeys[0] != string(tenantrole.Admin) {
-		t.Errorf("grant = %+v, want id=g1 role=%s", grants.grants[0], tenantrole.Admin)
-	}
-
 	var got gibsonv1alpha1.TenantMember
 	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "henry"}, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Status.ZitadelMembershipID == "" {
-		t.Error("ZitadelMembershipID not set after Roles.Assign updated the existing grant")
+	if got.Status.ZitadelMembershipID != "org-111/zuser-henry" {
+		t.Errorf("ZitadelMembershipID = %q, want org-111/zuser-henry", got.Status.ZitadelMembershipID)
+	}
+}
+
+// TestSyncZitadel_StaleOwnerRecordAssignsNothing: the Owner of the tenant was
+// transferred from alice to bob, and the record of alice, made before
+// gibson#1189, still names Owner and has no membership id. The reconcile
+// assigns nothing, makes no second Owner, returns no error, and the next
+// reconcile does nothing (gibson#1190).
+func TestSyncZitadel_StaleOwnerRecordAssignsNothing(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{grants: []tenantrole.Grant{
+		{ID: "g-alice", UserID: "zuser-alice", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Admin)}, Active: true},
+		{ID: "g-bob", UserID: "zuser-bob", UserOrgID: "org-111", OrgID: "org-111", RoleKeys: []string{string(tenantrole.Owner)}, Active: true},
+	}}
+	tuples := &fakeRoleTuples{tuples: []tenantrole.Tuple{
+		{User: "user:zuser-alice", Relation: "admin", Object: "tenant:acme"},
+		{User: "user:zuser-bob", Relation: "owner", Object: "tenant:acme"},
+	}}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "alice",
+			Namespace:  "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     "alice@acme.com",
+			Role:      gibsonv1alpha1.MemberRoleOwner,
+			TenantRef: localRef(),
+		},
+		Status: gibsonv1alpha1.TenantMemberStatus{
+			ZitadelUserID: "zuser-alice",
+			Phase:         gibsonv1alpha1.TenantMemberPhaseActive,
+		},
+	}
+
+	r, fc, grants, tuples := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, tuples)
+	for range 2 {
+		res, err := r.Reconcile(context.Background(),
+			ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "alice"}})
+		if err != nil || res.RequeueAfter != 0 {
+			t.Fatalf("reconcile = (%+v, %v), want done with no retry", res, err)
+		}
+	}
+
+	owners := 0
+	for _, g := range grants.grants {
+		if slices.Contains(g.RoleKeys, string(tenantrole.Owner)) {
+			owners++
+		}
+	}
+	if owners != 1 || len(grants.grants) != 2 {
+		t.Fatalf("grants = %+v, want the two grants unchanged and one Owner", grants.grants)
+	}
+	if len(tuples.tuples) != 2 {
+		t.Errorf("tuples = %+v, want the two tuples unchanged", tuples.tuples)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "alice"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.ZitadelMembershipID != "org-111/zuser-alice" {
+		t.Errorf("ZitadelMembershipID = %q, want org-111/zuser-alice", got.Status.ZitadelMembershipID)
+	}
+}
+
+// TestSyncZitadel_StaleOwnerRecordWithNoGrantAssignsNothing: bob holds Owner,
+// and alice, the former Owner, was removed and holds no grant. Her record from
+// before gibson#1189 still names Owner. The reconcile writes no grant, makes
+// no second Owner, and stops (gibson#1190).
+func TestSyncZitadel_StaleOwnerRecordWithNoGrantAssignsNothing(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{grants: []tenantrole.Grant{
+		{ID: "g-bob", UserID: "zuser-bob", UserOrgID: "org-111", OrgID: "org-111",
+			RoleKeys: []string{string(tenantrole.Owner)}, Active: true},
+	}}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "alice",
+			Namespace:  "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     "alice@acme.com",
+			Role:      gibsonv1alpha1.MemberRoleOwner,
+			TenantRef: localRef(),
+		},
+		Status: gibsonv1alpha1.TenantMemberStatus{ZitadelUserID: "zuser-alice"},
+	}
+
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
+	for range 2 {
+		res, err := r.Reconcile(context.Background(),
+			ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "alice"}})
+		if err != nil || res.RequeueAfter != 0 {
+			t.Fatalf("reconcile = (%+v, %v), want done with no retry", res, err)
+		}
+	}
+	if len(grants.grants) != 1 || grants.grants[0].ID != "g-bob" {
+		t.Fatalf("grants = %+v, want only the Owner grant of bob", grants.grants)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "alice"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.ZitadelMembershipID != "org-111/zuser-alice" {
+		t.Errorf("ZitadelMembershipID = %q, want org-111/zuser-alice", got.Status.ZitadelMembershipID)
+	}
+}
+
+// TestSyncZitadel_GrantReadFailureWritesNothing: when the read of the grant
+// fails, the reconcile returns the error for backoff, writes no grant, and
+// leaves the record unsynced.
+func TestSyncZitadel_GrantReadFailureWritesNothing(t *testing.T) {
+	fz := &fakeZitadelClient{}
+	grants := &fakeRoleGrants{listErr: fmt.Errorf("connect: %w", tenantrole.ErrUnreachable)}
+	member := &gibsonv1alpha1.TenantMember{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "gina",
+			Namespace:  "default",
+			Finalizers: []string{gibsonv1alpha1.TenantMemberFinalizer},
+		},
+		Spec: gibsonv1alpha1.TenantMemberSpec{
+			Email:     "gina@acme.com",
+			Role:      gibsonv1alpha1.MemberRoleMember,
+			TenantRef: localRef(),
+		},
+		Status: gibsonv1alpha1.TenantMemberStatus{ZitadelUserID: "zuser-gina"},
+	}
+
+	r, fc, grants, _ := buildMemberReconcilerWithRoles(t, fz, tenantWithOrgID(), member, grants, &fakeRoleTuples{})
+	_, err := r.Reconcile(context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "default", Name: "gina"}})
+	if err == nil {
+		t.Fatal("expected an error when the grant read fails")
+	}
+	if len(grants.grants) != 0 {
+		t.Fatalf("grants = %+v, want none", grants.grants)
+	}
+	var got gibsonv1alpha1.TenantMember
+	if err := fc.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "gina"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.ZitadelMembershipID != "" {
+		t.Errorf("ZitadelMembershipID = %q, want empty", got.Status.ZitadelMembershipID)
 	}
 }
 

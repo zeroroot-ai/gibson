@@ -141,12 +141,14 @@ func (r *TenantMemberReconciler) activateMember(ctx context.Context, tm *gibsonv
 	ev := audit.ObjectEvent(audit.ActionMemberInvitationAccept, tm, map[string]string{"user_id": tm.Spec.AcceptedByUserID})
 	if err := r.Audit.Change(ctx, ev, func() error {
 		if r.FGA != nil {
-			// The tenant role tuple is no longer written here: syncZitadel runs
-			// before this branch on every reconcile and, for a member with a
-			// Zitadel user id, already called Roles.Assign — which writes the
-			// Zitadel grant and copies it into FGA in one call (ADR-0093). The
-			// only writes left here are the session tuples, which are not role
-			// tuples and stay direct FGA writes.
+			// The tenant role tuple is not written here. syncZitadel runs
+			// before this branch on every reconcile. For a member with a
+			// Zitadel user id and no grant, it called Roles.Assign, which
+			// writes the Zitadel grant and copies it into FGA in one call
+			// (ADR-0093). A member who already held a grant keeps it, and the
+			// TenantRoleSyncReconciler copies it into FGA. The only writes
+			// left here are the session tuples, which are not role tuples
+			// and stay direct FGA writes.
 
 			// Slice 2 of gibson#627: seed the active_session conditional tuple so
 			// that ext-authz (Slice 3) can enforce the session-validity gate.
@@ -297,6 +299,22 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 		return ctrl.Result{}, nil
 	}
 
+	// The daemon writes every role change and every ownership transfer in
+	// Zitadel, and it does not rewrite this record (ADR-0093). So the record
+	// only fills a missing grant. A user who already holds one keeps it, and
+	// the record's role, which can be out of date, assigns nothing. A record
+	// from before gibson#1189 that names a transferred Owner then makes no
+	// second Owner and does not retry (gibson#1190).
+	held, err := r.holdsGrant(ctx, tm, orgID)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if held {
+		log.Info("syncZitadel: the member already holds a tenant role; the record assigns nothing",
+			"userId", tm.Status.ZitadelUserID)
+		return r.recordMembership(ctx, tm, membershipKey(orgID, tm.Status.ZitadelUserID))
+	}
+
 	// The Zitadel user and the tenant role change under one audit record,
 	// written first (gibson#583).
 	var membershipID string
@@ -313,20 +331,53 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	case errors.Is(err, clients.ErrUnreachable):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
+	case errors.Is(err, tenantrole.ErrOwnerHeld) && tm.Spec.Role == gibsonv1alpha1.MemberRoleOwner:
+		// Only a founding owner gets a record, so a record that names Owner
+		// on a tenant where another user holds Owner is stale: the daemon
+		// moved ownership and then removed this user. ErrOwnerHeld means the
+		// Syncer refused before any write, so the record assigns nothing and
+		// stops (gibson#1190). An ErrOwnerConflict from the Sync after a
+		// write is not this case: it takes the default branch and retries.
+		log.Info("syncZitadel: another user holds Owner; the stale Owner record assigns nothing",
+			"userId", tm.Status.ZitadelUserID)
+		return r.recordMembership(ctx, tm, membershipKey(orgID, tm.Status.ZitadelUserID))
 	default:
-		// This includes tenantrole.ErrOwnerConflict: another user holds
-		// Owner, and a record that names a second Owner is stale (the daemon
-		// transfers ownership and does not rewrite this record). That is
-		// not a wait. The error surfaces, and the controller retries with
-		// backoff until the record changes (gibson#1190).
 		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
+	return r.recordMembership(ctx, tm, membershipID)
+}
 
+// holdsGrant reports whether the member's Zitadel user already holds a role
+// grant on the tenant. It reads Zitadel and writes nothing.
+func (r *TenantMemberReconciler) holdsGrant(
+	ctx context.Context, tm *gibsonv1alpha1.TenantMember, orgID string,
+) (bool, error) {
+	if r.Roles == nil {
+		return false, errors.New("syncZitadel: role sync not configured")
+	}
+	t := tenantrole.Tenant{ID: tm.Spec.TenantRef.Name, OrgID: orgID}
+	held, err := r.Roles.IsMember(ctx, t, tm.Status.ZitadelUserID)
+	if err != nil {
+		return false, fmt.Errorf("syncZitadel: read the grant of the member: %w", err)
+	}
+	return held, nil
+}
+
+// recordMembership writes the membership id to the status, which marks the
+// record as synced.
+func (r *TenantMemberReconciler) recordMembership(
+	ctx context.Context, tm *gibsonv1alpha1.TenantMember, membershipID string,
+) (ctrl.Result, error) {
 	tm.Status.ZitadelMembershipID = membershipID
 	if err := r.Status().Update(ctx, tm); err != nil {
 		return ctrl.Result{}, fmt.Errorf("syncZitadel: status update: %w", err)
 	}
 	return ctrl.Result{}, nil
+}
+
+// membershipKey is the membership id "<org>/<user>".
+func membershipKey(orgID, userID string) string {
+	return orgID + "/" + userID
 }
 
 // assignMembership assigns the tenant role of a member that has a Zitadel
@@ -348,7 +399,7 @@ func (r *TenantMemberReconciler) assignMembership(ctx context.Context, tm *gibso
 	if err := r.Roles.Assign(tenantrole.WithCaller(ctx, "tenant-operator"), t, userID, role); err != nil {
 		return "", fmt.Errorf("syncZitadel: assign role: %w", err)
 	}
-	return fmt.Sprintf("%s/%s", orgID, userID), nil
+	return membershipKey(orgID, userID), nil
 }
 
 // zitadelOrgID looks up the parent Tenant's Zitadel organization ID from its

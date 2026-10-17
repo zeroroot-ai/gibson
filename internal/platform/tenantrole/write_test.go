@@ -146,6 +146,30 @@ func TestAssign_CreatesAGrantWhenNoneExistsAndWritesTheTuple(t *testing.T) {
 	}
 }
 
+// An Owner assign while another user holds Owner is refused before any
+// Zitadel write, so no second Owner grant is left behind (gibson#1190). The
+// Owner may still assign Owner to itself.
+func TestAssign_OwnerRefusedWhileAnotherUserIsOwner(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	bob := f.id.AddUser(f.orgID, "bob@example.com")
+	alice := f.id.AddUser(f.orgID, "alice@example.com")
+	createGrant(t, f, bob, []string{string(tenantrole.Owner)})
+
+	err := f.syncer.Assign(ctx, tenant("acme", f.orgID), alice, tenantrole.Owner)
+	if !errors.Is(err, tenantrole.ErrOwnerHeld) || !errors.Is(err, tenantrole.ErrOwnerConflict) {
+		t.Fatalf("Assign Owner to alice: err = %v, want ErrOwnerHeld, which is an ErrOwnerConflict", err)
+	}
+	member, err := f.syncer.IsMember(ctx, tenant("acme", f.orgID), alice)
+	if err != nil || member {
+		t.Fatalf("IsMember(alice) = (%v, %v), want no grant written", member, err)
+	}
+
+	if err := f.syncer.Assign(ctx, tenant("acme", f.orgID), bob, tenantrole.Owner); err != nil {
+		t.Fatalf("Assign Owner to the Owner: %v", err)
+	}
+}
+
 func TestAssign_UpdatesAnExistingGrantInPlace(t *testing.T) {
 	f := newFixture(t)
 	userID := f.id.AddUser(f.orgID, "existing@example.com")
