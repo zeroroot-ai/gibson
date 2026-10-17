@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.161.1](https://github.com/zeroroot-ai/gibson/compare/v0.161.0...v0.161.1) (2026-10-17)
+
+
+### Bug Fixes
+
+* **datapool:** delete the mission recovery hook that the daemon never wired ([#1198](https://github.com/zeroroot-ai/gibson/issues/1198)) ([0d28f35](https://github.com/zeroroot-ai/gibson/commit/0d28f353ed8089a35f5a6b84667d8dacca46ef3a))
+* **providers:** classify OpenAI and Ollama models as chat or embedding ([#1201](https://github.com/zeroroot-ai/gibson/issues/1201)) ([8929a65](https://github.com/zeroroot-ai/gibson/commit/8929a65ef5b53eb746462b64e4dfd1c50b2520dc))
+* **rework:** a member record only fills a missing role grant ([#1199](https://github.com/zeroroot-ai/gibson/issues/1199)) ([b5d4ae0](https://github.com/zeroroot-ai/gibson/commit/b5d4ae0c2daf76f8ff60fea6606bd0b97199f3b7))
+* **tenant-operator:** register the belief trainer SPIFFE ID of each tenant ([#1169](https://github.com/zeroroot-ai/gibson/issues/1169)) ([79d4730](https://github.com/zeroroot-ai/gibson/commit/79d473092d30f6ee0085b1b2fa86cbf9b80a1015))
+
 ## [0.161.0](https://github.com/zeroroot-ai/gibson/compare/v0.160.4...v0.161.0) (2026-10-14)
 
 
