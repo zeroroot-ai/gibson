@@ -163,8 +163,6 @@ internal/infra/datapool/evictor.go	fakeClock.Now
 internal/infra/datapool/evictor.go	newFakeClock
 internal/infra/datapool/kek.go	DeriveTenantKEK
 internal/infra/datapool/metrics/metrics.go	IncAdminPoolAcquire
-internal/infra/datapool/recovery_hook.go	NewNoopRecoveryHook
-internal/infra/datapool/recovery_hook.go	runRecoveryHook.Run
 internal/infra/observability/config.go	ContentLoggingConfig.Validate
 internal/infra/observability/logging.go	NewLogger
 internal/infra/otelinit/observability.go	Observability.MeterProvider
