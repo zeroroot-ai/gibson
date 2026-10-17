@@ -13,7 +13,8 @@
 #   3. A Job from the belief-trainer CronJob that the tenant operator created
 #      in the tenant namespace runs once and must complete.
 #   2b. assert-run-nodes.sh reads the tenant graph: the mission wrote one
-#      MissionRun and one AgentRun node (gibson#1021).
+#      MissionRun node (gibson#1021). A tool-only mission writes no AgentRun
+#      (gibson#1156).
 #   3b. The trainer log must show at least one fitted row: the seed host.
 #   4. After one reload interval of the daemon, TestBeliefTraining_NextMissionPins
 #      runs one more mission and asserts that it pins a stored version of the
@@ -255,10 +256,11 @@ jobs:
             2>&1 | tee "$E2E_OUT/seed.log"
 
       # The seed ran a real nmap mission. The projector must have written its
-      # run nodes to the graph of the tenant: one MissionRun keyed on id and
-      # one AgentRun keyed on brain_id (ADR-0112, gibson#1021).
-      - name: The mission wrote its run nodes to the tenant graph
-        run: gibson/.github/scripts/assert-run-nodes.sh "$TENANT"
+      # run node to the graph of the tenant: one MissionRun keyed on id
+      # (ADR-0112, gibson#1021). The mission is one tool node with no agent,
+      # so it writes no AgentRun (gibson#1156).
+      - name: The mission wrote its run node to the tenant graph
+        run: gibson/.github/scripts/assert-run-nodes.sh "$TENANT" MissionRun:id
 
       # The tenant operator creates the CronJob during provisioning. A Job from
       # it is the nightly run, started now.

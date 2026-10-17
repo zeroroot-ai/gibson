@@ -8,7 +8,12 @@
 # asserted lowercase labels left with gibson#1015, so after it no exit test
 # checked that a mission reaches the graph at all.
 #
-# Usage: assert-run-nodes.sh <tenant>
+# Usage: assert-run-nodes.sh <tenant> <Label:key>...
+#
+# Each <Label:key> names a node the mission must have written. A mission
+# writes only the nodes of what it ran: a tool-only mission writes a
+# MissionRun and no AgentRun, because only an agent delegation submits
+# AgentRunObserved (brain_ingest.go, gibson#1156).
 #
 # It reads the tenant Neo4j directly: the bolt NetworkPolicy of the tenant
 # admits the daemon only, so the check runs cypher-shell inside the Neo4j pod
@@ -17,6 +22,11 @@
 set -euo pipefail
 
 TENANT="${1:?tenant}"
+shift
+if [ "$#" -eq 0 ]; then
+  echo "::error::name at least one <Label:key> node spec" >&2
+  exit 2
+fi
 ns="tenant-${TENANT}"
 sts="tenant-${TENANT}-neo4j"
 pod="${sts}-0"
@@ -42,7 +52,7 @@ count() {
 }
 
 status=0
-for spec in MissionRun:id AgentRun:brain_id; do
+for spec in "$@"; do
   label=${spec%%:*}
   key=${spec#*:}
   n=$(count "$label" "$key") || { status=1; continue; }
