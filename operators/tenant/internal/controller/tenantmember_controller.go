@@ -141,12 +141,14 @@ func (r *TenantMemberReconciler) activateMember(ctx context.Context, tm *gibsonv
 	ev := audit.ObjectEvent(audit.ActionMemberInvitationAccept, tm, map[string]string{"user_id": tm.Spec.AcceptedByUserID})
 	if err := r.Audit.Change(ctx, ev, func() error {
 		if r.FGA != nil {
-			// The tenant role tuple is no longer written here: syncZitadel runs
-			// before this branch on every reconcile and, for a member with a
-			// Zitadel user id, already called Roles.Assign — which writes the
-			// Zitadel grant and copies it into FGA in one call (ADR-0093). The
-			// only writes left here are the session tuples, which are not role
-			// tuples and stay direct FGA writes.
+			// The tenant role tuple is not written here. syncZitadel runs
+			// before this branch on every reconcile. For a member with a
+			// Zitadel user id and no grant, it called Roles.Assign, which
+			// writes the Zitadel grant and copies it into FGA in one call
+			// (ADR-0093). A member who already held a grant keeps it, and the
+			// TenantRoleSyncReconciler copies it into FGA. The only writes
+			// left here are the session tuples, which are not role tuples
+			// and stay direct FGA writes.
 
 			// Slice 2 of gibson#627: seed the active_session conditional tuple so
 			// that ext-authz (Slice 3) can enforce the session-validity gate.
@@ -329,10 +331,16 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	case errors.Is(err, clients.ErrUnreachable):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
+	case errors.Is(err, tenantrole.ErrOwnerConflict) && tm.Spec.Role == gibsonv1alpha1.MemberRoleOwner:
+		// Only a founding owner gets a record, so a record that names Owner
+		// on a tenant where another user holds Owner is stale: the daemon
+		// moved ownership and then removed this user. The Syncer refused
+		// before any write, so the record assigns nothing and stops
+		// (gibson#1190).
+		log.Info("syncZitadel: another user holds Owner; the stale Owner record assigns nothing",
+			"userId", tm.Status.ZitadelUserID)
+		return r.recordMembership(ctx, tm, membershipKey(orgID, tm.Status.ZitadelUserID))
 	default:
-		// This includes tenantrole.ErrOwnerConflict: the user holds no
-		// grant, and another user holds Owner. That is not a wait. The error
-		// surfaces, and the controller retries with backoff.
 		return ctrl.Result{}, fmt.Errorf("sync the Zitadel role of the member: %w", err)
 	}
 	return r.recordMembership(ctx, tm, membershipID)
