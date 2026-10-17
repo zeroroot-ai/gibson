@@ -80,10 +80,13 @@ var Manifest = []CriticalPath{
 		Name:    "mission-run",
 		Purpose: "The engine drives a mission, and after a daemon restart it fails and judges the in-flight work again.",
 		// The restart path is the brain Hydrate step (ResumeFailInFlight,
-		// ADR-0163). The datapool recovery hook that the old covering test
-		// exercised was never wired into the daemon, and gibson#1165 deleted it.
+		// ADR-0163). TestHydrate_InFlightWorkFailedOnRestart runs it through
+		// Registry.For on a real TimelineStore. The datapool recovery hook that
+		// the old covering test exercised was never wired into the daemon, and
+		// gibson#1165 deleted it.
 		Tests: []CoveringTest{
 			{Dir: "internal/engine/brain", Func: "TestWireExecutor_DrivesGoalMissionEndToEnd"},
+			{Dir: "internal/infra/datapool", Func: "TestHydrate_InFlightWorkFailedOnRestart"},
 			{Dir: "internal/engine/brain", Func: "TestCrashResume_GoalMissionDeciderReEngages"},
 		},
 	},
