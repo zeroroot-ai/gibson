@@ -37,6 +37,11 @@ type Result struct {
 // Sync). The caller changed nothing in FGA.
 var ErrOwnerConflict = errors.New("tenantrole: sync would leave the tenant without exactly one Owner")
 
+// ErrOwnerHeld is returned by an Owner Assign when another user already holds
+// an Owner grant in Zitadel. Assign returns it before any write, so nothing
+// changed in Zitadel or FGA. It wraps ErrOwnerConflict.
+var ErrOwnerHeld = fmt.Errorf("tenantrole: another user holds Owner: %w", ErrOwnerConflict)
+
 // Syncer is the one writer of tenant-role tuples (ADR-0093 decision 3).
 type Syncer struct {
 	grants Grants

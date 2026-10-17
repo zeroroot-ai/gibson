@@ -13,8 +13,8 @@ import (
 // grant, or creates one when none exists, then calls Sync for that user so
 // FGA matches at once.
 //
-// An Owner assign while another user holds Owner returns ErrOwnerConflict
-// before any Zitadel write. A move of ownership is Transfer. Without this
+// An Owner assign while another user holds Owner returns ErrOwnerHeld (which
+// wraps ErrOwnerConflict) before any Zitadel write. A move of ownership is Transfer. Without this
 // check the grant was written first and Sync refused after, so Zitadel kept
 // a second Owner that FGA never got (gibson#1190).
 func (s *Syncer) Assign(ctx context.Context, t Tenant, userID string, r Role) error {
@@ -162,7 +162,7 @@ func (s *Syncer) activeGrant(ctx context.Context, t Tenant, userID string) (*Gra
 	return nil, nil
 }
 
-// refuseSecondOwner returns ErrOwnerConflict when a user other than userID
+// refuseSecondOwner returns ErrOwnerHeld when a user other than userID
 // holds an active Owner grant on the tenant.
 func (s *Syncer) refuseSecondOwner(ctx context.Context, t Tenant, userID string) error {
 	grants, err := s.grants.List(ctx, t.OrgID, nil)
@@ -174,7 +174,7 @@ func (s *Syncer) refuseSecondOwner(ctx context.Context, t Tenant, userID string)
 			continue
 		}
 		if role, ok := validRole(g, t); ok && role == Owner {
-			return ErrOwnerConflict
+			return ErrOwnerHeld
 		}
 	}
 	return nil

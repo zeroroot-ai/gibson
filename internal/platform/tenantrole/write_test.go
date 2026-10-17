@@ -157,8 +157,8 @@ func TestAssign_OwnerRefusedWhileAnotherUserIsOwner(t *testing.T) {
 	createGrant(t, f, bob, []string{string(tenantrole.Owner)})
 
 	err := f.syncer.Assign(ctx, tenant("acme", f.orgID), alice, tenantrole.Owner)
-	if !errors.Is(err, tenantrole.ErrOwnerConflict) {
-		t.Fatalf("Assign Owner to alice: err = %v, want ErrOwnerConflict", err)
+	if !errors.Is(err, tenantrole.ErrOwnerHeld) || !errors.Is(err, tenantrole.ErrOwnerConflict) {
+		t.Fatalf("Assign Owner to alice: err = %v, want ErrOwnerHeld, which is an ErrOwnerConflict", err)
 	}
 	member, err := f.syncer.IsMember(ctx, tenant("acme", f.orgID), alice)
 	if err != nil || member {

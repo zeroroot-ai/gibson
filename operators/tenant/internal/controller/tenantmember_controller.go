@@ -331,12 +331,13 @@ func (r *TenantMemberReconciler) syncZitadel(ctx context.Context, tm *gibsonv1al
 	case errors.Is(err, clients.ErrUnreachable):
 		log.Info("syncZitadel: zitadel not ready; requeue", "err", err.Error())
 		return ctrl.Result{RequeueAfter: zitadelBackoff}, nil
-	case errors.Is(err, tenantrole.ErrOwnerConflict) && tm.Spec.Role == gibsonv1alpha1.MemberRoleOwner:
+	case errors.Is(err, tenantrole.ErrOwnerHeld) && tm.Spec.Role == gibsonv1alpha1.MemberRoleOwner:
 		// Only a founding owner gets a record, so a record that names Owner
 		// on a tenant where another user holds Owner is stale: the daemon
-		// moved ownership and then removed this user. The Syncer refused
-		// before any write, so the record assigns nothing and stops
-		// (gibson#1190).
+		// moved ownership and then removed this user. ErrOwnerHeld means the
+		// Syncer refused before any write, so the record assigns nothing and
+		// stops (gibson#1190). An ErrOwnerConflict from the Sync after a
+		// write is not this case: it takes the default branch and retries.
 		log.Info("syncZitadel: another user holds Owner; the stale Owner record assigns nothing",
 			"userId", tm.Status.ZitadelUserID)
 		return r.recordMembership(ctx, tm, membershipKey(orgID, tm.Status.ZitadelUserID))
