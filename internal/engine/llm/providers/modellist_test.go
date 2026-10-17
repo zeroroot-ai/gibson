@@ -665,3 +665,79 @@ func TestAnthropicProvider_BuildsWithNoModelAndRefusesToComplete(t *testing.T) {
 	_, err = f.Complete(context.Background(), req)
 	require.Error(t, err)
 }
+
+// The OpenAI list sends no capabilities, so the daemon classifies each model by
+// its name (gibson#1197).
+func TestOpenAIModels_ClassifiesEachModelByName(t *testing.T) {
+	embedding, chat := []string{"embedding"}, []string{"chat"}
+	want := map[string][]string{
+		"text-embedding-3-small": embedding, "text-embedding-3-large": embedding,
+		"gpt-4o": chat, "gpt-4.1": chat, "gpt-5": chat, "chatgpt-4o-latest": chat,
+		"o1": chat, "o3-mini": chat, "o4-mini": chat, "gpt-4o-search-preview": chat,
+		"gpt-4o-audio-preview": nil, "gpt-4o-mini-tts": nil, "gpt-4o-transcribe": nil,
+		"gpt-4o-realtime-preview": nil, "gpt-image-1": nil, "dall-e-3": nil, "whisper-1": nil,
+		"omni-moderation-latest": nil, "davinci-002": nil, "codex-mini-latest": nil,
+		"o1-pro": nil, "gpt-5-pro": nil, "o3-deep-research": nil, "gpt-5-codex": nil,
+		"gpt-3.5-turbo-instruct": nil,
+	}
+	data := make([]string, 0, len(want))
+	for id := range want {
+		data = append(data, `{"id":"`+id+`"}`)
+	}
+	tc := caseNamed(t, "openai")
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"data":[`+strings.Join(data, ",")+`]}`)
+	})
+	models, err := tc.build(t, fake.URL).Models(context.Background())
+	require.NoError(t, err)
+	require.Len(t, models, len(want))
+	for _, m := range models {
+		if want[m.Name] == nil {
+			assert.Empty(t, m.Features, "%s has no known class", m.Name)
+			continue
+		}
+		assert.Equal(t, want[m.Name], m.Features, m.Name)
+	}
+}
+
+// Every other provider on the OpenAI-shaped list keeps what it reports. The
+// name rule is for OpenAI only.
+func TestOpenAICompatibleModels_NameRuleDoesNotApply(t *testing.T) {
+	for _, name := range []string{"mistral", "huggingface", "llamafile"} {
+		t.Run(name, func(t *testing.T) {
+			tc := caseNamed(t, name)
+			fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+				reply(w, 200, `{"data":[{"id":"gpt-4o"},{"id":"text-embedding-3-small"}]}`)
+			})
+			models, err := tc.build(t, fake.URL).Models(context.Background())
+			require.NoError(t, err)
+			require.Len(t, models, 2)
+			for _, m := range models {
+				assert.Empty(t, m.Features, m.Name)
+			}
+		})
+	}
+}
+
+// Ollama serves a model for generation or for embeddings. The encoder family
+// or an "embed" name marks an embedding model (gibson#1197).
+func TestOllamaModels_ClassifiesEmbeddingModels(t *testing.T) {
+	tc := caseNamed(t, "ollama")
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"models":[`+
+			`{"name":"nomic-embed-text:latest","details":{"family":"nomic-bert","families":["nomic-bert"]}},`+
+			`{"name":"bge-m3:latest","details":{"family":"bert","families":["bert"]}},`+
+			`{"name":"mxbai-embed-large:latest"},`+
+			`{"name":"llama3:latest","details":{"family":"llama","families":["llama"]}}]}`)
+	})
+	models, err := tc.build(t, fake.URL).Models(context.Background())
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, m := range models {
+		got[m.Name] = m.Features
+	}
+	assert.Equal(t, []string{"embedding"}, got["nomic-embed-text:latest"])
+	assert.Equal(t, []string{"embedding"}, got["bge-m3:latest"])
+	assert.Equal(t, []string{"embedding"}, got["mxbai-embed-large:latest"])
+	assert.Equal(t, []string{"chat"}, got["llama3:latest"])
+}

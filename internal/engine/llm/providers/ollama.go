@@ -74,7 +74,11 @@ func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 		}
 		var tags struct {
 			Models []struct {
-				Name string `json:"name"`
+				Name    string `json:"name"`
+				Details struct {
+					Family   string   `json:"family"`
+					Families []string `json:"families"`
+				} `json:"details"`
 			} `json:"models"`
 		}
 		if err := getJSON(ctx, p.listClient, "ollama", strings.TrimRight(p.listBase, "/")+"/api/tags", header, &tags); err != nil {
@@ -85,10 +89,31 @@ func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 			if m.Name == "" {
 				continue
 			}
-			models = append(models, llm.ModelInfo{Name: m.Name, Features: []string{"chat"}})
+			models = append(models, llm.ModelInfo{
+				Name:     m.Name,
+				Features: ollamaModelFeatures(m.Name, m.Details.Family, m.Details.Families),
+			})
 		}
 		return models, nil
 	})
+}
+
+// ollamaModelFeatures classifies a pulled Ollama model (gibson#1197). Ollama
+// serves a model either for generation or for embeddings. A model of an
+// encoder family or with "embed" in its name is "embedding" only. The match on
+// "bert" covers bert, nomic-bert, jina-bert and xlm-roberta. Every other model
+// is "chat". The /api/show capabilities field is the authoritative source, at
+// one more call for each model. Use it if the family rule drifts.
+func ollamaModelFeatures(name, family string, families []string) []string {
+	if strings.Contains(strings.ToLower(name), "embed") {
+		return []string{"embedding"}
+	}
+	for _, f := range append([]string{family}, families...) {
+		if strings.Contains(strings.ToLower(f), "bert") {
+			return []string{"embedding"}
+		}
+	}
+	return []string{"chat"}
 }
 
 // Complete sends a completion request
