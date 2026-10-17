@@ -665,3 +665,61 @@ func TestAnthropicProvider_BuildsWithNoModelAndRefusesToComplete(t *testing.T) {
 	_, err = f.Complete(context.Background(), req)
 	require.Error(t, err)
 }
+
+// The OpenAI list sends no capabilities, so the daemon classifies each model by
+// its name (gibson#1197).
+func TestOpenAIModels_ClassifiesEachModelByName(t *testing.T) {
+	tc := caseNamed(t, "openai")
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"data":[{"id":"text-embedding-3-small"},{"id":"gpt-4o"},{"id":"o3-mini"},`+
+			`{"id":"gpt-4o-audio-preview"},{"id":"gpt-image-1"},{"id":"dall-e-3"},{"id":"whisper-1"}]}`)
+	})
+	models, err := tc.build(t, fake.URL).Models(context.Background())
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, m := range models {
+		got[m.Name] = m.Features
+	}
+	assert.Equal(t, []string{"embedding"}, got["text-embedding-3-small"])
+	assert.Equal(t, []string{"chat"}, got["gpt-4o"])
+	assert.Equal(t, []string{"chat"}, got["o3-mini"])
+	for _, id := range []string{"gpt-4o-audio-preview", "gpt-image-1", "dall-e-3", "whisper-1"} {
+		assert.Empty(t, got[id], "%s has no known class", id)
+	}
+}
+
+// A Mistral-shaped list keeps the capabilities it reports. The name rule is
+// for OpenAI only.
+func TestMistralModels_NameRuleDoesNotApply(t *testing.T) {
+	tc := caseNamed(t, "mistral")
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"data":[{"id":"gpt-4o"}]}`)
+	})
+	models, err := tc.build(t, fake.URL).Models(context.Background())
+	require.NoError(t, err)
+	require.Len(t, models, 1)
+	assert.Empty(t, models[0].Features)
+}
+
+// Ollama serves a model for generation or for embeddings. The encoder family
+// or an "embed" name marks an embedding model (gibson#1197).
+func TestOllamaModels_ClassifiesEmbeddingModels(t *testing.T) {
+	tc := caseNamed(t, "ollama")
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"models":[`+
+			`{"name":"nomic-embed-text:latest","details":{"family":"nomic-bert","families":["nomic-bert"]}},`+
+			`{"name":"bge-m3:latest","details":{"family":"bert","families":["bert"]}},`+
+			`{"name":"mxbai-embed-large:latest"},`+
+			`{"name":"llama3:latest","details":{"family":"llama","families":["llama"]}}]}`)
+	})
+	models, err := tc.build(t, fake.URL).Models(context.Background())
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, m := range models {
+		got[m.Name] = m.Features
+	}
+	assert.Equal(t, []string{"embedding"}, got["nomic-embed-text:latest"])
+	assert.Equal(t, []string{"embedding"}, got["bge-m3:latest"])
+	assert.Equal(t, []string{"embedding"}, got["mxbai-embed-large:latest"])
+	assert.Equal(t, []string{"chat"}, got["llama3:latest"])
+}
