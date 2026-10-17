@@ -1611,14 +1611,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "configured callback service with component authz metrics recorder")
 	}
 
-	// Mission crash recovery is now lazy and per-tenant: the datapool's
-	// RecoveryHook fires on the first Pool.For dial of each tenant per
-	// process, transitioning any missions left `running` by the previous
-	// daemon process to `paused`. This replaces the eager startup
-	// enumeration of Tenant CRDs that crashed the daemon on 2026-05-19
-	// (testa123 incident). See ADR-0023 and gibson#207.
-	d.logger.Info(ctx, "lazy mission recovery armed; will fire per-tenant on first Pool.For dial")
-
 	// Start callback server via Serve (blocking lifecycle in goroutine).
 	if d.config.Callback.Enabled {
 		d.logger.Info(ctx, "starting callback server")

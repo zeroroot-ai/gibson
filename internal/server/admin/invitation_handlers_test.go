@@ -626,6 +626,19 @@ func TestInviteMember_ConflictNoticeSendFailureStillReportsSent(t *testing.T) {
 
 // --- store ListPending test ---
 
+// ListPending refuses a store with no database, the same as every other
+// method. An empty list would hide the fault from the roster (gibson#1165).
+func TestInvitationStore_ListPendingRefusesWithNoDatabase(t *testing.T) {
+	ctx := context.Background()
+	var nilStore *InvitationStore
+	if _, err := nilStore.ListPending(ctx, "acme"); err == nil {
+		t.Error("a nil store: no error")
+	}
+	if _, err := NewInvitationStore(nil).ListPending(ctx, "acme"); err == nil {
+		t.Error("a store with no database: no error")
+	}
+}
+
 func TestInvitationStore_ListPending(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

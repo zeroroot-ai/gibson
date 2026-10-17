@@ -179,7 +179,7 @@ green integration test. They are pinned in [`tests/criticalpath/manifest.go`](..
 | auth-chain (JWT→ext-authz→FGA→handler) | `internal/server/extauthz/fga` `TestCheck_*`, `tests/integration` `TestGetUserProfile_CrossUser_Denied` |
 | per-tenant isolation (predicate-leak guard) | `TestPerTenantMissionIsolation_*`, `TestPerTenantFindingIDOR_*` |
 | tenant-provision saga (idempotency + rollback) | `operators/tenant/.../saga/flows` `Test*Idempotent*`, `TestEnrollmentRevocationSteps_*` |
-| mission-run | `TestRecoverRunningMissions_PerTenantFanOut` |
+| mission-run (engine drive + restart resume) | `internal/engine/brain` `TestWireExecutor_DrivesGoalMissionEndToEnd`, `TestCrashResume_GoalMissionDeciderReEngages` |
 | entitlements / billing-bypass | `internal/server/daemon/api` `TestClassifyRelationAction`, `TestGetCheckpoint_OperatorBypassesRedaction` |
 
 `tests/criticalpath/manifest_test.go` is a **pure-unit guard** (no Docker): it
