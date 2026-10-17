@@ -318,15 +318,19 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 
 // openAIModelFeatures classifies an OpenAI model by its name, because the
 // OpenAI list sends no capabilities (gibson#1197). An embedding model is
-// "embedding" only. A GPT or o-series text model is "chat". Audio, realtime,
-// speech, image and search variants, and every other model, get no class, so
-// no menu offers them for a role they cannot do.
+// "embedding" only. A GPT or o-series text model is "chat". The provider calls
+// chat completions, so a model that does not serve them gets no class: audio,
+// realtime, speech and image variants, the Responses-only pro, deep-research
+// and codex models, the legacy instruct models, and every other model.
 func openAIModelFeatures(id string) []string {
 	name := strings.ToLower(id)
 	if strings.HasPrefix(name, "text-embedding-") {
 		return []string{"embedding"}
 	}
-	for _, part := range []string{"audio", "realtime", "transcribe", "tts", "image", "search"} {
+	for _, part := range []string{
+		"audio", "realtime", "transcribe", "tts", "image",
+		"-pro", "deep-research", "codex", "instruct",
+	} {
 		if strings.Contains(name, part) {
 			return nil
 		}

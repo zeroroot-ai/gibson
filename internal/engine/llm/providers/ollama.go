@@ -100,15 +100,16 @@ func (p *OllamaProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 
 // ollamaModelFeatures classifies a pulled Ollama model (gibson#1197). Ollama
 // serves a model either for generation or for embeddings. A model of an
-// encoder family (BERT and its variants, XLM-RoBERTa) or with "embed" in its
-// name is "embedding" only. Every other model is "chat".
+// encoder family or with "embed" in its name is "embedding" only. The match on
+// "bert" covers bert, nomic-bert, jina-bert and xlm-roberta. Every other model
+// is "chat". The /api/show capabilities field is the authoritative source, at
+// one more call for each model. Use it if the family rule drifts.
 func ollamaModelFeatures(name, family string, families []string) []string {
 	if strings.Contains(strings.ToLower(name), "embed") {
 		return []string{"embedding"}
 	}
 	for _, f := range append([]string{family}, families...) {
-		f = strings.ToLower(f)
-		if strings.Contains(f, "bert") || strings.Contains(f, "roberta") {
+		if strings.Contains(strings.ToLower(f), "bert") {
 			return []string{"embedding"}
 		}
 	}

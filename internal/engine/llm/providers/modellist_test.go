@@ -669,36 +669,54 @@ func TestAnthropicProvider_BuildsWithNoModelAndRefusesToComplete(t *testing.T) {
 // The OpenAI list sends no capabilities, so the daemon classifies each model by
 // its name (gibson#1197).
 func TestOpenAIModels_ClassifiesEachModelByName(t *testing.T) {
+	embedding, chat := []string{"embedding"}, []string{"chat"}
+	want := map[string][]string{
+		"text-embedding-3-small": embedding, "text-embedding-3-large": embedding,
+		"gpt-4o": chat, "gpt-4.1": chat, "gpt-5": chat, "chatgpt-4o-latest": chat,
+		"o1": chat, "o3-mini": chat, "o4-mini": chat, "gpt-4o-search-preview": chat,
+		"gpt-4o-audio-preview": nil, "gpt-4o-mini-tts": nil, "gpt-4o-transcribe": nil,
+		"gpt-4o-realtime-preview": nil, "gpt-image-1": nil, "dall-e-3": nil, "whisper-1": nil,
+		"omni-moderation-latest": nil, "davinci-002": nil, "codex-mini-latest": nil,
+		"o1-pro": nil, "gpt-5-pro": nil, "o3-deep-research": nil, "gpt-5-codex": nil,
+		"gpt-3.5-turbo-instruct": nil,
+	}
+	data := make([]string, 0, len(want))
+	for id := range want {
+		data = append(data, `{"id":"`+id+`"}`)
+	}
 	tc := caseNamed(t, "openai")
 	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, `{"data":[{"id":"text-embedding-3-small"},{"id":"gpt-4o"},{"id":"o3-mini"},`+
-			`{"id":"gpt-4o-audio-preview"},{"id":"gpt-image-1"},{"id":"dall-e-3"},{"id":"whisper-1"}]}`)
+		reply(w, 200, `{"data":[`+strings.Join(data, ",")+`]}`)
 	})
 	models, err := tc.build(t, fake.URL).Models(context.Background())
 	require.NoError(t, err)
-	got := map[string][]string{}
+	require.Len(t, models, len(want))
 	for _, m := range models {
-		got[m.Name] = m.Features
-	}
-	assert.Equal(t, []string{"embedding"}, got["text-embedding-3-small"])
-	assert.Equal(t, []string{"chat"}, got["gpt-4o"])
-	assert.Equal(t, []string{"chat"}, got["o3-mini"])
-	for _, id := range []string{"gpt-4o-audio-preview", "gpt-image-1", "dall-e-3", "whisper-1"} {
-		assert.Empty(t, got[id], "%s has no known class", id)
+		if want[m.Name] == nil {
+			assert.Empty(t, m.Features, "%s has no known class", m.Name)
+			continue
+		}
+		assert.Equal(t, want[m.Name], m.Features, m.Name)
 	}
 }
 
-// A Mistral-shaped list keeps the capabilities it reports. The name rule is
-// for OpenAI only.
-func TestMistralModels_NameRuleDoesNotApply(t *testing.T) {
-	tc := caseNamed(t, "mistral")
-	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, `{"data":[{"id":"gpt-4o"}]}`)
-	})
-	models, err := tc.build(t, fake.URL).Models(context.Background())
-	require.NoError(t, err)
-	require.Len(t, models, 1)
-	assert.Empty(t, models[0].Features)
+// Every other provider on the OpenAI-shaped list keeps what it reports. The
+// name rule is for OpenAI only.
+func TestOpenAICompatibleModels_NameRuleDoesNotApply(t *testing.T) {
+	for _, name := range []string{"mistral", "huggingface", "llamafile"} {
+		t.Run(name, func(t *testing.T) {
+			tc := caseNamed(t, name)
+			fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+				reply(w, 200, `{"data":[{"id":"gpt-4o"},{"id":"text-embedding-3-small"}]}`)
+			})
+			models, err := tc.build(t, fake.URL).Models(context.Background())
+			require.NoError(t, err)
+			require.Len(t, models, 2)
+			for _, m := range models {
+				assert.Empty(t, m.Features, m.Name)
+			}
+		})
+	}
 }
 
 // Ollama serves a model for generation or for embeddings. The encoder family
