@@ -1,7 +1,6 @@
 rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.agent.v1.AgentService/Execute,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agent.v1.AgentService/GetDescriptor,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
-/gibson.agent.v1.AgentService/GetSlotSchema,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agent.v1.AgentService/Health,member,tenant,tenant_from_identity,COMPONENT,gibson/agent/v1/agent.proto,rule
 /gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/agentidentity/v1/agent_identity.proto,rule
 /gibson.agentidentity.v1.AgentIdentityService/ListAgentIdentities,writer,tenant,tenant_from_identity,USER|SERVICE,gibson/agentidentity/v1/agent_identity.proto,rule
