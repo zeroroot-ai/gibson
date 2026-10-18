@@ -40,16 +40,6 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
-  "/gibson.agent.v1.AgentService/GetSlotSchema": {
-    method: "/gibson.agent.v1.AgentService/GetSlotSchema",
-    service: "gibson.agent.v1.AgentService",
-    relation: "member",
-    objectType: "tenant",
-    objectDeriver: "tenant_from_identity",
-    allowedIdentities: IdentityClass.COMPONENT,
-    unauthenticated: false,
-    self: false,
-  },
   "/gibson.agent.v1.AgentService/Health": {
     method: "/gibson.agent.v1.AgentService/Health",
     service: "gibson.agent.v1.AgentService",

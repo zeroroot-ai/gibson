@@ -56,15 +56,6 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
-	"/gibson.agent.v1.AgentService/GetSlotSchema": {
-		Service:           "gibson.agent.v1.AgentService",
-		Relation:          "member",
-		ObjectType:        "tenant",
-		ObjectDeriver:     "tenant_from_identity",
-		AllowedIdentities: IdentityComponent,
-		Unauthenticated:   false,
-		Self:              false,
-	},
 	"/gibson.agent.v1.AgentService/Health": {
 		Service:           "gibson.agent.v1.AgentService",
 		Relation:          "member",

@@ -13,12 +13,6 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - COMPONENT
-  "/gibson.agent.v1.AgentService/GetSlotSchema":
-    relation: "member"
-    object_type: "tenant"
-    object_deriver: "tenant_from_identity"
-    allowed_identities:
-      - COMPONENT
   "/gibson.agent.v1.AgentService/Health":
     relation: "member"
     object_type: "tenant"
