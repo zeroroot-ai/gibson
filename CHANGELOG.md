@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.161.2](https://github.com/zeroroot-ai/gibson/compare/v0.161.1...v0.161.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* **authz:** decide a SPIFFE caller in the form of its FGA tuples ([#1211](https://github.com/zeroroot-ai/gibson/issues/1211)) ([fec84f2](https://github.com/zeroroot-ai/gibson/commit/fec84f2bc3d8a9f575e5f0c9120f9e506598c907))
+* **component:** a served agent's completion uses the slot pin of its node ([#1208](https://github.com/zeroroot-ai/gibson/issues/1208)) ([d3f6625](https://github.com/zeroroot-ai/gibson/commit/d3f662505adb840b2aa5dff04184ef51eaba64cf))
+* **ingest:** a discovery with no resolved tenant is dropped, not routed ([#1206](https://github.com/zeroroot-ai/gibson/issues/1206)) ([fd719a0](https://github.com/zeroroot-ai/gibson/commit/fd719a08e9c7b67138316ed10712b39895350d09))
+* **rework:** the OpenAI API list holds only chat and embedding models ([#1205](https://github.com/zeroroot-ai/gibson/issues/1205)) ([8170832](https://github.com/zeroroot-ai/gibson/commit/81708326f4d2a5280aef0ea142828f1888f2f22c))
+
 ## [0.161.1](https://github.com/zeroroot-ai/gibson/compare/v0.161.0...v0.161.1) (2026-10-17)
 
 
