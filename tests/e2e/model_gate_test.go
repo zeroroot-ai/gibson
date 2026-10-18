@@ -282,7 +282,7 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 			"the model came through the default grant of the tenant, which the Model Access page lists")
 	})
 
-	t.Run("after the tenant grant is revoked the gate refuses the same mission", func(t *testing.T) {
+	t.Run("after the tenant grant is revoked the gate refuses a mission", func(t *testing.T) {
 		_, err := access.RevokeAccess(ctx, &tenantv1.RevokeAccessRequest{
 			SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
 			SubjectId:   modelGateTenant,
