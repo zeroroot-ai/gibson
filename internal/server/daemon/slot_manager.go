@@ -143,9 +143,11 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 // 1. Check if any providers are available
 // 2. Apply slot name-based defaults if no explicit config is provided
 // 3. Merge slot default config with any override
-// 4. Query registry for available providers
-// 5. Find a model that meets all constraints (context window)
-// 6. Return the provider and model info
+// 4. A node pin that names a provider resolves on that provider only, and
+//    its failure is the answer: a pin never falls back (gibson#1203)
+// 5. Otherwise query registry for available providers
+// 6. Find a model that meets all constraints (context window)
+// 7. Return the provider and model info
 //
 // Returns ErrNoMatchingProvider if:
 //   - No providers are available in the registry

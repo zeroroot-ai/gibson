@@ -76,7 +76,11 @@ func (s *ComponentServiceServer) CompleteWithTools(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	content, finishReason, _, promptTokens, completionTokens, toolCallsJSON, err := s.llmToolCompleter.CompleteWithTools(
 		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), 0, 0, // the provider defaults of max tokens and temperature
@@ -161,7 +165,11 @@ func (s *ComponentServiceServer) CompleteStructured(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	resultJSON, promptTokens, completionTokens, err := s.llmToolCompleter.CompleteStructured(
 		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, 0, 0, // the provider defaults of max tokens and temperature

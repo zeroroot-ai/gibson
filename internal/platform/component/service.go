@@ -1385,7 +1385,11 @@ func (s *ComponentServiceServer) Complete(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	content, finishReason, modelUsed, promptTokens, completionTokens, err := s.llmCompleter.Complete(
 		ctx,
@@ -1482,7 +1486,11 @@ func (s *ComponentServiceServer) CompleteStream(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	err = s.llmCompleter.Stream(
 		ctx,

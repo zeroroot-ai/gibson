@@ -23,6 +23,8 @@ import (
 	"log/slog"
 
 	"github.com/redis/go-redis/v9"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -107,9 +109,16 @@ func slotPinFrom(ctx context.Context) *agent.SlotConfig {
 // serves the work of a tenant gets no pin: its completion keeps the _system
 // default, as before. A work id with no owner on record, or of another tenant,
 // also gives no pin. A failed read is logged, and the slot keeps the default.
-func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID, slot string) *agent.SlotConfig {
-	if workID == "" || s.workContext == nil {
-		return nil
+// A server with no work-context registry cannot tell whether a pin exists, so
+// a completion with a work id is refused, as SubmitResult refuses it.
+func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID, slot string) (*agent.SlotConfig, error) {
+	if workID == "" {
+		return nil, nil
+	}
+	if s.workContext == nil {
+		s.logger.ErrorContext(ctx, "llm: work-context registry not wired; refusing a completion with a work id",
+			slog.String("tenant", tenant), slog.String("work_id", workID))
+		return nil, status.Error(codes.FailedPrecondition, "work-context registry is not configured")
 	}
 	owner, err := s.workContext.WorkOwner(ctx, workID)
 	if err != nil {
@@ -118,25 +127,25 @@ func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID
 				slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
 				slog.String("error", err.Error()))
 		}
-		return nil
+		return nil, nil
 	}
 	if owner != tenant {
 		if tenant == auth.SystemTenantString {
 			// A shared component resolves in the _system provider set, so a
 			// pin of the owning tenant cannot apply. Say so when one exists.
 			if pin, perr := s.workContext.WorkSlotPin(ctx, workID, slot); perr == nil && pin != nil {
-				s.logger.InfoContext(ctx, "llm: a shared component ignores the slot pin of the tenant's node on Complete",
+				s.logger.DebugContext(ctx, "llm: a shared component ignores the slot pin of the tenant's node on Complete",
 					slog.String("owner", owner), slog.String("work_id", workID), slog.String("slot", slot))
 			}
 		}
-		return nil
+		return nil, nil
 	}
 	pin, err := s.workContext.WorkSlotPin(ctx, workID, slot)
 	if err != nil {
 		s.logger.WarnContext(ctx, "llm: the slot pin of the work item could not be read; the slot pin is not applied",
 			slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
 			slog.String("error", err.Error()))
-		return nil
+		return nil, nil
 	}
-	return pin
+	return pin, nil
 }

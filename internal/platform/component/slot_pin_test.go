@@ -9,6 +9,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -124,4 +126,22 @@ func TestComplete_ASharedComponentGetsNoPinOfTheTenant(t *testing.T) {
 
 	assert.Equal(t, 1, env.defaultProv.calls, "the caller's default serves the slot")
 	assert.Zero(t, env.pinnedProv.calls)
+}
+
+// A server with no work-context registry cannot tell whether a node pinned the
+// slot, so it refuses a completion that carries a work id.
+func TestComplete_AWorkIDWithNoRegistryIsRefused(t *testing.T) {
+	reply := &llm.CompletionResponse{Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"}}
+	prov := &mockLLMProvider{name: "default-p", models: []llm.ModelInfo{{Name: "d-1"}}, completeResp: reply}
+	base := newWorkIDEnv(t)
+	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), newTestAdapter(prov), nil, nil, nil)
+
+	ctx := auth.ContextWithTenantString(context.Background(), adapterTestTenant)
+	_, err := svc.Complete(ctx, &componentpb.CompleteRequest{
+		WorkId:   "work-pin-5",
+		Slot:     "fast",
+		Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+	require.Equal(t, codes.FailedPrecondition, status.Code(err))
+	assert.Zero(t, prov.calls)
 }
