@@ -207,7 +207,7 @@ func TestResolveMissionForWork(t *testing.T) {
 	sc, err := state.NewStateClient(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
-	r := &MissionContextResolver{stateClient: sc, logger: testLogger()}
+	r := NewMissionContextResolver(sc, testLogger())
 	ctx := context.Background()
 
 	writeWorkContext(t, mr, "w-own", "mission-1", "acme")
@@ -230,7 +230,7 @@ func TestResolveMissionForWork(t *testing.T) {
 	}
 
 	t.Run("a store failure is an error", func(t *testing.T) {
-		_, err := (&MissionContextResolver{stateClient: broken, logger: testLogger()}).ResolveMissionForWork(ctx, "w", "acme")
+		_, err := NewMissionContextResolver(broken, nil).ResolveMissionForWork(ctx, "w", "acme")
 		require.Error(t, err)
 	})
 	t.Run("the shim with no resolver", func(t *testing.T) {

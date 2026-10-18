@@ -29,6 +29,7 @@ import (
 	"net"
 	"testing"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -37,6 +38,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/capname"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -445,4 +447,26 @@ func TestCreateMission_OverTheWire_DeniedWithoutTheCapability(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	assert.Empty(t, mgr.originated)
+}
+
+// With the resolver wired, CreateMission takes the mission of the caller's own
+// work item as the parent (ADR-0063, gibson#1209).
+func TestCreateMission_TheWorkItemsMissionIsTheParent(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sc.Close() })
+	writeWorkContext(t, mr, "work-own", "parent-mission", "test-tenant")
+
+	mgr := &recordingMissionManager{payload: []byte(`{}`)}
+	svc := missionServer(mgr, originateChecker("grant-1")).
+		WithMissionContextResolver(NewMissionContextResolver(sc, testLogger()))
+
+	_, err = svc.CreateMission(componentCtx("agent_principal:abc"), &componentpb.CreateMissionRequest{WorkId: "work-own"})
+
+	require.NoError(t, err)
+	require.Len(t, mgr.originated, 1)
+	assert.Equal(t, "parent-mission", mgr.originated[0].ParentMissionID)
 }

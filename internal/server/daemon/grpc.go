@@ -1882,6 +1882,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// tiers were retired (gibson#756); only this mapping remains.
 			compSvc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(d.stateClient))
 
+			// Resolve the mission of a component's work item from the same
+			// mapping, so a component can originate a child mission from the
+			// mission it was dispatched to (ADR-0063), read that mission's run
+			// history, and delegate within it. Without it each of those saw no
+			// mission (gibson#1209).
+			compSvc.WithMissionContextResolver(component.NewMissionContextResolver(d.stateClient,
+				d.logger.WithComponent("mission-context").Slog()))
+
 			// Wire the decision of the callback path into ComponentService.Authorize,
 			// so the pull transport and the callback transport run one FGA check
 			// (D86). Without it Authorize refuses every request.

@@ -57,6 +57,15 @@ type MissionContextResolver struct {
 	logger *slog.Logger
 }
 
+// NewMissionContextResolver returns a resolver over the state client that
+// PollWork writes the work-context hash with. A nil logger uses slog.Default.
+func NewMissionContextResolver(stateClient *state.StateClient, logger *slog.Logger) *MissionContextResolver {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &MissionContextResolver{stateClient: stateClient, logger: logger}
+}
+
 // ResolveMissionForWork looks up the work item's mission ID. caller is the
 // authenticated tenant of the requesting component; the work id itself arrives
 // from the component and is NOT trusted — a work context recorded for another
