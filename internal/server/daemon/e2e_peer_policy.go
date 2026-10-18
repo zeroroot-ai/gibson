@@ -110,6 +110,21 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			// SecretsService methods above.
 			"/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity": true,
 			"/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity": true,
+			// The model-gate exit test (hosted#358,
+			// tests/e2e/model_gate_test.go): the tenant gets the e2e mock
+			// provider through the RPC, the runner serves an agent node as
+			// an outside agent (register, poll, complete, submit) so the
+			// node's completion meets the tenant's model gate, and as the
+			// tenant admin it reads, revokes and grants the tenant's model
+			// access through the RPCs of the dashboard Model Access page.
+			"/gibson.component.v1.ComponentService/RegisterComponent": true,
+			"/gibson.component.v1.ComponentService/Heartbeat":         true,
+			"/gibson.component.v1.ComponentService/PollWork":          true,
+			"/gibson.component.v1.ComponentService/Complete":          true,
+			"/gibson.component.v1.ComponentService/SubmitResult":      true,
+			"/gibson.tenant.v1.ModelAccessService/ListAccess":         true,
+			"/gibson.tenant.v1.ModelAccessService/RevokeAccess":       true,
+			"/gibson.tenant.v1.ModelAccessService/GrantAccess":        true,
 		},
 	}
 }

@@ -50,6 +50,10 @@ type ProviderConfigStore interface {
 }
 
 func validateType(t llm.ProviderType) error {
+	// The e2e mock provider type, in a fixture build with the gate on only.
+	if llm.IsFixtureProviderType(t) {
+		return nil
+	}
 	for _, supported := range llm.SupportedProviderTypes() {
 		if t == supported {
 			return nil
