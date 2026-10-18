@@ -543,3 +543,26 @@ func TestFGALookup_QueriesExistInTheModel(t *testing.T) {
 		}
 	}
 }
+
+// TestWhoAmI_SPIFFECaller: a SPIFFE caller is asked about in the form of its
+// FGA tuples (principal.IDOf): its id without the scheme. The raw
+// spiffe://... id is a user value that FGA rejects (gibson#1212).
+func TestWhoAmI_SPIFFECaller(t *testing.T) {
+	var pluginUsers []string
+	srv, err := NewServer(Config{Authorizer: strictFGA(&pluginUsers), Lookup: &fakeLookup{}})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	ctx := ctxWithIdentity(t, "spiffe://zeroroot.ai/platform/e2e-runner", "tenant-a")
+	resp, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{})
+	if err != nil {
+		t.Fatalf("WhoAmI: %v", err)
+	}
+	if got := resp.GetPrincipalId(); got != "zeroroot.ai/platform/e2e-runner" {
+		t.Errorf("principal_id = %q, want zeroroot.ai/platform/e2e-runner", got)
+	}
+	if len(pluginUsers) != 1 || pluginUsers[0] != "user:zeroroot.ai/platform/e2e-runner" {
+		t.Errorf("plugin can_invoke user = %v, want [user:zeroroot.ai/platform/e2e-runner]", pluginUsers)
+	}
+}
