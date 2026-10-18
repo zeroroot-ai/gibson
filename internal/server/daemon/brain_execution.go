@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	toolpb "github.com/zeroroot-ai/sdk/api/gen/gibson/tool/v1"
@@ -313,6 +314,16 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 	messages := buildDeciderPrompt(mc)
 	structured, err := bind.harness.CompleteStructuredAnyWithUsage(ctx, slot, messages, deciderDecision{})
 	if err != nil {
+		if pinnedDeciderUnservable(mc.DeciderSlot, err) {
+			// The brain retries a failed decision on the next evidence change,
+			// and the budget System bounds a persistent failure. A pin that
+			// cannot be served spends no tokens, and a retry cannot serve it.
+			// So the mission fails with the reason (gibson#1210).
+			return brain.DeciderOutput{Complete: &brain.DeciderComplete{
+				Outcome: "failed",
+				Reason:  fmt.Sprintf("the decider_slot of the mission cannot be served: %v", err),
+			}}, nil
+		}
 		return brain.DeciderOutput{}, fmt.Errorf("brain decide: llm: %w", err)
 	}
 
@@ -336,6 +347,15 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 	}
 
 	return parseDecision(structured.Result), nil
+}
+
+// pinnedDeciderUnservable reports whether err is a slot resolution failure of a
+// mission that pins its Decider. Without a pin the brain keeps its retry.
+func pinnedDeciderUnservable(pin brain.DeciderSlot, err error) bool {
+	if pin.Provider == "" && pin.Model == "" {
+		return false
+	}
+	return errors.Is(err, types.NewError(llm.ErrNoMatchingProvider, ""))
 }
 
 // catalog lists the mission tenant's enrolled components as brain capabilities.

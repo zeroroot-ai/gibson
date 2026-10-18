@@ -1450,7 +1450,7 @@ func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engin
 // newRunMissionContext is the MissionContext every harness in one run starts
 // from.
 //
-// Extracted from startMissionExecution so it can be asserted directly. It
+// Extracted from executeMission so it can be asserted directly. It
 // carries four things a wrong value would break silently rather than loudly:
 // the tenant (a wrong one shows a run on another tenant's console), the run id
 // (mission-scoped GraphRAG storage), the run number (mission memory queries),

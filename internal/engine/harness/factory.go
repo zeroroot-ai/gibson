@@ -328,6 +328,9 @@ func (f *DefaultHarnessFactory) CreateChild(parent AgentHarness, agentName strin
 	parentMission := parent.Mission()
 	childMission := parentMission
 	childMission.CurrentAgent = agentName
+	// The slot pins of the parent belong to the node of the parent (or to its
+	// Decider, gibson#1210). A child names its own, so it starts with none.
+	childMission.NodeSlotOverrides = nil
 
 	// Get parent's target info (shared with child)
 	targetInfo := parent.Target()
