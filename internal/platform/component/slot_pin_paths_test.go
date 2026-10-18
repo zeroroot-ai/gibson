@@ -87,6 +87,7 @@ func TestCompleteStream_UsesTheSlotPinOfTheDispatchingNode(t *testing.T) {
 		WorkId: "work-stream-1", Slot: "fast", Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
 	}, stream))
 	assert.NotEmpty(t, stream.sent)
+	assert.Equal(t, 1, env.pinnedProv.calls, "the pinned provider serves the stream")
 	assert.Zero(t, env.defaultProv.calls)
 }
 
@@ -167,15 +168,15 @@ func TestWorkSlotPins_BindAndLookupPaths(t *testing.T) {
 	})
 }
 
-// A registry that cannot read the owner or the pin gives no pin, and the
-// failure is logged.
-func TestNodeSlotPin_AReadFailureGivesNoPin(t *testing.T) {
+// A registry that cannot read the owner refuses the completion: the server
+// cannot tell whether the node pinned the slot.
+func TestNodeSlotPin_AnOwnerReadFailureRefuses(t *testing.T) {
 	sc := brokenStateClient(t)
 	base := newWorkIDEnv(t)
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(sc))
 	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, "w", "fast")
-	require.NoError(t, err)
+	assert.Equal(t, codes.Unavailable, status.Code(err))
 	assert.Nil(t, pin)
 }
 
@@ -186,12 +187,13 @@ func (failingPinRegistry) WorkSlotPin(context.Context, string, string) (*agent.S
 	return nil, assert.AnError
 }
 
-func TestNodeSlotPin_APinReadFailureGivesNoPin(t *testing.T) {
+// A failed pin read refuses the completion.
+func TestNodeSlotPin_APinReadFailureRefuses(t *testing.T) {
 	base := newWorkIDEnv(t)
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
 		WithWorkContextRegistry(failingPinRegistry{ownEveryWorkItem{tenant: adapterTestTenant}})
 	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, "w", "fast")
-	require.NoError(t, err)
+	assert.Equal(t, codes.Unavailable, status.Code(err))
 	assert.Nil(t, pin)
 }
 

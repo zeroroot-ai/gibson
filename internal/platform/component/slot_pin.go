@@ -108,7 +108,8 @@ func slotPinFrom(ctx context.Context) *agent.SlotConfig {
 // resolves its slot in the caller's set, so a shared (_system) component that
 // serves the work of a tenant gets no pin: its completion keeps the _system
 // default, as before. A work id with no owner on record, or of another tenant,
-// also gives no pin. A failed read is logged, and the slot keeps the default.
+// also gives no pin. A failed read refuses the completion with Unavailable:
+// a pin never falls back to the default in silence.
 // A server with no work-context registry cannot tell whether a pin exists, so
 // a completion with a work id is refused, as SubmitResult refuses it.
 func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID, slot string) (*agent.SlotConfig, error) {
@@ -122,12 +123,15 @@ func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID
 	}
 	owner, err := s.workContext.WorkOwner(ctx, workID)
 	if err != nil {
-		if !errors.Is(err, ErrWorkOwnerUnknown) {
-			s.logger.WarnContext(ctx, "llm: the owner of the work item could not be read; the slot pin is not applied",
-				slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
-				slog.String("error", err.Error()))
+		if errors.Is(err, ErrWorkOwnerUnknown) {
+			return nil, nil
 		}
-		return nil, nil
+		// The server cannot tell whether the node pinned the slot. A pin never
+		// falls back to the default in silence, so the completion is refused.
+		s.logger.WarnContext(ctx, "llm: the owner of the work item could not be read; refusing the completion",
+			slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
+			slog.String("error", err.Error()))
+		return nil, status.Error(codes.Unavailable, "the work item could not be read, try again")
 	}
 	if owner != tenant {
 		if tenant == auth.SystemTenantString {
@@ -142,10 +146,10 @@ func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID
 	}
 	pin, err := s.workContext.WorkSlotPin(ctx, workID, slot)
 	if err != nil {
-		s.logger.WarnContext(ctx, "llm: the slot pin of the work item could not be read; the slot pin is not applied",
+		s.logger.WarnContext(ctx, "llm: the slot pin of the work item could not be read; refusing the completion",
 			slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
 			slog.String("error", err.Error()))
-		return nil, nil
+		return nil, status.Error(codes.Unavailable, "the slot pin of the work item could not be read, try again")
 	}
 	return pin, nil
 }
