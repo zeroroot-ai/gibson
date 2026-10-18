@@ -284,6 +284,9 @@ func TestDelegateToAgent_AFailedMissionLookupDelegatesWithNoMission(t *testing.T
 	env.svc.WithRunAuthorizer(&fakeRunAuthorizer{allowed: true, reason: "fga_allow"})
 	const tenant = "test-tenant"
 	source := env.enqueueRun(t, tenant, "work-source", "run-42")
+	// The source has a mission, so only the failed lookup can drop it.
+	require.NoError(t, NewRedisWorkContextRegistry(env.state).
+		RegisterWorkContext(context.Background(), source, "mission-7", tenant))
 
 	// A resolver over a closed state client fails each lookup.
 	cfg := state.DefaultConfig()

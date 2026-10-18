@@ -328,15 +328,12 @@ func NewComponentServiceServer(
 	}
 }
 
-// WithMemoryResolver attaches a MemoryResolver to the server so that
-// MemoryGet, MemorySet, and MemorySearch route mission-tier operations to the
-// per-agent mission namespace rather than a shared store.
-//
-// Call this immediately after NewComponentServiceServer, before serving any
-// RPCs:
+// WithWorkContextRegistry sets only the writer of the work context mapping,
+// which PollWork uses. Production code wires the writer and the reader
+// together with WithWorkContextStore:
 //
 //	svc := component.NewComponentServiceServer(...)
-//	svc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(stateClient))
+//	svc.WithWorkContextStore(stateClient, logger)
 func (s *ComponentServiceServer) WithWorkContextRegistry(r WorkContextRegistry) *ComponentServiceServer {
 	s.workContext = r
 	return s
