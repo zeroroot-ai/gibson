@@ -65,7 +65,7 @@ func newWorkIDEnv(t *testing.T) *workIDEnv {
 
 	queue := NewRedisWorkQueue(client)
 	svc := NewComponentServiceServer(&noopRegistry{}, queue, testLogger(), nil, nil, nil, nil).
-		WithWorkContextRegistry(NewRedisWorkContextRegistry(sc))
+		WithWorkContextStore(sc, testLogger())
 
 	return &workIDEnv{svc: svc, queue: queue, state: sc, mr: mr}
 }

@@ -1880,7 +1880,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// Wire the work-context registry so PollWork records work_id → mission/
 			// tenant mappings (used by the finding/mission-context paths). The memory
 			// tiers were retired (gibson#756); only this mapping remains.
-			compSvc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(d.stateClient))
+			//
+			// The same mapping resolves the mission of a component's work item,
+			// so a component can originate a child mission from the mission it
+			// was dispatched to (ADR-0063) and delegate within it. Without the
+			// resolver each of those saw no mission (gibson#1209).
+			compSvc.WithWorkContextStore(d.stateClient, d.logger.WithComponent("mission-context").Slog())
 
 			// Wire the decision of the callback path into ComponentService.Authorize,
 			// so the pull transport and the callback transport run one FGA check

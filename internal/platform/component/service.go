@@ -31,6 +31,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
@@ -327,18 +328,25 @@ func NewComponentServiceServer(
 	}
 }
 
-// WithMemoryResolver attaches a MemoryResolver to the server so that
-// MemoryGet, MemorySet, and MemorySearch route mission-tier operations to the
-// per-agent mission namespace rather than a shared store.
-//
-// Call this immediately after NewComponentServiceServer, before serving any
-// RPCs:
+// WithWorkContextRegistry sets only the writer of the work context mapping,
+// which PollWork uses. Production code wires the writer and the reader
+// together with WithWorkContextStore:
 //
 //	svc := component.NewComponentServiceServer(...)
-//	svc.WithWorkContextRegistry(component.NewRedisWorkContextRegistry(stateClient))
+//	svc.WithWorkContextStore(stateClient, logger)
 func (s *ComponentServiceServer) WithWorkContextRegistry(r WorkContextRegistry) *ComponentServiceServer {
 	s.workContext = r
 	return s
+}
+
+// WithWorkContextStore wires both sides of the work context mapping in
+// stateClient: PollWork records the mission and tenant of each work item, and
+// the mission and completion RPCs resolve the mission of a work id from that
+// record (gibson#1209). The daemon calls this once, so the writer and the
+// reader cannot be wired apart.
+func (s *ComponentServiceServer) WithWorkContextStore(stateClient *state.StateClient, logger *slog.Logger) *ComponentServiceServer {
+	return s.WithWorkContextRegistry(NewRedisWorkContextRegistry(stateClient)).
+		WithMissionContextResolver(NewMissionContextResolver(stateClient, logger))
 }
 
 // WithConnectorTools wires the source of the connector tools that ListTools
