@@ -133,7 +133,10 @@ func (a *LLMRegistryAdapter) resolveProvider(ctx context.Context, tenant, slotNa
 		})
 	}
 
-	resolvedProvider, resolvedModel, resolveErr := slots.ResolveSlot(ctx, slotDef, nil)
+	// The slot pin of the mission node that dispatched the work, when the
+	// completion RPC found one (gibson#1203). Nil leaves the slot to the
+	// tenant default.
+	resolvedProvider, resolvedModel, resolveErr := slots.ResolveSlot(ctx, slotDef, slotPinFrom(ctx))
 	if resolveErr != nil {
 		return nil, llm.ModelInfo{}, status.Errorf(codes.Unavailable,
 			"slot %q: no provider in this tenant's configured set can serve the slot: %v", slotName, resolveErr)

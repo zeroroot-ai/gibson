@@ -66,6 +66,7 @@ func SchedulerSystem(w *World) []Event {
 			Group:        wi.Group,
 			Limit:        wi.Limit,
 			Network:      wi.Network,
+			SlotPins:     wi.SlotPins,
 			StartsFrom:   wi.StartsFrom,
 			Forkable:     wi.Forkable,
 			Checkpoint:   wi.Checkpoint,

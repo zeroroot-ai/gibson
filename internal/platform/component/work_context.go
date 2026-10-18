@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
@@ -95,6 +96,11 @@ type WorkContextRegistry interface {
 	// WorkQueue.Enqueue. It returns ErrWorkRunUnknown when the work item has
 	// no mission run.
 	WorkRun(ctx context.Context, workID string) (string, error)
+
+	// WorkSlotPin returns the LLM slot pin that the mission node of workID
+	// set for slot, as bound by WorkQueue.Enqueue. It returns nil when the
+	// work item has no pin for that slot.
+	WorkSlotPin(ctx context.Context, workID, slot string) (*agent.SlotConfig, error)
 }
 
 // bindWorkOwner records tenant as the owner of workID.

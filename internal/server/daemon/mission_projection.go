@@ -153,9 +153,11 @@ func missionDefinitionToProjected(
 		return brain.MissionProjected{}, nil, err
 	}
 
-	// 6. The network scope of each node (owner decision S6, gibson#865).
+	// 6. The network scope of each node (owner decision S6, gibson#865), and
+	// the LLM slot pins of each agent node (gibson#1203).
 	for i := range nodes {
 		nodes[i].Network = nodeNetwork(allNodes[nodes[i].ID], boundTargets(nodes[i].ID, targets, origins))
+		nodes[i].SlotPins = nodeSlotPins(allNodes[nodes[i].ID])
 	}
 
 	// 7. The fork fields of each node (ADR-0169, gibson#802). A node starts
@@ -448,6 +450,27 @@ func nodeTimeout(n *missionpb.MissionNode) time.Duration {
 // endpoint of the daemon, so the scope names no provider host.
 func nodeNetwork(n *missionpb.MissionNode, targets []string) *agent.NodeNetwork {
 	return &agent.NodeNetwork{Research: n.GetResearch(), Targets: targets}
+}
+
+// nodeSlotPins returns the LLM slot pins of an agent node
+// (AgentNodeConfig.llm_slots): slot name to provider and model. An entry with
+// no provider pins nothing and is left out. A node with no pin returns nil.
+// The dispatch copies the pins into agent.Task.SlotOverrides, so the slot
+// manager of the agent's harness, and the ComponentService for an agent served
+// with sdk.ServeAgent, resolve each pinned slot to its provider and model
+// (gibson#539, gibson#1203).
+func nodeSlotPins(n *missionpb.MissionNode) map[string]agent.SlotConfig {
+	var pins map[string]agent.SlotConfig
+	for _, s := range n.GetAgentConfig().GetLlmSlots() {
+		if s.GetSlot() == "" || s.GetProvider() == "" {
+			continue
+		}
+		if pins == nil {
+			pins = make(map[string]agent.SlotConfig)
+		}
+		pins[s.GetSlot()] = agent.SlotConfig{Provider: s.GetProvider(), Model: s.GetModel()}
+	}
+	return pins
 }
 
 // boundTargets returns the address of each target bound to the node id. A

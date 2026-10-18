@@ -137,6 +137,8 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				Goal:    req.Input,
 				Timeout: req.Timeout,
 				Network: req.Network,
+				// The LLM slot pins of the node (gibson#539, gibson#1203).
+				SlotOverrides: taskSlotOverrides(req.SlotPins),
 				// The fork fields of the node (ADR-0169, gibson#802).
 				NodeID:     nodeIDOf(req.WorkID, req.MissionID),
 				StartsFrom: req.StartsFrom,
@@ -551,4 +553,17 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// taskSlotOverrides converts the slot pins of a node to the per-slot overrides
+// of an agent task. Nil pins give nil overrides.
+func taskSlotOverrides(pins map[string]agent.SlotConfig) map[string]*agent.SlotConfig {
+	if len(pins) == 0 {
+		return nil
+	}
+	out := make(map[string]*agent.SlotConfig, len(pins))
+	for slot, cfg := range pins {
+		out[slot] = &cfg
+	}
+	return out
 }

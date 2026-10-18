@@ -88,6 +88,10 @@ type WorkItem struct {
 	// WorkItem for the same reason Timeout does: a snapshot restore and a
 	// retry hand the same scope back to the dispatcher.
 	Network *agent.NodeNetwork
+	// SlotPins are the LLM slot pins of an agent node
+	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
+	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
+	SlotPins map[string]agent.SlotConfig
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -125,6 +129,10 @@ type WorkDispatched struct {
 	// Network carries the network scope of the node to the dispatch
 	// effect-handler, for the same reason Timeout does (gibson#865).
 	Network *agent.NodeNetwork
+	// SlotPins are the LLM slot pins of an agent node
+	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
+	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
+	SlotPins map[string]agent.SlotConfig
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -195,6 +203,9 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		if e.Network != nil {
 			wi.Network = e.Network
 		}
+		if e.SlotPins != nil {
+			wi.SlotPins = e.SlotPins
+		}
 		if e.StartsFrom != "" {
 			wi.StartsFrom = e.StartsFrom
 		}
@@ -221,6 +232,7 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 		Group:        e.Group,
 		Limit:        e.Limit,
 		Network:      e.Network,
+		SlotPins:     e.SlotPins,
 		StartsFrom:   e.StartsFrom,
 		Forkable:     e.Forkable,
 		Checkpoint:   e.Checkpoint,
@@ -293,6 +305,10 @@ type WorkSnapshot struct {
 	// Network mirrors WorkItem.Network; the scheduler hands it to the
 	// dispatch (gibson#865).
 	Network *agent.NodeNetwork
+	// SlotPins are the LLM slot pins of an agent node
+	// (AgentNodeConfig.llm_slots): slot name to provider and model. They
+	// travel with Network to the dispatch (gibson#1203). Nil pins nothing.
+	SlotPins map[string]agent.SlotConfig
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -332,6 +348,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 			Group:                  wi.Group,
 			Limit:                  wi.Limit,
 			Network:                wi.Network,
+			SlotPins:               wi.SlotPins,
 			StartsFrom:             wi.StartsFrom,
 			Forkable:               wi.Forkable,
 			Checkpoint:             wi.Checkpoint,

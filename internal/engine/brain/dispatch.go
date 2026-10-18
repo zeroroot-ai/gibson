@@ -36,6 +36,9 @@ type DispatchRequest struct {
 	// gibson#865). The Dispatcher copies it into agent.Task.Network. Nil
 	// keeps the egress of the catalog manifest.
 	Network *agent.NodeNetwork
+	// SlotPins are the LLM slot pins of an agent node (gibson#1203). The
+	// Dispatcher copies them into agent.Task.SlotOverrides.
+	SlotPins map[string]agent.SlotConfig
 	// StartsFrom names the earlier node whose parked sandbox this node forks,
 	// and Forkable marks a node that a later node names (ADR-0169,
 	// gibson#802). They travel with Network to the dispatch.
@@ -87,6 +90,7 @@ func (h *DispatchHandler) Tap(ev Event) {
 		Input:        d.Input,
 		Timeout:      d.Timeout,
 		Network:      d.Network,
+		SlotPins:     d.SlotPins,
 		StartsFrom:   d.StartsFrom,
 		Forkable:     d.Forkable,
 		Checkpoint:   d.Checkpoint,

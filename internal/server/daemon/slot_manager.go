@@ -140,12 +140,14 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 // satisfies the slot's constraints and configuration.
 //
 // Resolution process:
-// 1. Check if any providers are available
-// 2. Apply slot name-based defaults if no explicit config is provided
-// 3. Merge slot default config with any override
-// 4. Query registry for available providers
-// 5. Find a model that meets all constraints (context window)
-// 6. Return the provider and model info
+//  1. Check if any providers are available
+//  2. Apply slot name-based defaults if no explicit config is provided
+//  3. Merge slot default config with any override
+//  4. A node pin that names a provider resolves on that provider only, and
+//     its failure is the answer: a pin never falls back (gibson#1203)
+//  5. Otherwise query registry for available providers
+//  6. Find a model that meets all constraints (context window)
+//  7. Return the provider and model info
 //
 // Returns ErrNoMatchingProvider if:
 //   - No providers are available in the registry
@@ -193,8 +195,32 @@ func (m *DaemonSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefi
 		}
 	}
 
+	// A node pin that names a provider (gibson#1203) allows that provider
+	// only. Its failure is the answer: a pin never falls back to another
+	// provider in silence.
+	if override != nil && override.Provider != "" {
+		return m.resolvePinnedProvider(ctx, effectiveSlot, config)
+	}
+
 	// Search for a matching provider/model based on constraints
 	return m.resolveByConstraints(ctx, effectiveSlot, config)
+}
+
+// resolvePinnedProvider resolves a slot on the one provider that a node pin
+// names, with the pinned model or the provider's saved default model. A
+// provider that the tenant does not have, a provider with no saved model, a
+// model below the slot constraints and a model the gate denies each fail the
+// resolution with their own reason.
+func (m *DaemonSlotManager) resolvePinnedProvider(ctx context.Context, slot agent.SlotDefinition, config agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
+	provider, model, err := m.tryProvider(ctx, config.Provider, slot, config.Model)
+	if err != nil {
+		return nil, llm.ModelInfo{}, types.WrapError(
+			llm.ErrNoMatchingProvider,
+			fmt.Sprintf("slot %q is pinned to provider %q, and the pin cannot be served", slot.Name, config.Provider),
+			err,
+		)
+	}
+	return provider, model, nil
 }
 
 // ValidateSlot validates that a slot configuration can be satisfied by available providers.

@@ -91,7 +91,7 @@ func (s *ComponentServiceServer) CreateMission(ctx context.Context, req *compone
 	// to. A work id the caller does not own resolves to "" here, not to
 	// someone else's mission, and origination is then refused for want of a
 	// parent — the same answer a caller with no work item at all gets.
-	parentMissionID, _, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant, "", s.logger)
+	parentMissionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant)
 	if resolveErr != nil {
 		s.logger.ErrorContext(ctx, "CreateMission: failed to resolve the caller's work context",
 			"tenant", tenant, "work_id", req.GetWorkId(), "error", resolveErr)
@@ -212,7 +212,7 @@ func (s *ComponentServiceServer) GetMissionRunHistory(ctx context.Context, req *
 	// Same resolution as CreateMission's parent lookup, and the same refusal:
 	// a work id belonging to another tenant resolves to "", so the answer is
 	// "no such history", never someone else's.
-	missionID, _, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant, "", s.logger)
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant)
 	if resolveErr != nil {
 		s.logger.ErrorContext(ctx, "GetMissionRunHistory: failed to resolve the caller's work context",
 			"tenant", tenant, "work_id", req.GetWorkId(), "error", resolveErr)

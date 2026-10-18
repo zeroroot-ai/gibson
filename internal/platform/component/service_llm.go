@@ -66,7 +66,7 @@ func (s *ComponentServiceServer) CompleteWithTools(
 		slog.Int("tool_count", len(req.Tools)),
 	)
 
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeWithTools: mission context lookup failed; using tenant defaults",
 			slog.String("tenant", tenant),
@@ -75,10 +75,15 @@ func (s *ComponentServiceServer) CompleteWithTools(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	content, finishReason, _, promptTokens, completionTokens, toolCallsJSON, err := s.llmToolCompleter.CompleteWithTools(
-		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), maxTokens, temperature,
+		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), 0, 0, // the provider defaults of max tokens and temperature
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "completeWithTools: LLM completion failed",
@@ -150,7 +155,7 @@ func (s *ComponentServiceServer) CompleteStructured(
 		slog.String("slot", req.Slot),
 	)
 
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeStructured: mission context lookup failed; using tenant defaults",
 			slog.String("tenant", tenant),
@@ -159,10 +164,15 @@ func (s *ComponentServiceServer) CompleteStructured(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	ctx = withSlotPin(ctx, pin)
 
 	resultJSON, promptTokens, completionTokens, err := s.llmToolCompleter.CompleteStructured(
-		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, maxTokens, temperature,
+		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, 0, 0, // the provider defaults of max tokens and temperature
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "completeStructured: LLM completion failed",
