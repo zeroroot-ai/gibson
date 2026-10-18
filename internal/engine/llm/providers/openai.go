@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	einoschema "github.com/cloudwego/eino/schema"
@@ -63,10 +65,11 @@ func NewOpenAIProvider(cfg llm.ProviderConfig) (*OpenAIProvider, error) {
 		model:  model,
 		config: cfg,
 		lister: &openAIListEndpoint{
-			client:   client,
-			provider: string(llm.ProviderOpenAI),
-			listURL:  openAIModelsURL(firstNonEmpty(cfg.BaseURL, defaultOpenAIBaseURL)),
-			token:    apiKey,
+			client:      client,
+			provider:    string(llm.ProviderOpenAI),
+			listURL:     openAIModelsURL(firstNonEmpty(cfg.BaseURL, defaultOpenAIBaseURL)),
+			token:       apiKey,
+			dropNonChat: isOpenAIAPI(cfg.BaseURL),
 		},
 	}, nil
 }
@@ -264,3 +267,20 @@ func (p *OpenAIProvider) DefaultModel() string { return p.config.DefaultModel }
 // DefaultModelContextWindow returns the context window stored with the saved
 // default model, or 0 when none is stored.
 func (p *OpenAIProvider) DefaultModelContextWindow() int { return p.config.DefaultModelContextWindow }
+
+// isOpenAIAPI reports whether baseURL is the OpenAI API itself: the default
+// (an empty base URL), api.openai.com, or a data residency host such as
+// eu.api.openai.com. Another host, such as a proxy or a compatible server, can
+// serve models with names that the OpenAI name rule does not know, so its list
+// keeps every model.
+func isOpenAIAPI(baseURL string) bool {
+	if baseURL == "" {
+		return true
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "api.openai.com" || strings.HasSuffix(host, ".api.openai.com")
+}
