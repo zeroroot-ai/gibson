@@ -196,6 +196,11 @@ func (q *redisWorkQueue) Enqueue(ctx context.Context, tenant, kind, name string,
 	if err := bindWorkRun(ctx, q.client, item); err != nil {
 		return "", fmt.Errorf("work queue enqueue: %w", err)
 	}
+	// Bind the LLM slot pins of the mission node the same way, so a
+	// completion for this work resolves the node's slot pins (gibson#1203).
+	if err := bindWorkSlotPins(ctx, q.client, item); err != nil {
+		return "", fmt.Errorf("work queue enqueue: %w", err)
+	}
 
 	msgID, err := q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamKey(tenant, kind, name),

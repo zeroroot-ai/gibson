@@ -67,6 +67,9 @@ type mockLLMProvider struct {
 	// standing in for one tenant's credential must never record a call made
 	// on behalf of another tenant.
 	calls int
+
+	// lastModel is the model of the last completion this provider served.
+	lastModel string
 }
 
 func (m *mockLLMProvider) Name() string { return m.name }
@@ -78,8 +81,9 @@ func (m *mockLLMProvider) Models(_ context.Context) ([]llm.ModelInfo, error) {
 	return m.models, nil
 }
 
-func (m *mockLLMProvider) Complete(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
+func (m *mockLLMProvider) Complete(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	m.calls++
+	m.lastModel = req.Model
 	return m.completeResp, m.completeErr
 }
 
@@ -217,6 +221,14 @@ func (m *mockSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefini
 	}
 	if len(models) == 0 {
 		return nil, llm.ModelInfo{}, errors.New("provider has no models: " + name)
+	}
+	if override != nil && override.Model != "" {
+		for _, mi := range models {
+			if mi.Name == override.Model {
+				return provider, mi, nil
+			}
+		}
+		return nil, llm.ModelInfo{}, errors.New("provider " + name + " has no model " + override.Model)
 	}
 	return provider, models[0], nil
 }

@@ -66,7 +66,7 @@ func (s *ComponentServiceServer) CompleteWithTools(
 		slog.Int("tool_count", len(req.Tools)),
 	)
 
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeWithTools: mission context lookup failed; using tenant defaults",
 			slog.String("tenant", tenant),
@@ -75,7 +75,10 @@ func (s *ComponentServiceServer) CompleteWithTools(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	ctx = withSlotPin(ctx, pin)
+	maxTokens, temperature := slotPinLimits(pin)
 
 	content, finishReason, _, promptTokens, completionTokens, toolCallsJSON, err := s.llmToolCompleter.CompleteWithTools(
 		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), maxTokens, temperature,
@@ -150,7 +153,7 @@ func (s *ComponentServiceServer) CompleteStructured(
 		slog.String("slot", req.Slot),
 	)
 
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeStructured: mission context lookup failed; using tenant defaults",
 			slog.String("tenant", tenant),
@@ -159,7 +162,10 @@ func (s *ComponentServiceServer) CompleteStructured(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	ctx = withSlotPin(ctx, pin)
+	maxTokens, temperature := slotPinLimits(pin)
 
 	resultJSON, promptTokens, completionTokens, err := s.llmToolCompleter.CompleteStructured(
 		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, maxTokens, temperature,

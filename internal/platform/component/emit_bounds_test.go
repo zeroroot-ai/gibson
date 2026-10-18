@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"google.golang.org/grpc/codes"
@@ -43,6 +44,10 @@ func (ownEveryWorkItem) WorkRun(context.Context, string) (string, error) {
 
 func (o ownEveryWorkItem) WorkOwner(context.Context, string) (string, error) {
 	return o.tenant, nil
+}
+
+func (ownEveryWorkItem) WorkSlotPin(context.Context, string, string) (*agent.SlotConfig, error) {
+	return nil, nil
 }
 
 func boundedComponentServer(submitter FindingSubmitter) *ComponentServiceServer {

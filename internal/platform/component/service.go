@@ -160,11 +160,8 @@ type ComponentServiceServer struct {
 	// memory tiers were retired). May be nil.
 	workContext WorkContextRegistry
 
-	// missionCtx resolves a work item ID to its parent mission ID and any
-	// per-mission LLM slot overrides. Used by Complete and CompleteStream to
-	// apply per-mission provider configuration before delegating to llmCompleter.
-	// May be nil; when nil, Complete and CompleteStream pass an empty missionID
-	// and no overrides (current behaviour preserved).
+	// missionCtx resolves a work item ID to its parent mission ID. May be nil;
+	// when nil, the completion and mission RPCs see no mission for a work id.
 	missionCtx *MissionContextResolver
 
 	// findingSubmitter persists findings from remote agents.
@@ -351,17 +348,8 @@ func (s *ComponentServiceServer) WithConnectorTools(src ConnectorToolSource) *Co
 	return s
 }
 
-// WithMissionContextResolver attaches a MissionContextResolver so that
-// Complete and CompleteStream can look up per-mission LLM slot overrides
-// before delegating to the LLMCompleter. When non-nil the resolver is called
-// with the request's work_id and any returned overrides are passed to the
-// completer. Missing mission context is handled gracefully — the server falls
-// back to tenant-level defaults so existing behaviour is fully preserved.
-//
-// Call this immediately after NewComponentServiceServer, before serving RPCs:
-//
-//	svc := component.NewComponentServiceServer(...)
-//	svc.WithMissionContextResolver(component.NewMissionContextResolver(sc, ts, logger))
+// WithMissionContextResolver attaches a MissionContextResolver so that the
+// completion and mission RPCs can resolve the mission of a work id.
 func (s *ComponentServiceServer) WithMissionContextResolver(r *MissionContextResolver) *ComponentServiceServer {
 	s.missionCtx = r
 	return s
@@ -1383,10 +1371,9 @@ func (s *ComponentServiceServer) Complete(
 		slog.String("slot", req.Slot),
 	)
 
-	// Resolve per-mission slot overrides. Missing context is not an error;
-	// the resolver returns empty strings and nil overrides so we fall back to
-	// the tenant-level defaults that were in place before this lookup was added.
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	// The mission of the work item, for attribution. Missing context is not
+	// an error: the completion then carries no mission id.
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		// Log and continue; the lookup is best-effort.
 		s.logger.WarnContext(ctx, "complete: mission context lookup failed; using tenant defaults",
@@ -1397,7 +1384,10 @@ func (s *ComponentServiceServer) Complete(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	ctx = withSlotPin(ctx, pin)
+	maxTokens, temperature := slotPinLimits(pin)
 
 	content, finishReason, modelUsed, promptTokens, completionTokens, err := s.llmCompleter.Complete(
 		ctx,
@@ -1481,10 +1471,9 @@ func (s *ComponentServiceServer) CompleteStream(
 		slog.String("slot", req.Slot),
 	)
 
-	// Resolve per-mission slot overrides. Missing context is not an error;
-	// the resolver returns empty strings and nil overrides so we fall back to
-	// the tenant-level defaults that were in place before this lookup was added.
-	missionID, slotOverrides, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant, req.Slot, s.logger)
+	// The mission of the work item, for attribution. Missing context is not
+	// an error: the completion then carries no mission id.
+	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "complete stream: mission context lookup failed; using tenant defaults",
 			slog.String("tenant", tenant),
@@ -1494,7 +1483,10 @@ func (s *ComponentServiceServer) CompleteStream(
 		)
 	}
 
-	maxTokens, temperature := applySlotOverrides(req.Slot, slotOverrides)
+	// The slot pin of the mission node that dispatched this work (gibson#1203).
+	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	ctx = withSlotPin(ctx, pin)
+	maxTokens, temperature := slotPinLimits(pin)
 
 	err = s.llmCompleter.Stream(
 		ctx,

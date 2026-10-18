@@ -925,7 +925,12 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// the harness would pick: a live coding-agent session runs for hours. Its
 	// own declared timeout bounds it, and when it declares none the worker's
 	// heartbeat does (gibson#1602).
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil, info,
+	extraCtx, err := slotPinsWorkContext(task.SlotOverrides)
+	if err != nil {
+		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+			"failed to encode the LLM slot pins of the agent node: "+name, err)
+	}
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, extraCtx, info,
 		waitPolicy{bound: task.Timeout, livenessBounded: true})
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
@@ -959,6 +964,28 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	h.logger.Debug("agent work queue delegation succeeded",
 		"agent", name, "tenant", tenant, "instance_id", info.InstanceID)
 	return result, nil
+}
+
+// slotPinsWorkContext puts the LLM slot pins of the agent node on the work
+// item (component.SlotPinsWorkKey). WorkQueue.Enqueue binds them to the work
+// id, so an agent served with sdk.ServeAgent gets the node's pinned provider
+// and model when it calls Complete with that work id (gibson#1203). A node with
+// no pins adds nothing.
+func slotPinsWorkContext(overrides map[string]*agent.SlotConfig) (map[string]string, error) {
+	pins := make(map[string]agent.SlotConfig, len(overrides))
+	for slot, cfg := range overrides {
+		if cfg != nil {
+			pins[slot] = *cfg
+		}
+	}
+	if len(pins) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(pins)
+	if err != nil {
+		return nil, fmt.Errorf("encode slot pins: %w", err)
+	}
+	return map[string]string{component.SlotPinsWorkKey: string(raw)}, nil
 }
 
 // observeDelegation records that this run delegated to a child run. It does

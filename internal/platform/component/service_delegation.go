@@ -140,7 +140,7 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		"caller_tenant":  tenant,
 	}
 	if s.missionCtx != nil && req.GetWorkId() != "" {
-		if missionID, _, resolveErr := s.missionCtx.ResolveMissionForWork(ctx, req.GetWorkId(), tenant); resolveErr == nil && missionID != "" {
+		if missionID, resolveErr := s.missionCtx.ResolveMissionForWork(ctx, req.GetWorkId(), tenant); resolveErr == nil && missionID != "" {
 			workCtx["mission_id"] = missionID
 		}
 	}
