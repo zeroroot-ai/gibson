@@ -12,6 +12,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	// BudgetService is a gibson-local gibson.tenant.v1 service (re-homed from the
 	// OSS SDK in E6, ADR-0058). BudgetScope is still from budget_status/v1 (SDK)
 	// (the OSS enum used by both Budget messages and the budget-exceeded error).
@@ -52,7 +53,7 @@ func (s *DaemonServer) isTenantAdmin(ctx context.Context, tenantID string) (stri
 		return userID, false, nil
 	}
 	ok, err := s.authorizer.Check(ctx,
-		fmt.Sprintf("user:%s", userID), "admin",
+		principal.FGAUser(callerID), "admin",
 		fmt.Sprintf("tenant:%s", tenantID),
 	)
 	if err != nil {

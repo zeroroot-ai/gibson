@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/manifest"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	manifestpb "github.com/zeroroot-ai/sdk/api/gen/gibson/manifest/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -92,7 +93,7 @@ func (s *DaemonServer) resolveManifestSubject(id auth.Identity, req *manifestpb.
 			return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "impersonation requires tenant admin")
 		}
 		isAdmin, err := s.authorizer.Check(ctx,
-			"user:"+id.Subject, "admin", "tenant:"+tenantID)
+			principal.FGAUser(id), "admin", "tenant:"+tenantID)
 		if err != nil || !isAdmin {
 			return manifest.ManifestSubject{}, status.Error(codes.PermissionDenied, "impersonation requires tenant admin")
 		}

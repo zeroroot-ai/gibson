@@ -2415,7 +2415,7 @@ func (s *DaemonServer) GetMyPermissions(ctx context.Context, req *daemonpb.GetMy
 	// member check is required: GetMyPermissions takes an attacker-influenceable
 	// tenant_id, so membership itself must be verified, not assumed.
 	objStr := "tenant:" + tenantID
-	userStr := "user:" + userID
+	userStr := principal.FGAUser(callerID)
 	results, err := s.authorizer.BatchCheck(ctx, tenantrole.RoleChecks(userStr, objStr))
 	if err != nil {
 		// Fail closed: an authz-check failure must never be reported to the
@@ -2493,7 +2493,7 @@ func (s *DaemonServer) ListMyMemberships(ctx context.Context, _ *daemonpb.ListMy
 	}
 
 	objStr := "tenant:" + bareTID
-	results, err := s.authorizer.BatchCheck(ctx, tenantrole.RoleChecks("user:"+userID, objStr))
+	results, err := s.authorizer.BatchCheck(ctx, tenantrole.RoleChecks(principal.FGAUser(callerID), objStr))
 	if err != nil {
 		s.logger.WarnContext(ctx, "ListMyMemberships: BatchCheck failed",
 			slog.String("user_id", userID),

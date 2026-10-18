@@ -5,9 +5,10 @@ package modelgate
 
 import (
 	"context"
-	"strings"
 
 	"github.com/zeroroot-ai/sdk/auth"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // relationCanUse is the FGA relation the gate checks on a model and on a
@@ -21,10 +22,6 @@ const relationOwner = "owner"
 // TenantMembers is the FGA userset of every member of a tenant.
 func TenantMembers(tenantID string) string { return "tenant:" + tenantID + "#member" }
 
-// componentPrincipalPrefixes are the subjects that already name their FGA
-// type: a component's subject is a typed principal.
-var componentPrincipalPrefixes = []string{"agent_principal:", "tool_principal:", "plugin_principal:"}
-
 // Subject returns the FGA subject the gate decides for, or "" when the
 // request names no user, no component and no tenant. The order is the one in
 // the package doc: the acting user, the mission initiator, the calling
@@ -37,12 +34,11 @@ func Subject(ctx context.Context) string {
 		return "user:" + u
 	}
 	if id, err := auth.IdentityFromContext(ctx); err == nil && id.Subject != "" {
-		for _, p := range componentPrincipalPrefixes {
-			if strings.HasPrefix(id.Subject, p) {
-				return id.Subject
-			}
-		}
-		return "user:" + id.Subject
+		// The FGA user of the caller: a typed principal unchanged, otherwise
+		// "user:<subject>" with a SPIFFE scheme stripped. Every tuple of a
+		// SPIFFE caller has that form, so "user:spiffe://..." never matched
+		// one (gibson#13 found the same split for records).
+		return principal.FGAUser(id)
 	}
 	if tenantID := auth.TenantStringFromContext(ctx); tenantID != "" {
 		return TenantMembers(tenantID)
