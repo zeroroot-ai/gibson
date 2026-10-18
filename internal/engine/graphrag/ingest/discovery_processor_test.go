@@ -161,16 +161,19 @@ func TestProcessFoldsEveryTaxonomyEntityIntoTheWorld(t *testing.T) {
 	}, find[0], "a host-parented finding carries the host's coordinate, not its uuid")
 }
 
-func TestProcessFallsBackToAnEmptyTenantWhenNoneWasResolved(t *testing.T) {
+// A discovery with no resolved tenant has no World that owns it. The processor
+// drops it, reports it, and submits nothing.
+func TestProcessDropsADiscoveryWithNoResolvedTenant(t *testing.T) {
 	rec := &recordingSink{}
 	p := NewDiscoveryProcessor(rec.sink(), discardLogger())
 
-	_, err := p.Process(context.Background(), ExecContext{MissionID: "m"}, &graphragpb.DiscoveryResult{
+	res, err := p.Process(context.Background(), ExecContext{MissionID: "m"}, &graphragpb.DiscoveryResult{
 		Hosts: []*graphragpb.Host{{Id: strp("h1"), Ip: "10.0.0.1"}},
 	})
-	require.NoError(t, err)
-	require.Len(t, rec.tenants, 1)
-	assert.Empty(t, rec.tenants[0], "an unresolved tenant is passed through empty; the sink applies the fallback")
+	require.NoError(t, err, "best effort: the caller has already answered its own caller")
+	assert.Empty(t, rec.events, "a discovery with no tenant reaches no World")
+	assert.Zero(t, res.EventsSubmitted)
+	assert.True(t, res.HasErrors(), "the drop is reported, not silent")
 }
 
 func TestProcessReportsAnErrorWhenWiredToNothing(t *testing.T) {
@@ -186,7 +189,7 @@ func TestProcessSkipsRatherThanInventsWhatTheWorldCannotHold(t *testing.T) {
 	rec := &recordingSink{}
 	p := NewDiscoveryProcessor(rec.sink(), discardLogger())
 
-	res, err := p.Process(context.Background(), ExecContext{MissionID: "m"}, &graphragpb.DiscoveryResult{
+	res, err := p.Process(context.Background(), ExecContext{MissionID: "m", TenantID: auth.MustNewTenantID("acme")}, &graphragpb.DiscoveryResult{
 		// A host with no address has no identity coordinate.
 		Hosts: []*graphragpb.Host{{Id: strp("h0")}},
 		// A port whose host is not in the payload.

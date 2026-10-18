@@ -37,8 +37,7 @@ type ExecContext struct {
 	ToolExecutionID string
 
 	// TenantID is the owning tenant. It selects the per-tenant World the events
-	// are submitted to. Zero means "tenant not resolved here" and the ingest
-	// sink falls back to the daemon's registry tenant, matching how the Observe
-	// RPC's sink resolves tenancy on the same callback path.
+	// are submitted to. Zero means no tenant was resolved, and the processor
+	// drops the discovery.
 	TenantID auth.TenantID
 }

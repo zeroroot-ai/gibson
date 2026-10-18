@@ -1345,14 +1345,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// Process discovery if present (async, non-blocking)
 	if s.discoveryProcessor != nil {
 		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
-			// Build execution context from request context
-			execCtx := ingest.ExecContext{
-				MissionRunID:    req.Context.MissionRunId,
-				MissionID:       req.Context.MissionId,
-				AgentName:       req.Context.AgentName,
-				AgentRunID:      req.Context.AgentRunId,
-				ToolExecutionID: req.Context.ToolExecutionId,
-			}
+			execCtx := callToolDiscoveryScope(ctx, req.Context)
 
 			// Process discovery asynchronously with timeout
 			// This doesn't block the tool response
@@ -3683,4 +3676,22 @@ func inheritNodeScope(task agent.Task, caller MissionContext) agent.Task {
 	task.StartsFrom = ""
 	task.Forkable = false
 	return task
+}
+
+// callToolDiscoveryScope is the scope of a discovery that a tool call of an
+// agent returns: the mission ids of the call, and the tenant of the callback
+// call. A call with no tenant gives a scope with no tenant, and the discovery
+// processor then drops the discovery.
+func callToolDiscoveryScope(ctx context.Context, info *harnesspb.ContextInfo) ingest.ExecContext {
+	ec := ingest.ExecContext{
+		MissionRunID:    info.GetMissionRunId(),
+		MissionID:       info.GetMissionId(),
+		AgentName:       info.GetAgentName(),
+		AgentRunID:      info.GetAgentRunId(),
+		ToolExecutionID: info.GetToolExecutionId(),
+	}
+	if tenant, ok := auth.TenantFromContext(ctx); ok {
+		ec.TenantID = tenant
+	}
+	return ec
 }

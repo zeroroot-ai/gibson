@@ -39,10 +39,9 @@ type DiscoveryProcessor interface {
 
 // WorldSink submits one brain Timeline event to a tenant's World engine.
 //
-// tenant is the resolved owning tenant, or "" when the dispatch path did not
-// carry one — the sink decides what to do with that, exactly as the Observe
-// RPC's sink does, so tenancy policy stays in the daemon where the registry
-// tenant is known.
+// tenant is the resolved owning tenant. The processor never calls the sink
+// with an empty tenant, and the sink drops an event with one: only the tenant
+// of the dispatch decides which World a discovery lands in.
 type WorldSink func(tenant string, ev brain.Event)
 
 // ProcessResult reports what one Process call did.
@@ -117,10 +116,20 @@ func (p *discoveryProcessor) Process(
 		return result, errNoWorldSink
 	}
 
-	tenant := ""
-	if !execCtx.TenantID.IsZero() {
-		tenant = execCtx.TenantID.String()
+	// A discovery with no resolved tenant has no World that owns it. It is
+	// dropped and reported, never folded into a guessed tenant.
+	if execCtx.TenantID.IsZero() {
+		p.logger.WarnContext(ctx, "discovery result has no resolved tenant; dropped",
+			"node_count", nodeCount,
+			"mission_id", execCtx.MissionID,
+			"mission_run_id", execCtx.MissionRunID,
+			"agent_name", execCtx.AgentName,
+			"tool_execution_id", execCtx.ToolExecutionID,
+		)
+		result.Duration = time.Since(start)
+		return result.AddError(errNoTenant), nil
 	}
+	tenant := execCtx.TenantID.String()
 
 	for _, ev := range events {
 		p.sink(tenant, ev)

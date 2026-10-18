@@ -15,6 +15,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 func sp(s string) *string { return &s }
@@ -62,6 +63,7 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 		MissionID:    "mission-42",
 		MissionRunID: "run-1",
 		AgentName:    "recon",
+		TenantID:     auth.MustNewTenantID(tenant),
 	}, discoveryFixture())
 	require.NoError(t, err)
 	require.Equal(t, 3, res.EventsSubmitted, "host, domain and finding must all be submitted")
@@ -106,24 +108,24 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 	}
 }
 
-// TestDiscoveryIngestFallsBackToTheRegistryTenant covers the callback and
-// sandboxed dispatch paths, neither of which resolves a tenant: their ExecContext
-// carries mission context only. The sink applies the daemon's registry tenant,
-// matching how the Observe RPC's sink behaves on the same surface.
-func TestDiscoveryIngestFallsBackToTheRegistryTenant(t *testing.T) {
+// TestDiscoveryWithNoTenantReachesNoWorld: a discovery whose ExecContext has no
+// tenant reaches no World, also when the daemon has a registry tenant. Only the
+// tenant of the dispatch decides where a discovery lands.
+func TestDiscoveryWithNoTenantReachesNoWorld(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: "fallback-tenant"}
+	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: "registry-tenant"}
 
 	_, err := d.newDiscoveryProcessor().Process(ctx, ingest.ExecContext{MissionID: "m"}, discoveryFixture())
 	require.NoError(t, err)
 
-	require.Eventually(t, func() bool {
-		return len(reg.For("fallback-tenant").Hosts()) == 1
-	}, 5*time.Second, 10*time.Millisecond,
-		"a tenant-less ExecContext must land in the registry tenant's World, not nowhere")
+	sink := ingestDiscovery(reg)
+	sink("", brain.HostObserved{ScopeID: "s", Address: "192.0.2.99"})
+
+	assert.Never(t, func() bool { return len(reg.Tenants()) > 0 }, 200*time.Millisecond, 10*time.Millisecond,
+		"a discovery with no tenant must not create or reach any World")
 }
 
 // TestDiscoveryProcessorIsAlwaysConstructed states the constructor is total.
@@ -140,15 +142,15 @@ func TestDiscoveryProcessorIsAlwaysConstructed(t *testing.T) {
 	assert.NotNil(t, d.newDiscoveryProcessor())
 }
 
-// TestDiscoverySinkDropsEventsWithNoTenantToRouteThem checks the one case where
-// dropping is correct: no resolved tenant AND no fallback means there is no
-// World to submit to, and guessing one would be a cross-tenant write.
+// TestDiscoverySinkDropsEventsWithNoTenantToRouteThem: the sink has no fallback
+// tenant. An event with no tenant has no World to submit to, and a guess would
+// be a cross-tenant write.
 func TestDiscoverySinkDropsEventsWithNoTenantToRouteThem(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	sink := ingestDiscovery(reg, "")
+	sink := ingestDiscovery(reg)
 	sink("", brain.HostObserved{ScopeID: "s", Address: "192.0.2.99"})
 
 	assert.Empty(t, reg.Tenants(), "an unroutable event must not conjure a World")
