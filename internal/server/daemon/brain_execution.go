@@ -45,6 +45,7 @@ import (
 
 // deciderSlot is the LLM slot the Decider runs on. The mission-level decider_slot
 // (gibson#850) selects the provider/model; this is the harness slot name.
+// withDeciderSlotPin puts that pin on this slot of the mission harness.
 const deciderSlot = "primary"
 
 // missionBinding ties a live mission to the harness + engine the executor needs.
