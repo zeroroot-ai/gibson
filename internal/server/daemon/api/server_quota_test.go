@@ -230,3 +230,15 @@ func TestGetTenantQuota_NilPlatformDB_PlanIdEmpty(t *testing.T) {
 		t.Errorf("plan_id: got %q, want empty when platformDB is nil", resp.GetPlanId())
 	}
 }
+
+// A SPIFFE caller holds its tenant relation as "user:<id>" with the scheme
+// stripped (principal.FGAUser). The admin gate asks FGA in that form, so a
+// SPIFFE admin passes it.
+func TestRequireTenantAdmin_ASPIFFECallerIsCheckedInItsTupleForm(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.WithAuthorizer(newFakeAuthorizer().allow("user:zeroroot.ai/platform/e2e-runner", "admin", "tenant:acme"))
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/e2e-runner"})
+	if err := srv.requireTenantAdmin(ctx, "acme"); err != nil {
+		t.Fatalf("requireTenantAdmin: %v", err)
+	}
+}

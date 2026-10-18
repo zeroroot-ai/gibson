@@ -181,6 +181,9 @@ func TestSubject(t *testing.T) {
 	tenant := auth.MustNewTenantID(testTenant)
 	person := auth.WithIdentity(tenantCtx(t), auth.Identity{Subject: "u-carol", Tenant: tenant})
 	component := auth.WithIdentity(tenantCtx(t), auth.Identity{Subject: "tool_principal:nmap", Tenant: tenant})
+	// A SPIFFE caller is "user:<id>" with the scheme stripped, the form every
+	// FGA tuple of that caller has (principal.FGAUser).
+	spiffePeer := auth.WithIdentity(tenantCtx(t), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/e2e-runner", Tenant: tenant})
 	for name, tc := range map[string]struct {
 		ctx  context.Context
 		want string
@@ -189,6 +192,7 @@ func TestSubject(t *testing.T) {
 		"initiator over caller": {auth.ContextWithInitiatorUser(component, "alice"), "user:alice"},
 		"calling person":        {person, "user:u-carol"},
 		"calling component":     {component, "tool_principal:nmap"},
+		"calling SPIFFE peer":   {spiffePeer, "user:zeroroot.ai/platform/e2e-runner"},
 		"tenant members":        {tenantCtx(t), "tenant:acme#member"},
 		"nobody":                {context.Background(), ""},
 	} {

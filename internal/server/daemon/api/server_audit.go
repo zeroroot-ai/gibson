@@ -30,6 +30,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -285,8 +286,11 @@ func (s *DaemonServer) requireTenantRelation(ctx context.Context, tenantID, rela
 		return status_grpc.Error(codes.Unauthenticated, "authentication required")
 	}
 
+	// The caller in the form of its tuples: "user:<id>", with a SPIFFE scheme
+	// stripped (principal.FGAUser). "user:spiffe://..." matched no tuple, so a
+	// SPIFFE admin was always refused.
 	held, err := s.authorizer.Check(ctx,
-		fmt.Sprintf("user:%s", id.Subject),
+		principal.FGAUser(id),
 		relation,
 		fmt.Sprintf("tenant:%s", tenantID),
 	)
