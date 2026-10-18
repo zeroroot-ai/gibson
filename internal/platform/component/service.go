@@ -1385,9 +1385,7 @@ func (s *ComponentServiceServer) Complete(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
-	ctx = withSlotPin(ctx, pin)
-	maxTokens, temperature := slotPinLimits(pin)
+	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
 
 	content, finishReason, modelUsed, promptTokens, completionTokens, err := s.llmCompleter.Complete(
 		ctx,
@@ -1395,8 +1393,8 @@ func (s *ComponentServiceServer) Complete(
 		missionID,
 		req.Slot,
 		string(messagesJSON),
-		maxTokens,
-		temperature,
+		0, // max tokens: the provider default
+		0, // temperature: the provider default
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "complete: LLM completion failed",
@@ -1484,9 +1482,7 @@ func (s *ComponentServiceServer) CompleteStream(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
-	ctx = withSlotPin(ctx, pin)
-	maxTokens, temperature := slotPinLimits(pin)
+	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
 
 	err = s.llmCompleter.Stream(
 		ctx,
@@ -1494,8 +1490,8 @@ func (s *ComponentServiceServer) CompleteStream(
 		missionID,
 		req.Slot,
 		string(messagesJSON),
-		maxTokens,
-		temperature,
+		0, // max tokens: the provider default
+		0, // temperature: the provider default
 		func(delta, finishReason string) error {
 			done := finishReason != ""
 			return stream.Send(&componentpb.CompleteStreamResponse{

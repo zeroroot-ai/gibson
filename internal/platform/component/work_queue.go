@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
 // WorkItem represents a unit of work dispatched to a remote component via Redis Streams.
@@ -25,6 +27,11 @@ type WorkItem struct {
 	Context   map[string]string `json:"context"`
 	TimeoutMs int64             `json:"timeout_ms"`
 	CreatedAt time.Time         `json:"created_at"`
+	// SlotPins are the LLM slot pins of the mission node that dispatched
+	// agent work: slot name to provider and model. Only the daemon sets them
+	// (the harness dispatch), and Enqueue binds them to the work id
+	// (gibson#1203). A component request never sets this field.
+	SlotPins map[string]agent.SlotConfig `json:"slot_pins,omitempty"`
 }
 
 // WorkResult carries the outcome of a completed WorkItem back to the caller.

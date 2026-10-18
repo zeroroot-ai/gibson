@@ -8,11 +8,12 @@ package component
 //
 // A mission AGENT node can pin a provider and a model for each LLM slot
 // (AgentNodeConfig.llm_slots). The harness that dispatches the node puts the
-// pins on the agent work item (SlotPinsWorkKey). WorkQueue.Enqueue binds them to
-// the work id, the same way it binds the owner and the run, so the pins always
-// come from the daemon and never from a component's request. An agent served
-// with sdk.ServeAgent calls Complete with the work id, and the completion
-// resolves its slot with the pin of the node that dispatched the work.
+// pins on the agent work item (WorkItem.SlotPins). WorkQueue.Enqueue binds them
+// to the work id, the same way it binds the owner and the run, so the pins
+// always come from the daemon and never from a component's request. An agent
+// served with sdk.ServeAgent calls Complete with the work id, and the
+// completion resolves its slot with the pin of the node that dispatched the
+// work.
 
 import (
 	"context"
@@ -26,10 +27,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
-// SlotPinsWorkKey is the work item context key that holds the LLM slot pins of
-// the mission node: a JSON object from slot name to agent.SlotConfig.
-const SlotPinsWorkKey = "llm_slot_pins"
-
 // workSlotsKeyPrefix is the Redis key prefix for the work-item → slot pins
 // binding.
 //
@@ -38,21 +35,15 @@ const workSlotsKeyPrefix = "gibson:work:slots:"
 
 func workSlotsKey(workID string) string { return workSlotsKeyPrefix + workID }
 
-// bindWorkSlotPins records the slot pins of the work item, read from its
-// context. A work item with no pins writes nothing. Pins that do not parse are
-// an error: the daemon wrote them, so bad pins are a defect and must not pass
-// as "no pin".
+// bindWorkSlotPins records the slot pins of the work item. A work item with no
+// pins writes nothing.
 func bindWorkSlotPins(ctx context.Context, client redis.UniversalClient, item WorkItem) error {
-	raw := item.Context[SlotPinsWorkKey]
-	if raw == "" {
+	if len(item.SlotPins) == 0 {
 		return nil
 	}
-	var pins map[string]agent.SlotConfig
-	if err := json.Unmarshal([]byte(raw), &pins); err != nil {
-		return fmt.Errorf("work-context registry: parse the slot pins of work %q: %w", item.WorkID, err)
-	}
-	if len(pins) == 0 {
-		return nil
+	raw, err := json.Marshal(item.SlotPins)
+	if err != nil {
+		return fmt.Errorf("work-context registry: encode the slot pins of work %q: %w", item.WorkID, err)
 	}
 	if err := client.Set(ctx, workSlotsKey(item.WorkID), raw, workOwnerTTL).Err(); err != nil {
 		return fmt.Errorf("work-context registry: bind slot pins of work %q: %w", item.WorkID, err)
@@ -107,41 +98,36 @@ func slotPinFrom(ctx context.Context) *agent.SlotConfig {
 	return pin
 }
 
-// nodeSlotPin returns the pin of slot for the work item workID, when the
-// caller's tenant may act on that work item. A work id with no owner on record,
-// or owned by another tenant, gives no pin: the slot then resolves to the
-// tenant default, as for a call with no work id.
+// nodeSlotPin returns the pin of slot for the work item workID.
+//
+// The pin applies only when the caller is the tenant that owns the work item.
+// A pin names a provider of the owning tenant's set, and a completion
+// resolves its slot in the caller's set, so a shared (_system) component that
+// serves the work of a tenant gets no pin: its completion keeps the _system
+// default, as before. A work id with no owner on record, or of another tenant,
+// also gives no pin. A failed read is logged, and the slot keeps the default.
 func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID, slot string) *agent.SlotConfig {
 	if workID == "" || s.workContext == nil {
 		return nil
 	}
-	if _, err := s.resolveWorkOwner(ctx, tenant, workID); err != nil {
+	owner, err := s.workContext.WorkOwner(ctx, workID)
+	if err != nil {
+		if !errors.Is(err, ErrWorkOwnerUnknown) {
+			s.logger.WarnContext(ctx, "llm: the owner of the work item could not be read; the slot pin is not applied",
+				slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
+				slog.String("error", err.Error()))
+		}
+		return nil
+	}
+	if owner != tenant {
 		return nil
 	}
 	pin, err := s.workContext.WorkSlotPin(ctx, workID, slot)
 	if err != nil {
-		s.logger.WarnContext(ctx, "llm: the slot pin of the work item could not be read; using the tenant default",
-			slog.String("tenant", tenant),
-			slog.String("work_id", workID),
-			slog.String("slot", slot),
-			slog.String("error", err.Error()),
-		)
+		s.logger.WarnContext(ctx, "llm: the slot pin of the work item could not be read; the slot pin is not applied",
+			slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
+			slog.String("error", err.Error()))
 		return nil
 	}
 	return pin
-}
-
-// slotPinLimits returns the max tokens and the temperature of a pin. Zero means
-// the provider default.
-func slotPinLimits(pin *agent.SlotConfig) (maxTokens int32, temperature float32) {
-	if pin == nil {
-		return 0, 0
-	}
-	if pin.MaxTokens > 0 {
-		maxTokens = int32(pin.MaxTokens) //nolint:gosec // a node's max_tokens is a small positive int
-	}
-	if pin.Temperature > 0 {
-		temperature = float32(pin.Temperature)
-	}
-	return maxTokens, temperature
 }

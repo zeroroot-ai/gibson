@@ -925,13 +925,10 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// the harness would pick: a live coding-agent session runs for hours. Its
 	// own declared timeout bounds it, and when it declares none the worker's
 	// heartbeat does (gibson#1602).
-	extraCtx, err := slotPinsWorkContext(task.SlotOverrides)
-	if err != nil {
-		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
-			"failed to encode the LLM slot pins of the agent node: "+name, err)
-	}
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, extraCtx, info,
-		waitPolicy{bound: task.Timeout, livenessBounded: true})
+	// The LLM slot pins of the node go on the work item, so an agent served
+	// with sdk.ServeAgent gets them on its completions (gibson#1203).
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil,
+		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true})
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
@@ -966,26 +963,23 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	return result, nil
 }
 
-// slotPinsWorkContext puts the LLM slot pins of the agent node on the work
-// item (component.SlotPinsWorkKey). WorkQueue.Enqueue binds them to the work
-// id, so an agent served with sdk.ServeAgent gets the node's pinned provider
-// and model when it calls Complete with that work id (gibson#1203). A node with
-// no pins adds nothing.
-func slotPinsWorkContext(overrides map[string]*agent.SlotConfig) (map[string]string, error) {
-	pins := make(map[string]agent.SlotConfig, len(overrides))
+// WorkSlotPins returns the LLM slot pins of an agent node in the form that a
+// work item carries (component.WorkItem.SlotPins). WorkQueue.Enqueue binds
+// them to the work id, so an agent served with sdk.ServeAgent gets the node's
+// pinned provider and model when it calls Complete with that work id
+// (gibson#1203). A node with no pins gives nil.
+func WorkSlotPins(overrides map[string]*agent.SlotConfig) map[string]agent.SlotConfig {
+	var pins map[string]agent.SlotConfig
 	for slot, cfg := range overrides {
-		if cfg != nil {
-			pins[slot] = *cfg
+		if cfg == nil {
+			continue
 		}
+		if pins == nil {
+			pins = make(map[string]agent.SlotConfig, len(overrides))
+		}
+		pins[slot] = *cfg
 	}
-	if len(pins) == 0 {
-		return nil, nil
-	}
-	raw, err := json.Marshal(pins)
-	if err != nil {
-		return nil, fmt.Errorf("encode slot pins: %w", err)
-	}
-	return map[string]string{component.SlotPinsWorkKey: string(raw)}, nil
+	return pins
 }
 
 // observeDelegation records that this run delegated to a child run. It does
@@ -1072,7 +1066,7 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 	// (workCtx, AuthzContext, task CG-JWT, _system config injection, enqueue,
 	// wait) are shared across agent/tool/plugin via dispatchWorkAndWait; this
 	// wrapper only owns the tool-specific proto marshal/unmarshal + metrics.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, info, waitPolicy{})
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, info, waitPolicy{})
 	if err != nil {
 		h.logger.Error("tool work queue dispatch failed",
 			"tool", name, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1152,7 +1146,7 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	// Kind-uniform work-queue dispatch (gibson#663). The "method" goes in the
 	// work context; everything else (CG-JWT, AuthzContext, _system config
 	// injection, enqueue, wait) is shared via dispatchWorkAndWait.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, info, waitPolicy{})
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, info, waitPolicy{})
 	if err != nil {
 		h.logger.Error("plugin work queue dispatch failed",
 			"plugin", name, "method", method, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1208,6 +1202,7 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	tenant, kind, name, workType string,
 	payload []byte,
 	extraCtx map[string]string,
+	slotPins map[string]agent.SlotConfig,
 	info component.ComponentInfo,
 	wait waitPolicy,
 ) ([]byte, error) {
@@ -1268,6 +1263,7 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 		WorkType: workType,
 		Payload:  payload,
 		Context:  workCtx,
+		SlotPins: slotPins,
 	}
 
 	if _, err := h.workQueue.Enqueue(ctx, tenant, kind, name, workItem); err != nil {

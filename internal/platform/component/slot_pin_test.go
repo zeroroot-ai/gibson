@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -38,21 +39,21 @@ func newSlotPinEnv(t *testing.T) *slotPinEnv {
 	}
 	set := newTenantSet("default-p", defaultProv, pinnedProv)
 	adapter := NewLLMRegistryAdapter(nil, nil, adapterTestLogger).
-		WithTenantResolver(tenantResolverFor(map[string]*tenantSet{adapterTestTenant: set}))
+		WithTenantResolver(tenantResolverFor(map[string]*tenantSet{adapterTestTenant: set, auth.SystemTenantString: set}))
 
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), adapter, nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(base.state))
 	return &slotPinEnv{svc: svc, queue: base.queue, defaultProv: defaultProv, pinnedProv: pinnedProv}
 }
 
-// dispatchAgentWork enqueues agent work for tenant with the given work context,
+// dispatchAgentWork enqueues agent work for tenant with the given slot pins,
 // the way the harness dispatches a mission AGENT node.
-func (e *slotPinEnv) dispatchAgentWork(t *testing.T, tenant, workID string, workCtx map[string]string) {
+func (e *slotPinEnv) dispatchAgentWork(t *testing.T, tenant, workID string, pins map[string]agent.SlotConfig) {
 	t.Helper()
 	_, err := e.queue.Enqueue(context.Background(), tenant, "agent", "recon", WorkItem{
 		WorkID:   workID,
 		WorkType: WorkTypeAgentExecute,
-		Context:  workCtx,
+		SlotPins: pins,
 	})
 	require.NoError(t, err)
 }
@@ -68,13 +69,13 @@ func (e *slotPinEnv) complete(t *testing.T, tenant, workID, slot string) error {
 	return err
 }
 
-const fastPin = `{"fast":{"provider":"fast-p","model":"f-large","temperature":0,"max_tokens":0}}`
+var fastPin = map[string]agent.SlotConfig{"fast": {Provider: "fast-p", Model: "f-large"}}
 
 // A node that pins a slot gets the pinned provider and model when its agent
 // calls Complete with the work id and that slot (gibson#1203).
 func TestComplete_UsesTheSlotPinOfTheDispatchingNode(t *testing.T) {
 	env := newSlotPinEnv(t)
-	env.dispatchAgentWork(t, adapterTestTenant, "work-pin-1", map[string]string{SlotPinsWorkKey: fastPin})
+	env.dispatchAgentWork(t, adapterTestTenant, "work-pin-1", fastPin)
 
 	require.NoError(t, env.complete(t, adapterTestTenant, "work-pin-1", "fast"))
 
@@ -86,7 +87,7 @@ func TestComplete_UsesTheSlotPinOfTheDispatchingNode(t *testing.T) {
 // A slot that the node does not pin keeps the tenant default.
 func TestComplete_AnUnpinnedSlotKeepsTheTenantDefault(t *testing.T) {
 	env := newSlotPinEnv(t)
-	env.dispatchAgentWork(t, adapterTestTenant, "work-pin-2", map[string]string{SlotPinsWorkKey: fastPin})
+	env.dispatchAgentWork(t, adapterTestTenant, "work-pin-2", fastPin)
 
 	require.NoError(t, env.complete(t, adapterTestTenant, "work-pin-2", "primary"))
 
@@ -98,7 +99,7 @@ func TestComplete_AnUnpinnedSlotKeepsTheTenantDefault(t *testing.T) {
 // default, never the slot choice of another tenant's node.
 func TestComplete_AWorkIDOfAnotherTenantGivesNoPin(t *testing.T) {
 	env := newSlotPinEnv(t)
-	env.dispatchAgentWork(t, "other-tenant", "work-pin-3", map[string]string{SlotPinsWorkKey: fastPin})
+	env.dispatchAgentWork(t, "other-tenant", "work-pin-3", fastPin)
 
 	require.NoError(t, env.complete(t, adapterTestTenant, "work-pin-3", "fast"))
 
@@ -106,14 +107,21 @@ func TestComplete_AWorkIDOfAnotherTenantGivesNoPin(t *testing.T) {
 	assert.Zero(t, env.pinnedProv.calls)
 }
 
-// Pins that do not parse refuse the enqueue: the daemon wrote them, so bad
-// pins are a defect and must not pass as "no pin".
-func TestEnqueue_RefusesSlotPinsThatDoNotParse(t *testing.T) {
+// A shared (_system) component that serves the work of a tenant gets no pin:
+// the pin names a provider of the owning tenant, and the completion resolves
+// in the _system provider set.
+func TestComplete_ASharedComponentGetsNoPinOfTheTenant(t *testing.T) {
 	env := newSlotPinEnv(t)
-	_, err := env.queue.Enqueue(context.Background(), adapterTestTenant, "agent", "recon", WorkItem{
-		WorkID:   "work-pin-4",
-		WorkType: WorkTypeAgentExecute,
-		Context:  map[string]string{SlotPinsWorkKey: "{not json"},
+	env.dispatchAgentWork(t, "owner-tenant", "work-pin-4", fastPin)
+
+	ctx := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
+	_, err := env.svc.Complete(ctx, &componentpb.CompleteRequest{
+		WorkId:   "work-pin-4",
+		Slot:     "fast",
+		Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
 	})
-	require.Error(t, err)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, env.defaultProv.calls, "the caller's default serves the slot")
+	assert.Zero(t, env.pinnedProv.calls)
 }

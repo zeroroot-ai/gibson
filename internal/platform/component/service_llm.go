@@ -76,12 +76,10 @@ func (s *ComponentServiceServer) CompleteWithTools(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
-	ctx = withSlotPin(ctx, pin)
-	maxTokens, temperature := slotPinLimits(pin)
+	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
 
 	content, finishReason, _, promptTokens, completionTokens, toolCallsJSON, err := s.llmToolCompleter.CompleteWithTools(
-		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), maxTokens, temperature,
+		ctx, tenant, missionID, req.Slot, string(messagesJSON), string(toolsJSON), 0, 0, // the provider defaults of max tokens and temperature
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "completeWithTools: LLM completion failed",
@@ -163,12 +161,10 @@ func (s *ComponentServiceServer) CompleteStructured(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
-	ctx = withSlotPin(ctx, pin)
-	maxTokens, temperature := slotPinLimits(pin)
+	ctx = withSlotPin(ctx, s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot))
 
 	resultJSON, promptTokens, completionTokens, err := s.llmToolCompleter.CompleteStructured(
-		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, maxTokens, temperature,
+		ctx, tenant, missionID, req.Slot, string(messagesJSON), req.SchemaJson, 0, 0, // the provider defaults of max tokens and temperature
 	)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "completeStructured: LLM completion failed",
