@@ -78,12 +78,11 @@ func decideWith(t *testing.T, def *missionpb.MissionDefinition, filter modelgate
 	require.NoError(t, herr)
 
 	exec := newBrainExecutor(nil, logger)
-	exec.register("m1", &missionBinding{ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot})
-	out, err = exec.Decide(context.Background(), brain.MissionContext{
-		MissionID:   "m1",
-		Goal:        "find things",
-		DeciderSlot: deciderSlotFrom(def.GetDeciderSlot()),
+	exec.register("m1", &missionBinding{
+		ctx: context.Background(), tenant: chainTenant, harness: h, slot: deciderSlot,
+		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
 	})
+	out, err = exec.Decide(context.Background(), brain.MissionContext{MissionID: "m1", Goal: "find things"})
 	return defaultP, fastP, out, err
 }
 
@@ -153,6 +152,29 @@ func TestDecide_TheModelGateDeniesAPinnedDecider(t *testing.T) {
 	assert.Equal(t, "failed", out.Complete.Outcome)
 	assert.Contains(t, out.Complete.Reason, "model_access_denied")
 	assert.Empty(t, defaultP.servedModels(), "no fallback to the tenant default")
+	assert.Empty(t, fastP.servedModels())
+}
+
+// failingFilter is a model gate whose authorizer fails.
+type failingFilter struct{}
+
+func (failingFilter) Permitted(context.Context, []modelgate.Candidate) ([]modelgate.Candidate, error) {
+	return nil, errors.New("fga: connection refused")
+}
+
+func (failingFilter) InvalidateCache() {}
+
+// A gate that could not decide denies the call, but it does not end a pinned
+// mission: a later decision can succeed, so the brain keeps its retry.
+func TestDecide_AGateThatCannotDecideKeepsTheRetry(t *testing.T) {
+	defaultP, fastP, out, err := decideWith(t, &missionpb.MissionDefinition{
+		Id:          "m1",
+		DeciderSlot: &missionpb.LLMSlotConfig{Provider: "fast-p", Model: "f-large"},
+	}, failingFilter{})
+	require.Error(t, err)
+	require.ErrorIs(t, err, modelgate.ErrUnavailable)
+	assert.Nil(t, out.Complete, "the mission does not end")
+	assert.Empty(t, defaultP.servedModels())
 	assert.Empty(t, fastP.servedModels())
 }
 

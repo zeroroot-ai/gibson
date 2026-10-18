@@ -63,6 +63,11 @@ type Candidate struct {
 	Model    string
 }
 
+// ErrUnavailable marks a gate that could not decide, because the authorizer
+// failed. The gate then denies (fail closed), but a later check can permit,
+// so a caller may retry. A real denial does not carry this error.
+var ErrUnavailable = errors.New("modelgate: the authorizer could not decide")
+
 // Filter returns the subset of candidates the calling user is permitted
 // to use, preserving rank order. Returning an empty slice when no
 // candidates pass signals to the caller that PermissionDenied is

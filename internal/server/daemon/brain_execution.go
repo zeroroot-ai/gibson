@@ -36,6 +36,7 @@ import (
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
@@ -58,6 +59,10 @@ type missionBinding struct {
 	eng     *brain.Engine
 	harness gibsonharness.AgentHarness
 	slot    string
+	// deciderPin is the decider_slot of the mission. newMissionHarness puts
+	// the same value on the harness, so one value decides both the slot and
+	// how Decide treats a resolution failure (gibson#1210).
+	deciderPin brain.DeciderSlot
 }
 
 // brainExecutor implements brain.Dispatcher and brain.DeciderLLM by routing to
@@ -314,7 +319,7 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 	messages := buildDeciderPrompt(mc)
 	structured, err := bind.harness.CompleteStructuredAnyWithUsage(ctx, slot, messages, deciderDecision{})
 	if err != nil {
-		if pinnedDeciderUnservable(mc.DeciderSlot, err) {
+		if pinnedDeciderUnservable(bind.deciderPin, err) {
 			// The brain retries a failed decision on the next evidence change,
 			// and the budget System bounds a persistent failure. A pin that
 			// cannot be served spends no tokens, and a retry cannot serve it.
@@ -350,9 +355,15 @@ func (b *brainExecutor) Decide(ctx context.Context, mc brain.MissionContext) (br
 }
 
 // pinnedDeciderUnservable reports whether err is a slot resolution failure of a
-// mission that pins its Decider. Without a pin the brain keeps its retry.
+// mission that pins its Decider. Without a pin the brain keeps its retry. A
+// gate that could not decide (modelgate.ErrUnavailable) and a canceled or
+// timed out call also keep the retry, because a later call can succeed.
 func pinnedDeciderUnservable(pin brain.DeciderSlot, err error) bool {
 	if pin.Provider == "" && pin.Model == "" {
+		return false
+	}
+	if errors.Is(err, modelgate.ErrUnavailable) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
 	return errors.Is(err, types.NewError(llm.ErrNoMatchingProvider, ""))

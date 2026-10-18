@@ -1099,11 +1099,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Register the per-mission binding so the brain executor can dispatch this
 	// mission's agents and run its Decider on this mission's harness.
 	m.brainExecutor.register(missionID, &missionBinding{
-		ctx:     ctx,
-		tenant:  active.tenantID.String(),
-		eng:     eng,
-		harness: agentHarness,
-		slot:    deciderSlot,
+		ctx:        ctx,
+		tenant:     active.tenantID.String(),
+		eng:        eng,
+		harness:    agentHarness,
+		slot:       deciderSlot,
+		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
 	})
 	defer m.brainExecutor.unregister(missionID)
 
