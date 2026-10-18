@@ -207,8 +207,9 @@ func (s *IdentityServer) canRevokeSomeSessions(ctx context.Context, principalID,
 	if tenantID == "" {
 		return false, nil
 	}
-	// Component principals carry a typed prefix containing ':'; a bare
-	// subject is a human user. Only users can hold admin roles.
+	// Component principals carry a typed prefix containing ':'. Any other id
+	// is a user: a person's subject, or a SPIFFE peer in its tuple form
+	// <td>/<path> (principal.IDOf). Only users can hold admin roles.
 	if strings.ContainsRune(principalID, ':') {
 		return false, nil
 	}
