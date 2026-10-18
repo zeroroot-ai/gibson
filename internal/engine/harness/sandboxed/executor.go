@@ -478,9 +478,8 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 // discoveryExecContext is the scope of a discovery: the context keys of the
 // call, then the mission ids of the spec and the tenant that owns the mission
 // where a key is empty. The brain execution context of a mission tool node
-// carries no tenant and no mission ids, and an empty tenant made the ingest
-// sink fold the discovery into the daemon's registry tenant, not the
-// mission's (gibson#1145).
+// carries no tenant and no mission ids. The ingest processor drops a
+// discovery with no tenant, so the mission tenant fills it here (gibson#1145).
 func discoveryExecContext(ctx context.Context, live LiveScope, missionTenant string) ingest.ExecContext {
 	ec := ingest.ExecContext{
 		MissionRunID:    contextkeys.GetMissionRunID(ctx),

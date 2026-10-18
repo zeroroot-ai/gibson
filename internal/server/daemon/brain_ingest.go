@@ -66,15 +66,11 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 // `graphrag/loader`, which built Cypher out of the payload's own labels and
 // property names; that package is gone.
 //
-// tenant is empty on the dispatch paths that never resolved one (the harness
-// callback and the sandboxed executor both carry mission context, not tenancy),
-// so it falls back to the daemon's registry tenant exactly as ingestObservation
-// does on the same callback surface. Resolving it properly is gibson#1256.
-func ingestDiscovery(reg *brain.Registry, fallbackTenant string) ingest.WorldSink {
+// tenant is the tenant of the dispatch. The sink has no fallback: an event
+// with an empty tenant has no World that owns it, and it is dropped. The
+// processor already drops such a discovery, so this is the second check.
+func ingestDiscovery(reg *brain.Registry) ingest.WorldSink {
 	return func(tenant string, ev brain.Event) {
-		if tenant == "" {
-			tenant = fallbackTenant
-		}
 		if tenant == "" {
 			return
 		}
@@ -96,7 +92,7 @@ func ingestDiscovery(reg *brain.Registry, fallbackTenant string) ingest.WorldSin
 // path came to be imported in seven files and wired in none (gibson#1266).
 func (d *daemonImpl) newDiscoveryProcessor() ingest.DiscoveryProcessor {
 	return ingest.NewDiscoveryProcessor(
-		ingestDiscovery(d.brainRegistry, d.registryTenant),
+		ingestDiscovery(d.brainRegistry),
 		d.logger.WithComponent("discovery-ingest").Slog(),
 	)
 }
