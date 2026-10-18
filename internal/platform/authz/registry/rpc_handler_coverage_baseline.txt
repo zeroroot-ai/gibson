@@ -8,7 +8,6 @@
 /gibson.agent.v1.AgentService/GetDescriptor
 /gibson.agent.v1.AgentService/GetSlotSchema
 /gibson.component.v1.ComponentService/CallToolStream
-/gibson.component.v1.ComponentService/CompleteStream
 /gibson.component.v1.ComponentService/DisablePlugin
 /gibson.component.v1.ComponentService/EnablePlugin
 /gibson.component.v1.ComponentService/GetPluginConfig
