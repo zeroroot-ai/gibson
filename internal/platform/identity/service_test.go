@@ -279,7 +279,9 @@ func (f *fakeAuthorizer) ListUsersOfType(_ context.Context, objectType, object, 
 func strictFGA(pluginUsers *[]string) *fakeAuthorizer {
 	return &fakeAuthorizer{
 		listObjectsFn: func(user, relation, objectType string) ([]string, error) {
-			if !strings.Contains(user, ":") {
+			// FGA rejects a bare id and a user value that keeps a SPIFFE
+			// scheme ("spiffe://..." is not a type:id object).
+			if !strings.Contains(user, ":") || strings.HasPrefix(user, "spiffe://") {
 				return nil, &authz.FgaError{
 					Sentinel: authz.ErrInvalidArgument,
 					Message:  "invalid 'user' value: the 'user' field must be an object",
@@ -541,5 +543,40 @@ func TestFGALookup_QueriesExistInTheModel(t *testing.T) {
 		if !admits(q[0], q[1], q[2]) {
 			t.Errorf("the model has no %s#%s that admits %s, which FGALookup asks for", q[0], q[1], q[2])
 		}
+	}
+}
+
+// TestWhoAmI_SPIFFECaller: a SPIFFE caller is asked about in the form of its
+// FGA tuples (principal.IDOf): its id without the scheme. The raw
+// spiffe://... id is a user value that FGA rejects (gibson#1212).
+func TestWhoAmI_SPIFFECaller(t *testing.T) {
+	var pluginUsers []string
+	var adminChecks []string
+	fga := strictFGA(&pluginUsers)
+	fga.checkFn = func(user, relation, object string) (bool, error) {
+		adminChecks = append(adminChecks, user+" "+relation+" "+object)
+		return relation == "admin" && object == "tenant:tenant-a" && user == "user:zeroroot.ai/platform/e2e-runner", nil
+	}
+	srv, err := NewServer(Config{Authorizer: fga, Lookup: &fakeLookup{}})
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+
+	ctx := ctxWithIdentity(t, "spiffe://zeroroot.ai/platform/e2e-runner", "tenant-a")
+	resp, err := srv.WhoAmI(ctx, &identitypb.WhoAmIRequest{})
+	if err != nil {
+		t.Fatalf("WhoAmI: %v", err)
+	}
+	if got := resp.GetPrincipalId(); got != "zeroroot.ai/platform/e2e-runner" {
+		t.Errorf("principal_id = %q, want zeroroot.ai/platform/e2e-runner", got)
+	}
+	if len(pluginUsers) != 1 || pluginUsers[0] != "user:zeroroot.ai/platform/e2e-runner" {
+		t.Errorf("plugin can_invoke user = %v, want [user:zeroroot.ai/platform/e2e-runner]", pluginUsers)
+	}
+	if len(adminChecks) == 0 || adminChecks[0] != "user:zeroroot.ai/platform/e2e-runner admin tenant:tenant-a" {
+		t.Errorf("can_revoke_sessions checks = %v, want the tenant admin check in the tuple form", adminChecks)
+	}
+	if !resp.GetCanRevokeSessions() {
+		t.Error("a SPIFFE tenant admin can revoke sessions")
 	}
 }

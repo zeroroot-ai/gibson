@@ -23,6 +23,7 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // truncationCap is the safety bound on per-action grant enumeration.
@@ -108,8 +109,12 @@ func (s *IdentityServer) WhoAmI(ctx context.Context, req *identitypb.WhoAmIReque
 	// principal the caller is asking about.
 	var target PrincipalRecord
 	if req.GetTargetPrincipalId() == "" {
+		// The caller's id in the form of its FGA tuples (principal.IDOf):
+		// a SPIFFE subject without its scheme, a typed principal unchanged.
+		// The raw spiffe://... subject is a user value that FGA rejects
+		// (gibson#1212).
 		target = PrincipalRecord{
-			PrincipalID: callerID.Subject,
+			PrincipalID: principal.IDOf(callerID),
 			TenantID:    callerTenant,
 			Name:        callerID.Subject,
 			Kind:        callerKind(callerID),
@@ -202,8 +207,9 @@ func (s *IdentityServer) canRevokeSomeSessions(ctx context.Context, principalID,
 	if tenantID == "" {
 		return false, nil
 	}
-	// Component principals carry a typed prefix containing ':'; a bare
-	// subject is a human user. Only users can hold admin roles.
+	// Component principals carry a typed prefix containing ':'. Any other id
+	// is a user: a person's subject, or a SPIFFE peer in its tuple form
+	// <td>/<path> (principal.IDOf). Only users can hold admin roles.
 	if strings.ContainsRune(principalID, ':') {
 		return false, nil
 	}
