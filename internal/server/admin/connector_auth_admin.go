@@ -34,7 +34,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/connectorauth"
-	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // ConnectorSecretStore is the slice of the platform secrets service this
@@ -245,7 +244,7 @@ func (s *ConnectorAuthAdminServer) StartConnectorAuthorization(ctx context.Conte
 		RedirectURI:        redirectURI,
 		Scope:              scope,
 		RevocationEndpoint: meta.RevocationEndpoint,
-		AuthorizedBy:       principal.FGAUser(identity),
+		AuthorizedBy:       "user:" + identity.Subject,
 		AuthorizedTenant:   tenant.String(),
 		CreatedAt:          s.now().UTC(),
 	})
@@ -465,7 +464,7 @@ func (s *ConnectorAuthAdminServer) SetConnectorSecret(ctx context.Context, req *
 
 	grant := &connectorauth.Grant{
 		Static:       true,
-		AuthorizedBy: principal.FGAUser(identity),
+		AuthorizedBy: "user:" + identity.Subject,
 		AuthorizedAt: s.now().UTC(),
 	}
 	blob, err := connectorauth.MarshalGrant(grant)

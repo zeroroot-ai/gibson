@@ -73,3 +73,12 @@ func TestSubjectKindToFGA_OtherKindsUnchanged(t *testing.T) {
 		t.Errorf("unspecified kind = %v, want a subject_kind rejection", err)
 	}
 }
+
+// A USER grant for a SPIFFE id is written in the form of that caller's tuples,
+// so the model gate can match it (principal.FGAUser).
+func TestSubjectKindToFGA_ASPIFFEUserIDLosesItsScheme(t *testing.T) {
+	user, err := subjectKindToFGA("acme", tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_USER, "spiffe://zeroroot.ai/platform/e2e-runner")
+	if err != nil || user != "user:zeroroot.ai/platform/e2e-runner" {
+		t.Errorf("user subject = %q, %v; want user:zeroroot.ai/platform/e2e-runner", user, err)
+	}
+}

@@ -260,3 +260,15 @@ func TestRequireTenantAdmin_AComponentPrincipalIsCheckedAsItself(t *testing.T) {
 	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "tool_principal:nmap"})
 	requireGRPCStatus(t, srv.requireTenantAdmin(ctx, "acme"), codes.PermissionDenied)
 }
+
+// isTenantAdmin (budgets, usage) asks in the same form as requireTenantAdmin,
+// so the two gates agree for a SPIFFE admin.
+func TestIsTenantAdmin_ASPIFFECallerIsCheckedInItsTupleForm(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.WithAuthorizer(newFakeAuthorizer().allow("user:zeroroot.ai/platform/e2e-runner", "admin", "tenant:acme"))
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/e2e-runner"})
+	_, admin, err := srv.isTenantAdmin(ctx, "acme")
+	if err != nil || !admin {
+		t.Fatalf("isTenantAdmin = %v, %v; want an admin", admin, err)
+	}
+}

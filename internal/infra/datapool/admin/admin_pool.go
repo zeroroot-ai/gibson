@@ -48,6 +48,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool/vectordb"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -219,7 +220,9 @@ func (ap *AdminPool) Acquire(ctx context.Context) (*datapool.AdminConn, error) {
 	}
 
 	// Step 2: FGA authorization check.
-	fgaUser := "user:" + subject
+	// The caller in the form of its tuples (principal.FGAUser): a SPIFFE
+	// subject without its scheme.
+	fgaUser := principal.FGAUser(identity)
 	allowed, err := ap.fgaClient.Check(ctx, fgaUser, "platform_operator", "system_tenant:_system")
 	if err != nil {
 		return nil, fmt.Errorf("admin pool: acquire: FGA check failed: %w", err)
