@@ -261,10 +261,13 @@ type openAIListEndpoint struct {
 	// listURL is the full URL of the list call.
 	listURL string
 	token   string
-	// dropUnclassified leaves out each model that openAIModelFeatures gives no
-	// class. It is set only for the OpenAI API itself (gibson#1202).
-	dropUnclassified bool
-	cache            modelCache
+	// dropNonChat leaves out each model of a known non-chat family. The
+	// platform uses a model only for chat or for embeddings, and the wire can
+	// say only those two classes, so a model left in the list with no class
+	// shows in the chat menu (gibson#1202). A model with an unknown name stays:
+	// it can be a new chat family. It is set only for the OpenAI API itself.
+	dropNonChat bool
+	cache       modelCache
 }
 
 // Models returns the models that the endpoint reports.
@@ -300,8 +303,9 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 			}
 			info := llm.ModelInfo{Name: m.ID, ContextWindow: firstPositive(m.ContextWindow, m.ContextLength, m.MaxContextLength)}
 			if m.Capabilities == nil && e.provider == string(llm.ProviderOpenAI) {
-				info.Features = openAIModelFeatures(m.ID)
-				if info.Features == nil && e.dropUnclassified {
+				var nonChat bool
+				info.Features, nonChat = openAIModelFeatures(m.ID)
+				if nonChat && e.dropNonChat {
 					continue
 				}
 			}
@@ -322,36 +326,37 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 	})
 }
 
+// openAINonChatParts name the OpenAI model families that serve neither chat
+// completions nor embeddings: audio, realtime, speech, image and video models,
+// moderation, the legacy completion and instruct models, and the
+// Responses-only pro, deep-research, codex and computer-use models.
+var openAINonChatParts = []string{
+	"audio", "realtime", "transcribe", "tts", "whisper", "image", "dall-e", "sora",
+	"moderation", "davinci", "babbage", "instruct",
+	"-pro", "deep-research", "codex", "computer-use",
+}
+
 // openAIModelFeatures classifies an OpenAI model by its name, because the
 // OpenAI list sends no capabilities (gibson#1197). An embedding model is
-// "embedding" only. A GPT or o-series text model is "chat". The provider calls
-// chat completions, so a model that does not serve them gets no class: audio,
-// realtime, speech and image variants, the Responses-only pro, deep-research
-// and codex models, the legacy instruct models, and every other model.
-//
-// The platform uses a model only for chat or for embeddings, and the wire can
-// say only those two classes. So on the OpenAI API itself the list leaves out
-// every model with no class (gibson#1202), and no menu offers one. A new
-// OpenAI chat family with a new name prefix needs a rule here.
-func openAIModelFeatures(id string) []string {
+// "embedding" only. A GPT or o-series text model is "chat". A model of a
+// known non-chat family gets no class, and nonChat is true. Any other model
+// gets no class, and nonChat is false: nothing says that it cannot chat.
+func openAIModelFeatures(id string) (features []string, nonChat bool) {
 	name := strings.ToLower(id)
 	if strings.HasPrefix(name, "text-embedding-") {
-		return []string{"embedding"}
+		return []string{"embedding"}, false
 	}
-	for _, part := range []string{
-		"audio", "realtime", "transcribe", "tts", "image",
-		"-pro", "deep-research", "codex", "instruct",
-	} {
+	for _, part := range openAINonChatParts {
 		if strings.Contains(name, part) {
-			return nil
+			return nil, true
 		}
 	}
 	for _, prefix := range []string{"gpt-", "chatgpt-", "o1", "o3", "o4"} {
 		if strings.HasPrefix(name, prefix) {
-			return []string{"chat"}
+			return []string{"chat"}, false
 		}
 	}
-	return nil
+	return nil, false
 }
 
 // openAIModelsURL returns the list URL for an OpenAI-shaped base URL.
