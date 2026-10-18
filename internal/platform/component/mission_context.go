@@ -59,6 +59,7 @@ type MissionContextResolver struct {
 
 // NewMissionContextResolver returns a resolver over the state client that
 // PollWork writes the work-context hash with. A nil logger uses slog.Default.
+// stateClient must not be nil: every lookup reads it.
 func NewMissionContextResolver(stateClient *state.StateClient, logger *slog.Logger) *MissionContextResolver {
 	if logger == nil {
 		logger = slog.Default()

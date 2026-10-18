@@ -449,24 +449,38 @@ func TestCreateMission_OverTheWire_DeniedWithoutTheCapability(t *testing.T) {
 	assert.Empty(t, mgr.originated)
 }
 
-// With the resolver wired, CreateMission takes the mission of the caller's own
-// work item as the parent (ADR-0063, gibson#1209).
-func TestCreateMission_TheWorkItemsMissionIsTheParent(t *testing.T) {
+// createMissionFromWork records the work context of one work item through the
+// production writer, wires the work context store the way the daemon does, and
+// calls CreateMission from that work item as a component of "test-tenant".
+func createMissionFromWork(t *testing.T, workTenant string) *recordingMissionManager {
+	t.Helper()
 	mr := miniredis.RunT(t)
 	cfg := state.DefaultConfig()
 	cfg.URL = "redis://" + mr.Addr()
 	sc, err := state.NewStateClient(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
-	writeWorkContext(t, mr, "work-own", "parent-mission", "test-tenant")
+	require.NoError(t, NewRedisWorkContextRegistry(sc).
+		RegisterWorkContext(context.Background(), "work-1", "parent-mission", workTenant))
 
 	mgr := &recordingMissionManager{payload: []byte(`{}`)}
-	svc := missionServer(mgr, originateChecker("grant-1")).
-		WithMissionContextResolver(NewMissionContextResolver(sc, testLogger()))
+	svc := missionServer(mgr, originateChecker("grant-1")).WithWorkContextStore(sc, testLogger())
 
-	_, err = svc.CreateMission(componentCtx("agent_principal:abc"), &componentpb.CreateMissionRequest{WorkId: "work-own"})
-
+	_, err = svc.CreateMission(componentCtx("agent_principal:abc"), &componentpb.CreateMissionRequest{WorkId: "work-1"})
 	require.NoError(t, err)
 	require.Len(t, mgr.originated, 1)
+	return mgr
+}
+
+// With the work context store wired, CreateMission takes the mission of the
+// caller's own work item as the parent (ADR-0063, gibson#1209).
+func TestCreateMission_TheWorkItemsMissionIsTheParent(t *testing.T) {
+	mgr := createMissionFromWork(t, "test-tenant")
 	assert.Equal(t, "parent-mission", mgr.originated[0].ParentMissionID)
+}
+
+// A work item of another tenant gives no parent mission.
+func TestCreateMission_AnotherTenantsWorkItemGivesNoParent(t *testing.T) {
+	mgr := createMissionFromWork(t, "other-tenant")
+	assert.Empty(t, mgr.originated[0].ParentMissionID)
 }

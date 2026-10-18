@@ -254,10 +254,56 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	env := newWorkIDEnv(t)
 	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
 	env.svc.WithRunAuthorizer(fake)
-	env.svc.WithCapabilityChecker(grantedChecker())
-	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
 	const tenant = "test-tenant"
 	source := env.enqueueRun(t, tenant, "work-source", "run-42")
+	// PollWork records the mission of the source work item (gibson#1209).
+	require.NoError(t, NewRedisWorkContextRegistry(env.state).
+		RegisterWorkContext(context.Background(), source, "mission-7", tenant))
+
+	item := env.delegateAndClaim(t, tenant, source)
+	assert.Contains(t, item.Context[authz.AuthzContextWorkKey], "run-42")
+	// The delegated item carries the mission of its caller.
+	assert.Equal(t, "mission-7", item.Context["mission_id"])
+
+	run, err := NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), item.WorkID)
+	require.NoError(t, err)
+	assert.Equal(t, "run-42", run)
+
+	resp, err := env.svc.Authorize(ctxForTenant(tenant), &componentpb.AuthorizeRequest{
+		WorkId: item.WorkID, Action: "execute", Resource: "tool:nmap",
+	})
+	require.NoError(t, err)
+	assert.True(t, resp.GetAllowed())
+	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls)
+}
+
+// A mission lookup that fails does not stop the delegation. The delegated item
+// then carries no mission.
+func TestDelegateToAgent_AFailedMissionLookupDelegatesWithNoMission(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.WithRunAuthorizer(&fakeRunAuthorizer{allowed: true, reason: "fga_allow"})
+	const tenant = "test-tenant"
+	source := env.enqueueRun(t, tenant, "work-source", "run-42")
+
+	// A resolver over a closed state client fails each lookup.
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + env.mr.Addr()
+	closed, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	require.NoError(t, closed.Close())
+	env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
+
+	item := env.delegateAndClaim(t, tenant, source)
+	assert.NotContains(t, item.Context, "mission_id")
+}
+
+// delegateAndClaim delegates to "recon-agent" from the source work item with
+// the real DelegateToAgent, and returns the delegated work item that the agent
+// claims from the real queue.
+func (e *workIDEnv) delegateAndClaim(t *testing.T, tenant, source string) *WorkItem {
+	t.Helper()
+	e.svc.WithCapabilityChecker(grantedChecker())
+	e.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
 
 	type claimed struct {
 		item *WorkItem
@@ -267,12 +313,12 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	go func() {
 		ctx := context.Background()
 		for range 100 {
-			item, err := env.queue.Claim(ctx, tenant, "agent", "recon-agent", "inst-agent", 200*time.Millisecond)
+			item, err := e.queue.Claim(ctx, tenant, "agent", "recon-agent", "inst-agent", 200*time.Millisecond)
 			if err != nil || item != nil {
 				if item != nil {
 					res := agentpb.ExecuteResponse{Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS}}
 					b, _ := protojson.Marshal(&res)
-					err = env.queue.DeliverResult(ctx, item.WorkID, WorkResult{WorkID: item.WorkID, Result: b})
+					err = e.queue.DeliverResult(ctx, item.WorkID, WorkResult{WorkID: item.WorkID, Result: b})
 				}
 				got <- claimed{item: item, err: err}
 				return
@@ -283,7 +329,7 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 
 	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
 	require.NoError(t, err)
-	_, err = env.svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
+	_, err = e.svc.DelegateToAgent(componentCtx("agent_principal:acct-1"), &componentpb.DelegateToAgentRequest{
 		WorkId: source, AgentName: "recon-agent", TaskJson: taskJSON,
 	})
 	require.NoError(t, err)
@@ -291,18 +337,7 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	c := <-got
 	require.NoError(t, c.err)
 	require.NotNil(t, c.item)
-	assert.Contains(t, c.item.Context[authz.AuthzContextWorkKey], "run-42")
-
-	run, err := NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), c.item.WorkID)
-	require.NoError(t, err)
-	assert.Equal(t, "run-42", run)
-
-	resp, err := env.svc.Authorize(ctxForTenant(tenant), &componentpb.AuthorizeRequest{
-		WorkId: c.item.WorkID, Action: "execute", Resource: "tool:nmap",
-	})
-	require.NoError(t, err)
-	assert.True(t, resp.GetAllowed())
-	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls)
+	return c.item
 }
 
 func TestDelegatedAuthzContext_WithoutARegistryTheAgentGetsNoRun(t *testing.T) {
