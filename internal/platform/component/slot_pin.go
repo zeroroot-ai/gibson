@@ -25,6 +25,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // workSlotsKeyPrefix is the Redis key prefix for the work-item → slot pins
@@ -120,6 +121,14 @@ func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID
 		return nil
 	}
 	if owner != tenant {
+		if tenant == auth.SystemTenantString {
+			// A shared component resolves in the _system provider set, so a
+			// pin of the owning tenant cannot apply. Say so when one exists.
+			if pin, perr := s.workContext.WorkSlotPin(ctx, workID, slot); perr == nil && pin != nil {
+				s.logger.InfoContext(ctx, "llm: a shared component ignores the slot pin of the tenant's node on Complete",
+					slog.String("owner", owner), slog.String("work_id", workID), slog.String("slot", slot))
+			}
+		}
 		return nil
 	}
 	pin, err := s.workContext.WorkSlotPin(ctx, workID, slot)

@@ -49,6 +49,8 @@ const chainTenant = "acme"
 type servingProvider struct {
 	name   string
 	models []string
+	// noSavedModel makes the provider report no saved default model.
+	noSavedModel bool
 
 	mu     sync.Mutex
 	served []string
@@ -57,7 +59,12 @@ type servingProvider struct {
 func (p *servingProvider) Name() string { return p.name }
 
 // DefaultModel is the saved default model of the provider: its first model.
-func (p *servingProvider) DefaultModel() string { return p.models[0] }
+func (p *servingProvider) DefaultModel() string {
+	if p.noSavedModel {
+		return ""
+	}
+	return p.models[0]
+}
 
 func (p *servingProvider) Models(context.Context) ([]llm.ModelInfo, error) {
 	out := make([]llm.ModelInfo, 0, len(p.models))
@@ -125,9 +132,11 @@ func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 
 	def := &servingProvider{name: "default-p", models: []string{"d-1"}}
 	pinned := &servingProvider{name: "fast-p", models: []string{"f-small", "f-large"}}
+	unsaved := &servingProvider{name: "unsaved-p", models: []string{"u-1"}, noSavedModel: true}
 	registry := llm.NewLLMRegistry()
 	require.NoError(t, registry.RegisterProvider(def))
 	require.NoError(t, registry.RegisterProvider(pinned))
+	require.NoError(t, registry.RegisterProvider(unsaved))
 	logger := slog.New(slog.DiscardHandler)
 	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
 	if filter != nil {
@@ -263,4 +272,34 @@ func TestNodeSlotPin_TheModelGateDecidesOnThePin(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "model_access_denied")
 	assert.Empty(t, env.pinned.servedModels())
+}
+
+// A provider-only pin never falls back to another provider in silence. Each
+// case fails the completion, and no provider serves it.
+func TestNodeSlotPin_AProviderOnlyPinNeverFallsBack(t *testing.T) {
+	cases := []struct {
+		name   string
+		pin    *missionpb.LLMSlotConfig
+		filter modelgate.Filter
+	}{
+		{name: "the tenant has no such provider", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "absent-p"}},
+		{name: "the provider has no saved default model", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "unsaved-p"}},
+		{
+			name:   "the model gate denies the saved model of the provider",
+			pin:    &missionpb.LLMSlotConfig{Slot: "fast", Provider: "fast-p"},
+			filter: newAllowProviderFilter("default-p"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newChainEnv(t, tc.filter)
+			workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{tc.pin})
+
+			err := env.complete(workID, "fast")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "pinned to provider")
+			assert.Empty(t, env.def.servedModels(), "the tenant default must not serve a pinned slot")
+			assert.Empty(t, env.pinned.servedModels())
+		})
+	}
 }

@@ -56,3 +56,33 @@ func TestNodeSlotPins_NoPinIsNil(t *testing.T) {
 	assert.Nil(t, nodeSlotPins(makeAgentNodeProto("my-agent", []*missionpb.LLMSlotConfig{{Slot: "fast"}})))
 	assert.Nil(t, nodeSlotPins(&missionpb.MissionNode{Type: missionpb.NodeType_NODE_TYPE_TOOL}))
 }
+
+// The sub-node of a parallel container keeps its pins in the projection.
+func TestMissionDefinitionToProjected_AParallelSubNodeKeepsItsPins(t *testing.T) {
+	sub := makeAgentNodeProto("recon", []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p", Model: "f-large"}})
+	sub.Id = "inner"
+	def := &missionpb.MissionDefinition{
+		Id: "m1",
+		Nodes: map[string]*missionpb.MissionNode{
+			"par": {
+				Id:   "par",
+				Type: missionpb.NodeType_NODE_TYPE_PARALLEL,
+				Config: &missionpb.MissionNode_ParallelConfig{ParallelConfig: &missionpb.ParallelNodeConfig{
+					SubNodes: []*missionpb.MissionNode{sub},
+				}},
+			},
+		},
+	}
+	proj, _, err := missionDefinitionToProjected(def, "", nil)
+	if err != nil {
+		t.Fatalf("project: %v", err)
+	}
+	var found bool
+	for _, n := range proj.Nodes {
+		if n.Kind == "agent" {
+			found = true
+			assert.Equal(t, map[string]agent.SlotConfig{"fast": {Provider: "fast-p", Model: "f-large"}}, n.SlotPins)
+		}
+	}
+	assert.True(t, found, "the parallel sub-node is projected")
+}
