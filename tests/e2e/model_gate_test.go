@@ -111,7 +111,10 @@ func (p *probeAgent) serve(ctx context.Context, t *testing.T) {
 			out, merr := protojson.Marshal(&agentpb.ExecuteResponse{
 				Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
 			})
-			require.NoError(t, merr)
+			if merr != nil {
+				t.Errorf("probe agent: marshal the result: %v", merr)
+				continue
+			}
 			submit.Result = out
 		}
 		if _, err := p.comp.SubmitResult(ctx, submit); err != nil && ctx.Err() == nil {
@@ -260,9 +263,12 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 
 	probe := &probeAgent{comp: comp, instanceID: reg.GetInstanceId()}
 	agentCtx, stopAgent := context.WithCancel(ctx)
-	t.Cleanup(stopAgent)
-	go probe.serve(agentCtx, t)
-	go probe.heartbeat(agentCtx)
+	var agentDone sync.WaitGroup
+	agentDone.Add(2)
+	go func() { defer agentDone.Done(); probe.serve(agentCtx, t) }()
+	go func() { defer agentDone.Done(); probe.heartbeat(agentCtx) }()
+	// The goroutines log through t, so they end before the test does.
+	t.Cleanup(func() { stopAgent(); agentDone.Wait() })
 
 	targetID, err := helpers.RegisterTestTarget(ctx, clients.Daemon, toolTargetName, toolTargetURL)
 	require.NoError(t, err, "register the synthetic target")

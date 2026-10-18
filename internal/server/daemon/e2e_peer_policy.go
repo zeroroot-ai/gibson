@@ -43,8 +43,8 @@ func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2
 // stops being able to prove that a denial is a denial — if the harness has more
 // authority than the thing under test, a passing assertion says nothing. These
 // are the RPCs tests/e2e/tool_dispatch_test.go,
-// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go and
-// tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
+// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go,
+// tests/e2e/model_gate_test.go and tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
