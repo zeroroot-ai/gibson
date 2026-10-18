@@ -6,7 +6,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -45,7 +44,9 @@ import (
 func subjectKindToFGA(callerTenant string, k tenantv1.GrantSubjectKind, id string) (string, error) {
 	switch k {
 	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_USER:
-		return fmt.Sprintf("user:%s", id), nil
+		// The form of the user's tuples (principal.FGAUser): a SPIFFE id
+		// without its scheme, so the gate can match the grant.
+		return "user:" + strings.TrimPrefix(id, "spiffe://"), nil
 	case tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TEAM:
 		obj, err := authz.TeamObject(callerTenant, id)
 		if err != nil {

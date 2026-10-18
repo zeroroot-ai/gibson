@@ -193,6 +193,7 @@ func TestSubject(t *testing.T) {
 		"calling person":        {person, "user:u-carol"},
 		"calling component":     {component, "tool_principal:nmap"},
 		"calling SPIFFE peer":   {spiffePeer, "user:zeroroot.ai/platform/e2e-runner"},
+		"a user: subject":       {auth.WithIdentity(tenantCtx(t), auth.Identity{Subject: "user:bob", Tenant: tenant}), "user:bob"},
 		"tenant members":        {tenantCtx(t), "tenant:acme#member"},
 		"nobody":                {context.Background(), ""},
 	} {

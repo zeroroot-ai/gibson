@@ -32,6 +32,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -89,7 +90,7 @@ func (s *DaemonServer) canRevokeSessions(ctx context.Context, callerSubject, cal
 		return false, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
 
-	callerRef := "user:" + callerSubject
+	callerRef := principal.FGAUser(auth.Identity{Subject: callerSubject})
 	targetRef := "user:" + targetUserID
 	tenantRef := "tenant:" + callerTenant
 

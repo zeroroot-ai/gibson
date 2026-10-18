@@ -29,6 +29,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -68,7 +69,7 @@ func callerUserRef(ctx context.Context) string {
 	if err != nil || id.Subject == "" {
 		return ""
 	}
-	return "user:" + id.Subject
+	return principal.FGAUser(id)
 }
 
 func callerTenant(ctx context.Context) string {
@@ -85,7 +86,7 @@ func (s *Server) WhoAmI(ctx context.Context, _ *discoverypb.WhoAmIRequest) (*dis
 		return nil, status.Error(codes.Unauthenticated, "no identity in context")
 	}
 
-	userRef := "user:" + id.Subject
+	userRef := principal.FGAUser(id)
 	activeTenant := callerTenant(ctx)
 
 	// Tenant membership: ask FGA which tenants have this user as `member`.

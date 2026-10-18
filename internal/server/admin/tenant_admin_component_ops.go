@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantrole"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -532,7 +533,7 @@ func (s *TenantAdminServer) TransferOwnership(ctx context.Context, req *tenantv1
 	}
 
 	tenantRef := "tenant:" + tenantID
-	callerRef := "user:" + identity.Subject
+	callerRef := principal.FGAUser(identity)
 	newOwnerRef := "user:" + req.GetNewOwnerUserId()
 
 	// Only the tenant's current Owner may transfer ownership.

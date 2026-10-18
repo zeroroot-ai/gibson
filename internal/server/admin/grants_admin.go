@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
 // GrantInfo is the dashboard-shaped view of one active capability grant.
@@ -310,7 +311,7 @@ func (s *GrantsAdminServer) WriteAgentGrants(ctx context.Context, req *tenantv1.
 	if identityErr != nil || callerIdentity.Subject == "" {
 		return nil, status.Errorf(codes.PermissionDenied, "no identity in context")
 	}
-	callerRef := "user:" + callerIdentity.Subject
+	callerRef := principal.FGAUser(callerIdentity)
 
 	// Caller-access intersection check: a caller may only forward an action
 	// on an object that the caller already holds themselves. The check uses

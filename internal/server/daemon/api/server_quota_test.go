@@ -242,3 +242,21 @@ func TestRequireTenantAdmin_ASPIFFECallerIsCheckedInItsTupleForm(t *testing.T) {
 		t.Fatalf("requireTenantAdmin: %v", err)
 	}
 }
+
+// A tuple in the old "user:spiffe://..." form grants nothing: the gate asks in
+// the stripped form only.
+func TestRequireTenantAdmin_TheOldSPIFFETupleFormGrantsNothing(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.WithAuthorizer(newFakeAuthorizer().allow("user:spiffe://zeroroot.ai/platform/e2e-runner", "admin", "tenant:acme"))
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "spiffe://zeroroot.ai/platform/e2e-runner"})
+	requireGRPCStatus(t, srv.requireTenantAdmin(ctx, "acme"), codes.PermissionDenied)
+}
+
+// A typed component principal is checked as itself, not as a user. The FGA
+// model gives it no admin relation, so the gate refuses it.
+func TestRequireTenantAdmin_AComponentPrincipalIsCheckedAsItself(t *testing.T) {
+	srv := newQuotaTestServer()
+	srv.WithAuthorizer(newFakeAuthorizer().allow("user:tool_principal:nmap", "admin", "tenant:acme"))
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "tool_principal:nmap"})
+	requireGRPCStatus(t, srv.requireTenantAdmin(ctx, "acme"), codes.PermissionDenied)
+}
