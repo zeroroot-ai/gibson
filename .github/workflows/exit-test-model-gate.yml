@@ -246,5 +246,6 @@ jobs:
         if: always()
         run: |
           kubectl -n "$NS" get pods || true
-          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=600 \
-            | grep -iE 'model_access|modelgate|default grant|slot|probe|e2e-model|provider' | tail -120 || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=5000 \
+            | grep -iE 'model_access|modelgate|default grant|slot|probe|e2e-model|provider|mission' \
+            | grep -v 'audit: entry refused' | tail -200 || true

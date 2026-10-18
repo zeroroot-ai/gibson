@@ -153,12 +153,15 @@ func (p *probeAgent) counts() (replies, errs int) {
 }
 
 // createProbeMissionDefinition creates a mission with one AGENT node that the
-// probe agent serves, and returns its id.
-func createProbeMissionDefinition(t *testing.T, ctx context.Context, daemon daemonpb.DaemonServiceClient) string {
+// probe agent serves, and returns its id. Each phase of the test runs its own
+// mission: a second run of one mission does nothing today (gibson#1217). The
+// gate decides for the tenant and the provider, not for the mission, so the
+// proof is the same.
+func createProbeMissionDefinition(t *testing.T, ctx context.Context, daemon daemonpb.DaemonServiceClient, name string) string {
 	t.Helper()
 	resp, err := daemon.CreateMissionDefinition(ctx, &daemonpb.CreateMissionDefinitionRequest{
 		Definition: &missionpb.MissionDefinition{
-			Name:        "model-gate-exit",
+			Name:        name,
 			Description: "hosted#358 model gate exit test",
 			Nodes: map[string]*missionpb.MissionNode{
 				"probe": {
@@ -268,9 +271,8 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		defer cancel()
 		helpers.DeleteTestTarget(auth.ContextWithTenantString(c, modelGateTenant), clients.Daemon, targetID)
 	})
-	defID := createProbeMissionDefinition(t, ctx, clients.Daemon)
-
 	t.Run("a member with no manual grant gets a model through the default tenant grant", func(t *testing.T) {
+		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-default-grant")
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.Equal(t, "mission_completed", terminal.EventType, "the mission must complete; reason: %s", reason)
 		reply, errText := probe.last()
@@ -291,6 +293,7 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		require.False(t, tenantHoldsProviderGrant(t, ctx, access), "the tenant grant is gone")
 
 		_, errsBefore := probe.counts()
+		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-revoked")
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.NotEqual(t, "mission_completed", terminal.EventType, "a mission with no model grant must not complete")
 		_, errsAfter := probe.counts()
@@ -307,6 +310,7 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the tenant grant is back")
 
 		repliesBefore, _ := probe.counts()
+		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-granted-again")
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.Equal(t, "mission_completed", terminal.EventType, "the mission must complete again; reason: %s", reason)
 		repliesAfter, _ := probe.counts()
