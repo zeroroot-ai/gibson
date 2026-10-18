@@ -741,3 +741,55 @@ func TestOllamaModels_ClassifiesEmbeddingModels(t *testing.T) {
 	assert.Equal(t, []string{"embedding"}, got["mxbai-embed-large:latest"])
 	assert.Equal(t, []string{"chat"}, got["llama3:latest"])
 }
+
+// On the OpenAI API itself the list leaves out every model with no class, so
+// no menu offers an audio, image, moderation, legacy or Responses-only model
+// (gibson#1202). Chat and embedding models stay, with their class.
+func TestOpenAIModels_TheOpenAIAPIListsOnlyChatAndEmbeddingModels(t *testing.T) {
+	fake := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"data":[{"id":"gpt-4o"},{"id":"o4-mini"},{"id":"text-embedding-3-small"},`+
+			`{"id":"gpt-4o-mini-tts"},{"id":"gpt-4o-transcribe"},{"id":"gpt-4o-realtime-preview"},`+
+			`{"id":"gpt-image-1"},{"id":"dall-e-3"},{"id":"whisper-1"},{"id":"omni-moderation-latest"},`+
+			`{"id":"davinci-002"},{"id":"o1-pro"},{"id":"gpt-3.5-turbo-instruct"},{"id":"sora-2"}]}`)
+	})
+	e := &openAIListEndpoint{
+		client: fake.Client(), provider: string(llm.ProviderOpenAI),
+		listURL: fake.URL + "/v1/models", token: "sk-test", dropUnclassified: true,
+	}
+	models, err := e.Models(context.Background())
+	require.NoError(t, err)
+	got := map[string][]string{}
+	for _, m := range models {
+		got[m.Name] = m.Features
+	}
+	assert.Equal(t, map[string][]string{
+		"gpt-4o": {"chat"}, "o4-mini": {"chat"}, "text-embedding-3-small": {"embedding"},
+	}, got)
+}
+
+// Only the OpenAI API host drops unclassified models. A proxy or a compatible
+// server can serve names that the OpenAI rule does not know.
+func TestIsOpenAIAPI(t *testing.T) {
+	for base, want := range map[string]bool{
+		"":                           true,
+		"https://api.openai.com/v1":  true,
+		"https://API.OpenAI.com/v1/": true,
+		"http://litellm:4000/v1":     false,
+		"https://example.com/openai": false,
+		"://bad":                     false,
+	} {
+		assert.Equal(t, want, isOpenAIAPI(base), base)
+	}
+}
+
+// A provider built with no base URL lists from the OpenAI API, so it drops
+// unclassified models. One built with another base URL keeps them.
+func TestNewOpenAIProvider_DropsUnclassifiedOnlyOnTheOpenAIAPI(t *testing.T) {
+	def, err := NewOpenAIProvider(llm.ProviderConfig{APIKey: "sk-test"})
+	require.NoError(t, err)
+	assert.True(t, def.lister.dropUnclassified)
+
+	custom, err := NewOpenAIProvider(llm.ProviderConfig{APIKey: "sk-test", BaseURL: "https://proxy.example.com/v1"})
+	require.NoError(t, err)
+	assert.False(t, custom.lister.dropUnclassified)
+}

@@ -261,7 +261,10 @@ type openAIListEndpoint struct {
 	// listURL is the full URL of the list call.
 	listURL string
 	token   string
-	cache   modelCache
+	// dropUnclassified leaves out each model that openAIModelFeatures gives no
+	// class. It is set only for the OpenAI API itself (gibson#1202).
+	dropUnclassified bool
+	cache            modelCache
 }
 
 // Models returns the models that the endpoint reports.
@@ -298,6 +301,9 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 			info := llm.ModelInfo{Name: m.ID, ContextWindow: firstPositive(m.ContextWindow, m.ContextLength, m.MaxContextLength)}
 			if m.Capabilities == nil && e.provider == string(llm.ProviderOpenAI) {
 				info.Features = openAIModelFeatures(m.ID)
+				if info.Features == nil && e.dropUnclassified {
+					continue
+				}
 			}
 			if c := m.Capabilities; c != nil {
 				if c.CompletionChat {
@@ -322,6 +328,11 @@ func (e *openAIListEndpoint) Models(ctx context.Context) ([]llm.ModelInfo, error
 // chat completions, so a model that does not serve them gets no class: audio,
 // realtime, speech and image variants, the Responses-only pro, deep-research
 // and codex models, the legacy instruct models, and every other model.
+//
+// The platform uses a model only for chat or for embeddings, and the wire can
+// say only those two classes. So on the OpenAI API itself the list leaves out
+// every model with no class (gibson#1202), and no menu offers one. A new
+// OpenAI chat family with a new name prefix needs a rule here.
 func openAIModelFeatures(id string) []string {
 	name := strings.ToLower(id)
 	if strings.HasPrefix(name, "text-embedding-") {
