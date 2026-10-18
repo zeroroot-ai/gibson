@@ -6,7 +6,6 @@
 # epic rather than becoming standing debt.
 # Generated tech-debt baseline for the per-RPC handler-test walker (gibson#793).
 /gibson.agent.v1.AgentService/GetDescriptor
-/gibson.agent.v1.AgentService/GetSlotSchema
 /gibson.component.v1.ComponentService/CallToolStream
 /gibson.component.v1.ComponentService/CompleteStream
 /gibson.component.v1.ComponentService/DisablePlugin
