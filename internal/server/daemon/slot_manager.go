@@ -115,10 +115,11 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 			if m.onResolve != nil {
 				m.onResolve(ctx, picked, false)
 			}
-			return types.NewError(
+			return types.WrapError(
 				llm.ErrNoMatchingProvider,
-				fmt.Sprintf("model_access_denied: authorization check failed for model %q on provider %q (slot %q): %v",
-					model.Name, provider.Name(), slot.Name, ferr),
+				fmt.Sprintf("model_access_denied: authorization check failed for model %q on provider %q (slot %q)",
+					model.Name, provider.Name(), slot.Name),
+				fmt.Errorf("%w: %w", modelgate.ErrUnavailable, ferr),
 			)
 		}
 		allowed = len(permitted) == 1

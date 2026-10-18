@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -1067,7 +1068,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	}
 
 	// Create harness for agent execution
-	agentHarness, err := m.harnessFactory.Create("orchestrator", missionCtx, targetInfo)
+	agentHarness, err := newMissionHarness(m.harnessFactory, missionCtx, def, targetInfo)
 	if err != nil {
 		m.logger.Error("failed to create harness", "error", err)
 		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to create harness: %v", err))
@@ -1098,11 +1099,12 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Register the per-mission binding so the brain executor can dispatch this
 	// mission's agents and run its Decider on this mission's harness.
 	m.brainExecutor.register(missionID, &missionBinding{
-		ctx:     ctx,
-		tenant:  active.tenantID.String(),
-		eng:     eng,
-		harness: agentHarness,
-		slot:    deciderSlot,
+		ctx:        ctx,
+		tenant:     active.tenantID.String(),
+		eng:        eng,
+		harness:    agentHarness,
+		slot:       deciderSlot,
+		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
 	})
 	defer m.brainExecutor.unregister(missionID)
 
@@ -1449,7 +1451,7 @@ func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engin
 // newRunMissionContext is the MissionContext every harness in one run starts
 // from.
 //
-// Extracted from startMissionExecution so it can be asserted directly. It
+// Extracted from executeMission so it can be asserted directly. It
 // carries four things a wrong value would break silently rather than loudly:
 // the tenant (a wrong one shows a run on another tenant's console), the run id
 // (mission-scoped GraphRAG storage), the run number (mission memory queries),
@@ -1473,4 +1475,40 @@ func newRunMissionContext(
 		WithTenant(m.TenantID).
 		WithCreatedBy(m.CreatedBy).
 		WithSecrets(harness.MissionSecretScopesFromProto(def.GetSecrets()))
+}
+
+// newMissionHarness builds the mission harness of one run. The brain
+// executor dispatches the agents of the mission and runs the Decider on it, so
+// it carries the decider_slot pin of the mission (gibson#1210).
+func newMissionHarness(
+	factory harness.HarnessFactoryInterface,
+	mc harness.MissionContext,
+	def *missionpb.MissionDefinition,
+	target harness.TargetInfo,
+) (harness.AgentHarness, error) {
+	h, err := factory.Create("orchestrator", withDeciderSlotPin(mc, def), target)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator harness: %w", err)
+	}
+	return h, nil
+}
+
+// withDeciderSlotPin puts the decider_slot of the mission (gibson#850) on the
+// slot that the Decider calls, as the override of that slot. The slot manager
+// applies the same rule as to a node pin (gibson#1203): a pin that names a
+// provider is served by that provider or fails, and never falls back.
+//
+// Only the mission harness gets this context. A delegated child replaces
+// NodeSlotOverrides with the pins of its own node, so the decider pin never
+// reaches an agent.
+//
+// A mission with no decider_slot keeps the tenant default (gibson#1210).
+func withDeciderSlotPin(mc harness.MissionContext, def *missionpb.MissionDefinition) harness.MissionContext {
+	pin := deciderSlotFrom(def.GetDeciderSlot())
+	if pin.Provider == "" && pin.Model == "" {
+		return mc
+	}
+	return mc.WithNodeSlotOverrides(map[string]*agent.SlotConfig{
+		deciderSlot: {Provider: pin.Provider, Model: pin.Model},
+	})
 }

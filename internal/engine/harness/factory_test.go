@@ -373,6 +373,26 @@ func TestFactory_Create_SharedFindingStore(t *testing.T) {
 // Factory CreateChild Tests
 // ────────────────────────────────────────────────────────────────────────────
 
+// A child does not inherit the slot pins of its parent (gibson#1210). The
+// mission harness carries the decider pin, and no child may run on it.
+func TestFactory_CreateChild_DropsTheSlotPinsOfTheParent(t *testing.T) {
+	factory, err := NewHarnessFactory(HarnessConfig{
+		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		TargetFacts: testTargetFacts,
+	})
+	require.NoError(t, err)
+
+	parentCtx := NewMissionContext(types.NewID(), "test-mission", "orchestrator").
+		WithNodeSlotOverrides(map[string]*agent.SlotConfig{"primary": {Provider: "fast-p", Model: "f-large"}})
+	parent, err := factory.Create("orchestrator", parentCtx, NewTargetInfo(types.NewID(), "t", "https://example.com", "web"))
+	require.NoError(t, err)
+	require.NotEmpty(t, parent.Mission().NodeSlotOverrides)
+
+	child, err := factory.CreateChild(parent, "child-agent")
+	require.NoError(t, err)
+	assert.Nil(t, child.Mission().NodeSlotOverrides)
+}
+
 func TestFactory_CreateChild_Success(t *testing.T) {
 	config := HarnessConfig{
 		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),

@@ -4,12 +4,14 @@
 package harness
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
@@ -44,4 +46,30 @@ func TestDelegateToAgent_PutsTheNodeSlotPinsOnTheWorkItem(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]agent.SlotConfig{"fast": {Provider: "fast-p", Model: "f-large"}}, q.gotItem.SlotPins)
+}
+
+// The mission harness carries the decider pin (gibson#1210). An agent that it
+// delegates to gets the pins of its own node, never the decider pin: neither
+// on its child harness nor on its work item.
+func TestDelegateToAgent_TheDeciderPinNeverReachesTheAgent(t *testing.T) {
+	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
+		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
+	})}
+	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
+	h.callbackManager = &registrarFake{}
+	h.missionCtx.ID = types.NewID()
+	decider := map[string]*agent.SlotConfig{"primary": {Provider: "fast-p", Model: "f-large"}}
+	h.missionCtx.NodeSlotOverrides = decider
+	h.nodeSlotOverrides = decider
+	var child MissionContext
+	h.factory = func(_ context.Context, mc MissionContext, _ TargetInfo) (AgentHarness, error) {
+		child = mc
+		return h, nil
+	}
+
+	_, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal"))
+	require.NoError(t, err)
+
+	assert.Nil(t, child.NodeSlotOverrides, "the child harness has no decider pin")
+	assert.Empty(t, q.gotItem.SlotPins, "the work item has no decider pin")
 }

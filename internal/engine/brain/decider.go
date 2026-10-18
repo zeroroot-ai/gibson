@@ -47,7 +47,10 @@ type Capability struct {
 
 // DeciderSlot names the LLM the Decider runs on (gibson#850): the mission-level
 // slot, distinct from worker node slots. Empty fields mean "use the tenant's
-// dashboard-default provider/model" — the concrete DeciderLLM resolves it.
+// dashboard-default provider/model". The daemon puts the same pin on the
+// harness that the Decider calls and on its mission binding, and the slot
+// manager resolves it there (gibson#1210). This copy is the record in the
+// World.
 type DeciderSlot struct {
 	Provider string
 	Model    string
