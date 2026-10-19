@@ -103,23 +103,39 @@ type MissionProjected struct {
 	Description string
 	TargetID    string
 	TenantID    string
+
+	// RunID names this run of the mission. The daemon mints it when the run
+	// starts. A mission ID is the stable record ID, so the RunID is what makes
+	// the second run of a mission a new run and not a repeat of the first
+	// (gibson#1217).
+	RunID string
 }
 
 func (MissionProjected) Kind() string { return "mission.projected" }
 
 func applyMissionProjected(w *World, e MissionProjected) {
 	if ent, ok := findMission(w, e.ID); ok {
-		if !isTerminalMission(w.missions.Get(ent).Status) {
-			return // idempotent: already projected, still running
+		m := w.missions.Get(ent)
+		switch {
+		case m.Status == MissionPending:
+			// A mission that a person created and that has not run yet. Keep
+			// the entity, which holds the creator, and start its first run.
+			startRun(m, e)
+			projectWork(w, e)
+			return
+		case m.RunID == e.RunID:
+			return // idempotent: the same run, projected again
 		}
-		// The mission ID is the stable record ID, so a projection of a
-		// finished mission is the next run of that record. Retire the
-		// finished run first, or the new run finds the old terminal status
-		// and the old work items and does nothing (gibson#1217).
-		retireMissionRun(w, e.ID, ent)
+		// A new run of a mission that ran before. The mission ID is the
+		// stable record ID, so the new run finds the entity of the old run.
+		// Retire everything of the old run first, or the new run finds the
+		// old terminal status and the old work and does nothing
+		// (gibson#1217). The Timeline keeps the history of the old run.
+		retireMissionRun(w, e.ID)
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
+		RunID:          e.RunID,
 		Goal:           e.Goal,
 		Status:         MissionRunning,
 		Budget:         e.Budget,
@@ -131,6 +147,11 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
 	})
+	projectWork(w, e)
+}
+
+// projectWork adds the work items of a projected run to the World.
+func projectWork(w *World, e MissionProjected) {
 	// The node of a rewound checkpoint starts from the snapshot of that
 	// checkpoint (ADR-0170). The rewind event comes before the projection.
 	rewind, rewound := w.missionRewinds[e.ID]
@@ -149,6 +170,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		w.work.NewEntity(&WorkItem{
 			ID:                     id,
 			MissionID:              e.ID,
+			RunID:                  e.RunID,
 			Kind:                   n.Kind,
 			Target:                 n.Target,
 			Input:                  n.Input,
@@ -201,24 +223,126 @@ func nodeName(workID string) string {
 	return workID
 }
 
-// isTerminalMission reports whether a mission status ends a run.
-func isTerminalMission(s MissionStatus) bool {
-	return s == MissionCompleted || s == MissionFailed
+// startRun turns a pending mission into a running one, with the first run of
+// the projection. The entity keeps what creation recorded, such as the creator.
+func startRun(m *Mission, e MissionProjected) {
+	m.RunID = e.RunID
+	m.Goal = e.Goal
+	m.Status = MissionRunning
+	m.Budget = e.Budget
+	m.DecisionCursor = -1
+	m.DeciderSlot = e.DeciderSlot
+	m.BeliefModel = e.BeliefModel
+	// What creation recorded stays when the projection carries none.
+	if e.Name != "" {
+		m.Name = e.Name
+	}
+	if e.Description != "" {
+		m.Description = e.Description
+	}
+	if e.TargetID != "" {
+		m.TargetID = e.TargetID
+	}
+	if e.TenantID != "" {
+		m.TenantID = e.TenantID
+	}
 }
 
-// retireMissionRun removes the mission entity and the work items of a finished
-// run, so the next projection of the same mission ID starts from a clean state.
-// The Timeline keeps the history of the finished run.
-func retireMissionRun(w *World, missionID string, mission ecs.Entity) {
+// retireMissionRun removes the state of the last run of a mission: the mission
+// entity, its work items, its decisions and its VoI plan. The next projection
+// of the mission ID then starts from a clean state.
+func retireMissionRun(w *World, missionID string) {
 	var stale []ecs.Entity
-	q := ecs.NewFilter1[WorkItem](w.ecs).Query()
-	for q.Next() {
-		if q.Get().MissionID == missionID {
-			stale = append(stale, q.Entity())
+	mq := ecs.NewFilter1[Mission](w.ecs).Query()
+	for mq.Next() {
+		if mq.Get().ID == missionID {
+			stale = append(stale, mq.Entity())
+		}
+	}
+	wq := ecs.NewFilter1[WorkItem](w.ecs).Query()
+	for wq.Next() {
+		if wq.Get().MissionID == missionID {
+			stale = append(stale, wq.Entity())
+		}
+	}
+	dq := ecs.NewFilter1[DecisionRecord](w.ecs).Query()
+	for dq.Next() {
+		if dq.Get().MissionID == missionID {
+			stale = append(stale, dq.Entity())
+		}
+	}
+	vq := ecs.NewFilter1[VoIPlanState](w.ecs).Query()
+	for vq.Next() {
+		if vq.Get().MissionID == missionID {
+			stale = append(stale, vq.Entity())
 		}
 	}
 	for _, ent := range stale {
 		w.ecs.RemoveEntity(ent)
 	}
-	w.ecs.RemoveEntity(mission)
+}
+
+// staleRun reports whether ev belongs to a run that is not the current run of
+// its mission. Reduce drops such an event: a worker of run 1 can report after
+// run 2 has started, and its result must not change run 2 (gibson#1217). An
+// event with no RunID is not run-scoped and is never stale.
+func staleRun(w *World, ev Event) bool {
+	switch e := ev.(type) {
+	case WorkCompleted:
+		return workRunIs(w, e.ID, e.RunID) == runOther
+	case WorkDispatched:
+		switch workRunIs(w, e.ID, e.RunID) {
+		case runOther:
+			return true
+		case runUnknown:
+			return missionRunIs(w, e.MissionID, e.RunID) == runOther
+		}
+	case MissionDone:
+		return missionRunIs(w, e.ID, e.RunID) == runOther
+	case MissionPauseRequested:
+		return missionRunIs(w, e.ID, e.RunID) == runOther
+	case MissionResumed:
+		return missionRunIs(w, e.ID, e.RunID) == runOther
+	case DecisionCompleted:
+		return missionRunIs(w, e.MissionID, e.RunID) == runOther
+	case VoIPlanned:
+		return missionRunIs(w, e.MissionID, e.RunID) == runOther
+	}
+	return false
+}
+
+type runMatch int
+
+const (
+	runUnknown runMatch = iota // no run to compare: not run-scoped, or the entity is not there
+	runSame
+	runOther
+)
+
+func missionRunIs(w *World, missionID, runID string) runMatch {
+	if runID == "" {
+		return runUnknown
+	}
+	ent, ok := findMission(w, missionID)
+	if !ok {
+		return runUnknown
+	}
+	if w.missions.Get(ent).RunID == runID {
+		return runSame
+	}
+	return runOther
+}
+
+func workRunIs(w *World, workID, runID string) runMatch {
+	if runID == "" {
+		return runUnknown
+	}
+	ent, ok := findWork(w, workID)
+	if !ok {
+		return runUnknown
+	}
+	if w.work.Get(ent).RunID == runID {
+		return runSame
+	}
+	return runOther
 }

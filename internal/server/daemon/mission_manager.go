@@ -319,17 +319,74 @@ func (m *missionManager) getActive(tenant auth.TenantID, missionID string) (*act
 	return nil, false
 }
 
-// deleteActive removes a mission from the active map (C9 closure).
-func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string) {
+// deleteActive removes the run am from the active map (C9 closure). It removes
+// the entry only when the entry is am. The next run of the same mission may
+// already have replaced it, and that run must stay (gibson#1217).
+func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string, am *activeMission) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if sub, ok := m.activeMissions[tenant]; ok {
+	if sub, ok := m.activeMissions[tenant]; ok && sub[missionID] == am {
 		delete(sub, missionID)
 		if len(sub) == 0 {
 			delete(m.activeMissions, tenant)
 		}
 	}
 	m.completedCount++
+}
+
+// runIDOf is the ID of the run of an active mission. It is empty when the
+// mission has no run record.
+func runIDOf(am *activeMission) string {
+	if am == nil || am.missionRun == nil {
+		return ""
+	}
+	return am.missionRun.ID.String()
+}
+
+// runEnded reports whether the brain shows the run of am as ended. A run that
+// has ended still holds its active entry until its executor finishes the
+// cleanup, and the next run of the mission may take the entry over.
+func (m *missionManager) runEnded(tenant auth.TenantID, am *activeMission) bool {
+	eng, ok := api.TenantEngine(m.brainRegistry, tenant.String())
+	if !ok {
+		return false
+	}
+	runID := runIDOf(am)
+	for _, ms := range eng.Missions() {
+		if ms.ID == am.mission.ID.String() && ms.RunID == runID {
+			return ms.Status == brain.MissionCompleted || ms.Status == brain.MissionFailed
+		}
+	}
+	return false
+}
+
+// activeRunOf returns the run of the mission that is still going, if there is
+// one. A run that has ended does not count.
+func (m *missionManager) activeRunOf(tenant auth.TenantID, missionID string) (*activeMission, bool) {
+	am, ok := m.getActive(tenant, missionID)
+	if !ok || m.runEnded(tenant, am) {
+		return nil, false
+	}
+	return am, true
+}
+
+// claimActive registers am as the active run of the mission. It refuses when
+// another run of the same mission is still going, so two runs of one record
+// never share one entry in the active map or one brain binding (gibson#1217).
+func (m *missionManager) claimActive(tenant auth.TenantID, missionID string, am *activeMission) error {
+	cur, held := m.getActive(tenant, missionID)
+	ended := held && m.runEnded(tenant, cur)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	// The entry may be replaced only when it is the ended run seen above.
+	if now := m.activeMissions[tenant][missionID]; now != nil && (now != cur || !ended) {
+		return fmt.Errorf("mission %s is already running", missionID)
+	}
+	if m.activeMissions[tenant] == nil {
+		m.activeMissions[tenant] = make(map[string]*activeMission)
+	}
+	m.activeMissions[tenant][missionID] = am
+	return nil
 }
 
 // Run starts a mission by reference and returns an event channel for progress
@@ -546,10 +603,6 @@ func (m *missionManager) RunExisting(ctx context.Context, missionID string) (str
 		return "", fmt.Errorf("mission run: save bound definition of mission %s: %w", missionID, saveErr)
 	}
 
-	if _, running := m.getActive(callingTenant, missionRecord.ID.String()); running {
-		return "", fmt.Errorf("mission %s is already running", missionRecord.ID)
-	}
-
 	return m.startRun(ctx, callingTenant, missionRecord, def)
 }
 
@@ -613,6 +666,12 @@ func (m *missionManager) startRun(
 	missionRecord *mission.Mission,
 	def *missionpb.MissionDefinition,
 ) (string, error) {
+	// One run of a mission record at a time. Both ways to start a mission end
+	// here, so both refuse a second run of a record that still runs.
+	if _, running := m.activeRunOf(callingTenant, missionRecord.ID.String()); running {
+		return "", fmt.Errorf("mission %s is already running", missionRecord.ID)
+	}
+
 	// Create new MissionRun for this execution
 	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, callingTenant)
 	defer rStoreRelease()
@@ -658,7 +717,10 @@ func (m *missionManager) startRun(
 	}
 
 	// Register active mission under the calling tenant's partition (C9 closure).
-	m.setActive(callingTenant, missionRecord.ID.String(), active)
+	if claimErr := m.claimActive(callingTenant, missionRecord.ID.String(), active); claimErr != nil {
+		cancel()
+		return "", claimErr
+	}
 
 	// Launch mission executor in goroutine - pass mission ID (stable).
 	// Every lifecycle event the caller can observe flows brain → lifecycle
@@ -923,11 +985,14 @@ func (m *missionManager) releaseChildReservation(ctx context.Context, poolConn *
 // the single source of mission state, including runs that never got off the
 // ground). These failures occur before the mission is projected into the
 // engine, so MissionDone alone would be a silent no-op: applyMissionDone
-// ignores unknown IDs. The Started/Done pair encodes exactly what happened.
-func (m *missionManager) failBeforeStart(tenantID auth.TenantID, missionID, name, reason string) {
+// ignores unknown IDs. The projection of an empty run starts the run in the
+// World and retires the run before it, if the mission ran before. The
+// Started/Done pair then encodes exactly what happened (gibson#1217).
+func (m *missionManager) failBeforeStart(tenantID auth.TenantID, missionID, runID, name, reason string) {
 	eng := m.brainRegistry.For(tenantID.String())
-	eng.Submit(brain.MissionStarted{ID: missionID, Name: name})
-	eng.Submit(brain.MissionDone{ID: missionID, Outcome: brain.MissionFailed, Reason: reason})
+	eng.Submit(brain.MissionProjected{ID: missionID, RunID: runID, Name: name})
+	eng.Submit(brain.MissionStarted{ID: missionID, RunID: runID, Name: name})
+	eng.Submit(brain.MissionDone{ID: missionID, RunID: runID, Outcome: brain.MissionFailed, Reason: reason})
 }
 
 func (m *missionManager) executeMission(ctx context.Context, missionID string, def *missionpb.MissionDefinition) {
@@ -945,7 +1010,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Defer cleanup using the tenant from the active entry (C9 closure).
 	defer func() {
 		if active != nil {
-			m.deleteActive(active.tenantID, missionID)
+			m.deleteActive(active.tenantID, missionID, active)
 		}
 	}()
 
@@ -965,6 +1030,8 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		// full signal (gibson#1112 PR 3).
 		return
 	}
+
+	runID := runIDOf(active)
 
 	// Add mission name to span now that we have the active mission
 	if span != nil {
@@ -996,7 +1063,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	if m.pool == nil {
 		m.logger.Error("data-plane pool not available - mission execution requires Neo4j",
 			"mission_id", missionID)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), "data-plane pool is required for mission execution but not configured")
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), "data-plane pool is required for mission execution but not configured")
 		return
 	}
 	poolConn, poolErr := m.pool.For(ctx, active.tenantID)
@@ -1005,7 +1072,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 			"mission_id", missionID,
 			"tenant_id", active.tenantID,
 			"error", poolErr)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to acquire tenant Neo4j session: %v", poolErr))
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), fmt.Sprintf("failed to acquire tenant Neo4j session: %v", poolErr))
 		return
 	}
 	defer poolConn.Release()
@@ -1014,7 +1081,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	missionRun := active.missionRun
 	if missionRun == nil {
 		m.logger.Error("mission run not found in active mission", "mission_id", missionID)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), "internal error: mission run not initialized")
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), "internal error: mission run not initialized")
 		return
 	}
 
@@ -1043,7 +1110,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 			span.RecordError(projErr)
 			span.SetStatus(codes.Error, errorMsg)
 		}
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), errorMsg)
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), errorMsg)
 		return
 	}
 
@@ -1054,7 +1121,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	bootstrapResult, err := bootstrapper.Bootstrap(ctx, active.tenantID.String(), active.mission, def, missionRun, proj, fanOrigins, fanTargets)
 	if err != nil {
 		m.logger.Error("failed to bootstrap mission graph", "error", err, "mission_id", missionID)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), fmt.Sprintf("failed to initialize mission graph: %v", err))
 		return
 	}
 
@@ -1063,7 +1130,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Load target entity to get connection details
 	targetInfo, targetInfoErr := m.resolveRunTargetInfo(ctx, active.mission.TargetID)
 	if targetInfoErr != nil {
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), targetInfoErr.Error())
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), targetInfoErr.Error())
 		return
 	}
 
@@ -1071,7 +1138,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	agentHarness, err := newMissionHarness(m.harnessFactory, missionCtx, def, targetInfo)
 	if err != nil {
 		m.logger.Error("failed to create harness", "error", err)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to create harness: %v", err))
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), fmt.Sprintf("failed to create harness: %v", err))
 		return
 	}
 
@@ -1089,7 +1156,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	beliefVersion, releaseBelief, pinErr := m.beliefs.Pin(ctx, active.tenantID.String())
 	if pinErr != nil {
 		m.logger.Error("failed to pin the belief version", "error", pinErr, "mission_id", missionID)
-		m.failBeforeStart(active.tenantID, missionID, def.GetName(), fmt.Sprintf("failed to pin the belief version: %v", pinErr))
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), fmt.Sprintf("failed to pin the belief version: %v", pinErr))
 		return
 	}
 	defer releaseBelief()
@@ -1098,15 +1165,16 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 
 	// Register the per-mission binding so the brain executor can dispatch this
 	// mission's agents and run its Decider on this mission's harness.
-	m.brainExecutor.register(missionID, &missionBinding{
+	binding := &missionBinding{
 		ctx:        ctx,
 		tenant:     active.tenantID.String(),
 		eng:        eng,
 		harness:    agentHarness,
 		slot:       deciderSlot,
 		deciderPin: deciderSlotFrom(def.GetDeciderSlot()),
-	})
-	defer m.brainExecutor.unregister(missionID)
+	}
+	m.brainExecutor.register(missionID, binding)
+	defer m.brainExecutor.unregister(missionID, binding)
 
 	// Record the pinned belief version on the mission (ADR-0134): a replay
 	// reads this record, never the current version.
@@ -1124,6 +1192,9 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// registered for ("brain dispatch for unknown mission") and stranded the
 	// terminal-state wait. Unify on missionID so execution actually resolves.
 	proj.ID = missionID
+	// The run ID is what tells this run from the run before it, because the
+	// mission ID is the same for both (gibson#1217).
+	proj.RunID = runID
 	eng.Submit(proj)
 
 	// Emit MissionStarted into the brain Timeline so the lifecycle projector
@@ -1132,6 +1203,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// path has the full mission identity in the World (gibson#1118).
 	eng.Submit(brain.MissionStarted{
 		ID:          missionID,
+		RunID:       runID,
 		BeliefModel: beliefVersion,
 		Name:        active.mission.Name,
 		Description: active.mission.Description,
@@ -1143,7 +1215,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// Block until the brain reaches a terminal mission state (or ctx is cancelled).
 	// The projector derives status:completed/failed from brain.MissionDone —
 	// no emitEvent calls here (ADR-0163, gibson#1116).
-	finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID)
+	finalStatus, errorMsg = m.awaitBrainMission(ctx, eng, missionID, runID)
 	missionDuration = time.Since(active.startTime)
 
 	m.logger.Info("brain mission execution finished",
@@ -1206,7 +1278,8 @@ func (m *missionManager) Pause(ctx context.Context, missionID string, force bool
 		return fmt.Errorf("mission %s not found or not running", missionID)
 	}
 
-	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionPauseRequested{ID: missionID})
+	m.brainRegistry.For(active.tenantID.String()).Submit(
+		brain.MissionPauseRequested{ID: missionID, RunID: runIDOf(active)})
 	// Status is World-derived (ADR-0163/gibson#1118): MissionPauseRequested sets
 	// status=paused in the World via Reduce. No store write.
 
@@ -1237,7 +1310,7 @@ func (m *missionManager) Resume(ctx context.Context, missionID string) error {
 		return fmt.Errorf("cannot resume mission %s: status is %s (expected paused)", missionID, worldStatus)
 	}
 
-	eng.Submit(brain.MissionResumed{ID: missionID})
+	eng.Submit(brain.MissionResumed{ID: missionID, RunID: runIDOf(active)})
 	// Status is World-derived (ADR-0163/gibson#1118): MissionResumed sets
 	// status=running in the World via Reduce. No store write.
 
@@ -1264,6 +1337,7 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 	// then cancel the mission context (awaitBrainMission returns).
 	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionDone{
 		ID:      missionID,
+		RunID:   runIDOf(active),
 		Outcome: brain.MissionFailed,
 		Reason:  "stopped by user",
 	})
@@ -1418,10 +1492,18 @@ func missionGoal(m *mission.Mission) string {
 }
 
 // awaitBrainMission blocks until the brain reaches a terminal state for the given
-// mission, or ctx is cancelled. It polls the engine's mission snapshots (the
-// engine's own tick + drain loops drive execution). Returns the mapped mission
+// run of the mission, or ctx is cancelled. It polls the engine's mission snapshots
+// (the engine's own tick + drain loops drive execution). Returns the mapped mission
 // status and an error message (empty on success).
-func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engine, missionID string) (mission.MissionStatus, string) {
+//
+// It reads the run it submitted and no other. The mission ID is the same for
+// every run of a record, and the projection of this run may still wait in the
+// engine's queue when the first poll runs. Until the World holds this run,
+// the status in the World is the status of the run before, and the awaiter
+// must not return it (gibson#1217).
+func (m *missionManager) awaitBrainMission(
+	ctx context.Context, eng *brain.Engine, missionID, runID string,
+) (mission.MissionStatus, string) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -1430,7 +1512,7 @@ func (m *missionManager) awaitBrainMission(ctx context.Context, eng *brain.Engin
 			return mission.MissionStatusCancelled, "mission cancelled"
 		case <-ticker.C:
 			for _, ms := range eng.Missions() {
-				if ms.ID != missionID {
+				if ms.ID != missionID || ms.RunID != runID {
 					continue
 				}
 				switch ms.Status {

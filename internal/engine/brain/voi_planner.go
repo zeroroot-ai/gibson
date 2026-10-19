@@ -67,6 +67,7 @@ type VoIPlanState struct {
 type VoIPlanRequested struct {
 	MissionID string
 	Cursor    int
+	RunID     string // see DecisionRequested.RunID
 }
 
 // Kind identifies the voi.plan.requested brain event.
@@ -79,6 +80,7 @@ func (VoIPlanRequested) Kind() string { return "voi.plan.requested" }
 // event on replay (ADR-0126).
 type VoIPlanned struct {
 	MissionID  string
+	RunID      string // see DecisionRequested.RunID
 	Cursor     int
 	Candidates []VoICandidate
 }
@@ -173,7 +175,7 @@ func VoIGateSystem(w *World) []Event {
 		}
 		terminal := terminalWorkCount(work, m.ID)
 		if !ok || terminal != st.Cursor {
-			out = append(out, VoIPlanRequested{MissionID: m.ID, Cursor: terminal})
+			out = append(out, VoIPlanRequested{MissionID: m.ID, Cursor: terminal, RunID: m.RunID})
 		}
 	}
 	return out
@@ -202,7 +204,7 @@ type VoIWorker struct {
 	bamcp *BAMCPPlanner
 
 	mu      sync.Mutex
-	pending []string // mission ids awaiting a plan
+	pending []voiRequest // plan requests awaiting a worker
 }
 
 // NewVoIWorker builds a worker. substrate is typically a WorldBeliefSubstrate
@@ -240,7 +242,7 @@ func NewVoIWorker(
 func (vw *VoIWorker) Tap(ev Event) {
 	if r, ok := ev.(VoIPlanRequested); ok {
 		vw.mu.Lock()
-		vw.pending = append(vw.pending, r.MissionID)
+		vw.pending = append(vw.pending, voiRequest{missionID: r.MissionID, runID: r.RunID})
 		vw.mu.Unlock()
 	}
 }
@@ -253,13 +255,21 @@ func (vw *VoIWorker) Drain(ctx context.Context) int {
 	vw.pending = nil
 	vw.mu.Unlock()
 
-	for _, missionID := range ids {
-		vw.plan(ctx, missionID)
+	for _, req := range ids {
+		vw.plan(ctx, req)
 	}
 	return len(ids)
 }
 
-func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
+// voiRequest is one buffered VoIPlanRequested. The worker answers it with an
+// event of the same run (gibson#1217).
+type voiRequest struct {
+	missionID string
+	runID     string
+}
+
+func (vw *VoIWorker) plan(ctx context.Context, req voiRequest) {
+	missionID := req.missionID
 	packs := vw.eng.DomainPacks()
 	registry := tenantBeliefRegistry(vw.registry, packs)
 	in := vw.buildInput(missionID, packs, registry)
@@ -274,7 +284,7 @@ func (vw *VoIWorker) plan(ctx context.Context, missionID string) {
 		// LLM call.
 		candidates = nil
 	}
-	vw.eng.Submit(VoIPlanned{MissionID: missionID, Candidates: candidates})
+	vw.eng.Submit(VoIPlanned{MissionID: missionID, RunID: req.runID, Candidates: candidates})
 }
 
 // voiPlanCursor returns missionID's current in-flight evidence cursor from

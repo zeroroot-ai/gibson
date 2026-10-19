@@ -419,7 +419,7 @@ func TestFailBeforeStart_ProjectsStartedThenFailed(t *testing.T) {
 	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
 	acme := auth.MustNewTenantID("acme")
 
-	mm.failBeforeStart(acme, "m-preflight", "recon", "pool not configured")
+	mm.failBeforeStart(acme, "m-preflight", "run-1", "recon", "pool not configured")
 
 	waitWorldStatus(t, mm.brainRegistry.For(acme.String()), "m-preflight", string(brain.MissionFailed))
 }
@@ -567,7 +567,8 @@ func TestResume_Paused(t *testing.T) {
 	// A mission can only be paused once it exists in the World: executeMission
 	// submits MissionStarted before any pause is possible. Mirror that here.
 	eng := mm.brainRegistry.For(tenant.String())
-	eng.Submit(brain.MissionStarted{ID: "m-run", Name: "recon"})
+	active, _ := mm.getActive(tenant, "m-run")
+	eng.Submit(brain.MissionStarted{ID: "m-run", RunID: runIDOf(active), Name: "recon"})
 	waitWorldStatus(t, eng, "m-run", string(brain.MissionRunning))
 
 	tctx := auth.WithTenant(context.Background(), tenant)

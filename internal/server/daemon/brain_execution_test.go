@@ -95,7 +95,7 @@ func TestBindingRegistry_RegisterGetUnregister(t *testing.T) {
 	if !ok || got != bind {
 		t.Fatal("register/get failed")
 	}
-	b.unregister("m1")
+	b.unregister("m1", bind)
 	if _, ok := b.get("m1"); ok {
 		t.Fatal("expected no binding after unregister")
 	}
@@ -116,7 +116,8 @@ func TestIsMissionLive_TracksTheBindingWindowExactly(t *testing.T) {
 		t.Fatal("an unknown mission id must not be live")
 	}
 
-	b.register("m1", &missionBinding{slot: "primary"})
+	bind := &missionBinding{slot: "primary"}
+	b.register("m1", bind)
 	if !b.IsMissionLive("m1") {
 		t.Fatal("a registered mission must be live")
 	}
@@ -124,7 +125,7 @@ func TestIsMissionLive_TracksTheBindingWindowExactly(t *testing.T) {
 		t.Fatal("liveness must be per-mission, not global")
 	}
 
-	b.unregister("m1")
+	b.unregister("m1", bind)
 	if b.IsMissionLive("m1") {
 		t.Fatal("a returned mission must not stay live — renewal would outlive its run")
 	}

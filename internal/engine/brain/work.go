@@ -43,6 +43,7 @@ const (
 type WorkItem struct {
 	ID         string
 	MissionID  string   // owning mission (empty for free-standing work)
+	RunID      string   // the run of the mission that owns the item (gibson#1217)
 	Kind       string   // "tool" | "agent" | "plugin"
 	Target     string   // the capability being executed
 	Input      string   // opaque dispatch input (e.g. the CUE node config), carried for dispatch
@@ -114,9 +115,14 @@ type WorkItem struct {
 type WorkDispatched struct {
 	ID        string
 	MissionID string
-	ItemKind  string // tool | agent | plugin
-	Target    string
-	Input     string
+	// RunID names the run this event belongs to. The daemon mints it when a run
+	// starts. The reducer drops an event whose RunID is not the current run of
+	// the mission, so a late event of run 1 cannot change run 2 (gibson#1217).
+	// Empty means the event is not run-scoped.
+	RunID    string
+	ItemKind string // tool | agent | plugin
+	Target   string
+	Input    string
 	// Timeout carries the node's execution bound to the dispatch effect-handler
 	// so it does not have to read the World back inside the locked tick — the
 	// same reason MissionID and Input are carried here (gibson#1602).
@@ -159,7 +165,12 @@ func (WorkRetried) Kind() string { return "work.retried" }
 // WorkCompleted records that a previously-dispatched unit of work finished —
 // whenever that is. Err non-empty means failure.
 type WorkCompleted struct {
-	ID     string
+	ID string
+	// RunID names the run this event belongs to. The daemon mints it when a run
+	// starts. The reducer drops an event whose RunID is not the current run of
+	// the mission, so a late event of run 1 cannot change run 2 (gibson#1217).
+	// Empty means the event is not run-scoped.
+	RunID  string
 	Result string
 	Err    string
 	// Snapshot is the id of the sandbox snapshot that the node left in the
@@ -223,6 +234,7 @@ func applyWorkDispatched(w *World, e WorkDispatched) {
 	w.work.NewEntity(&WorkItem{
 		ID:           e.ID,
 		MissionID:    e.MissionID,
+		RunID:        e.RunID,
 		Kind:         e.ItemKind,
 		Target:       e.Target,
 		Input:        e.Input,
@@ -284,6 +296,7 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 type WorkSnapshot struct {
 	ID         string
 	MissionID  string
+	RunID      string
 	Kind       string
 	Target     string
 	Input      string
@@ -334,6 +347,7 @@ func (w *World) WorkSnapshot() []WorkSnapshot {
 		out = append(out, WorkSnapshot{
 			ID:                     wi.ID,
 			MissionID:              wi.MissionID,
+			RunID:                  wi.RunID,
 			Kind:                   wi.Kind,
 			Target:                 wi.Target,
 			Input:                  wi.Input,

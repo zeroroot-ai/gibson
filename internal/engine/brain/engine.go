@@ -264,12 +264,20 @@ func (e *Engine) apply(ev Event) bool {
 		}
 	}
 	e.Timeline.Append(ev)
+	// A stale event is in the Timeline, and a replay drops it the same way.
+	// The subscribers do not see it: it is not an event of the current run,
+	// and the lifecycle projector must not tell a client that run 1 ended
+	// while run 2 runs (gibson#1217).
+	stale := staleRun(e.World, ev)
 	Reduce(e.World, ev)
 	// Snapshot AFTER folding ev so the snapshot's World reflects ev (whose seq is
 	// lastAppendedSeq / AtSeq). Snapshotting before the fold would exclude ev from
 	// both the snapshot and the exclusive-after-AtSeq tail — losing it on hydrate.
 	if snapshotDue {
 		e.maybeSnapshot()
+	}
+	if stale {
+		return true
 	}
 	for _, fn := range e.subscribers {
 		fn(ev)

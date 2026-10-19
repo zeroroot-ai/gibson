@@ -189,6 +189,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		}
 		startEv := MissionStarted{
 			ID:          m.ID,
+			RunID:       m.RunID,
 			Goal:        m.Goal,
 			BeliefModel: m.BeliefModel,
 			Name:        m.Name,
@@ -213,6 +214,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		dsp := WorkDispatched{
 			ID:           wi.ID,
 			MissionID:    wi.MissionID,
+			RunID:        wi.RunID,
 			ItemKind:     wi.Kind,
 			Target:       wi.Target,
 			Input:        wi.Input,

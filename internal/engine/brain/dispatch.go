@@ -23,9 +23,13 @@ import (
 type DispatchRequest struct {
 	WorkID    string
 	MissionID string
-	Kind      string // tool | agent | plugin
-	Target    string // capability name
-	Input     string // opaque dispatch input (CUE node config)
+	// RunID is the run that owns the work. The Dispatcher puts it on the
+	// WorkCompleted it reports, so a result of a finished run is dropped
+	// (gibson#1217).
+	RunID  string
+	Kind   string // tool | agent | plugin
+	Target string // capability name
+	Input  string // opaque dispatch input (CUE node config)
 	// Timeout is the node's declared execution bound (MissionNode.timeout).
 	// Zero means the node declared none; the Dispatcher decides what that means
 	// for its kind — a live agent runs until it returns a result or its worker
@@ -85,6 +89,7 @@ func (h *DispatchHandler) Tap(ev Event) {
 	h.pending = append(h.pending, DispatchRequest{
 		WorkID:       d.ID,
 		MissionID:    d.MissionID,
+		RunID:        d.RunID,
 		Kind:         d.ItemKind,
 		Target:       d.Target,
 		Input:        d.Input,

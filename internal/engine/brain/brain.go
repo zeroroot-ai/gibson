@@ -408,6 +408,9 @@ func (HostObserved) Kind() string { return "host.observed" }
 // Reduce folds one event into the World. It is the ONLY thing that mutates the
 // World, and must be driven by a single goroutine (the engine tick).
 func Reduce(w *World, ev Event) {
+	if staleRun(w, ev) {
+		return
+	}
 	switch e := ev.(type) {
 	case HostObserved:
 		applyHostObserved(w, e)

@@ -45,7 +45,11 @@ type Budget struct {
 // with an empty Goal is a **no-goal** mission: it runs its scripted graph to
 // quiescence and completes mechanically, never invoking the Decider.
 type Mission struct {
-	ID     string
+	ID string
+	// RunID names the current run of the mission. A mission ID is the stable
+	// record ID, so it stays the same over every run. The run changes each
+	// time the mission is projected again (gibson#1217).
+	RunID  string
 	Goal   string
 	Status MissionStatus
 	Reason string // why it completed
@@ -96,6 +100,10 @@ type Mission struct {
 type MissionStarted struct {
 	ID   string
 	Goal string
+	// RunID is the run this start belongs to. It only matters when the start
+	// creates the mission (a snapshot restore): a start of an existing mission
+	// never changes the run (gibson#1217).
+	RunID string
 	// BeliefModel pins the belief-model version (ADR-0134); empty → unpinned.
 	BeliefModel string
 
@@ -152,6 +160,11 @@ type MissionDone struct {
 	ID      string
 	Reason  string
 	Outcome MissionStatus
+	// RunID names the run this event belongs to. The daemon mints it when a run
+	// starts. The reducer drops an event whose RunID is not the current run of
+	// the mission, so a late event of run 1 cannot change run 2 (gibson#1217).
+	// Empty means the event is not run-scoped.
+	RunID string
 }
 
 func (MissionDone) Kind() string { return "mission.done" }
@@ -198,6 +211,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
+		RunID:          e.RunID,
 		Goal:           e.Goal,
 		Status:         MissionRunning,
 		DecisionCursor: -1,
@@ -212,12 +226,18 @@ func applyMissionStarted(w *World, e MissionStarted) {
 
 // MissionPauseRequested halts a running mission (operator pause). The executor
 // Systems skip a paused mission until MissionResumed.
-type MissionPauseRequested struct{ ID string }
+type MissionPauseRequested struct {
+	ID    string
+	RunID string // the run to pause; see MissionDone.RunID
+}
 
 func (MissionPauseRequested) Kind() string { return "mission.pause" }
 
 // MissionResumed returns a paused mission to running.
-type MissionResumed struct{ ID string }
+type MissionResumed struct {
+	ID    string
+	RunID string // the run to resume; see MissionDone.RunID
+}
 
 func (MissionResumed) Kind() string { return "mission.resume" }
 
@@ -320,6 +340,7 @@ func (o Orchestrator) System() System {
 // MissionSnapshot is a stable, comparable view of a Mission.
 type MissionSnapshot struct {
 	ID               string
+	RunID            string
 	Goal             string
 	Status           MissionStatus
 	Reason           string
@@ -395,6 +416,7 @@ func (w *World) MissionSnapshot() []MissionSnapshot {
 		}
 		out = append(out, MissionSnapshot{
 			ID:               m.ID,
+			RunID:            m.RunID,
 			Goal:             m.Goal,
 			Status:           m.Status,
 			Reason:           m.Reason,
