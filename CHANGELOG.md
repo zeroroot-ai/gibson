@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.161.3](https://github.com/zeroroot-ai/gibson/compare/v0.161.2...v0.161.3) (2026-10-19)
+
+
+### Bug Fixes
+
+* **brain:** start a new run when a finished mission is projected again ([#1226](https://github.com/zeroroot-ai/gibson/issues/1226)) ([8f43d25](https://github.com/zeroroot-ai/gibson/commit/8f43d25436ee958af8437a926f08e4dd9eb6e13d))
+* **component:** construct and wire the mission context resolver ([#1214](https://github.com/zeroroot-ai/gibson/issues/1214)) ([f802eb0](https://github.com/zeroroot-ai/gibson/commit/f802eb09742ff7431553ea0d4dcca9750ebe39d1))
+* **daemon:** run the decider on the decider_slot of the mission ([#1215](https://github.com/zeroroot-ai/gibson/issues/1215)) ([4bd2cde](https://github.com/zeroroot-ai/gibson/commit/4bd2cdeb14571c8383fa4e27793effc68467b662))
+* **harness:** refuse a callback registration with no mission run ([#1231](https://github.com/zeroroot-ai/gibson/issues/1231)) ([76108b8](https://github.com/zeroroot-ai/gibson/commit/76108b82bf01ccc5162b57a54963261cf9c936d9))
+* **rework:** whoami asks FGA about a SPIFFE caller in its tuple form ([#1213](https://github.com/zeroroot-ai/gibson/issues/1213)) ([60369df](https://github.com/zeroroot-ai/gibson/commit/60369df931056c75c4ab9b3d8ddd76d020cbf485))
+
 ## [0.161.2](https://github.com/zeroroot-ai/gibson/compare/v0.161.1...v0.161.2) (2026-10-18)
 
 
