@@ -250,3 +250,14 @@ func TestReleaseActive_DoesNotCountACompletedMission(t *testing.T) {
 		t.Errorf("completedCount = %d after a finished run, want 1", mm.completedCount)
 	}
 }
+
+// setActive puts a run in the active map without the claim check. Tests use it
+// to seed an active run. The daemon claims the slot with claimActive.
+func (m *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.activeMissions[tenant] == nil {
+		m.activeMissions[tenant] = make(map[string]*activeMission)
+	}
+	m.activeMissions[tenant][missionID] = am
+}

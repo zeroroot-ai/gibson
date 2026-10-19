@@ -418,6 +418,7 @@ func Reduce(w *World, ev Event) {
 		return
 	case runDetached:
 		ev = detachEvidence(ev)
+	case runCurrent:
 	}
 	switch e := ev.(type) {
 	case HostObserved:

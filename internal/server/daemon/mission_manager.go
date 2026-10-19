@@ -294,16 +294,6 @@ func newMissionContext(ctx context.Context, tenant auth.TenantID) (context.Conte
 	return context.WithCancel(auth.ContextWithTenant(context.WithoutCancel(ctx), tenant))
 }
 
-// setActive registers a mission in the tenant-partitioned active map (C9 closure).
-func (m *missionManager) setActive(tenant auth.TenantID, missionID string, am *activeMission) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.activeMissions[tenant] == nil {
-		m.activeMissions[tenant] = make(map[string]*activeMission)
-	}
-	m.activeMissions[tenant][missionID] = am
-}
-
 // getActive retrieves an active mission scoped to the given tenant (C9 closure).
 // Returns nil, false if not found.
 func (m *missionManager) getActive(tenant auth.TenantID, missionID string) (*activeMission, bool) {
@@ -1538,7 +1528,7 @@ func missionGoal(m *mission.Mission) string {
 // must not return it (gibson#1217).
 func (m *missionManager) awaitBrainMission(
 	ctx context.Context, eng *brain.Engine, missionID, runID string,
-) (mission.MissionStatus, string) {
+) (status mission.MissionStatus, errMsg string) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {

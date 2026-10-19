@@ -287,6 +287,7 @@ func (e *Engine) apply(ev Event) bool {
 	case runDetached:
 		e.noteRunMismatch(chk, "detached")
 		ev = detachEvidence(ev)
+	case runCurrent:
 	}
 	for _, fn := range e.subscribers {
 		fn(ev)
