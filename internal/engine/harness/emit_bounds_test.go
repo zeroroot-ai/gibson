@@ -56,9 +56,9 @@ func observeRequestOfSize(t *testing.T, n int) *harnesspb.ObserveRequest {
 // need a registry; the rejection cases deliberately do not, and are asserted
 // against a registry-less service to prove the caps hold whether or not the
 // brain is wired.
-func boundsService(sink ObservationSink) *HarnessCallbackService {
+func boundsService(t *testing.T, sink ObservationSink) *HarnessCallbackService {
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("m1", "probe", &observeMockHarness{
+	mustRegister(t, registry, "m1", "probe", &observeMockHarness{
 		missionID: types.NewID(),
 		tenantID:  "tenant-a",
 		targetID:  types.NewID(),
@@ -73,7 +73,7 @@ func boundsService(sink ObservationSink) *HarnessCallbackService {
 func TestObserveRejectsOverSizePayload(t *testing.T) {
 	t.Run("at the limit reaches the sink", func(t *testing.T) {
 		reached := 0
-		svc := boundsService(func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
+		svc := boundsService(t, func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
 			reached++
 			return nil
 		})
@@ -93,7 +93,7 @@ func TestObserveRejectsOverSizePayload(t *testing.T) {
 
 	t.Run("one byte over is rejected and writes nothing", func(t *testing.T) {
 		reached := 0
-		svc := boundsService(func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
+		svc := boundsService(t, func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
 			reached++
 			return nil
 		})
@@ -133,7 +133,7 @@ func TestObserveRejectsOverSizePayload(t *testing.T) {
 // the RPC boundary.
 func TestObserveRejectsOverCountPerTask(t *testing.T) {
 	reached := 0
-	svc := boundsService(func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
+	svc := boundsService(t, func(context.Context, ObservationAttribution, *harnesspb.ObserveRequest) error {
 		reached++
 		return nil
 	})

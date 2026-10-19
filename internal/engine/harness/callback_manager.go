@@ -339,7 +339,15 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 		)
 		return ""
 	}
-	key := m.registry.Register(missionID, agentName, h)
+	key, regErr := m.registry.Register(missionID, agentName, h)
+	if regErr != nil {
+		m.logger.Error("harness not registered",
+			"mission_id", missionID,
+			"agent_name", agentName,
+			"error", regErr,
+		)
+		return ""
+	}
 	m.logger.Debug("registered harness for mission agent",
 		"mission_id", missionID,
 		"agent_name", agentName,

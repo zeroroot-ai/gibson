@@ -185,7 +185,7 @@ func forkOriginService(t *testing.T, mgr *childNodeOperator, parent *forkingPare
 		t.Fatal(err)
 	}
 	parent.mission = MissionContext{ID: parentID, TenantID: originTenant, MissionRunID: "run-7"}
-	svc.registry.Register(originParentMissionID, "zerocool", parent)
+	mustRegister(t, svc.registry, originParentMissionID, "zerocool", parent)
 	l := newForkLedger(t)
 	svc.forkLedger = l
 	svc.sandboxIdentity = testIdentity()

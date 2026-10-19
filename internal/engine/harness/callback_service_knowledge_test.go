@@ -81,7 +81,7 @@ func knowledgeService(t *testing.T, q *stubQuerier) (*HarnessCallbackService, *h
 	// The factory always wires a tracer; only a hand-built mock lacks one.
 	h.tracer = noop.NewTracerProvider().Tracer("test")
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(mid.String(), "recon-agent", h)
+	mustRegister(t, registry, mid.String(), "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
 }
@@ -420,7 +420,7 @@ func findingHandlerService(t *testing.T, cp MissionContextProvider, fs FindingSt
 	h.contextProvider = cp
 	h.findingStore = fs
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(mid.String(), "recon-agent", &runHistoryHarness{observeMockHarness: h, runs: runs})
+	mustRegister(t, registry, mid.String(), "recon-agent", &runHistoryHarness{observeMockHarness: h, runs: runs})
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
 }

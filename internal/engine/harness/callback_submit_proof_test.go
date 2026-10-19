@@ -42,7 +42,7 @@ type submitProofMockHarness struct {
 }
 
 func (m *submitProofMockHarness) Mission() MissionContext {
-	return MissionContext{ID: m.missionID, TenantID: m.tenantID}
+	return MissionContext{ID: m.missionID, TenantID: m.tenantID, MissionRunID: "run-1"}
 }
 
 func (m *submitProofMockHarness) Workspace() workspace.Workspace { return nil }
@@ -152,7 +152,7 @@ func newSubmitProofService(
 ) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(h.missionID.String(), agentName, h)
+	mustRegister(t, registry, h.missionID.String(), agentName, h)
 	var opts []CallbackServiceOption
 	if substrate != nil {
 		opts = append(opts, WithBeliefSubstrate(substrate))

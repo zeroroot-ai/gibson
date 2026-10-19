@@ -29,7 +29,7 @@ import (
 //	registry := NewCallbackHarnessRegistry()
 //
 //	// Register before agent execution
-//	key := registry.Register(missionID, agentName, harness)
+//	key, err := registry.Register(missionID, agentName, harness)
 //	defer registry.Unregister(key)
 //
 //	// External agent makes callback
@@ -67,7 +67,7 @@ type CallbackHarnessRegistry struct {
 // Example:
 //
 //	registry := NewCallbackHarnessRegistry()
-//	key := registry.Register("mission-123", "recon-agent", harness)
+//	key, err := registry.Register("mission-123", "recon-agent", harness)
 func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 	return &CallbackHarnessRegistry{
 		harnesses: make(map[string]AgentHarness),
@@ -91,16 +91,20 @@ func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 //   - string: The registration key. It is unique for each registration.
 //
 // This method is thread-safe and can be called concurrently from multiple
-// goroutines. A second registration of the same mission and agent becomes the
+// goroutines. A harness with no mission run is refused with ErrHarnessWithoutRun.
+// A second registration of the same mission and agent becomes the
 // current one for Lookup. Unregister removes only the registration of its key,
 // so the end of an agent of run 1 leaves the agent of run 2 in place.
 //
 // Example:
 //
-//	key := registry.Register("mission-123", "recon-agent", harness)
+//	key, err := registry.Register("mission-123", "recon-agent", harness)
 //	defer registry.Unregister(key)
 //	// Execute external agent...
-func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness AgentHarness) string {
+func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness AgentHarness) (string, error) {
+	if harness.Mission().MissionRunID == "" {
+		return "", fmt.Errorf("%w: mission %s, agent %s", ErrHarnessWithoutRun, missionID, agentName)
+	}
 	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.Lock()
@@ -111,7 +115,7 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 	r.harnesses[key] = harness
 	r.byAgent[agent] = append(r.byAgent[agent], key)
 	r.agentOf[key] = agent
-	return key
+	return key, nil
 }
 
 // Lookup retrieves a harness by mission ID, agent name and run ID.
@@ -154,11 +158,9 @@ func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (Ag
 
 	if runID != "" {
 		// The callback names its run. Pick the newest registration of that
-		// run, even when a registration of a newer run exists. A harness with
-		// no run is not scoped to a run and serves any callback.
+		// run, even when a registration of a newer run exists.
 		for i := len(keys) - 1; i >= 0; i-- {
-			h := r.harnesses[keys[i]]
-			if run := h.Mission().MissionRunID; run == "" || run == runID {
+			if h := r.harnesses[keys[i]]; h.Mission().MissionRunID == runID {
 				return h, nil
 			}
 		}
@@ -170,9 +172,7 @@ func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (Ag
 	// would be the wrong harness for a late callback of an older run.
 	runs := map[string]struct{}{}
 	for _, k := range keys {
-		if run := r.harnesses[k].Mission().MissionRunID; run != "" {
-			runs[run] = struct{}{}
-		}
+		runs[r.harnesses[k].Mission().MissionRunID] = struct{}{}
 	}
 	if len(runs) > 1 {
 		return nil, fmt.Errorf("%w: a callback with no run matches %d runs of mission %s, agent %s",
@@ -199,7 +199,7 @@ func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (Ag
 //
 // Example:
 //
-//	key := registry.Register(missionID, agentName, harness)
+//	key, err := registry.Register(missionID, agentName, harness)
 //	defer registry.Unregister(key)
 //	// Agent execution happens here...
 func (r *CallbackHarnessRegistry) Unregister(key string) {
@@ -289,3 +289,8 @@ func makeRegistryKey(missionID, agentName string) string {
 // mission: it names a run that has no registration, or it names no run while
 // the registrations span more than one.
 var ErrCallbackRunMismatch = errors.New("callback does not match one run of the mission")
+
+// ErrHarnessWithoutRun reports a registration of a harness that has no mission
+// run. Every registration belongs to one run, so a lookup can tell the runs of
+// a mission apart (gibson#1217).
+var ErrHarnessWithoutRun = errors.New("harness has no mission run")

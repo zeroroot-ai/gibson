@@ -113,7 +113,7 @@ func newStreamCaptureSvc(t *testing.T, captured *[]capturedTool, toolErr error) 
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(slog.Default(), registry,
 		WithToolCallSink(func(_ context.Context, tn string, call ToolCallRecord) {
 			*captured = append(*captured, capturedTool{tenant: tn, call: call})

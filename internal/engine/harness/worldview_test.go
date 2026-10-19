@@ -29,7 +29,7 @@ func worldViewRequest(missionID string, focus ...string) *harnesspb.WorldViewReq
 func newWorldViewService(t *testing.T, h *observeMockHarness, source WorldViewSource) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(h.missionID.String(), "recon-agent", h)
+	mustRegister(t, registry, h.missionID.String(), "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 	// Production wires the source through CallbackManager.SetWorldViewSource;
 	// tests set the field directly (same package) to avoid a test-only option.
@@ -213,7 +213,7 @@ func TestSetWorldViewSource(t *testing.T) {
 
 	mid := types.NewID()
 	h := &observeMockHarness{missionID: mid, tenantID: "acme", targetID: types.NewID()}
-	mgr.server.service.registry.Register(mid.String(), "recon-agent", h)
+	mustRegister(t, mgr.server.service.registry, mid.String(), "recon-agent", h)
 
 	resp, err := mgr.server.service.WorldView(acmeCtx(), worldViewRequest(mid.String()))
 	require.NoError(t, err)

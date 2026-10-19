@@ -51,7 +51,7 @@ type tenantAwareMockHarness struct {
 }
 
 func (m *tenantAwareMockHarness) Mission() MissionContext {
-	return MissionContext{TenantID: m.tenantID}
+	return MissionContext{TenantID: m.tenantID, MissionRunID: "run-1"}
 }
 
 func (m *tenantAwareMockHarness) Workspace() workspace.Workspace { return nil }
@@ -80,7 +80,7 @@ func TestGetHarness_WithExplicitMissionId(t *testing.T) {
 
 	// Create callback harness registry and register the harness
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("mission-123", "test-agent", mockHarn)
+	mustRegister(t, registry, "mission-123", "test-agent", mockHarn)
 
 	// Create service with registry
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
@@ -137,7 +137,7 @@ func TestGetHarness_LegacyTaskIdWithColon_NoLongerSupported(t *testing.T) {
 
 	// Create callback harness registry and register the harness
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("mission-abc", "test-agent", mockHarn)
+	mustRegister(t, registry, "mission-abc", "test-agent", mockHarn)
 
 	// Create service with registry
 	service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
@@ -559,7 +559,7 @@ func (m *mockHarnessWithResolver) GetPreviousRunFindings(ctx context.Context, fi
 
 func (m *mockHarnessWithResolver) Mission() MissionContext {
 	// Return a tenant so getHarness tenant-isolation check passes.
-	return MissionContext{TenantID: "test-tenant"}
+	return MissionContext{TenantID: "test-tenant", MissionRunID: "run-1"}
 }
 
 func (m *mockHarnessWithResolver) Workspace() workspace.Workspace {
@@ -681,7 +681,7 @@ func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {
 	// Register mock harness
 	missionID := "test-mission-123"
 	agentName := "test-agent"
-	registry.Register(missionID, agentName, mockHarness)
+	mustRegister(t, registry, missionID, agentName, mockHarness)
 
 	// Create request with JSON input
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)
@@ -749,7 +749,7 @@ func TestCallToolProto_InputJSONToTypedMessage(t *testing.T) {
 
 	missionID := "test-mission-456"
 	agentName := "test-agent"
-	registry.Register(missionID, agentName, mockHarness)
+	mustRegister(t, registry, missionID, agentName, mockHarness)
 
 	// Test various JSON input scenarios
 	testCases := []struct {
@@ -877,7 +877,7 @@ func TestCallToolProto_OutputTypedMessageToJSON(t *testing.T) {
 
 			missionID := "test-mission-789"
 			agentName := "test-agent"
-			registry.Register(missionID, agentName, mockHarness)
+			mustRegister(t, registry, missionID, agentName, mockHarness)
 
 			req := &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
@@ -956,7 +956,7 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 
 	missionID := "test-mission-discovery"
 	agentName := "test-agent"
-	registry.Register(missionID, agentName, mockHarness)
+	mustRegister(t, registry, missionID, agentName, mockHarness)
 
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
@@ -1099,7 +1099,7 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			service := NewHarnessCallbackServiceWithRegistry(logger, registry, testEventBus())
 
 			harness := tc.setupHarness()
-			registry.Register(tc.request.Context.MissionId, tc.request.Context.AgentName, harness)
+			mustRegister(t, registry, tc.request.Context.MissionId, tc.request.Context.AgentName, harness)
 
 			ctx := testCtxWithTenant()
 			resp, err := service.CallToolProto(ctx, tc.request)
