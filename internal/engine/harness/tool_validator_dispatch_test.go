@@ -33,10 +33,13 @@ import (
 // `fill`, and returns the response. toolName is what the catalog is asked
 // about, so it decides whether the response is expected to carry a
 // DiscoveryResult.
-func dispatchToolCall(t *testing.T, toolName, pkg, fds string, fill func(proto.Message)) *harnesspb.CallToolProtoResponse {
+func dispatchToolCall(
+	t *testing.T, run, toolName, pkg, fds string, fill func(proto.Message),
+) *harnesspb.CallToolProtoResponse {
 	t.Helper()
 
 	mockHarness := &mockHarnessWithResolver{
+		missionRunID: run,
 		toolDescriptors: map[string]*ToolDescriptor{
 			toolName: {
 				Name:            toolName,
@@ -61,7 +64,7 @@ func dispatchToolCall(t *testing.T, toolName, pkg, fds string, fill func(proto.M
 			TaskId:       "task-625",
 			AgentName:    agentName,
 			MissionId:    missionID,
-			MissionRunId: "run-1",
+			MissionRunId: run,
 		},
 		Name:       toolName,
 		InputType:  pkg + ".ToolInput",
@@ -87,19 +90,20 @@ func setResult(response proto.Message) {
 func TestCallToolProto_ADiscoveryToolWithNoDiscoveryResultIsCounted(t *testing.T) {
 	// A real catalog tool, so componentcatalog says it emits a DiscoveryResult.
 	const tool = "nmap"
+	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
 	require.True(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool),
 		"this test needs a tool the catalog calls a discovery tool")
 
-	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-1"))
-	beforeCompliance := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", "run-1"))
+	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run))
+	beforeCompliance := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", run))
 
-	dispatchToolCall(t, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
+	dispatchToolCall(t, run, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
 	assert.InDelta(t, before+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-1")), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run)), 0.5,
 		"the skip metric did not move; the validator is not on the dispatch path")
 	assert.InDelta(t, beforeCompliance+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", "run-1")), 0.5,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", run)), 0.5,
 		"the compliance metric did not record a non-compliant dispatch")
 }
 
@@ -108,11 +112,12 @@ func TestCallToolProto_ADiscoveryToolWithNoDiscoveryResultIsCounted(t *testing.T
 // non-compliant.
 func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.T) {
 	const tool = "httpx"
+	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
 	require.True(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool))
 
-	before := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", "run-1"))
+	before := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", run))
 
-	dispatchToolCall(t, tool, "testdisc", discoveryShapedFDS(t), func(response proto.Message) {
+	dispatchToolCall(t, run, tool, "testdisc", discoveryShapedFDS(t), func(response proto.Message) {
 		setResult(response)
 		refl := response.ProtoReflect()
 		field := refl.Descriptor().Fields().ByNumber(100)
@@ -131,7 +136,7 @@ func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.
 	})
 
 	assert.InDelta(t, before+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", "run-1")), 0.5,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", run)), 0.5,
 		"a compliant dispatch was not recorded")
 }
 
@@ -140,20 +145,21 @@ func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.
 // non-discovery tool call would look like a broken parser.
 func TestCallToolProto_ANonDiscoveryToolIsNotCountedAsMissing(t *testing.T) {
 	const tool = "not-in-the-catalog"
+	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
 	require.False(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool))
 
-	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-1"))
-	beforeNotOne := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", "run-1"))
+	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run))
+	beforeNotOne := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", run))
 
-	dispatchToolCall(t, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
+	dispatchToolCall(t, run, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
 	assert.InDelta(t, before,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", "run-1")), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run)), 0.5,
 		"a non-discovery tool was counted as missing a DiscoveryResult")
 	// It is still RECORDED, under its own reason, so the metric distinguishes
 	// "this tool does not produce graph nodes" from "it should have and did not".
 	assert.InDelta(t, beforeNotOne+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", "run-1")), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", run)), 0.5,
 		"the dispatch was not recorded at all")
 }
 

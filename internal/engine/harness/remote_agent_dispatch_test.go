@@ -327,9 +327,9 @@ type registrarFake struct {
 	unregistered []string
 }
 
-func (r *registrarFake) RegisterHarnessForMission(missionID, agentName string, _ any) string {
+func (r *registrarFake) RegisterHarnessForMission(missionID, agentName string, _ any) (string, error) {
 	r.registered = append(r.registered, missionID+"|"+agentName)
-	return "key-" + agentName
+	return "key-" + agentName, nil
 }
 func (r *registrarFake) UnregisterHarness(key string) { r.unregistered = append(r.unregistered, key) }
 
@@ -398,5 +398,34 @@ func TestDelegateToAgent_QueueDispatchChildHarnessFailureIsReported(t *testing.T
 	}
 	if len(reg.registered) != 0 || q.gotName != "" {
 		t.Errorf("registered=%v enqueued=%q, want nothing", reg.registered, q.gotName)
+	}
+}
+
+// A child harness with no mission run is refused by the callback manager. The
+// delegation then fails and nothing is enqueued: an agent that runs with no
+// registered harness would find no harness for its callbacks (gibson#1217).
+func TestDelegateToAgent_QueueDispatchRefusedRegistrationStopsTheWork(t *testing.T) {
+	m := NewCallbackManager(CallbackConfig{
+		ListenAddress:  "127.0.0.1:0",
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+	}, slog.New(slog.DiscardHandler))
+	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
+		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
+	})}
+	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
+	h.callbackManager = m
+	h.missionCtx.ID = types.NewID() // and no MissionRunID
+	h.factory = func(context.Context, MissionContext, TargetInfo) (AgentHarness, error) { return h, nil }
+
+	_, err := h.DelegateToAgent(callerCtx(t, "user-remote", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal"))
+	var gerr *types.GibsonError
+	if !errors.As(err, &gerr) || gerr.Code != ErrHarnessDelegationFailed || !errors.Is(err, ErrHarnessWithoutRun) {
+		t.Fatalf("err = %v, want a delegation failure caused by a harness with no run", err)
+	}
+	if q.gotName != "" {
+		t.Errorf("enqueued %q, want nothing", q.gotName)
+	}
+	if m.registry.Count() != 0 {
+		t.Errorf("registry holds %d harnesses, want 0", m.registry.Count())
 	}
 }

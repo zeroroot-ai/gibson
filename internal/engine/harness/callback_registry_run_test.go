@@ -103,7 +103,8 @@ func TestCallbackManager_UnregisterHarnessRemovesTheRegistration(t *testing.T) {
 		ServiceOptions: []CallbackServiceOption{testEventBus()},
 	}, slog.New(slog.DiscardHandler))
 
-	key := m.RegisterHarnessForMission("m1", "recon", newRunHarness("run-1"))
+	key, err := m.RegisterHarnessForMission("m1", "recon", newRunHarness("run-1"))
+	require.NoError(t, err)
 	require.NotEmpty(t, key)
 	require.Equal(t, 1, m.registry.Count())
 

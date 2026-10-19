@@ -462,6 +462,8 @@ type mockHarnessWithResolver struct {
 	// forTargetID records what ForTarget was asked for, so a test can assert a
 	// scope reader followed the per-target view.
 	forTargetID string
+	// missionRunID is the run of the mission. It defaults to run-1.
+	missionRunID string
 	// queryPluginHook, when set, runs on each QueryPlugin call.
 	queryPluginHook func()
 }
@@ -559,7 +561,14 @@ func (m *mockHarnessWithResolver) GetPreviousRunFindings(ctx context.Context, fi
 
 func (m *mockHarnessWithResolver) Mission() MissionContext {
 	// Return a tenant so getHarness tenant-isolation check passes.
-	return MissionContext{TenantID: "test-tenant", MissionRunID: "run-1"}
+	return MissionContext{TenantID: "test-tenant", MissionRunID: m.runOrDefault()}
+}
+
+func (m *mockHarnessWithResolver) runOrDefault() string {
+	if m.missionRunID != "" {
+		return m.missionRunID
+	}
+	return "run-1"
 }
 
 func (m *mockHarnessWithResolver) Workspace() workspace.Workspace {
