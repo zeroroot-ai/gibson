@@ -432,3 +432,19 @@ func TestRescan_LateFindingOfRun1DoesNotCountForRun2(t *testing.T) {
 		t.Fatalf("a late finding of run 1 must not count for run 2, got %q", got)
 	}
 }
+
+// TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance: the late finding is a
+// real weakness, so it is in the World. It has no scan scope and no last scan,
+// so no rescan of the record reconciles it or counts it as seen.
+func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
+	w := NewWorld("t1")
+	scanRun(w, "run-1")
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
+	scanRun(w, "run-2")
+	Reduce(w, FindingRaised{ID: "late", MissionID: "scan", MissionRunID: "run-1"})
+
+	f := findingByID(t, w, "late")
+	if f.ScanScope != "" || f.LastScan != "" {
+		t.Fatalf("a late finding has scan scope %q and last scan %q, want none", f.ScanScope, f.LastScan)
+	}
+}

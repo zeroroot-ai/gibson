@@ -6,6 +6,8 @@ package brain
 import (
 	"reflect"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // TestProjection_TwoMissionsMayShareNodeNames is the regression: node ids are
@@ -281,48 +283,90 @@ func TestProjection_NewRunRetiresDecisionAndPlanOfTheLastRun(t *testing.T) {
 	}
 }
 
-// TestProjection_LateEvidenceOfRun1IsDropped covers the evidence that a worker
-// of run 1 reports after run 2 has started. Each kind carries the run of the
-// mission that produced it.
-func TestProjection_LateEvidenceOfRun1IsDropped(t *testing.T) {
-	w := NewWorld("acme")
-	Reduce(w, runProjection("run-1"))
-	Reduce(w, MissionDone{ID: "m1", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
-	Reduce(w, runProjection("run-2"))
+// TestProjection_LateEvidenceOfRun1IsKeptAndDetached covers the evidence that a
+// worker of run 1 reports after run 2 has started. A late finding is a real
+// weakness and a late call is the record of real spend, so the World keeps
+// them. They have no link to the mission, so run 2 does not count them as its
+// own. The run goes through an engine, and a replay gives the same World.
+func TestProjection_LateEvidenceOfRun1IsKeptAndDetached(t *testing.T) {
+	e := NewEngine("acme", &memTimelineStore{})
+	var seen []Event
+	e.Subscribe(func(ev Event) { seen = append(seen, ev) })
 
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-1"})
-	Reduce(w, HostObserved{MissionID: "m1", MissionRunID: "run-1", ScopeID: "s", Address: "10.0.0.5"})
-	Reduce(w, EntityObserved{Label: "Application", Key: "app", MissionID: "m1", MissionRunID: "run-1"})
-	Reduce(w, ObservationRecorded{EventID: "e1", MissionID: "m1", MissionRunID: "run-1", Shape: "x"})
-	Reduce(w, HypothesisObserved{MissionID: "m1", MissionRunID: "run-1", Claim: "c"})
-	Reduce(w, LlmCallObserved{CallID: "c1", MissionID: "m1", MissionRunID: "run-1"})
-	Reduce(w, AgentToolCallObserved{ToolCallID: "t1", MissionID: "m1", MissionRunID: "run-1"})
+	e.Submit(runProjection("run-1"))
+	e.Submit(MissionDone{ID: "m1", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
+	e.Submit(runProjection("run-2"))
+	e.Submit(FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-1"})
+	e.Submit(HostObserved{MissionID: "m1", MissionRunID: "run-1", ScopeID: "s", Address: "10.0.0.5"})
+	e.Submit(EntityObserved{Label: "Application", Key: "app", MissionID: "m1", MissionRunID: "run-1"})
+	e.Submit(ObservationRecorded{EventID: "e1", MissionID: "m1", MissionRunID: "run-1", Shape: "x"})
+	e.Submit(HypothesisObserved{MissionID: "m1", MissionRunID: "run-1", Claim: "c"})
+	e.Submit(LlmCallObserved{CallID: "c1", MissionID: "m1", MissionRunID: "run-1"})
+	e.Submit(AgentToolCallObserved{ToolCallID: "t1", MissionID: "m1", MissionRunID: "run-1"})
+	// Evidence of run 2 keeps its link.
+	e.Submit(AgentToolCallObserved{ToolCallID: "t2", MissionID: "m1", MissionRunID: "run-2"})
+	tickN(e, 2)
 
-	if n := len(w.FindingSnapshot()); n != 0 {
-		t.Errorf("findings = %d, want 0", n)
+	w := e.World
+	if got := w.FindingSnapshot(); len(got) != 1 {
+		t.Errorf("findings = %d, want the late finding kept", len(got))
 	}
-	if n := len(w.Snapshot()); n != 0 {
-		t.Errorf("hosts = %d, want 0", n)
+	hosts := w.Snapshot()
+	if len(hosts) != 1 || hosts[0].MissionID != "" {
+		t.Errorf("hosts = %+v, want one host with no mission", hosts)
 	}
-	if n := len(w.EntitySnapshot()); n != 0 {
-		t.Errorf("entities = %d, want 0", n)
+	if got := w.EntitySnapshot(); len(got) != 1 || got[0].MissionID != "" {
+		t.Errorf("entities = %+v, want one entity with no mission", got)
 	}
-	if n := len(w.ObservationSnapshot()); n != 0 {
-		t.Errorf("observations = %d, want 0", n)
+	if got := w.ObservationSnapshot(); len(got) != 1 || got[0].MissionID != "" {
+		t.Errorf("observations = %+v, want one with no mission", got)
 	}
-	if n := len(w.HypothesisSnapshot()); n != 0 {
-		t.Errorf("hypotheses = %d, want 0", n)
+	if got := w.HypothesisSnapshot(); len(got) != 1 || got[0].MissionID != "" {
+		t.Errorf("hypotheses = %+v, want one with no mission", got)
 	}
-	if n := len(w.LlmCallSnapshot()); n != 0 {
-		t.Errorf("LLM calls = %d, want 0", n)
+	if got := w.LlmCallSnapshot(); len(got) != 1 {
+		t.Errorf("LLM calls = %d, want the late call kept", len(got))
 	}
-	if n := len(w.AgentToolCallSnapshot()); n != 0 {
-		t.Errorf("tool calls = %d, want 0", n)
+	calls := map[string]string{}
+	for _, c := range w.AgentToolCallSnapshot() {
+		calls[c.ToolCallID] = c.MissionID
+	}
+	if len(calls) != 2 || calls["t1"] != "" || calls["t2"] != "m1" {
+		t.Errorf("tool calls = %v, want t1 detached and t2 linked to m1", calls)
 	}
 
-	// The same evidence of the current run lands.
-	Reduce(w, FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-2"})
-	if n := len(w.FindingSnapshot()); n != 1 {
-		t.Errorf("findings of run 2 = %d, want 1", n)
+	// A subscriber sees the evidence as the World holds it, without the link.
+	for _, ev := range seen {
+		if f, ok := ev.(FindingRaised); ok && f.MissionID != "" {
+			t.Errorf("a subscriber saw the late finding linked to mission %s", f.MissionID)
+		}
+	}
+
+	if got, want := worldView(Replay("acme", e.Timeline)), worldView(w); !reflect.DeepEqual(got, want) {
+		t.Errorf("replay differs from the live World\nreplay: %+v\nlive:   %+v", got, want)
+	}
+	if got, want := Replay("acme", e.Timeline).FindingSnapshot(), w.FindingSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Errorf("replayed findings differ\nreplay: %+v\nlive:   %+v", got, want)
+	}
+}
+
+// Each event of another run leaves a count, so a context that gives the wrong
+// run ID shows up in the metrics and not only in the Timeline.
+func TestProjection_RunMismatchIsCounted(t *testing.T) {
+	dropped := runMismatchEventsTotal.WithLabelValues("mission.done", "dropped")
+	detached := runMismatchEventsTotal.WithLabelValues("finding.raised", "detached")
+	droppedBefore, detachedBefore := testutil.ToFloat64(dropped), testutil.ToFloat64(detached)
+
+	e := NewEngine("acme", &memTimelineStore{})
+	e.Submit(runProjection("run-2"))
+	e.Submit(MissionDone{ID: "m1", RunID: "run-1", Outcome: MissionCompleted})
+	e.Submit(FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-1"})
+	tickN(e, 2)
+
+	if got := testutil.ToFloat64(dropped) - droppedBefore; got != 1 {
+		t.Errorf("dropped mission.done count = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(detached) - detachedBefore; got != 1 {
+		t.Errorf("detached finding.raised count = %v, want 1", got)
 	}
 }

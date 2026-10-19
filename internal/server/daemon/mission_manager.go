@@ -322,13 +322,25 @@ func (m *missionManager) getActive(tenant auth.TenantID, missionID string) (*act
 func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string, am *activeMission) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.releaseActiveLocked(tenant, missionID, am)
+	m.completedCount++
+}
+
+// releaseActive gives the claim of a run back without counting a completed
+// mission. A start that failed after the claim never ran (gibson#1217).
+func (m *missionManager) releaseActive(tenant auth.TenantID, missionID string, am *activeMission) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.releaseActiveLocked(tenant, missionID, am)
+}
+
+func (m *missionManager) releaseActiveLocked(tenant auth.TenantID, missionID string, am *activeMission) {
 	if sub, ok := m.activeMissions[tenant]; ok && sub[missionID] == am {
 		delete(sub, missionID)
 		if len(sub) == 0 {
 			delete(m.activeMissions, tenant)
 		}
 	}
-	m.completedCount++
 }
 
 // runIDOf is the ID of the run of an active mission. It is empty when the
@@ -705,7 +717,7 @@ func (m *missionManager) startRun(
 	// The claim is held, so the run and its authz state are written. A write
 	// that fails gives the claim back.
 	if saveErr := m.persistRun(ctx, rStore, missionRun); saveErr != nil {
-		m.deleteActive(callingTenant, missionRecord.ID.String(), active)
+		m.releaseActive(callingTenant, missionRecord.ID.String(), active)
 		cancel()
 		return "", saveErr
 	}

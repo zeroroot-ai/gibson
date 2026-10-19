@@ -40,27 +40,6 @@ func TestNewHarnessCallbackService(t *testing.T) {
 	assert.NotNil(t, service.logger)
 }
 
-// TestHarnessCallbackServiceUnregister tests harness unregistration via activeHarnesses.
-func TestHarnessCallbackServiceUnregister(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	service := NewHarnessCallbackService(logger, testEventBus())
-
-	// Manually store a harness entry to test unregistration
-	taskID := "task-123"
-	service.activeHarnesses.Store(taskID, (*DefaultAgentHarness)(nil))
-
-	// Check it's stored
-	_, ok := service.activeHarnesses.Load(taskID)
-	assert.True(t, ok)
-
-	// Unregister
-	service.UnregisterHarness(taskID)
-
-	// Check it's gone
-	_, ok = service.activeHarnesses.Load(taskID)
-	assert.False(t, ok)
-}
-
 // newMockHarness creates a minimal harness for testing.
 // tenantAwareMockHarness is a lightweight AgentHarness stub that satisfies the
 // tenant isolation check in getHarness (Mission().TenantID must match the

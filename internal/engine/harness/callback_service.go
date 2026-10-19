@@ -95,9 +95,6 @@ type DiscoveryProcessor interface {
 type HarnessCallbackService struct {
 	harnesspb.UnimplementedHarnessCallbackServiceServer
 
-	// activeHarnesses maps task IDs to their corresponding harness instances (legacy mode)
-	activeHarnesses sync.Map // map[string]AgentHarness
-
 	// registry provides mission-based harness lookup for external agents (new mode)
 	registry *CallbackHarnessRegistry
 
@@ -693,13 +690,6 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 	return s
 }
 
-// UnregisterHarness removes a harness instance when a task completes.
-// This prevents memory leaks from accumulating completed tasks.
-func (s *HarnessCallbackService) UnregisterHarness(taskID string) {
-	s.activeHarnesses.Delete(taskID)
-	s.logger.Debug("unregistered harness for task", "task_id", taskID)
-}
-
 // getHarness retrieves the harness for a request based on the context information.
 //
 // This method requires explicit mission ID and agent name for harness lookup via registry.
@@ -743,6 +733,22 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		)
 		return nil, status.Errorf(codes.NotFound, "no active harness for mission %s, agent %s: %v",
 			contextInfo.MissionId, contextInfo.AgentName, err)
+	}
+
+	// A callback of another run is refused. The mission ID is the same for every
+	// run of a record, so an agent of run 1 that still runs can find the harness
+	// of run 2 under the same mission and agent name. Its evidence would then
+	// take the run of run 2 (gibson#1217).
+	run, harnessRun := contextInfo.MissionRunId, harness.Mission().MissionRunID
+	if run != "" && harnessRun != "" && run != harnessRun {
+		s.logger.Warn("callback of another run refused",
+			slog.String("mission_id", contextInfo.MissionId),
+			slog.String("agent_name", contextInfo.AgentName),
+			slog.String("callback_run_id", run),
+			slog.String("harness_run_id", harnessRun),
+		)
+		return nil, status.Errorf(codes.FailedPrecondition,
+			"callback of run %s refused: the active run of mission %s is %s", run, contextInfo.MissionId, harnessRun)
 	}
 
 	s.logger.Debug("harness lookup succeeded",

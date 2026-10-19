@@ -224,3 +224,29 @@ func TestStartRun_RefusedStartLeavesNothingBehind(t *testing.T) {
 		t.Error("a refused start changed the active entry of the winner")
 	}
 }
+
+// A claim that is given back did not complete a mission, so it is not counted.
+func TestReleaseActive_DoesNotCountACompletedMission(t *testing.T) {
+	mm := helperMM()
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	tenant := auth.MustNewTenantID("acme")
+	rec := &mission.Mission{ID: types.NewID()}
+	id := rec.ID.String()
+
+	run := activeRunOfRecord(rec, tenant)
+	mm.setActive(tenant, id, run)
+	mm.releaseActive(tenant, id, run)
+	if _, ok := mm.getActive(tenant, id); ok {
+		t.Fatal("the claim was not given back")
+	}
+	if mm.completedCount != 0 {
+		t.Errorf("completedCount = %d after a released claim, want 0", mm.completedCount)
+	}
+
+	run = activeRunOfRecord(rec, tenant)
+	mm.setActive(tenant, id, run)
+	mm.deleteActive(tenant, id, run)
+	if mm.completedCount != 1 {
+		t.Errorf("completedCount = %d after a finished run, want 1", mm.completedCount)
+	}
+}

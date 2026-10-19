@@ -345,9 +345,18 @@ func (s *GraphRAGFindingSubmitter) resolveMissionRunID(ctx context.Context, work
 	}
 	run, err := lookupWorkRun(ctx, s.stateClient.Client(), workID)
 	if err != nil {
-		s.logger.DebugContext(ctx, "finding submitter: no mission run bound to the work item",
-			slog.String("work_id", workID),
-		)
+		if errors.Is(err, ErrWorkRunUnknown) {
+			s.logger.DebugContext(ctx, "finding submitter: no mission run bound to the work item",
+				slog.String("work_id", workID),
+			)
+		} else {
+			// The finding is kept without a run. A Redis fault must not pass
+			// without a sign.
+			s.logger.WarnContext(ctx, "finding submitter: could not read the mission run of the work item",
+				slog.String("work_id", workID),
+				slog.String("error", err.Error()),
+			)
+		}
 		return ""
 	}
 	return run

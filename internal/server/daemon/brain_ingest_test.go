@@ -340,8 +340,9 @@ func TestIngestDelegation(t *testing.T) {
 	t.Fatalf("delegation not folded into the World: %+v", reg.For("acme").AgentRuns())
 }
 
-// The sinks carry the run of the mission onto the evidence they fold, so the
-// World can drop evidence that a finished run reports late (gibson#1217).
+// The sinks carry the run of the mission onto the evidence they fold. Evidence
+// that a finished run reports late is kept, and the World detaches it from the
+// mission (gibson#1217).
 func TestIngestSinks_CarryTheMissionRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -350,26 +351,30 @@ func TestIngestSinks_CarryTheMissionRun(t *testing.T) {
 	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "run-2"})
 
 	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: "late", MissionID: "m1", MissionRunID: "run-1"})
+	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: "now", MissionID: "m1", MissionRunID: "run-2"})
 	ingestLLMCall(reg)(ctx, "acme", api.LLMCallRecord{CallID: "late", MissionID: "m1", MissionRunID: "run-1"})
 	ingestComponentFinding(reg)(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
 		ID: types.NewID(), Title: "late",
 	}, types.ID("m1"), "agent"), "run-1")
-	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: "now", MissionID: "m1", MissionRunID: "run-2"})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(eng.AgentToolCalls()) == 1 {
+		if len(eng.AgentToolCalls()) == 2 && len(eng.LlmCalls()) == 1 && len(eng.Findings()) == 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if got := eng.AgentToolCalls(); len(got) != 1 || got[0].ToolCallID != "now" {
-		t.Errorf("tool calls = %+v, want only the call of run 2", got)
+	if got := eng.AgentToolCalls(); len(got) != 2 {
+		t.Errorf("tool calls = %+v, want the late call kept beside the call of run 2", got)
 	}
-	if got := eng.LlmCalls(); len(got) != 0 {
-		t.Errorf("LLM calls = %+v, want none: the call is of run 1", got)
+	if got := eng.LlmCalls(); len(got) != 1 {
+		t.Errorf("LLM calls = %+v, want the late call kept", got)
 	}
-	if got := eng.Findings(); len(got) != 0 {
-		t.Errorf("findings = %+v, want none: the finding is of run 1", got)
+	got := eng.Findings()
+	if len(got) != 1 {
+		t.Fatalf("findings = %+v, want the late finding kept", got)
+	}
+	if got[0].ScanScope != "" || got[0].LastScan != "" {
+		t.Errorf("the late finding has scan provenance %q %q, want none", got[0].ScanScope, got[0].LastScan)
 	}
 }

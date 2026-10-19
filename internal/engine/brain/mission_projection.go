@@ -282,81 +282,133 @@ func retireMissionRun(w *World, missionID string) {
 	}
 }
 
-// staleRun reports whether ev belongs to a run that is not the current run of
-// its mission. Reduce drops such an event: a worker of run 1 can report after
-// run 2 has started, and its result must not change run 2 (gibson#1217). An
-// event with no RunID is not run-scoped and is never stale.
-func staleRun(w *World, ev Event) bool {
-	switch e := ev.(type) {
-	case WorkCompleted:
-		return workRunIs(w, e.ID, e.RunID) == runOther
-	case WorkDispatched:
-		switch workRunIs(w, e.ID, e.RunID) {
-		case runOther:
-			return true
-		case runUnknown:
-			return missionRunIs(w, e.MissionID, e.RunID) == runOther
-		}
-	case MissionDone:
-		return missionRunIs(w, e.ID, e.RunID) == runOther
-	case MissionPauseRequested:
-		return missionRunIs(w, e.ID, e.RunID) == runOther
-	case MissionResumed:
-		return missionRunIs(w, e.ID, e.RunID) == runOther
-	case DecisionCompleted:
-		return missionRunIs(w, e.MissionID, e.RunID) == runOther
-	case VoIPlanned:
-		return missionRunIs(w, e.MissionID, e.RunID) == runOther
-	case FindingRaised:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case HostObserved:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case EntityObserved:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case ObservationRecorded:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case HypothesisObserved:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case LlmCallObserved:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	case AgentToolCallObserved:
-		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
-	}
-	return false
-}
-
-type runMatch int
+// runVerdict is what the reducer does with an event of a run that is not the
+// current run of its mission.
+type runVerdict int
 
 const (
-	runUnknown runMatch = iota // no run to compare: not run-scoped, or the entity is not there
-	runSame
-	runOther
+	// runCurrent: the event is of the current run, or it is not run-scoped.
+	runCurrent runVerdict = iota
+	// runDropped: the event is control state of an older run (work, mission,
+	// decision, plan). It must not change the current run, so the reducer
+	// ignores it.
+	runDropped
+	// runDetached: the event is evidence of an older run (a finding, a host,
+	// a call). The fact is true and stays in the World, but it has no link to
+	// the current run, so it is not counted as seen by that run.
+	runDetached
 )
 
-func missionRunIs(w *World, missionID, runID string) runMatch {
+// runCheck is the result of checkRun, with what a log line needs.
+type runCheck struct {
+	verdict    runVerdict
+	kind       string
+	missionID  string
+	eventRun   string
+	currentRun string
+}
+
+// checkRun compares the run of ev with the current run of its mission. It is a
+// pure function of the World, so a replay of the Timeline reaches the same
+// verdict for the same event (gibson#1217). An event with no RunID is not
+// run-scoped and is current.
+func checkRun(w *World, ev Event) runCheck {
+	switch e := ev.(type) {
+	case WorkCompleted:
+		return workRunCheck(w, ev, e.ID, e.RunID)
+	case WorkDispatched:
+		if chk := workRunCheck(w, ev, e.ID, e.RunID); chk.verdict != runCurrent {
+			return chk
+		}
+		if _, ok := findWork(w, e.ID); ok {
+			return runCheck{}
+		}
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case MissionDone:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case MissionPauseRequested:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case MissionResumed:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case DecisionCompleted:
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case VoIPlanned:
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case FindingRaised:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case HostObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case EntityObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case ObservationRecorded:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case HypothesisObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case LlmCallObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case AgentToolCallObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	}
+	return runCheck{}
+}
+
+func missionRunCheck(w *World, ev Event, missionID, runID string, mismatch runVerdict) runCheck {
 	if runID == "" {
-		return runUnknown
+		return runCheck{}
 	}
 	ent, ok := findMission(w, missionID)
 	if !ok {
-		return runUnknown
+		return runCheck{}
 	}
-	if w.missions.Get(ent).RunID == runID {
-		return runSame
+	current := w.missions.Get(ent).RunID
+	if current == runID {
+		return runCheck{}
 	}
-	return runOther
+	return runCheck{verdict: mismatch, kind: ev.Kind(), missionID: missionID, eventRun: runID, currentRun: current}
 }
 
-func workRunIs(w *World, workID, runID string) runMatch {
+func workRunCheck(w *World, ev Event, workID, runID string) runCheck {
 	if runID == "" {
-		return runUnknown
+		return runCheck{}
 	}
 	ent, ok := findWork(w, workID)
 	if !ok {
-		return runUnknown
+		return runCheck{}
 	}
-	if w.work.Get(ent).RunID == runID {
-		return runSame
+	wi := w.work.Get(ent)
+	if wi.RunID == runID {
+		return runCheck{}
 	}
-	return runOther
+	return runCheck{verdict: runDropped, kind: ev.Kind(), missionID: wi.MissionID, eventRun: runID, currentRun: wi.RunID}
+}
+
+// detachEvidence returns ev without its link to a mission. The evidence of a
+// finished run stays in the World as a fact with no mission frame, so it is
+// not attributed to the current run (gibson#1217). The Timeline keeps the
+// event as it came.
+func detachEvidence(ev Event) Event {
+	switch e := ev.(type) {
+	case FindingRaised:
+		e.MissionID = ""
+		return e
+	case HostObserved:
+		e.MissionID = ""
+		return e
+	case EntityObserved:
+		e.MissionID = ""
+		return e
+	case ObservationRecorded:
+		e.MissionID = ""
+		return e
+	case HypothesisObserved:
+		e.MissionID = ""
+		return e
+	case LlmCallObserved:
+		e.MissionID = ""
+		return e
+	case AgentToolCallObserved:
+		e.MissionID = ""
+		return e
+	}
+	return ev
 }

@@ -40,8 +40,22 @@ type CallbackHarnessRegistry struct {
 	// mu protects the harnesses map
 	mu sync.RWMutex
 
-	// harnesses maps "missionID:agentName" keys to harness instances
+	// harnesses maps a registration key to its harness. The key is unique
+	// for each registration, so a registration that ended removes itself and
+	// no other (gibson#1217).
 	harnesses map[string]AgentHarness
+
+	// byAgent lists, for each "missionID:agentName", the registration keys
+	// in the order they were made. The last one is the current registration.
+	// Run 2 of a mission registers an agent of the same name while an agent
+	// of run 1 may still hold its entry.
+	byAgent map[string][]string
+
+	// agentOf maps a registration key to its "missionID:agentName".
+	agentOf map[string]string
+
+	// seq makes each registration key unique.
+	seq uint64
 }
 
 // NewCallbackHarnessRegistry creates a new empty harness registry.
@@ -56,6 +70,8 @@ type CallbackHarnessRegistry struct {
 func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 	return &CallbackHarnessRegistry{
 		harnesses: make(map[string]AgentHarness),
+		byAgent:   make(map[string][]string),
+		agentOf:   make(map[string]string),
 	}
 }
 
@@ -71,11 +87,12 @@ func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 //   - harness: The harness instance that will handle callbacks
 //
 // Returns:
-//   - string: The registration key in the format "missionID:agentName"
+//   - string: The registration key. It is unique for each registration.
 //
 // This method is thread-safe and can be called concurrently from multiple
-// goroutines. If a harness is already registered for the same key, it will
-// be overwritten (this typically indicates a programming error).
+// goroutines. A second registration of the same mission and agent becomes the
+// current one for Lookup. Unregister removes only the registration of its key,
+// so the end of an agent of run 1 leaves the agent of run 2 in place.
 //
 // Example:
 //
@@ -83,12 +100,16 @@ func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 //	defer registry.Unregister(key)
 //	// Execute external agent...
 func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness AgentHarness) string {
-	key := makeRegistryKey(missionID, agentName)
+	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.seq++
+	key := fmt.Sprintf("%s#%d", agent, r.seq)
 	r.harnesses[key] = harness
+	r.byAgent[agent] = append(r.byAgent[agent], key)
+	r.agentOf[key] = agent
 	return key
 }
 
@@ -118,17 +139,18 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 //	}
 //	return harness.Complete(ctx, slot, messages)
 func (r *CallbackHarnessRegistry) Lookup(missionID, agentName string) (AgentHarness, error) {
-	key := makeRegistryKey(missionID, agentName)
+	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	harness, ok := r.harnesses[key]
-	if !ok {
+	keys := r.byAgent[agent]
+	if len(keys) == 0 {
 		return nil, fmt.Errorf("no harness registered for mission %s, agent %s", missionID, agentName)
 	}
 
-	return harness, nil
+	// The last registration is the current one.
+	return r.harnesses[keys[len(keys)-1]], nil
 }
 
 // Unregister removes a harness from the registry.
@@ -156,7 +178,24 @@ func (r *CallbackHarnessRegistry) Unregister(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	agent, ok := r.agentOf[key]
+	if !ok {
+		return
+	}
 	delete(r.harnesses, key)
+	delete(r.agentOf, key)
+	keys := r.byAgent[agent]
+	for i, k := range keys {
+		if k == key {
+			keys = append(keys[:i], keys[i+1:]...)
+			break
+		}
+	}
+	if len(keys) == 0 {
+		delete(r.byAgent, agent)
+		return
+	}
+	r.byAgent[agent] = keys
 }
 
 // Count returns the number of currently registered harnesses.
@@ -199,6 +238,8 @@ func (r *CallbackHarnessRegistry) Clear() {
 	defer r.mu.Unlock()
 
 	r.harnesses = make(map[string]AgentHarness)
+	r.byAgent = make(map[string][]string)
+	r.agentOf = make(map[string]string)
 }
 
 // makeRegistryKey creates a registry key from mission ID and agent name.
