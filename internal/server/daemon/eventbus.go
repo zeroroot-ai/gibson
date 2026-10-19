@@ -26,7 +26,7 @@ import (
 // without circular imports (internal/events cannot import internal/server/daemon/api).
 // The long-term migration target is to adopt internal/events.DefaultEventBus
 // end-to-end once the gRPC Subscribe handler is updated to emit events.Event
-// directly. The OrchestratorEventBusAdapter in eventbus_adapter.go bridges
+// directly. The EventBusAdapter in eventbus_adapter.go bridges
 // between the two representations today.
 type EventBus struct {
 	mu          sync.RWMutex

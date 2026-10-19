@@ -41,3 +41,14 @@ type ExecContext struct {
 	// drops the discovery.
 	TenantID auth.TenantID
 }
+
+// missionRun is the run of the mission that owns the discovery, for the events
+// folded out of it. A discovery with no mission is not run-scoped. Without a
+// mission, MissionRunID can be a work item id (the component path), which is
+// not a run of any mission (gibson#1217).
+func (c ExecContext) missionRun() string {
+	if c.MissionID == "" {
+		return ""
+	}
+	return c.MissionRunID
+}

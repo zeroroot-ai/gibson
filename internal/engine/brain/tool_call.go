@@ -48,8 +48,13 @@ type AgentToolCall struct {
 // mission-graph's WorkDispatched/WorkCompleted did not cover (those model the
 // dispatched *node*'s lifecycle, not the agent's own tool-call I/O).
 type AgentToolCallObserved struct {
-	ToolCallID         string
-	MissionID          string
+	ToolCallID string
+	MissionID  string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID       string
 	RunID              string
 	ScopeID            string
 	ToolName           string

@@ -281,7 +281,7 @@ func newRecordingFindingSubmitter(t *testing.T, sc *state.StateClient) (submitte
 	t.Helper()
 
 	var seenMission string
-	sink := func(_ context.Context, _ string, f finding.EnhancedFinding) {
+	sink := func(_ context.Context, _ string, f finding.EnhancedFinding, _ string) {
 		seenMission = f.MissionID.String()
 	}
 	return NewGraphRAGFindingSubmitter(sink, nil, sc, testLogger()), &seenMission
@@ -318,6 +318,33 @@ func TestFindingSubmitter_ResolvesMissionForOwningTenant(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "mission-of-victim", *seenMission,
 		"the owning tenant's finding must still attach to its mission")
+}
+
+// TestFindingSubmitter_CarriesTheMissionRunOfTheWorkItem checks that the sink
+// gets the run that the daemon bound to the work item, so the World can drop a
+// finding of a run that has ended (gibson#1217). A finding with no mission has
+// no run.
+func TestFindingSubmitter_CarriesTheMissionRunOfTheWorkItem(t *testing.T) {
+	env := newWorkIDEnv(t)
+	var seenRun string
+	sink := func(_ context.Context, _ string, _ finding.EnhancedFinding, run string) { seenRun = run }
+	submitter := NewGraphRAGFindingSubmitter(sink, nil, env.state, testLogger())
+
+	writeWorkContext(t, env.mr, "work-run-1", "mission-of-victim", victimTenant)
+	require.NoError(t, env.mr.Set(workRunKey("work-run-1"), "run-7"))
+	// A work item that carries a run and no mission.
+	require.NoError(t, env.mr.Set(workRunKey("work-run-2"), "run-8"))
+
+	_, err := submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-run-1",
+		`{"title":"genuine"}`, "high", "genuine")
+	require.NoError(t, err)
+	assert.Equal(t, "run-7", seenRun)
+
+	seenRun = "unset"
+	_, err = submitter.Submit(submitterCtx(victimTenant, "agent_principal:victim"), victimTenant, "work-run-2",
+		`{"title":"no mission"}`, "high", "no mission")
+	require.NoError(t, err)
+	assert.Empty(t, seenRun, "a finding with no mission has no run")
 }
 
 // ---------------------------------------------------------------------------

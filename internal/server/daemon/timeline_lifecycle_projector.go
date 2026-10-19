@@ -254,7 +254,7 @@ func (p *lifecycleProjectorTap) drain() {
 }
 
 // fanOut publishes one event to the in-process EventBus and the tenant's
-// Redis stream (the same fan-out OrchestratorEventBusAdapter.Publish does).
+// Redis stream (the same fan-out the retired orchestrator adapter did).
 func (p *lifecycleProjectorTap) fanOut(out api.EventData) {
 	ctx := context.Background()
 	if p.eventBus != nil {

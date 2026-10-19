@@ -134,7 +134,7 @@ func RescanReconciliationSystem(w *World) []Event {
 				continue // only a fix is waiting on a rescan's verdict
 			}
 			status := FindingStatusVerified
-			if f.LastScan == m.ID {
+			if f.LastScan == m.RunID {
 				status = FindingStatusOpen // the scan saw it again
 			}
 			out = append(out, FindingStatusChanged{

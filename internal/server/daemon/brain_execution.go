@@ -53,6 +53,11 @@ const deciderSlot = "primary"
 // missionBinding ties a live mission to the harness + engine the executor needs.
 type missionBinding struct {
 	ctx context.Context
+	// runID is the run of the mission that this binding serves. The mission ID
+	// is the same for every run of a record, so the binding of run 2 replaces
+	// the binding of run 1 under one key. A dispatch of another run is refused
+	// (gibson#1217).
+	runID string
 	// tenant owns this mission. Component discovery for the mission is scoped to
 	// it; without it the mission has no catalog rather than a shared one.
 	tenant  string
@@ -134,6 +139,13 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 	bind, ok := b.get(req.MissionID)
 	if !ok {
 		b.logger.Warn("brain dispatch for unknown mission", "mission_id", req.MissionID, "work_id", req.WorkID)
+		return
+	}
+	if bind.runID != req.RunID {
+		// A dispatch that was queued by run 1 reaches the binding of run 2.
+		// It must not run against the target under run 2.
+		b.logger.Warn("brain dispatch of another run; refused",
+			"mission_id", req.MissionID, "work_id", req.WorkID, "run_id", req.RunID, "binding_run_id", bind.runID)
 		return
 	}
 	go func() {

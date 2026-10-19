@@ -307,6 +307,20 @@ func staleRun(w *World, ev Event) bool {
 		return missionRunIs(w, e.MissionID, e.RunID) == runOther
 	case VoIPlanned:
 		return missionRunIs(w, e.MissionID, e.RunID) == runOther
+	case FindingRaised:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case HostObserved:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case EntityObserved:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case ObservationRecorded:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case HypothesisObserved:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case LlmCallObserved:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
+	case AgentToolCallObserved:
+		return missionRunIs(w, e.MissionID, e.MissionRunID) == runOther
 	}
 	return false
 }

@@ -54,12 +54,17 @@ type ObservationRecorded struct {
 	// EventID is the Timeline event id and therefore the Observation's
 	// identity. An event without one records nothing — there would be no
 	// replay-stable key to project.
-	EventID    string
-	ScopeID    string
-	MissionID  string
-	Shape      string
-	Payload    map[string]string
-	ObservedAt int64
+	EventID   string
+	ScopeID   string
+	MissionID string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID string
+	Shape        string
+	Payload      map[string]string
+	ObservedAt   int64
 }
 
 // Kind identifies the observation.recorded brain event.

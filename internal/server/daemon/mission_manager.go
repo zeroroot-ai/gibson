@@ -151,7 +151,6 @@ type missionManager struct {
 	targetStore     targetStoreLookup
 	infrastructure  *Infrastructure
 	otelStack       *observability.OTelObservabilityStack // nil when OTel is disabled
-	eventBus        eventPublisher                        // emits orchestration events to the brain + Redis stream
 
 	// brainRegistry + brainExecutor make the ECS brain the mission execution
 	// engine (gibson#851): executeMission projects the CUE mission into the
@@ -215,7 +214,6 @@ func newMissionManager(
 	targetStore targetStoreLookup,
 	infrastructure *Infrastructure,
 	otelStack *observability.OTelObservabilityStack,
-	eventBus eventPublisher,
 	authzStore mission.MissionAuthzStore,
 	quotaCounter mission.QuotaCounter,
 	brainRegistry *brain.Registry,
@@ -233,7 +231,6 @@ func newMissionManager(
 		targetStore:     targetStore,
 		infrastructure:  infrastructure,
 		otelStack:       otelStack,
-		eventBus:        eventBus,
 		authzStore:      authzStore,
 		quotaCounter:    quotaCounter,
 		brainRegistry:   brainRegistry,
@@ -672,15 +669,45 @@ func (m *missionManager) startRun(
 		return "", fmt.Errorf("mission %s is already running", missionRecord.ID)
 	}
 
-	// Create new MissionRun for this execution
+	// Allocate the run. The run store is read and nothing is written, so a
+	// start that the claim below refuses leaves no run record and no authz
+	// state behind.
 	rStore, rStoreRelease, rStoreErr := m.runStoreFor(ctx, callingTenant)
 	defer rStoreRelease()
 	if rStoreErr != nil {
 		m.logger.Warn("failed to acquire run store; using ephemeral run", "error", rStoreErr)
 	}
-	missionRun, err := m.createRunRecord(ctx, rStore, missionRecord.ID)
+	missionRun, err := m.allocateRun(ctx, rStore, missionRecord.ID)
 	if err != nil {
 		return "", err
+	}
+
+	// Create mission context with cancellation.
+	missionCtx, cancel := newMissionContext(ctx, callingTenant)
+
+	// Create active mission entry - use mission.ID (stable) for tracking
+	active := &activeMission{
+		mission:    missionRecord,
+		missionRun: missionRun,
+		ctx:        missionCtx,
+		cancel:     cancel,
+		startTime:  time.Now(),
+		tenantID:   callingTenant,
+	}
+
+	// Claim the active slot of the mission under the calling tenant's
+	// partition (C9 closure) before anything is written.
+	if claimErr := m.claimActive(callingTenant, missionRecord.ID.String(), active); claimErr != nil {
+		cancel()
+		return "", claimErr
+	}
+
+	// The claim is held, so the run and its authz state are written. A write
+	// that fails gives the claim back.
+	if saveErr := m.persistRun(ctx, rStore, missionRun); saveErr != nil {
+		m.deleteActive(callingTenant, missionRecord.ID.String(), active)
+		cancel()
+		return "", saveErr
 	}
 
 	// Record authz state so HarnessCallbackService.Authorize can resolve
@@ -701,25 +728,6 @@ func (m *missionManager) startRun(
 				slog.String("error", putErr.Error()),
 			)
 		}
-	}
-
-	// Create mission context with cancellation.
-	missionCtx, cancel := newMissionContext(ctx, callingTenant)
-
-	// Create active mission entry - use mission.ID (stable) for tracking
-	active := &activeMission{
-		mission:    missionRecord,
-		missionRun: missionRun,
-		ctx:        missionCtx,
-		cancel:     cancel,
-		startTime:  time.Now(),
-		tenantID:   callingTenant,
-	}
-
-	// Register active mission under the calling tenant's partition (C9 closure).
-	if claimErr := m.claimActive(callingTenant, missionRecord.ID.String(), active); claimErr != nil {
-		cancel()
-		return "", claimErr
 	}
 
 	// Launch mission executor in goroutine - pass mission ID (stable).
@@ -804,9 +812,12 @@ func (m *missionManager) findOrCreateRecord(ctx context.Context, mStore mission.
 	return missionRecord, nil
 }
 
-// createRunRecord allocates and persists the MissionRun for this execution.
-// A nil store (pool not configured) yields an ephemeral run.
-func (m *missionManager) createRunRecord(ctx context.Context, rStore mission.MissionRunStore, missionID types.ID) (*mission.MissionRun, error) {
+// allocateRun builds the MissionRun for this execution. It reads the next run
+// number and writes nothing, so a start that is refused after this leaves
+// nothing behind. persistRun writes the run.
+func (m *missionManager) allocateRun(
+	ctx context.Context, rStore mission.MissionRunStore, missionID types.ID,
+) (*mission.MissionRun, error) {
 	if rStore == nil {
 		// Fallback: create ephemeral run when pool is not configured.
 		missionRun := mission.NewMissionRun(missionID, 1)
@@ -821,16 +832,27 @@ func (m *missionManager) createRunRecord(ctx context.Context, rStore mission.Mis
 	}
 	missionRun := mission.NewMissionRun(missionID, runNumber)
 	missionRun.MarkStarted()
+	return missionRun, nil
+}
+
+// persistRun writes the MissionRun to the run store. An ephemeral run (no
+// store) has nothing to write.
+func (m *missionManager) persistRun(
+	ctx context.Context, rStore mission.MissionRunStore, missionRun *mission.MissionRun,
+) error {
+	if rStore == nil {
+		return nil
+	}
 	if err := rStore.Save(ctx, missionRun); err != nil {
 		m.logger.Error("failed to save mission run", "error", err)
-		return nil, fmt.Errorf("failed to save mission run: %w", err)
+		return fmt.Errorf("failed to save mission run: %w", err)
 	}
 	m.logger.Info("created mission run",
-		"mission_id", missionID,
+		"mission_id", missionRun.MissionID,
 		"run_id", missionRun.ID,
-		"run_number", runNumber,
+		"run_number", missionRun.RunNumber,
 	)
-	return missionRun, nil
+	return nil
 }
 
 // recordMissionOutcomeSpan stamps the terminal mission status and duration
@@ -1167,6 +1189,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// mission's agents and run its Decider on this mission's harness.
 	binding := &missionBinding{
 		ctx:        ctx,
+		runID:      runID,
 		tenant:     active.tenantID.String(),
 		eng:        eng,
 		harness:    agentHarness,

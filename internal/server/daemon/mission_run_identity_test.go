@@ -5,13 +5,17 @@ package daemon
 
 import (
 	"context"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -123,5 +127,100 @@ func TestUnregister_KeepsTheBindingOfTheNextRun(t *testing.T) {
 	b.unregister("m1", run1)
 	if got, ok := b.get("m1"); !ok || got != run2 {
 		t.Fatal("the cleanup of run 1 removed the binding of run 2")
+	}
+}
+
+// A dispatch that run 1 queued must not run under run 2. The binding of run 2
+// replaces the binding of run 1 under the same mission ID.
+func TestDispatch_RefusesTheDispatchOfAnotherRun(t *testing.T) {
+	eng := brain.NewEngine("t1", braintest.NewMemTimelineStore())
+	b := newBrainExecutor(nil, slog.New(slog.DiscardHandler))
+	b.register("m1", &missionBinding{ctx: context.Background(), eng: eng, runID: "run-2"})
+
+	// A kind the executor does not support completes the work with an error at
+	// once. That is the sign that the dispatch ran.
+	b.Dispatch(brain.DispatchRequest{WorkID: "m1/scan", MissionID: "m1", RunID: "run-1", Kind: "unsupported"})
+	b.Dispatch(brain.DispatchRequest{WorkID: "m1/scan", MissionID: "m1", RunID: "run-2", Kind: "unsupported"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		eng.Tick()
+		var runs []string
+		for _, ev := range eng.Timeline.Events() {
+			if wc, ok := ev.(brain.WorkCompleted); ok {
+				runs = append(runs, wc.RunID)
+			}
+		}
+		if len(runs) > 0 {
+			if len(runs) != 1 || runs[0] != "run-2" {
+				t.Fatalf("completions of runs %v, want only run-2", runs)
+			}
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("the dispatch of run 2 did not run")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	// Give a wrongly run dispatch of run 1 time to report.
+	time.Sleep(100 * time.Millisecond)
+	eng.Tick()
+	for _, ev := range eng.Timeline.Events() {
+		if wc, ok := ev.(brain.WorkCompleted); ok && wc.RunID == "run-1" {
+			t.Fatal("the dispatch of run 1 ran under the binding of run 2")
+		}
+	}
+}
+
+// racingPool occupies the active slot of a record in the window between the
+// early check of startRun and its claim. It stands for a second start that wins
+// the race.
+type racingPool struct {
+	datapool.Pool
+	onFor func()
+}
+
+func (p *racingPool) For(context.Context, auth.TenantID) (*datapool.Conn, error) {
+	p.onFor()
+	return nil, &datapool.NotProvisionedError{}
+}
+
+type countingAuthzStore struct {
+	mission.MissionAuthzStore
+	puts int
+}
+
+func (c *countingAuthzStore) Put(context.Context, string, string, string, string) error {
+	c.puts++
+	return nil
+}
+
+// A start that loses the claim leaves nothing behind: no authz entry, and the
+// active entry of the winner stays.
+func TestStartRun_RefusedStartLeavesNothingBehind(t *testing.T) {
+	tenant := auth.MustNewTenantID("acme")
+	rec := &mission.Mission{ID: types.NewID()}
+	id := rec.ID.String()
+	winner := activeRunOfRecord(rec, tenant)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mm := helperMM()
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	authz := &countingAuthzStore{}
+	mm.authzStore = authz
+	mm.pool = &racingPool{onFor: func() { mm.setActive(tenant, id, winner) }}
+
+	_, err := mm.startRun(auth.ContextWithTenant(ctx, tenant), tenant, rec, &missionpb.MissionDefinition{Name: "recon"})
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("want an already-running refusal, got %v", err)
+	}
+	if authz.puts != 0 {
+		t.Errorf("a refused start wrote %d authz entries", authz.puts)
+	}
+	if got, _ := mm.getActive(tenant, id); got != winner {
+		t.Error("a refused start changed the active entry of the winner")
 	}
 }

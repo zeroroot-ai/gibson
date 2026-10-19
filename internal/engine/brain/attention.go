@@ -64,7 +64,9 @@ type Finding struct {
 	// never reconciled, so a pentest finding or a hand-filed one is not verified
 	// because an unrelated scan finished without seeing it.
 	//
-	// LastScan is the mission id of the most recent scan that raised it. A
+	// LastScan is the run ID of the most recent scan run that raised it. The
+	// mission ID is the same for every run of a recurring scan, so only the
+	// run tells one scan from the next (gibson#1217). A
 	// rescan re-raises what it still sees, so after a scan completes LastScan
 	// divides the scope in two: equal to that scan means seen again, anything
 	// else means this scan looked and did not find it.
@@ -112,6 +114,11 @@ type FindingRaised struct {
 	// finding submitted over the component path, which carries no mission context —
 	// follow-up gibson#1078); such findings stay tenant-ambient.
 	MissionID string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID string
 
 	// Status is the initial lifecycle status. Empty or invalid means open.
 	Status string
@@ -174,8 +181,8 @@ func scanProvenance(w *World, missionID string) (scope, scan string) {
 		return "", ""
 	}
 	for _, m := range w.MissionSnapshot() {
-		if m.ID == missionID && m.Name == ScanMissionName {
-			return m.TargetID, m.ID
+		if m.ID == missionID && m.Name == ScanMissionName && m.RunID != "" {
+			return m.TargetID, m.RunID
 		}
 	}
 	return "", ""

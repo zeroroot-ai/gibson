@@ -390,13 +390,18 @@ type HostObserved struct {
 	// mission-evidence edge (gibson#1075), carried from the ingest ContextInfo so a
 	// mission-scoped slice surfaces the hosts that mission discovered. Empty when the
 	// observation has no mission context (tenant-ambient).
-	MissionID  string
-	ScopeID    string
-	Address    string
-	SSHHostKey string
-	CloudID    string
-	OpenPorts  []int
-	Services   map[int]ServiceInfo
+	MissionID string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID string
+	ScopeID      string
+	Address      string
+	SSHHostKey   string
+	CloudID      string
+	OpenPorts    []int
+	Services     map[int]ServiceInfo
 	// Per-port service detail (keyed by port number; all optional).
 	Endpoints    map[int][]EndpointInfo
 	Technologies map[int][]TechnologyInfo

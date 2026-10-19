@@ -280,3 +280,49 @@ func TestProjection_NewRunRetiresDecisionAndPlanOfTheLastRun(t *testing.T) {
 		t.Errorf("a late VoIPlanned of run 1 made %d VoI plans", got)
 	}
 }
+
+// TestProjection_LateEvidenceOfRun1IsDropped covers the evidence that a worker
+// of run 1 reports after run 2 has started. Each kind carries the run of the
+// mission that produced it.
+func TestProjection_LateEvidenceOfRun1IsDropped(t *testing.T) {
+	w := NewWorld("acme")
+	Reduce(w, runProjection("run-1"))
+	Reduce(w, MissionDone{ID: "m1", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
+	Reduce(w, runProjection("run-2"))
+
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-1"})
+	Reduce(w, HostObserved{MissionID: "m1", MissionRunID: "run-1", ScopeID: "s", Address: "10.0.0.5"})
+	Reduce(w, EntityObserved{Label: "Application", Key: "app", MissionID: "m1", MissionRunID: "run-1"})
+	Reduce(w, ObservationRecorded{EventID: "e1", MissionID: "m1", MissionRunID: "run-1", Shape: "x"})
+	Reduce(w, HypothesisObserved{MissionID: "m1", MissionRunID: "run-1", Claim: "c"})
+	Reduce(w, LlmCallObserved{CallID: "c1", MissionID: "m1", MissionRunID: "run-1"})
+	Reduce(w, AgentToolCallObserved{ToolCallID: "t1", MissionID: "m1", MissionRunID: "run-1"})
+
+	if n := len(w.FindingSnapshot()); n != 0 {
+		t.Errorf("findings = %d, want 0", n)
+	}
+	if n := len(w.Snapshot()); n != 0 {
+		t.Errorf("hosts = %d, want 0", n)
+	}
+	if n := len(w.EntitySnapshot()); n != 0 {
+		t.Errorf("entities = %d, want 0", n)
+	}
+	if n := len(w.ObservationSnapshot()); n != 0 {
+		t.Errorf("observations = %d, want 0", n)
+	}
+	if n := len(w.HypothesisSnapshot()); n != 0 {
+		t.Errorf("hypotheses = %d, want 0", n)
+	}
+	if n := len(w.LlmCallSnapshot()); n != 0 {
+		t.Errorf("LLM calls = %d, want 0", n)
+	}
+	if n := len(w.AgentToolCallSnapshot()); n != 0 {
+		t.Errorf("tool calls = %d, want 0", n)
+	}
+
+	// The same evidence of the current run lands.
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "m1", MissionRunID: "run-2"})
+	if n := len(w.FindingSnapshot()); n != 1 {
+		t.Errorf("findings of run 2 = %d, want 1", n)
+	}
+}

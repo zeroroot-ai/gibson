@@ -203,10 +203,10 @@ func TestFindOrCreateRecord_NewMissionKeepsRecordAsIs(t *testing.T) {
 	}
 }
 
-// ---- createRunRecord ------------------------------------------------------
+// ---- allocateRun and persistRun ---------------------------------------------
 
-func TestCreateRunRecord_NilStoreEphemeral(t *testing.T) {
-	run, err := helperMM().createRunRecord(context.Background(), nil, types.NewID())
+func TestAllocateRun_NilStoreEphemeral(t *testing.T) {
+	run, err := helperMM().allocateRun(context.Background(), nil, types.NewID())
 	if err != nil || run == nil {
 		t.Fatalf("want ephemeral run, got %v err %v", run, err)
 	}
@@ -215,37 +215,49 @@ func TestCreateRunRecord_NilStoreEphemeral(t *testing.T) {
 	}
 }
 
-func TestCreateRunRecord_NextNumberError(t *testing.T) {
+func TestAllocateRun_NextNumberError(t *testing.T) {
 	st := &fakeRunStore{nextNum: func(context.Context, types.ID) (int, error) { return 0, errors.New("boom") }}
-	_, err := helperMM().createRunRecord(context.Background(), st, types.NewID())
+	_, err := helperMM().allocateRun(context.Background(), st, types.NewID())
 	if err == nil || !strings.Contains(err.Error(), "failed to get next run number") {
 		t.Fatalf("want run-number error, got %v", err)
 	}
 }
 
-func TestCreateRunRecord_SaveError(t *testing.T) {
+func TestAllocateRun_WritesNothing(t *testing.T) {
+	saved := false
 	st := &fakeRunStore{
-		nextNum: func(context.Context, types.ID) (int, error) { return 3, nil },
-		save:    func(context.Context, *mission.MissionRun) error { return errors.New("boom") },
+		nextNum: func(context.Context, types.ID) (int, error) { return 7, nil },
+		save:    func(context.Context, *mission.MissionRun) error { saved = true; return nil },
 	}
-	_, err := helperMM().createRunRecord(context.Background(), st, types.NewID())
+	run, err := helperMM().allocateRun(context.Background(), st, types.NewID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.RunNumber != 7 || saved {
+		t.Fatalf("want run number 7 and no write, got %+v (saved %v)", run, saved)
+	}
+}
+
+func TestPersistRun_SaveError(t *testing.T) {
+	st := &fakeRunStore{save: func(context.Context, *mission.MissionRun) error { return errors.New("boom") }}
+	err := helperMM().persistRun(context.Background(), st, mission.NewMissionRun(types.NewID(), 3))
 	if err == nil || !strings.Contains(err.Error(), "failed to save mission run") {
 		t.Fatalf("want save error, got %v", err)
 	}
 }
 
-func TestCreateRunRecord_Persisted(t *testing.T) {
+func TestPersistRun_Saves(t *testing.T) {
 	var saved *mission.MissionRun
-	st := &fakeRunStore{
-		nextNum: func(context.Context, types.ID) (int, error) { return 7, nil },
-		save:    func(_ context.Context, r *mission.MissionRun) error { saved = r; return nil },
-	}
-	run, err := helperMM().createRunRecord(context.Background(), st, types.NewID())
-	if err != nil {
+	st := &fakeRunStore{save: func(_ context.Context, r *mission.MissionRun) error { saved = r; return nil }}
+	run := mission.NewMissionRun(types.NewID(), 7)
+	if err := helperMM().persistRun(context.Background(), st, run); err != nil {
 		t.Fatal(err)
 	}
-	if run.RunNumber != 7 || saved != run {
-		t.Fatalf("want saved run number 7, got %+v (saved %v)", run, saved)
+	if saved != run {
+		t.Fatalf("want the run saved, got %v", saved)
+	}
+	if err := helperMM().persistRun(context.Background(), nil, run); err != nil {
+		t.Fatalf("an ephemeral run has nothing to write: %v", err)
 	}
 }
 

@@ -56,7 +56,7 @@ func (s *stubEnrolledAgents) LookupEnrolledAgent(_ context.Context, tenant, prin
 
 // recordingSink captures the record the World sink is handed.
 func recordingSink(seen *finding.EnhancedFinding) WorldFindingSink {
-	return func(_ context.Context, _ string, f finding.EnhancedFinding) { *seen = f }
+	return func(_ context.Context, _ string, f finding.EnhancedFinding, _ string) { *seen = f }
 }
 
 func TestFindingSubmitter_StampsTheVerifiedSubmitter(t *testing.T) {

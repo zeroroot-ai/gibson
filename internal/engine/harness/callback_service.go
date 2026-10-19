@@ -463,6 +463,10 @@ type LLMCallRecord struct {
 	MissionID string
 	// RunID is the mission run (or agent run) the call ran under, for provenance.
 	RunID string
+	// MissionRunID is the mission run that issued the call, and only that. RunID
+	// falls back to the agent run, so it cannot tell one run of a mission from
+	// the next (gibson#1217). Empty when the context carries no mission run.
+	MissionRunID string
 	// Model is the resolved model that produced the completion.
 	Model            string
 	PromptTokens     int
@@ -536,6 +540,10 @@ type ToolCallRecord struct {
 	MissionID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
+	// MissionRunID is the mission run that issued the call, and only that. RunID
+	// falls back to the agent run, so it cannot tell one run of a mission from
+	// the next (gibson#1217). Empty when the context carries no mission run.
+	MissionRunID string
 	// ToolName is the tool that was called.
 	ToolName string
 	// Arguments + Result are the full JSON the agent sent and the tool
@@ -822,6 +830,7 @@ func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo
 	s.llmCallSink(ctx, tenant, LLMCallRecord{
 		CallID:              uuid.NewString(),
 		MissionID:           contextInfo.GetMissionId(),
+		MissionRunID:        contextInfo.GetMissionRunId(),
 		RunID:               runID,
 		Model:               resp.Model,
 		PromptTokens:        resp.Usage.PromptTokens,
@@ -888,6 +897,7 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 	s.toolCallSink(ctx, tenant, ToolCallRecord{
 		ToolCallID:         toolCallID,
 		MissionID:          contextInfo.GetMissionId(),
+		MissionRunID:       contextInfo.GetMissionRunId(),
 		RunID:              runID,
 		ToolName:           toolName,
 		Arguments:          argumentsJSON,
