@@ -8,7 +8,14 @@
 
 package providers
 
-import "github.com/zeroroot-ai/gibson/internal/engine/llm"
+import (
+	"fmt"
 
-// fixtureProvider builds nothing in a production build.
-func fixtureProvider(llm.ProviderConfig) (llm.LLMProvider, bool) { return nil, false }
+	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+)
+
+// newFixtureProvider builds nothing in a production build: every type that
+// reaches it is unknown.
+func newFixtureProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
+	return nil, fmt.Errorf("new provider: %w", llm.NewInvalidInputError("factory", unknownTypeMessage(cfg)))
+}

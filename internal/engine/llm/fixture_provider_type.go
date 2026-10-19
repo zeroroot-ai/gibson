@@ -14,6 +14,9 @@
 // tenant through the normal ProviderService RPC, so the tenant's own slot
 // manager and its model gate serve it (hosted#358).
 
+// Package llm defines the LLM provider contract, the provider types and the
+// slot model of the daemon. This file adds the e2e mock provider type to a
+// fixture build.
 package llm
 
 import "os"
@@ -26,4 +29,12 @@ const FixtureProviderType ProviderType = "mock-llm-e2e-test"
 // the runtime fixture gate is on.
 func IsFixtureProviderType(t ProviderType) bool {
 	return t == FixtureProviderType && os.Getenv("GIBSON_TEST_FIXTURES_ENABLED") == "true"
+}
+
+// fixtureProviderTypes holds the e2e mock type when the fixture gate is on.
+func fixtureProviderTypes() []ProviderType {
+	if !IsFixtureProviderType(FixtureProviderType) {
+		return nil
+	}
+	return []ProviderType{FixtureProviderType}
 }

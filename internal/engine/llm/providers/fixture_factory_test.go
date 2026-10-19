@@ -18,15 +18,17 @@ import (
 // In a fixture build with the gate on, the factory builds the e2e mock for
 // the fixture type (hosted#358). With the gate off it knows no such type.
 func TestNewProvider_TheFixtureTypeNeedsTheFixtureGate(t *testing.T) {
-	assert.Equal(t, string(llm.FixtureProviderType), mockllm.ProviderName,
+	assert.Equal(t, mockllm.ProviderName, string(llm.FixtureProviderType),
 		"the fixture type is the mock's registry name")
 
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "true")
+	assert.Contains(t, llm.AcceptedProviderTypes(), llm.FixtureProviderType)
 	p, err := NewProvider(llm.ProviderConfig{Type: llm.FixtureProviderType})
 	require.NoError(t, err)
 	assert.Equal(t, mockllm.ProviderName, p.Name())
 
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "false")
+	assert.NotContains(t, llm.AcceptedProviderTypes(), llm.FixtureProviderType)
 	_, err = NewProvider(llm.ProviderConfig{Type: llm.FixtureProviderType})
 	require.Error(t, err)
 }

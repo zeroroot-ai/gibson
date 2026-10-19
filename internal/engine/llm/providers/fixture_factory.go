@@ -12,14 +12,17 @@
 package providers
 
 import (
+	"fmt"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	mockllm "github.com/zeroroot-ai/gibson/tests/e2e/fixtures/providers/mock-llm"
 )
 
-// fixtureProvider returns the e2e mock provider for its fixture type.
-func fixtureProvider(cfg llm.ProviderConfig) (llm.LLMProvider, bool) {
+// newFixtureProvider returns the e2e mock provider for its fixture type, and
+// the unknown type error for every other type.
+func newFixtureProvider(cfg llm.ProviderConfig) (llm.LLMProvider, error) {
 	if !llm.IsFixtureProviderType(cfg.Type) {
-		return nil, false
+		return nil, fmt.Errorf("new provider: %w", llm.NewInvalidInputError("factory", unknownTypeMessage(cfg)))
 	}
-	return mockllm.New(), true
+	return mockllm.New(), nil
 }

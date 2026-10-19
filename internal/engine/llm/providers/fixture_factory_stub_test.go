@@ -18,7 +18,8 @@ import (
 // flag says.
 func TestNewProvider_AProductionBuildKnowsNoFixtureType(t *testing.T) {
 	t.Setenv("GIBSON_TEST_FIXTURES_ENABLED", "true")
-	assert.False(t, llm.IsFixtureProviderType("mock-llm-e2e-test"))
+	assert.Equal(t, llm.SupportedProviderTypes(), llm.AcceptedProviderTypes(),
+		"a production build accepts exactly the supported types")
 	_, err := NewProvider(llm.ProviderConfig{Type: "mock-llm-e2e-test"})
 	require.Error(t, err)
 }

@@ -8,5 +8,5 @@
 // provider type (fixture_provider_type.go is the fixture build).
 package llm
 
-// IsFixtureProviderType is false in every production build.
-func IsFixtureProviderType(ProviderType) bool { return false }
+// fixtureProviderTypes is empty in every production build.
+func fixtureProviderTypes() []ProviderType { return nil }

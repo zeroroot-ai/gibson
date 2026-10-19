@@ -193,13 +193,8 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 	if input.Type == string(llm.ProviderCustom) {
 		return fmt.Errorf("provider type %q is operator-only and cannot be configured via the dashboard", input.Type)
 	}
-	// The e2e mock provider type exists only in a fixture build with the
-	// fixture gate on (llm.IsFixtureProviderType, hosted#358).
-	if llm.IsFixtureProviderType(llm.ProviderType(input.Type)) {
-		return nil
-	}
 	supported := false
-	for _, t := range llm.SupportedProviderTypes() {
+	for _, t := range llm.AcceptedProviderTypes() {
 		if string(t) == input.Type {
 			supported = true
 			break
@@ -931,8 +926,8 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 	}
 
 	// Validate against the known type list (reuse logic without a full input struct).
-	supported := llm.IsFixtureProviderType(llm.ProviderType(provType))
-	for _, t := range llm.SupportedProviderTypes() {
+	supported := false
+	for _, t := range llm.AcceptedProviderTypes() {
 		if string(t) == provType {
 			supported = true
 			break
