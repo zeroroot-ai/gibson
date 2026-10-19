@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -94,7 +95,7 @@ type CallbackConfig struct {
 //	defer manager.Stop()
 //
 //	// Register harness before external agent execution
-//	key := manager.RegisterHarnessForMission(missionID, agentName, harness)
+//	key, err := manager.RegisterHarnessForMission(missionID, agentName, harness)
 //	defer manager.UnregisterHarness(key)
 //
 //	// Pass callback endpoint to agent in gRPC request
@@ -310,14 +311,15 @@ func (m *CallbackManager) Stop() {
 //   - harness: The harness instance that will handle callbacks
 //
 // Returns:
-//   - string: The registration key in the format "missionID:agentName"
+//   - string: The registration key
+//   - error: Non-nil when the harness is refused, for example when it has no mission run
 //
 // The harness must be registered BEFORE the agent execution request is sent,
 // otherwise callbacks will fail with "no harness found" errors.
 //
 // Always unregister the harness after agent completion to prevent memory leaks:
 //
-//	key := manager.RegisterHarnessForMission(missionID, agentName, harness)
+//	key, err := manager.RegisterHarnessForMission(missionID, agentName, harness)
 //	defer manager.UnregisterHarness(key)
 //	// Execute external agent...
 //
@@ -325,10 +327,10 @@ func (m *CallbackManager) Stop() {
 //
 // Example:
 //
-//	key := callbackMgr.RegisterHarnessForMission("mission-123", "recon-agent", harness)
+//	key, err := callbackMgr.RegisterHarnessForMission("mission-123", "recon-agent", harness)
 //	defer callbackMgr.UnregisterHarness(key)
 //	result, err := grpcClient.Execute(ctx, task, callbackMgr.CallbackEndpoint())
-func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string, harness any) string {
+func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string, harness any) (string, error) {
 	// Type assert to AgentHarness - the registry.CallbackManager interface uses any to avoid
 	// circular imports, but the actual harness must implement AgentHarness
 	h, ok := harness.(AgentHarness)
@@ -337,15 +339,24 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 			"mission_id", missionID,
 			"agent_name", agentName,
 		)
-		return ""
+		return "", fmt.Errorf("register harness for mission %s, agent %s: harness does not implement AgentHarness",
+			missionID, agentName)
 	}
-	key := m.registry.Register(missionID, agentName, h)
+	key, err := m.registry.Register(missionID, agentName, h)
+	if err != nil {
+		m.logger.Error("harness not registered",
+			"mission_id", missionID,
+			"agent_name", agentName,
+			"error", err,
+		)
+		return "", fmt.Errorf("register harness for mission %s, agent %s: %w", missionID, agentName, err)
+	}
 	m.logger.Debug("registered harness for mission agent",
 		"mission_id", missionID,
 		"agent_name", agentName,
 		"registry_key", key,
 	)
-	return key
+	return key, nil
 }
 
 // UnregisterHarness removes a harness registration when a task completes.
@@ -356,7 +367,7 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 // This method should be called in a defer block immediately after registration
 // to ensure cleanup happens even if the agent execution fails:
 //
-//	key := manager.RegisterHarnessForMission(missionID, agentName, harness)
+//	key, err := manager.RegisterHarnessForMission(missionID, agentName, harness)
 //	defer manager.UnregisterHarness(key)
 //	result, err := agent.Execute(ctx, task, callbackEndpoint)
 //

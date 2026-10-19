@@ -121,7 +121,7 @@ type capturedCall struct {
 func newCaptureService(t *testing.T, tenant string, captured *[]capturedCall) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("mission-A", "recon-agent", newCompletingHarness(tenant))
+	mustRegister(t, registry, "mission-A", "recon-agent", newCompletingHarness(tenant))
 	return NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		registry,
@@ -207,7 +207,7 @@ func TestLLMStream_FeedsLLMCallSink_WithAggregatedUsage(t *testing.T) {
 	err := svc.LLMStream(&harnesspb.LLMStreamRequest{
 		Context: &harnesspb.ContextInfo{
 			MissionId:    "mission-A",
-			MissionRunId: "run-7",
+			MissionRunId: "run-1",
 			AgentName:    "recon-agent",
 		},
 		Slot:     "default",
@@ -219,7 +219,7 @@ func TestLLMStream_FeedsLLMCallSink_WithAggregatedUsage(t *testing.T) {
 	got := captured[0]
 	assert.Equal(t, "acme", got.tenant)
 	assert.Equal(t, "mission-A", got.call.MissionID, "mission context must be stamped")
-	assert.Equal(t, "run-7", got.call.RunID)
+	assert.Equal(t, "run-1", got.call.RunID)
 	assert.Equal(t, "claude-haiku-4-5", got.call.Model, "model read off terminal chunk")
 	assert.Equal(t, 11, got.call.PromptTokens, "usage aggregated at stream end")
 	assert.Equal(t, 7, got.call.CompletionTokens)
@@ -248,7 +248,7 @@ func TestLLMStream_ErrorMidStream_NoCapture(t *testing.T) {
 	h := &erroringStreamHarness{}
 	h.resp = &llm.CompletionResponse{Model: "claude-haiku-4-5"}
 	h.tenantID = "acme"
-	registry.Register("mission-A", "recon-agent", h)
+	mustRegister(t, registry, "mission-A", "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(io.Discard, nil)),
 		registry,
@@ -281,7 +281,7 @@ func TestLLMCompleteStructured_FeedsLLMCallSink_Decider(t *testing.T) {
 	resp, err := svc.LLMCompleteStructured(ctx, &harnesspb.LLMCompleteStructuredRequest{
 		Context: &harnesspb.ContextInfo{
 			MissionId:    "mission-A",
-			MissionRunId: "run-decider",
+			MissionRunId: "run-1",
 			AgentName:    "recon-agent",
 		},
 		Slot:       "default",
@@ -296,7 +296,7 @@ func TestLLMCompleteStructured_FeedsLLMCallSink_Decider(t *testing.T) {
 	got := captured[0]
 	assert.Equal(t, "acme", got.tenant)
 	assert.Equal(t, "mission-A", got.call.MissionID)
-	assert.Equal(t, "run-decider", got.call.RunID)
+	assert.Equal(t, "run-1", got.call.RunID)
 	assert.Equal(t, "claude-haiku-4-5", got.call.Model)
 	assert.Equal(t, 13, got.call.PromptTokens, "structured usage surfaced + captured")
 	assert.Equal(t, 5, got.call.CompletionTokens)
@@ -332,7 +332,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 		},
 	}
 	h.tenantID = "acme"
-	registry.Register("mission-A", "recon-agent", h)
+	mustRegister(t, registry, "mission-A", "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.DiscardHandler),
 		registry,
@@ -369,7 +369,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 // is unwired (chat-only / capture-disabled deployments).
 func TestLLMComplete_NoSink_NoPanic(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("mission-A", "recon-agent", newCompletingHarness("acme"))
+	mustRegister(t, registry, "mission-A", "recon-agent", newCompletingHarness("acme"))
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")

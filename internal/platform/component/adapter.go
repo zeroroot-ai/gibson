@@ -31,7 +31,7 @@ import (
 type CallbackManager interface {
 	// RegisterHarnessForMission registers a harness for external agent execution within
 	// a mission context and returns the registration key.
-	RegisterHarnessForMission(missionID, agentName string, harness any) string
+	RegisterHarnessForMission(missionID, agentName string, harness any) (string, error)
 
 	// UnregisterHarness removes a harness registration after task or mission completion.
 	UnregisterHarness(key string)

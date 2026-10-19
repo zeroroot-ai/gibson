@@ -437,6 +437,6 @@ func DefaultClassifierConfig() *ClassifierConfig {
 // harness under (mission, agent) for the work item's lifetime, then drop it.
 // *CallbackManager satisfies it.
 type CallbackRegistrar interface {
-	RegisterHarnessForMission(missionID, agentName string, harness any) string
+	RegisterHarnessForMission(missionID, agentName string, harness any) (string, error)
 	UnregisterHarness(key string)
 }

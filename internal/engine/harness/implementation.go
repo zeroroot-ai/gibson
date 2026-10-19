@@ -915,10 +915,14 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 				"failed to create child harness for the queue-dispatched agent: "+name, cerr)
 		}
-		key := h.callbackManager.RegisterHarnessForMission(h.missionCtx.ID.String(), name, childHarness)
-		if key != "" {
-			defer h.callbackManager.UnregisterHarness(key)
+		// A registration that is refused stops the delegation. The agent would
+		// otherwise run with no harness for its callbacks.
+		key, regErr := h.callbackManager.RegisterHarnessForMission(h.missionCtx.ID.String(), name, childHarness)
+		if regErr != nil {
+			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+				"failed to register the child harness of the queue-dispatched agent: "+name, regErr)
 		}
+		defer h.callbackManager.UnregisterHarness(key)
 		h.observeDelegation(ctx, name, childHarness)
 	}
 	// An agent node is the one dispatch that may legitimately outlive any clock

@@ -55,7 +55,7 @@ func TestCallToolProto_FeedsToolCallSink_OnMarshalFailure(t *testing.T) {
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		registry,

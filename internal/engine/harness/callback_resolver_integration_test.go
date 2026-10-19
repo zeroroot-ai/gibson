@@ -232,7 +232,7 @@ func (m *mockHarnessForResolver) Mission() MissionContext {
 	// getHarness enforces tenant isolation: the context tenant must match the
 	// harness mission tenant. The integration test calls with a context
 	// carrying the same tenant (resolverTestTenant).
-	return MissionContext{TenantID: resolverTestTenant}
+	return MissionContext{TenantID: resolverTestTenant, MissionRunID: "run-1"}
 }
 
 func (m *mockHarnessForResolver) MissionID() types.ID {
@@ -346,7 +346,7 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 
 	missionID := "integration-mission-123"
 	agentName := "integration-agent"
-	registry.Register(missionID, agentName, mockHarness)
+	mustRegister(t, registry, missionID, agentName, mockHarness)
 
 	// Create request
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)

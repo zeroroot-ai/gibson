@@ -69,7 +69,7 @@ func newOriginService(t *testing.T, mgr MissionOperator, missionID, agentName st
 
 	parentID, err := types.ParseID(originParentMissionID)
 	require.NoError(t, err)
-	registry.Register(missionID, agentName, &originMockHarness{
+	mustRegister(t, registry, missionID, agentName, &originMockHarness{
 		mission: MissionContext{
 			ID:              parentID,
 			Name:            "watch-customer-portal",

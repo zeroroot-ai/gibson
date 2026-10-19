@@ -448,3 +448,40 @@ func TestDelegateToAgent_SandboxFailureResultIsAnError(t *testing.T) {
 		t.Fatalf("err = %v; want the failure reason of the agent", err)
 	}
 }
+
+// A child harness with no mission run is refused by the callback manager. The
+// sandbox delegation then fails before it launches anything: a sandboxed agent
+// with no registered harness would find none for its callbacks (gibson#1217).
+func TestDelegateToAgent_SandboxRefusedRegistrationStopsTheLaunch(t *testing.T) {
+	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{
+		SandboxID: "sbx-1", Result: &sandboxed.AgentTerminalResult{Success: true, Output: "done"},
+	}}
+	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{
+		Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent",
+	}}
+	q := successResultQueue(t)
+	h := newSandboxDelegateHarness(launcher, resolver, q, untrustedAgentInstances(), testMinter(t))
+	h.missionCtx.MissionRunID = "" // the child harness inherits no run
+	m := NewCallbackManager(CallbackConfig{
+		ListenAddress:  "127.0.0.1:0",
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+	}, slog.New(slog.DiscardHandler))
+	h.callbackManager = m
+	h.factory = func(context.Context, MissionContext, TargetInfo) (AgentHarness, error) { return h, nil }
+
+	_, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", agent.NewTask("probe", "goal"))
+
+	var gerr *types.GibsonError
+	if !errors.As(err, &gerr) || gerr.Code != ErrHarnessDelegationFailed || !errors.Is(err, ErrHarnessWithoutRun) {
+		t.Fatalf("err = %v, want a delegation failure caused by a harness with no run", err)
+	}
+	if launcher.calls != 0 {
+		t.Errorf("launcher calls = %d, want 0: nothing is dispatched to the sandbox", launcher.calls)
+	}
+	if q.gotKind != "" {
+		t.Errorf("the agent was enqueued (gotKind=%q), want nothing", q.gotKind)
+	}
+	if m.registry.Count() != 0 {
+		t.Errorf("registry holds %d harnesses, want 0", m.registry.Count())
+	}
+}

@@ -150,9 +150,14 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
 				"failed to create child harness for the sandboxed agent: "+name, cerr)
 		}
-		if key := h.callbackManager.RegisterHarnessForMission(h.missionCtx.ID.String(), name, childHarness); key != "" {
-			defer h.callbackManager.UnregisterHarness(key)
+		// A registration that is refused stops the delegation. The agent would
+		// otherwise run with no harness for its callbacks.
+		key, regErr := h.callbackManager.RegisterHarnessForMission(h.missionCtx.ID.String(), name, childHarness)
+		if regErr != nil {
+			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+				"failed to register the child harness of the sandboxed agent: "+name, regErr)
 		}
+		defer h.callbackManager.UnregisterHarness(key)
 	}
 
 	// Per-dispatch grant: a tenant+run-scoped CG-JWT with a short TTL, nothing

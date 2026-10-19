@@ -31,7 +31,7 @@ type placeBetMockHarness struct {
 }
 
 func (m *placeBetMockHarness) Mission() MissionContext {
-	return MissionContext{ID: m.missionID, TenantID: m.tenantID}
+	return MissionContext{ID: m.missionID, TenantID: m.tenantID, MissionRunID: "run-1"}
 }
 
 func (m *placeBetMockHarness) Workspace() workspace.Workspace { return nil }
@@ -78,7 +78,7 @@ var _ brain.BeliefSubstrate = (*fakeBeliefSubstrate)(nil)
 func newPlaceBetService(t *testing.T, h *placeBetMockHarness, agentName string, substrate brain.BeliefSubstrate) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(h.missionID.String(), agentName, h)
+	mustRegister(t, registry, h.missionID.String(), agentName, h)
 	opts := []CallbackServiceOption{}
 	if substrate != nil {
 		opts = append(opts, WithBeliefSubstrate(substrate))

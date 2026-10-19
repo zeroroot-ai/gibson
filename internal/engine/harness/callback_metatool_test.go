@@ -474,7 +474,7 @@ func TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable(t *testing.T) {
 type blockedToolHarness struct{ *mockHarnessWithResolver }
 
 func (h blockedToolHarness) Mission() MissionContext {
-	return MissionContext{TenantID: "test-tenant", BlockedTools: []string{"test-external-tool"}}
+	return MissionContext{TenantID: "test-tenant", MissionRunID: "run-1", BlockedTools: []string{"test-external-tool"}}
 }
 
 // TestInvokeNativeTool_Refusals covers the refusals before and after the
@@ -515,7 +515,7 @@ func TestInvokeNativeTool_Refusals(t *testing.T) {
 		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
 		blocked := blockedToolHarness{harness}
 		registry := NewCallbackHarnessRegistry()
-		registry.Register(contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
+		mustRegister(t, registry, contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
 		svc.registry = registry
 		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, blocked, "test-external-tool", "native:test-external-tool", []byte(`{}`))
 		if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {

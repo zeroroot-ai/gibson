@@ -49,7 +49,7 @@ type proposeOntologyExtensionMockHarness struct {
 }
 
 func (m *proposeOntologyExtensionMockHarness) Mission() MissionContext {
-	return MissionContext{ID: m.missionID, TenantID: m.tenantID}
+	return MissionContext{ID: m.missionID, TenantID: m.tenantID, MissionRunID: "run-1"}
 }
 
 func (m *proposeOntologyExtensionMockHarness) Workspace() workspace.Workspace { return nil }
@@ -65,7 +65,7 @@ func newProposeOntologyExtensionService(
 ) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(h.missionID.String(), agentName, h)
+	mustRegister(t, registry, h.missionID.String(), agentName, h)
 	var opts []CallbackServiceOption
 	if engine != nil {
 		opts = append(opts, WithOntologyDiscovery(engine))

@@ -30,7 +30,7 @@ type observeMockHarness struct {
 }
 
 func (m *observeMockHarness) Mission() MissionContext {
-	return MissionContext{ID: m.missionID, TenantID: m.tenantID}
+	return MissionContext{ID: m.missionID, TenantID: m.tenantID, MissionRunID: "run-1"}
 }
 
 func (m *observeMockHarness) Target() TargetInfo {
@@ -53,7 +53,7 @@ type observeCapture struct {
 func newObserveService(t *testing.T, h *observeMockHarness, got *[]observeCapture) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	registry.Register(h.missionID.String(), "recon-agent", h)
+	mustRegister(t, registry, h.missionID.String(), "recon-agent", h)
 	return NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.DiscardHandler),
 		registry,

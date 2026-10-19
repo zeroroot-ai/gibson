@@ -51,7 +51,7 @@ func TestCallToolProto_FeedsToolCallSink_OnSuccess(t *testing.T) {
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		registry,
@@ -113,7 +113,7 @@ func TestCallToolProto_FeedsToolCallSink_OnFailure(t *testing.T) {
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		registry,
@@ -167,7 +167,7 @@ func TestCallToolProto_ToolCallIDFallsBackToFreshUUID(t *testing.T) {
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.NewTextHandler(os.Stdout, nil)),
 		registry,
@@ -227,7 +227,7 @@ func TestCallToolProto_NoSink_NoPanic(t *testing.T) {
 		},
 	}
 	registry := NewCallbackHarnessRegistry()
-	registry.Register("test-mission-123", "test-agent", mockHarness)
+	mustRegister(t, registry, "test-mission-123", "test-agent", mockHarness)
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.NewTextHandler(os.Stdout, nil)), registry, testEventBus())
 
 	req := &harnesspb.CallToolProtoRequest{
