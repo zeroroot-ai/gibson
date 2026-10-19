@@ -35,7 +35,7 @@ func TestMissionGoal(t *testing.T) {
 type completingDispatcher struct{ eng *brain.Engine }
 
 func (c *completingDispatcher) Dispatch(req brain.DispatchRequest) {
-	c.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: "ok"})
+	c.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: "ok"})
 }
 
 func TestAwaitBrainMission_ReturnsCompleted(t *testing.T) {
@@ -59,7 +59,7 @@ func TestAwaitBrainMission_ReturnsCompleted(t *testing.T) {
 	}})
 
 	var mm missionManager
-	status, errMsg := mm.awaitBrainMission(ctx, eng, "m1")
+	status, errMsg := mm.awaitBrainMission(ctx, eng, "m1", "")
 	if status != mission.MissionStatusCompleted {
 		t.Fatalf("want completed, got %s (%s)", status, errMsg)
 	}
@@ -72,7 +72,7 @@ func TestAwaitBrainMission_CtxCancelledReturnsCancelled(t *testing.T) {
 
 	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
 	var mm missionManager
-	status, _ := mm.awaitBrainMission(ctx, eng, "m1")
+	status, _ := mm.awaitBrainMission(ctx, eng, "m1", "")
 	if status != mission.MissionStatusCancelled {
 		t.Fatalf("want cancelled, got %s", status)
 	}

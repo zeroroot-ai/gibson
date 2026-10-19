@@ -124,6 +124,8 @@ func entityObservedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult) (e
 			Key:       fromKey,
 			ScopeID:   scope,
 			MissionID: execCtx.MissionID,
+			// The run of the mission, for the stale-run drop (gibson#1217).
+			MissionRunID: execCtx.missionRun(),
 			Edges: []brain.EntityEdge{{
 				Type: relType, TargetLabel: toLabel, TargetKey: toKey,
 			}},
@@ -420,9 +422,10 @@ func hostObservedEvents(
 		addressByHostID[h.GetId()] = h.Ip
 
 		ev := brain.HostObserved{
-			MissionID: execCtx.MissionID,
-			ScopeID:   execCtx.MissionID,
-			Address:   h.Ip,
+			MissionID:    execCtx.MissionID,
+			MissionRunID: execCtx.missionRun(),
+			ScopeID:      execCtx.MissionID,
+			Address:      h.Ip,
 		}
 		if hd := details[h.GetId()]; hd != nil {
 			ev.OpenPorts = hd.openPorts
@@ -492,6 +495,7 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 			ScopeID:         execCtx.MissionID,
 			Address:         addressByHostID[f.GetParentId()],
 			MissionID:       execCtx.MissionID,
+			MissionRunID:    execCtx.missionRun(),
 			Status:          brain.FindingStatusOpen,
 			VulnerabilityID: firstVulnerabilityID(f.GetCveIds()),
 		})

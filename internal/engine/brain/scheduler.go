@@ -59,6 +59,7 @@ func SchedulerSystem(w *World) []Event {
 		out = append(out, WorkDispatched{
 			ID:           wi.ID,
 			MissionID:    wi.MissionID,
+			RunID:        wi.RunID,
 			ItemKind:     wi.Kind,
 			Target:       wi.Target,
 			Input:        wi.Input,

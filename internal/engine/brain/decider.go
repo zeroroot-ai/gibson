@@ -114,6 +114,11 @@ type DeciderLLM interface {
 type DecisionRequested struct {
 	MissionID string
 	Cursor    int
+	// RunID names the run this event belongs to. The daemon mints it when a run
+	// starts. The reducer drops an event whose RunID is not the current run of
+	// the mission, so a late event of run 1 cannot change run 2 (gibson#1217).
+	// Empty means the event is not run-scoped.
+	RunID string
 }
 
 func (DecisionRequested) Kind() string { return "decision.requested" }
@@ -122,6 +127,7 @@ func (DecisionRequested) Kind() string { return "decision.requested" }
 // its resulting events.
 type DecisionCompleted struct {
 	MissionID string
+	RunID     string // see DecisionRequested.RunID
 }
 
 func (DecisionCompleted) Kind() string { return "decision.completed" }
@@ -288,7 +294,7 @@ func DeciderGateSystem(w *World) []Event {
 		}
 		terminal := terminalWorkCount(work, m.ID)
 		if m.DecisionCursor == -1 || terminal != m.DecisionCursor {
-			out = append(out, DecisionRequested{MissionID: m.ID, Cursor: terminal})
+			out = append(out, DecisionRequested{MissionID: m.ID, Cursor: terminal, RunID: m.RunID})
 		}
 	}
 	return out
@@ -306,8 +312,8 @@ type DeciderWorker struct {
 	catalog func(missionID string) []Capability
 
 	mu      sync.Mutex
-	pending []string // mission ids awaiting a decision
-	seq     int      // monotonic id suffix for dispatched executions
+	pending []decisionRequest // decisions awaiting a worker
+	seq     int               // monotonic id suffix for dispatched executions
 }
 
 // NewDeciderWorker builds a worker. catalog may be nil (no capabilities offered).
@@ -322,7 +328,7 @@ func NewDeciderWorker(eng *Engine, llm DeciderLLM, catalog func(missionID string
 func (dw *DeciderWorker) Tap(ev Event) {
 	if r, ok := ev.(DecisionRequested); ok {
 		dw.mu.Lock()
-		dw.pending = append(dw.pending, r.MissionID)
+		dw.pending = append(dw.pending, decisionRequest{missionID: r.MissionID, runID: r.RunID})
 		dw.mu.Unlock()
 	}
 }
@@ -342,14 +348,14 @@ func (dw *DeciderWorker) Drain(ctx context.Context) int {
 	dw.mu.Unlock()
 
 	planning := dw.voiPlansInFlight()
-	var deferred []string
+	var deferred []decisionRequest
 	done := 0
-	for _, missionID := range ids {
-		if planning[missionID] {
-			deferred = append(deferred, missionID)
+	for _, req := range ids {
+		if planning[req.missionID] {
+			deferred = append(deferred, req)
 			continue
 		}
-		dw.decide(ctx, missionID)
+		dw.decide(ctx, req)
 		done++
 	}
 	if len(deferred) > 0 {
@@ -373,7 +379,16 @@ func (dw *DeciderWorker) voiPlansInFlight() map[string]bool {
 	return out
 }
 
-func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
+// decisionRequest is one buffered DecisionRequested. The worker answers it with
+// events of the same run, so an answer that comes after the run ended cannot
+// change the next run of the mission (gibson#1217).
+type decisionRequest struct {
+	missionID string
+	runID     string
+}
+
+func (dw *DeciderWorker) decide(ctx context.Context, req decisionRequest) {
+	missionID, runID := req.missionID, req.runID
 	mc := dw.buildContext(missionID)
 
 	out, err := dw.llm.Decide(ctx, mc)
@@ -399,20 +414,23 @@ func (dw *DeciderWorker) decide(ctx context.Context, missionID string) {
 		// gate retry on the next evidence change. (A persistent failure is bounded
 		// by the budget System, gibson#849.)
 	case out.Complete != nil:
-		evs = append(evs, missionDoneFrom(missionID, *out.Complete))
+		evs = append(evs, missionDoneFrom(missionID, runID, *out.Complete))
 	case len(valid) > 0:
 		for _, d := range valid {
-			evs = append(evs, dw.dispatchEvent(missionID, d))
+			evs = append(evs, dw.dispatchEvent(missionID, runID, d))
 		}
 	default:
 		// No actionable dispatch (empty, or all rejected). On a quiescent mission
 		// (nothing left running/pending), that is terminal — the Decider has nothing
 		// more to do (CONTEXT.md).
 		if mc.quiescent() {
-			evs = append(evs, MissionDone{ID: missionID, Outcome: MissionCompleted, Reason: "decider: goal resolved, nothing left to do"})
+			evs = append(evs, MissionDone{
+				ID: missionID, RunID: runID, Outcome: MissionCompleted,
+				Reason: "decider: goal resolved, nothing left to do",
+			})
 		}
 	}
-	evs = append(evs, DecisionCompleted{MissionID: missionID})
+	evs = append(evs, DecisionCompleted{MissionID: missionID, RunID: runID})
 	for _, e := range evs {
 		dw.eng.Submit(e)
 	}
@@ -464,15 +482,15 @@ func (dw *DeciderWorker) voiGatedDispatch(missionID string, d DeciderDispatch) b
 	return false
 }
 
-func (dw *DeciderWorker) dispatchEvent(missionID string, d DeciderDispatch) Event {
+func (dw *DeciderWorker) dispatchEvent(missionID, runID string, d DeciderDispatch) Event {
 	dw.mu.Lock()
 	dw.seq++
 	id := fmt.Sprintf("%s-dec-%d", missionID, dw.seq)
 	dw.mu.Unlock()
-	return WorkDispatched{ID: id, MissionID: missionID, ItemKind: d.Kind, Target: d.Target, Input: d.Input}
+	return WorkDispatched{ID: id, MissionID: missionID, RunID: runID, ItemKind: d.Kind, Target: d.Target, Input: d.Input}
 }
 
-func missionDoneFrom(missionID string, c DeciderComplete) MissionDone {
+func missionDoneFrom(missionID, runID string, c DeciderComplete) MissionDone {
 	outcome := MissionCompleted
 	if c.Outcome == "failed" {
 		outcome = MissionFailed
@@ -481,7 +499,7 @@ func missionDoneFrom(missionID string, c DeciderComplete) MissionDone {
 	if reason == "" {
 		reason = "decider"
 	}
-	return MissionDone{ID: missionID, Outcome: outcome, Reason: reason}
+	return MissionDone{ID: missionID, RunID: runID, Outcome: outcome, Reason: reason}
 }
 
 // buildContext reads the own-mission slice off the tick (engine read-locked).

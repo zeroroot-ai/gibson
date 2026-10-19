@@ -36,7 +36,12 @@ import (
 // stamped and the finding attaches to its mission's frame. The mission is empty
 // when the finding was submitted outside a formal mission (the context expired
 // or never existed), in which case the finding stays tenant-ambient.
-type WorldFindingSink func(ctx context.Context, tenant string, finding finding.EnhancedFinding)
+//
+// missionRunID is the run of the mission that the work item belongs to, as the
+// daemon bound it when it enqueued the work. It is empty when the finding has
+// no mission or the binding is gone. The World drops a finding of a run that is
+// not the current run of the mission (gibson#1217).
+type WorldFindingSink func(ctx context.Context, tenant string, finding finding.EnhancedFinding, missionRunID string)
 
 // ErrNoSubmitterIdentity reports a SubmitFinding call whose context carries no
 // verified caller identity. Every request reaches the daemon through ext-authz
@@ -173,7 +178,7 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// and the finding attaches to its mission's frame (gibson#1078); empty when the
 	// finding was submitted outside a formal mission (tenant-ambient).
 	if s.worldSink != nil {
-		s.worldSink(ctx, tenant, enhanced)
+		s.worldSink(ctx, tenant, enhanced, s.resolveMissionRunID(ctx, workID, missionID))
 	}
 
 	s.logger.InfoContext(ctx, "finding submitter: finding queued for GraphRAG storage",
@@ -329,6 +334,32 @@ func (s *GraphRAGFindingSubmitter) resolveMissionID(ctx context.Context, tenant,
 	}
 
 	return types.ID(fields[workContextMissionField])
+}
+
+// resolveMissionRunID returns the run of the mission that workID belongs to. The
+// daemon bound it to the work id when it enqueued the work, so it does not come
+// from the component. A finding with no mission has no run.
+func (s *GraphRAGFindingSubmitter) resolveMissionRunID(ctx context.Context, workID string, missionID types.ID) string {
+	if missionID.IsZero() || s.stateClient == nil {
+		return ""
+	}
+	run, err := lookupWorkRun(ctx, s.stateClient.Client(), workID)
+	if err != nil {
+		if errors.Is(err, ErrWorkRunUnknown) {
+			s.logger.DebugContext(ctx, "finding submitter: no mission run bound to the work item",
+				slog.String("work_id", workID),
+			)
+		} else {
+			// The finding is kept without a run. A Redis fault must not pass
+			// without a sign.
+			s.logger.WarnContext(ctx, "finding submitter: could not read the mission run of the work item",
+				slog.String("work_id", workID),
+				slog.String("error", err.Error()),
+			)
+		}
+		return ""
+	}
+	return run
 }
 
 // Compile-time check: GraphRAGFindingSubmitter must satisfy FindingSubmitter.

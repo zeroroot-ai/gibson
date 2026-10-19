@@ -95,9 +95,6 @@ type DiscoveryProcessor interface {
 type HarnessCallbackService struct {
 	harnesspb.UnimplementedHarnessCallbackServiceServer
 
-	// activeHarnesses maps task IDs to their corresponding harness instances (legacy mode)
-	activeHarnesses sync.Map // map[string]AgentHarness
-
 	// registry provides mission-based harness lookup for external agents (new mode)
 	registry *CallbackHarnessRegistry
 
@@ -463,6 +460,10 @@ type LLMCallRecord struct {
 	MissionID string
 	// RunID is the mission run (or agent run) the call ran under, for provenance.
 	RunID string
+	// MissionRunID is the mission run that issued the call, and only that. RunID
+	// falls back to the agent run, so it cannot tell one run of a mission from
+	// the next (gibson#1217). Empty when the context carries no mission run.
+	MissionRunID string
 	// Model is the resolved model that produced the completion.
 	Model            string
 	PromptTokens     int
@@ -536,6 +537,10 @@ type ToolCallRecord struct {
 	MissionID string
 	// RunID is the mission run (or agent run) that made this call.
 	RunID string
+	// MissionRunID is the mission run that issued the call, and only that. RunID
+	// falls back to the agent run, so it cannot tell one run of a mission from
+	// the next (gibson#1217). Empty when the context carries no mission run.
+	MissionRunID string
 	// ToolName is the tool that was called.
 	ToolName string
 	// Arguments + Result are the full JSON the agent sent and the tool
@@ -685,13 +690,6 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 	return s
 }
 
-// UnregisterHarness removes a harness instance when a task completes.
-// This prevents memory leaks from accumulating completed tasks.
-func (s *HarnessCallbackService) UnregisterHarness(taskID string) {
-	s.activeHarnesses.Delete(taskID)
-	s.logger.Debug("unregistered harness for task", "task_id", taskID)
-}
-
 // getHarness retrieves the harness for a request based on the context information.
 //
 // This method requires explicit mission ID and agent name for harness lookup via registry.
@@ -724,9 +722,21 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		return nil, status.Error(codes.Internal, "callback registry not configured")
 	}
 
-	// Perform registry lookup with explicit mission ID and agent name
-	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName)
+	// Perform registry lookup with explicit mission ID, agent name and run ID.
+	// The mission ID is the same for every run of a record, so an agent of
+	// run 1 that still runs must not find the harness of run 2. Its evidence
+	// would take the run of run 2 (gibson#1217).
+	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName, contextInfo.MissionRunId)
 	if err != nil {
+		if errors.Is(err, ErrCallbackRunMismatch) {
+			s.logger.Warn("callback of another run refused",
+				"mission_id", contextInfo.MissionId,
+				"agent_name", contextInfo.AgentName,
+				"callback_run_id", contextInfo.MissionRunId,
+				"error", err,
+			)
+			return nil, status.Errorf(codes.FailedPrecondition, "callback refused: %v", err)
+		}
 		s.logger.Error("harness lookup failed",
 			"mission_id", contextInfo.MissionId,
 			"agent_name", contextInfo.AgentName,
@@ -822,6 +832,7 @@ func (s *HarnessCallbackService) captureLLMCall(ctx context.Context, contextInfo
 	s.llmCallSink(ctx, tenant, LLMCallRecord{
 		CallID:              uuid.NewString(),
 		MissionID:           contextInfo.GetMissionId(),
+		MissionRunID:        contextInfo.GetMissionRunId(),
 		RunID:               runID,
 		Model:               resp.Model,
 		PromptTokens:        resp.Usage.PromptTokens,
@@ -888,6 +899,7 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 	s.toolCallSink(ctx, tenant, ToolCallRecord{
 		ToolCallID:         toolCallID,
 		MissionID:          contextInfo.GetMissionId(),
+		MissionRunID:       contextInfo.GetMissionRunId(),
 		RunID:              runID,
 		ToolName:           toolName,
 		Arguments:          argumentsJSON,

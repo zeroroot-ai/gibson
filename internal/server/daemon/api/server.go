@@ -961,7 +961,9 @@ type LLMCallRecord struct {
 	// ExecuteLLM request; the handler copies it here so the call attaches to its
 	// mission's frame. Empty for non-mission callers (e.g. dashboard chat), which
 	// stay tenant-ambient.
-	MissionID        string
+	MissionID string
+	// MissionRunID is the mission run that issued the call (gibson#1217).
+	MissionRunID     string
 	ScopeID          string
 	RunID            string
 	PromptTokens     int

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/events"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
@@ -20,66 +19,6 @@ import (
 // daemon and mission packages.
 type EventBusAdapter struct {
 	eventBus *EventBus
-}
-
-// eventPublisher is the minimal event-emit surface the mission manager needs (it
-// feeds the ECS brain + Redis stream). Satisfied by *OrchestratorEventBusAdapter.
-// Replaces the former orchestrator.EventBus interface dependency (gibson#851).
-type eventPublisher interface {
-	Publish(event events.Event)
-}
-
-// OrchestratorEventBusAdapter adapts the daemon's EventBus to the orchestrator's
-// EventBus interface which expects Publish(event events.Event).
-//
-// When redisStream is non-nil, each event is also written to the tenant's
-// Redis Stream so that gRPC Subscribe clients backed by Redis Streams receive
-// mission execution events in real time.
-type OrchestratorEventBusAdapter struct {
-	eventBus    *EventBus
-	redisStream *RedisEventStream // optional; nil means Redis Streams disabled
-	tenant      string            // tenant scope for redis stream key
-	brainReg    *brain.Registry   // optional; nil means ECS-brain ingest disabled
-}
-
-// NewOrchestratorEventBusAdapterWithRedis creates an adapter that bridges events
-// to both the in-process EventBus and a tenant-scoped Redis Stream.
-func NewOrchestratorEventBusAdapterWithRedis(
-	eventBus *EventBus,
-	redisStream *RedisEventStream,
-	tenant string,
-	brainReg *brain.Registry,
-) *OrchestratorEventBusAdapter {
-	if tenant == "" {
-		tenant = "default"
-	}
-	return &OrchestratorEventBusAdapter{
-		eventBus:    eventBus,
-		redisStream: redisStream,
-		tenant:      tenant,
-		brainReg:    brainReg,
-	}
-}
-
-// Publish implements the orchestrator's EventBus interface.
-func (a *OrchestratorEventBusAdapter) Publish(event events.Event) {
-	eventData := convertToAPIEventData(event)
-	ctx := context.Background()
-
-	// In-process EventBus (always).
-	_ = a.eventBus.Publish(ctx, eventData)
-
-	// Redis Streams bridge (optional).
-	if a.redisStream != nil {
-		if err := a.redisStream.PublishEvent(ctx, a.tenant, eventData); err != nil {
-			// Best-effort; do not block the orchestrator.
-			_ = err
-		}
-	}
-
-	// ECS-brain ingest (optional) — the capture path (ADR-0101): feed the
-	// tenant's brain World from the live mission event stream.
-	ingestToBrain(a.brainReg, a.tenant, eventData)
 }
 
 // NewEventBusAdapter creates a new adapter that wraps an EventBus.

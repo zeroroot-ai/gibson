@@ -374,11 +374,6 @@ func (s *CallbackServer) Stop() {
 	s.gracefulStop()
 }
 
-// UnregisterHarness removes a harness registration when a task completes.
-func (s *CallbackServer) UnregisterHarness(taskID string) {
-	s.service.UnregisterHarness(taskID)
-}
-
 // SetCredentialStore sets the credential store for secure credential retrieval.
 // This must be called before starting the server.
 func (s *CallbackServer) SetCredentialStore(store CredentialStore) {

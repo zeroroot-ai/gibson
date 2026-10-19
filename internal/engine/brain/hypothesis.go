@@ -120,7 +120,12 @@ type Hypothesis struct {
 // so it is replayable like any other event, but it lands as the Hypothesis
 // provenance class — never as Evidence, and never as a Belief.
 type HypothesisObserved struct {
-	MissionID    string
+	MissionID string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID string
 	RunID        string
 	ScopeID      string
 	Proposer     string

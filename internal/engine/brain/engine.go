@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 // TickInterval is the clock-tick period (ADR-0104): ~one gRPC round-trip, the
@@ -264,12 +266,28 @@ func (e *Engine) apply(ev Event) bool {
 		}
 	}
 	e.Timeline.Append(ev)
+	// An event of another run is in the Timeline, and a replay treats it the
+	// same way. The reducer drops control state of an older run and detaches
+	// its evidence (gibson#1217).
+	chk := checkRun(e.World, ev)
 	Reduce(e.World, ev)
 	// Snapshot AFTER folding ev so the snapshot's World reflects ev (whose seq is
 	// lastAppendedSeq / AtSeq). Snapshotting before the fold would exclude ev from
 	// both the snapshot and the exclusive-after-AtSeq tail — losing it on hydrate.
 	if snapshotDue {
 		e.maybeSnapshot()
+	}
+	switch chk.verdict {
+	case runDropped:
+		// The subscribers do not see it: it is not an event of the current
+		// run, and the lifecycle projector must not tell a client that run 1
+		// ended while run 2 runs.
+		e.noteRunMismatch(chk, "dropped")
+		return true
+	case runDetached:
+		e.noteRunMismatch(chk, "detached")
+		ev = detachEvidence(ev)
+	case runCurrent:
 	}
 	for _, fn := range e.subscribers {
 		fn(ev)
@@ -727,4 +745,31 @@ func (e *Engine) MissionFrameAt(missionID string, n int) *World {
 		tl.Append(ev)
 	}
 	return Replay(tenant, tl)
+}
+
+// runMismatchEventsTotal counts the events whose run is not the current run of
+// their mission. A dropped event is control state of an older run. A detached
+// event is evidence that the World kept without a link to the current run.
+var runMismatchEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "gibson_brain_run_mismatch_events_total",
+	Help: "Brain events of a run that is not the current run of the mission (gibson#1217).",
+}, []string{"kind", "disposition"})
+
+// noteRunMismatch logs and counts one event of a run that is not current. A
+// context that gives the wrong run ID would lose control events or detach
+// evidence without a sign, so each one leaves a log line and a count.
+func (e *Engine) noteRunMismatch(chk runCheck, disposition string) {
+	runMismatchEventsTotal.WithLabelValues(chk.kind, disposition).Inc()
+	log := slog.Info
+	if disposition == "dropped" {
+		log = slog.Warn
+	}
+	log("brain: event of another run of the mission",
+		"disposition", disposition,
+		"tenant", e.World.Tenant,
+		"kind", chk.kind,
+		"mission_id", chk.missionID,
+		"event_run_id", chk.eventRun,
+		"current_run_id", chk.currentRun,
+	)
 }

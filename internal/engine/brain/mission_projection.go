@@ -6,6 +6,8 @@ package brain
 import (
 	"time"
 
+	"github.com/mlange-42/ark/ecs"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
@@ -101,16 +103,39 @@ type MissionProjected struct {
 	Description string
 	TargetID    string
 	TenantID    string
+
+	// RunID names this run of the mission. The daemon mints it when the run
+	// starts. A mission ID is the stable record ID, so the RunID is what makes
+	// the second run of a mission a new run and not a repeat of the first
+	// (gibson#1217).
+	RunID string
 }
 
 func (MissionProjected) Kind() string { return "mission.projected" }
 
 func applyMissionProjected(w *World, e MissionProjected) {
-	if _, ok := findMission(w, e.ID); ok {
-		return // idempotent: already projected
+	if ent, ok := findMission(w, e.ID); ok {
+		m := w.missions.Get(ent)
+		switch {
+		case m.Status == MissionPending:
+			// A mission that a person created and that has not run yet. Keep
+			// the entity, which holds the creator, and start its first run.
+			startRun(m, e)
+			projectWork(w, e)
+			return
+		case m.RunID == e.RunID:
+			return // idempotent: the same run, projected again
+		}
+		// A new run of a mission that ran before. The mission ID is the
+		// stable record ID, so the new run finds the entity of the old run.
+		// Retire everything of the old run first, or the new run finds the
+		// old terminal status and the old work and does nothing
+		// (gibson#1217). The Timeline keeps the history of the old run.
+		retireMissionRun(w, e.ID)
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
+		RunID:          e.RunID,
 		Goal:           e.Goal,
 		Status:         MissionRunning,
 		Budget:         e.Budget,
@@ -122,6 +147,11 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		TargetID:       e.TargetID,
 		TenantID:       e.TenantID,
 	})
+	projectWork(w, e)
+}
+
+// projectWork adds the work items of a projected run to the World.
+func projectWork(w *World, e MissionProjected) {
 	// The node of a rewound checkpoint starts from the snapshot of that
 	// checkpoint (ADR-0170). The rewind event comes before the projection.
 	rewind, rewound := w.missionRewinds[e.ID]
@@ -140,6 +170,7 @@ func applyMissionProjected(w *World, e MissionProjected) {
 		w.work.NewEntity(&WorkItem{
 			ID:                     id,
 			MissionID:              e.ID,
+			RunID:                  e.RunID,
 			Kind:                   n.Kind,
 			Target:                 n.Target,
 			Input:                  n.Input,
@@ -190,4 +221,194 @@ func nodeName(workID string) string {
 		}
 	}
 	return workID
+}
+
+// startRun turns a pending mission into a running one, with the first run of
+// the projection. The entity keeps what creation recorded, such as the creator.
+func startRun(m *Mission, e MissionProjected) {
+	m.RunID = e.RunID
+	m.Goal = e.Goal
+	m.Status = MissionRunning
+	m.Budget = e.Budget
+	m.DecisionCursor = -1
+	m.DeciderSlot = e.DeciderSlot
+	m.BeliefModel = e.BeliefModel
+	// What creation recorded stays when the projection carries none.
+	if e.Name != "" {
+		m.Name = e.Name
+	}
+	if e.Description != "" {
+		m.Description = e.Description
+	}
+	if e.TargetID != "" {
+		m.TargetID = e.TargetID
+	}
+	if e.TenantID != "" {
+		m.TenantID = e.TenantID
+	}
+}
+
+// retireMissionRun removes the state of the last run of a mission: the mission
+// entity, its work items, its decisions and its VoI plan. The next projection
+// of the mission ID then starts from a clean state.
+func retireMissionRun(w *World, missionID string) {
+	var stale []ecs.Entity
+	mq := ecs.NewFilter1[Mission](w.ecs).Query()
+	for mq.Next() {
+		if mq.Get().ID == missionID {
+			stale = append(stale, mq.Entity())
+		}
+	}
+	wq := ecs.NewFilter1[WorkItem](w.ecs).Query()
+	for wq.Next() {
+		if wq.Get().MissionID == missionID {
+			stale = append(stale, wq.Entity())
+		}
+	}
+	dq := ecs.NewFilter1[DecisionRecord](w.ecs).Query()
+	for dq.Next() {
+		if dq.Get().MissionID == missionID {
+			stale = append(stale, dq.Entity())
+		}
+	}
+	vq := ecs.NewFilter1[VoIPlanState](w.ecs).Query()
+	for vq.Next() {
+		if vq.Get().MissionID == missionID {
+			stale = append(stale, vq.Entity())
+		}
+	}
+	for _, ent := range stale {
+		w.ecs.RemoveEntity(ent)
+	}
+}
+
+// runVerdict is what the reducer does with an event of a run that is not the
+// current run of its mission.
+type runVerdict int
+
+const (
+	// runCurrent: the event is of the current run, or it is not run-scoped.
+	runCurrent runVerdict = iota
+	// runDropped: the event is control state of an older run (work, mission,
+	// decision, plan). It must not change the current run, so the reducer
+	// ignores it.
+	runDropped
+	// runDetached: the event is evidence of an older run (a finding, a host,
+	// a call). The fact is true and stays in the World, but it has no link to
+	// the current run, so it is not counted as seen by that run.
+	runDetached
+)
+
+// runCheck is the result of checkRun, with what a log line needs.
+type runCheck struct {
+	verdict    runVerdict
+	kind       string
+	missionID  string
+	eventRun   string
+	currentRun string
+}
+
+// checkRun compares the run of ev with the current run of its mission. It is a
+// pure function of the World, so a replay of the Timeline reaches the same
+// verdict for the same event (gibson#1217). An event with no RunID is not
+// run-scoped and is current.
+func checkRun(w *World, ev Event) runCheck {
+	switch e := ev.(type) {
+	case WorkCompleted:
+		return workRunCheck(w, ev, e.ID, e.RunID)
+	case WorkDispatched:
+		if chk := workRunCheck(w, ev, e.ID, e.RunID); chk.verdict != runCurrent {
+			return chk
+		}
+		if _, ok := findWork(w, e.ID); ok {
+			return runCheck{}
+		}
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case MissionDone:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case MissionPauseRequested:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case MissionResumed:
+		return missionRunCheck(w, ev, e.ID, e.RunID, runDropped)
+	case DecisionCompleted:
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case VoIPlanned:
+		return missionRunCheck(w, ev, e.MissionID, e.RunID, runDropped)
+	case FindingRaised:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case HostObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case EntityObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case ObservationRecorded:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case HypothesisObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case LlmCallObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case AgentToolCallObserved:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	}
+	return runCheck{}
+}
+
+func missionRunCheck(w *World, ev Event, missionID, runID string, mismatch runVerdict) runCheck {
+	if runID == "" {
+		return runCheck{}
+	}
+	ent, ok := findMission(w, missionID)
+	if !ok {
+		return runCheck{}
+	}
+	current := w.missions.Get(ent).RunID
+	if current == runID {
+		return runCheck{}
+	}
+	return runCheck{verdict: mismatch, kind: ev.Kind(), missionID: missionID, eventRun: runID, currentRun: current}
+}
+
+func workRunCheck(w *World, ev Event, workID, runID string) runCheck {
+	if runID == "" {
+		return runCheck{}
+	}
+	ent, ok := findWork(w, workID)
+	if !ok {
+		return runCheck{}
+	}
+	wi := w.work.Get(ent)
+	if wi.RunID == runID {
+		return runCheck{}
+	}
+	return runCheck{verdict: runDropped, kind: ev.Kind(), missionID: wi.MissionID, eventRun: runID, currentRun: wi.RunID}
+}
+
+// detachEvidence returns ev without its link to a mission. The evidence of a
+// finished run stays in the World as a fact with no mission frame, so it is
+// not attributed to the current run (gibson#1217). The Timeline keeps the
+// event as it came.
+func detachEvidence(ev Event) Event {
+	switch e := ev.(type) {
+	case FindingRaised:
+		e.MissionID = ""
+		return e
+	case HostObserved:
+		e.MissionID = ""
+		return e
+	case EntityObserved:
+		e.MissionID = ""
+		return e
+	case ObservationRecorded:
+		e.MissionID = ""
+		return e
+	case HypothesisObserved:
+		e.MissionID = ""
+		return e
+	case LlmCallObserved:
+		e.MissionID = ""
+		return e
+	case AgentToolCallObserved:
+		e.MissionID = ""
+		return e
+	}
+	return ev
 }

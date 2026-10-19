@@ -53,6 +53,11 @@ const deciderSlot = "primary"
 // missionBinding ties a live mission to the harness + engine the executor needs.
 type missionBinding struct {
 	ctx context.Context
+	// runID is the run of the mission that this binding serves. The mission ID
+	// is the same for every run of a record, so the binding of run 2 replaces
+	// the binding of run 1 under one key. A dispatch of another run is refused
+	// (gibson#1217).
+	runID string
 	// tenant owns this mission. Component discovery for the mission is scoped to
 	// it; without it the mission has no catalog rather than a shared one.
 	tenant  string
@@ -99,9 +104,14 @@ func (b *brainExecutor) register(missionID string, bind *missionBinding) {
 	b.mu.Unlock()
 }
 
-func (b *brainExecutor) unregister(missionID string) {
+// unregister removes the binding bind of a mission. It removes the entry only
+// when the entry is bind: the next run of the mission may have registered its
+// own binding, and that one must stay (gibson#1217).
+func (b *brainExecutor) unregister(missionID string, bind *missionBinding) {
 	b.mu.Lock()
-	delete(b.bindings, missionID)
+	if b.bindings[missionID] == bind {
+		delete(b.bindings, missionID)
+	}
 	b.mu.Unlock()
 }
 
@@ -131,6 +141,13 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 		b.logger.Warn("brain dispatch for unknown mission", "mission_id", req.MissionID, "work_id", req.WorkID)
 		return
 	}
+	if bind.runID != req.RunID {
+		// A dispatch that was queued by run 1 reaches the binding of run 2.
+		// It must not run against the target under run 2.
+		b.logger.Warn("brain dispatch of another run; refused",
+			"mission_id", req.MissionID, "work_id", req.WorkID, "run_id", req.RunID, "binding_run_id", bind.runID)
+		return
+	}
 	go func() {
 		switch req.Kind {
 		case "agent":
@@ -155,12 +172,15 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				FromSnapshot: req.FromSnapshot,
 			})
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return
 			}
 			// The snapshot id of the node end is part of the Timeline event,
 			// so a replay names the same checkpoint state (ADR-0170).
-			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: resultSummary(res), Snapshot: gibsonharness.CheckpointSnapshot(res)})
+			bind.eng.Submit(brain.WorkCompleted{
+				ID: req.WorkID, RunID: req.RunID, Result: resultSummary(res),
+				Snapshot: gibsonharness.CheckpointSnapshot(res),
+			})
 
 		case "tool":
 			// A tool node is a mission node in its own right: it names a tool and
@@ -175,20 +195,20 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// mission node.
 			out, err := b.dispatchTool(bind, req)
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return
 			}
-			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: out})
 
 		case "job":
 			// A job node drives a bank (ADR-0119): open
 			// a job, let the verifier judge each turn, close with a verdict.
 			out, err := b.dispatchJob(bind, req)
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return
 			}
-			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: out})
 		case "plugin":
 			// A plugin node names a plugin, a method and its params; the harness
 			// routes the call over the component work queue the same way an
@@ -197,16 +217,17 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 			// failed that node by name.
 			out, err := b.dispatchPlugin(bind, req)
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Err: err.Error()})
+				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
 				return
 			}
-			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, Result: out})
+			bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Result: out})
 
 		default:
 			// Name what is unsupported rather than letting the mission hang.
 			bind.eng.Submit(brain.WorkCompleted{
-				ID:  req.WorkID,
-				Err: "direct " + req.Kind + " dispatch not supported (agent, tool, plugin and job nodes are)",
+				ID:    req.WorkID,
+				RunID: req.RunID,
+				Err:   "direct " + req.Kind + " dispatch not supported (agent, tool, plugin and job nodes are)",
 			})
 		}
 	}()

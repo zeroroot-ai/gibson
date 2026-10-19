@@ -189,6 +189,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		}
 		startEv := MissionStarted{
 			ID:          m.ID,
+			RunID:       m.RunID,
 			Goal:        m.Goal,
 			BeliefModel: m.BeliefModel,
 			Name:        m.Name,
@@ -213,6 +214,7 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		dsp := WorkDispatched{
 			ID:           wi.ID,
 			MissionID:    wi.MissionID,
+			RunID:        wi.RunID,
 			ItemKind:     wi.Kind,
 			Target:       wi.Target,
 			Input:        wi.Input,
@@ -478,11 +480,15 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 		})
 	}
 
-	// Replay tool calls (ADR-0120, gibson#271). AgentToolCallSnapshot and
-	// AgentToolCallObserved share identical fields, so a direct conversion
-	// replaces the field-by-field literal.
+	// Replay tool calls (ADR-0120, gibson#271). The snapshot holds folded
+	// state, so the replayed event carries no MissionRunID: it is not live
+	// evidence of a run.
 	for _, c := range data.AgentToolCalls {
-		Reduce(w, AgentToolCallObserved(c))
+		Reduce(w, AgentToolCallObserved{
+			ToolCallID: c.ToolCallID, MissionID: c.MissionID, RunID: c.RunID, ScopeID: c.ScopeID,
+			ToolName: c.ToolName, Arguments: c.Arguments, Result: c.Result, Err: c.Err,
+			RecordedAtUnixNano: c.RecordedAtUnixNano,
+		})
 	}
 
 	// Replay decisions in deterministic (ID) order.

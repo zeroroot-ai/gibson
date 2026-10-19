@@ -52,7 +52,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 			return
 		}
 
-		// Create mission manager with eventBus for orchestration events.
+		// Create the mission manager.
 		// The pool replaces the three legacy stores (missionStore, missionRunStore, findingStore).
 		missionManagerInstance.mgr = newMissionManager(
 			d.config,
@@ -65,7 +65,6 @@ func (d *daemonImpl) ensureMissionManager() error {
 			d.targetStore,
 			d.infrastructure,
 			d.infrastructure.otelStack,
-			NewOrchestratorEventBusAdapterWithRedis(d.eventBus, d.redisEventStream, d.registryTenant, d.brainRegistry), // Bridge events to Redis + the ECS brain
 			d.missionAuthzStore, // Required (one-code-path slice deploy#195); set during Redis init phase
 			d.quotaManager,      // Spec plans-and-quotas-simplification: may be nil in dev
 			d.brainRegistry,     // ECS brain engine (gibson#851)

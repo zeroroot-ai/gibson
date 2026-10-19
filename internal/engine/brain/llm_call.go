@@ -86,7 +86,12 @@ type LlmCallObserved struct {
 	// frame surfaces the calls that mission made. Empty when the caller (e.g.
 	// ExecuteLLM) carries no mission context, in which case the call is
 	// tenant-ambient and never attaches to a mission frame (follow-up gibson#1078).
-	MissionID           string
+	MissionID string
+	// MissionRunID is the run of the mission that produced this evidence. The
+	// reducer drops the event when the mission has moved on to another run, so
+	// late evidence of run 1 cannot count for run 2 (gibson#1217). Empty means
+	// the event is not run-scoped.
+	MissionRunID        string
 	RunID               string
 	Model               string
 	ScopeID             string

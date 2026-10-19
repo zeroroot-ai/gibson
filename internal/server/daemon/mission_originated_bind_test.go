@@ -12,6 +12,8 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -304,8 +306,14 @@ func runExistingManager(t *testing.T, rec *mission.Mission, target *types.Target
 	t.Helper()
 	rdb := requireRedisStack(t)
 
+	// The start of a run reads the World to tell a run that ended from one that
+	// still runs, so the manager needs a brain registry (gibson#1217).
+	brainCtx, cancelBrain := context.WithCancel(context.Background())
+	t.Cleanup(cancelBrain)
+
 	m := &missionManager{
 		logger:         slog.New(slog.DiscardHandler),
+		brainRegistry:  brain.NewRegistry(brainCtx, braintest.StoreFactory()),
 		pool:           &runExistingPool{rdb: rdb},
 		activeMissions: make(map[auth.TenantID]map[string]*activeMission),
 		targetStore: &fakeTargetStore{get: func(_ context.Context, got types.ID) (*types.Target, error) {

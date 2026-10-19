@@ -11,7 +11,7 @@ import "testing"
 func scanWorld(t *testing.T, missionID, target string, status MissionStatus) *World {
 	t.Helper()
 	w := NewWorld("t1")
-	Reduce(w, MissionStarted{ID: missionID, Name: ScanMissionName, TargetID: target})
+	Reduce(w, MissionStarted{ID: missionID, RunID: "run-" + missionID, Name: ScanMissionName, TargetID: target})
 	if status != MissionRunning {
 		Reduce(w, MissionDone{ID: missionID, Outcome: status})
 	}
@@ -53,7 +53,7 @@ func TestRescan_FixedAndUnseen_BecomesVerified(t *testing.T) {
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
 	// A second scan of the same target runs and does NOT re-raise f1.
-	Reduce(w, MissionStarted{ID: "scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
 	applyAll(w, RescanReconciliationSystem(w))
@@ -69,7 +69,7 @@ func TestRescan_FixedAndSeenAgain_ReturnsToOpen(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2"}) // seen again
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
@@ -88,7 +88,7 @@ func TestRescan_OpenAndUnseen_DoesNotMove(t *testing.T) {
 	raiseInto(w, "open-one", "scan-1", FindingStatusOpen)
 	raiseInto(w, "fixing-one", "scan-1", FindingStatusFixing)
 
-	Reduce(w, MissionStarted{ID: "scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionCompleted})
 
 	applyAll(w, RescanReconciliationSystem(w))
@@ -108,7 +108,7 @@ func TestRescan_FailedScan_VerifiesNothing(t *testing.T) {
 	w := scanWorld(t, "scan-1", "target-a", MissionRunning)
 	raiseInto(w, "f1", "scan-1", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
 	Reduce(w, MissionDone{ID: "scan-2", Outcome: MissionFailed})
 
 	evs := RescanReconciliationSystem(w)
@@ -155,7 +155,7 @@ func TestRescan_AnotherTargetsScan_DoesNotReconcile(t *testing.T) {
 	w := scanWorld(t, "scan-a", "target-a", MissionRunning)
 	raiseInto(w, "f-a", "scan-a", FindingStatusFixed)
 
-	Reduce(w, MissionStarted{ID: "scan-b", Name: ScanMissionName, TargetID: "target-b"})
+	Reduce(w, MissionStarted{ID: "scan-b", RunID: "run-scan-b", Name: ScanMissionName, TargetID: "target-b"})
 	Reduce(w, MissionDone{ID: "scan-b", Outcome: MissionCompleted})
 
 	applyAll(w, RescanReconciliationSystem(w))
@@ -235,7 +235,7 @@ func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-1", Title: "original", Severity: "high"})
 	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
 
-	Reduce(w, MissionStarted{ID: "scan-2", Name: ScanMissionName, TargetID: "target-a"})
+	Reduce(w, MissionStarted{ID: "scan-2", RunID: "run-scan-2", Name: ScanMissionName, TargetID: "target-a"})
 	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan-2", Title: "ignored", Severity: "low"})
 
 	f := findingByID(t, w, "f1")
@@ -245,7 +245,7 @@ func TestRescan_ReRaiseKeepsStatusAndMovesLastScan(t *testing.T) {
 	if f.Title != "original" || f.Severity != "high" {
 		t.Errorf("a re-raise must not overwrite the Finding, got title=%q severity=%q", f.Title, f.Severity)
 	}
-	if f.LastScan != "scan-2" {
+	if f.LastScan != "run-scan-2" {
 		t.Errorf("a re-raise must move LastScan to the scan that saw it, got %q", f.LastScan)
 	}
 	if f.ScanScope != "target-a" {
@@ -309,7 +309,7 @@ func TestRescan_ScanWithNoTarget_ReconcilesNothing(t *testing.T) {
 	raiseInto(w, "hand-filed", "", FindingStatusFixed)
 
 	// A scan mission that never bound a target.
-	Reduce(w, MissionStarted{ID: "scan-untargeted", Name: ScanMissionName, TargetID: ""})
+	Reduce(w, MissionStarted{ID: "scan-untargeted", RunID: "run-scan-untargeted", Name: ScanMissionName, TargetID: ""})
 	Reduce(w, MissionDone{ID: "scan-untargeted", Outcome: MissionCompleted})
 
 	for _, ev := range RescanReconciliationSystem(w) {
@@ -354,7 +354,7 @@ func TestScanReconciled_RoundTripsThroughTheTimeline(t *testing.T) {
 // intact.
 func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	timeline := []Event{
-		MissionStarted{ID: "scan-1", Name: ScanMissionName, TargetID: "target-a"},
+		MissionStarted{ID: "scan-1", RunID: "run-scan-1", Name: ScanMissionName, TargetID: "target-a"},
 		FindingRaised{ID: "f1", MissionID: "scan-1"},
 		FindingStatusChanged{ID: "f1", Status: FindingStatusFixed},
 		MissionDone{ID: "scan-1", Outcome: MissionCompleted},
@@ -382,5 +382,69 @@ func TestRescan_ReplayAfterRestart_DoesNotReReconcile(t *testing.T) {
 	}
 	if got := findingByID(t, replayed, "f1").Status; got != FindingStatusOpen {
 		t.Fatalf("replay overwrote the agent's re-open, got %q", got)
+	}
+}
+
+// scanRun projects one run of a recurring scan. The mission ID is the record ID
+// and is the same for every run (gibson#1217).
+func scanRun(w *World, runID string) {
+	Reduce(w, MissionProjected{ID: "scan", RunID: runID, Name: ScanMissionName, TargetID: "target-a"})
+}
+
+// TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified is the rescan
+// fault of gibson#1217. Both runs have mission ID "scan". A Finding that run 1
+// saw and the agent then fixed must end verified when run 2 does not see it.
+// LastScan held the mission ID, so run 2 read "seen by this scan" and reopened
+// the Finding.
+func TestRescan_SecondRunOfOneScanRecord_FixedFindingEndsVerified(t *testing.T) {
+	w := NewWorld("t1")
+	scanRun(w, "run-1")
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionCompleted})
+	applyAll(w, RescanReconciliationSystem(w))
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+
+	scanRun(w, "run-2")
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-2", Outcome: MissionCompleted})
+	applyAll(w, RescanReconciliationSystem(w))
+
+	if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
+		t.Fatalf("a fixed Finding that run 2 did not see must be verified, got %q", got)
+	}
+}
+
+// TestRescan_LateFindingOfRun1DoesNotCountForRun2 covers a finding that a worker
+// of run 1 raises after run 2 has started. It is not evidence that run 2 saw the
+// Finding.
+func TestRescan_LateFindingOfRun1DoesNotCountForRun2(t *testing.T) {
+	w := NewWorld("t1")
+	scanRun(w, "run-1")
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"})
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
+	Reduce(w, FindingStatusChanged{ID: "f1", Status: FindingStatusFixed})
+
+	scanRun(w, "run-2")
+	Reduce(w, FindingRaised{ID: "f1", MissionID: "scan", MissionRunID: "run-1"}) // late
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-2", Outcome: MissionCompleted})
+	applyAll(w, RescanReconciliationSystem(w))
+
+	if got := findingByID(t, w, "f1").Status; got != FindingStatusVerified {
+		t.Fatalf("a late finding of run 1 must not count for run 2, got %q", got)
+	}
+}
+
+// TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance: the late finding is a
+// real weakness, so it is in the World. It has no scan scope and no last scan,
+// so no rescan of the record reconciles it or counts it as seen.
+func TestRescan_LateFindingOfRun1IsKeptWithNoScanProvenance(t *testing.T) {
+	w := NewWorld("t1")
+	scanRun(w, "run-1")
+	Reduce(w, MissionDone{ID: "scan", RunID: "run-1", Outcome: MissionFailed, Reason: "stopped by user"})
+	scanRun(w, "run-2")
+	Reduce(w, FindingRaised{ID: "late", MissionID: "scan", MissionRunID: "run-1"})
+
+	f := findingByID(t, w, "late")
+	if f.ScanScope != "" || f.LastScan != "" {
+		t.Fatalf("a late finding has scan scope %q and last scan %q, want none", f.ScanScope, f.LastScan)
 	}
 }

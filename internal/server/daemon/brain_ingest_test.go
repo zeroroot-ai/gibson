@@ -17,44 +17,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 )
 
-// TestIngestToBrain_FeedsWorld: daemon mission events translate into brain
-// domain events and populate the tenant's live World (the capture path that
-// makes the brain — and the Scroller — live).
-func TestIngestToBrain_FeedsWorld(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-
-	ingestToBrain(reg, "acme", api.EventData{
-		EventType:    "mission.started",
-		MissionEvent: &api.MissionEventData{MissionID: "m1", Payload: map[string]interface{}{"mission_name": "exfiltrate PII"}},
-	})
-	ingestToBrain(reg, "acme", api.EventData{
-		EventType:    "node.started",
-		MissionEvent: &api.MissionEventData{MissionID: "m1", NodeID: "recon"},
-	})
-	ingestToBrain(reg, "acme", api.EventData{
-		EventType:    "finding.discovered",
-		FindingEvent: &api.FindingEventData{Finding: api.FindingData{ID: "f1", Title: "exposed jenkins", Severity: "high"}},
-	})
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		eng := reg.For("acme")
-		ms, work, fs := eng.Missions(), eng.Work(), eng.Findings()
-		if len(ms) == 1 && ms[0].Goal == "exfiltrate PII" && len(work) == 1 && len(fs) == 1 {
-			// Isolation: another tenant sees nothing.
-			if len(reg.For("other").Missions()) != 0 {
-				t.Fatal("cross-tenant leak")
-			}
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	eng := reg.For("acme")
-	t.Fatalf("brain not fed: missions=%+v work=%+v findings=%+v", eng.Missions(), eng.Work(), eng.Findings())
-}
-
 // TestIngestLLMCall_FeedsWorld: a completed ExecuteLLM call is folded into the
 // calling tenant's World as an LlmCall entity (gibson#755), routed by the call's
 // own tenant (multi-tenant correct), with no cross-tenant leak.
@@ -97,33 +59,6 @@ func TestIngestLLMCall_NilSafe(t *testing.T) {
 	}
 }
 
-// TestIngestToBrain_AgentFindingSubmitted: agent-submitted findings (event type
-// agent.finding_submitted) reach the World — they previously did not (the ingest
-// only matched finding.submitted), which is why findings were direct-written to
-// the graph instead of flowing World→projector (gibson#837). Description carries.
-func TestIngestToBrain_AgentFindingSubmitted(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-
-	ingestToBrain(reg, "acme", api.EventData{
-		EventType: "agent.finding_submitted",
-		FindingEvent: &api.FindingEventData{Finding: api.FindingData{
-			ID: "f7", Title: "SSRF", Description: "blind SSRF in /proxy", Severity: "high",
-		}},
-	})
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		fs := reg.For("acme").Findings()
-		if len(fs) == 1 && fs[0].Description == "blind SSRF in /proxy" {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("agent.finding_submitted not folded into the World: %+v", reg.For("acme").Findings())
-}
-
 // TestIngestComponentFinding: the component finding path routes findings into the
 // World (sole-writer convergence, gibson#837) instead of a direct graph write.
 func TestIngestComponentFinding(t *testing.T) {
@@ -135,7 +70,7 @@ func TestIngestComponentFinding(t *testing.T) {
 	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
 		ID: types.NewID(), Title: "RCE", Description: "unauth RCE", Severity: gibsonagent.SeverityCritical,
 		SubmittedBy: "agent_principal:sa-1", EnrolledBy: "user-9",
-	}, "", "zerocool-demo"))
+	}, "", "zerocool-demo"), "")
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -165,8 +100,12 @@ func TestIngestComponentFinding_MissionStamped(t *testing.T) {
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 
 	sink := ingestComponentFinding(reg)
-	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh}, "m-7", ""))
-	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{ID: types.NewID(), Title: "ambient", Description: "no mission", Severity: gibsonagent.SeverityLow}, "", ""))
+	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
+		ID: types.NewID(), Title: "SQLi", Description: "auth bypass", Severity: gibsonagent.SeverityHigh,
+	}, "m-7", ""), "")
+	sink(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
+		ID: types.NewID(), Title: "ambient", Description: "no mission", Severity: gibsonagent.SeverityLow,
+	}, "", ""), "")
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -399,4 +338,43 @@ func TestIngestDelegation(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("delegation not folded into the World: %+v", reg.For("acme").AgentRuns())
+}
+
+// The sinks carry the run of the mission onto the evidence they fold. Evidence
+// that a finished run reports late is kept, and the World detaches it from the
+// mission (gibson#1217).
+func TestIngestSinks_CarryTheMissionRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	eng := reg.For("acme")
+	eng.Submit(brain.MissionProjected{ID: "m1", RunID: "run-2"})
+
+	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: "late", MissionID: "m1", MissionRunID: "run-1"})
+	ingestToolCall(reg)(ctx, "acme", harness.ToolCallRecord{ToolCallID: "now", MissionID: "m1", MissionRunID: "run-2"})
+	ingestLLMCall(reg)(ctx, "acme", api.LLMCallRecord{CallID: "late", MissionID: "m1", MissionRunID: "run-1"})
+	ingestComponentFinding(reg)(ctx, "acme", finding.NewEnhancedFinding(gibsonagent.Finding{
+		ID: types.NewID(), Title: "late",
+	}, types.ID("m1"), "agent"), "run-1")
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(eng.AgentToolCalls()) == 2 && len(eng.LlmCalls()) == 1 && len(eng.Findings()) == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := eng.AgentToolCalls(); len(got) != 2 {
+		t.Errorf("tool calls = %+v, want the late call kept beside the call of run 2", got)
+	}
+	if got := eng.LlmCalls(); len(got) != 1 {
+		t.Errorf("LLM calls = %+v, want the late call kept", got)
+	}
+	got := eng.Findings()
+	if len(got) != 1 {
+		t.Fatalf("findings = %+v, want the late finding kept", got)
+	}
+	if got[0].ScanScope != "" || got[0].LastScan != "" {
+		t.Errorf("the late finding has scan provenance %q %q, want none", got[0].ScanScope, got[0].LastScan)
+	}
 }

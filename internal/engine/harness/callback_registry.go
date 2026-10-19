@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -32,7 +33,7 @@ import (
 //	defer registry.Unregister(key)
 //
 //	// External agent makes callback
-//	harness, err := registry.Lookup(missionID, agentName)
+//	harness, err := registry.Lookup(missionID, agentName, runID)
 //	if err != nil {
 //	    return errors.New("harness not found")
 //	}
@@ -40,8 +41,22 @@ type CallbackHarnessRegistry struct {
 	// mu protects the harnesses map
 	mu sync.RWMutex
 
-	// harnesses maps "missionID:agentName" keys to harness instances
+	// harnesses maps a registration key to its harness. The key is unique
+	// for each registration, so a registration that ended removes itself and
+	// no other (gibson#1217).
 	harnesses map[string]AgentHarness
+
+	// byAgent lists, for each "missionID:agentName", the registration keys
+	// in the order they were made. The last one is the current registration.
+	// Run 2 of a mission registers an agent of the same name while an agent
+	// of run 1 may still hold its entry.
+	byAgent map[string][]string
+
+	// agentOf maps a registration key to its "missionID:agentName".
+	agentOf map[string]string
+
+	// seq makes each registration key unique.
+	seq uint64
 }
 
 // NewCallbackHarnessRegistry creates a new empty harness registry.
@@ -56,6 +71,8 @@ type CallbackHarnessRegistry struct {
 func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 	return &CallbackHarnessRegistry{
 		harnesses: make(map[string]AgentHarness),
+		byAgent:   make(map[string][]string),
+		agentOf:   make(map[string]string),
 	}
 }
 
@@ -71,11 +88,12 @@ func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 //   - harness: The harness instance that will handle callbacks
 //
 // Returns:
-//   - string: The registration key in the format "missionID:agentName"
+//   - string: The registration key. It is unique for each registration.
 //
 // This method is thread-safe and can be called concurrently from multiple
-// goroutines. If a harness is already registered for the same key, it will
-// be overwritten (this typically indicates a programming error).
+// goroutines. A second registration of the same mission and agent becomes the
+// current one for Lookup. Unregister removes only the registration of its key,
+// so the end of an agent of run 1 leaves the agent of run 2 in place.
 //
 // Example:
 //
@@ -83,16 +101,20 @@ func NewCallbackHarnessRegistry() *CallbackHarnessRegistry {
 //	defer registry.Unregister(key)
 //	// Execute external agent...
 func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness AgentHarness) string {
-	key := makeRegistryKey(missionID, agentName)
+	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	r.seq++
+	key := fmt.Sprintf("%s#%d", agent, r.seq)
 	r.harnesses[key] = harness
+	r.byAgent[agent] = append(r.byAgent[agent], key)
+	r.agentOf[key] = agent
 	return key
 }
 
-// Lookup retrieves a harness by mission ID and agent name.
+// Lookup retrieves a harness by mission ID, agent name and run ID.
 //
 // This method is called by the callback server when an external agent makes
 // a harness operation request. The callback includes the mission ID and agent
@@ -101,10 +123,12 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 // Parameters:
 //   - missionID: The mission ID provided by the external agent
 //   - agentName: The agent name provided by the external agent
+//   - runID: The mission run the callback names. It may be empty.
 //
 // Returns:
 //   - AgentHarness: The registered harness instance
-//   - error: Non-nil if no harness is found for the given key
+//   - error: Non-nil if no harness is found. ErrCallbackRunMismatch means the
+//     callback cannot be tied to one run (gibson#1217).
 //
 // This method is thread-safe and can be called concurrently with Register
 // and Unregister operations. It uses a read lock to allow multiple concurrent
@@ -112,23 +136,49 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 //
 // Example:
 //
-//	harness, err := registry.Lookup("mission-123", "recon-agent")
+//	harness, err := registry.Lookup("mission-123", "recon-agent", "run-1")
 //	if err != nil {
 //	    return status.Error(codes.NotFound, "harness not found")
 //	}
 //	return harness.Complete(ctx, slot, messages)
-func (r *CallbackHarnessRegistry) Lookup(missionID, agentName string) (AgentHarness, error) {
-	key := makeRegistryKey(missionID, agentName)
+func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (AgentHarness, error) {
+	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	harness, ok := r.harnesses[key]
-	if !ok {
+	keys := r.byAgent[agent]
+	if len(keys) == 0 {
 		return nil, fmt.Errorf("no harness registered for mission %s, agent %s", missionID, agentName)
 	}
 
-	return harness, nil
+	if runID != "" {
+		// The callback names its run. Pick the newest registration of that
+		// run, even when a registration of a newer run exists. A harness with
+		// no run is not scoped to a run and serves any callback.
+		for i := len(keys) - 1; i >= 0; i-- {
+			h := r.harnesses[keys[i]]
+			if run := h.Mission().MissionRunID; run == "" || run == runID {
+				return h, nil
+			}
+		}
+		return nil, fmt.Errorf("%w: run %s of mission %s, agent %s", ErrCallbackRunMismatch, runID, missionID, agentName)
+	}
+
+	// The callback names no run. When the registrations span more than one
+	// run, the callback cannot be tied to one of them, and the newest one
+	// would be the wrong harness for a late callback of an older run.
+	runs := map[string]struct{}{}
+	for _, k := range keys {
+		if run := r.harnesses[k].Mission().MissionRunID; run != "" {
+			runs[run] = struct{}{}
+		}
+	}
+	if len(runs) > 1 {
+		return nil, fmt.Errorf("%w: a callback with no run matches %d runs of mission %s, agent %s",
+			ErrCallbackRunMismatch, len(runs), missionID, agentName)
+	}
+	return r.harnesses[keys[len(keys)-1]], nil
 }
 
 // Unregister removes a harness from the registry.
@@ -156,7 +206,24 @@ func (r *CallbackHarnessRegistry) Unregister(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	agent, ok := r.agentOf[key]
+	if !ok {
+		return
+	}
 	delete(r.harnesses, key)
+	delete(r.agentOf, key)
+	keys := r.byAgent[agent]
+	for i, k := range keys {
+		if k == key {
+			keys = append(keys[:i], keys[i+1:]...)
+			break
+		}
+	}
+	if len(keys) == 0 {
+		delete(r.byAgent, agent)
+		return
+	}
+	r.byAgent[agent] = keys
 }
 
 // Count returns the number of currently registered harnesses.
@@ -199,6 +266,8 @@ func (r *CallbackHarnessRegistry) Clear() {
 	defer r.mu.Unlock()
 
 	r.harnesses = make(map[string]AgentHarness)
+	r.byAgent = make(map[string][]string)
+	r.agentOf = make(map[string]string)
 }
 
 // makeRegistryKey creates a registry key from mission ID and agent name.
@@ -215,3 +284,8 @@ func (r *CallbackHarnessRegistry) Clear() {
 func makeRegistryKey(missionID, agentName string) string {
 	return fmt.Sprintf("%s:%s", missionID, agentName)
 }
+
+// ErrCallbackRunMismatch reports a callback that cannot be tied to a run of its
+// mission: it names a run that has no registration, or it names no run while
+// the registrations span more than one.
+var ErrCallbackRunMismatch = errors.New("callback does not match one run of the mission")

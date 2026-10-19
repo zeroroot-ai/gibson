@@ -362,7 +362,7 @@ func (m *CallbackManager) RegisterHarnessForMission(missionID, agentName string,
 //
 // Thread-safe: Safe to call from multiple goroutines.
 func (m *CallbackManager) UnregisterHarness(taskID string) {
-	m.server.UnregisterHarness(taskID)
+	m.registry.Unregister(taskID)
 	m.logger.Debug("unregistered harness for task", "task_id", taskID)
 }
 

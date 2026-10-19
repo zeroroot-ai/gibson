@@ -3,16 +3,9 @@
 
 // Package daemon — brain_ingest.go
 //
-// ingestToBrain bridges the daemon's mission event stream into the ECS brain
-// (epic ecs-brain). It is the "capture path" from ADR-0101: the brain is fed by
-// the existing event bus, not by a parallel execution path. The orchestrator
-// event-bus adapter calls this for every published event with the tenant in
-// hand, so each tenant's brain World fills from its real mission execution and
-// the WorldService / Scroller show live data.
-//
-// This is the additive feed that makes the brain live; the wholesale cutover
-// (agents emitting directly via the reshaped Harness, sdk#341, and retiring the
-// old orchestrator, gibson#755/#756) replaces it later.
+// The sinks in this file fold what a mission's work reports (findings,
+// observations, delegations, LLM calls and tool calls) into the tenant's ECS
+// brain World as Timeline events (ADR-0101, ADR-0107).
 package daemon
 
 import (
@@ -36,7 +29,7 @@ import (
 // tenant World as a Finding so the graph projector — the sole writer of finding
 // nodes — materializes it. Replaces the old direct StoreAsync graph write.
 func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
-	return func(_ context.Context, tenant string, f finding.EnhancedFinding) {
+	return func(_ context.Context, tenant string, f finding.EnhancedFinding, missionRunID string) {
 		if reg == nil {
 			return
 		}
@@ -48,7 +41,8 @@ func ingestComponentFinding(reg *brain.Registry) component.WorldFindingSink {
 			// Mission-evidence edge (gibson#1078): the submitter resolves the mission
 			// id from the work-item context and passes it through, so a component-path
 			// finding attaches to the mission that produced it. Empty = tenant-ambient.
-			MissionID: f.MissionID.String(),
+			MissionID:    f.MissionID.String(),
+			MissionRunID: missionRunID,
 			// The verified submitter (gibson#208): the record the store keeps and
 			// the node the projector writes name the same principal, agent and
 			// enroller.
@@ -220,6 +214,7 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			}
 			reg.For(tenant).Submit(brain.HostObserved{
 				MissionID:    missionID,
+				MissionRunID: runID,
 				ScopeID:      scope,
 				Address:      h.Address,
 				SSHHostKey:   h.SshHostKey,
@@ -269,6 +264,7 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			}
 			reg.For(tenant).Submit(brain.HypothesisObserved{
 				MissionID:    missionID,
+				MissionRunID: runID,
 				RunID:        runID,
 				ScopeID:      scope,
 				Proposer:     hyp.GetProposer(),
@@ -304,8 +300,10 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 				})
 			}
 			if ev, _, ok := ingest.EntityObservedFromSighting(sighting, scope, missionID); ok {
+				ev.MissionRunID = runID
 				reg.For(tenant).Submit(ev)
 			} else if obs, gated := gateObservation(req, scope, missionID, time.Now()); gated {
+				obs.MissionRunID = runID
 				reg.For(tenant).Submit(obs)
 			}
 		default:
@@ -313,72 +311,11 @@ func ingestObservation(reg *brain.Registry) harness.ObservationSink {
 			// out of the Taxonomy, so it lands as an Observation rather than
 			// falling out of the bottom of this switch and being lost.
 			if obs, ok := gateObservation(req, scope, missionID, time.Now()); ok {
+				obs.MissionRunID = runID
 				reg.For(tenant).Submit(obs)
 			}
 		}
 		return nil
-	}
-}
-
-func payloadString(m map[string]interface{}, key string) string {
-	if m == nil {
-		return ""
-	}
-	if v, ok := m[key].(string); ok {
-		return v
-	}
-	return ""
-}
-
-// ingestToBrain translates a daemon EventData into brain domain events and
-// submits them to the tenant's engine. No-op when the registry is nil.
-func ingestToBrain(reg *brain.Registry, tenant string, ed api.EventData) {
-	if reg == nil {
-		return
-	}
-	eng := reg.For(tenant)
-
-	switch ed.EventType {
-	case "mission.started":
-		if m := ed.MissionEvent; m != nil {
-			eng.Submit(brain.MissionStarted{ID: m.MissionID, Goal: payloadString(m.Payload, "mission_name")})
-		}
-	case "mission.completed":
-		if m := ed.MissionEvent; m != nil {
-			eng.Submit(brain.MissionDone{ID: m.MissionID, Reason: "completed"})
-		}
-	case "mission.failed":
-		if m := ed.MissionEvent; m != nil {
-			reason := "failed"
-			if m.Error != "" {
-				reason = "failed: " + m.Error
-			}
-			eng.Submit(brain.MissionDone{ID: m.MissionID, Reason: reason})
-		}
-	case "node.started":
-		if m := ed.MissionEvent; m != nil {
-			eng.Submit(brain.WorkDispatched{ID: m.MissionID + "/" + m.NodeID, ItemKind: "node", Target: m.NodeID})
-		}
-	case "node.completed":
-		if m := ed.MissionEvent; m != nil {
-			eng.Submit(brain.WorkCompleted{ID: m.MissionID + "/" + m.NodeID})
-		}
-	case "node.failed":
-		if m := ed.MissionEvent; m != nil {
-			eng.Submit(brain.WorkCompleted{ID: m.MissionID + "/" + m.NodeID, Err: m.Error})
-		}
-	case "finding.discovered", "finding.submitted", "agent.finding_submitted":
-		if fe := ed.FindingEvent; fe != nil {
-			eng.Submit(brain.FindingRaised{
-				ID:          fe.Finding.ID,
-				Title:       fe.Finding.Title,
-				Description: fe.Finding.Description,
-				Severity:    fe.Finding.Severity,
-				// Mission-evidence edge (gibson#1075): the mission-event carries the
-				// mission id, so the finding attaches to the mission that raised it.
-				MissionID: fe.MissionID,
-			})
-		}
 	}
 }
 
@@ -412,6 +349,7 @@ func ingestLLMCall(reg *brain.Registry) api.LLMCallSink {
 			// so the call attaches to its mission's frame. Empty = tenant-ambient (e.g.
 			// dashboard chat), which never attaches to a mission frame.
 			MissionID:           call.MissionID,
+			MissionRunID:        call.MissionRunID,
 			PromptTokens:        call.PromptTokens,
 			CompletionTokens:    call.CompletionTokens,
 			Messages:            msgs,
@@ -440,6 +378,7 @@ func harnessLLMCallToAPI(call harness.LLMCallRecord) api.LLMCallRecord {
 	return api.LLMCallRecord{
 		CallID:              call.CallID,
 		MissionID:           call.MissionID,
+		MissionRunID:        call.MissionRunID,
 		RunID:               call.RunID,
 		Model:               call.Model,
 		PromptTokens:        call.PromptTokens,
@@ -491,6 +430,7 @@ func ingestToolCall(reg *brain.Registry) harness.ToolCallSink {
 		reg.For(tenant).Submit(brain.AgentToolCallObserved{
 			ToolCallID:         call.ToolCallID,
 			MissionID:          call.MissionID,
+			MissionRunID:       call.MissionRunID,
 			RunID:              call.RunID,
 			ToolName:           call.ToolName,
 			Arguments:          call.Arguments,
