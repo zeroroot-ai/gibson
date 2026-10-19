@@ -456,7 +456,9 @@ func TestDelegateToAgent_SandboxRefusedRegistrationStopsTheLaunch(t *testing.T) 
 	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{
 		SandboxID: "sbx-1", Result: &sandboxed.AgentTerminalResult{Success: true, Output: "done"},
 	}}
-	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent"}}
+	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{
+		Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent",
+	}}
 	q := successResultQueue(t)
 	h := newSandboxDelegateHarness(launcher, resolver, q, untrustedAgentInstances(), testMinter(t))
 	h.missionCtx.MissionRunID = "" // the child harness inherits no run
