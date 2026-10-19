@@ -40,18 +40,18 @@ func TestCallbackHarnessRegistry_UnregisterRemovesOnlyItsOwnRegistration(t *test
 	key2 := registry.Register("m1", "recon", run2)
 	require.NotEqual(t, key1, key2)
 
-	got, err := registry.Lookup("m1", "recon")
+	got, err := registry.Lookup("m1", "recon", "run-2")
 	require.NoError(t, err)
-	assert.Same(t, run2, got, "the current registration is the last one")
+	assert.Same(t, run2, got)
 
 	registry.Unregister(key1) // the deferred cleanup of run 1
-	got, err = registry.Lookup("m1", "recon")
+	got, err = registry.Lookup("m1", "recon", "")
 	require.NoError(t, err)
 	assert.Same(t, run2, got, "the cleanup of run 1 removed the harness of run 2")
 	assert.Equal(t, 1, registry.Count())
 
 	registry.Unregister(key2)
-	_, err = registry.Lookup("m1", "recon")
+	_, err = registry.Lookup("m1", "recon", "")
 	require.Error(t, err)
 	assert.Equal(t, 0, registry.Count())
 }
@@ -64,7 +64,7 @@ func TestCallbackHarnessRegistry_EarlierRegistrationSurvivesTheLaterOne(t *testi
 	key2 := registry.Register("m1", "recon", run2)
 
 	registry.Unregister(key2)
-	got, err := registry.Lookup("m1", "recon")
+	got, err := registry.Lookup("m1", "recon", "")
 	require.NoError(t, err)
 	assert.Same(t, run1, got)
 	registry.Unregister(key1)
@@ -84,7 +84,8 @@ func TestGetHarness_RefusesACallbackOfAnotherRun(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 
-	// The callback of run 2, and one that names no run, still resolve.
+	// The callback of run 2, and one that names no run while only run 2 is
+	// registered, still resolve.
 	for _, run := range []string{"run-2", ""} {
 		got, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{
 			MissionId: "m1", AgentName: "recon", MissionRunId: run,
@@ -108,4 +109,61 @@ func TestCallbackManager_UnregisterHarnessRemovesTheRegistration(t *testing.T) {
 
 	m.UnregisterHarness(key)
 	assert.Equal(t, 0, m.registry.Count())
+}
+
+// A callback with no run ID cannot be tied to a run when two runs hold a
+// registration of the agent. The newest registration would be the wrong
+// harness for a late callback of the older run.
+func TestCallbackHarnessRegistry_EmptyRunWithTwoRunsIsRefused(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	registry.Register("m1", "recon", newRunHarness("run-1"))
+	registry.Register("m1", "recon", newRunHarness("run-2"))
+
+	_, err := registry.Lookup("m1", "recon", "")
+	require.ErrorIs(t, err, ErrCallbackRunMismatch)
+}
+
+// A callback with no run ID still works when the registrations are of one run.
+func TestCallbackHarnessRegistry_EmptyRunWithOneRunWorks(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	first, second := newRunHarness("run-1"), newRunHarness("run-1")
+	registry.Register("m1", "recon", first)
+	registry.Register("m1", "recon", second)
+
+	got, err := registry.Lookup("m1", "recon", "")
+	require.NoError(t, err)
+	assert.Same(t, second, got, "one run: the newest registration serves")
+}
+
+// A callback that names its run gets the registration of that run, even when a
+// newer run has registered the same agent.
+func TestCallbackHarnessRegistry_NamedRunPicksItsOwnRegistration(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	run1, run2 := newRunHarness("run-1"), newRunHarness("run-2")
+	registry.Register("m1", "recon", run1)
+	registry.Register("m1", "recon", run2)
+
+	got, err := registry.Lookup("m1", "recon", "run-1")
+	require.NoError(t, err)
+	assert.Same(t, run1, got)
+	got, err = registry.Lookup("m1", "recon", "run-2")
+	require.NoError(t, err)
+	assert.Same(t, run2, got)
+
+	_, err = registry.Lookup("m1", "recon", "run-3")
+	require.ErrorIs(t, err, ErrCallbackRunMismatch)
+}
+
+// A late callback of run 1 that names no run is refused while run 1 and run 2
+// both hold a registration. Most agents send no run ID, so the harness of run 2
+// must not serve it.
+func TestGetHarness_RefusesAnEmptyRunCallbackWhenTwoRunsAreRegistered(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	registry.Register("m1", "recon", newRunHarness("run-1"))
+	registry.Register("m1", "recon", newRunHarness("run-2"))
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	_, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1", AgentName: "recon"})
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 }

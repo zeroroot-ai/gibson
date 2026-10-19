@@ -722,9 +722,21 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		return nil, status.Error(codes.Internal, "callback registry not configured")
 	}
 
-	// Perform registry lookup with explicit mission ID and agent name
-	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName)
+	// Perform registry lookup with explicit mission ID, agent name and run ID.
+	// The mission ID is the same for every run of a record, so an agent of
+	// run 1 that still runs must not find the harness of run 2. Its evidence
+	// would take the run of run 2 (gibson#1217).
+	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName, contextInfo.MissionRunId)
 	if err != nil {
+		if errors.Is(err, ErrCallbackRunMismatch) {
+			s.logger.Warn("callback of another run refused",
+				"mission_id", contextInfo.MissionId,
+				"agent_name", contextInfo.AgentName,
+				"callback_run_id", contextInfo.MissionRunId,
+				"error", err,
+			)
+			return nil, status.Errorf(codes.FailedPrecondition, "callback refused: %v", err)
+		}
 		s.logger.Error("harness lookup failed",
 			"mission_id", contextInfo.MissionId,
 			"agent_name", contextInfo.AgentName,
@@ -733,22 +745,6 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		)
 		return nil, status.Errorf(codes.NotFound, "no active harness for mission %s, agent %s: %v",
 			contextInfo.MissionId, contextInfo.AgentName, err)
-	}
-
-	// A callback of another run is refused. The mission ID is the same for every
-	// run of a record, so an agent of run 1 that still runs can find the harness
-	// of run 2 under the same mission and agent name. Its evidence would then
-	// take the run of run 2 (gibson#1217).
-	run, harnessRun := contextInfo.MissionRunId, harness.Mission().MissionRunID
-	if run != "" && harnessRun != "" && run != harnessRun {
-		s.logger.Warn("callback of another run refused",
-			slog.String("mission_id", contextInfo.MissionId),
-			slog.String("agent_name", contextInfo.AgentName),
-			slog.String("callback_run_id", run),
-			slog.String("harness_run_id", harnessRun),
-		)
-		return nil, status.Errorf(codes.FailedPrecondition,
-			"callback of run %s refused: the active run of mission %s is %s", run, contextInfo.MissionId, harnessRun)
 	}
 
 	s.logger.Debug("harness lookup succeeded",
