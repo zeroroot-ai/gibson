@@ -93,7 +93,7 @@ func TestProjection_SecondRunOfAFinishedMissionRunsItsWork(t *testing.T) {
 	for run := 1; run <= 2; run++ {
 		e.Submit(proj)
 		e.Submit(MissionStarted{ID: "m1"})
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			e.Tick()
 		}
 
@@ -113,12 +113,11 @@ func TestProjection_SecondRunOfAFinishedMissionRunsItsWork(t *testing.T) {
 		}
 	}
 
-	// Each run must emit its own start and its own terminal event, so a
+	// Each run must emit its own terminal event, so a
 	// RunMission stream sees an end for run 2.
 	var done int
 	for _, ev := range e.Events() {
-		switch ev.(type) {
-		case MissionDone:
+		if _, ok := ev.(MissionDone); ok {
 			done++
 		}
 	}
