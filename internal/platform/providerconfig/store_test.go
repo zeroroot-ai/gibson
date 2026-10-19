@@ -37,6 +37,6 @@ func TestValidateType(t *testing.T) {
 }
 
 func TestJoinTypes(t *testing.T) {
-	assert.Equal(t, "", joinTypes(nil))
+	assert.Empty(t, joinTypes(nil))
 	assert.Equal(t, "a, b", joinTypes([]llm.ProviderType{"a", "b"}))
 }
