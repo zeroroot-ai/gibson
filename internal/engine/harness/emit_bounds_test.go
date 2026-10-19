@@ -57,6 +57,7 @@ func observeRequestOfSize(t *testing.T, n int) *harnesspb.ObserveRequest {
 // against a registry-less service to prove the caps hold whether or not the
 // brain is wired.
 func boundsService(t *testing.T, sink ObservationSink) *HarnessCallbackService {
+	t.Helper()
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, "m1", "probe", &observeMockHarness{
 		missionID: types.NewID(),
