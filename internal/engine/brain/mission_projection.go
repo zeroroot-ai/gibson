@@ -6,6 +6,8 @@ package brain
 import (
 	"time"
 
+	"github.com/mlange-42/ark/ecs"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 )
 
@@ -106,8 +108,15 @@ type MissionProjected struct {
 func (MissionProjected) Kind() string { return "mission.projected" }
 
 func applyMissionProjected(w *World, e MissionProjected) {
-	if _, ok := findMission(w, e.ID); ok {
-		return // idempotent: already projected
+	if ent, ok := findMission(w, e.ID); ok {
+		if !isTerminalMission(w.missions.Get(ent).Status) {
+			return // idempotent: already projected, still running
+		}
+		// The mission ID is the stable record ID, so a projection of a
+		// finished mission is the next run of that record. Retire the
+		// finished run first, or the new run finds the old terminal status
+		// and the old work items and does nothing (gibson#1217).
+		retireMissionRun(w, e.ID, ent)
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
@@ -190,4 +199,26 @@ func nodeName(workID string) string {
 		}
 	}
 	return workID
+}
+
+// isTerminalMission reports whether a mission status ends a run.
+func isTerminalMission(s MissionStatus) bool {
+	return s == MissionCompleted || s == MissionFailed
+}
+
+// retireMissionRun removes the mission entity and the work items of a finished
+// run, so the next projection of the same mission ID starts from a clean state.
+// The Timeline keeps the history of the finished run.
+func retireMissionRun(w *World, missionID string, mission ecs.Entity) {
+	var stale []ecs.Entity
+	q := ecs.NewFilter1[WorkItem](w.ecs).Query()
+	for q.Next() {
+		if q.Get().MissionID == missionID {
+			stale = append(stale, q.Entity())
+		}
+	}
+	for _, ent := range stale {
+		w.ecs.RemoveEntity(ent)
+	}
+	w.ecs.RemoveEntity(mission)
 }

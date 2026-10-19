@@ -78,3 +78,51 @@ func TestWorkID_RoundTripsThroughNodeName(t *testing.T) {
 		t.Errorf("nodeName of an unscoped id = %q", got)
 	}
 }
+
+// TestProjection_SecondRunOfAFinishedMissionRunsItsWork is the regression for
+// gibson#1217. The mission ID is the stable record ID, so run 2 of a mission
+// projects the same ID as run 1. It used to find run 1 terminal, add no work,
+// and report completed at once with nothing dispatched.
+func TestProjection_SecondRunOfAFinishedMissionRunsItsWork(t *testing.T) {
+	e := engineWithScheduler(nil)
+	proj := MissionProjected{ID: "m1", Nodes: []WorkNode{
+		{ID: "scan", Kind: "tool", Target: "nmap"},
+		{ID: "report", Kind: "tool", Target: "md", DependsOn: []string{"scan"}},
+	}}
+
+	for run := 1; run <= 2; run++ {
+		e.Submit(proj)
+		e.Submit(MissionStarted{ID: "m1"})
+		for i := 0; i < 10; i++ {
+			e.Tick()
+		}
+
+		ms := e.Missions()
+		if len(ms) != 1 || ms[0].Status != MissionCompleted {
+			t.Fatalf("run %d: missions = %+v, want one completed mission", run, ms)
+		}
+		dispatched := 0
+		for _, wi := range e.Work() {
+			if wi.State != WorkDone {
+				t.Fatalf("run %d: work %s state = %s, want done", run, wi.ID, wi.State)
+			}
+			dispatched += wi.Attempts
+		}
+		if len(e.Work()) != 2 || dispatched != 2 {
+			t.Fatalf("run %d: work items = %d, attempts = %d, want 2 and 2", run, len(e.Work()), dispatched)
+		}
+	}
+
+	// Each run must emit its own start and its own terminal event, so a
+	// RunMission stream sees an end for run 2.
+	var done int
+	for _, ev := range e.Events() {
+		switch ev.(type) {
+		case MissionDone:
+			done++
+		}
+	}
+	if done != 2 {
+		t.Errorf("MissionDone events = %d, want 2 (one for each run)", done)
+	}
+}
