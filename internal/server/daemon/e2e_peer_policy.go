@@ -43,8 +43,8 @@ func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2
 // stops being able to prove that a denial is a denial — if the harness has more
 // authority than the thing under test, a passing assertion says nothing. These
 // are the RPCs tests/e2e/tool_dispatch_test.go,
-// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go and
-// tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
+// tests/e2e/sandboxed_agent_dispatch_test.go, tests/e2e/bank_test.go,
+// tests/e2e/model_gate_test.go and tests/e2e/secrets actually use. A suite that calls an RPC not listed here is denied at the
 // daemon with PermissionDenied naming the method, which is how the bank exit
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
@@ -110,6 +110,21 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 			// SecretsService methods above.
 			"/gibson.agentidentity.v1.AgentIdentityService/CreateAgentIdentity": true,
 			"/gibson.agentidentity.v1.AgentIdentityService/RevokeAgentIdentity": true,
+			// The model-gate exit test (hosted#358,
+			// tests/e2e/model_gate_test.go): the tenant gets the e2e mock
+			// provider through the RPC, the runner serves an agent node as
+			// an outside agent (register, poll, complete, submit) so the
+			// node's completion meets the tenant's model gate, and as the
+			// tenant admin it reads, revokes and grants the tenant's model
+			// access through the RPCs of the dashboard Model Access page.
+			"/gibson.component.v1.ComponentService/RegisterComponent": true,
+			"/gibson.component.v1.ComponentService/Heartbeat":         true,
+			"/gibson.component.v1.ComponentService/PollWork":          true,
+			"/gibson.component.v1.ComponentService/Complete":          true,
+			"/gibson.component.v1.ComponentService/SubmitResult":      true,
+			"/gibson.tenant.v1.ModelAccessService/ListAccess":         true,
+			"/gibson.tenant.v1.ModelAccessService/RevokeAccess":       true,
+			"/gibson.tenant.v1.ModelAccessService/GrantAccess":        true,
 		},
 	}
 }

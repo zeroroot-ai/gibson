@@ -62,6 +62,11 @@ func Register(registry llm.LLMRegistry) error {
 	return nil
 }
 
+// New returns a fresh e2e mock provider. The provider factory builds one for a
+// tenant that configures the fixture provider type (llm.FixtureProviderType),
+// so the tenant's own slot manager and its model gate serve it (hosted#358).
+func New() llm.LLMProvider { return newE2EMockProvider() }
+
 // e2EMockProvider is the in-process deterministic provider.
 // All state mutations are protected by mu; errorMode is an atomic string for
 // fast-path read in Complete without holding the lock.

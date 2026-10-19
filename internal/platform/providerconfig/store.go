@@ -50,7 +50,7 @@ type ProviderConfigStore interface {
 }
 
 func validateType(t llm.ProviderType) error {
-	for _, supported := range llm.SupportedProviderTypes() {
+	for _, supported := range llm.AcceptedProviderTypes() {
 		if t == supported {
 			return nil
 		}

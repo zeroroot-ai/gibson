@@ -83,9 +83,9 @@ func TestBank(t *testing.T) {
 	var bankID string
 	t.Run("a bank of two comes up and both members report idle", func(t *testing.T) {
 		// The runner owns the bank. A tenant-owned bank is owned by the
-		// tenant's admins, and the runner is a member (its membership is the
-		// fixture seed, and a suite with admin authority proves less), so it
-		// could send to and read a shared bank but not scale it to zero.
+		// tenant's admins. The runner creates its own bank and does not lean
+		// on the admin role that the fixture seed also gives it for the Model
+		// Access RPCs (hosted#358): each bank assertion holds for any member.
 		created, err := banks.CreateBank(ctx, &bankpb.CreateBankRequest{
 			Name: "exit-bank", DesiredCount: 2,
 			LoginShape: bankpb.LoginShape_LOGIN_SHAPE_ANTHROPIC_API_KEY, ProviderConfigName: bankProviderName,

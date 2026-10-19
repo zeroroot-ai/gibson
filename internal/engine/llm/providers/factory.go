@@ -80,14 +80,22 @@ func NewProviderWithContext(ctx context.Context, cfg llm.ProviderConfig) (llm.LL
 		// test helpers can inspect raw call counts without breaker interference.
 		return NewMockProvider([]string{"Mock response"}), nil
 	default:
-		return nil, llm.NewInvalidInputError("factory",
-			fmt.Sprintf("unknown provider type %q; supported: %s", cfg.Type, supportedTypesList()))
+		// The e2e mock provider, in a fixture build with the fixture gate on
+		// only (fixture_factory.go). A production build has no such type, so
+		// its newFixtureProvider is the unknown type error.
+		return newFixtureProvider(cfg)
 	}
 
 	if err != nil {
 		return nil, err
 	}
 	return newCircuitLLMProvider(p, p.Name()), nil
+}
+
+// unknownTypeMessage is the message for a provider type the factory cannot
+// build.
+func unknownTypeMessage(cfg llm.ProviderConfig) string {
+	return fmt.Sprintf("unknown provider type %q; supported: %s", cfg.Type, supportedTypesList())
 }
 
 // supportedTypesList returns the enum as a comma-separated list for error messages.

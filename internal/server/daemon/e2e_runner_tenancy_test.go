@@ -19,13 +19,13 @@ import (
 // build the test run selects: the fixture build seeds, the production build
 // never writes.
 
-func TestEnsureTenantMember(t *testing.T) {
+func TestEnsureTenantRole(t *testing.T) {
 	ctx := context.Background()
 	want := authz.Tuple{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
 
 	t.Run("absent tuple is written", func(t *testing.T) {
 		fa := &fakeAuthorizer{deny: true}
-		if err := ensureTenantMember(ctx, fa, want.User, "primary", slog.Default()); err != nil {
+		if err := ensureTenantRole(ctx, fa, want.User, "member", "primary", slog.Default()); err != nil {
 			t.Fatal(err)
 		}
 		if len(fa.written) != 1 || fa.written[0] != want {
@@ -34,7 +34,7 @@ func TestEnsureTenantMember(t *testing.T) {
 	})
 	t.Run("present tuple is left alone", func(t *testing.T) {
 		fa := &fakeAuthorizer{}
-		if err := ensureTenantMember(ctx, fa, want.User, "primary", slog.Default()); err != nil {
+		if err := ensureTenantRole(ctx, fa, want.User, "member", "primary", slog.Default()); err != nil {
 			t.Fatal(err)
 		}
 		if len(fa.written) != 0 {
@@ -43,13 +43,13 @@ func TestEnsureTenantMember(t *testing.T) {
 	})
 	t.Run("check error is reported", func(t *testing.T) {
 		fa := &fakeAuthorizer{checkErr: context.DeadlineExceeded}
-		if err := ensureTenantMember(ctx, fa, want.User, "primary", slog.Default()); err == nil {
+		if err := ensureTenantRole(ctx, fa, want.User, "member", "primary", slog.Default()); err == nil {
 			t.Fatal("a failed check must be reported")
 		}
 	})
 	t.Run("write error is reported", func(t *testing.T) {
 		fa := &fakeAuthorizer{deny: true, writeErr: context.DeadlineExceeded}
-		if err := ensureTenantMember(ctx, fa, want.User, "primary", slog.Default()); err == nil {
+		if err := ensureTenantRole(ctx, fa, want.User, "member", "primary", slog.Default()); err == nil {
 			t.Fatal("a failed write must be reported")
 		}
 	})
@@ -80,8 +80,8 @@ func TestSeedTenantMembership_LogsAFailedWrite(t *testing.T) {
 	}
 	fa = &fakeAuthorizer{deny: true}
 	seedTenantMembership(context.Background(), fa, "user:zeroroot.ai/platform/e2e-runner", "primary", slog.Default())
-	if len(fa.written) != 1 {
-		t.Fatalf("wrote %v, want one membership tuple", fa.written)
+	if len(fa.written) != 2 {
+		t.Fatalf("wrote %v, want the member and the admin tuple", fa.written)
 	}
 }
 
@@ -99,8 +99,11 @@ func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMember(t *testing.T) {
 	t.Setenv("GIBSON_PLATFORM_TENANT", "primary")
 	fa := &fakeAuthorizer{deny: true} // the tuple is absent
 	seedE2ERunnerTenancy(context.Background(), fa, slog.Default(), testTD)
-	want := authz.Tuple{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"}
-	if len(fa.written) != 1 || fa.written[0] != want {
+	want := []authz.Tuple{
+		{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"},
+		{User: "user:example.org/platform/e2e-runner", Relation: "admin", Object: "tenant:primary"},
+	}
+	if len(fa.written) != 2 || fa.written[0] != want[0] || fa.written[1] != want[1] {
 		t.Fatalf("wrote %v, want exactly %v: the gate's caller shape is user:<svid without scheme> (callbackFGAUser)", fa.written, want)
 	}
 }

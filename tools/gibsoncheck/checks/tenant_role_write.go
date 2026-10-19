@@ -44,6 +44,7 @@ import (
 //     tenant-operator's FGA adapter file, which translates a
 //     tenantrole.Tuple into its own client's wire shape.
 //   - The three files in tenantRoleAllowedFiles below that write "member"
+//     (and, for the exit-test runner only, "admin")
 //     (Viewer's relation string) on a tenant object for a subject ADR-0093
 //     never governs: a non-human "<kind>_principal:<id>" component identity
 //     (ADR-0045/0046 tenant membership, unrelated to any Zitadel project
@@ -113,7 +114,9 @@ var tenantRoleAllowedFiles = []string{
 
 	// seedE2ERunnerTenancy seeds the exit-test runner's SPIFFE-derived
 	// pseudo-user as a tenant member at boot, fixture builds only
-	// (gibson#14). That subject is excluded from tenantrole.Syncer by
+	// (gibson#14). It also writes "admin" for that subject, so the
+	// model-gate exit test can call GrantAccess and RevokeAccess
+	// (hosted#358). That subject is excluded from tenantrole.Syncer by
 	// design (owner decision D2, option b: tenantrole.IsZitadelUserSubject
 	// rejects any "user:" id containing "/", which every SPIFFE id does) —
 	// it is not, and can never become, a Zitadel grant.

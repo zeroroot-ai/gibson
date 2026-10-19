@@ -194,7 +194,7 @@ func validateProviderInput(input *tenantv1.ProviderConfigInput) error {
 		return fmt.Errorf("provider type %q is operator-only and cannot be configured via the dashboard", input.Type)
 	}
 	supported := false
-	for _, t := range llm.SupportedProviderTypes() {
+	for _, t := range llm.AcceptedProviderTypes() {
 		if string(t) == input.Type {
 			supported = true
 			break
@@ -927,7 +927,7 @@ func (s *DaemonServer) ProbeProvider(ctx context.Context, req *tenantv1.ProbePro
 
 	// Validate against the known type list (reuse logic without a full input struct).
 	supported := false
-	for _, t := range llm.SupportedProviderTypes() {
+	for _, t := range llm.AcceptedProviderTypes() {
 		if string(t) == provType {
 			supported = true
 			break

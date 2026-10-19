@@ -54,6 +54,14 @@ const (
 	ProviderTEI ProviderType = "tei"
 )
 
+// AcceptedProviderTypes is the list a provider configuration is validated
+// against: SupportedProviderTypes plus the e2e mock type, which exists only in
+// a fixture build with the fixture gate on (fixtureProviderTypes, hosted#358).
+// A production build accepts exactly SupportedProviderTypes.
+func AcceptedProviderTypes() []ProviderType {
+	return append(SupportedProviderTypes(), fixtureProviderTypes()...)
+}
+
 // SupportedProviderTypes returns every ProviderType the platform supports,
 // in a deterministic order. This is the single source of truth for the factory
 // switch, config validator, and the GetSupportedProviders introspection RPC.

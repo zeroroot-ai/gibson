@@ -1,0 +1,255 @@
+# ----------------------------------------------------------------------------
+# The model-gate exit test (hosted#358).
+#
+# In plain words: a member of a tenant runs a mission and its agent gets a
+# model through the default grant of the tenant. When an administrator revokes
+# that grant on the Model Access page, the same mission is refused, and the
+# refusal names the gate. A new grant gives the mission a model again.
+#
+# The steps:
+#   1. The kind bring-up and the test-mode daemon of
+#      exit-test-belief-training.yml, copied. ONE bring-up path.
+#   2. TestModelGate_DefaultGrantRevokeAndGrantAgain (in-cluster, runner SVID)
+#      configures the deterministic e2e mock provider for the tenant through
+#      the ProviderService RPC, serves the agent node of a mission as an
+#      outside agent, and runs the mission three times: with the default
+#      tenant grant, after RevokeAccess, and after GrantAccess.
+#
+# The test fails when the gate permits every model: the second run then
+# completes. The PR that added this workflow carries a branch run with the
+# gate forced open, which failed on that step.
+#
+# ADR-0080: NEVER on pull_request. It needs a live cluster. It runs on main and
+# daily.
+# ----------------------------------------------------------------------------
+name: exit-test-model-gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/engine/llm/modelgate/**'
+      - 'internal/engine/llm/fixture_provider_type*.go'
+      - 'internal/engine/llm/providers/fixture_factory*.go'
+      - 'internal/server/daemon/slot_manager.go'
+      - 'internal/server/daemon/harness_init.go'
+      - 'internal/server/daemon/api/server_model_access.go'
+      - 'internal/server/daemon/e2e_peer_policy.go'
+      - 'internal/server/daemon/e2e_runner_tenancy.go'
+      - 'internal/engine/llm/providers/factory.go'
+      - 'internal/platform/providerconfig/store.go'
+      - 'internal/server/daemon/api/server_provider_config.go'
+      - 'internal/platform/component/service*.go'
+      - 'internal/platform/component/llm_adapter.go'
+      - 'internal/platform/component/slot_pin.go'
+      - 'tests/e2e/model_gate_test.go'
+      - 'tests/e2e/fixtures/providers/mock-llm/**'
+      - '.github/workflows/exit-test-model-gate.yml'
+  schedule:
+    - cron: '15 8 * * *'
+  workflow_dispatch: {}
+
+# One run at a time, and a run that started finishes (gibson#151).
+concurrency:
+  group: exit-test-model-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHARTS_ROOT: ${{ github.workspace }}/charts
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: gibson
+  NODE: gibson-control-plane
+  # The tenant the sanctioned baseline profile always provisions.
+  TENANT: primary
+  E2E_OUT: ${{ github.workspace }}/e2e-out
+
+jobs:
+  model-gate:
+    name: the model gate decides each mission completion
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      # The kind bring-up (make substrate / make recreate ENV=kind) lives in
+      # the hosted repo since the 2026-09-04 split (ADR-0086). hosted is private,
+      # so the checkout needs the org read PAT.
+      - name: Checkout hosted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      # The chart source lives in zeroroot-ai/charts (ADR-0086); hosted holds
+      # none and its recreate reads CHARTS_ROOT. charts is public.
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          path: charts
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          install_only: true
+
+      # `make recreate ENV=kind` runs stage 1 through terraform
+      # (scripts/recreate-kind.sh). Pinned to hosted's own CI version.
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # Stage 0 writes the bringup keyring the install reads (ADR-0083). The
+      # registry pull token is the keyring member GHCR_PULL_TOKEN. The state
+      # dir is the runner's temp, because nothing here owns /bulk.
+      - name: Stage 0, the substrate and the bringup keyring
+        working-directory: hosted
+        env:
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_RO_PAT }}
+        run: |
+          if [ -z "${GHCR_PULL_TOKEN}" ]; then
+            echo "::error::GHCR_RO_PAT is required to pull first-party images (daemon, setec)."
+            exit 1
+          fi
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node. The
+      # gvisor backend and the runtime agent that wrote the
+      # runtime.gvisor node label are gone (gibson#1096).
+      - name: Open /dev/kvm for the launcher
+        uses: ./gibson/.github/actions/open-kvm
+
+      # Stand up kind with the sanctioned setec profile. The 2-core overlay
+      # shrinks REQUESTS so the whole platform packs onto the runner.
+      - name: Stand up the setec cluster
+        working-directory: hosted
+        run: |
+          SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+            RUNG=ci make recreate ENV=kind
+
+      # With no KVM on the node every sandbox stays Pending. Fail here with a
+      # clear message, not as a timeout later.
+      - name: Node offers KVM to the launcher
+        uses: ./gibson/.github/actions/node-offers-kvm
+        with:
+          node: ${{ env.NODE }}
+
+      # The overlay below builds FROM the private daemon image on ghcr.io.
+      # The runner's own docker needs the same read-only token the cluster
+      # pulls with (run 33643826807).
+      - name: Log the runner's docker in to ghcr.io
+        env:
+          GHCR_RO_PAT: ${{ secrets.GHCR_RO_PAT }}
+        run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Swap in a TEST-MODE daemon: authz disabled, test fixtures on, built
+      # with setec_integration so dispatch reaches the real setec executor.
+      # This changes ONLY how the client authenticates, never the runtime.
+      - name: Build + load the test-mode daemon
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+            -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+          echo "overlaying onto base daemon image: ${BASE}"
+          mkdir -p /tmp/dctx
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -tags="setec_integration test_fixtures" \
+            -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+            -o /tmp/dctx/gibson ./cmd/gibson
+          cat > /tmp/dctx/Dockerfile <<EOF
+          FROM ${BASE}
+          COPY gibson /usr/local/bin/gibson
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson:model-gate /tmp/dctx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson:model-gate --name "$CLUSTER"
+
+      # The e2eRunner values register the runner's ClusterSPIFFEID, allow-list
+      # its SVID on the daemon's listener and set GIBSON_TEST_FIXTURES_ENABLED
+      # on the daemon (charts#142). One patch means one Argo sync and one
+      # daemon rollout.
+      - name: Point the daemon at the test-mode image with authz off + fixtures on
+        working-directory: hosted
+        run: |
+          set -euo pipefail
+          kubectl -n argocd patch application gibson --type json -p '[
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"model-gate","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+              {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}}
+            ]'
+
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+                    -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' 2>/dev/null || true)
+            case "$img" in *:model-gate) echo "daemon image is $img"; break;; esac
+            [ "$i" = 60 ] && { echo "::error::the daemon StatefulSet never took the model-gate image (Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"; exit 1; }
+            sleep 20
+          done
+          kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+
+      - name: Build the e2e suite into an image
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ectx "$E2E_OUT"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+            -o /tmp/ectx/e2e.test ./tests/e2e/
+          cat > /tmp/ectx/Dockerfile <<'EOF'
+          FROM gcr.io/distroless/static-debian12:nonroot
+          COPY e2e.test /usr/local/bin/e2e.test
+          ENTRYPOINT ["/usr/local/bin/e2e.test"]
+          EOF
+          docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+          kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
+
+      - name: The model gate decides each mission completion
+        run: |
+          set -o pipefail
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate 'TestModelGate_DefaultGrantRevokeAndGrantAgain$' 20m \
+            2>&1 | tee "$E2E_OUT/model-gate.log"
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: model-gate-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-out
+          if-no-files-found: ignore
+
+      # always(), not failure(): a job that hits timeout-minutes is cancelled,
+      # and a cancelled job skips failure() steps.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          kubectl -n "$NS" get pods || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=5000 \
+            | grep -iE 'model_access|modelgate|default grant|slot|probe|e2e-model|provider|mission' \
+            | grep -v 'audit: entry refused' | tail -200 || true
