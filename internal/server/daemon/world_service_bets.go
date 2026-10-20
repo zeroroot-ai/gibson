@@ -44,7 +44,10 @@ func betLabelTargetID(hypothesisID string) string {
 // (Hypothesis.Confidence), not a reconciled market stake read back from
 // BeliefSubstrate — that reconciliation is a pre-existing, tracked gap
 // (gibson#273) this RPC does not close.
-func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsRequest) (*worldpb.ListOpenBetsResponse, error) {
+func (s *worldServer) ListOpenBets(
+	ctx context.Context,
+	req *worldpb.ListOpenBetsRequest,
+) (*worldpb.ListOpenBetsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -55,11 +58,22 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 		settled[st.HypothesisID] = true
 	}
 
-	resp := &worldpb.ListOpenBetsResponse{}
+	pg, err := s.pageOf(ctx, "ListOpenBets", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	var open []brain.HypothesisSnapshot
 	for _, h := range e.Hypotheses() {
-		if h.HypothesisID == "" || settled[h.HypothesisID] {
-			continue
+		if h.HypothesisID != "" && !settled[h.HypothesisID] {
+			open = append(open, h)
 		}
+	}
+	page, next := worldKeyedPage(s, pg, open, func(h brain.HypothesisSnapshot) string {
+		return worldKey(h.HypothesisID, h.ScopeID, h.Claim)
+	})
+
+	resp := &worldpb.ListOpenBetsResponse{NextPageToken: next}
+	for _, h := range page {
 		evidence := make([]*worldpb.ReferencedEntityView, 0, len(h.References))
 		for _, r := range h.References {
 			evidence = append(evidence, &worldpb.ReferencedEntityView{
@@ -94,7 +108,10 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 // settlement (ADR-0106 provenance, ADR-0132's class of destructive/
 // consequential action), so an unattributable verdict must fail closed, not
 // flow through as a zero-value identity.
-func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBetByHITLRequest) (*worldpb.SettleBetByHITLResponse, error) {
+func (s *worldServer) SettleBetByHITL(
+	ctx context.Context,
+	req *worldpb.SettleBetByHITLRequest,
+) (*worldpb.SettleBetByHITLResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -138,7 +155,10 @@ func (s *worldServer) SettleBetByHITL(ctx context.Context, req *worldpb.SettleBe
 // (ADR-0131, gibson#798), one page at a time in hypothesis id order. The
 // brain drops a proof from the list when its bet settles by any path, so a
 // reviewer never sees a settled bet here.
-func (s *worldServer) ListProofReviews(ctx context.Context, req *worldpb.ListProofReviewsRequest) (*worldpb.ListProofReviewsResponse, error) {
+func (s *worldServer) ListProofReviews(
+	ctx context.Context,
+	req *worldpb.ListProofReviewsRequest,
+) (*worldpb.ListProofReviewsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
