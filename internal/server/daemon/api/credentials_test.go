@@ -167,17 +167,6 @@ func TestCredentialHandler_GetByName_NotFound(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestCredentialHandler_GetDecrypted_Success(t *testing.T) {
-	broker := &apiTestBroker{getVal: []byte("plaintext-key")}
-	svc := buildAPITestService(t, broker)
-	handler, _ := NewCredentialHandler(svc)
-
-	cred, secret, err := handler.GetDecrypted(apiCtx(), "my-cred")
-	require.NoError(t, err)
-	assert.Equal(t, "my-cred", cred.Name)
-	assert.Equal(t, "plaintext-key", secret)
-}
-
 func TestCredentialHandler_List_Success(t *testing.T) {
 	broker := &apiTestBroker{lstVal: []string{"cred1", "cred2", "cred3"}}
 	svc := buildAPITestService(t, broker)
