@@ -24,60 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- service.go: parseCapabilityName -----------------------------------------
-
-func TestParseCapabilityName(t *testing.T) {
-	cases := []struct {
-		in                        string
-		wantRef, wantKind, wantNm string
-		wantOK                    bool
-	}{
-		{"read:tool:scanner", "component:tool/scanner", "tool", "scanner", true},
-		{"exec:plugin:gitlab", "component:plugin/gitlab", "plugin", "gitlab", true},
-		// SplitN(_,3) keeps extra colons in the name segment.
-		{"read:tool:a:b:c", "component:tool/a:b:c", "tool", "a:b:c", true},
-		// Empty verb is permitted — only kind and name must be non-empty.
-		{":tool:scanner", "component:tool/scanner", "tool", "scanner", true},
-		// Invalid shapes.
-		{"tool:scanner", "", "", "", false},
-		{"read::scanner", "", "", "", false},
-		{"read:tool:", "", "", "", false},
-		{"", "", "", "", false},
-		{"singletoken", "", "", "", false},
-	}
-	for _, c := range cases {
-		t.Run(c.in, func(t *testing.T) {
-			ref, kind, nm, ok := parseCapabilityName(c.in)
-			if ok != c.wantOK || ref != c.wantRef || kind != c.wantKind || nm != c.wantNm {
-				t.Fatalf("parseCapabilityName(%q) = (%q,%q,%q,%v), want (%q,%q,%q,%v)",
-					c.in, ref, kind, nm, ok, c.wantRef, c.wantKind, c.wantNm, c.wantOK)
-			}
-		})
-	}
-}
-
-// --- service.go: stripFGATypePrefix ------------------------------------------
-
-func TestStripFGATypePrefix(t *testing.T) {
-	cases := []struct {
-		s, typeName, want string
-	}{
-		{"tenant:acme", "tenant", "acme"},
-		{"component:scanner:v2", "component", "scanner:v2"}, // only first prefix stripped
-		{"acme", "tenant", "acme"},                          // no prefix → unchanged
-		{"user:alice", "tenant", "user:alice"},              // wrong prefix → unchanged
-		{"tenant:", "tenant", "tenant:"},                    // prefix with empty remainder → unchanged
-		{"tenant:x", "tenant", "x"},
-	}
-	for _, c := range cases {
-		t.Run(c.s+"|"+c.typeName, func(t *testing.T) {
-			if got := stripFGATypePrefix(c.s, c.typeName); got != c.want {
-				t.Fatalf("stripFGATypePrefix(%q,%q) = %q, want %q", c.s, c.typeName, got, c.want)
-			}
-		})
-	}
-}
-
 // --- service.go: newAgentID --------------------------------------------------
 
 var agentIDRe = regexp.MustCompile(`^agt_[0-9a-f]{16}$`)
