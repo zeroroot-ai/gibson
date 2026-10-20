@@ -8,6 +8,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -120,5 +122,39 @@ func TestReserveChildBudget_RefusesWhatCannotBeReserved(t *testing.T) {
 	}, tenant)
 	if err := mm.reserveChildBudget(ctx, conn, child); err == nil {
 		t.Fatal("a run against a spent parent was not refused")
+	}
+}
+
+// failingLedger refuses every reservation.
+type failingLedger struct{ mission.ReservationLedger }
+
+func (failingLedger) Reserve(context.Context, *mission.Mission, types.ID, mission.ChildBudget) (mission.ChildBudget, error) {
+	return mission.ChildBudget{}, errors.New("ledger down")
+}
+
+// A run that cannot reserve its budget fails before it starts, and the World
+// records the failure.
+func TestReserveRunBudget_ARefusalFailsTheRunBeforeItStarts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	mm := helperMM()
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
+	tenant := auth.MustNewTenantID("acme")
+	parent := &mission.Mission{ID: types.NewID(), Constraints: &missionpb.MissionConstraints{MaxCost: 100}}
+	mm.loadMission = func(context.Context, *datapool.Conn, types.ID) (*mission.Mission, error) { return parent, nil }
+	mm.newLedger = func(*datapool.Conn) mission.ReservationLedger { return failingLedger{} }
+
+	run := activeRunOfRecord(&mission.Mission{ID: types.NewID(), ParentMissionID: &parent.ID}, tenant)
+	if mm.reserveRunBudget(ctx, conn, run, "child") {
+		t.Fatal("the run went on without a reservation")
+	}
+	waitWorldStatus(t, mm.brainRegistry.For(tenant.String()), run.mission.ID.String(), string(brain.MissionFailed))
+
+	// A run with no parent goes on.
+	root := activeRunOfRecord(&mission.Mission{ID: types.NewID()}, tenant)
+	if !mm.reserveRunBudget(ctx, conn, root, "root") {
+		t.Fatal("a run with no parent was stopped")
 	}
 }

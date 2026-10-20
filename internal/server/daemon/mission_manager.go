@@ -1063,6 +1063,18 @@ func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapoo
 	}
 }
 
+// reserveRunBudget reserves the budget of a run at its start. It records a
+// refusal as a failed run before it starts, and reports whether the run may go on.
+func (m *missionManager) reserveRunBudget(ctx context.Context, poolConn *datapool.Conn, am *activeMission, name string) bool {
+	err := m.reserveChildBudget(ctx, poolConn, am)
+	if err == nil {
+		return true
+	}
+	m.failBeforeStart(am.tenantID, am.mission.ID.String(), runIDOf(am), name,
+		fmt.Sprintf("failed to reserve the budget of the run against the parent: %v", err))
+	return false
+}
+
 // reserveChildBudget reserves the budget of a child mission against its parent
 // at the start of a run. A mission with no parent reserved nothing and needs
 // nothing. The record already holds a reservation after origination, and Reserve
@@ -1321,9 +1333,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// reserved once for the record, and the end of a run releases it, so a
 	// later run of the record (a rewind or a restart) holds none until it
 	// reserves here (gibson#1270).
-	if reserveErr := m.reserveChildBudget(ctx, poolConn, active); reserveErr != nil {
-		m.failBeforeStart(active.tenantID, missionID, runID, def.GetName(),
-			fmt.Sprintf("failed to reserve the budget of the run against the parent: %v", reserveErr))
+	if !m.reserveRunBudget(ctx, poolConn, active, def.GetName()) {
 		return
 	}
 	eng.Submit(proj)
