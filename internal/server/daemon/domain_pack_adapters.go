@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/compliance"
 
 	"google.golang.org/grpc"
@@ -24,14 +25,13 @@ import (
 // time this runs (the WorldService registration block builds brainRegistry;
 // newInfrastructure builds domainPackCatalog). Without an authorizer the
 // service is not registered — Unimplemented, never a fail-open catalog.
-func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
+func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) error {
 	if d.authorizer == nil {
 		d.logger.Warn(ctx, "DomainPackService: no authorizer; not registering")
-		return
+		return nil
 	}
 	if d.brainRegistry == nil {
-		d.logger.Warn(ctx, "DomainPackService: no brain registry; not registering")
-		return
+		return errors.New("daemon: DomainPackService needs the brain registry")
 	}
 	if d.domainPackCatalog == nil {
 		d.domainPackCatalog = ontology.EmbeddedCatalog()
@@ -39,7 +39,7 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 	imports, err := ontology.NewImportStore(d.platformDB)
 	if err != nil {
 		d.logger.Warn(ctx, "DomainPackService: not registered", "error", err.Error())
-		return
+		return nil
 	}
 	tenantv1.RegisterDomainPackServiceServer(srv,
 		api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer, imports))
@@ -52,8 +52,9 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) {
 	reader, err := compliance.NewReader(d.platformDB, d.domainPackCatalog, api.BrainEnabledPacks{Registry: d.brainRegistry})
 	if err != nil {
 		d.logger.Warn(ctx, "ComplianceService: not registered", "error", err.Error())
-		return
+		return nil
 	}
 	tenantv1.RegisterComplianceServiceServer(srv, api.NewComplianceService(reader))
 	d.logger.Info(ctx, "ComplianceService registered (ADR-0113)")
+	return nil
 }

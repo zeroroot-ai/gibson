@@ -30,7 +30,9 @@ func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; !ok {
 		t.Fatal("DomainPackService must be registered when a brain registry and authorizer are present")
@@ -51,7 +53,9 @@ func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if d.domainPackCatalog == nil {
 		t.Fatal("registerDomainPack must construct a catalog when none is wired")
@@ -77,7 +81,9 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if d.domainPackCatalog != want {
 		t.Fatal("registerDomainPack must reuse the already-wired catalog, not replace it")
@@ -91,7 +97,9 @@ func TestRegisterDomainPack_SkipsWithoutAuthorizer(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
 		t.Fatal("DomainPackService must not be registered without an authorizer")
@@ -106,7 +114,9 @@ func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without a brain registry")
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
 		t.Fatal("DomainPackService must not be registered without a brain registry")
@@ -136,7 +146,9 @@ func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
 		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 	if _, ok := srv.GetServiceInfo()["gibson.tenant.v1.ComplianceService"]; !ok {
 		t.Fatal("ComplianceService must be registered with the Domain Pack service")
 	}

@@ -311,10 +311,6 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 4.9).
 	auditQuery auditQueryIface
 
-	// pageKeys derives the signers of the page tokens of the list RPCs (ADR-0028, rule 3).
-	// Wired via WithPageKeys.
-	pageKeys *pagetoken.Keys
-
 	// idpAdminClient is the vendor-neutral IdP admin interface used by
 	// TenantAdminService agent-identity RPCs. May be nil; when nil the
 	// agent-identity RPCs return codes.Unavailable.
