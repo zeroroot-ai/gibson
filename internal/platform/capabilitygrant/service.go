@@ -10,7 +10,6 @@
 // Handler responsibilities:
 //   - RegisterCapabilityGrant: upsert host, create agent, resolve capabilities via FGA,
 //     write grants, emit audit event.
-//   - ExecuteAgentCapability: check FGA, emit audit event, dispatch to component.
 //   - ListAgentCapabilities: resolve via FGABridge and return.
 //   - GetCapabilityGrantStatus: read agent + grants from store.
 //   - RevokeCapabilityGrant: revoke agent + grants in store, emit audit event.
@@ -37,7 +36,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -145,18 +143,6 @@ func appendSessionCapabilities(caps []Capability, ceiling []string) []Capability
 }
 
 // ---------------------------------------------------------------------------
-// ComponentDispatcher
-// ---------------------------------------------------------------------------
-
-// ComponentDispatcher dispatches work to a registered component and returns
-// the result bytes. The tenant, kind, and name identify the target component
-// (e.g. tenant="acme", kind="tool", name="nmap"). Input is the raw request
-// payload and the returned bytes are the raw response from the component.
-type ComponentDispatcher interface {
-	Dispatch(ctx context.Context, tenant, kind, name string, input []byte) ([]byte, error)
-}
-
-// ---------------------------------------------------------------------------
 // CapabilityGrantService
 // ---------------------------------------------------------------------------
 
@@ -171,7 +157,6 @@ type CapabilityGrantService struct {
 	authorizer  authz.Authorizer
 	auditWriter *audit.Writer
 	auditQuery  *audit.Query
-	dispatcher  ComponentDispatcher
 	logger      *slog.Logger
 }
 
@@ -192,11 +177,6 @@ type CapabilityGrantServiceConfig struct {
 
 	// AuditQuery is the synchronous Postgres audit reader. Required.
 	AuditQuery *audit.Query
-
-	// Dispatcher dispatches work to registered components and returns results.
-	// Optional: when nil, ExecuteAgentCapability returns an error indicating the
-	// dispatcher is not configured.
-	Dispatcher ComponentDispatcher
 
 	// Logger is the structured logger. If nil, slog.Default() is used.
 	Logger *slog.Logger
@@ -230,7 +210,6 @@ func NewCapabilityGrantService(cfg CapabilityGrantServiceConfig) *CapabilityGran
 		authorizer:  cfg.Authorizer,
 		auditWriter: cfg.AuditWriter,
 		auditQuery:  cfg.AuditQuery,
-		dispatcher:  cfg.Dispatcher,
 		logger:      logger.With("component", "capabilitygrant.service"),
 	}
 }
@@ -445,10 +424,6 @@ func (s *CapabilityGrantService) RegisterCapabilityGrant(
 }
 
 // ---------------------------------------------------------------------------
-// ExecuteAgentCapability
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // HasCapability
 // ---------------------------------------------------------------------------
 
@@ -527,130 +502,6 @@ func (s *CapabilityGrantService) LookupEnrolledAgent(ctx context.Context, tenant
 		return "", "", nil
 	}
 	return ag.Name, ag.UserID, nil
-}
-
-// ExecuteAgentCapabilityResult is the result returned by ExecuteAgentCapability.
-type ExecuteAgentCapabilityResult struct {
-	Result       []byte
-	Status       string
-	ErrorMessage string
-}
-
-// ExecuteAgentCapability checks FGA for permission to execute the requested
-// capability, records an audit event, and dispatches work to the target
-// component via the configured ComponentDispatcher.
-func (s *CapabilityGrantService) ExecuteAgentCapability(
-	ctx context.Context,
-	agentID, capabilityName string,
-	arguments []byte,
-	tenantID string,
-) (*ExecuteAgentCapabilityResult, error) {
-	if agentID == "" {
-		return nil, fmt.Errorf("capabilitygrant: ExecuteAgentCapability: agent_id is required")
-	}
-	if capabilityName == "" {
-		return nil, fmt.Errorf("capabilitygrant: ExecuteAgentCapability: capability_name is required")
-	}
-	if tenantID == "" {
-		return nil, errors.New("capabilitygrant: ExecuteAgentCapability: tenant_id is required")
-	}
-
-	// Resolve the agent WITHIN the caller's tenant: an agent id from another
-	// tenant must read as absent, not as an executable identity.
-	agent, err := s.store.GetAgentInTenant(ctx, tenantID, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("capabilitygrant: ExecuteAgentCapability: store lookup: %w", err)
-	}
-	if agent == nil {
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: "agent not found",
-		}, nil
-	}
-
-	// Parse the capability name (format: "{verb}:{kind}:{name}") to extract the
-	// component ref for FGA checks and the kind+name for dispatch routing.
-	componentRef, kind, name, ok := parseCapabilityName(capabilityName)
-	if !ok {
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: fmt.Sprintf("malformed capability_name %q: expected {verb}:{kind}:{name}", capabilityName),
-		}, nil
-	}
-
-	// Authorize the COMPONENT PRINCIPAL that is executing — the identity minted
-	// for this installation — not the human who enrolled it. Checking the
-	// fetched row's owner asked "may the account that owns this agent execute
-	// this?", which the owner of any agent answers yes to, and let the component
-	// act with its enroller's whole authority for as long as it exists.
-	//
-	// An agent row with no principal has no identity to authorize, so it is
-	// denied rather than falling back to a broader subject.
-	if agent.PrincipalRef == "" {
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: "permission denied: agent has no component principal",
-		}, nil
-	}
-	allowed, err := s.fgaBridge.CheckExecution(ctx, agent.PrincipalRef, componentRef)
-	if err != nil {
-		return nil, fmt.Errorf("capabilitygrant: ExecuteAgentCapability: FGA check: %w", err)
-	}
-
-	decision := "allow"
-	if !allowed {
-		decision = "deny"
-	}
-
-	// Emit audit event regardless of outcome.
-	meta, _ := json.Marshal(map[string]any{
-		"capability_name": capabilityName,
-		"component_ref":   componentRef,
-		"decision":        decision,
-	})
-	s.auditWriter.Log(audit.Event{
-		TenantID:   tenantID,
-		ActorID:    agentID,
-		ActorType:  "agent",
-		Action:     "capability_executed",
-		TargetType: "component",
-		TargetID:   componentRef,
-		Decision:   decision,
-		Metadata:   json.RawMessage(meta),
-	})
-
-	if !allowed {
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: "permission denied: insufficient FGA grants",
-		}, nil
-	}
-
-	if s.dispatcher == nil {
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: "component dispatcher not configured",
-		}, nil
-	}
-
-	result, err := s.dispatcher.Dispatch(ctx, tenantID, kind, name, arguments)
-	if err != nil {
-		s.logger.WarnContext(ctx, "capabilitygrant: ExecuteAgentCapability: dispatch failed",
-			slog.String("agent_id", agentID),
-			slog.String("capability", capabilityName),
-			slog.String("tenant_id", tenantID),
-			slog.String("error", err.Error()),
-		)
-		return &ExecuteAgentCapabilityResult{
-			Status:       "error",
-			ErrorMessage: fmt.Sprintf("dispatch failed: %v", err),
-		}, nil
-	}
-
-	return &ExecuteAgentCapabilityResult{
-		Result: result,
-		Status: "success",
-	}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -975,19 +826,6 @@ func jwkThumbprint(jwk json.RawMessage) (string, error) {
 	canonical := fmt.Sprintf(`{"crv":%q,"kty":%q,"x":%q}`, key.Crv, key.Kty, key.X)
 	sum := sha256.Sum256([]byte(canonical))
 	return base64.RawURLEncoding.EncodeToString(sum[:]), nil
-}
-
-// parseCapabilityName parses a capability name in "{verb}:{kind}:{name}" format
-// and returns the FGA component ref ("component:{kind}/{name}"), the kind, and the name.
-// Returns ("", "", "", false) if the format is invalid.
-func parseCapabilityName(capName string) (componentRef, kind, name string, ok bool) {
-	parts := strings.SplitN(capName, ":", 3)
-	if len(parts) != 3 || parts[2] == "" || !authz.IsComponentKind(parts[1]) {
-		return "", "", "", false
-	}
-	// The capability name carries the kind ("{verb}:{kind}:{name}"), so the FGA
-	// object is the canonical kind-prefixed ref (ADR-0136).
-	return authz.ComponentObject(parts[1], parts[2]), parts[1], parts[2], true
 }
 
 // stripFGATypePrefix removes the "type:" prefix from an FGA object/user string.

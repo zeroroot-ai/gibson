@@ -1021,17 +1021,12 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 
 				fgaBridge := capabilitygrant.NewFGABridge(d.authorizer, d.compRegistry, d.logger.Slog())
 
-				capabilityGrantDispatcher := newWorkQueueDispatcher(
-					component.NewRedisWorkQueue(d.stateClient.Client()),
-				)
-
 				capabilityGrantSvc := capabilitygrant.NewCapabilityGrantService(capabilitygrant.CapabilityGrantServiceConfig{
 					Store:       agentStore,
 					FGABridge:   fgaBridge,
 					Authorizer:  d.authorizer,
 					AuditWriter: auditWriter,
 					AuditQuery:  auditQuery,
-					Dispatcher:  capabilityGrantDispatcher,
 					Logger:      d.logger.Slog(),
 				})
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
