@@ -121,9 +121,16 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		return nil, status.Errorf(codes.NotFound, "agent %q not available for tenant %q", req.GetAgentName(), tenant)
 	}
 
-	// The delegated agent acts for the mission run of its caller. The run goes
-	// in the request, so the agent sends it on every callback (gibson#1235).
-	sourceRun := s.sourceWorkRun(ctx, tenant, req.GetWorkId())
+	// Bind the delegated work item to the mission of the caller, then take its
+	// run. The work id comes from the caller, so a caller that names the work
+	// item of another mission gets no run. The run goes in the request, so the
+	// agent sends it on every callback (gibson#1235). The agent run of the
+	// request stays empty: it is the caller's agent run, and a delegation
+	// starts a new one.
+	sourceMission, sourceRun, bindErr := s.bindSourceWork(ctx, tenant, req.GetWorkId())
+	if bindErr != nil {
+		return nil, bindErr
+	}
 	execReq := &agentpb.ExecuteRequest{
 		Task:         agent.TaskToProto(task),
 		TimeoutMs:    task.Timeout.Milliseconds(),
@@ -134,26 +141,13 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		return nil, status.Errorf(codes.Internal, "failed to marshal delegated task: %v", marshalErr)
 	}
 
-	// Best-effort lineage: resolve the caller's own mission (from its own
-	// work_id) so the delegated work item's context carries it, mirroring
-	// dispatchWorkAndWait's workCtx["mission_id"]. A resolver miss or nil
-	// resolver never blocks dispatch — CallTool's work item context has the
-	// same "best-effort" shape for source_work_id.
 	workCtx := map[string]string{
 		"source_work_id": req.GetWorkId(),
 		"caller_tenant":  tenant,
 	}
-	if s.missionCtx != nil && req.GetWorkId() != "" {
-		missionID, resolveErr := s.missionCtx.ResolveMissionForWork(ctx, req.GetWorkId(), tenant)
-		if resolveErr != nil {
-			s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
-				"work_id", req.GetWorkId(), "error", resolveErr)
-		}
-		if missionID != "" {
-			workCtx["mission_id"] = missionID
-		}
+	if sourceMission != "" {
+		workCtx["mission_id"] = sourceMission
 	}
-
 	// The delegated agent acts for the mission run of its caller, so its own
 	// Authorize resolves to that run (D86). Without it every Authorize of a
 	// delegated agent is refused.
@@ -241,15 +235,47 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	return &componentpb.DelegateToAgentResponse{ResultJson: resultJSON}, nil
 }
 
-// sourceWorkRun returns the mission run of the work item that the caller names
-// as its own. The caller names its own work item in the request, so the id is
-// checked against the owner recorded at enqueue before it selects a run: a
-// caller cannot borrow the run of another tenant's work item. It returns an
-// empty string when the work item is not the caller's or has no run.
-func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sourceWorkID string) string {
+// bindSourceWork binds the work item that the caller names to the mission of
+// the caller. It returns the mission and the mission run of that work item.
+//
+// The work id arrives from the caller and only the tenant is checked against
+// its owner, so a same-tenant agent could name the work item of another
+// mission. The grant that the caller presents names its mission and its run.
+// A work item of another mission, or of another run, is refused. A caller with
+// no grant claim cannot be bound, so it gets no run and its delegated agent is
+// refused at Authorize (fail closed). Delegation itself is not blocked.
+func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sourceWorkID string) (mission, run string, err error) {
 	if sourceWorkID == "" {
-		return ""
+		return "", "", nil
 	}
+	if s.missionCtx != nil {
+		var resolveErr error
+		mission, resolveErr = s.missionCtx.ResolveMissionForWork(ctx, sourceWorkID, tenant)
+		if resolveErr != nil {
+			s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
+				"work_id", sourceWorkID, "error", resolveErr)
+		}
+	}
+	run = s.sourceWorkRun(ctx, tenant, sourceWorkID)
+
+	grantMission := callerGrantClaim(ctx, "mission_id")
+	if grantMission != "" && mission != "" && grantMission != mission {
+		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another mission")
+	}
+	grantRun := callerGrantClaim(ctx, "mrid")
+	if grantRun != "" && run != "" && grantRun != run {
+		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another run")
+	}
+	if grantMission == "" || grantMission != mission {
+		run = ""
+	}
+	return mission, run, nil
+}
+
+// sourceWorkRun returns the mission run of the work item that the caller names
+// as its own, when the owner recorded at enqueue is the caller tenant. It
+// returns an empty string when the work item is not the caller's or has no run.
+func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sourceWorkID string) string {
 	// resolveWorkOwner refuses when no work-context registry is wired.
 	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
 		return ""
@@ -263,12 +289,6 @@ func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sour
 		return ""
 	}
 	return runID
-}
-
-// delegatedAuthzContext returns the work item context entry that gives a
-// delegated agent the mission run of its caller (see sourceWorkRun).
-func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
-	return authzContextEntry(s.sourceWorkRun(ctx, tenant, sourceWorkID))
 }
 
 // authzContextEntry is the work item context entry for a run. When the caller
