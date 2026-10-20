@@ -1055,6 +1055,12 @@ func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapoo
 		m.releaseChildReservation(ctx, poolConn, am.mission)
 	}
 	unlock()
+	m.releaseQuotaSlot(ctx, am)
+}
+
+// releaseQuotaSlot gives back the concurrent_missions slot that the run took
+// when it started. The counter is floored at zero.
+func (m *missionManager) releaseQuotaSlot(ctx context.Context, am *activeMission) {
 	if m.quotaCounter != nil {
 		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
 			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
@@ -1072,6 +1078,8 @@ func (m *missionManager) reserveRunBudget(ctx context.Context, poolConn *datapoo
 	}
 	m.failBeforeStart(am.tenantID, am.mission.ID.String(), runIDOf(am), name,
 		fmt.Sprintf("failed to reserve the budget of the run against the parent: %v", err))
+	// The run never starts, so it must give back the slot that it took.
+	m.releaseQuotaSlot(ctx, am)
 	return false
 }
 

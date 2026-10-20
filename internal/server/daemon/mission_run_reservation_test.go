@@ -145,12 +145,17 @@ func TestReserveRunBudget_ARefusalFailsTheRunBeforeItStarts(t *testing.T) {
 	parent := &mission.Mission{ID: types.NewID(), Constraints: &missionpb.MissionConstraints{MaxCost: 100}}
 	mm.loadMission = func(context.Context, *datapool.Conn, types.ID) (*mission.Mission, error) { return parent, nil }
 	mm.newLedger = func(*datapool.Conn) mission.ReservationLedger { return failingLedger{} }
+	quota := &countingQuota{open: 1} // the run took a slot when it started
+	mm.quotaCounter = quota
 
 	run := activeRunOfRecord(&mission.Mission{ID: types.NewID(), ParentMissionID: &parent.ID}, tenant)
 	if mm.reserveRunBudget(ctx, conn, run, "child") {
 		t.Fatal("the run went on without a reservation")
 	}
 	waitWorldStatus(t, mm.brainRegistry.For(tenant.String()), run.mission.ID.String(), string(brain.MissionFailed))
+	if quota.open != 0 {
+		t.Fatalf("open runs = %d after a refused run, want 0: the slot leaked", quota.open)
+	}
 
 	// A run with no parent goes on.
 	root := activeRunOfRecord(&mission.Mission{ID: types.NewID()}, tenant)
