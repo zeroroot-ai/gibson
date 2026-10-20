@@ -66,6 +66,10 @@ const (
 	envAgentMissionID    = "GIBSON_MISSION_ID"
 	envAgentMissionRunID = "GIBSON_MISSION_RUN_ID"
 	envAgentAgentRunID   = "GIBSON_AGENT_RUN_ID"
+	// envAgentTaskID is the id of the task of the run. The agent sends it on
+	// each callback, so the daemon can tell the instances of a for_each
+	// fan-out of one agent apart (gibson#1229).
+	envAgentTaskID = "GIBSON_TASK_ID"
 	// envAgentModel is the model resolved for the tenant at dispatch time
 	// (ADR-0116 — the signed manifest does not pin a model).
 	envAgentModel = "GIBSON_MODEL"
@@ -148,6 +152,8 @@ type AgentDispatch struct {
 	MissionID    string
 	MissionRunID string
 	AgentRunID   string
+	// TaskID is the id of the agent.Task to run.
+	TaskID string
 	// TaskB64 is the base64 protojson of the agent.Task to run.
 	TaskB64 string
 	// Tenant is the CUSTOMER tenant that owns this mission run, derived from the
