@@ -32,6 +32,15 @@ var (
 	// FGA is not consulted; the validation happens in the wrapper before the call.
 	ErrInvalidArgument = errors.New("authz: invalid argument")
 
+	// ErrFgaUnauthenticated is returned when FGA rejects the credentials of the
+	// daemon (HTTP 401 or 403). A retry cannot fix a bad token, so this error is
+	// permanent. It is not an outage.
+	ErrFgaUnauthenticated = errors.New("authz: fga rejected the credentials")
+
+	// ErrFgaNotFound is returned when FGA answers 404, for example for a wrong
+	// store ID. A retry cannot fix it, so this error is permanent.
+	ErrFgaNotFound = errors.New("authz: fga store or resource not found")
+
 	// ErrModelNotFound is returned when the specified authorization model ID
 	// does not exist in the FGA store.
 	ErrModelNotFound = errors.New("authz: authorization model not found")
