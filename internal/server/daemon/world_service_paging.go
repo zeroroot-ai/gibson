@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,7 +37,7 @@ func worldSigners(keys *pagetoken.Keys) (map[string]*pagetoken.Signer, error) {
 	for _, rpc := range worldPagedRPCs {
 		signer, err := keys.Signer("world-" + rpc)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("world page signer %s: %w", rpc, err)
 		}
 		out[rpc] = signer
 	}

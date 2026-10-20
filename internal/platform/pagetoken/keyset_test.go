@@ -83,7 +83,7 @@ func TestSize(t *testing.T) {
 }
 
 func TestKeysetPage_WalksEachItemOnce(t *testing.T) {
-	var items []int
+	items := make([]int, 0, 7)
 	for i := range 7 {
 		items = append(items, i*10)
 	}

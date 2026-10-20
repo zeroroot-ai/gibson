@@ -11,8 +11,9 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 )
 
-// newPageKeys builds the page token keys of the daemon once and keeps them in
-// d.pageKeys. Every paged service takes its signers from that field, so the
+// newPageKeys runs once, on one goroutine, at startup.
+//
+// It builds the page token keys of the daemon and keeps them in d.pageKeys. Every paged service takes its signers from that field, so the
 // daemon has one construction. The keys derive from the master KEK, which each
 // replica shares, so a token from one replica works on another.
 func (d *daemonImpl) newPageKeys(ctx context.Context) (*pagetoken.Keys, error) {
