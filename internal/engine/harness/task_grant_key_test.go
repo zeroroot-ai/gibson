@@ -5,7 +5,6 @@ package harness
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"reflect"
 	"testing"
@@ -81,7 +80,7 @@ func newTaskKeyEventService(t *testing.T, data chan map[string]interface{}) *Har
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, "mission-A", "recon-agent", newCompletingHarness("acme"))
 	return NewHarnessCallbackServiceWithRegistry(
-		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		slog.New(slog.DiscardHandler),
 		registry,
 		WithEventBus(dataBus{data}),
 	)
