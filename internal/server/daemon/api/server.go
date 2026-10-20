@@ -1894,9 +1894,8 @@ func (s *DaemonServer) PauseMission(ctx context.Context, req *daemonpb.PauseMiss
 	s.logger.Info("mission paused successfully", "mission_id", req.MissionId)
 
 	return &daemonpb.PauseMissionResponse{
-		Success:      true,
-		CheckpointId: "", // Will be populated when checkpoint system is fully integrated
-		Message:      fmt.Sprintf("Mission %s paused successfully", req.MissionId),
+		Success: true,
+		Message: fmt.Sprintf("Mission %s paused successfully", req.MissionId),
 	}, nil
 }
 
