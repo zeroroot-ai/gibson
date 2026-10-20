@@ -1000,6 +1000,32 @@ func (m *missionManager) releaseChildReservation(ctx context.Context, poolConn *
 	}
 }
 
+// newerRunActive reports whether another run of the mission record holds the
+// active entry. The record ID is the same for every run, so the accounting of
+// an ended run must not take what a newer run of the record holds
+// (gibson#1228).
+func (m *missionManager) newerRunActive(am *activeMission) bool {
+	cur, ok := m.getActive(am.tenantID, am.mission.ID.String())
+	return ok && cur != am
+}
+
+// endRunAccounting settles what a run holds when it reaches terminal. It gives
+// a child mission's reserved budget back to its parent (gibson#1358). That
+// reservation belongs to the record, so it stays when a newer run of the record
+// is active. It also decrements the concurrent_missions counter of the tenant,
+// floored at zero, once for the run that incremented it.
+func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapool.Conn, am *activeMission) {
+	if !m.newerRunActive(am) {
+		m.releaseChildReservation(ctx, poolConn, am.mission)
+	}
+	if m.quotaCounter != nil {
+		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
+			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
+				"mission_id", am.mission.ID.String(), "error", decErr.Error())
+		}
+	}
+}
+
 // executeMission runs the mission execution using the orchestrator.
 // This handles the full mission lifecycle including setup, execution via
 // the Observe → Think → Act loop, and cleanup.
@@ -1256,22 +1282,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// row was allocated.
 	m.finalizeAuthzState(ctx, missionRun, finalStatus)
 
-	// Give a child mission's reserved budget back to its parent now that the
-	// child is terminal (gibson#1358). This used to hang off the store's
-	// UpdateStatus write, but mission status became World-derived (gibson#1112)
-	// and the store no longer writes a terminal transition — so the release
-	// moved here, to the one place a run actually reaches terminal. A missed
-	// release is not a leak that heals: it is budget the parent never gets back.
-	m.releaseChildReservation(ctx, poolConn, active.mission)
-
-	// Decrement the concurrent_missions counter on terminal-state transition.
-	// Floored at zero. Spec plans-and-quotas-simplification.
-	if m.quotaCounter != nil {
-		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
-			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
-				"mission_id", missionID, "error", decErr.Error())
-		}
-	}
+	m.endRunAccounting(ctx, poolConn, active)
 
 	// Status is World-derived (ADR-0163/gibson#1118): the brain's MissionDone event
 	// already set the terminal status in the World via Reduce. No store write.

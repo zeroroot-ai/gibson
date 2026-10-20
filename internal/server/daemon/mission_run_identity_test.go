@@ -300,3 +300,57 @@ func TestCleanupOfRun1_LeavesRun2Alone(t *testing.T) {
 		t.Fatal("the cleanup of run 1 removed run 2")
 	}
 }
+
+// countingQuota counts the open runs of a tenant.
+type countingQuota struct{ open int }
+
+func (q *countingQuota) IncrementMissionCount(context.Context) error { q.open++; return nil }
+func (q *countingQuota) DecrementMissionCount(context.Context) error { q.open--; return nil }
+
+// The accounting of run 1 runs while run 2 of the same record is active. It
+// must not decrement the quota of run 2 and must not release the child
+// reservation that the record holds for run 2 (gibson#1228).
+func TestEndRunAccounting_Run1LeavesRun2Alone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	quota := &countingQuota{}
+	mm := helperMM()
+	mm.quotaCounter = quota
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	tenant := auth.MustNewTenantID("acme")
+
+	parent := &mission.Mission{ID: types.NewID()}
+	rec := &mission.Mission{ID: types.NewID(), ParentMissionID: &parent.ID}
+	cost := int64(500)
+	ledger := mission.NewRedisReservationLedger(conn.Redis)
+	if _, err := ledger.Reserve(ctx, parent, rec.ID, mission.ChildBudget{CostUSDCents: &cost}); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+
+	id := rec.ID.String()
+	run1, run2 := activeRunOfRecord(rec, tenant), activeRunOfRecord(rec, tenant)
+	mm.setActive(tenant, id, run1)
+	_ = quota.IncrementMissionCount(ctx) // run 1 started
+	mm.setActive(tenant, id, run2)       // run 2 took the entry while run 1 cleans up
+	_ = quota.IncrementMissionCount(ctx) // run 2 started
+
+	mm.endRunAccounting(ctx, conn, run1)
+	if quota.open != 1 {
+		t.Fatalf("open runs = %d after the cleanup of run 1, want 1 (the quota of run 2)", quota.open)
+	}
+	held, err := ledger.Reserved(ctx, parent.ID)
+	if err != nil || held.CostUSDCents == nil {
+		t.Fatalf("the cleanup of run 1 released the reservation of run 2: %+v, %v", held, err)
+	}
+
+	mm.endRunAccounting(ctx, conn, run2)
+	if quota.open != 0 {
+		t.Fatalf("open runs = %d after both runs ended, want 0", quota.open)
+	}
+	held, err = ledger.Reserved(ctx, parent.ID)
+	if err != nil || held.CostUSDCents != nil {
+		t.Fatalf("the reservation was not released when the last run ended: %+v, %v", held, err)
+	}
+}
