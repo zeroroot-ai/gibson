@@ -896,7 +896,97 @@ func TestApprovalStoreFailsClosedWithoutADatabase(t *testing.T) {
 	if _, err := s.RejectRegistration(context.Background(), "x", "admin-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("RejectRegistration error = %v, want ErrSignupStoreUnavailable", err)
 	}
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("ListExpiringRegistrations error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if _, err := s.BeginExpiry(context.Background(), "x", "system"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("BeginExpiry error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if err := s.CompleteExpiry(context.Background(), "x"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("CompleteExpiry error = %v, want ErrSignupStoreUnavailable", err)
+	}
 	if err := s.ReleaseApproval(context.Background(), "x"); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("ReleaseApproval error = %v, want ErrSignupStoreUnavailable", err)
+	}
+}
+
+// The janitor reads the registrations past their TTL and the ones it claimed.
+func TestListExpiringRegistrations_ReadsDueAndClaimedRows(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification\s+WHERE \(status = 'pending_approval' AND expires_at <= \$1\) OR status = 'expiring'`).
+		WithArgs(now, SignupApprovalPageSize).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at", "status",
+		}).AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now, now, "expiring"))
+
+	rows, err := s.ListExpiringRegistrations(context.Background(), 10_000)
+	if err != nil {
+		t.Fatalf("ListExpiringRegistrations: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != "reg-1" || rows[0].Status != signupStatusExpiring {
+		t.Fatalf("rows = %+v, want reg-1 expiring", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestListExpiringRegistrations_FailuresAreReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).WillReturnError(errors.New("read failed"))
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); err == nil {
+		t.Fatal("a query failure must be reported")
+	}
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("reg-1"))
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); err == nil {
+		t.Fatal("an unreadable row must be reported")
+	}
+}
+
+// BeginExpiry claims with the one-decision predicate, and CompleteExpiry ends it.
+func TestBeginAndCompleteExpiry(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	id := "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
+	mock.ExpectQuery(`UPDATE signup_verification\s+SET status = 'expiring'`).
+		WithArgs(id, "system:signup-janitor", now).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "expires_at",
+			"completion_attempts", "owner_user_id",
+		}).AddRow(id, "attempt-1", "owner@example.com", "Acme", "team",
+			"Ada", "Lovelace", now, 0, "user-1"))
+	row, err := s.BeginExpiry(context.Background(), id, "system:signup-janitor")
+	if err != nil || row.Status != signupStatusExpiring || row.OwnerUserID != "user-1" {
+		t.Fatalf("BeginExpiry = %+v, %v", row, err)
+	}
+
+	mock.ExpectExec(`UPDATE signup_verification\s+SET status = 'rejected'`).
+		WithArgs(id, now).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := s.CompleteExpiry(context.Background(), id); err != nil {
+		t.Fatalf("CompleteExpiry: %v", err)
+	}
+
+	mock.ExpectExec(`UPDATE signup_verification`).WillReturnError(errors.New("write failed"))
+	if err := s.CompleteExpiry(context.Background(), id); err == nil {
+		t.Fatal("a write failure must be reported")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// A row error that surfaces while the janitor reads is reported.
+func TestListExpiringRegistrations_RowErrorIsReported(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at", "status",
+		}).AddRow("reg-1", "a", "a@example.com", "Acme", "team", "A", "L", "u", now, now, "expiring").
+			RowError(0, errors.New("broken row")))
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); err == nil {
+		t.Fatal("a row error must be reported")
 	}
 }

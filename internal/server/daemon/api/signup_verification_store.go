@@ -58,14 +58,15 @@ const (
 	SignupRowRetention = 7 * 24 * time.Hour
 
 	// SignupRegistrationTTL is how long a registration awaiting an
-	// administrator's decision is considered current.
+	// administrator's decision keeps its workspace name (gibson#1191).
 	//
 	// It is generous because the thing it waits for is a person, and people
-	// take days. The janitor does NOT sweep on it: a registration that aged
-	// out would take a decision away from an administrator who had not made
-	// one, and would strand the deactivated account it names. Clearing the
-	// queue is a rejection, which is exactly the human decision this rung is
-	// built around.
+	// take days. After it, the signup janitor rejects the registration as the
+	// system and frees the workspace name, the same way an administrator's
+	// rejection does. Zitadel keeps org names unique, so without this bound an
+	// unauthenticated caller could hold a name for as long as nobody decides.
+	// PurgeExpired does not touch these rows: the rejection needs the identity
+	// provider, which only the server holds.
 	SignupRegistrationTTL = 30 * 24 * time.Hour
 )
 
@@ -85,6 +86,12 @@ const (
 	// signupStatusRejected is an administrator's refusal. The account stays
 	// deactivated for good; there is no path from here back to pending.
 	signupStatusRejected = "rejected"
+
+	// signupStatusExpiring is a pending registration that the janitor claimed
+	// after its TTL and whose workspace org is not yet removed (gibson#1191).
+	// It is invisible to administrators. The janitor retries it until the org
+	// is gone, then marks it rejected.
+	signupStatusExpiring = "expiring"
 )
 
 // The four statements that carry the flow's safety predicates.
@@ -167,6 +174,26 @@ const (
 		RETURNING id, attempt_id, email, workspace_name, tier,
 		          owner_first_name, owner_last_name, expires_at,
 		          completion_attempts, owner_user_id
+	`
+
+	// beginExpiryStatement is the janitor's claim of a registration past its
+	// TTL. It has the same one-decision predicate as a decision by an
+	// administrator, so a row is decided once.
+	beginExpiryStatement = `
+		UPDATE signup_verification
+		   SET status = 'expiring', updated_at = $3,
+		       decided_by = $2, decided_at = $3
+		 WHERE id = $1 AND status = 'pending_approval' AND expires_at <= $3
+		RETURNING id, attempt_id, email, workspace_name, tier,
+		          owner_first_name, owner_last_name, expires_at,
+		          completion_attempts, owner_user_id
+	`
+
+	// completeExpiryStatement ends an expiry once the workspace org is gone.
+	completeExpiryStatement = `
+		UPDATE signup_verification
+		   SET status = 'rejected', updated_at = $2
+		 WHERE id = $1 AND status = 'expiring'
 	`
 
 	// releaseApprovalStatement puts a claimed registration back in the queue
@@ -608,7 +635,7 @@ func (s *SignupVerificationStore) ensureTable(ctx context.Context) error {
 			status                      TEXT NOT NULL DEFAULT 'pending'
 				CONSTRAINT signup_verification_status_check
 				CHECK (status IN ('pending', 'verified', 'consumed', 'expired', 'send_failed',
-			                  'pending_approval', 'rejected')),
+			                  'pending_approval', 'rejected', 'expiring')),
 			expires_at                  TIMESTAMPTZ NOT NULL,
 			verified_session_hash       TEXT UNIQUE,
 			verified_session_expires_at TIMESTAMPTZ,
@@ -740,6 +767,67 @@ func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, offs
 		return nil, fmt.Errorf("read pending registrations: %w", err)
 	}
 	return out, nil
+}
+
+// ListExpiringRegistrations returns up to limit registrations that the
+// janitor must work on, oldest first (gibson#1191): those past their TTL that
+// still wait for a decision, and those it claimed earlier whose workspace org
+// is not yet removed.
+func (s *SignupVerificationStore) ListExpiringRegistrations(ctx context.Context, limit int) ([]SignupVerification, error) {
+	db, err := s.handle()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > SignupApprovalPageSize {
+		limit = SignupApprovalPageSize
+	}
+	const q = `
+		SELECT id, attempt_id, email, workspace_name, tier,
+		       owner_first_name, owner_last_name, owner_user_id, created_at, expires_at, status
+		  FROM signup_verification
+		 WHERE (status = 'pending_approval' AND expires_at <= $1) OR status = 'expiring'
+		 ORDER BY expires_at ASC, id ASC
+		 LIMIT $2
+	`
+	rows, err := db.QueryContext(ctx, q, s.clock(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list expiring registrations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SignupVerification
+	for rows.Next() {
+		var r SignupVerification
+		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+			&r.OwnerFirstName, &r.OwnerLastName, &r.OwnerUserID, &r.CreatedAt, &r.ExpiresAt, &r.Status); err != nil {
+			return nil, fmt.Errorf("scan expiring registration: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read expiring registrations: %w", err)
+	}
+	return out, nil
+}
+
+// BeginExpiry claims one registration past its TTL for the janitor. A
+// registration that an administrator decided first matches zero rows, which is
+// ErrSignupVerificationNotFound.
+func (s *SignupVerificationStore) BeginExpiry(ctx context.Context, id, decidedBy string) (SignupVerification, error) {
+	return s.decideRegistration(ctx, beginExpiryStatement, id, decidedBy, signupStatusExpiring)
+}
+
+// CompleteExpiry marks an expiring registration rejected, after the janitor
+// removed its workspace org.
+func (s *SignupVerificationStore) CompleteExpiry(ctx context.Context, id string) error {
+	db, err := s.handle()
+	if err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, completeExpiryStatement, id, s.clock()); err != nil {
+		return fmt.Errorf("complete registration expiry: %w", err)
+	}
+	return nil
 }
 
 // ClaimApproval marks one pending registration decided by decidedBy and
