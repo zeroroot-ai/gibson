@@ -467,7 +467,9 @@ func TestBuildEnv_CarriesTheTaskID(t *testing.T) {
 // A member serves many tasks, so it gets no task ID in its environment.
 func TestBuildEnv_MemberGetsNoTaskID(t *testing.T) {
 	l := &AgentLauncher{}
-	env := l.buildEnv(context.Background(), AgentLaunchSpec{Mode: "member"}, AgentDispatch{TaskID: "task-7"})
+	forged := map[string]string{envAgentTaskID: "forged"}
+	env := l.buildEnv(context.Background(), AgentLaunchSpec{Mode: "member", Env: forged},
+		AgentDispatch{TaskID: "task-7", Env: forged})
 	if _, has := env[envAgentTaskID]; has {
 		t.Fatalf("a member got %s", envAgentTaskID)
 	}
