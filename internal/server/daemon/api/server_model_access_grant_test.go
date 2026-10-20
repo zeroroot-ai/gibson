@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -138,7 +139,7 @@ type blockingProvider struct{ stubMockProvider }
 
 func (blockingProvider) Models(ctx context.Context) ([]llm.ModelInfo, error) {
 	<-ctx.Done()
-	return nil, ctx.Err()
+	return nil, fmt.Errorf("the list call ended: %w", ctx.Err())
 }
 
 // The live lists are asked at once under one deadline for all of them. A slow
@@ -181,4 +182,73 @@ func TestGrantAccess_ModelListsAreAskedAtOnceUnderOneDeadline(t *testing.T) {
 	start = time.Now()
 	assert.False(t, build(false).anyProviderListsModel(context.Background(), "tenant-a", configs, "wanted"))
 	assert.Less(t, time.Since(start), 250*time.Millisecond, "three hanging providers must cost one deadline, not three")
+}
+
+// failingListStore fails the list call of the provider store.
+type failingListStore struct{ stubProviderConfigStore }
+
+func (failingListStore) List(context.Context, string) ([]*providerconfig.ProviderConfig, error) {
+	return nil, errors.New("the store is down")
+}
+
+// A grant that the server cannot check is refused, never written.
+func TestCheckGrantTarget_RefusesWhatItCannotCheck(t *testing.T) {
+	prov := tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER
+	t.Run("no provider store", func(t *testing.T) {
+		s, _ := grantServer(t)
+		s.providerConfig = nil
+		assert.Equal(t, codes.FailedPrecondition, status_grpc.Code(s.checkGrantTarget(context.Background(), "tenant-a", prov, "openai")))
+	})
+	t.Run("the list fails", func(t *testing.T) {
+		s, _ := grantServer(t)
+		s.providerConfig = &failingListStore{}
+		assert.Error(t, s.checkGrantTarget(context.Background(), "tenant-a", prov, "openai"))
+	})
+	for name, kind := range map[string]tenantv1.GrantTargetKind{
+		"unspecified kind": tenantv1.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED,
+		"unknown kind":     tenantv1.GrantTargetKind(99),
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _ := grantServer(t)
+			assert.Equal(t, codes.InvalidArgument, status_grpc.Code(s.checkGrantTarget(context.Background(), "tenant-a", kind, "openai")))
+		})
+	}
+}
+
+// A provider that cannot be resolved, built or listed names no model. A tenant
+// with no chat config names none either.
+func TestProviderListsModel_NamesNothingWhenItFails(t *testing.T) {
+	ctx := context.Background()
+	cfg := &providerconfig.ProviderConfig{Name: "my-openai", Type: llm.ProviderOpenAI, Enabled: true}
+
+	t.Run("resolve fails", func(t *testing.T) {
+		s, _ := grantServer(t)
+		store := &listingProviderStore{}
+		store.resolveFunc = func(context.Context, string, string) (*providerconfig.DecryptedConfig, error) {
+			return nil, errors.New("no credential")
+		}
+		s.providerConfig = store
+		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
+	})
+	t.Run("factory fails", func(t *testing.T) {
+		s, _ := grantServer(t)
+		s.providerFactory = func(llm.ProviderConfig) (llm.LLMProvider, error) { return nil, errors.New("cannot build") }
+		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
+	})
+	t.Run("default factory refuses an embedding-only type", func(t *testing.T) {
+		s, _ := grantServer(t)
+		store := &listingProviderStore{}
+		store.resolveFunc = func(context.Context, string, string) (*providerconfig.DecryptedConfig, error) {
+			dec := knownDecryptedConfig()
+			dec.Type = llm.ProviderVoyage
+			return dec, nil
+		}
+		s.providerConfig = store
+		s.providerFactory = nil
+		assert.False(t, s.providerListsModel(ctx, "tenant-a", cfg, "m"))
+	})
+	t.Run("no config", func(t *testing.T) {
+		s, _ := grantServer(t)
+		assert.False(t, s.anyProviderListsModel(ctx, "tenant-a", nil, "m"))
+	})
 }
