@@ -62,7 +62,7 @@ type MissionQuery struct {
 	TenantID  string
 	MissionID string
 	Start     time.Time // zero -> default window
-	End       time.Time // zero -> now
+	End       time.Time // zero -> now. Loki treats End as exclusive.
 	Limit     int       // <=0 -> default
 }
 
@@ -120,9 +120,12 @@ func NewClient(cfg Config, logger *slog.Logger) (*Client, error) {
 }
 
 const (
-	defaultLimit  = 200
-	maxLimit      = 1000
-	defaultWindow = time.Hour
+	defaultLimit = 200
+	// MaxLimit is the most lines one query returns. The client clamps a larger
+	// Limit to it.
+	MaxLimit = 1000
+	// DefaultWindow is the time range of a query with no Start.
+	DefaultWindow = time.Hour
 )
 
 // QueryMissionLogs returns the tenant's log lines for one mission. The tenant_id
@@ -159,8 +162,8 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 	if limit <= 0 {
 		limit = defaultLimit
 	}
-	if limit > maxLimit {
-		limit = maxLimit
+	if limit > MaxLimit {
+		limit = MaxLimit
 	}
 	endTime := end
 	if endTime.IsZero() {
@@ -168,7 +171,7 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 	}
 	startTime := start
 	if startTime.IsZero() {
-		startTime = endTime.Add(-defaultWindow)
+		startTime = endTime.Add(-DefaultWindow)
 	}
 
 	params := url.Values{}
@@ -220,8 +223,14 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 			entries = append(entries, Entry{UnixNanos: ns, Line: v[1], Labels: stream.Stream})
 		}
 	}
-	// Newest first (direction=backward).
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].UnixNanos > entries[j].UnixNanos })
+	// Newest first (direction=backward). Lines with the same nanosecond sort by
+	// text, so that one result has one order.
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].UnixNanos != entries[j].UnixNanos {
+			return entries[i].UnixNanos > entries[j].UnixNanos
+		}
+		return entries[i].Line < entries[j].Line
+	})
 	return entries, nil
 }
 

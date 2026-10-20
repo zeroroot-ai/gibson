@@ -243,7 +243,12 @@ lint: $(GOLANGCI_LINT)
 	@echo "Running linter (blocking; new since $(LINT_BASE))..."
 	$(GOLANGCI_LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 	@bash scripts/check-fga-model-headers.sh
-	@node scripts/lint-pagination.mjs
+	@bash scripts/__tests__/lint-pagination.test.sh
+	@prev=$$(mktemp); \
+	  if git show $(LINT_BASE):scripts/lint-pagination.baseline > $$prev 2>/dev/null; then \
+	    node scripts/lint-pagination.mjs --prev-baseline $$prev; rc=$$?; \
+	  else echo "lint-pagination: no baseline at $(LINT_BASE); the shrink check is skipped"; node scripts/lint-pagination.mjs; rc=$$?; fi; \
+	  rm -f $$prev; exit $$rc
 	@node scripts/lint-allowed-identities.mjs
 
 # lint-all — full-tree, non-baselined. Surfaces the entire backlog for the

@@ -3,82 +3,56 @@
 // Copyright 2026 Zero Root AI
 
 /**
- * lint-pagination.mjs — Gibson daemon-local proto pagination lint
+ * lint-pagination.mjs - Gibson daemon-local proto pagination lint (ADR-0028 rule 3)
  *
- * Spec: cross-repo-cohesion-fixes Requirement 4.3, 4.4, D3.
+ * Walks every *.proto under internal/server/daemon/api/ and checks every unary
+ * RPC, whatever its name:
  *
- * Walks every *.proto under core/gibson/internal/server/daemon/api/, finds every
- * service method whose name starts with "List", inspects the request message
- * for fields named "limit" or "offset", and fails (exit 1) when any such
- * method is NOT in the grandfathered allow-list below.
+ *   1. The request message has no field named "limit" or "offset".
+ *   2. When the RPC returns a collection, the request has page_size and
+ *      page_token, and the response has next_page_token.
  *
- * The grandfather list is a literal const — adding to it requires editing this
- * file, i.e. it requires PR review of the addition.
+ * An RPC returns a collection when its name starts with List, Query or Search,
+ * or when every field of its response is repeated (or a map). A response with
+ * one object and a repeated attribute, such as a Describe or Get of one thing,
+ * is not a collection.
  *
- * NOTE: This script is intentionally duplicated from core/sdk/scripts/ with
- * a different proto root (D3 — do not abstract into a shared package).
+ * A violation fails the run (exit 1), unless the RPC is in the baseline file
+ * (scripts/lint-pagination.baseline). The baseline holds the RPCs that broke
+ * the rules before this check covered them. Each line is "<proto path> <Rpc>".
+ * The key is content, never a line number. The baseline can only shrink:
+ * an entry for an RPC that now passes, or that no longer exists, fails the
+ * run, so a fixed RPC leaves the file in the same PR. With --prev-baseline
+ * <file> (the baseline of the base branch), a key that the base does not hold
+ * also fails, so the baseline cannot grow.
  *
  * Usage:
- *   node core/gibson/scripts/lint-pagination.mjs
- *   node scripts/lint-pagination.mjs   (from core/gibson/ directory)
+ *   node scripts/lint-pagination.mjs
+ *   node scripts/lint-pagination.mjs --root <proto dir> --baseline <file>
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { join, relative, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
-const PROTO_ROOT = join(REPO_ROOT, 'internal/server/daemon/api');
 
-// ---------------------------------------------------------------------------
-// Grandfathered (proto-root-relative-path, method-name) pairs.
-// These RPCs pre-date the AIP-158 pagination convention and keep limit-only
-// pagination for compatibility. DO NOT add new entries — new List* RPCs MUST
-// use page_size + page_token. Adding here requires a PR justification.
-//
-// Spec: cross-repo-cohesion-fixes Requirement 4.2; design.md "Out of scope".
-// ---------------------------------------------------------------------------
-// NOTE: the E6 narrow-SDK flip (ADR-0058 amendment, gibson#921) re-homed the 9
-// tenant-admin services out of the OSS SDK and into this gibson daemon-local
-// tree at gibson/tenant/v1/. The `limit`/`offset` RPCs below pre-date AIP-158
-// and were grandfathered in the SDK; the move re-keys them to their new
-// daemon-local paths (e.g. the old gibson/user/v1/user.proto is now
-// gibson/tenant/v1/user.proto, and ListAuditEvents moved from tenant_admin.proto
-// to tenant.proto). These are MOVED-not-new RPCs with unchanged wire shape —
-// not new pagination violations. ListActiveGrants was grandfathered
-// upstream in the SDK and carries the same legacy shape. ListSecrets is now only
-// in the SDK (gibson.secrets.v1), so it has no entry here.
-const GRANDFATHER_LIST = [
-  // Pre-existing daemon-local user service (unchanged by E6).
-  { file: 'gibson/user/v1/user.proto',      method: 'ListAlerts' },
-  { file: 'gibson/user/v1/user.proto',      method: 'ListConversations' },
-  // E6-rehomed tenant-admin services (new daemon-local paths).
-  { file: 'gibson/tenant/v1/tenant.proto',  method: 'ListAuditEvents' },
-  { file: 'gibson/tenant/v1/grants.proto',  method: 'ListActiveGrants' },
-  { file: 'gibson/tenant/v1/user.proto',    method: 'ListAlerts' },
-  { file: 'gibson/tenant/v1/user.proto',    method: 'ListConversations' },
-];
-
-function isGrandfathered(relPath, methodName) {
-  return GRANDFATHER_LIST.some(
-    (e) => relPath === e.file && methodName === e.method,
-  );
+function arg(name, fallback) {
+  const i = process.argv.indexOf(name);
+  return i > -1 && process.argv[i + 1] ? resolve(process.argv[i + 1]) : fallback;
 }
 
-// ---------------------------------------------------------------------------
-// Proto text parsing helpers
-// ---------------------------------------------------------------------------
+const PROTO_ROOT = arg('--root', join(REPO_ROOT, 'internal/server/daemon/api'));
+const BASELINE = arg('--baseline', join(__dirname, 'lint-pagination.baseline'));
+const PREV_BASELINE = arg('--prev-baseline', null);
 
-/**
- * Walk a directory tree and collect all *.proto file paths.
- */
+/** Collect all *.proto file paths under dir. */
 function findProtos(dir) {
   const results = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    const st = statSync(full);
-    if (st.isDirectory()) {
+    if (statSync(full).isDirectory()) {
       results.push(...findProtos(full));
     } else if (entry.endsWith('.proto')) {
       results.push(full);
@@ -87,99 +61,130 @@ function findProtos(dir) {
   return results;
 }
 
-/**
- * Parse all service definitions from a proto file's text.
- * Returns an array of { serviceName, methods: [{ name, requestMessage }] }.
- */
-function parseServices(text) {
-  const services = [];
-  // Strip block comments to avoid false positives from commented-out code.
-  const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '');
-
-  const serviceRe = /service\s+(\w+)\s*\{/g;
-  let svcMatch;
-
-  while ((svcMatch = serviceRe.exec(stripped)) !== null) {
-    const svcName = svcMatch[1];
-    // Find the matching closing brace for this service block.
-    const blockStart = svcMatch.index + svcMatch[0].length;
-    let depth = 1;
-    let i = blockStart;
-    while (i < stripped.length && depth > 0) {
-      if (stripped[i] === '{') depth++;
-      else if (stripped[i] === '}') depth--;
-      i++;
-    }
-    const block = stripped.slice(blockStart, i - 1);
-
-    // Find rpc declarations within the service block.
-    const rpcRe = /rpc\s+(\w+)\s*\(\s*(\w+)\s*\)/g;
-    let rpcMatch;
-    const methods = [];
-    while ((rpcMatch = rpcRe.exec(block)) !== null) {
-      methods.push({ name: rpcMatch[1], requestMessage: rpcMatch[2] });
-    }
-    services.push({ serviceName: svcName, methods });
-  }
-  return services;
+/** Remove comments, so commented-out code does not count. */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
-/**
- * Check whether a named message in the proto text contains a field
- * named "limit" or "offset".
- */
-function messageHasLimitOrOffset(text, messageName) {
-  // Find the message block.
-  const msgRe = new RegExp(`\\bmessage\\s+${messageName}\\s*\\{`);
-  const m = msgRe.exec(text);
-  if (!m) return false;
+/** Return the unary RPCs of a proto: [{ name, request, response }]. */
+function parseUnaryRpcs(text) {
+  const rpcs = [];
+  const re = /rpc\s+(\w+)\s*\(\s*(stream\s+)?([\w.]+)\s*\)\s*returns\s*\(\s*(stream\s+)?([\w.]+)\s*\)/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m[2] || m[4]) continue; // streaming RPCs page by their stream
+    rpcs.push({ name: m[1], request: m[3].split('.').pop(), response: m[5].split('.').pop() });
+  }
+  return rpcs;
+}
 
-  const blockStart = m.index + m[0].length;
+/** Return the top-level body of a message (nested messages removed), or null. */
+function messageBody(text, name) {
+  const m = new RegExp(`\\bmessage\\s+${name}\\s*\\{`).exec(text);
+  if (!m) return null;
   let depth = 1;
-  let i = blockStart;
+  let i = m.index + m[0].length;
+  let body = '';
   while (i < text.length && depth > 0) {
-    if (text[i] === '{') depth++;
-    else if (text[i] === '}') depth--;
+    const ch = text[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    else if (depth === 1) body += ch;
     i++;
   }
-  const block = text.slice(blockStart, i - 1);
-  // Match field declarations: "int32 limit = N;" or "int64 offset = N;"
-  return /\b(limit|offset)\s*=\s*\d+\s*;/.test(block);
+  return body;
+}
+
+/** Return the field declarations of a message body: [{ repeated, name }]. */
+function fieldsOf(body) {
+  const fields = [];
+  for (const stmt of body.split(';')) {
+    const m = /^\s*(repeated\s+|map\s*<[^>]*>\s+)?(?!reserved\b|option\b|oneof\b)[\w.]+\s+(\w+)\s*=\s*\d+/.exec(stmt);
+    const mapField = /^\s*map\s*<[^>]*>\s+(\w+)\s*=\s*\d+/.exec(stmt);
+    if (mapField) fields.push({ repeated: true, name: mapField[1] });
+    else if (m) fields.push({ repeated: Boolean(m[1]), name: m[2] });
+  }
+  return fields;
+}
+
+/** True when the RPC returns a collection (see the header). */
+function returnsCollection(rpcName, respBody) {
+  if (!/\brepeated\b|\bmap\s*</.test(respBody)) return false;
+  if (/^(List|Query|Search)/.test(rpcName)) return true;
+  const fields = fieldsOf(respBody).filter((f) => f.name !== 'next_page_token');
+  return fields.length > 0 && fields.every((f) => f.repeated);
+}
+
+const hasField = (body, field) => new RegExp(`\\b${field}\\s*=\\s*\\d+`).test(body);
+
+/** Return the violations of every unary RPC in one proto text. */
+export function checkProto(text) {
+  const t = stripComments(text);
+  const found = [];
+  for (const rpc of parseUnaryRpcs(t)) {
+    const req = messageBody(t, rpc.request);
+    const resp = messageBody(t, rpc.response);
+    if (req !== null && (hasField(req, 'limit') || hasField(req, 'offset'))) {
+      found.push({ rpc: rpc.name, why: 'the request has a limit or offset field; use page_size and page_token' });
+      continue;
+    }
+    if (resp !== null && returnsCollection(rpc.name, resp)) {
+      const ok = req !== null && hasField(req, 'page_size') && hasField(req, 'page_token') &&
+        hasField(resp, 'next_page_token');
+      if (!ok) {
+        found.push({ rpc: rpc.name, why: 'the response is a list; the request needs page_size and page_token and the response needs next_page_token' });
+      }
+    }
+  }
+  return found;
+}
+
+function readBaseline(file) {
+  if (!existsSync(file)) return new Set();
+  return new Set(
+    readFileSync(file, 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#')),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-const protoFiles = findProtos(PROTO_ROOT);
-let violations = 0;
+const baseline = readBaseline(BASELINE);
+const prev = PREV_BASELINE ? readBaseline(PREV_BASELINE) : null;
+const live = new Set();
+let failures = 0;
 
-for (const absPath of protoFiles) {
+for (const absPath of findProtos(PROTO_ROOT)) {
   const relPath = relative(PROTO_ROOT, absPath);
-  const text = readFileSync(absPath, 'utf8');
-  const services = parseServices(text);
+  for (const v of checkProto(readFileSync(absPath, 'utf8'))) {
+    const key = `${relPath} ${v.rpc}`;
+    live.add(key);
+    if (baseline.has(key)) continue;
+    console.error(`[lint-pagination] ${key}: ${v.why} (ADR-0028 rule 3).`);
+    failures++;
+  }
+}
 
-  for (const svc of services) {
-    for (const method of svc.methods) {
-      if (!method.name.startsWith('List')) continue;
-      if (!messageHasLimitOrOffset(text, method.requestMessage)) continue;
-      if (isGrandfathered(relPath, method.name)) continue;
+for (const key of baseline) {
+  if (!live.has(key)) {
+    console.error(`[lint-pagination] baseline entry "${key}" no longer violates the rules or no longer exists. Delete it from ${relative(REPO_ROOT, BASELINE)}.`);
+    failures++;
+  }
+}
 
-      console.error(
-        `[lint-pagination] ${relPath}: ${svc.serviceName}/${method.name} ` +
-        `uses limit/offset pagination. New List* RPCs must use page_size + page_token (AIP-158). ` +
-        `If this is intentional, add it to GRANDFATHER_LIST in core/gibson/scripts/lint-pagination.mjs ` +
-        `with a PR justification.`
-      );
-      violations++;
+if (prev) {
+  for (const key of baseline) {
+    if (!prev.has(key)) {
+      console.error(`[lint-pagination] baseline entry "${key}" is new. The baseline can only shrink. Page the RPC instead.`);
+      failures++;
     }
   }
 }
 
-if (violations > 0) {
-  console.error(`[lint-pagination] FAIL: ${violations} violation(s). See above.`);
+if (failures > 0) {
+  console.error(`[lint-pagination] FAIL: ${failures} problem(s). See above.`);
   process.exit(1);
 }
 
-console.log('[lint-pagination] Gibson daemon-local protos: all List* methods use AIP-158 pagination or are grandfathered.');
-process.exit(0);
+console.log(`[lint-pagination] every unary RPC pages its lists (${baseline.size} baselined).`);
