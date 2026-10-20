@@ -69,22 +69,37 @@ message LogEntry {
 
 // QueryMissionLogsRequest asks for one mission's logs. start_unix_nanos /
 // end_unix_nanos bound the time range (0 means "use the server default
-// window"); limit caps the number of returned entries (0 means server default).
+// window"); page_size caps the number of entries on one page (0 means the
+// server default) and page_token continues a previous page (ADR-0028).
 message QueryMissionLogsRequest {
+  reserved 4;
+  reserved "limit";
   string mission_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }]; // required
   int64 start_unix_nanos = 2;   // optional time-range start
   int64 end_unix_nanos = 3;     // optional time-range end
-  int32 limit = 4;              // optional cap on entries
+  int32 page_size = 5 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];  // optional cap on entries per page
+  string page_token = 6 [(buf.validate.field).string = { max_len: 1024 }];   // next_page_token of the previous page
 }
-message QueryMissionLogsResponse { repeated LogEntry entries = 1; }
+message QueryMissionLogsResponse {
+  repeated LogEntry entries = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
 // QueryDaemonLogsRequest asks for the tenant's daemon logs, optionally filtered
 // by level and/or a mission_id substring.
 message QueryDaemonLogsRequest {
+  reserved 5;
+  reserved "limit";
   LogLevel level = 1 [(buf.validate.field).enum = { defined_only: true }]; // optional level filter
   string mission_id = 2 [(buf.validate.field).string = { max_len: 1024 }]; // optional mission-id substring filter
   int64 start_unix_nanos = 3;   // optional time-range start
   int64 end_unix_nanos = 4;     // optional time-range end
-  int32 limit = 5;              // optional cap on entries
+  int32 page_size = 6 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];  // optional cap on entries per page
+  string page_token = 7 [(buf.validate.field).string = { max_len: 1024 }];   // next_page_token of the previous page
 }
-message QueryDaemonLogsResponse { repeated LogEntry entries = 1; }
+message QueryDaemonLogsResponse {
+  repeated LogEntry entries = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}

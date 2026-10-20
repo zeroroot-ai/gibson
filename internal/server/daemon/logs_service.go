@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -97,17 +98,25 @@ func (s *logsServer) QueryMissionLogs(ctx context.Context, req *logspb.QueryMiss
 	if req.GetMissionId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "mission_id is required")
 	}
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	entries, err := s.querier.QueryMissionLogs(ctx, lokilogs.MissionQuery{
 		TenantID:  tenant,
 		MissionID: req.GetMissionId(),
 		Start:     nanosToTime(req.GetStartUnixNanos()),
 		End:       nanosToTime(req.GetEndUnixNanos()),
-		Limit:     int(req.GetLimit()),
+		Limit:     offset + limit,
 	})
 	if err != nil {
 		return nil, lokiErr(err)
 	}
-	return &logspb.QueryMissionLogsResponse{Entries: toProto(entries)}, nil
+	page := logsPage(entries, offset, limit)
+	return &logspb.QueryMissionLogsResponse{
+		Entries:       toProto(page),
+		NextPageToken: pagetoken.Next(offset, limit, len(page), -1),
+	}, nil
 }
 
 func (s *logsServer) QueryDaemonLogs(ctx context.Context, req *logspb.QueryDaemonLogsRequest) (*logspb.QueryDaemonLogsResponse, error) {
@@ -115,18 +124,35 @@ func (s *logsServer) QueryDaemonLogs(ctx context.Context, req *logspb.QueryDaemo
 	if err != nil {
 		return nil, err
 	}
+	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
 	entries, err := s.querier.QueryDaemonLogs(ctx, lokilogs.DaemonQuery{
 		TenantID:  tenant,
 		Level:     levelString(req.GetLevel()),
 		MissionID: req.GetMissionId(),
 		Start:     nanosToTime(req.GetStartUnixNanos()),
 		End:       nanosToTime(req.GetEndUnixNanos()),
-		Limit:     int(req.GetLimit()),
+		Limit:     offset + limit,
 	})
 	if err != nil {
 		return nil, lokiErr(err)
 	}
-	return &logspb.QueryDaemonLogsResponse{Entries: toProto(entries)}, nil
+	page := logsPage(entries, offset, limit)
+	return &logspb.QueryDaemonLogsResponse{
+		Entries:       toProto(page),
+		NextPageToken: pagetoken.Next(offset, limit, len(page), -1),
+	}, nil
+}
+
+// logsPage cuts the page [offset, offset+limit) from the newest-first entries
+// that Loki returned for a query of offset+limit lines.
+func logsPage(entries []lokilogs.Entry, offset, limit int) []lokilogs.Entry {
+	if offset >= len(entries) {
+		return nil
+	}
+	return entries[offset:min(offset+limit, len(entries))]
 }
 
 // nanosToTime converts a Unix-nanos field to a time.Time; 0 -> zero value
