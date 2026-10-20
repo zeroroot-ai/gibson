@@ -107,7 +107,7 @@ func TestClient_ClampsTheLimitAndOrdersTies(t *testing.T) {
 	if gotLimit != "1000" {
 		t.Errorf("limit sent to Loki = %q, want 1000", gotLimit)
 	}
-	var lines []string
+	lines := make([]string, 0, len(entries))
 	for _, e := range entries {
 		lines = append(lines, e.Line)
 	}
