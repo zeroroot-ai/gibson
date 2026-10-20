@@ -87,7 +87,7 @@ func (s *worldServer) ListMissions(ctx context.Context, req *worldpb.ListMission
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.Missions(), func(m brain.MissionSnapshot) string { return m.ID })
+	page, next := pagetoken.Page(pg, e.Missions(), func(m brain.MissionSnapshot) string { return m.ID })
 	resp := &worldpb.ListMissionsResponse{NextPageToken: next}
 	for _, m := range page {
 		resp.Missions = append(resp.Missions, &worldpb.MissionView{
@@ -107,7 +107,7 @@ func (s *worldServer) ListHosts(ctx context.Context, req *worldpb.ListHostsReque
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.Hosts(), func(h brain.HostSnapshot) string {
+	page, next := pagetoken.Page(pg, e.Hosts(), func(h brain.HostSnapshot) string {
 		return worldKey(h.ScopeID, h.Address, h.SSHHostKey, strconv.FormatUint(h.ID, 10))
 	})
 	resp := &worldpb.ListHostsResponse{NextPageToken: next}
@@ -137,7 +137,7 @@ func (s *worldServer) ListFindings(ctx context.Context, req *worldpb.ListFinding
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.Findings(), func(f brain.FindingSnapshot) string { return f.ID })
+	page, next := pagetoken.Page(pg, e.Findings(), func(f brain.FindingSnapshot) string { return f.ID })
 	resp := &worldpb.ListFindingsResponse{NextPageToken: next}
 	for _, f := range page {
 		resp.Findings = append(resp.Findings, &worldpb.FindingView{
@@ -156,7 +156,7 @@ func (s *worldServer) ListLlmCalls(ctx context.Context, req *worldpb.ListLlmCall
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.LlmCalls(), func(c brain.LlmCallSnapshot) string { return c.CallID })
+	page, next := pagetoken.Page(pg, e.LlmCalls(), func(c brain.LlmCallSnapshot) string { return c.CallID })
 	resp := &worldpb.ListLlmCallsResponse{NextPageToken: next}
 	for _, c := range page {
 		resp.LlmCalls = append(resp.LlmCalls, &worldpb.LlmCallView{
@@ -360,7 +360,7 @@ func (s *worldServer) ListReviewQueue(ctx context.Context, req *worldpb.ListRevi
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.ReviewQueue(), func(it brain.ReviewItem) string {
+	page, next := pagetoken.Page(pg, e.ReviewQueue(), func(it brain.ReviewItem) string {
 		return worldKey(it.Kind, it.TargetID)
 	})
 	resp := &worldpb.ListReviewQueueResponse{NextPageToken: next}
@@ -422,7 +422,7 @@ func (s *worldServer) ListLabels(ctx context.Context, req *worldpb.ListLabelsReq
 	if err != nil {
 		return nil, err
 	}
-	page, next := worldKeyedPage(s, pg, e.Labels(), func(l brain.LabelSnapshot) string { return l.TargetID })
+	page, next := pagetoken.Page(pg, e.Labels(), func(l brain.LabelSnapshot) string { return l.TargetID })
 	resp := &worldpb.ListLabelsResponse{NextPageToken: next}
 	for _, l := range page {
 		resp.Labels = append(resp.Labels, labelView(l))

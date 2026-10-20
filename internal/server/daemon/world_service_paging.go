@@ -6,7 +6,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -48,15 +47,6 @@ func worldSigners(keys *pagetoken.Keys) (map[string]*pagetoken.Signer, error) {
 // so the joined keys sort like the parts do.
 const keySep = "\x00"
 
-// worldPage is the position of one request in its list.
-type worldPage struct {
-	signer   *pagetoken.Signer
-	scope    []string
-	after    string
-	hasAfter bool
-	limit    int
-}
-
 // pageOf checks the token of a request. A token that the daemon did not sign
 // for this tenant, RPC and filter set gives InvalidArgument.
 func (s *worldServer) pageOf(
@@ -65,48 +55,29 @@ func (s *worldServer) pageOf(
 	size int32,
 	token string,
 	filters ...string,
-) (worldPage, error) {
+) (pagetoken.Request, error) {
 	t, ok := auth.TenantFromContext(ctx)
 	if !ok {
-		return worldPage{}, status.Error(codes.PermissionDenied, "no tenant in context")
+		return pagetoken.Request{}, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	scope := append([]string{t.String(), rpc}, filters...)
 	signer, ok := s.signers[rpc]
 	if !ok {
-		return worldPage{}, status.Errorf(codes.Internal, "no page token signer for %s", rpc)
+		return pagetoken.Request{}, status.Errorf(codes.Internal, "no page token signer for %s", rpc)
 	}
-	after, hasAfter, err := signer.After(scope, token)
+	pr, err := pagetoken.NewRequest(signer, append([]string{t.String(), rpc}, filters...), size, token)
 	if err != nil {
-		return worldPage{}, status.Error(codes.InvalidArgument, err.Error())
+		return pagetoken.Request{}, status.Error(codes.InvalidArgument, err.Error())
 	}
-	return worldPage{signer: signer, scope: scope, after: after, hasAfter: hasAfter, limit: pagetoken.Size(size)}, nil
-}
-
-// nextToken signs the key of the last item of a page. It returns "" when the
-// page is the last one.
-func (s *worldServer) nextToken(p worldPage, last string, more bool) string {
-	if !more {
-		return ""
-	}
-	return p.signer.Token(p.scope, last)
-}
-
-// worldKeyedPage sorts items by key and returns the page after the cursor of p
-// and the token of the page after that.
-func worldKeyedPage[T any](s *worldServer, p worldPage, items []T, key func(T) string) (page []T, next string) {
-	sorted := append([]T(nil), items...)
-	sort.SliceStable(sorted, func(i, j int) bool { return key(sorted[i]) < key(sorted[j]) })
-	page, last, more := pagetoken.KeysetPage(sorted, key, p.after, p.hasAfter, p.limit)
-	return page, s.nextToken(p, last, more)
+	return pr, nil
 }
 
 // seqWindow returns the range [start, end) of the events of one page, and
 // the token of the page after it. The cursor is the seq of the last event that
 // the client has. Event seq numbers only grow, so an event that arrives
 // between two pages has a seq after the cursor.
-func (s *worldServer) seqWindow(p worldPage, total int) (start, end int, next string, err error) {
-	if p.hasAfter {
-		last, parseErr := strconv.Atoi(p.after)
+func (s *worldServer) seqWindow(p pagetoken.Request, total int) (start, end int, next string, err error) {
+	if after, hasAfter := p.After(); hasAfter {
+		last, parseErr := strconv.Atoi(after)
 		if parseErr != nil || last < 0 {
 			return 0, 0, "", status.Error(codes.InvalidArgument, pagetoken.ErrBadToken.Error())
 		}
@@ -115,10 +86,8 @@ func (s *worldServer) seqWindow(p worldPage, total int) (start, end int, next st
 		}
 		start = last + 1
 	}
-	end = min(start+p.limit, total)
-	if end < total {
-		next = p.signer.Token(p.scope, strconv.Itoa(end-1))
-	}
+	end = min(start+p.Limit(), total)
+	next = p.Token(strconv.Itoa(end-1), end < total)
 	return start, end, next, nil
 }
 

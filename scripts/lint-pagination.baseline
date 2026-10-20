@@ -2,8 +2,6 @@
 # One line per RPC: <proto path> <Rpc>. This file can only shrink.
 # Delete a line in the PR that fixes the RPC. A stale line fails the lint.
 gibson/daemon/agentconsole/v1/agentconsole.proto ListRunningAgents
-gibson/daemon/connection/v1/connection.proto ListTenantUsage
-gibson/daemon/destructiveauthz/v1/destructive_authz.proto ListPendingDestructiveActions
 gibson/daemon/discovery/v1/discovery.proto ListAgents
 gibson/daemon/discovery/v1/discovery.proto ListConnectors
 gibson/daemon/discovery/v1/discovery.proto ListLLMSlots

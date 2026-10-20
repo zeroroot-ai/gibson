@@ -145,8 +145,14 @@ message SetTenantActivationResponse {
   bool changed = 1;
 }
 
-// ListTenantUsageRequest carries no fields.
-message ListTenantUsageRequest {}
+// ListTenantUsageRequest pages the tenants in tenant id order.
+message ListTenantUsageRequest {
+  // page_size is the largest number of tenants on one page. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 
 // TenantUsage is the usage of one tenant in the current budget period.
 message TenantUsage {
@@ -161,4 +167,6 @@ message ListTenantUsageResponse {
   // The budget period bounds had no consumer (ADR-0094, gibson#1166).
   reserved 2, 3;
   reserved "period_start_unix", "period_end_unix";
+  // next_page_token is empty on the last page.
+  string next_page_token = 4;
 }

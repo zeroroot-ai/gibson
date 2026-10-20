@@ -1742,7 +1742,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// .proto's authz options), unlike WorldService/LogsService above.
 	destructiveauthzv1.RegisterDestructiveAuthorizationServiceServer(
 		srv,
-		NewDestructiveAuthorizationServer(d.brainRegistry, d.logger.WithComponent("destructive-authz-service").Slog()),
+		NewDestructiveAuthorizationServer(d.brainRegistry, d.logger.WithComponent("destructive-authz-service").Slog(), pageKeys),
 	)
 	d.logger.Info(ctx, "registered DestructiveAuthorizationService gRPC endpoint")
 

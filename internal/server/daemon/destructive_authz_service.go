@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	destructiveauthzv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/destructiveauthz/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -33,18 +34,22 @@ type destructiveAuthzServer struct {
 
 	registry *brain.Registry
 	logger   *slog.Logger
+	// pageKeys derives the signer of the page tokens of ListPendingDestructiveActions.
+	pageKeys *pagetoken.Keys
 }
 
 // NewDestructiveAuthorizationServer constructs the DestructiveAuthorizationService
-// backed by the per-tenant brain registry.
-func NewDestructiveAuthorizationServer(registry *brain.Registry, logger *slog.Logger) destructiveauthzv1.DestructiveAuthorizationServiceServer {
+// backed by the per-tenant brain registry. pageKeys signs the page tokens.
+func NewDestructiveAuthorizationServer(
+	registry *brain.Registry, logger *slog.Logger, pageKeys *pagetoken.Keys,
+) destructiveauthzv1.DestructiveAuthorizationServiceServer {
 	if registry == nil {
 		panic("destructive authorization server: registry cannot be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &destructiveAuthzServer{registry: registry, logger: logger}
+	return &destructiveAuthzServer{registry: registry, logger: logger, pageKeys: pageKeys}
 }
 
 // queue resolves the caller's tenant from context and returns its
@@ -86,16 +91,35 @@ func toPendingDestructiveActionPB(a brain.DestructiveActionSnapshot) *destructiv
 // caller's tenant still awaiting a human decision.
 func (s *destructiveAuthzServer) ListPendingDestructiveActions(
 	ctx context.Context,
-	_ *destructiveauthzv1.ListPendingDestructiveActionsRequest,
+	req *destructiveauthzv1.ListPendingDestructiveActionsRequest,
 ) (*destructiveauthzv1.ListPendingDestructiveActionsResponse, error) {
 	q, err := s.queue(ctx)
 	if err != nil {
 		return nil, err
 	}
+	if s.pageKeys == nil {
+		return nil, status.Error(codes.Internal, "page tokens are not configured")
+	}
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status.Error(codes.PermissionDenied, "no tenant in context")
+	}
+	const list = "destructive-authz-pending"
+	signer, err := s.pageKeys.Signer(list)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "page token: %v", err)
+	}
+	pr, err := pagetoken.NewRequest(signer, []string{tenant.String(), list}, req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	// The position of an action is its hypothesis id, which is unique.
+	page, next := pagetoken.Page(pr, q.Pending(), func(a brain.DestructiveActionSnapshot) string { return a.HypothesisID })
 	resp := &destructiveauthzv1.ListPendingDestructiveActionsResponse{}
-	for _, a := range q.Pending() {
+	for _, a := range page {
 		resp.Actions = append(resp.Actions, toPendingDestructiveActionPB(a))
 	}
+	resp.NextPageToken = next
 	return resp, nil
 }
 

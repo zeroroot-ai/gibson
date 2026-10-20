@@ -93,25 +93,33 @@ func setTenantActivation(ctx context.Context, db *sql.DB, tenantID, activation s
 	return true, true, nil
 }
 
-// listTenantIDs returns each tenant that has a tenant_status row.
-func listTenantIDs(ctx context.Context, db *sql.DB) ([]string, error) {
-	rows, err := db.QueryContext(ctx, `SELECT tenant_id FROM tenant_status ORDER BY tenant_id`)
+// listTenantIDsAfter returns up to limit tenants that have a tenant_status
+// row, in tenant_id order, starting after the tenant id after. An empty after
+// starts at the first tenant. more is true when another tenant follows the
+// page. It never uses OFFSET.
+func listTenantIDsAfter(ctx context.Context, db *sql.DB, after string, limit int) (ids []string, more bool, err error) {
+	// One row more than the page tells whether another page follows.
+	rows, err := db.QueryContext(ctx,
+		`SELECT tenant_id FROM tenant_status WHERE tenant_id > $1 ORDER BY tenant_id LIMIT $2`, after, limit+1)
 	if err != nil {
-		return nil, fmt.Errorf("list tenants: %w", err)
+		return nil, false, fmt.Errorf("list tenants: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []string
+	ids = make([]string, 0, limit+1)
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan tenant: %w", err)
+			return nil, false, fmt.Errorf("scan tenant: %w", err)
 		}
-		out = append(out, id)
+		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate tenants: %w", err)
+		return nil, false, fmt.Errorf("iterate tenants: %w", err)
 	}
-	return out, nil
+	if len(ids) > limit {
+		return ids[:limit], true, nil
+	}
+	return ids, false, nil
 }
 
 // requireActiveTenant refuses new work for a suspended tenant. With no
