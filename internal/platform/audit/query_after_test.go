@@ -43,7 +43,7 @@ func TestParsePosition_RefusesJunk(t *testing.T) {
 func TestListAfter_FirstPageUsesNoOffsetAndReportsMore(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	rows := sqlmock.NewRows(afterCols).
 		AddRow(afterRow("3", now)...).AddRow(afterRow("2", now)...).AddRow(afterRow("1", now)...)
@@ -61,7 +61,7 @@ func TestListAfter_FirstPageUsesNoOffsetAndReportsMore(t *testing.T) {
 func TestListAfter_NextPageAddsTheKeysetCondition(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	at := time.Date(2026, 10, 1, 12, 0, 0, 5000, time.UTC)
 	mock.ExpectQuery(`\(created_at, id\) < \(\$2, \$3\)`).
 		WithArgs("acme", at, int64(7), 11).
@@ -78,7 +78,7 @@ func TestListAfter_NextPageAddsTheKeysetCondition(t *testing.T) {
 func TestListAfter_Refusals(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	q := NewQuery(db)
 
 	_, _, err = q.ListAfter(context.Background(), "", Filters{}, "", 10)
@@ -94,7 +94,7 @@ func TestListAfter_Refusals(t *testing.T) {
 func TestListAfter_ScanFailureIsReported(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	mock.ExpectQuery(`SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("1"))
 	_, _, err = NewQuery(db).ListAfter(context.Background(), "acme", Filters{}, "", 5)
 	assert.Error(t, err)

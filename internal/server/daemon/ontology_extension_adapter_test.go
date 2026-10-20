@@ -24,6 +24,7 @@ func TestRegisterOntologyExtension_ServesWithBrainRegistry(t *testing.T) {
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 		platformDB:    testPlatformDB(t),
+		keyProvider:   &kekProvider{kek: make([]byte, 32)},
 	}
 	srv := grpc.NewServer()
 

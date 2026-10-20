@@ -189,41 +189,10 @@ func (s *RedisMissionDraftStore) ListPage(
 			return nil, "", err
 		}
 	}
-
-	idx := indexKey(tenantID)
-	ids, err := s.client.ZRange(ctx, idx, 0, -1).Result()
-	if err != nil && err != goredis.Nil {
-		return nil, "", fmt.Errorf("failed to list draft index: %w", err)
+	entries, err := s.sortedIndex(ctx, tenantID)
+	if err != nil {
+		return nil, "", err
 	}
-	pipe := s.client.Pipeline()
-	created := make([]*goredis.StringCmd, len(ids))
-	for i, id := range ids {
-		created[i] = pipe.HGet(ctx, draftKey(tenantID, id), "created_at")
-	}
-	// A missing hash makes Exec report goredis.Nil. The cmds carry the verdict.
-	if _, execErr := pipe.Exec(ctx); execErr != nil && execErr != goredis.Nil {
-		return nil, "", fmt.Errorf("failed to read draft times: %w", execErr)
-	}
-	type entry struct{ createdAt, id string }
-	entries := make([]entry, 0, len(ids))
-	for i, id := range ids {
-		c, cErr := created[i].Result()
-		if cErr == goredis.Nil {
-			// Draft removed; clean stale index entry.
-			_ = s.client.ZRem(ctx, idx, id)
-			continue
-		}
-		if cErr != nil {
-			return nil, "", fmt.Errorf("failed to read draft time: %w", cErr)
-		}
-		entries = append(entries, entry{createdAt: c, id: id})
-	}
-	slices.SortFunc(entries, func(a, b entry) int {
-		if c := strings.Compare(b.createdAt, a.createdAt); c != 0 {
-			return c
-		}
-		return strings.Compare(b.id, a.id)
-	})
 
 	drafts = make([]*MissionDraft, 0, limit)
 	for _, e := range entries {
@@ -235,27 +204,78 @@ func (s *RedisMissionDraftStore) ListPage(
 			last := drafts[len(drafts)-1]
 			return drafts, position(last.CreatedAt, last.ID), nil
 		}
-		fields, hErr := s.client.HGetAll(ctx, draftKey(tenantID, e.id)).Result()
-		if hErr != nil || len(fields) == 0 {
-			if hErr != nil {
-				s.logger.WarnContext(ctx, "missiondraft: failed to fetch draft",
-					slog.String("tenant_id", tenantID),
-					slog.String("draft_id", e.id),
-					slog.String("error", hErr.Error()),
-				)
-			}
-			continue
+		if d := s.loadDraft(ctx, tenantID, e.id); d != nil {
+			drafts = append(drafts, d)
 		}
-		drafts = append(drafts, &MissionDraft{
-			ID:                  fields["id"],
-			Name:                fields["name"],
-			MissionDefinitionID: fields["mission_definition_id"],
-			CreatedAt:           fields["created_at"],
-			UpdatedAt:           fields["updated_at"],
-			// CUE source omitted from list responses.
-		})
 	}
 	return drafts, "", nil
+}
+
+// draftRef names one draft of the index: its creation time and its id.
+type draftRef struct{ createdAt, id string }
+
+// sortedIndex reads the ids of the tenant index and the creation time of each
+// in one pipeline. It returns them newest first, with the id as the tie
+// breaker. An index entry with no hash is removed.
+func (s *RedisMissionDraftStore) sortedIndex(ctx context.Context, tenantID string) ([]draftRef, error) {
+	idx := indexKey(tenantID)
+	ids, err := s.client.ZRange(ctx, idx, 0, -1).Result()
+	if err != nil && !errors.Is(err, goredis.Nil) {
+		return nil, fmt.Errorf("failed to list draft index: %w", err)
+	}
+	pipe := s.client.Pipeline()
+	created := make([]*goredis.StringCmd, len(ids))
+	for i, id := range ids {
+		created[i] = pipe.HGet(ctx, draftKey(tenantID, id), "created_at")
+	}
+	// A missing hash makes Exec report goredis.Nil. The cmds carry the verdict.
+	if _, execErr := pipe.Exec(ctx); execErr != nil && !errors.Is(execErr, goredis.Nil) {
+		return nil, fmt.Errorf("failed to read draft times: %w", execErr)
+	}
+	entries := make([]draftRef, 0, len(ids))
+	for i, id := range ids {
+		c, cErr := created[i].Result()
+		if errors.Is(cErr, goredis.Nil) {
+			// Draft removed; clean stale index entry.
+			_ = s.client.ZRem(ctx, idx, id)
+			continue
+		}
+		if cErr != nil {
+			return nil, fmt.Errorf("failed to read draft time: %w", cErr)
+		}
+		entries = append(entries, draftRef{createdAt: c, id: id})
+	}
+	slices.SortFunc(entries, func(a, b draftRef) int {
+		if c := strings.Compare(b.createdAt, a.createdAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.id, a.id)
+	})
+	return entries, nil
+}
+
+// loadDraft reads the metadata of one draft. It returns nil when the draft is
+// gone or the read failed. The CUE source is omitted.
+func (s *RedisMissionDraftStore) loadDraft(ctx context.Context, tenantID, id string) *MissionDraft {
+	fields, err := s.client.HGetAll(ctx, draftKey(tenantID, id)).Result()
+	if err != nil {
+		s.logger.WarnContext(ctx, "missiondraft: failed to fetch draft",
+			slog.String("tenant_id", tenantID),
+			slog.String("draft_id", id),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return &MissionDraft{
+		ID:                  fields["id"],
+		Name:                fields["name"],
+		MissionDefinitionID: fields["mission_definition_id"],
+		CreatedAt:           fields["created_at"],
+		UpdatedAt:           fields["updated_at"],
+	}
 }
 
 // Get retrieves a single draft including its YAML content.

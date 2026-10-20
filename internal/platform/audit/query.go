@@ -137,7 +137,7 @@ func (q *Query) List(
 	limit, offset int,
 ) ([]PgEntry, int, error) {
 	if tenantID == "" {
-		return nil, 0, fmt.Errorf("audit.Query.List: tenantID must not be empty")
+		return nil, 0, errors.New("audit.Query.List: tenantID must not be empty")
 	}
 
 	where, args, nextParam := buildWhere(tenantID, filters)
@@ -271,25 +271,27 @@ func (q *Query) ListAfter(
 		if perr != nil {
 			return nil, false, perr
 		}
-		where += fmt.Sprintf(" AND (created_at, id) < ($%d, $%d)", nextParam, nextParam+1)
+		where += " AND (created_at, id) < ($" + strconv.Itoa(nextParam) + ", $" + strconv.Itoa(nextParam+1) + ")"
 		args = append(args, at, id)
 		nextParam += 2
 	}
-	// One row more than the page tells whether another page follows.
-	dataQuery := fmt.Sprintf(`
-SELECT id, tenant_id, actor_id, actor_type, action,
-       target_type, target_id, COALESCE(decision, ''), metadata, created_at
-FROM   audit_log
-WHERE  %s
-ORDER  BY created_at DESC, id DESC
-LIMIT  $%d`, where, nextParam)
+	// One row more than the page tells whether another page follows. The query
+	// holds fixed column names and numbered placeholders only. Each value goes
+	// in args.
+	var sqlText strings.Builder
+	sqlText.WriteString("SELECT id, tenant_id, actor_id, actor_type, action, ")
+	sqlText.WriteString("target_type, target_id, COALESCE(decision, ''), metadata, created_at ")
+	sqlText.WriteString("FROM audit_log WHERE ")
+	sqlText.WriteString(where)
+	sqlText.WriteString(" ORDER BY created_at DESC, id DESC LIMIT $")
+	sqlText.WriteString(strconv.Itoa(nextParam))
 	args = append(args, limit+1)
 
-	rows, err := q.db.QueryContext(ctx, dataQuery, args...)
+	rows, err := q.db.QueryContext(ctx, sqlText.String(), args...)
 	if err != nil {
 		return nil, false, fmt.Errorf("audit.Query.ListAfter: query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	entries, err = scanEntries(rows, limit+1)
 	if err != nil {
