@@ -5,6 +5,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -298,5 +300,152 @@ func TestCleanupOfRun1_LeavesRun2Alone(t *testing.T) {
 	}
 	if got, _ := mm.getActive(tenant, id); got != run2 {
 		t.Fatal("the cleanup of run 1 removed run 2")
+	}
+}
+
+// countingQuota counts the open runs of a tenant.
+type countingQuota struct{ open int }
+
+func (q *countingQuota) IncrementMissionCount(context.Context) error { q.open++; return nil }
+func (q *countingQuota) DecrementMissionCount(context.Context) error { q.open--; return nil }
+
+// The accounting of run 1 runs while run 2 of the same record is active. Run 1
+// decrements its own slot once. It must not decrement the slot of run 2, and
+// it must not release the child reservation that the record holds for run 2
+// (gibson#1228).
+func TestEndRunAccounting_Run1LeavesRun2Alone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	quota := &countingQuota{}
+	mm := helperMM()
+	mm.quotaCounter = quota
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	tenant := auth.MustNewTenantID("acme")
+
+	parent := &mission.Mission{ID: types.NewID()}
+	rec := &mission.Mission{ID: types.NewID(), ParentMissionID: &parent.ID}
+	cost := int64(500)
+	ledger := mission.NewRedisReservationLedger(conn.Redis)
+	if _, err := ledger.Reserve(ctx, parent, rec.ID, mission.ChildBudget{CostUSDCents: &cost}); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+
+	id := rec.ID.String()
+	run1, run2 := activeRunOfRecord(rec, tenant), activeRunOfRecord(rec, tenant)
+	mm.setActive(tenant, id, run1)
+	_ = quota.IncrementMissionCount(ctx) // run 1 started
+	mm.setActive(tenant, id, run2)       // run 2 took the entry while run 1 cleans up
+	_ = quota.IncrementMissionCount(ctx) // run 2 started
+
+	mm.endRunAccounting(ctx, conn, run1)
+	if quota.open != 1 {
+		t.Fatalf("open runs = %d after the cleanup of run 1, want 1 (the quota of run 2)", quota.open)
+	}
+	held, err := ledger.Reserved(ctx, parent.ID)
+	if err != nil || held.CostUSDCents == nil {
+		t.Fatalf("the cleanup of run 1 released the reservation of run 2: %+v, %v", held, err)
+	}
+
+	mm.endRunAccounting(ctx, conn, run2)
+	if quota.open != 0 {
+		t.Fatalf("open runs = %d after both runs ended, want 0", quota.open)
+	}
+	held, err = ledger.Reserved(ctx, parent.ID)
+	if err != nil || held.CostUSDCents != nil {
+		t.Fatalf("the reservation was not released when the last run ended: %+v, %v", held, err)
+	}
+}
+
+// failingQuota fails every decrement.
+type failingQuota struct{}
+
+func (failingQuota) IncrementMissionCount(context.Context) error { return nil }
+func (failingQuota) DecrementMissionCount(context.Context) error { return errors.New("redis down") }
+
+// A failed decrement is logged and never stops the cleanup of the run.
+func TestEndRunAccounting_DecrementFailureIsNotFatal(t *testing.T) {
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	mm := helperMM()
+	mm.quotaCounter = failingQuota{}
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	run := activeRunOfRecord(&mission.Mission{ID: types.NewID()}, auth.MustNewTenantID("acme"))
+	mm.endRunAccounting(context.Background(), conn, run) // must not panic
+}
+
+// claimingLedger lets a claim of run 2 try to start inside the release of run 1.
+type claimingLedger struct {
+	mission.ReservationLedger
+	claimed chan struct{}
+	claim   func()
+	t       *testing.T
+}
+
+func (l *claimingLedger) Release(ctx context.Context, parentID, childID types.ID) error {
+	go func() {
+		l.claim()
+		close(l.claimed)
+	}()
+	select {
+	case <-l.claimed:
+		l.t.Error("run 2 claimed the record between the decision and the release of run 1")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := l.ReservationLedger.Release(ctx, parentID, childID); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	return nil
+}
+
+// Run 2 cannot claim the record between the decision of run 1 and its release
+// of the reservation. The claim waits for the record lock (gibson#1228).
+func TestEndRunAccounting_ClaimWaitsForTheRelease(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	mm := helperMM()
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
+	tenant := auth.MustNewTenantID("acme")
+	eng := mm.brainRegistry.For(tenant.String())
+
+	parent := &mission.Mission{ID: types.NewID()}
+	rec := &mission.Mission{ID: types.NewID(), ParentMissionID: &parent.ID}
+	cost := int64(500)
+	ledger := mission.NewRedisReservationLedger(conn.Redis)
+	if _, err := ledger.Reserve(ctx, parent, rec.ID, mission.ChildBudget{CostUSDCents: &cost}); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+
+	id := rec.ID.String()
+	run1, run2 := activeRunOfRecord(rec, tenant), activeRunOfRecord(rec, tenant)
+	if err := mm.claimActive(tenant, id, run1); err != nil {
+		t.Fatalf("claim run 1: %v", err)
+	}
+	eng.Submit(brain.MissionProjected{ID: id, RunID: runIDOf(run1)})
+	eng.Submit(brain.MissionDone{ID: id, RunID: runIDOf(run1), Outcome: brain.MissionCompleted})
+	waitWorldStatus(t, eng, id, string(brain.MissionCompleted))
+
+	claimed := make(chan struct{})
+	mm.newLedger = func(c *datapool.Conn) mission.ReservationLedger {
+		return &claimingLedger{
+			ReservationLedger: mission.NewRedisReservationLedger(c.Redis),
+			claimed:           claimed,
+			claim:             func() { _ = mm.claimActive(tenant, id, run2) },
+			t:                 t,
+		}
+	}
+	mm.endRunAccounting(ctx, conn, run1)
+
+	select {
+	case <-claimed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("run 2 never claimed the record after the release")
+	}
+	if got, _ := mm.getActive(tenant, id); got != run2 {
+		t.Fatal("run 2 does not hold the record")
 	}
 }

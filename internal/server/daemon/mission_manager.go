@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"time"
@@ -183,6 +184,18 @@ type missionManager struct {
 	// (audit C9 closure — a tenant cannot affect another tenant's missions).
 	mu             sync.RWMutex
 	activeMissions map[auth.TenantID]map[string]*activeMission
+
+	// recordLocks is a fixed set of lock stripes. A mission record hashes to
+	// one stripe. claimActive and endRunAccounting take it, so the decision of
+	// one is atomic with the act of the other. It is a lock of its own, so the
+	// Redis call of a release never runs under the m.mu of the whole manager.
+	// No code path holds two record locks, so the stripes cannot deadlock.
+	recordLocks [256]sync.Mutex
+
+	// newLedger builds the reservation ledger of a tenant connection. It is
+	// nil in production, which uses the Redis ledger. A test sets it.
+	newLedger func(conn *datapool.Conn) mission.ReservationLedger
+
 	completedCount int
 }
 
@@ -369,10 +382,21 @@ func (m *missionManager) activeRunOf(tenant auth.TenantID, missionID string) (*a
 	return am, true
 }
 
+// lockRecord takes the lock of a mission record and returns its release.
+func (m *missionManager) lockRecord(missionID string) func() {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(missionID))
+	mu := &m.recordLocks[h.Sum32()%uint32(len(m.recordLocks))]
+	mu.Lock()
+	return mu.Unlock
+}
+
 // claimActive registers am as the active run of the mission. It refuses when
 // another run of the same mission is still going, so two runs of one record
 // never share one entry in the active map or one brain binding (gibson#1217).
 func (m *missionManager) claimActive(tenant auth.TenantID, missionID string, am *activeMission) error {
+	unlock := m.lockRecord(missionID)
+	defer unlock()
 	cur, held := m.getActive(tenant, missionID)
 	ended := held && m.runEnded(tenant, cur)
 	m.mu.Lock()
@@ -991,11 +1015,46 @@ func (m *missionManager) releaseChildReservation(ctx context.Context, poolConn *
 	// graceful-nil in request paths).
 	if parentID := mi.ParentMissionID; parentID != nil {
 		ledger := mission.NewRedisReservationLedger(poolConn.Redis)
+		if m.newLedger != nil {
+			ledger = m.newLedger(poolConn)
+		}
 		if err := ledger.Release(context.WithoutCancel(ctx), *parentID, mi.ID); err != nil {
 			m.logger.Warn("mission manager: failed to release child budget reservation (non-fatal)",
 				"mission_id", mi.ID.String(),
 				"parent_mission_id", parentID.String(),
 				"error", err.Error())
+		}
+	}
+}
+
+// newerRunActive reports whether another run of the mission record holds the
+// active entry. The record ID is the same for every run, so the accounting of
+// an ended run must not take what a newer run of the record holds
+// (gibson#1228). The caller holds the record lock. The guard is in process
+// memory, so it is correct only while one replica runs all runs of a record
+// (gibson.replicas is 1 in charts).
+func (m *missionManager) newerRunActive(am *activeMission) bool {
+	cur, ok := m.getActive(am.tenantID, am.mission.ID.String())
+	return ok && cur != am
+}
+
+// endRunAccounting settles what a run holds when it reaches terminal. It gives
+// a child mission's reserved budget back to its parent (gibson#1358). That
+// reservation belongs to the record, so it stays when a newer run of the record
+// is active. It also decrements the concurrent_missions counter of the tenant,
+// floored at zero, once for the run that incremented it.
+func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapool.Conn, am *activeMission) {
+	// The decision and the release run under the record lock that claimActive
+	// takes, so a new run cannot claim the record between them.
+	unlock := m.lockRecord(am.mission.ID.String())
+	if !m.newerRunActive(am) {
+		m.releaseChildReservation(ctx, poolConn, am.mission)
+	}
+	unlock()
+	if m.quotaCounter != nil {
+		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
+			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
+				"mission_id", am.mission.ID.String(), "error", decErr.Error())
 		}
 	}
 }
@@ -1256,22 +1315,7 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// row was allocated.
 	m.finalizeAuthzState(ctx, missionRun, finalStatus)
 
-	// Give a child mission's reserved budget back to its parent now that the
-	// child is terminal (gibson#1358). This used to hang off the store's
-	// UpdateStatus write, but mission status became World-derived (gibson#1112)
-	// and the store no longer writes a terminal transition — so the release
-	// moved here, to the one place a run actually reaches terminal. A missed
-	// release is not a leak that heals: it is budget the parent never gets back.
-	m.releaseChildReservation(ctx, poolConn, active.mission)
-
-	// Decrement the concurrent_missions counter on terminal-state transition.
-	// Floored at zero. Spec plans-and-quotas-simplification.
-	if m.quotaCounter != nil {
-		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
-			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
-				"mission_id", missionID, "error", decErr.Error())
-		}
-	}
+	m.endRunAccounting(ctx, poolConn, active)
 
 	// Status is World-derived (ADR-0163/gibson#1118): the brain's MissionDone event
 	// already set the terminal status in the World via Reduce. No store write.
