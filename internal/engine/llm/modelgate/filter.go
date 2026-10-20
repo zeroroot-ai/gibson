@@ -68,6 +68,11 @@ type Candidate struct {
 // so a caller may retry. A real denial does not carry this error.
 var ErrUnavailable = errors.New("modelgate: the authorizer could not decide")
 
+// ErrDenied marks a refusal of the gate that a retry cannot change: the subject
+// has no grant, or the authorizer failed in a permanent way. A caller maps it to
+// PermissionDenied. It never appears together with ErrUnavailable.
+var ErrDenied = errors.New("modelgate: the model is not permitted")
+
 // Filter returns the subset of candidates the calling user is permitted
 // to use, preserving rank order. Returning an empty slice when no
 // candidates pass signals to the caller that PermissionDenied is

@@ -26,6 +26,7 @@ package component
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"google.golang.org/grpc/codes"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 )
 
@@ -138,6 +140,14 @@ func (a *LLMRegistryAdapter) resolveProvider(ctx context.Context, tenant, slotNa
 	// tenant default.
 	resolvedProvider, resolvedModel, resolveErr := slots.ResolveSlot(ctx, slotDef, slotPinFrom(ctx))
 	if resolveErr != nil {
+		// A refusal of the model gate is a policy answer. A retry cannot change
+		// it, so it is PermissionDenied. A gate that could not decide
+		// (modelgate.ErrUnavailable) stays Unavailable, because a retry can
+		// succeed (gibson#1221).
+		if errors.Is(resolveErr, modelgate.ErrDenied) && !errors.Is(resolveErr, modelgate.ErrUnavailable) {
+			return nil, llm.ModelInfo{}, status.Errorf(codes.PermissionDenied,
+				"slot %q: the model gate refused the model: %v", slotName, resolveErr)
+		}
 		return nil, llm.ModelInfo{}, status.Errorf(codes.Unavailable,
 			"slot %q: no provider in this tenant's configured set can serve the slot: %v", slotName, resolveErr)
 	}

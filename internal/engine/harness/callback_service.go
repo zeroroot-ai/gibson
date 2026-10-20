@@ -21,6 +21,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -919,6 +920,33 @@ func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInf
 	})
 }
 
+// llmErrorCode maps the error of an LLM call to the code that the agent sees.
+// A refusal of the model gate is a policy answer and a retry cannot change it,
+// so it is PERMISSION_DENIED. A gate that could not decide is UNAVAILABLE,
+// because a retry can succeed. Every other error stays INTERNAL (gibson#1221).
+func llmErrorCode(err error) commonpb.ErrorCode {
+	switch {
+	case errors.Is(err, modelgate.ErrUnavailable):
+		return commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE
+	case errors.Is(err, modelgate.ErrDenied):
+		return commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED
+	default:
+		return commonpb.ErrorCode_ERROR_CODE_INTERNAL
+	}
+}
+
+// llmStatusCode is llmErrorCode for an RPC that answers with a gRPC status.
+func llmStatusCode(err error) codes.Code {
+	switch {
+	case errors.Is(err, modelgate.ErrUnavailable):
+		return codes.Unavailable
+	case errors.Is(err, modelgate.ErrDenied):
+		return codes.PermissionDenied
+	default:
+		return codes.Internal
+	}
+}
+
 // LLMComplete implements the LLM completion RPC.
 func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb.LLMCompleteRequest) (*harnesspb.LLMCompleteResponse, error) {
 	harness, err := s.getHarness(ctx, req.Context)
@@ -972,7 +1000,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 
 		return &harnesspb.LLMCompleteResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    llmErrorCode(err),
 				Message: err.Error(),
 			},
 		}, nil
@@ -1024,7 +1052,7 @@ func (s *HarnessCallbackService) LLMCompleteWithTools(ctx context.Context, req *
 		s.logger.Error("LLM completion with tools failed", "error", err, "task_id", req.Context.TaskId)
 		return &harnesspb.LLMCompleteWithToolsResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    llmErrorCode(err),
 				Message: err.Error(),
 			},
 		}, nil
@@ -1075,7 +1103,7 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 	chunkChan, err := harness.Stream(stream.Context(), req.Slot, messages, opts...)
 	if err != nil {
 		s.logger.Error("LLM stream failed", "error", err, "task_id", req.Context.TaskId)
-		return status.Errorf(codes.Internal, "stream failed: %v", err)
+		return status.Errorf(llmStatusCode(err), "stream failed: %v", err)
 	}
 
 	// Forward chunks to client while aggregating the completion for World
@@ -1092,7 +1120,7 @@ func (s *HarnessCallbackService) LLMStream(req *harnesspb.LLMStreamRequest, stre
 		if chunk.Error != nil {
 			protoChunk := &harnesspb.LLMStreamResponse{
 				Error: &harnesspb.HarnessError{
-					Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+					Code:    llmErrorCode(chunk.Error),
 					Message: chunk.Error.Error(),
 				},
 			}
@@ -1180,7 +1208,7 @@ func (s *HarnessCallbackService) LLMCompleteStructured(ctx context.Context, req 
 		s.logger.Error("LLM structured completion failed", "error", err, "task_id", req.Context.TaskId)
 		return &harnesspb.LLMCompleteStructuredResponse{
 			Error: &harnesspb.HarnessError{
-				Code:    commonpb.ErrorCode_ERROR_CODE_INTERNAL,
+				Code:    llmErrorCode(err),
 				Message: err.Error(),
 			},
 		}, nil

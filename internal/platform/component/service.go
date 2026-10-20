@@ -1415,7 +1415,7 @@ func (s *ComponentServiceServer) Complete(
 			slog.String("slot", req.Slot),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Errorf(codes.Internal, "LLM completion failed: %v", err)
+		return nil, completionStatus(err)
 	}
 
 	s.logger.InfoContext(ctx, "complete: LLM completion succeeded",
@@ -1527,7 +1527,7 @@ func (s *ComponentServiceServer) CompleteStream(
 		// that clients that do not inspect the trailing status still see the
 		// stream terminated.
 		_ = stream.Send(&componentpb.CompleteStreamResponse{Done: true})
-		return status.Errorf(codes.Internal, "LLM streaming failed: %v", err)
+		return completionStatus(err)
 	}
 
 	return nil

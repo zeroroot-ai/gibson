@@ -129,10 +129,11 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 			// Only an outage marks the error as retryable. A permanent error
 			// (no authorizer, a bad request, a short answer) cannot succeed on
 			// a retry, so a pinned Decider must stop on it (gibson#1219).
-			cause := ferr
+			mark := modelgate.ErrDenied
 			if gateCouldNotDecide(ferr) {
-				cause = fmt.Errorf("%w: %w", modelgate.ErrUnavailable, ferr)
+				mark = modelgate.ErrUnavailable
 			}
+			cause := fmt.Errorf("%w: %w", mark, ferr)
 			return types.WrapError(
 				llm.ErrNoMatchingProvider,
 				fmt.Sprintf("model_access_denied: authorization check failed for model %q on provider %q (slot %q)",
@@ -146,10 +147,11 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 		m.onResolve(ctx, picked, allowed)
 	}
 	if !allowed {
-		return types.NewError(
+		return types.WrapError(
 			llm.ErrNoMatchingProvider,
 			fmt.Sprintf("model_access_denied: user not permitted to use model %q on provider %q for slot %q",
 				model.Name, provider.Name(), slot.Name),
+			modelgate.ErrDenied,
 		)
 	}
 	return nil

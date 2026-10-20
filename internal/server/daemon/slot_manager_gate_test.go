@@ -77,6 +77,22 @@ func TestApplyModelGate(t *testing.T) {
 		}
 	})
 
+	t.Run("a denial and a permanent error carry ErrDenied, an outage does not", func(t *testing.T) {
+		ctx := context.Background()
+		denied := gateManager(&gateFakeFilter{permit: false}).applyModelGate(ctx, slot, prov, model)
+		if !errors.Is(denied, modelgate.ErrDenied) || errors.Is(denied, modelgate.ErrUnavailable) {
+			t.Errorf("a denial must carry ErrDenied only, got %v", denied)
+		}
+		permanent := gateManager(&gateFakeFilter{err: authz.ErrInvalidArgument}).applyModelGate(ctx, slot, prov, model)
+		if !errors.Is(permanent, modelgate.ErrDenied) || errors.Is(permanent, modelgate.ErrUnavailable) {
+			t.Errorf("a permanent error must carry ErrDenied only, got %v", permanent)
+		}
+		outage := gateManager(&gateFakeFilter{err: authz.ErrFgaTimeout}).applyModelGate(ctx, slot, prov, model)
+		if !errors.Is(outage, modelgate.ErrUnavailable) || errors.Is(outage, modelgate.ErrDenied) {
+			t.Errorf("an outage must carry ErrUnavailable only, got %v", outage)
+		}
+	})
+
 	t.Run("authorizer error fails closed", func(t *testing.T) {
 		err := gateManager(&gateFakeFilter{err: errors.New("fga unavailable")}).applyModelGate(context.Background(), slot, prov, model)
 		if err == nil || !strings.Contains(err.Error(), "model_access_denied") {
