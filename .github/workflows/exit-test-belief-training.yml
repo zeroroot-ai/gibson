@@ -1,7 +1,7 @@
 # ----------------------------------------------------------------------------
 # The belief training exit test (ADR-0106, gibson#616).
 #
-# In plain words: a tenant gets something to learn from, its nightly trainer
+# In plain words: a tenant gets something to learn from, its trainer
 # runs once, and the next mission of the tenant pins the new belief version.
 #
 # The steps:
@@ -24,7 +24,7 @@
 #      belief than the seed host: the trained model changed the belief.
 #
 # ADR-0080: NEVER on pull_request. It needs a live cluster. It runs on main and
-# daily.
+# on dispatch.
 # ----------------------------------------------------------------------------
 name: exit-test-belief-training
 
@@ -43,8 +43,6 @@ on:
       - 'internal/server/daemon/graph_projector_*.go'
       - '.github/scripts/assert-run-nodes.sh'
       - '.github/workflows/exit-test-belief-training.yml'
-  schedule:
-    - cron: '45 7 * * *'
   workflow_dispatch: {}
 
 # One run at a time, and a run that started finishes (gibson#151).

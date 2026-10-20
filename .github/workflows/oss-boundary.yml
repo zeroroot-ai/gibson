@@ -17,7 +17,6 @@
 # graphs, so running this on every PR would be pure spend):
 #   - pull_request, path-filtered to this workflow + its script + go.mod
 #     (go.mod: the gibson->billing direction IS gibson-content-dependent)
-#   - weekly schedule (drift watch over the OSS repos' default branches)
 #   - workflow_dispatch (run on demand, e.g. from an epic checklist)
 
 name: oss-boundary
@@ -29,8 +28,6 @@ on:
       - .github/workflows/oss-boundary.yml
       - scripts/check-oss-boundary.sh
       - go.mod
-  schedule:
-    - cron: "17 6 * * 1" # Mondays 06:17 UTC
   workflow_dispatch:
 
 permissions:

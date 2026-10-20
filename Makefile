@@ -423,7 +423,7 @@ check-bringup-diagnostics:
 # requires the closed billing repo or gibson-executor. Runs its fixtures first.
 # Clones the public repos (network) unless OSS_BOUNDARY_REPOS_DIR points at
 # existing checkouts.
-# CI: .github/workflows/oss-boundary.yml (path-filtered PRs + weekly sweep).
+# CI: .github/workflows/oss-boundary.yml (path-filtered PRs and dispatch).
 check-oss-boundary:
 	@echo "Checking the license layers (permissive, ELv2, closed)..."
 	@bash scripts/check-oss-boundary.sh --selftest
@@ -434,7 +434,7 @@ check-oss-boundary:
 # ADR-0089): fresh anonymous clones of the OSS stack (sdk/adk/setec/
 # gibson-executor) build + test-compile with zero external fetch after a
 # single public-proxy module-cache warm-up. Needs network for phases 0/1.
-# CI: .github/workflows/airgap-build.yml (path-filtered PRs + weekly sweep).
+# CI: .github/workflows/airgap-build.yml (path-filtered PRs and dispatch).
 check-airgap-build:
 	@echo "Checking air-gapped clean-room build of the OSS stack..."
 	@bash scripts/check-airgap-build.sh
@@ -643,7 +643,7 @@ check-env-readers:
 	@$(GOCMD) run ./tools/envreaders -dir . -check
 # check-proto-field-consumers — every daemon-owned proto field has a consumer
 # in one of seven repositories (gibson#502, ADR-0094 layer 5). The fixture runs
-# on every PR; the measurement needs the six other checkouts and runs nightly
+# on every PR; the measurement needs the six other checkouts and runs on dispatch
 # (.github/workflows/proto-field-consumers.yml). Locally:
 #   CONSUMER_ROOTS=". ../sdk ../adk ../gibson-executor ../setec ../dashboard ../sdk-ts" make check-proto-field-consumers
 .PHONY: check-proto-field-consumers-fixture

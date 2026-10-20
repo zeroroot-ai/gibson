@@ -475,7 +475,7 @@ jobs:
     # That is how trivy and tlsx shipped in the executor and stayed invisible to
     # the catalog while this gate was green (gibson#1675). The other direction —
     # is the capture still current — is a question about the outside world, so it
-    # is asked on a schedule by executor-catalog-staleness.yml, never here.
+    # is asked on dispatch by executor-catalog-staleness.yml, never here.
     steps:
       - name: The change filter succeeded
         # gibson#807 condition 7: when the filter fails, GitHub would skip this

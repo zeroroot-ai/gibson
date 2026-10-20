@@ -20,7 +20,7 @@
 # gate forced open, which failed on that step.
 #
 # ADR-0080: NEVER on pull_request. It needs a live cluster. It runs on main and
-# daily.
+# on dispatch.
 # ----------------------------------------------------------------------------
 name: exit-test-model-gate
 
@@ -45,8 +45,6 @@ on:
       - 'tests/e2e/model_gate_test.go'
       - 'tests/e2e/fixtures/providers/mock-llm/**'
       - '.github/workflows/exit-test-model-gate.yml'
-  schedule:
-    - cron: '15 8 * * *'
   workflow_dispatch: {}
 
 # One run at a time, and a run that started finishes (gibson#151).
