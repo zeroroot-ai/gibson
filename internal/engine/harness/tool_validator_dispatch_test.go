@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -90,20 +92,20 @@ func setResult(response proto.Message) {
 func TestCallToolProto_ADiscoveryToolWithNoDiscoveryResultIsCounted(t *testing.T) {
 	// A real catalog tool, so componentcatalog says it emits a DiscoveryResult.
 	const tool = "nmap"
-	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
+	run := "run-" + t.Name()
 	require.True(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool),
 		"this test needs a tool the catalog calls a discovery tool")
 
-	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run))
-	beforeCompliance := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", run))
+	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field"))
+	beforeCompliance := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false"))
 
 	dispatchToolCall(t, run, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
 	assert.InDelta(t, before+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run)), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field")), 0.5,
 		"the skip metric did not move; the validator is not on the dispatch path")
 	assert.InDelta(t, beforeCompliance+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false", run)), 0.5,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "false")), 0.5,
 		"the compliance metric did not record a non-compliant dispatch")
 }
 
@@ -112,10 +114,10 @@ func TestCallToolProto_ADiscoveryToolWithNoDiscoveryResultIsCounted(t *testing.T
 // non-compliant.
 func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.T) {
 	const tool = "httpx"
-	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
+	run := "run-" + t.Name()
 	require.True(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool))
 
-	before := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", run))
+	before := testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true"))
 
 	dispatchToolCall(t, run, tool, "testdisc", discoveryShapedFDS(t), func(response proto.Message) {
 		setResult(response)
@@ -136,7 +138,7 @@ func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.
 	})
 
 	assert.InDelta(t, before+1,
-		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true", run)), 0.5,
+		testutil.ToFloat64(toolDiscoveryComplianceTotal.WithLabelValues(tool, "true")), 0.5,
 		"a compliant dispatch was not recorded")
 }
 
@@ -145,21 +147,21 @@ func TestCallToolProto_ADiscoveryToolWithADiscoveryResultIsCompliant(t *testing.
 // non-discovery tool call would look like a broken parser.
 func TestCallToolProto_ANonDiscoveryToolIsNotCountedAsMissing(t *testing.T) {
 	const tool = "not-in-the-catalog"
-	run := "run-" + t.Name() // a label of its own, so the counters of the tests stay apart
+	run := "run-" + t.Name()
 	require.False(t, NewToolValidator(slog.Default()).isDiscoveryTool(tool))
 
-	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run))
-	beforeNotOne := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", run))
+	before := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field"))
+	beforeNotOne := testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool"))
 
 	dispatchToolCall(t, run, tool, "testtool", createTestFileDescriptorSetForCallback(), setResult)
 
 	assert.InDelta(t, before,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field", run)), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "missing_discovery_field")), 0.5,
 		"a non-discovery tool was counted as missing a DiscoveryResult")
 	// It is still RECORDED, under its own reason, so the metric distinguishes
 	// "this tool does not produce graph nodes" from "it should have and did not".
 	assert.InDelta(t, beforeNotOne+1,
-		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool", run)), 0.5,
+		testutil.ToFloat64(toolExtractionSkippedTotal.WithLabelValues(tool, "not_discovery_tool")), 0.5,
 		"the dispatch was not recorded at all")
 }
 
@@ -241,4 +243,25 @@ func discoveryShapedFDS(t *testing.T) string {
 	})
 	require.NoError(t, err)
 	return base64.StdEncoding.EncodeToString(raw)
+}
+
+// The compliance counters carry the tool and the reason or outcome, and no run
+// ID. A run label adds series with every run and nothing bounds them
+// (gibson#1232).
+func TestToolComplianceCounters_HaveNoRunLabel(t *testing.T) {
+	toolDiscoveryComplianceTotal.WithLabelValues("label-check", "true").Inc()
+	toolExtractionSkippedTotal.WithLabelValues("label-check", "reason").Inc()
+
+	for _, c := range []prometheus.Collector{toolDiscoveryComplianceTotal, toolExtractionSkippedTotal} {
+		ch := make(chan prometheus.Metric, 64)
+		c.Collect(ch)
+		close(ch)
+		for m := range ch {
+			var pb dto.Metric
+			require.NoError(t, m.Write(&pb))
+			for _, l := range pb.GetLabel() {
+				assert.NotContains(t, l.GetName(), "run")
+			}
+		}
+	}
 }

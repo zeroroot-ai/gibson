@@ -23,7 +23,7 @@ var (
 			Name: "gibson_tool_extraction_skipped_total",
 			Help: "Total number of tool responses skipped for entity extraction",
 		},
-		[]string{"tool_name", "reason", "mission_run_id"},
+		[]string{"tool_name", "reason"},
 	)
 
 	// toolDiscoveryComplianceTotal tracks tool proto compliance with discovery requirements
@@ -32,7 +32,7 @@ var (
 			Name: "gibson_tool_discovery_compliance_total",
 			Help: "Total tool response compliance checks by outcome",
 		},
-		[]string{"tool_name", "compliant", "mission_run_id"},
+		[]string{"tool_name", "compliant"},
 	)
 )
 
@@ -152,7 +152,7 @@ func (v *ToolValidator) ValidateDiscoveryCompliance(ctx context.Context, toolNam
 	}
 
 	// Record metrics
-	v.recordMetrics(result, missionRunID)
+	v.recordMetrics(result)
 
 	return result
 }
@@ -186,16 +186,16 @@ func (v *ToolValidator) countEntities(discovery proto.Message) int {
 }
 
 // recordMetrics records Prometheus metrics for validation results.
-func (v *ToolValidator) recordMetrics(result ToolValidationResult, missionRunID string) {
+func (v *ToolValidator) recordMetrics(result ToolValidationResult) {
 	// Record compliance metric
 	compliant := "false"
 	if result.Compliant {
 		compliant = "true"
 	}
-	toolDiscoveryComplianceTotal.WithLabelValues(result.ToolName, compliant, missionRunID).Inc()
+	toolDiscoveryComplianceTotal.WithLabelValues(result.ToolName, compliant).Inc()
 
 	// Record skipped metric if extraction was skipped
 	if result.SkipReason != "" {
-		toolExtractionSkippedTotal.WithLabelValues(result.ToolName, result.SkipReason, missionRunID).Inc()
+		toolExtractionSkippedTotal.WithLabelValues(result.ToolName, result.SkipReason).Inc()
 	}
 }
