@@ -59,6 +59,9 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 	if spec.Model != "" {
 		env[envAgentModel] = spec.Model
 	}
+	if dispatch.TaskID != "" {
+		env[envAgentTaskID] = dispatch.TaskID
+	}
 	if dispatch.TaskB64 != "" {
 		env[envAgentTaskB64] = dispatch.TaskB64
 	}
