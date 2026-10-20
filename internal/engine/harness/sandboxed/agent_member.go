@@ -59,7 +59,8 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 	if spec.Model != "" {
 		env[envAgentModel] = spec.Model
 	}
-	if dispatch.TaskID != "" {
+	// A member serves many tasks over its life, so it gets no task of its own.
+	if dispatch.TaskID != "" && spec.Mode != "member" {
 		env[envAgentTaskID] = dispatch.TaskID
 	}
 	if dispatch.TaskB64 != "" {

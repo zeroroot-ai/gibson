@@ -485,3 +485,38 @@ func TestDelegateToAgent_SandboxRefusedRegistrationStopsTheLaunch(t *testing.T) 
 		t.Errorf("registry holds %d harnesses, want 0", m.registry.Count())
 	}
 }
+
+// The task ID in the environment of the sandbox is the task ID that the child
+// harness is registered under, so a callback of the task finds its own harness
+// (gibson#1229).
+func TestDelegateToAgent_SandboxTaskIDMatchesTheChildHarness(t *testing.T) {
+	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{
+		SandboxID: "sbx-1", Result: &sandboxed.AgentTerminalResult{Success: true, Output: "done"},
+	}}
+	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{
+		Image: "ghcr.io/zeroroot-ai/zerocool:dev", SandboxClass: "agent",
+	}}
+	q := successResultQueue(t)
+	h := newSandboxDelegateHarness(launcher, resolver, q, untrustedAgentInstances(), testMinter(t))
+	m := NewCallbackManager(CallbackConfig{
+		ListenAddress:  "127.0.0.1:0",
+		ServiceOptions: []CallbackServiceOption{testEventBus()},
+	}, slog.New(slog.DiscardHandler))
+	h.callbackManager = m
+	var childTask string
+	h.factory = func(_ context.Context, mc MissionContext, _ TargetInfo) (AgentHarness, error) {
+		childTask = mc.TaskID
+		return h, nil
+	}
+
+	task := agent.NewTask("probe", "goal")
+	if _, err := h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task); err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	if launcher.gotDispatch.TaskID != task.ID.String() {
+		t.Errorf("dispatch task ID = %q, want %q", launcher.gotDispatch.TaskID, task.ID.String())
+	}
+	if childTask != launcher.gotDispatch.TaskID {
+		t.Errorf("child harness task ID = %q, dispatch task ID = %q, want them equal", childTask, launcher.gotDispatch.TaskID)
+	}
+}

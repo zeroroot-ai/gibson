@@ -463,3 +463,12 @@ func TestBuildEnv_CarriesTheTaskID(t *testing.T) {
 		t.Fatalf("a forged env won: %q", got)
 	}
 }
+
+// A member serves many tasks, so it gets no task ID in its environment.
+func TestBuildEnv_MemberGetsNoTaskID(t *testing.T) {
+	l := &AgentLauncher{}
+	env := l.buildEnv(context.Background(), AgentLaunchSpec{Mode: "member"}, AgentDispatch{TaskID: "task-7"})
+	if _, has := env[envAgentTaskID]; has {
+		t.Fatalf("a member got %s", envAgentTaskID)
+	}
+}
