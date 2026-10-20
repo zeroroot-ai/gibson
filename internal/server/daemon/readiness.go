@@ -106,20 +106,7 @@ func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 
 	// FGA authorizer — nil when initAuthorizer has not run yet.
 	if d.authorizer != nil {
-		a := d.authorizer
-		probes = append(probes, &platformReadinessProbe{
-			name: "authz_fga",
-			check: func(ctx context.Context) error {
-				// Check a known-nonexistent tuple: any transport error
-				// surfaces as unhealthy; a well-formed FGA response (even
-				// denied) means FGA is reachable → healthy.
-				_, err := a.Check(ctx, "user:_probe", "member", "tenant:_probe")
-				if err != nil && (authz.IsUnavailable(err) || authz.IsTimeout(err)) {
-					return fmt.Errorf("fga connectivity probe failed: %w", err)
-				}
-				return nil
-			},
-		})
+		probes = append(probes, fgaReadinessProbe(d.authorizer))
 	}
 
 	// Secrets broker (OpenBao) — the daemon's single credential store. A broker
@@ -163,4 +150,21 @@ func (d *daemonImpl) registerPlatformReadinessProbes(ctx context.Context, reg re
 		})
 	}
 	d.logger.Debug(ctx, "registered internal/infra readiness probes", "count", len(probes))
+}
+
+// fgaHealthStatus is the readiness answer of the FGA probe. Any probe error is
+// Degraded, including a bad token or a wrong store ID.
+func fgaHealthStatus(ctx context.Context, a authz.Authorizer) sdktypes.HealthStatus {
+	if err := authz.Probe(ctx, a); err != nil {
+		return sdktypes.NewDegradedStatus("authz: FGA probe failed: "+err.Error(), nil)
+	}
+	return sdktypes.NewHealthyStatus("authz: FGA reachable")
+}
+
+// fgaReadinessProbe is the platform readiness probe of FGA.
+func fgaReadinessProbe(a authz.Authorizer) *platformReadinessProbe {
+	return &platformReadinessProbe{
+		name:  "authz_fga",
+		check: func(ctx context.Context) error { return authz.Probe(ctx, a) },
+	}
 }

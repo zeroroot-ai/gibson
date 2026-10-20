@@ -1794,13 +1794,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 
 			// Probe FGA: both allowed=true and allowed=false are valid — we only
 			// care that the RPC succeeds, meaning FGA is reachable.
-			_, probeErr := a.Check(ctx, "user:_system", "platform_operator", "system_tenant:_system")
-			var result sdktypes.HealthStatus
-			if authz.IsUnavailable(probeErr) || authz.IsTimeout(probeErr) {
-				result = sdktypes.NewDegradedStatus("authz: FGA unreachable: "+probeErr.Error(), nil)
-			} else {
-				result = sdktypes.NewHealthyStatus("authz: FGA reachable")
-			}
+			result := fgaHealthStatus(ctx, a)
 
 			cacheMu.Lock()
 			cachedAt = time.Now()

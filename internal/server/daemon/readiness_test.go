@@ -11,8 +11,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	pcreadiness "github.com/zeroroot-ai/gibson/internal/infra/readiness"
 	sdksecrets "github.com/zeroroot-ai/gibson/internal/infra/secrets"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/sdk/auth"
 	healthhttp "github.com/zeroroot-ai/sdk/health/http"
+	sdktypes "github.com/zeroroot-ai/sdk/types"
 )
 
 // readinessFakeBroker is a Broker whose Health result is controllable.
@@ -116,5 +118,41 @@ func TestRegisterPlatformReadinessProbes(t *testing.T) {
 	down := reg.checks["pc_down"](context.Background())
 	if !down.IsDegraded() || down.Message != "internal/infra/readiness probe 'down' failed: refused" {
 		t.Fatalf("pc_down = %+v", down)
+	}
+}
+
+// failingCheckAuthorizer fails every Check with err. Its other methods are never called.
+type failingCheckAuthorizer struct {
+	authz.Authorizer
+	err error
+}
+
+func (f failingCheckAuthorizer) Check(context.Context, string, string, string) (bool, error) {
+	return false, f.err
+}
+
+// A bad token and a wrong store ID fail the FGA readiness probes, as an outage
+// does. A deny does not.
+func TestFGAProbes_FailOnAnyError(t *testing.T) {
+	ctx := context.Background()
+	for name, err := range map[string]error{
+		"unauthenticated": authz.ErrFgaUnauthenticated,
+		"not found":       authz.ErrFgaNotFound,
+		"outage":          authz.ErrFgaUnavailable,
+	} {
+		a := failingCheckAuthorizer{err: err}
+		if probeErr := fgaReadinessProbe(a).check(ctx); !errors.Is(probeErr, err) {
+			t.Errorf("%s: the platform probe must fail with the cause, got %v", name, probeErr)
+		}
+		if got := fgaHealthStatus(ctx, a); got.Status == sdktypes.StatusHealthy {
+			t.Errorf("%s: the health status must not be healthy", name)
+		}
+	}
+	allow := failingCheckAuthorizer{}
+	if err := fgaReadinessProbe(allow).check(ctx); err != nil {
+		t.Errorf("a deny must pass the probe: %v", err)
+	}
+	if got := fgaHealthStatus(ctx, allow); got.Status != sdktypes.StatusHealthy {
+		t.Errorf("a deny must be healthy, got %v", got.Status)
 	}
 }

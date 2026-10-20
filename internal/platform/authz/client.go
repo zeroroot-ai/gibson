@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -282,18 +283,21 @@ func isTupleNotFoundError(err error) bool {
 
 // mapSDKError converts OpenFGA SDK errors into typed authz errors.
 //
-// The FGA SDK returns errors as error strings. We check for common patterns:
-//   - context deadline exceeded → ErrFgaTimeout
+// The typed SDK errors decide first, because a status code is exact and a
+// message is not:
+//   - FGA validation error (HTTP 400) → ErrInvalidArgument (permanent)
+//   - FGA authentication error (HTTP 401 or 403) → ErrFgaUnauthenticated (permanent)
+//   - FGA not found error (HTTP 404) → ErrFgaNotFound (permanent)
+//   - FGA internal error (5xx) and rate limit (429) → ErrFgaUnavailable
+//
+// Then the cause of the transport decides:
+//   - a deadline or a network timeout → ErrFgaTimeout
 //   - connection refused / unavailable / EOF → ErrFgaUnavailable
-//   - FGA validation error (HTTP 400) → ErrInvalidArgument
 //   - everything else → ErrFgaUnavailable (conservative fail-closed)
 func mapSDKError(err error) error {
 	if err == nil {
 		return nil
 	}
-
-	msg := err.Error()
-	lower := strings.ToLower(msg)
 
 	// A 400 from FGA means the request itself is malformed (for example a
 	// user that is not type:id). That is a caller fault, not an outage, so
@@ -302,13 +306,23 @@ func mapSDKError(err error) error {
 	if errors.As(err, &validationErr) {
 		return &FgaError{Sentinel: ErrInvalidArgument, Message: "FGA rejected the request as invalid", Cause: err}
 	}
+	// A bad token or a wrong store ID is permanent. A retry cannot fix it.
+	var authErr fgasdk.FgaApiAuthenticationError
+	if errors.As(err, &authErr) {
+		return &FgaError{Sentinel: ErrFgaUnauthenticated, Message: "FGA rejected the credentials", Cause: err}
+	}
+	var notFoundErr fgasdk.FgaApiNotFoundError
+	if errors.As(err, &notFoundErr) {
+		return &FgaError{Sentinel: ErrFgaNotFound, Message: "FGA store or resource not found", Cause: err}
+	}
 
-	switch {
-	case strings.Contains(lower, "context deadline exceeded"),
-		strings.Contains(lower, "timeout"),
-		strings.Contains(lower, "deadline"):
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
 		return newTimeoutError("call exceeded configured timeout", err)
+	}
 
+	lower := strings.ToLower(err.Error())
+	switch {
 	case strings.Contains(lower, "connection refused"),
 		strings.Contains(lower, "no such host"),
 		strings.Contains(lower, "connection reset"),
@@ -318,7 +332,7 @@ func mapSDKError(err error) error {
 		return newUnavailableError("FGA service unreachable", err)
 
 	default:
-		// Unknown SDK error — treat as unavailable (fail-closed)
+		// Unknown SDK error, a 5xx or a 429: treat as unavailable (fail-closed)
 		return newUnavailableError("FGA SDK error", err)
 	}
 }

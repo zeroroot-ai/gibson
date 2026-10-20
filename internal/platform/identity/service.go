@@ -395,6 +395,10 @@ func fgaStatus(op string, err error) error {
 		return status.Errorf(codes.DeadlineExceeded, "%s: %v", op, err)
 	case errors.Is(err, authz.ErrFgaUnavailable):
 		return status.Errorf(codes.Unavailable, "%s: %v", op, err)
+	case errors.Is(err, authz.ErrFgaUnauthenticated), errors.Is(err, authz.ErrFgaNotFound):
+		// The daemon is misconfigured: a bad token or a wrong store ID. The
+		// caller cannot fix it and a retry cannot help.
+		return status.Errorf(codes.FailedPrecondition, "%s: %v", op, err)
 	default:
 		return status.Errorf(codes.Internal, "%s: %v", op, err)
 	}

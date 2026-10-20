@@ -207,7 +207,7 @@ func TestListObjects_ValidationError_IsInvalidArgument(t *testing.T) {
 	if !IsInvalidArgument(err) {
 		t.Errorf("err = %v, want ErrInvalidArgument", err)
 	}
-	if IsUnavailable(err) {
+	if errors.Is(err, ErrFgaUnavailable) {
 		t.Errorf("err = %v, must not be ErrFgaUnavailable", err)
 	}
 }
