@@ -29,7 +29,11 @@ func (s *DaemonServer) ListDesiredCatalogPlugins(
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
-	key, err := s.pageStart(pageScopeDesiredCatalogPlugins, req.GetPageToken(), 2)
+	sg, err := s.pageSigner(pageScopeDesiredCatalogPlugins)
+	if err != nil {
+		return nil, err
+	}
+	key, err := pageStart(sg, pageScopeDesiredCatalogPlugins, req.GetPageToken(), 2)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +51,7 @@ func (s *DaemonServer) ListDesiredCatalogPlugins(
 	if len(plugins) > size {
 		plugins = plugins[:size]
 		last := plugins[size-1]
-		out.NextPageToken = s.pageToken(pageScopeDesiredCatalogPlugins, last.TenantID, last.PluginID)
+		out.NextPageToken = pageToken(sg, pageScopeDesiredCatalogPlugins, last.TenantID, last.PluginID)
 	}
 	// The image and the egress list come from the catalog of this daemon. A
 	// row whose plugin left the catalog is not desired any more: the operator

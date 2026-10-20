@@ -42,7 +42,11 @@ func (s *DaemonServer) ListDesiredConnectors(
 	if err != nil {
 		return nil, err
 	}
-	key, err := s.pageStart(pageScopeDesiredConnectors, req.GetPageToken(), 2)
+	sg, err := s.pageSigner(pageScopeDesiredConnectors)
+	if err != nil {
+		return nil, err
+	}
+	key, err := pageStart(sg, pageScopeDesiredConnectors, req.GetPageToken(), 2)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +64,7 @@ func (s *DaemonServer) ListDesiredConnectors(
 	if len(rows) > size {
 		rows = rows[:size]
 		last := rows[size-1]
-		out.NextPageToken = s.pageToken(pageScopeDesiredConnectors, last.TenantID, last.ConnectorID)
+		out.NextPageToken = pageToken(sg, pageScopeDesiredConnectors, last.TenantID, last.ConnectorID)
 	}
 	// A page can hold fewer items than page_size, or none, and still have a
 	// next page: a row whose connector left the catalog is not in the answer.

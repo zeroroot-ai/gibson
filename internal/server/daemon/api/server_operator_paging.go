@@ -5,7 +5,6 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -32,16 +31,13 @@ const (
 // errNoPageTokenKey reports a daemon that has no page token key.
 var errNoPageTokenKey = errors.New("page token key is not configured")
 
-// WithPageTokenKEK derives the page token key of each operator list from the
-// master KEK. Every daemon replica holds the same KEK, so a token from one
-// replica works on another. Without it, the operator lists answer Unavailable.
-func (s *DaemonServer) WithPageTokenKEK(masterKEK []byte) (*DaemonServer, error) {
-	keys, err := pagetoken.NewKeys(masterKEK)
-	if err != nil {
-		return nil, fmt.Errorf("operator page token key: %w", err)
-	}
+// WithPageKeys gives the server the page token keys of the daemon. Each list
+// takes the signer of its own name from them. Every daemon replica derives the
+// keys from the master KEK, so a token from one replica works on another.
+// Without keys, the operator lists answer Unavailable.
+func (s *DaemonServer) WithPageKeys(keys *pagetoken.Keys) *DaemonServer {
 	s.pageKeys = keys
-	return s, nil
+	return s
 }
 
 // pageScope is the scope that a token of one list binds to. The operator lists
@@ -51,14 +47,24 @@ func pageScope(list string) []string {
 	return []string{"platform", list}
 }
 
-// pageStart returns the sort key that a page token holds, as fields, or nil for
-// the first page. A token that this daemon did not sign for this list is
-// InvalidArgument.
-func (s *DaemonServer) pageStart(list, token string, fields int) ([]string, error) {
+// pageSigner returns the signer of one list. A daemon with no page token keys
+// answers Unavailable, and never serves an unsigned page.
+func (s *DaemonServer) pageSigner(list string) (*pagetoken.Signer, error) {
 	if s.pageKeys == nil {
 		return nil, status.Error(codes.Unavailable, errNoPageTokenKey.Error())
 	}
-	key, has, err := s.pageKeys.Signer(list).After(pageScope(list), token)
+	sg, err := s.pageKeys.Signer(list)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "page token key: %v", err)
+	}
+	return sg, nil
+}
+
+// pageStart returns the sort key that a page token holds, as fields, or nil for
+// the first page. A token that this daemon did not sign for this list is
+// InvalidArgument.
+func pageStart(sg *pagetoken.Signer, list, token string, fields int) ([]string, error) {
+	key, has, err := sg.After(pageScope(list), token)
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -73,8 +79,8 @@ func (s *DaemonServer) pageStart(list, token string, fields int) ([]string, erro
 }
 
 // pageToken signs the sort key of the last item of a page.
-func (s *DaemonServer) pageToken(list string, fields ...string) string {
-	return s.pageKeys.Signer(list).Token(pageScope(list), joinKey(fields...))
+func pageToken(sg *pagetoken.Signer, list string, fields ...string) string {
+	return sg.Token(pageScope(list), joinKey(fields...))
 }
 
 // joinKey writes the fields of a sort key as one string. Each field has a

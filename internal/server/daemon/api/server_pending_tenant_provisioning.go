@@ -184,7 +184,11 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
-	after, err := s.pageStart(pageScopePendingTenantProvisioning, req.GetPageToken(), 2)
+	sg, err := s.pageSigner(pageScopePendingTenantProvisioning)
+	if err != nil {
+		return nil, err
+	}
+	after, err := pageStart(sg, pageScopePendingTenantProvisioning, req.GetPageToken(), 2)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +240,7 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *d
 		}
 		if scanned == size {
 			// The extra row only shows that a next page exists.
-			out.NextPageToken = s.pageToken(pageScopePendingTenantProvisioning, lastKey[0], lastKey[1])
+			out.NextPageToken = pageToken(sg, pageScopePendingTenantProvisioning, lastKey[0], lastKey[1])
 			break
 		}
 		scanned++

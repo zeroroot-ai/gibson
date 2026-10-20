@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
@@ -26,10 +27,17 @@ func newPendingServer() *DaemonServer {
 	srv := &DaemonServer{
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
-	if _, err := srv.WithPageTokenKEK(bytes.Repeat([]byte{7}, 32)); err != nil {
+	withTestPageKeys(srv)
+	return srv
+}
+
+// withTestPageKeys gives srv a page token key source over a fixed KEK.
+func withTestPageKeys(srv *DaemonServer) {
+	keys, err := pagetoken.NewKeys(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
 		panic(err)
 	}
-	return srv
+	srv.WithPageKeys(keys)
 }
 
 // withTestPageKey gives srv the page token keys of the operator lists, unless
@@ -39,9 +47,7 @@ func withTestPageKey(t *testing.T, srv *DaemonServer) {
 	if srv.pageKeys != nil {
 		return
 	}
-	if _, err := srv.WithPageTokenKEK(bytes.Repeat([]byte{7}, 32)); err != nil {
-		t.Fatal(err)
-	}
+	withTestPageKeys(srv)
 }
 
 // expectEnsureTable matches the CREATE TABLE IF NOT EXISTS guard that every

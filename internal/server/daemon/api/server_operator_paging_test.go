@@ -276,7 +276,7 @@ func TestOperatorLists_ForgedTokenIsInvalidArgument(t *testing.T) {
 	srv.platformDB = db
 	ctx := context.Background()
 
-	genuine := srv.pageToken(pageScopeDesiredConnectors, "acme", "gitlab")
+	genuine := testPageToken(t, srv, pageScopeDesiredConnectors, "acme", "gitlab")
 	// Edit the key part: the signature no longer matches.
 	_, signature, _ := strings.Cut(genuine, ".")
 	edited := "WyJldmlsIiwiZ2l0bGFiIl0." + signature
@@ -330,7 +330,7 @@ func TestListPendingTenantOps_BadTimeKeyIsInvalidArgument(t *testing.T) {
 	srv := newAdminOpsServer(t)
 	srv.platformDB = db
 	_, err = srv.ListPendingTenantOps(context.Background(),
-		&daemonoperatorv1.ListPendingTenantOpsRequest{PageToken: srv.pageToken(pageScopePendingTenantOps, "yesterday", "op-1")})
+		&daemonoperatorv1.ListPendingTenantOpsRequest{PageToken: testPageToken(t, srv, pageScopePendingTenantOps, "yesterday", "op-1")})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -356,12 +356,6 @@ func TestOperatorLists_NoKeyIsUnavailable(t *testing.T) {
 		if status.Code(err) != codes.Unavailable {
 			t.Errorf("list %d: code = %v, want Unavailable", i, status.Code(err))
 		}
-	}
-}
-
-func TestWithPageTokenKEK_RefusesAShortKey(t *testing.T) {
-	if _, err := (&DaemonServer{}).WithPageTokenKEK([]byte("short")); err == nil {
-		t.Fatal("a short KEK must be refused")
 	}
 }
 
@@ -391,7 +385,7 @@ func TestOperatorLists_SignedKeyWithWrongFieldCountIsInvalidArgument(t *testing.
 	srv := newPendingServer()
 	srv.platformDB = db
 	_, err = srv.ListDesiredConnectors(context.Background(),
-		&daemonoperatorv1.ListDesiredConnectorsRequest{PageToken: srv.pageToken(pageScopeDesiredConnectors, "only-one")})
+		&daemonoperatorv1.ListDesiredConnectorsRequest{PageToken: testPageToken(t, srv, pageScopeDesiredConnectors, "only-one")})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -407,7 +401,7 @@ func TestListPendingTenantProvisioning_BadTimeKeyIsInvalidArgument(t *testing.T)
 	srv.platformDB = db
 	_, err = srv.ListPendingTenantProvisioning(context.Background(),
 		&daemonoperatorv1.ListPendingTenantProvisioningRequest{
-			PageToken: srv.pageToken(pageScopePendingTenantProvisioning, "yesterday", "t1"),
+			PageToken: testPageToken(t, srv, pageScopePendingTenantProvisioning, "yesterday", "t1"),
 		})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
@@ -482,4 +476,14 @@ func TestPendingQueueLists_DatabaseFailuresAreInternal(t *testing.T) {
 		}
 		_ = db.Close()
 	}
+}
+
+// testPageToken signs a sort key for a list, as the daemon does.
+func testPageToken(t *testing.T, srv *DaemonServer, list string, fields ...string) string {
+	t.Helper()
+	sg, err := srv.pageSigner(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pageToken(sg, list, fields...)
 }

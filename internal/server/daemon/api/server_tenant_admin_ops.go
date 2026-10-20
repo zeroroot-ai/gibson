@@ -301,7 +301,11 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoper
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
-	after, err := s.pageStart(pageScopePendingTenantOps, req.GetPageToken(), 2)
+	sg, err := s.pageSigner(pageScopePendingTenantOps)
+	if err != nil {
+		return nil, err
+	}
+	after, err := pageStart(sg, pageScopePendingTenantOps, req.GetPageToken(), 2)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +359,7 @@ func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoper
 	}
 	if len(out.Ops) > size {
 		out.Ops = out.Ops[:size]
-		out.NextPageToken = s.pageToken(pageScopePendingTenantOps, timeKey(createdAt[size-1]), out.Ops[size-1].GetOpId())
+		out.NextPageToken = pageToken(sg, pageScopePendingTenantOps, timeKey(createdAt[size-1]), out.Ops[size-1].GetOpId())
 	}
 	return out, nil
 }
