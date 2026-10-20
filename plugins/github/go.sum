@@ -21,8 +21,8 @@ github.com/spiffe/go-spiffe/v2 v2.9.0 h1:g5qTg3qIP1HXV+GzuyEfSJFVxUCpEP5Ui1OINVJ
 github.com/spiffe/go-spiffe/v2 v2.9.0/go.mod h1:w2CLWKLMTX/PPYUEUPv3ltH0RXsw5S8suwNF46w9/Aw=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
-github.com/zeroroot-ai/sdk v0.205.1 h1:osW7ZFt62hvTc52XUgzKrQvBfWMO+ARXo5efKdox40k=
-github.com/zeroroot-ai/sdk v0.205.1/go.mod h1:YhPORhstrvWBfUt9QmAMaYth3Cm6Rk+Ag9NXSIiIY50=
+github.com/zeroroot-ai/sdk v0.208.0 h1:YRufJfKKoJvJ9chrMoI5LEdL/K3tqB8S9hTQG0sOKxc=
+github.com/zeroroot-ai/sdk v0.208.0/go.mod h1:YhPORhstrvWBfUt9QmAMaYth3Cm6Rk+Ag9NXSIiIY50=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/net v0.60.0 h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=
