@@ -116,10 +116,6 @@ func NewRegistryAdapter(reg ComponentRegistry) *RegistryAdapter {
 	}
 }
 
-// SetAuthConfig configures authentication for callback connections.
-func (a *RegistryAdapter) SetAuthConfig(cfg *AuthConfig) {
-}
-
 // SetResolver configures a custom ProtoResolver for this adapter.
 func (a *RegistryAdapter) SetResolver(r protoresolver.ProtoResolver) {
 	a.resolver = r
