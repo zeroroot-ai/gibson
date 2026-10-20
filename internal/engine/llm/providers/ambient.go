@@ -4,9 +4,10 @@
 package providers
 
 import (
+	"fmt"
 	"net/http"
 	"os"
-	"sync"
+	"strings"
 )
 
 // The Anthropic client of anthropic-sdk-go reads defaults from the environment
@@ -14,55 +15,43 @@ import (
 // URL, a profile and a federation identity. The eino-ext Claude client builds
 // that client and offers no option to turn the defaults off. A tenant request
 // must never carry or follow a credential or an address that belongs to the
-// platform, so the provider removes every one of these variables before it
-// builds a client, and points the profile directory at an empty directory.
-// The daemon has no use for them: its own environment is never a credential.
-var ambientAnthropicEnv = []string{
-	"ANTHROPIC_API_KEY",
-	"ANTHROPIC_AUTH_TOKEN",
-	"ANTHROPIC_AWS_API_KEY",
-	"ANTHROPIC_AWS_BASE_URL",
-	"ANTHROPIC_AWS_WORKSPACE_ID",
-	"ANTHROPIC_BASE_URL",
-	"ANTHROPIC_BEDROCK_MANTLE_BASE_URL",
-	"ANTHROPIC_CREDENTIALS_FILE",
-	"ANTHROPIC_CUSTOM_HEADERS",
-	"ANTHROPIC_ENVIRONMENT_ID",
-	"ANTHROPIC_ENVIRONMENT_KEY",
-	"ANTHROPIC_FEDERATION_RULE_ID",
-	"ANTHROPIC_IDENTITY_TOKEN",
-	"ANTHROPIC_IDENTITY_TOKEN_FILE",
-	"ANTHROPIC_ORGANIZATION_ID",
-	"ANTHROPIC_PROFILE",
-	"ANTHROPIC_SCOPE",
-	"ANTHROPIC_SERVICE_ACCOUNT_ID",
-	"ANTHROPIC_SESSION_ID",
-	"ANTHROPIC_WORK_ID",
-	"ANTHROPIC_WORKSPACE_ID",
-}
+// platform. So the daemon refuses to start when any ANTHROPIC_ variable is set,
+// and points the profile directory at an empty directory that it creates.
+const anthropicEnvPrefix = "ANTHROPIC_"
 
-var (
-	emptyConfigDirOnce sync.Once
-	emptyConfigDir     string
-)
+// anthropicConfigDirVar names the profile directory of the SDK.
+const anthropicConfigDirVar = "ANTHROPIC_CONFIG_DIR"
 
-func init() { scrubAnthropicAmbient() }
-
-// scrubAnthropicAmbient removes the ambient Anthropic defaults of the process.
-// It is idempotent, and the daemon calls it before each client it builds.
-func scrubAnthropicAmbient() {
-	for _, name := range ambientAnthropicEnv {
-		_ = os.Unsetenv(name)
-	}
-	emptyConfigDirOnce.Do(func() {
-		dir, err := os.MkdirTemp("", "gibson-anthropic-empty-")
-		if err == nil {
-			emptyConfigDir = dir
+// SecureAnthropicEnvironment runs once at daemon start, before any client
+// exists. It fails when any environment variable with the ANTHROPIC_ prefix,
+// other than ANTHROPIC_CONFIG_DIR, is set. It then creates an empty directory
+// and makes it the profile directory of the SDK. The SDK reads a default profile
+// from that directory and fails a request when the file is missing, so an empty
+// directory of the daemon also keeps a profile of the host out of reach. It
+// fails when the directory holds any file.
+func SecureAnthropicEnvironment() error {
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(name, anthropicEnvPrefix) && name != anthropicConfigDirVar {
+			return fmt.Errorf("providers: the environment variable %s is set. "+
+				"The daemon never uses an Anthropic default of its own environment as a credential. Remove it", name)
 		}
-	})
-	if emptyConfigDir != "" {
-		_ = os.Setenv("ANTHROPIC_CONFIG_DIR", emptyConfigDir)
 	}
+	dir, err := os.MkdirTemp("", "gibson-anthropic-empty-")
+	if err != nil {
+		return fmt.Errorf("providers: create the empty Anthropic profile directory: %w", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("providers: read the Anthropic profile directory: %w", err)
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("providers: the Anthropic profile directory %s is not empty", dir)
+	}
+	if err := os.Setenv(anthropicConfigDirVar, dir); err != nil {
+		return fmt.Errorf("providers: set %s: %w", anthropicConfigDirVar, err)
+	}
+	return nil
 }
 
 // stripAmbientAuth wraps a transport so that no request carries an API key

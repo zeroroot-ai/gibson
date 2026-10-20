@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -85,7 +86,6 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
 		// The base URL is always explicit, so ANTHROPIC_BASE_URL never decides
 		// where the tenant key goes.
-		scrubAnthropicAmbient()
 		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client, BaseURL: &baseURL}
 		return einoclaude.NewChatModel(ctx, claudeCfg)
 	}
@@ -125,9 +125,20 @@ func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicP
 	return newVertexProvider(ctx, cfg, serviceAccountToken)
 }
 
+// vertexNamePattern is a plain Google Cloud project id or region name.
+var vertexNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+
 // newVertexProvider is NewVertexProvider with the token source injected, so a
 // test can mint a fixed token.
 func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertexTokenFunc) (*AnthropicProvider, error) {
+	return newVertexProviderWithClient(ctx, cfg, token, guardedHTTPClient(cfg))
+}
+
+// newVertexProviderWithClient is newVertexProvider with the HTTP client
+// injected, so a test can point every connection at a fake.
+func newVertexProviderWithClient(
+	ctx context.Context, cfg llm.ProviderConfig, token vertexTokenFunc, client *http.Client,
+) (*AnthropicProvider, error) {
 	project := cfg.Extra["vertex_project_id"]
 	region := cfg.Extra["vertex_region"]
 	if project == "" || region == "" {
@@ -139,12 +150,17 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			errors.New("google_application_credentials_json is required: the daemon's own Google credentials are never used")))
 	}
+	// The region and the project name a host and a path of the Vertex request.
+	// Anything but a plain name could move the request to another host.
+	if !vertexNamePattern.MatchString(region) || !vertexNamePattern.MatchString(project) {
+		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			errors.New("vertex_project_id and vertex_region may hold only letters, digits and hyphens")))
+	}
 	if cfg.BaseURL != "" {
 		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
 			return nil, err
 		}
 	}
-	client := guardedHTTPClient(cfg)
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderVertex)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
@@ -168,8 +184,9 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 //     impersonated_service_account document is refused before the client sees it.
 //     Those types make the daemon read a file or call a URL that the tenant chose.
 //   - The token call of the service account goes through the guarded client.
-//   - The Anthropic client is built after the ambient Anthropic defaults are
-//     removed, and the transport drops any API key header.
+//   - The transport drops any API key header, so an ambient Anthropic default
+//     cannot put a key on the request. The daemon refuses to start with such a
+//     default set (SecureAnthropicEnvironment).
 //   - A panic in the client libraries becomes an auth error, never a crash.
 func newVertexChatModel(
 	ctx context.Context, project, region, modelID, serviceAccount string, client *http.Client,
@@ -189,7 +206,6 @@ func newVertexChatModel(
 		return nil, llm.NewAuthError(string(llm.ProviderVertex),
 			fmt.Errorf("the credential must be a service account key: %w", credErr))
 	}
-	scrubAnthropicAmbient()
 	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
 		ByVertex:                 true,
 		VertexProjectID:          project,

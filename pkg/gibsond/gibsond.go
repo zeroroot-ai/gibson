@@ -28,6 +28,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/engine/sandbox/health"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -149,6 +150,14 @@ func run(
 	// Apply env-var override for gRPC address (R3.6: env-reading lives in main).
 	if addr := os.Getenv("GIBSON_DAEMON_GRPC_ADDR"); addr != "" {
 		cfg.Daemon.GRPCAddress = addr
+	}
+
+	// A tenant LLM request must never carry or follow an Anthropic default of
+	// the daemon's own environment. Refuse to start with one set, and give the
+	// Anthropic SDK an empty profile directory (before any client exists).
+	if err := providers.SecureAnthropicEnvironment(); err != nil {
+		fmt.Fprintf(stderr, "gibson: %v\n", err)
+		return 1
 	}
 
 	// Build structured logger (text for interactive TTY, JSON elsewhere).
