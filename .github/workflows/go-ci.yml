@@ -28,6 +28,9 @@ name: go-ci
 #                                that was doing the silent evicting.
 #   both lanes   integration     testcontainers + envtest `-tags integration`
 #                                suite. Moved onto pull_request by gibson#1236.
+#   both lanes   fixture-tests   `go test -tags test_fixtures` on every package
+#                                with a test_fixtures file (gibson#1227). vet-tags
+#                                only compiles that code, so its tests never ran.
 #   both lanes   critical-paths  pure-unit Tier-3 manifest guard, ~seconds.
 #   both lanes   queue-gate      native aggregator, the required context.
 #
