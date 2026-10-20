@@ -177,8 +177,8 @@ func NewRedisReservationLedger(rdb redis.UniversalClient) ReservationLedger {
 	}
 }
 
-// luaReserve atomically sums every existing reservation against the parent
-// (HVALS + cjson.decode, cheap — a mission's live children are not expected
+// luaReserve atomically sums every other reservation against the parent
+// (HGETALL + cjson.decode, cheap — a mission's live children are not expected
 // to number more than a handful at once), clamps the request to what
 // remains per dimension, writes the grant as a new hash field, and returns
 // it. Runs as a single EVAL so concurrent Reserve calls against the same
@@ -200,11 +200,15 @@ func NewRedisReservationLedger(rdb redis.UniversalClient) ReservationLedger {
 const luaReserve = `
 local reservedCost = 0
 local reservedTokens = 0
-local vals = redis.call('HVALS', KEYS[1])
-for i = 1, #vals do
-  local entry = cjson.decode(vals[i])
-  if entry.has_cost then reservedCost = reservedCost + (entry.cost_cents or 0) end
-  if entry.has_tokens then reservedTokens = reservedTokens + (entry.tokens or 0) end
+local all = redis.call('HGETALL', KEYS[1])
+for i = 1, #all, 2 do
+  -- The entry of the same child is replaced below, so it does not count
+  -- against its own new reservation (gibson#1270).
+  if all[i] ~= ARGV[1] then
+    local entry = cjson.decode(all[i + 1])
+    if entry.has_cost then reservedCost = reservedCost + (entry.cost_cents or 0) end
+    if entry.has_tokens then reservedTokens = reservedTokens + (entry.tokens or 0) end
+  end
 end
 
 local hasCostCap = tonumber(ARGV[2]) == 1

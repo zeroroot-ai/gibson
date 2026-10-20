@@ -233,7 +233,7 @@ func (o *Originator) Originate(ctx context.Context, req OriginateRequest) (*Miss
 	// records. A caller that asks for more than the parent has left gets
 	// the remainder, not an error — that is the "clamp" half of
 	// "clamped and reserved".
-	requested := requestedBudget(def.GetConstraints())
+	requested := RequestedBudget(def.GetConstraints())
 	childID := types.NewID()
 	granted, reserveErr := o.ledger.Reserve(ctx, req.Parent, childID, requested)
 	if reserveErr != nil {
@@ -345,12 +345,12 @@ func parseOriginationDefinition(raw []byte) (*missionv1.MissionDefinition, error
 	return def, nil
 }
 
-// requestedBudget reads the caller's asked-for envelope out of the mission
+// RequestedBudget reads the caller's asked-for envelope out of the mission
 // definition's constraints. The proto's own convention — 0 means "no limit"
 // on both max_cost and max_tokens — maps to a nil ChildBudget field, i.e.
 // "the caller named no ceiling on this dimension", which lets the ledger
 // answer with the parent's remainder instead.
-func requestedBudget(c *missionv1.MissionConstraints) ChildBudget {
+func RequestedBudget(c *missionv1.MissionConstraints) ChildBudget {
 	out := ChildBudget{}
 	if c == nil {
 		return out

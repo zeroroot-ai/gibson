@@ -277,3 +277,42 @@ func TestReservationLedger_ReserveGuards(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "child mission ID is required")
 }
+
+// A run that reserves again for the same child replaces the reservation of
+// origination. The old entry does not count against the new one (gibson#1270).
+func TestReservationLedger_ReserveAgainForTheSameChild(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("a grant that takes the whole parent is granted again", func(t *testing.T) {
+		ledger := newTestReservationLedger(t)
+		parent := missionWithCostCap(10.00, 0)
+		child := types.NewID()
+
+		first, err := ledger.Reserve(ctx, parent, child, ChildBudget{CostUSDCents: costPtr(1000)})
+		require.NoError(t, err)
+		require.Equal(t, int64(1000), *first.CostUSDCents)
+
+		again, err := ledger.Reserve(ctx, parent, child, ChildBudget{CostUSDCents: costPtr(1000)})
+		require.NoError(t, err)
+		assert.Equal(t, int64(1000), *again.CostUSDCents)
+	})
+
+	t.Run("a smaller grant keeps its size and a sibling keeps its own", func(t *testing.T) {
+		ledger := newTestReservationLedger(t)
+		parent := missionWithCostCap(10.00, 0)
+		child, sibling := types.NewID(), types.NewID()
+
+		_, err := ledger.Reserve(ctx, parent, child, ChildBudget{CostUSDCents: costPtr(600)})
+		require.NoError(t, err)
+		_, err = ledger.Reserve(ctx, parent, sibling, ChildBudget{CostUSDCents: costPtr(300)})
+		require.NoError(t, err)
+
+		again, err := ledger.Reserve(ctx, parent, child, ChildBudget{CostUSDCents: costPtr(600)})
+		require.NoError(t, err)
+		assert.Equal(t, int64(600), *again.CostUSDCents)
+
+		held, err := ledger.Reserved(ctx, parent.ID)
+		require.NoError(t, err)
+		assert.Equal(t, int64(900), *held.CostUSDCents, "the child and its sibling hold 600 and 300")
+	})
+}

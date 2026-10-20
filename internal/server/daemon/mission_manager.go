@@ -196,6 +196,10 @@ type missionManager struct {
 	// nil in production, which uses the Redis ledger. A test sets it.
 	newLedger func(conn *datapool.Conn) mission.ReservationLedger
 
+	// loadMission reads a mission record of a tenant connection. It is nil in
+	// production, which reads the mission store. A test sets it.
+	loadMission func(ctx context.Context, conn *datapool.Conn, id types.ID) (*mission.Mission, error)
+
 	completedCount int
 }
 
@@ -1051,12 +1055,65 @@ func (m *missionManager) endRunAccounting(ctx context.Context, poolConn *datapoo
 		m.releaseChildReservation(ctx, poolConn, am.mission)
 	}
 	unlock()
+	m.releaseQuotaSlot(ctx, am)
+}
+
+// releaseQuotaSlot gives back the concurrent_missions slot that the run took
+// when it started. The counter is floored at zero.
+func (m *missionManager) releaseQuotaSlot(ctx context.Context, am *activeMission) {
 	if m.quotaCounter != nil {
 		if decErr := m.quotaCounter.DecrementMissionCount(ctx); decErr != nil {
 			m.logger.Warn("mission manager: decrement concurrent_missions failed (non-fatal)",
 				"mission_id", am.mission.ID.String(), "error", decErr.Error())
 		}
 	}
+}
+
+// reserveRunBudget reserves the budget of a run at its start. It records a
+// refusal as a failed run before it starts, and reports whether the run may go on.
+func (m *missionManager) reserveRunBudget(ctx context.Context, poolConn *datapool.Conn, am *activeMission, name string) bool {
+	err := m.reserveChildBudget(ctx, poolConn, am)
+	if err == nil {
+		return true
+	}
+	m.failBeforeStart(am.tenantID, am.mission.ID.String(), runIDOf(am), name,
+		fmt.Sprintf("failed to reserve the budget of the run against the parent: %v", err))
+	// The run never starts, so it must give back the slot that it took.
+	m.releaseQuotaSlot(ctx, am)
+	return false
+}
+
+// reserveChildBudget reserves the budget of a child mission against its parent
+// at the start of a run. A mission with no parent reserved nothing and needs
+// nothing. The record already holds a reservation after origination, and Reserve
+// replaces the reservation of the same child, so the first run keeps what origination
+// granted. It runs under the record lock that endRunAccounting takes, so the
+// release of an older run cannot fall between the reservation and the claim.
+func (m *missionManager) reserveChildBudget(ctx context.Context, poolConn *datapool.Conn, am *activeMission) error {
+	parentID := am.mission.ParentMissionID
+	if parentID == nil {
+		return nil
+	}
+	unlock := m.lockRecord(am.mission.ID.String())
+	defer unlock()
+	var parent *mission.Mission
+	var err error
+	if m.loadMission != nil {
+		parent, err = m.loadMission(ctx, poolConn, *parentID)
+	} else {
+		parent, err = mission.NewConnBoundMissionStore(poolConn.Redis).Get(ctx, *parentID)
+	}
+	if err != nil {
+		return fmt.Errorf("load parent mission %s: %w", parentID, err)
+	}
+	ledger := mission.NewRedisReservationLedger(poolConn.Redis)
+	if m.newLedger != nil {
+		ledger = m.newLedger(poolConn)
+	}
+	if _, err := ledger.Reserve(ctx, parent, am.mission.ID, mission.RequestedBudget(am.mission.Constraints)); err != nil {
+		return fmt.Errorf("reserve against parent %s: %w", parentID, err)
+	}
+	return nil
 }
 
 // executeMission runs the mission execution using the orchestrator.
@@ -1279,6 +1336,14 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 	// The run ID is what tells this run from the run before it, because the
 	// mission ID is the same for both (gibson#1217).
 	proj.RunID = runID
+
+	// A child run reserves its budget against the parent again. Origination
+	// reserved once for the record, and the end of a run releases it, so a
+	// later run of the record (a rewind or a restart) holds none until it
+	// reserves here (gibson#1270).
+	if !m.reserveRunBudget(ctx, poolConn, active, def.GetName()) {
+		return
+	}
 	eng.Submit(proj)
 
 	// Emit MissionStarted into the brain Timeline so the lifecycle projector
