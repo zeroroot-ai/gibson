@@ -50,7 +50,8 @@ fi
 
 root="${1:-.}"
 root="$(cd "$root" && pwd)"
-pkgs="$(list "$root" || true)"
+# Exit status 1 is grep finding no file. Any other status is a real error.
+pkgs="$(list "$root" || [ $? -eq 1 ])"
 if [ -z "$pkgs" ]; then
   echo "fixture-test-packages: no Go file under $root has a test_fixtures build tag." >&2
   echo "The fixture-tests job would run nothing. Fix the search or delete the job." >&2
