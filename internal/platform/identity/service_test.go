@@ -580,3 +580,19 @@ func TestWhoAmI_SPIFFECaller(t *testing.T) {
 		t.Error("a SPIFFE tenant admin can revoke sessions")
 	}
 }
+
+// A rejected credential and a missing store are a fault of the daemon, so they
+// are FailedPrecondition and not the Internal default.
+func TestFGAStatus_PermanentFaultsAreFailedPrecondition(t *testing.T) {
+	for name, cause := range map[string]error{
+		"unauthenticated": authz.ErrFgaUnauthenticated,
+		"not found":       authz.ErrFgaNotFound,
+	} {
+		if got := status.Code(fgaStatus("check", cause)); got != codes.FailedPrecondition {
+			t.Errorf("%s: want FailedPrecondition, got %v", name, got)
+		}
+	}
+	if got := status.Code(fgaStatus("check", authz.ErrFgaUnavailable)); got != codes.Unavailable {
+		t.Errorf("an outage must stay Unavailable, got %v", got)
+	}
+}
