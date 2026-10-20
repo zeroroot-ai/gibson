@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -392,7 +393,10 @@ func (l *claimingLedger) Release(ctx context.Context, parentID, childID types.ID
 		l.t.Error("run 2 claimed the record between the decision and the release of run 1")
 	case <-time.After(150 * time.Millisecond):
 	}
-	return l.ReservationLedger.Release(ctx, parentID, childID)
+	if err := l.ReservationLedger.Release(ctx, parentID, childID); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	return nil
 }
 
 // Run 2 cannot claim the record between the decision of run 1 and its release

@@ -1011,7 +1011,7 @@ func (m *missionManager) releaseChildReservation(ctx context.Context, poolConn *
 	// acquired poolConn, so neither is defensively nil-checked (ADR-0003: no
 	// graceful-nil in request paths).
 	if parentID := mi.ParentMissionID; parentID != nil {
-		var ledger mission.ReservationLedger = mission.NewRedisReservationLedger(poolConn.Redis)
+		ledger := mission.NewRedisReservationLedger(poolConn.Redis)
 		if m.newLedger != nil {
 			ledger = m.newLedger(poolConn)
 		}
