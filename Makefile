@@ -247,7 +247,7 @@ lint: $(GOLANGCI_LINT)
 	@prev=$$(mktemp); \
 	  if git show $(LINT_BASE):scripts/lint-pagination.baseline > $$prev 2>/dev/null; then \
 	    node scripts/lint-pagination.mjs --prev-baseline $$prev; rc=$$?; \
-	  else node scripts/lint-pagination.mjs; rc=$$?; fi; \
+	  else echo "lint-pagination: no baseline at $(LINT_BASE); the shrink check is skipped"; node scripts/lint-pagination.mjs; rc=$$?; fi; \
 	  rm -f $$prev; exit $$rc
 	@node scripts/lint-allowed-identities.mjs
 

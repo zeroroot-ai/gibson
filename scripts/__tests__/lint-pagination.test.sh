@@ -7,14 +7,48 @@
 # fail is worse than none.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-FIX="__tests__/lint-pagination"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 fail() { echo "lint-pagination.test: FAIL: $1" >&2; exit 1; }
 
 mkdir "$TMP/bad" "$TMP/good"
-cp "$FIX/bad.proto" "$TMP/bad/"
-cp "$FIX/good.proto" "$TMP/good/"
+# The fixtures are written here, not tracked as .proto files: tests/protorules
+# loads every tracked .proto and these belong to no proto root.
+cat > "$TMP/bad/bad.proto" <<'PROTO'
+syntax = "proto3";
+package fixture.v1;
+
+service FixtureService {
+  // A read that is not named List and returns a repeated field with no paging.
+  rpc FetchThings(FetchThingsRequest) returns (FetchThingsResponse);
+  // A request with a limit field.
+  rpc CountThings(CountThingsRequest) returns (CountThingsResponse);
+}
+
+message FetchThingsRequest { string kind = 1; }
+message FetchThingsResponse { repeated string things = 1; }
+message CountThingsRequest { int32 limit = 1; }
+message CountThingsResponse { int32 count = 1; }
+PROTO
+cat > "$TMP/good/good.proto" <<'PROTO'
+syntax = "proto3";
+package fixture.v1;
+
+service FixtureService {
+  rpc FetchThings(FetchThingsRequest) returns (FetchThingsResponse);
+  rpc Watch(FetchThingsRequest) returns (stream FetchThingsResponse);
+}
+
+message FetchThingsRequest {
+  string kind = 1;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+message FetchThingsResponse {
+  repeated string things = 1;
+  string next_page_token = 2;
+}
+PROTO
 : > "$TMP/empty"
 
 # 1. A list RPC not named List*, and a limit field, both fail.
