@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -353,4 +354,21 @@ func TestEndRunAccounting_Run1LeavesRun2Alone(t *testing.T) {
 	if err != nil || held.CostUSDCents != nil {
 		t.Fatalf("the reservation was not released when the last run ended: %+v, %v", held, err)
 	}
+}
+
+// failingQuota fails every decrement.
+type failingQuota struct{}
+
+func (failingQuota) IncrementMissionCount(context.Context) error { return nil }
+func (failingQuota) DecrementMissionCount(context.Context) error { return errors.New("redis down") }
+
+// A failed decrement is logged and never stops the cleanup of the run.
+func TestEndRunAccounting_DecrementFailureIsNotFatal(t *testing.T) {
+	conn, cleanup := newMiniredisConn(t)
+	defer cleanup()
+	mm := helperMM()
+	mm.quotaCounter = failingQuota{}
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	run := activeRunOfRecord(&mission.Mission{ID: types.NewID()}, auth.MustNewTenantID("acme"))
+	mm.endRunAccounting(context.Background(), conn, run) // must not panic
 }
