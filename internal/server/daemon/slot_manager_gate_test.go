@@ -121,11 +121,12 @@ func TestApplyModelGate(t *testing.T) {
 
 	t.Run("a pinned decider stops on a permanent error and retries an outage", func(t *testing.T) {
 		pin := brain.DeciderSlot{Provider: "anthropic"}
-		permanent := gateManager(&gateFakeFilter{err: authz.ErrInvalidArgument}).applyModelGate(context.Background(), slot, prov, model)
+		ctx := context.Background()
+		permanent := gateManager(&gateFakeFilter{err: authz.ErrInvalidArgument}).applyModelGate(ctx, slot, prov, model)
 		if !pinnedDeciderUnservable(pin, permanent) {
 			t.Error("a permanent gate error must end a pinned mission")
 		}
-		outage := gateManager(&gateFakeFilter{err: authz.ErrFgaUnavailable}).applyModelGate(context.Background(), slot, prov, model)
+		outage := gateManager(&gateFakeFilter{err: authz.ErrFgaUnavailable}).applyModelGate(ctx, slot, prov, model)
 		if pinnedDeciderUnservable(pin, outage) {
 			t.Error("an outage must keep the retry")
 		}
