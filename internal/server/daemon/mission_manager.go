@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
 	"sync"
 	"time"
@@ -184,11 +185,12 @@ type missionManager struct {
 	mu             sync.RWMutex
 	activeMissions map[auth.TenantID]map[string]*activeMission
 
-	// recordLocks holds one mutex for each mission record. claimActive and
-	// endRunAccounting take it, so the decision of one is atomic with the act
-	// of the other. It is a lock of its own, so the Redis call of a release
-	// never runs under the m.mu of the whole manager.
-	recordLocks sync.Map // missionID (string) -> *sync.Mutex
+	// recordLocks is a fixed set of lock stripes. A mission record hashes to
+	// one stripe. claimActive and endRunAccounting take it, so the decision of
+	// one is atomic with the act of the other. It is a lock of its own, so the
+	// Redis call of a release never runs under the m.mu of the whole manager.
+	// No code path holds two record locks, so the stripes cannot deadlock.
+	recordLocks [256]sync.Mutex
 
 	// newLedger builds the reservation ledger of a tenant connection. It is
 	// nil in production, which uses the Redis ledger. A test sets it.
@@ -382,8 +384,9 @@ func (m *missionManager) activeRunOf(tenant auth.TenantID, missionID string) (*a
 
 // lockRecord takes the lock of a mission record and returns its release.
 func (m *missionManager) lockRecord(missionID string) func() {
-	v, _ := m.recordLocks.LoadOrStore(missionID, &sync.Mutex{})
-	mu, _ := v.(*sync.Mutex)
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(missionID))
+	mu := &m.recordLocks[h.Sum32()%uint32(len(m.recordLocks))]
 	mu.Lock()
 	return mu.Unlock
 }
