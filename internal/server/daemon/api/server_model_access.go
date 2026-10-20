@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -344,49 +345,94 @@ func timeNowUnix() int64 {
 	return time.Now().Unix()
 }
 
-// checkGrantTarget refuses a grant target that matches no registered provider
-// or model of the tenant. A provider target must be the provider name that the
-// gate uses, which is the type of a provider config of the tenant. A model
-// target must be the default model of such a config, or a model that the live
-// list of such a provider names.
+// grantListTimeout is the one total deadline for the live model lists that
+// checkGrantTarget asks for, however many providers the tenant has.
+var grantListTimeout = 10 * time.Second
+
+// chatConfig reports whether a provider config of the tenant can serve chat: it
+// is enabled, its type is not embedding-only, and it declares the chat
+// capability or declares none (the legacy chat-only default).
+func chatConfig(c *providerconfig.ProviderConfig) bool {
+	if !c.Enabled || isEmbeddingOnlyType(c.Type) {
+		return false
+	}
+	if len(c.Capabilities) == 0 {
+		return true
+	}
+	return slices.Contains(c.Capabilities, providerconfig.CapabilityChat)
+}
+
+// checkGrantTarget refuses a grant target that matches no chat provider or chat
+// model of the tenant. A provider target must be the type of an enabled,
+// chat-capable provider config of the tenant. That type is the provider name
+// that the gate uses. A model target must be the default model of such a config,
+// or a chat model that the live list of such a provider names.
 func (s *DaemonServer) checkGrantTarget(ctx context.Context, tenantID string, kind tenantv1.GrantTargetKind, id string) error {
 	if s.providerConfig == nil {
 		return status_grpc.Error(codes.FailedPrecondition, "provider store is not configured")
 	}
-	configs, err := s.providerConfig.List(ctx, tenantID)
+	all, err := s.providerConfig.List(ctx, tenantID)
 	if err != nil {
 		return toGRPCProviderError("list providers", err)
+	}
+	configs := make([]*providerconfig.ProviderConfig, 0, len(all))
+	for _, c := range all {
+		if chatConfig(c) {
+			configs = append(configs, c)
+		}
 	}
 	switch kind {
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER:
 		for _, c := range configs {
-			if c.Enabled && string(c.Type) == id {
+			if string(c.Type) == id {
 				return nil
 			}
 		}
 		return status_grpc.Errorf(codes.InvalidArgument,
-			"target_id: %q is not a registered provider of the tenant", id)
+			"target_id: %q is not a chat provider with an enabled config of the tenant", id)
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_MODEL:
 		for _, c := range configs {
-			if c.Enabled && c.DefaultModel == id {
+			if c.DefaultModel == id {
 				return nil
 			}
 		}
-		for _, c := range configs {
-			if c.Enabled && s.providerListsModel(ctx, tenantID, c, id) {
-				return nil
-			}
+		if s.anyProviderListsModel(ctx, tenantID, configs, id) {
+			return nil
 		}
 		return status_grpc.Errorf(codes.InvalidArgument,
-			"target_id: %q is not a known model of a registered provider of the tenant", id)
+			"target_id: %q is not a chat model of an enabled provider of the tenant", id)
 	case tenantv1.GrantTargetKind_GRANT_TARGET_KIND_UNSPECIFIED:
 		return status_grpc.Error(codes.InvalidArgument, "target_kind must be provider or model")
 	}
 	return status_grpc.Error(codes.InvalidArgument, "target_kind must be provider or model")
 }
 
+// anyProviderListsModel asks the live model list of every config at once, under
+// one deadline for all of them. It reports whether any list names the model as a
+// chat model. A provider that cannot be built or listed names none.
+func (s *DaemonServer) anyProviderListsModel(
+	ctx context.Context, tenantID string, configs []*providerconfig.ProviderConfig, model string,
+) bool {
+	if len(configs) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, grantListTimeout)
+	defer cancel()
+	found := make(chan bool, len(configs))
+	for _, c := range configs {
+		go func() { found <- s.providerListsModel(ctx, tenantID, c, model) }()
+	}
+	for range configs {
+		if <-found {
+			return true
+		}
+	}
+	return false
+}
+
 // providerListsModel reports whether the live model list of the provider names
-// the model. A provider that cannot be built or listed names none.
+// the model as a chat model. A model with the embedding feature and no chat
+// feature is not a chat model.
 func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, c *providerconfig.ProviderConfig, model string) bool {
 	dec, err := s.providerConfig.Resolve(ctx, tenantID, c.Name)
 	if err != nil {
@@ -400,15 +446,13 @@ func (s *DaemonServer) providerListsModel(ctx context.Context, tenantID string, 
 	if err != nil {
 		return false
 	}
-	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
-	defer cancel()
-	models, err := prov.Models(listCtx)
+	models, err := prov.Models(ctx)
 	if err != nil {
 		return false
 	}
 	for _, m := range models {
 		if m.Name == model {
-			return true
+			return !slices.Contains(m.Features, "embedding") || slices.Contains(m.Features, "chat")
 		}
 	}
 	return false
