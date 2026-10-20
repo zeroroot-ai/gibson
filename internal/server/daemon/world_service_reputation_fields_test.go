@@ -20,7 +20,7 @@ func TestGetReputation_ReturnsTheTrackRecord(t *testing.T) {
 	// The registry comes from the world view helper, so this test follows
 	// any change to how a test registry is built.
 	_, reg := newWorldViewTestSource(t)
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	acme := reg.For("acme")
 	acme.Submit(brain.BetSettledTrue{HypothesisID: "h1", Technique: "T1190", ScopeID: "net-a"})
@@ -63,7 +63,7 @@ func TestGetReputation_ReturnsTheTrackRecord(t *testing.T) {
 // never a bare zero.
 func TestGetReputation_NoTrackRecordReturnsTheNeutralPrior(t *testing.T) {
 	_, reg := newWorldViewTestSource(t)
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	resp, err := srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "never-seen", ScopeId: "net-a"})

@@ -61,7 +61,7 @@ func TestListProofReviews_ReturnsTheEvidenceOfTheCallersTenant(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	submitProofReview(ctx, t, reg.For("acme"), "hyp-acme")
 	submitProofReview(ctx, t, reg.For("other-tenant"), "hyp-other")
@@ -88,7 +88,7 @@ func TestListProofReviews_PagesGiveEachProofOnce(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 	for i := range 5 {
 		submitProofReview(ctx, t, reg.For("acme"), fmt.Sprintf("hyp-%d", i))
 	}
@@ -129,7 +129,7 @@ func TestListProofReviews_RefusesATokenItDidNotWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	reg.For("acme")
 

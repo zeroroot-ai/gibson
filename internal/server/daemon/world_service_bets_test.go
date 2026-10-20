@@ -47,7 +47,7 @@ func TestListOpenBets_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
 		ScopeID: "s1", Claim: "port 6443 is unauthenticated", Proposer: "recon-agent",
@@ -75,7 +75,7 @@ func TestListOpenBets_ReturnsClaimProposerConfidenceEvidenceRunID(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
 		ScopeID: "s1", Claim: "the admin panel is reachable without auth",
@@ -116,7 +116,7 @@ func TestListOpenBets_ExcludesSettled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
 		ScopeID: "s1", Claim: "settled claim", HypothesisID: "hyp-settled",
@@ -142,7 +142,7 @@ func TestListOpenBets_ExcludesHypothesesWithNoHypothesisID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.HypothesisObserved{
 		ScopeID: "s1", Claim: "a claim proposed with no bettable id",
@@ -164,7 +164,7 @@ func TestSettleBetByHITL_TruePositive_Settles(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -204,7 +204,7 @@ func TestSettleBetByHITL_MissingActingUser_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	_, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
@@ -230,7 +230,7 @@ func TestSettleBetByHITL_Dismiss_LabelOnlyNoSettle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -275,7 +275,7 @@ func TestSettleBetByHITL_InvalidVerdict_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
@@ -291,7 +291,7 @@ func TestSettleBetByHITL_MissingHypothesisID_Errors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.SettleBetByHITL(tctx, &worldpb.SettleBetByHITLRequest{
@@ -308,7 +308,7 @@ func TestSettleBetByHITL_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	if _, err := srv.SettleBetByHITL(context.Background(), &worldpb.SettleBetByHITLRequest{
 		HypothesisId: "hyp-1", Verdict: "true_positive",

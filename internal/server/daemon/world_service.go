@@ -36,30 +36,27 @@ type worldServer struct {
 
 	registry *brain.Registry
 	logger   *slog.Logger
-	// signer signs the page tokens of the list RPCs (world_service_paging.go).
-	signer *pagetoken.Signer
+	// signers sign the page tokens of the list RPCs, one for each RPC
+	// (world_service_paging.go).
+	signers map[string]*pagetoken.Signer
 }
 
 // NewWorldServer constructs the WorldService backed by the per-tenant brain registry.
-func NewWorldServer(registry *brain.Registry, logger *slog.Logger, opts ...WorldServerOption) *worldServer {
+// keys derives the signing key of the page tokens. The daemon builds it from
+// the master KEK, so a token from one replica works on another.
+//
+//nolint:revive // the daemon and its tests use the concrete type
+func NewWorldServer(registry *brain.Registry, logger *slog.Logger, keys *pagetoken.Keys) *worldServer {
 	if registry == nil {
 		panic("world server: registry cannot be nil")
+	}
+	if keys == nil {
+		panic("world server: page token keys cannot be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &worldServer{registry: registry, logger: logger}
-	for _, opt := range opts {
-		opt(s)
-	}
-	if s.signer == nil {
-		signer, err := pagetoken.NewRandomSigner()
-		if err != nil {
-			panic("world server: " + err.Error())
-		}
-		s.signer = signer
-	}
-	return s
+	return &worldServer{registry: registry, logger: logger, signers: worldSigners(keys)}
 }
 
 // engine resolves the caller's tenant from context and returns its brain engine
@@ -77,10 +74,7 @@ func (s *worldServer) engine(ctx context.Context) (*brain.Engine, error) {
 	return eng, nil
 }
 
-func (s *worldServer) ListMissions(
-	ctx context.Context,
-	req *worldpb.ListMissionsRequest,
-) (*worldpb.ListMissionsResponse, error) {
+func (s *worldServer) ListMissions(ctx context.Context, req *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -100,10 +94,7 @@ func (s *worldServer) ListMissions(
 	return resp, nil
 }
 
-func (s *worldServer) ListHosts(
-	ctx context.Context,
-	req *worldpb.ListHostsRequest,
-) (*worldpb.ListHostsResponse, error) {
+func (s *worldServer) ListHosts(ctx context.Context, req *worldpb.ListHostsRequest) (*worldpb.ListHostsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -133,10 +124,7 @@ func (s *worldServer) ListHosts(
 	return resp, nil
 }
 
-func (s *worldServer) ListFindings(
-	ctx context.Context,
-	req *worldpb.ListFindingsRequest,
-) (*worldpb.ListFindingsResponse, error) {
+func (s *worldServer) ListFindings(ctx context.Context, req *worldpb.ListFindingsRequest) (*worldpb.ListFindingsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -155,10 +143,7 @@ func (s *worldServer) ListFindings(
 	return resp, nil
 }
 
-func (s *worldServer) ListLlmCalls(
-	ctx context.Context,
-	req *worldpb.ListLlmCallsRequest,
-) (*worldpb.ListLlmCallsResponse, error) {
+func (s *worldServer) ListLlmCalls(ctx context.Context, req *worldpb.ListLlmCallsRequest) (*worldpb.ListLlmCallsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -182,10 +167,7 @@ func (s *worldServer) ListLlmCalls(
 	return resp, nil
 }
 
-func (s *worldServer) GetLlmCall(
-	ctx context.Context,
-	req *worldpb.GetLlmCallRequest,
-) (*worldpb.GetLlmCallResponse, error) {
+func (s *worldServer) GetLlmCall(ctx context.Context, req *worldpb.GetLlmCallRequest) (*worldpb.GetLlmCallResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -212,10 +194,7 @@ func (s *worldServer) GetLlmCall(
 	return nil, status.Errorf(codes.NotFound, "llm call %q not found", req.GetCallId())
 }
 
-func (s *worldServer) GetTimeline(
-	ctx context.Context,
-	req *worldpb.GetTimelineRequest,
-) (*worldpb.GetTimelineResponse, error) {
+func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineRequest) (*worldpb.GetTimelineResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -226,11 +205,18 @@ func (s *worldServer) GetTimeline(
 	// timeline and its GetFrameAt frames share one indexing.
 	// The events come from the full history of the tenant, not from the
 	// in-memory tail of the engine (ADR-0163, gibson#786).
-	events, err := e.MissionHistory(ctx, req.GetMissionId())
+	events, runID, runFound, err := e.MissionHistoryRun(ctx, req.GetMissionId())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "the Timeline history is not available: %v", err)
 	}
-	pg, err := s.pageOf(ctx, "GetTimeline", req.GetPageSize(), req.GetPageToken(), req.GetMissionId())
+	// The slice of a mission holds its latest run. A new run changes what an
+	// index of the slice points to, so the run is part of the token scope: a
+	// token of an old run gives InvalidArgument and the client starts again.
+	runScope := "no-run"
+	if runFound {
+		runScope = "run:" + runID
+	}
+	pg, err := s.pageOf(ctx, "GetTimeline", req.GetPageSize(), req.GetPageToken(), req.GetMissionId(), runScope)
 	if err != nil {
 		return nil, err
 	}
@@ -259,10 +245,7 @@ func (s *worldServer) GetTimeline(
 // (gibson#1060): the frame materializes only that mission's World and seq/total
 // index the mission's slice, so another mission's events never bleed in. Empty
 // folds the whole tenant Timeline (tenant-wide behavior unchanged).
-func (s *worldServer) GetFrameAt(
-	ctx context.Context,
-	req *worldpb.GetFrameAtRequest,
-) (*worldpb.GetFrameAtResponse, error) {
+func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtRequest) (*worldpb.GetFrameAtResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -364,10 +347,7 @@ func (s *worldServer) GetFrameAt(
 // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
 // Findings with any applied label (ADR-0106). Read-only projection; never gates
 // a mission.
-func (s *worldServer) ListReviewQueue(
-	ctx context.Context,
-	req *worldpb.ListReviewQueueRequest,
-) (*worldpb.ListReviewQueueResponse, error) {
+func (s *worldServer) ListReviewQueue(ctx context.Context, req *worldpb.ListReviewQueueRequest) (*worldpb.ListReviewQueueResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -404,10 +384,7 @@ func (s *worldServer) ListReviewQueue(
 // labelling user is taken from the caller's context server-side, so a caller can
 // never attribute a label to another user; and because the event lands in the
 // caller's tenant World only, labels pool tenant-wide and never cross tenants.
-func (s *worldServer) SubmitLabel(
-	ctx context.Context,
-	req *worldpb.SubmitLabelRequest,
-) (*worldpb.SubmitLabelResponse, error) {
+func (s *worldServer) SubmitLabel(ctx context.Context, req *worldpb.SubmitLabelRequest) (*worldpb.SubmitLabelResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -432,10 +409,7 @@ func (s *worldServer) SubmitLabel(
 
 // ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
 // training signal the offline trainer consumes alongside auto-outcomes.
-func (s *worldServer) ListLabels(
-	ctx context.Context,
-	req *worldpb.ListLabelsRequest,
-) (*worldpb.ListLabelsResponse, error) {
+func (s *worldServer) ListLabels(ctx context.Context, req *worldpb.ListLabelsRequest) (*worldpb.ListLabelsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -474,10 +448,7 @@ func labelView(l brain.LabelSnapshot) *worldpb.LabelView {
 // wiring has today), so every settled bet reads as Unscored until that
 // lands; this handler will start returning real numbers the day it does,
 // with no code change here.
-func (s *worldServer) GetCalibration(
-	ctx context.Context,
-	req *worldpb.GetCalibrationRequest,
-) (*worldpb.GetCalibrationResponse, error) {
+func (s *worldServer) GetCalibration(ctx context.Context, req *worldpb.GetCalibrationRequest) (*worldpb.GetCalibrationResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err

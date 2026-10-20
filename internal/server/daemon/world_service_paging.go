@@ -23,25 +23,29 @@ import (
 // holds an item twice. The token is signed for the tenant, the RPC and the
 // filters of the request.
 
-// worldPageKeyInfo is the HKDF info of the page token key of WorldService.
-const worldPageKeyInfo = "gibson-world-page-token-v1"
+// worldPagedRPCs are the RPCs that page. Each one has a signing key of its own,
+// so a token of one RPC never opens another.
+var worldPagedRPCs = []string{
+	"GetTimeline", "ListFindings", "ListHosts", "ListLabels",
+	"ListLlmCalls", "ListMissions", "ListOpenBets", "ListReviewQueue",
+}
+
+// worldSigners derives the signer of each paged RPC from the master KEK.
+func worldSigners(keys *pagetoken.Keys) map[string]*pagetoken.Signer {
+	out := make(map[string]*pagetoken.Signer, len(worldPagedRPCs))
+	for _, rpc := range worldPagedRPCs {
+		out[rpc] = keys.Signer("world-" + rpc)
+	}
+	return out
+}
 
 // keySep joins the parts of a composite sort key. No part holds a NUL byte,
 // so the joined keys sort like the parts do.
 const keySep = "\x00"
 
-// WorldServerOption changes how NewWorldServer builds the server.
-type WorldServerOption func(*worldServer)
-
-// WithWorldPageSigner sets the signer of the page tokens. The daemon passes a
-// signer that derives from the master KEK, so a token from one replica works
-// on another. Without it, the server signs with a key that only it knows.
-func WithWorldPageSigner(signer *pagetoken.Signer) WorldServerOption {
-	return func(s *worldServer) { s.signer = signer }
-}
-
 // worldPage is the position of one request in its list.
 type worldPage struct {
+	signer   *pagetoken.Signer
 	scope    []string
 	after    string
 	hasAfter bool
@@ -62,11 +66,12 @@ func (s *worldServer) pageOf(
 		return worldPage{}, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
 	scope := append([]string{t.String(), rpc}, filters...)
-	after, hasAfter, err := s.signer.After(scope, token)
+	signer := s.signers[rpc]
+	after, hasAfter, err := signer.After(scope, token)
 	if err != nil {
 		return worldPage{}, status.Error(codes.InvalidArgument, err.Error())
 	}
-	return worldPage{scope: scope, after: after, hasAfter: hasAfter, limit: pagetoken.Size(size)}, nil
+	return worldPage{signer: signer, scope: scope, after: after, hasAfter: hasAfter, limit: pagetoken.Size(size)}, nil
 }
 
 // nextToken signs the key of the last item of a page. It returns "" when the
@@ -75,7 +80,7 @@ func (s *worldServer) nextToken(p worldPage, last string, more bool) string {
 	if !more {
 		return ""
 	}
-	return s.signer.Token(p.scope, last)
+	return p.signer.Token(p.scope, last)
 }
 
 // worldKeyedPage sorts items by key and returns the page after the cursor of p
@@ -93,18 +98,18 @@ func worldKeyedPage[T any](s *worldServer, p worldPage, items []T, key func(T) s
 // between two pages has a seq after the cursor.
 func (s *worldServer) seqWindow(p worldPage, total int) (start, end int, next string, err error) {
 	if p.hasAfter {
-		last, parseErr := strconv.ParseUint(p.after, 10, 63)
-		if parseErr != nil {
+		last, parseErr := strconv.Atoi(p.after)
+		if parseErr != nil || last < 0 {
 			return 0, 0, "", status.Error(codes.InvalidArgument, pagetoken.ErrBadToken.Error())
 		}
-		if last >= uint64(total) {
+		if last >= total {
 			return total, total, "", nil
 		}
-		start = int(last) + 1
+		start = last + 1
 	}
 	end = min(start+p.limit, total)
 	if end < total {
-		next = s.signer.Token(p.scope, strconv.Itoa(end-1))
+		next = p.signer.Token(p.scope, strconv.Itoa(end-1))
 	}
 	return start, end, next, nil
 }

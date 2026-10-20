@@ -54,7 +54,7 @@ func downRegistry(t *testing.T) *brain.Registry {
 // During a store outage a read returns Unavailable, not the empty World of
 // the stopped engine (gibson#826).
 func TestWorldRead_AStoppedEngineIsUnavailable(t *testing.T) {
-	srv := NewWorldServer(downRegistry(t), slog.New(slog.DiscardHandler))
+	srv := NewWorldServer(downRegistry(t), slog.New(slog.DiscardHandler), testWorldKeys(t))
 	_, err := srv.ListMissions(tenantCtx(t, "tenant-a"), &worldpb.ListMissionsRequest{})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("code = %v (%v), want Unavailable", status.Code(err), err)
@@ -71,7 +71,7 @@ func TestListMissions_AStoppedEngineIsUnavailable(t *testing.T) {
 
 // A live engine still serves.
 func TestWorldRead_ALiveEngineServes(t *testing.T) {
-	srv := NewWorldServer(brain.NewRegistry(context.Background(), braintest.StoreFactory()), slog.New(slog.DiscardHandler))
+	srv := NewWorldServer(brain.NewRegistry(context.Background(), braintest.StoreFactory()), slog.New(slog.DiscardHandler), testWorldKeys(t))
 	if _, err := srv.ListMissions(tenantCtx(t, "tenant-a"), &worldpb.ListMissionsRequest{}); err != nil {
 		t.Fatalf("ListMissions: %v", err)
 	}

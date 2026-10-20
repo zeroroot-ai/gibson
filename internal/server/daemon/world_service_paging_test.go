@@ -44,7 +44,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListLabels(ctx, &worldpb.ListLabelsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetLabels()))
 				for _, l := range r.GetLabels() {
 					ids = append(ids, l.GetTargetId())
 				}
@@ -59,7 +59,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListFindings(ctx, &worldpb.ListFindingsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetFindings()))
 				for _, f := range r.GetFindings() {
 					ids = append(ids, f.GetId())
 				}
@@ -74,7 +74,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListReviewQueue(ctx, &worldpb.ListReviewQueueRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetItems()))
 				for _, it := range r.GetItems() {
 					ids = append(ids, it.GetTargetId())
 				}
@@ -89,7 +89,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListMissions(ctx, &worldpb.ListMissionsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetMissions()))
 				for _, m := range r.GetMissions() {
 					ids = append(ids, m.GetId())
 				}
@@ -104,7 +104,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListHosts(ctx, &worldpb.ListHostsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetHosts()))
 				for _, h := range r.GetHosts() {
 					ids = append(ids, h.GetAddress())
 				}
@@ -119,7 +119,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListLlmCalls(ctx, &worldpb.ListLlmCallsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetLlmCalls()))
 				for _, c := range r.GetLlmCalls() {
 					ids = append(ids, c.GetCallId())
 				}
@@ -134,7 +134,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.ListOpenBets(ctx, &worldpb.ListOpenBetsRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetBets()))
 				for _, b := range r.GetBets() {
 					ids = append(ids, b.GetHypothesisId())
 				}
@@ -149,7 +149,7 @@ func worldPageCases() []worldPageCase {
 			},
 			fetch: func(ctx context.Context, srv *worldServer, size int32, tok string) ([]string, string, error) {
 				r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: size, PageToken: tok})
-				var ids []string
+				ids := make([]string, 0, len(r.GetEvents()))
 				for _, ev := range r.GetEvents() {
 					ids = append(ids, strconv.FormatUint(ev.GetSeq(), 10))
 				}
@@ -161,7 +161,7 @@ func worldPageCases() []worldPageCase {
 }
 
 // listAll reads the whole list with one big page.
-func (c worldPageCase) listAll(t *testing.T, ctx context.Context, srv *worldServer) []string {
+func (c worldPageCase) listAll(ctx context.Context, t *testing.T, srv *worldServer) []string {
 	t.Helper()
 	ids, _, err := c.fetch(ctx, srv, 1000, "")
 	require.NoError(t, err)
@@ -169,11 +169,11 @@ func (c worldPageCase) listAll(t *testing.T, ctx context.Context, srv *worldServ
 }
 
 // await polls until the list holds want rows.
-func (c worldPageCase) await(t *testing.T, ctx context.Context, srv *worldServer, want int) {
+func (c worldPageCase) await(ctx context.Context, t *testing.T, srv *worldServer, want int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if len(c.listAll(t, ctx, srv)) >= want {
+		if len(c.listAll(ctx, t, srv)) >= want {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
@@ -186,7 +186,20 @@ func newWorldPageServer(t *testing.T) (*worldServer, *brain.Registry) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	return NewWorldServer(reg, nil), reg
+	return NewWorldServer(reg, nil, testWorldKeys(t)), reg
+}
+
+// testWorldKeys returns the page token keys of a test server. Two servers of
+// one test share the master KEK, like two replicas of the daemon.
+func testWorldKeys(t *testing.T) *pagetoken.Keys {
+	t.Helper()
+	kek := make([]byte, 32)
+	for i := range kek {
+		kek[i] = byte(i + 1)
+	}
+	keys, err := pagetoken.NewKeys(kek)
+	require.NoError(t, err)
+	return keys
 }
 
 func worldTenantCtx(id string) context.Context {
@@ -206,8 +219,8 @@ func TestWorldService_PageWalkWithInsertsBetweenPages(t *testing.T) {
 			for _, id := range seed {
 				c.add(e, id)
 			}
-			c.await(t, ctx, srv, len(seed))
-			original := c.listAll(t, ctx, srv)
+			c.await(ctx, t, srv, len(seed))
+			original := c.listAll(ctx, t, srv)
 			require.Len(t, original, len(seed))
 
 			page1, tok, err := c.fetch(ctx, srv, 2, "")
@@ -224,7 +237,7 @@ func TestWorldService_PageWalkWithInsertsBetweenPages(t *testing.T) {
 			for _, id := range late {
 				c.add(e, id)
 			}
-			c.await(t, ctx, srv, len(seed)+len(late))
+			c.await(ctx, t, srv, len(seed)+len(late))
 
 			got := append([]string(nil), page1...)
 			pages := 1
@@ -270,8 +283,8 @@ func TestWorldService_PageWalkGivesEachRowOnce(t *testing.T) {
 			for i := range 7 {
 				c.add(reg.For("acme"), "row-"+strconv.Itoa(i))
 			}
-			c.await(t, ctx, srv, 7)
-			want := c.listAll(t, ctx, srv)
+			c.await(ctx, t, srv, 7)
+			want := c.listAll(ctx, t, srv)
 
 			var got []string
 			tok := ""
@@ -301,8 +314,8 @@ func TestWorldService_ForgedOrForeignTokenIsInvalidArgument(t *testing.T) {
 				c.add(reg.For("acme"), "row-"+strconv.Itoa(i))
 				c.add(reg.For("other"), "row-"+strconv.Itoa(i))
 			}
-			c.await(t, acme, srv, 4)
-			c.await(t, other, srv, 4)
+			c.await(acme, t, srv, 4)
+			c.await(other, t, srv, 4)
 
 			_, tok, err := c.fetch(acme, srv, 2, "")
 			require.NoError(t, err)
@@ -339,7 +352,7 @@ func TestWorldService_TokenOfAnotherRPCIsInvalidArgument(t *testing.T) {
 		}
 	}
 	for _, c := range cases {
-		c.await(t, ctx, srv, 4)
+		c.await(ctx, t, srv, 4)
 	}
 	_, tok, err := cases[0].fetch(ctx, srv, 2, "")
 	require.NoError(t, err)
@@ -376,9 +389,9 @@ func TestWorldService_TimelineTokenIsBoundToTheMission(t *testing.T) {
 func TestWorldService_TimelineTokenWithABadSeq(t *testing.T) {
 	srv, _ := newWorldPageServer(t)
 	ctx := worldTenantCtx("acme")
-	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "")
+	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
 	require.NoError(t, err)
-	tok := srv.signer.Token(pg.scope, "not-a-number")
+	tok := pg.signer.Token(pg.scope, "not-a-number")
 	_, err = srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
@@ -393,9 +406,9 @@ func TestWorldService_TimelineCursorPastTheEnd(t *testing.T) {
 		return err == nil && len(r.GetEvents()) == 1
 	}, 5*time.Second, 5*time.Millisecond)
 
-	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "")
+	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
 	require.NoError(t, err)
-	tok := srv.signer.Token(pg.scope, "99")
+	tok := pg.signer.Token(pg.scope, "99")
 	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
 	require.NoError(t, err)
 	require.Empty(t, r.GetEvents())
@@ -410,7 +423,7 @@ func TestWorldService_DefaultPageSize(t *testing.T) {
 	for i := range pagetoken.DefaultSize + 5 {
 		c.add(reg.For("acme"), "row-"+strconv.Itoa(1000+i))
 	}
-	c.await(t, ctx, srv, pagetoken.DefaultSize+5)
+	c.await(ctx, t, srv, pagetoken.DefaultSize+5)
 	r, err := srv.ListLabels(ctx, &worldpb.ListLabelsRequest{})
 	require.NoError(t, err)
 	require.Len(t, r.GetLabels(), pagetoken.DefaultSize)
@@ -419,29 +432,62 @@ func TestWorldService_DefaultPageSize(t *testing.T) {
 
 // Two replicas that share the master KEK read each other tokens.
 func TestWorldService_SharedKeyOpensTokensAcrossReplicas(t *testing.T) {
-	kek := make([]byte, 32)
-	for i := range kek {
-		kek[i] = byte(i + 1)
-	}
-	signer, err := pagetoken.NewSigner(kek, worldPageKeyInfo)
-	require.NoError(t, err)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	a := NewWorldServer(reg, nil, WithWorldPageSigner(signer))
-	signer2, err := pagetoken.NewSigner(kek, worldPageKeyInfo)
-	require.NoError(t, err)
-	b := NewWorldServer(reg, nil, WithWorldPageSigner(signer2))
+	a := NewWorldServer(reg, nil, testWorldKeys(t))
+	b := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := worldTenantCtx("acme")
 	c := worldPageCases()[0]
 	for i := range 4 {
 		c.add(reg.For("acme"), "row-"+strconv.Itoa(i))
 	}
-	c.await(t, tctx, a, 4)
+	c.await(tctx, t, a, 4)
 	_, tok, err := c.fetch(tctx, a, 2, "")
 	require.NoError(t, err)
 	ids, _, err := c.fetch(tctx, b, 2, tok)
 	require.NoError(t, err)
 	require.Equal(t, []string{"row-2", "row-3"}, ids)
+
+	// A replica with another master KEK refuses the token.
+	other := make([]byte, 32)
+	keys, err := pagetoken.NewKeys(other)
+	require.NoError(t, err)
+	_, _, err = c.fetch(tctx, NewWorldServer(reg, nil, keys), 2, tok)
+	require.Equal(t, codes.InvalidArgument, status.Code(err))
+}
+
+// A new run of a mission changes the slice that GetTimeline pages. A token of
+// the old run gives InvalidArgument, and a walk of the new run starts again.
+func TestWorldService_TimelineTokenOfAnOldRunIsInvalidArgument(t *testing.T) {
+	srv, reg := newWorldPageServer(t)
+	ctx := worldTenantCtx("acme")
+	e := reg.For("acme")
+	e.Submit(brain.MissionProjected{ID: "A", Goal: "a", RunID: "run-1", Nodes: []brain.WorkNode{{ID: "n1"}}})
+	e.Submit(brain.MissionStarted{ID: "A", Goal: "a", RunID: "run-1"})
+	e.Submit(brain.HostObserved{ScopeID: "s", Address: "10.0.0.1", MissionID: "A", MissionRunID: "run-1"})
+
+	var tok string
+	require.Eventually(t, func() bool {
+		r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{MissionId: "A", PageSize: 1})
+		tok = r.GetNextPageToken()
+		return err == nil && tok != ""
+	}, 5*time.Second, 5*time.Millisecond)
+
+	// Run 1 pages on while nothing else happens.
+	_, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{MissionId: "A", PageSize: 1, PageToken: tok})
+	require.NoError(t, err)
+
+	// Run 2 starts: the slice now holds run 2 only.
+	e.Submit(brain.MissionProjected{ID: "A", Goal: "a", RunID: "run-2", Nodes: []brain.WorkNode{{ID: "n1"}}})
+	require.Eventually(t, func() bool {
+		_, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{MissionId: "A", PageSize: 1, PageToken: tok})
+		return status.Code(err) == codes.InvalidArgument
+	}, 5*time.Second, 5*time.Millisecond, "a token of run 1 must stop working when run 2 starts")
+
+	// The client starts again and walks run 2.
+	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{MissionId: "A", PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, r.GetEvents(), 1)
 }

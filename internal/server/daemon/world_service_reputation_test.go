@@ -22,7 +22,7 @@ func TestGetReputation_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	acme := reg.For("acme")
 	acme.Submit(brain.BetSettledTrue{HypothesisID: "h1", Technique: "T1190", ScopeID: "net-a"})
@@ -103,7 +103,7 @@ func TestGetReputation_NoTrackRecord_ReturnsNeutralPrior(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.GetReputation(tctx, &worldpb.GetReputationRequest{Technique: "never-seen", ScopeId: "net-a"}); err != nil {

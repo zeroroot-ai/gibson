@@ -652,11 +652,23 @@ func (e *Engine) History(ctx context.Context) ([]Event, error) {
 // MissionHistory returns the mission's slice of the full history
 // (gibson#1060), in order. An empty missionID returns the whole history.
 func (e *Engine) MissionHistory(ctx context.Context, missionID string) ([]Event, error) {
-	evs, err := e.History(ctx)
+	evs, _, _, err := e.MissionHistoryRun(ctx, missionID)
+	return evs, err
+}
+
+// MissionHistoryRun returns the slice of MissionHistory and the run that the
+// slice holds. found is false when the mission has no projection yet, and for
+// an empty missionID. A caller that pages the slice binds its cursor to the
+// run, because a later run changes what an index of the slice points to.
+func (e *Engine) MissionHistoryRun(ctx context.Context, missionID string) (evs []Event, runID string, found bool, err error) {
+	history, err := e.History(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("brain/engine: history of mission %q: %w", missionID, err)
+		return nil, "", false, fmt.Errorf("brain/engine: history of mission %q: %w", missionID, err)
 	}
-	return MissionSlice(evs, missionID), nil
+	if missionID != "" {
+		runID, found = LatestMissionRun(history, missionID)
+	}
+	return MissionSlice(history, missionID), runID, found, nil
 }
 
 // HistoryFrameAt returns the World as of the first n events of the mission's

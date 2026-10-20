@@ -23,7 +23,7 @@ func TestWorldService_SubmitAndListLabels_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	acme := auth.ContextWithActingUser(
 		auth.WithTenant(context.Background(), auth.MustNewTenantID("acme")), "alice")
@@ -58,7 +58,7 @@ func TestWorldService_SubmitAndListLabels_TenantScoped(t *testing.T) {
 func TestWorldService_SubmitLabel_Validation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	srv := NewWorldServer(brain.NewRegistry(ctx, braintest.StoreFactory()), nil)
+	srv := NewWorldServer(brain.NewRegistry(ctx, braintest.StoreFactory()), nil, testWorldKeys(t))
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
 	if _, err := srv.SubmitLabel(tctx, &worldpb.SubmitLabelRequest{TargetId: "f", Verdict: "bogus"}); status.Code(err) != codes.InvalidArgument {
@@ -78,7 +78,7 @@ func TestWorldService_ListReviewQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory(), brain.SurpriseFindingSystem)
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	eng := reg.For("acme")
 	eng.Submit(brain.HostObserved{ScopeID: "s1", Address: "10.0.0.5", SSHHostKey: "AAAA"})

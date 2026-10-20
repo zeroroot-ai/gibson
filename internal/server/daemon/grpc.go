@@ -267,11 +267,7 @@ type spiffeBypassFunc func(ctx context.Context, method string) (context.Context,
 //   - (ctx, false, err): identity resolution failed outright (bypass denied
 //     by policy, or loose-mode validation failed); the caller must reject
 //     the RPC with err.
-func resolveLooseOrBypassIdentity(
-	ctx context.Context,
-	method string,
-	bypass spiffeBypassFunc,
-) (context.Context, bool, error) {
+func resolveLooseOrBypassIdentity(ctx context.Context, method string, bypass spiffeBypassFunc) (context.Context, bool, error) {
 	if bypassCtx, ok, err := bypass(ctx, method); err != nil {
 		return ctx, false, err
 	} else if ok {
@@ -1715,7 +1711,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
-	// The page tokens are signed with a key derived from the master KEK, which
+	// The page tokens are signed with keys derived from the master KEK, which
 	// every daemon replica shares, so a token from one replica works on another.
 	if d.keyProvider == nil {
 		return nil, errors.New("daemon: WorldService needs the key provider to sign page tokens")
@@ -1724,12 +1720,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if worldKEKErr != nil {
 		return nil, fmt.Errorf("daemon: WorldService could not read the master KEK: %w", worldKEKErr)
 	}
-	worldSigner, worldSignerErr := pagetoken.NewSigner(worldMasterKEK, worldPageKeyInfo)
-	if worldSignerErr != nil {
-		return nil, fmt.Errorf("daemon: WorldService: %w", worldSignerErr)
+	worldPageKeys, worldKeysErr := pagetoken.NewKeys(worldMasterKEK)
+	if worldKeysErr != nil {
+		return nil, fmt.Errorf("daemon: WorldService: %w", worldKeysErr)
 	}
-	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(
-		d.brainRegistry, d.logger.WithComponent("world-service").Slog(), WithWorldPageSigner(worldSigner)))
+	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), worldPageKeys))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
@@ -2503,13 +2498,7 @@ func (d *daemonImpl) QueryPlugin(ctx context.Context, name, method string, _ map
 // RunMission starts a mission by reference and returns an event channel.
 // The mission definition and target must already be registered — inline
 // construction and YAML paths were removed under spec mission-api-only-cleanup.
-func (d *daemonImpl) RunMission(
-	ctx context.Context,
-	missionDefinitionID,
-	targetID string,
-	variables map[string]string,
-	memoryContinuity string,
-) (string, error) {
+func (d *daemonImpl) RunMission(ctx context.Context, missionDefinitionID, targetID string, variables map[string]string, memoryContinuity string) (string, error) {
 	return d.RunMissionWithManager(ctx, missionDefinitionID, targetID, variables, memoryContinuity)
 }
 
@@ -2560,11 +2549,7 @@ func (d *daemonImpl) StopMission(ctx context.Context, missionID string, force bo
 // When redisEventStream is nil (e.g., during unit tests that use a lightweight
 // daemon without Redis) the implementation falls back to the in-process
 // EventBus for full backwards compatibility.
-func (d *daemonImpl) Subscribe(
-	ctx context.Context,
-	eventTypes []string,
-	missionID string,
-) (<-chan api.EventData, error) {
+func (d *daemonImpl) Subscribe(ctx context.Context, eventTypes []string, missionID string) (<-chan api.EventData, error) {
 	d.logger.Info(ctx, "Subscribe called", "event_types", eventTypes, "mission_id", missionID)
 
 	// Use Redis Streams when available: this is the production path.
@@ -2605,12 +2590,7 @@ func (d *daemonImpl) StartComponent(ctx context.Context, kind string, name strin
 }
 
 // StopComponent is not supported; component lifecycle management has been removed.
-func (d *daemonImpl) StopComponent(
-	ctx context.Context,
-	kind string,
-	name string,
-	force bool,
-) (api.StopComponentResult, error) {
+func (d *daemonImpl) StopComponent(ctx context.Context, kind string, name string, force bool) (api.StopComponentResult, error) {
 	d.logger.Warn(ctx, "StopComponent called but component store has been removed", "kind", kind, "name", name)
 	return api.StopComponentResult{}, fmt.Errorf("component lifecycle management is not available")
 }
@@ -2668,12 +2648,7 @@ func (d *daemonImpl) ResumeMission(ctx context.Context, missionID string) error 
 }
 
 // GetMissionHistory returns all runs for a mission name.
-func (d *daemonImpl) GetMissionHistory(
-	ctx context.Context,
-	name string,
-	limit int,
-	offset int,
-) ([]api.MissionRunData, int, error) {
+func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit int, offset int) ([]api.MissionRunData, int, error) {
 	d.logger.Debug(ctx, "GetMissionHistory called", "name", name, "limit", limit, "offset", offset)
 
 	// Validate name
@@ -2800,13 +2775,7 @@ func (d *daemonImpl) RewindMission(ctx context.Context, req api.RewindRequest) (
 }
 
 // GetComponentLogs streams log entries for a component using the log tailer.
-func (d *daemonImpl) GetComponentLogs(
-	ctx context.Context,
-	kind string,
-	name string,
-	follow bool,
-	lines int,
-) (<-chan api.LogEntryData, error) {
+func (d *daemonImpl) GetComponentLogs(ctx context.Context, kind string, name string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	d.logger.Debug(ctx, "GetComponentLogs called", "kind", kind, "name", name, "follow", follow, "lines", lines)
 
 	// Construct log file path: ~/.gibson/logs/<component-name>.log
@@ -2829,13 +2798,7 @@ func (d *daemonImpl) GetComponentLogs(
 }
 
 // getComponentLogsWithTailer uses the LogTailer for efficient log streaming with fsnotify.
-func (d *daemonImpl) getComponentLogsWithTailer(
-	ctx context.Context,
-	componentName string,
-	logFilePath string,
-	follow bool,
-	lines int,
-) (<-chan api.LogEntryData, error) {
+func (d *daemonImpl) getComponentLogsWithTailer(ctx context.Context, componentName string, logFilePath string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	// Start watching this component if not already watching
 	if !d.logTailer.IsWatching(componentName) {
 		if err := d.logTailer.StartWatching(componentName, logFilePath); err != nil {
@@ -2890,13 +2853,7 @@ func (d *daemonImpl) getComponentLogsWithTailer(
 }
 
 // getComponentLogsSimple provides a simple fallback implementation without LogTailer.
-func (d *daemonImpl) getComponentLogsSimple(
-	ctx context.Context,
-	componentName string,
-	logFilePath string,
-	follow bool,
-	lines int,
-) (<-chan api.LogEntryData, error) {
+func (d *daemonImpl) getComponentLogsSimple(ctx context.Context, componentName string, logFilePath string, follow bool, lines int) (<-chan api.LogEntryData, error) {
 	// Create channel for streaming logs
 	logChan := make(chan api.LogEntryData, 100)
 
@@ -2992,11 +2949,7 @@ func (d *daemonImpl) getComponentLogsSimple(
 }
 
 // ListMissionDefinitions returns all installed mission definitions.
-func (d *daemonImpl) ListMissionDefinitions(
-	ctx context.Context,
-	limit int,
-	offset int,
-) ([]api.MissionDefinitionData, int, error) {
+func (d *daemonImpl) ListMissionDefinitions(ctx context.Context, limit int, offset int) ([]api.MissionDefinitionData, int, error) {
 	d.logger.Debug(ctx, "ListMissionDefinitions called", "limit", limit, "offset", offset)
 
 	tenantForDefs, tenantErr := tenantFromCtx(ctx)
@@ -3084,10 +3037,7 @@ func (d *daemonImpl) GetMissionDefinition(ctx context.Context, name string) (*mi
 // and target must already be registered (via CreateMissionDefinition and the
 // target API respectively). Inline construction was removed under spec
 // mission-api-only-cleanup.
-func (d *daemonImpl) CreateMission(
-	ctx context.Context,
-	req api.CreateMissionData,
-) (api.CreateMissionResultData, error) {
+func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionData) (api.CreateMissionResultData, error) {
 	d.logger.Info(ctx, "CreateMission called",
 		"name", req.Name,
 		"target_id", req.TargetID,
@@ -3263,10 +3213,7 @@ func (d *daemonImpl) CreateMission(
 // daemon. This is the API-only replacement for the removed InstallMission RPC;
 // no git cloning, no YAML parsing, no dependency resolution — just validate and
 // persist.
-func (d *daemonImpl) CreateMissionDefinition(
-	ctx context.Context,
-	req api.CreateMissionDefinitionData,
-) (api.CreateMissionDefinitionResultData, error) {
+func (d *daemonImpl) CreateMissionDefinition(ctx context.Context, req api.CreateMissionDefinitionData) (api.CreateMissionDefinitionResultData, error) {
 	if req.Definition == nil {
 		return api.CreateMissionDefinitionResultData{}, fmt.Errorf("definition is required")
 	}
@@ -3334,10 +3281,7 @@ func (d *daemonImpl) CreateMissionDefinition(
 // and original timestamps are preserved. Returns a wrapped mission.ErrDefinitionNotFound
 // when the name is not registered.
 // Spec: gibson#437.
-func (d *daemonImpl) UpdateMissionDefinition(
-	ctx context.Context,
-	req api.UpdateMissionDefinitionData,
-) (api.UpdateMissionDefinitionResultData, error) {
+func (d *daemonImpl) UpdateMissionDefinition(ctx context.Context, req api.UpdateMissionDefinitionData) (api.UpdateMissionDefinitionResultData, error) {
 	if req.Definition == nil {
 		return api.UpdateMissionDefinitionResultData{}, fmt.Errorf("definition is required")
 	}
