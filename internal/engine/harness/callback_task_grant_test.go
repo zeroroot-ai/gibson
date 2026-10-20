@@ -629,3 +629,29 @@ func TestCheckTaskGrantScope_TheGrantPicksTheTaskAndTheRun(t *testing.T) {
 		t.Errorf("no grant: callerTask = %q, want the body task (task-2)", got)
 	}
 }
+
+// A member takes a turn. The turn grant names the job as its task, and the
+// member driver puts the member as the task in the body. The scope check and
+// getHarness run together, as they do on the wire: the callback reaches the
+// harness of the member (gibson#1235).
+func TestTurnGrant_ScopeCheckAndGetHarnessReachTheMemberHarness(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	member := newRunHarness("run-1")
+	member.tenantID = "acme"
+	mustRegister(t, registry, "bank-1", "claude", member)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	claims := grantClaims(t, "acme", "bank-1")
+	claims.TaskID = "job-1"
+	v := &fakeGrantVerifier{claims: claims}
+	req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "bank-1", AgentName: "claude", TaskId: "member-1"}}
+
+	ctx, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+	if err != nil {
+		t.Fatalf("the scope check refused a turn of the member: %v", err)
+	}
+	got, err := service.getHarness(ctx, req.GetContext())
+	if err != nil || got != AgentHarness(member) {
+		t.Fatalf("getHarness = %v, %v, want the harness of the member", got, err)
+	}
+}
