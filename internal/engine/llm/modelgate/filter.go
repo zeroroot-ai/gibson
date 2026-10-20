@@ -73,6 +73,16 @@ var ErrUnavailable = errors.New("modelgate: the authorizer could not decide")
 // PermissionDenied. It never appears together with ErrUnavailable.
 var ErrDenied = errors.New("modelgate: the model is not permitted")
 
+// CouldNotDecide reports whether err is a transient failure of the authorizer:
+// FGA unreachable, FGA timed out, or a canceled or expired context. A later
+// check can succeed after one of these. Any other error is permanent.
+func CouldNotDecide(err error) bool {
+	return errors.Is(err, authz.ErrFgaUnavailable) ||
+		errors.Is(err, authz.ErrFgaTimeout) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
 // Filter returns the subset of candidates the calling user is permitted
 // to use, preserving rank order. Returning an empty slice when no
 // candidates pass signals to the caller that PermissionDenied is

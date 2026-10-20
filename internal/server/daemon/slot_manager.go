@@ -15,7 +15,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 )
 
 // DaemonSlotManager implements llm.SlotManager with intelligent slot-to-provider
@@ -97,16 +96,6 @@ func (m *DaemonSlotManager) WithResolveCallback(cb func(ctx context.Context, pic
 	return m
 }
 
-// gateCouldNotDecide reports whether err is a transient failure of the
-// authorizer: FGA unreachable, FGA timed out, or a canceled or expired context.
-// A later check can succeed after one of these. Any other error is permanent.
-func gateCouldNotDecide(err error) bool {
-	return errors.Is(err, authz.ErrFgaUnavailable) ||
-		errors.Is(err, authz.ErrFgaTimeout) ||
-		errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded)
-}
-
 // applyModelGate runs the configured modelgate.Filter on the picked
 // (provider, model) and emits the optional resolve callback. Returns
 // nil when access is permitted or no filter is wired; otherwise
@@ -130,7 +119,7 @@ func (m *DaemonSlotManager) applyModelGate(ctx context.Context, slot agent.SlotD
 			// (no authorizer, a bad request, a short answer) cannot succeed on
 			// a retry, so a pinned Decider must stop on it (gibson#1219).
 			mark := modelgate.ErrDenied
-			if gateCouldNotDecide(ferr) {
+			if modelgate.CouldNotDecide(ferr) {
 				mark = modelgate.ErrUnavailable
 			}
 			cause := fmt.Errorf("%w: %w", mark, ferr)

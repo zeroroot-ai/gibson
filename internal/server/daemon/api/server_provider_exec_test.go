@@ -1011,10 +1011,12 @@ func TestExecuteLLM_ModelGate(t *testing.T) {
 					return knownDecryptedConfig(), nil
 				},
 			}
-			built := false
+			called := false
 			s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-				built = true
-				return &stubMockProvider{}, nil
+				return &stubMockProvider{completeFunc: func(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
+					called = true
+					return &llm.CompletionResponse{}, nil
+				}}, nil
 			})
 			s.modelFilter = tc.filter
 
@@ -1024,7 +1026,49 @@ func TestExecuteLLM_ModelGate(t *testing.T) {
 			})
 			require.Error(t, err)
 			assert.Equal(t, tc.want, status_grpc.Code(err))
-			assert.False(t, built, "a denied call must not build a provider")
+			assert.False(t, called, "a denied call must not reach the provider")
 		})
 	}
+}
+
+// onlyProviderGate permits one provider name and records what it was asked.
+type onlyProviderGate struct {
+	allow string
+	asked []modelgate.Candidate
+}
+
+func (g *onlyProviderGate) Permitted(_ context.Context, c []modelgate.Candidate) ([]modelgate.Candidate, error) {
+	g.asked = append(g.asked, c...)
+	for _, cand := range c {
+		if cand.Provider == g.allow {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (*onlyProviderGate) InvalidateCache() {}
+
+// The gate names the provider as the slot path does: by the name of the built
+// provider, which is the name the default grant is written for. The configured
+// name of the provider (here "my-openai") is not that name. A member with only
+// the default grant must be allowed.
+func TestExecuteLLM_ModelGateNamesTheProviderAsTheSlotPathDoes(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return &stubMockProvider{}, nil // Name() is "stub"
+	})
+	gate := &onlyProviderGate{allow: "stub"}
+	s.modelFilter = gate
+
+	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, gate.asked, 1)
+	assert.Equal(t, "stub", gate.asked[0].Provider, "the gate must be asked about the provider name, not the configured name")
 }

@@ -19,7 +19,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
@@ -143,8 +142,7 @@ func (s *DaemonServer) checkModelGate(ctx context.Context, provider, model strin
 	}
 	permitted, err := s.modelFilter.Permitted(ctx, []modelgate.Candidate{{Provider: provider, Model: model}})
 	if err != nil {
-		if errors.Is(err, authz.ErrFgaUnavailable) || errors.Is(err, authz.ErrFgaTimeout) ||
-			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if modelgate.CouldNotDecide(err) {
 			return status_grpc.Errorf(codes.Unavailable, "model_access_denied: the model gate could not decide")
 		}
 		return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the model gate could not check access")
@@ -325,12 +323,6 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 	// stored or forwarded anywhere beyond the prov instance below.
 	provCfg := s.withEgressPolicy(decryptedConfigToLLMConfig(dec, req.GetModel()))
 
-	// 4b. Model gate: the caller must hold can_use on the model or the provider.
-	// This is the check that slot resolution runs for missions.
-	if gateErr := s.checkModelGate(ctx, req.GetProviderName(), provCfg.DefaultModel); gateErr != nil {
-		return nil, gateErr
-	}
-
 	// 5. Construct provider.
 	prov, err := s.providerFactory(provCfg)
 	if err != nil {
@@ -338,6 +330,15 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 		return nil, status_grpc.Errorf(codes.Internal, "failed to construct LLM provider")
 	}
 	// dec is no longer needed after prov is built.
+
+	// 5b. Model gate: the caller must hold can_use on the model or the provider.
+	// It is the check that slot resolution runs for missions, and it names the
+	// provider the same way: by prov.Name(), the name that the registry holds
+	// and that the default grant is written for. The configured name of the
+	// provider is not that name. Building the provider makes no network call.
+	if gateErr := s.checkModelGate(ctx, prov.Name(), provCfg.DefaultModel); gateErr != nil {
+		return nil, gateErr
+	}
 
 	// 6. Translate request messages.
 	msgs := protoMessagesToLLM(req.GetMessages())
