@@ -39,22 +39,50 @@ package brain
 // MissionID match-by-equality never bleeds into a named mission, and the
 // tenant-wide fold (empty missionID) is unchanged.
 
-// MissionSlice returns the sub-sequence of events attributable to missionID, in
-// Timeline order. An empty missionID returns a copy of the whole slice (the
+// MissionSlice returns the sub-sequence of events attributable to the latest
+// run of missionID, in Timeline order. A mission ID is the stable record ID, so
+// a record that ran twice holds the events of both runs. The slice holds one
+// run, or a frame would fold run 1 and run 2 one after the other
+// (gibson#1228). An empty missionID returns a copy of the whole slice (the
 // tenant-wide fold is unchanged). The result is deterministic, so folding it is
-// a stable replay frame.
+// a stable replay frame. A frame of an old run folds the late evidence of that
+// run with its mission link, though the live World detached it. That is the
+// true history of that run.
 func MissionSlice(events []Event, missionID string) []Event {
 	if missionID == "" {
 		return append([]Event(nil), events...)
 	}
+	runID, found := latestMissionRun(events, missionID)
+	if !found {
+		return missionSlice(events, missionID, "", false)
+	}
+	return missionSlice(events, missionID, runID, true)
+}
 
+// latestMissionRun returns the run of the last projection of missionID.
+func latestMissionRun(events []Event, missionID string) (runID string, found bool) {
+	for _, ev := range events {
+		if p, ok := ev.(MissionProjected); ok && p.ID == missionID {
+			runID, found = p.RunID, true
+		}
+	}
+	return runID, found
+}
+
+// missionSlice collects the events of missionID. When byRun is set, it keeps
+// only the events of runID.
+func missionSlice(events []Event, missionID, runID string, byRun bool) []Event {
 	// Pass 1: discover the WorkItem ids this mission owns, so events that name
 	// only a work id (retry / completion / condition) can be attributed.
 	owned := make(map[string]bool)
+	firstRun, haveFirst := "", false
 	for _, ev := range events {
 		switch e := ev.(type) {
 		case MissionProjected:
 			if e.ID == missionID {
+				if !haveFirst {
+					firstRun, haveFirst = e.RunID, true
+				}
 				for _, n := range e.Nodes {
 					// Same scoping the reducer applies; a bare node id would
 					// claim another mission's identically-named node.
@@ -68,14 +96,68 @@ func MissionSlice(events []Event, missionID string) []Event {
 		}
 	}
 
-	// Pass 2: collect the attributable events in Timeline order.
+	// Pass 2: collect the attributable events in Timeline order. An event
+	// that names its run belongs to that run. Any other event belongs to the
+	// run that was current at its position. An event before the first
+	// projection, such as the creation of the record, belongs to the first run.
 	out := make([]Event, 0, len(events))
+	current := firstRun
 	for _, ev := range events {
-		if eventInMission(ev, missionID, owned) {
-			out = append(out, ev)
+		if p, ok := ev.(MissionProjected); ok && p.ID == missionID {
+			current = p.RunID
 		}
+		if !eventInMission(ev, missionID, owned) {
+			continue
+		}
+		if byRun {
+			run := explicitRunID(ev)
+			if run == "" {
+				run = current
+			}
+			if run != runID {
+				continue
+			}
+		}
+		out = append(out, ev)
 	}
 	return out
+}
+
+// explicitRunID returns the run that ev names, or an empty string when ev does
+// not name a run.
+func explicitRunID(ev Event) string {
+	switch e := ev.(type) {
+	case MissionProjected:
+		return e.RunID
+	case MissionStarted:
+		return e.RunID
+	case MissionDone:
+		return e.RunID
+	case MissionPauseRequested:
+		return e.RunID
+	case MissionResumed:
+		return e.RunID
+	case WorkDispatched:
+		return e.RunID
+	case WorkCompleted:
+		return e.RunID
+	case DecisionRequested:
+		return e.RunID
+	case DecisionCompleted:
+		return e.RunID
+	case HostObserved:
+		return e.MissionRunID
+	case FindingRaised:
+		return e.MissionRunID
+	case EntityObserved:
+		return e.MissionRunID
+	case LlmCallObserved:
+		return e.MissionRunID
+	case AgentToolCallObserved:
+		return e.MissionRunID
+	default:
+		return ""
+	}
 }
 
 // eventInMission reports whether ev is attributable to missionID, given the set

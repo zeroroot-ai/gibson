@@ -261,3 +261,42 @@ func (m *missionManager) setActive(tenant auth.TenantID, missionID string, am *a
 	}
 	m.activeMissions[tenant][missionID] = am
 }
+
+// Run 2 starts while the cleanup of run 1 still has to run. The authz state of
+// run 1 is the only one that the cleanup changes, and run 2 stays active.
+func TestCleanupOfRun1_LeavesRun2Alone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	authz := &fakeAuthzStore{}
+	mm := helperMM()
+	mm.authzStore = authz
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	mm.brainRegistry = brain.NewRegistry(ctx, braintest.StoreFactory())
+	tenant := auth.MustNewTenantID("acme")
+	eng := mm.brainRegistry.For(tenant.String())
+
+	rec := &mission.Mission{ID: types.NewID()}
+	id := rec.ID.String()
+	run1 := activeRunOfRecord(rec, tenant)
+	if err := mm.claimActive(tenant, id, run1); err != nil {
+		t.Fatalf("claim run 1: %v", err)
+	}
+	eng.Submit(brain.MissionProjected{ID: id, RunID: runIDOf(run1)})
+	eng.Submit(brain.MissionDone{ID: id, RunID: runIDOf(run1), Outcome: brain.MissionCompleted})
+	waitWorldStatus(t, eng, id, string(brain.MissionCompleted))
+
+	run2 := activeRunOfRecord(rec, tenant)
+	if err := mm.claimActive(tenant, id, run2); err != nil {
+		t.Fatalf("claim run 2: %v", err)
+	}
+
+	mm.finalizeAuthzState(ctx, run1.missionRun, mission.MissionStatusCompleted)
+	mm.deleteActive(tenant, id, run1)
+
+	if len(authz.completed) != 1 || authz.completed[0] != run1.missionRun.ID.String() || len(authz.cancelled) != 0 {
+		t.Fatalf("authz completed=%v cancelled=%v, want only the run ID of run 1", authz.completed, authz.cancelled)
+	}
+	if got, _ := mm.getActive(tenant, id); got != run2 {
+		t.Fatal("the cleanup of run 1 removed run 2")
+	}
+}
