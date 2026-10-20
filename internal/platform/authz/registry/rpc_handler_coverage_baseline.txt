@@ -69,7 +69,6 @@
 /gibson.tenant.v1.MembershipService/GetReservedNames
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
 /gibson.tenant.v1.MembershipService/SetTeamAdmin
-/gibson.tenant.v1.ModelAccessService/GrantAccess
 /gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents
 /gibson.tenant.v1.ProviderService/ListProviderModels
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
