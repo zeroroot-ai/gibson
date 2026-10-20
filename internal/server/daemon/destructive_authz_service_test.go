@@ -46,7 +46,7 @@ func TestListPendingDestructiveActions_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
@@ -83,7 +83,7 @@ func TestListPendingDestructiveActions_OtherTenantIsInvisible(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
@@ -114,7 +114,7 @@ func TestApproveDestructiveAction_RecordsApproval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
@@ -145,7 +145,7 @@ func TestApproveDestructiveAction_RequiresActionID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.ApproveDestructiveAction(tctx, &destructiveauthzv1.ApproveDestructiveActionRequest{}); err == nil {
@@ -157,7 +157,7 @@ func TestApproveDestructiveAction_UnknownActionErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -178,7 +178,7 @@ func TestDenyDestructiveAction_RecordsDenial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()
@@ -209,7 +209,7 @@ func TestDenyDestructiveAction_RequiresActionID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.DenyDestructiveAction(tctx, &destructiveauthzv1.DenyDestructiveActionRequest{}); err == nil {
@@ -221,7 +221,7 @@ func TestDenyDestructiveAction_UnknownActionErrors(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	tctx = auth.ContextWithActingUser(tctx, "reviewer-1")
@@ -255,7 +255,7 @@ func assertRequiresActingUser(
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewDestructiveAuthorizationServer(reg, nil)
+	srv := NewDestructiveAuthorizationServer(reg, nil, testPageKeys(t))
 
 	e := reg.For("acme")
 	q := e.DestructiveAuthorizationQueue()

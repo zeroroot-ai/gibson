@@ -193,7 +193,7 @@ func (s *DaemonServer) SetTenantActivation(ctx context.Context, req *connectionv
 }
 
 // ListTenantUsage implements ConnectionPointServiceServer.
-func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.ListTenantUsageRequest) (*connectionv1.ListTenantUsageResponse, error) {
+func (s *DaemonServer) ListTenantUsage(ctx context.Context, req *connectionv1.ListTenantUsageRequest) (*connectionv1.ListTenantUsageResponse, error) {
 	if reason, ok := callerRefusal(ctx, s.connectionCallers.TenantActivation); !ok {
 		return nil, status.Error(codes.PermissionDenied, reason)
 	}
@@ -205,10 +205,17 @@ func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.List
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
+	// The list covers every tenant of the platform, so the scope names no one
+	// tenant. The position is the tenant id of the last row of the page.
+	page, err := pageOf(s.pageKeys, "connection-tenant-usage", req.GetPageSize(), req.GetPageToken(), "")
+	if err != nil {
+		return nil, err
+	}
+	after, _ := page.After()
 	if err := ensureTenantStatusTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	tenants, err := listTenantIDs(ctx, db)
+	tenants, more, err := listTenantIDsAfter(ctx, db, after, page.Limit())
 	if err != nil {
 		s.logger.ErrorContext(ctx, "ListTenantUsage: list tenants failed", "error", err.Error())
 		return nil, status.Error(codes.Unavailable, "usage is not available; try again")
@@ -217,6 +224,9 @@ func (s *DaemonServer) ListTenantUsage(ctx context.Context, _ *connectionv1.List
 	for _, t := range tenants {
 		tokens, cost, _ := usage.TenantPeriodUsage(ctx, t)
 		resp.Tenants = append(resp.Tenants, &connectionv1.TenantUsage{TenantId: t, Tokens: tokens, CostUsdCents: cost})
+	}
+	if more {
+		resp.NextPageToken = page.Token(tenants[len(tenants)-1], true)
 	}
 	return resp, nil
 }

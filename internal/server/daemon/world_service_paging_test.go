@@ -391,7 +391,7 @@ func TestWorldService_TimelineTokenWithABadSeq(t *testing.T) {
 	ctx := worldTenantCtx("acme")
 	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
 	require.NoError(t, err)
-	tok := pg.signer.Token(pg.scope, "not-a-number")
+	tok := pg.Token("not-a-number", true)
 	_, err = srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
 	require.Equal(t, codes.InvalidArgument, status.Code(err))
 }
@@ -408,7 +408,7 @@ func TestWorldService_TimelineCursorPastTheEnd(t *testing.T) {
 
 	pg, err := srv.pageOf(ctx, "GetTimeline", 2, "", "", "no-run")
 	require.NoError(t, err)
-	tok := pg.signer.Token(pg.scope, "99")
+	tok := pg.Token("99", true)
 	r, err := srv.GetTimeline(ctx, &worldpb.GetTimelineRequest{PageSize: 2, PageToken: tok})
 	require.NoError(t, err)
 	require.Empty(t, r.GetEvents())

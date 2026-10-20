@@ -65,7 +65,7 @@ func (s *worldServer) ListOpenBets(ctx context.Context, req *worldpb.ListOpenBet
 			open = append(open, h)
 		}
 	}
-	page, next := worldKeyedPage(s, pg, open, func(h brain.HypothesisSnapshot) string {
+	page, next := pagetoken.Page(pg, open, func(h brain.HypothesisSnapshot) string {
 		return worldKey(h.HypothesisID, h.ScopeID, h.Claim)
 	})
 

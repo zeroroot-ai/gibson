@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	connectionv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/connection/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -24,10 +26,12 @@ const (
 )
 
 func connectionServer() *DaemonServer {
+	// The KEK is long enough, so NewKeys cannot fail.
+	keys, _ := pagetoken.NewKeys(bytes.Repeat([]byte{9}, 32))
 	return newPendingServer().WithConnectionPointCallers(ConnectionPointCallers{
 		SignupStepCompleter: testCompleterSVID,
 		TenantActivation:    testActivationSVID,
-	})
+	}).WithPageKeys(keys)
 }
 
 // Only the configured identity completes a step. Envoy, the other connection
