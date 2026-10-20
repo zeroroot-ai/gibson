@@ -7,9 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
@@ -127,8 +125,10 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 	if err != nil {
 		return nil, err
 	}
-	// engine checked that the tenant is in the context.
-	tenantID, _ := auth.TenantFromContext(ctx)
+	tenantID, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.PermissionDenied, "ListOntologyExtensionProposals: missing tenant in context")
+	}
 	// The key of a proposal is its kind and its label, which name it.
 	page, err := pageOf(s.pageKeys, "tenant-ontology-proposals", req.GetPageSize(), req.GetPageToken(), tenantID.String())
 	if err != nil {
@@ -138,9 +138,7 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 	pos := func(p brain.OntologyProposalSnapshot) string {
 		return strconv.Itoa(int(p.ProposalKind)) + "/" + p.Label
 	}
-	proposals := e.OntologyProposals()
-	slices.SortFunc(proposals, func(a, b brain.OntologyProposalSnapshot) int { return strings.Compare(pos(a), pos(b)) })
-	snapshot, last, more := pagetoken.KeysetPage(proposals, pos, page.after, page.hasAfter, page.limit)
+	snapshot, next := pagetoken.Page(page, e.OntologyProposals(), pos)
 	out := make([]*tenantv1.OntologyExtensionProposal, 0, len(snapshot))
 	for _, p := range snapshot {
 		out = append(out, &tenantv1.OntologyExtensionProposal{
@@ -156,7 +154,7 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 			TaxonomyVersion: int32Count(p.PromotedVersion),
 		})
 	}
-	return &tenantv1.ListOntologyExtensionProposalsResponse{OntologyProposals: out, NextPageToken: page.next(last, more)}, nil
+	return &tenantv1.ListOntologyExtensionProposalsResponse{OntologyProposals: out, NextPageToken: next}, nil
 }
 
 // proposalKindToWire converts the taxonomy vocabulary back to its wire

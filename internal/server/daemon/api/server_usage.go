@@ -6,9 +6,7 @@ package api
 import (
 	"context"
 	"log/slog"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -93,11 +91,9 @@ func (s *DaemonServer) ListUsage(ctx context.Context, req *tenantv1.ListUsageReq
 		return nil, err
 	}
 	// The position of a row is its subject id, which is unique in a scope.
-	rows := resp.GetRows()
-	slices.SortFunc(rows, func(a, b *tenantv1.UsageRow) int { return strings.Compare(a.GetSubjectId(), b.GetSubjectId()) })
-	rows, last, more := pagetoken.KeysetPage(rows, (*tenantv1.UsageRow).GetSubjectId, page.after, page.hasAfter, page.limit)
+	rows, next := pagetoken.Page(page, resp.GetRows(), (*tenantv1.UsageRow).GetSubjectId)
 	resp.Rows = rows
-	resp.NextPageToken = page.next(last, more)
+	resp.NextPageToken = next
 	return resp, nil
 }
 

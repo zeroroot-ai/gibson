@@ -272,9 +272,8 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *tenantv1.ListAccessR
 		return nil, err
 	}
 	pos := func(g *tenantv1.AccessGrant) string { return g.GetTargetKind().String() + "/" + g.GetTargetId() }
-	slices.SortFunc(grants, func(a, b *tenantv1.AccessGrant) int { return strings.Compare(pos(a), pos(b)) })
-	grants, last, more := pagetoken.KeysetPage(grants, pos, page.after, page.hasAfter, page.limit)
-	return &tenantv1.ListAccessResponse{Grants: grants, NextPageToken: page.next(last, more)}, nil
+	grants, next := pagetoken.Page(page, grants, pos)
+	return &tenantv1.ListAccessResponse{Grants: grants, NextPageToken: next}, nil
 }
 
 // ListModelResolutionEvents returns recent model_resolved events.
@@ -316,8 +315,8 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *tenan
 	}
 	// The position is the audit.Position of the last row. The audit query reads
 	// it back, so the page does not use KeysetPage.
-	after := page.after
-	limit := page.limit
+	after, _ := page.After()
+	limit := page.Limit()
 	// The slot filter reads the metadata of each row, so it runs here and not
 	// in SQL. A selective slot makes a page cost several reads. Each page reads
 	// at most maxResolutionBatches batches, and a page that is short carries a
@@ -353,7 +352,7 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *tenan
 		after = lastPos
 	}
 
-	return &tenantv1.ListModelResolutionEventsResponse{Events: events, NextPageToken: page.next(lastPos, more)}, nil
+	return &tenantv1.ListModelResolutionEventsResponse{Events: events, NextPageToken: page.Token(lastPos, more)}, nil
 }
 
 // maxResolutionBatches bounds the audit reads of one ListModelResolutionEvents

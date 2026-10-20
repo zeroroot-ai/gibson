@@ -82,14 +82,15 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 		return nil, err
 	}
 	// The store reads the position back, so the position is the store's own.
-	drafts, nextPos, err := s.missionDraftStore.ListPage(ctx, tenantID, page.after, page.limit)
+	after, _ := page.After()
+	drafts, nextPos, err := s.missionDraftStore.ListPage(ctx, tenantID, after, page.Limit())
 	if err != nil {
 		if errors.Is(err, missiondraft.ErrBadPosition) {
 			return nil, status_grpc.Error(codes.InvalidArgument, pagetoken.ErrBadToken.Error())
 		}
 		return nil, status_grpc.Errorf(codes.Internal, "list mission drafts: %v", err)
 	}
-	next := page.next(nextPos, nextPos != "")
+	next := page.Token(nextPos, nextPos != "")
 
 	out := make([]*tenantv1.MissionDraft, 0, len(drafts))
 	for _, d := range drafts {
