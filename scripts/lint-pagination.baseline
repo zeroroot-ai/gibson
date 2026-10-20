@@ -20,12 +20,7 @@ gibson/tenant/v1/connector.proto ListConnectors
 gibson/tenant/v1/domain_pack.proto ListDomainPackCatalog
 gibson/tenant/v1/domain_pack.proto ListDomainPacks
 gibson/tenant/v1/membership.proto GetReservedNames
-gibson/tenant/v1/model_access.proto ListAccess
-gibson/tenant/v1/model_access.proto ListModelResolutionEvents
-gibson/tenant/v1/ontology_extension.proto ListOntologyExtensionProposals
 gibson/tenant/v1/provider.proto GetSupportedProviders
 gibson/tenant/v1/provider.proto ListProviderModels
 gibson/tenant/v1/provider.proto ListProviders
-gibson/tenant/v1/tenant.proto ListMissionDrafts
-gibson/tenant/v1/usage.proto ListUsage
 gibson/tenant/v1/user.proto ResolveUsers

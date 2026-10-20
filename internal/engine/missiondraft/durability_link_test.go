@@ -64,7 +64,7 @@ func TestMissionDefinitionLink_RoundTrips(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "def-123", got.MissionDefinitionID)
 
-	list, err := store.List(ctx, "tenant-link")
+	list, err := listAll(ctx, store, "tenant-link")
 	require.NoError(t, err)
 	require.Len(t, list, 1)
 	assert.Equal(t, "def-123", list[0].MissionDefinitionID)

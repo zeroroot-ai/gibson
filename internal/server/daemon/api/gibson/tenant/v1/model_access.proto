@@ -138,10 +138,17 @@ message RevokeAccessResponse {
 message ListAccessRequest {
   GrantSubjectKind subject_kind = 1 [(buf.validate.field).enum = { defined_only: true }];
   string subject_id = 2 [(buf.validate.field).string = { max_len: 1024 }];
+  // page_size is the largest number of grants on one page. Zero means 100.
+  int32 page_size = 3 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 4 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListAccessResponse {
   repeated AccessGrant grants = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 message ListModelResolutionEventsRequest {
@@ -149,8 +156,15 @@ message ListModelResolutionEventsRequest {
   int64 end_time_unix = 2;
   string user_id = 3 [(buf.validate.field).string = { max_len: 1024 }];
   string slot_name = 4 [(buf.validate.field).string = { max_len: 1024 }];
+  // page_size is the largest number of events on one page. Zero means 100.
+  int32 page_size = 5 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 6 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListModelResolutionEventsResponse {
   repeated ModelResolutionEvent events = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }

@@ -27,7 +27,7 @@ func newOntologyExtensionService(t *testing.T) (*OntologyExtensionService, *brai
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	return NewOntologyExtensionService(reg, &memFragmentWriter{}), reg
+	return NewOntologyExtensionService(reg, &memFragmentWriter{}, testPageKeys(t)), reg
 }
 
 // ownerCtx builds a context carrying both the tenant and the acting user —

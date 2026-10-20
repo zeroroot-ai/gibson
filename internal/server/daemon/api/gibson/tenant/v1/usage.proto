@@ -67,6 +67,11 @@ message ListUsageRequest {
   // Optional filter: narrow to a single subject. Non-admins are narrowed
   // to themselves regardless of this field.
   string subject_filter = 4 [(buf.validate.field).string = { max_len: 4096 }];
+  // page_size is the largest number of rows on one page. Zero means 100.
+  int32 page_size = 5 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 6 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 message ListUsageResponse {
@@ -74,4 +79,6 @@ message ListUsageResponse {
   // stale_as_of_unix is non-zero when the response was served from a cached
   // snapshot because the usage backing store was unavailable.
   int64 stale_as_of_unix = 2;
+  // next_page_token is empty on the last page.
+  string next_page_token = 3;
 }

@@ -37,6 +37,11 @@ func (d *daemonImpl) registerOntologyExtension(ctx context.Context, srv *grpc.Se
 	// A submitted fragment is one audit record in the platform database
 	// (gibson#712).
 	writer := newStartedAuditWriter(ctx, d.platformDB, d.logger.Slog())
-	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry, writer))
+	pageKeys, err := d.newPageKeys(ctx)
+	if err != nil {
+		d.logger.Error(ctx, "OntologyExtensionService: no page token keys; not registering", "error", err)
+		return
+	}
+	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry, writer, pageKeys))
 	d.logger.Info(ctx, "OntologyExtensionService registered (ADR-0133, gibson#392)")
 }

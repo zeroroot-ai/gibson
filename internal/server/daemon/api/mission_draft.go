@@ -17,6 +17,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -76,10 +77,19 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 		return nil, err
 	}
 
-	drafts, err := s.missionDraftStore.List(ctx, tenantID)
+	page, err := pageOf(s.pageKeys, "tenant-mission-drafts", req.GetPageSize(), req.GetPageToken(), tenantID)
 	if err != nil {
+		return nil, err
+	}
+	// The store reads the position back, so the position is the store's own.
+	drafts, nextPos, err := s.missionDraftStore.ListPage(ctx, tenantID, page.after, page.limit)
+	if err != nil {
+		if errors.Is(err, missiondraft.ErrBadPosition) {
+			return nil, status_grpc.Error(codes.InvalidArgument, pagetoken.ErrBadToken.Error())
+		}
 		return nil, status_grpc.Errorf(codes.Internal, "list mission drafts: %v", err)
 	}
+	next := page.next(nextPos, nextPos != "")
 
 	out := make([]*tenantv1.MissionDraft, 0, len(drafts))
 	for _, d := range drafts {
@@ -91,7 +101,7 @@ func (s *DaemonServer) ListMissionDrafts(ctx context.Context, req *tenantv1.List
 			UpdatedAt:           d.UpdatedAt,
 		})
 	}
-	return &tenantv1.ListMissionDraftsResponse{Drafts: out}, nil
+	return &tenantv1.ListMissionDraftsResponse{Drafts: out, NextPageToken: next}, nil
 }
 
 // GetMissionDraft fetches a single saved draft including its CUE source.

@@ -6,12 +6,16 @@ package api
 import (
 	"context"
 	"log/slog"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -42,26 +46,59 @@ func (s *DaemonServer) ListUsage(ctx context.Context, req *tenantv1.ListUsageReq
 		return nil, err
 	}
 
+	var resp *tenantv1.ListUsageResponse
 	switch req.GetScope() {
 	case tenantv1.UsageScope_USAGE_SCOPE_USER:
-		return s.listUsageByUser(ctx, userID, admin, req)
+		resp, err = s.listUsageByUser(ctx, userID, admin, req)
 	case tenantv1.UsageScope_USAGE_SCOPE_TEAM:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "team usage is admin-only")
 		}
-		return s.listUsageByTeam(ctx, req)
+		resp, err = s.listUsageByTeam(ctx, req)
 	case tenantv1.UsageScope_USAGE_SCOPE_AGENT:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "agent usage is admin-only")
 		}
-		return s.listUsageByAgent(ctx, req)
+		resp, err = s.listUsageByAgent(ctx, req)
 	case tenantv1.UsageScope_USAGE_SCOPE_MISSION:
 		if !admin {
 			return nil, status_grpc.Error(codes.PermissionDenied, "mission usage is admin-only")
 		}
-		return s.listUsageByMission(ctx, req)
+		resp, err = s.listUsageByMission(ctx, req)
+	default:
+		return nil, status_grpc.Error(codes.InvalidArgument, "scope must be user, team, agent, or mission")
 	}
-	return nil, status_grpc.Error(codes.InvalidArgument, "scope must be user, team, agent, or mission")
+	if err != nil {
+		return nil, err
+	}
+
+	// The token is bound to the tenant, the scope, the time range and the
+	// filter that the handler really applies. A non-admin always gets the own
+	// rows. The agent and mission scopes apply no filter.
+	filter := ""
+	switch req.GetScope() {
+	case tenantv1.UsageScope_USAGE_SCOPE_USER:
+		filter = req.GetSubjectFilter()
+		if !admin {
+			filter = userID
+		}
+	case tenantv1.UsageScope_USAGE_SCOPE_TEAM:
+		filter = req.GetSubjectFilter()
+	case tenantv1.UsageScope_USAGE_SCOPE_UNSPECIFIED, tenantv1.UsageScope_USAGE_SCOPE_AGENT, tenantv1.UsageScope_USAGE_SCOPE_MISSION:
+	}
+	page, err := pageOf(s.pageKeys, "tenant-usage", req.GetPageSize(), req.GetPageToken(), tenantID,
+		req.GetScope().String(), filter,
+		strconv.FormatInt(req.GetStartTimeUnix(), 10), strconv.FormatInt(req.GetEndTimeUnix(), 10))
+	if err != nil {
+		return nil, err
+	}
+	// The position of a row is its subject id, which is unique in a scope.
+	rows := resp.GetRows()
+	slices.SortFunc(rows, func(a, b *tenantv1.UsageRow) int { return strings.Compare(a.GetSubjectId(), b.GetSubjectId()) })
+	rows, last, more := pagetoken.KeysetPage(rows, (*tenantv1.UsageRow).GetSubjectId, page.after, page.hasAfter, page.limit)
+	resp.Rows = rows
+	resp.NextPageToken = page.next(last, more)
+	return resp, nil
 }
 
 // listUsageByUser reads per-user budget counters. Non-admins see only

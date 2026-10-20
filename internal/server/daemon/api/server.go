@@ -311,6 +311,10 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 4.9).
 	auditQuery auditQueryIface
 
+	// pageKeys derives the signers of the page tokens of the list RPCs (ADR-0028, rule 3).
+	// Wired via WithPageKeys.
+	pageKeys *pagetoken.Keys
+
 	// idpAdminClient is the vendor-neutral IdP admin interface used by
 	// TenantAdminService agent-identity RPCs. May be nil; when nil the
 	// agent-identity RPCs return codes.Unavailable.
@@ -426,7 +430,7 @@ type modelGateInvalidator interface {
 // uses from audit.Query. Pluggable so tests can return deterministic
 // data without spinning up Postgres.
 type auditQueryIface interface {
-	List(ctx context.Context, tenantID string, filters audit.Filters, limit, offset int) ([]audit.PgEntry, int, error)
+	ListAfter(ctx context.Context, tenantID string, filters audit.Filters, after string, limit int) ([]audit.PgEntry, bool, error)
 }
 
 // missionDraftStoreIface is the narrow interface the DaemonServer uses for
@@ -434,7 +438,7 @@ type auditQueryIface interface {
 // mock without spinning up Redis.
 type missionDraftStoreIface interface {
 	Save(ctx context.Context, tenantID, name, cueSource, draftID, missionDefinitionID string) (string, error)
-	List(ctx context.Context, tenantID string) ([]*missiondraft.MissionDraft, error)
+	ListPage(ctx context.Context, tenantID, after string, limit int) ([]*missiondraft.MissionDraft, string, error)
 	Get(ctx context.Context, tenantID, draftID string) (*missiondraft.MissionDraft, error)
 	Delete(ctx context.Context, tenantID, draftID string) error
 }

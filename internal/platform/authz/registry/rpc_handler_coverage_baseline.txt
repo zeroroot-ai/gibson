@@ -69,15 +69,12 @@
 /gibson.tenant.v1.MembershipService/GetReservedNames
 /gibson.tenant.v1.MembershipService/RemoveTeamMember
 /gibson.tenant.v1.MembershipService/SetTeamAdmin
-/gibson.tenant.v1.ModelAccessService/ListModelResolutionEvents
 /gibson.tenant.v1.ProviderService/ListProviderModels
 /gibson.tenant.v1.TenantService/DeleteMissionDraft
 /gibson.tenant.v1.TenantService/GetMissionDraft
 /gibson.tenant.v1.TenantService/GetOnboardingState
-/gibson.tenant.v1.TenantService/ListMissionDrafts
 /gibson.tenant.v1.TenantService/SaveMissionDraft
 /gibson.tenant.v1.TenantService/UpdateOnboardingState
-/gibson.tenant.v1.UsageService/ListUsage
 /gibson.tenant.v1.UserService/UpdateUserOnboardingState
 /gibson.tool.v1.ToolService/GetDescriptor
 /gibson.tool.v1.ToolService/StreamExecute

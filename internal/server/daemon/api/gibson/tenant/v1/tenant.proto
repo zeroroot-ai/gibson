@@ -380,6 +380,11 @@ message SaveMissionDraftResponse {
 // ListMissionDraftsRequest queries the saved drafts for a tenant.
 message ListMissionDraftsRequest {
   string tenant_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // page_size is the largest number of drafts on one page. Zero means 100.
+  int32 page_size = 2 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page of the same
+  // query. Empty for the first page.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
 
 // MissionDraft carries the metadata for a saved mission draft.
@@ -394,6 +399,8 @@ message MissionDraft {
 // ListMissionDraftsResponse carries the list of mission drafts for a tenant.
 message ListMissionDraftsResponse {
   repeated MissionDraft drafts = 1;
+  // next_page_token is empty on the last page.
+  string next_page_token = 2;
 }
 
 // GetMissionDraftRequest fetches a single draft's full content.

@@ -81,6 +81,7 @@ func TestListAccess_ShowsTheDefaultTenantGrant(t *testing.T) {
 		allow("user:"+testViewerSubject, "admin", "tenant:acme").
 		withObjects("tenant:acme#member", "can_use", "provider", "provider:acme/anthropic", "provider:victim-co/openai", "provider:anthropic")
 	srv := &DaemonServer{logger: testSlogLogger, authorizer: a}
+	srv.WithPageKeys(testPageKeys(t))
 
 	resp, err := srv.ListAccess(missionViewerCtx(), &tenantv1.ListAccessRequest{
 		SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
