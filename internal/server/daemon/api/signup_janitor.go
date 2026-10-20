@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 )
 
 // signupJanitorInterval is how often the sweep runs. Rows self-describe their
@@ -53,54 +55,70 @@ func (s *DaemonServer) RunSignupJanitor(ctx context.Context) {
 }
 
 func (s *DaemonServer) sweepSignupVerifications(ctx context.Context) {
+	// The two steps are independent: a failed purge must not stop the expiry
+	// of a registration that holds a workspace name.
 	expired, deleted, err := s.signupVerifications.PurgeExpired(ctx)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "signup janitor: sweep failed", "error", err.Error())
-		return
-	}
-	if expired > 0 || deleted > 0 {
+	} else if expired > 0 || deleted > 0 {
 		s.logger.InfoContext(ctx, "signup janitor: swept signup_verification",
 			"expired", expired, "deleted", deleted)
 	}
-	s.expireStalePendingRegistrations(ctx)
+	// Only the approval rung has registrations that wait for a decision. The
+	// daemon refuses to start on that rung without the identity provider
+	// client (grpc.go), so the client is present here.
+	if s.signupPolicy == signup.PolicyApproval {
+		s.expireStalePendingRegistrations(ctx)
+	}
 }
 
 // signupJanitorDecider names the janitor in the audit record of a registration
-// it rejects.
+// it expires.
 const signupJanitorDecider = "system:signup-janitor"
 
-// expireStalePendingRegistrations rejects each registration that waited past
-// SignupRegistrationTTL and frees its workspace name (gibson#1191).
+// expireStalePendingRegistrations frees the workspace name of each
+// registration that waited past SignupRegistrationTTL (gibson#1191).
 //
-// It takes the same steps as AdminRejectRegistration: claim the decision, write
-// the audit record, remove the workspace org. The claim has the one-decision
-// predicate, so an administrator who decides the row at the same moment wins or
-// loses cleanly and the row is never decided twice.
+// The order never deletes the org before the claim. The claim moves the row to
+// 'expiring' with the one-decision predicate, so an administrator who decides
+// the row at the same moment wins or loses cleanly. The org is then removed,
+// and only after that the row becomes 'rejected'. A failed removal leaves the
+// row 'expiring', and the next sweep retries it.
 func (s *DaemonServer) expireStalePendingRegistrations(ctx context.Context) {
-	if s.idpAdminClient == nil {
-		return
-	}
-	rows, err := s.signupVerifications.ListExpiredPendingApprovals(ctx, SignupApprovalPageSize)
+	rows, err := s.signupVerifications.ListExpiringRegistrations(ctx, SignupApprovalPageSize)
 	if err != nil {
-		s.logger.ErrorContext(ctx, "signup janitor: listing expired registrations failed", "error", err.Error())
+		s.logger.ErrorContext(ctx, "signup janitor: listing expiring registrations failed", "error", err.Error())
 		return
 	}
 	for _, r := range rows {
-		row, err := s.signupVerifications.RejectRegistration(ctx, r.ID, signupJanitorDecider)
-		if err != nil {
-			// Not found means an administrator decided it first.
-			if !errors.Is(err, ErrSignupVerificationNotFound) {
-				s.logger.ErrorContext(ctx, "signup janitor: rejecting an expired registration failed",
-					"registration_id", r.ID, "error", err.Error())
+		row := r
+		if r.Status != signupStatusExpiring {
+			claimed, err := s.signupVerifications.BeginExpiry(ctx, r.ID, signupJanitorDecider)
+			if err != nil {
+				// Not found means an administrator decided it first.
+				if !errors.Is(err, ErrSignupVerificationNotFound) {
+					s.logger.ErrorContext(ctx, "signup janitor: claiming an expired registration failed",
+						"registration_id", r.ID, "error", err.Error())
+				}
+				continue
 			}
+			row = claimed
+			if err := s.recordRegistrationDecision(ctx, signupJanitorDecider, row,
+				"signup_registration.expired", "no decision before the registration expired", uuid.NewString()); err != nil {
+				s.logger.ErrorContext(ctx, "signup janitor: the audit record of an expiry could not be written",
+					"registration_id", row.ID, "error", err.Error())
+			}
+		}
+		if err := s.releaseWorkspaceOrg(ctx, row); err != nil {
+			s.logger.ErrorContext(ctx, "signup janitor: could not remove the workspace org; it retries on the next sweep",
+				"registration_id", row.ID, "error", err.Error())
 			continue
 		}
-		if err := s.recordRegistrationDecision(ctx, signupJanitorDecider, row,
-			"signup_registration.expired", "no decision before the registration expired", uuid.NewString()); err != nil {
-			s.logger.ErrorContext(ctx, "signup janitor: the audit record of an expiry could not be written",
+		if err := s.signupVerifications.CompleteExpiry(ctx, row.ID); err != nil {
+			s.logger.ErrorContext(ctx, "signup janitor: could not finish an expiry; it retries on the next sweep",
 				"registration_id", row.ID, "error", err.Error())
+			continue
 		}
-		s.dropRejectedWorkspace(ctx, row)
 		s.logger.InfoContext(ctx, "signup janitor: expired registration rejected, workspace name freed",
 			"registration_id", row.ID)
 	}

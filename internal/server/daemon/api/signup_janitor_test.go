@@ -17,6 +17,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/zeroroot-ai/gibson/internal/platform/idp"
 )
 
 // TestRunSignupJanitor_SweepsOnceThenStopsOnCancellation proves the two
@@ -119,5 +121,64 @@ func TestSweep_ExpiredPendingRegistrationFreesItsWorkspaceName(t *testing.T) {
 	}
 	if !audited {
 		t.Error("an expiry must leave an audit record naming the janitor")
+	}
+}
+
+// TestSweep_FailedOrgRemovalIsRetried proves the name is never held forever:
+// a removal that fails once leaves the row 'expiring', and the next sweep
+// finishes it (gibson#1191).
+func TestSweep_FailedOrgRemovalIsRetried(t *testing.T) {
+	h, auditWriter := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+
+	h.idp.deleteOrgErr = errors.New("zitadel down")
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusExpiring {
+		t.Fatalf("status after a failed removal = %q, want %q", got, signupStatusExpiring)
+	}
+
+	h.idp.deleteOrgErr = nil
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusRejected {
+		t.Fatalf("status after the retry = %q, want %q", got, signupStatusRejected)
+	}
+	if len(h.idp.deletedOrgs) != 2 {
+		t.Fatalf("deleted orgs = %v, want the removal tried twice", h.idp.deletedOrgs)
+	}
+	var records int
+	for _, ev := range auditWriter.events {
+		if ev.Action == "signup_registration.expired" {
+			records++
+		}
+	}
+	if records != 1 {
+		t.Errorf("expiry audit records = %d, want 1 (a retry writes none)", records)
+	}
+}
+
+// An org that is already gone counts as removed.
+func TestSweep_OrgAlreadyGoneCountsAsRemoved(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+
+	h.idp.deleteOrgErr = idp.ErrNotFound
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusRejected {
+		t.Fatalf("status = %q, want %q", got, signupStatusRejected)
+	}
+}
+
+// A failed purge must not stop the expiry step.
+func TestSweep_PurgeFailureDoesNotSkipExpiry(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+
+	h.store.purgeErr = errors.New("connection reset")
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusRejected {
+		t.Fatalf("status = %q, want %q even though the purge failed", got, signupStatusRejected)
 	}
 }

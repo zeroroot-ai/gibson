@@ -57,7 +57,9 @@ type signupVerificationStore interface {
 	// The admin-approval registration rung (ADR-0074, gibson#22).
 	IssuePendingApproval(ctx context.Context, p IssueParams, ownerUserID string) (SignupVerification, error)
 	ListPendingApprovals(ctx context.Context, offset, limit int) ([]SignupVerification, error)
-	ListExpiredPendingApprovals(ctx context.Context, limit int) ([]SignupVerification, error)
+	ListExpiringRegistrations(ctx context.Context, limit int) ([]SignupVerification, error)
+	BeginExpiry(ctx context.Context, id, decidedBy string) (SignupVerification, error)
+	CompleteExpiry(ctx context.Context, id string) error
 	ClaimApproval(ctx context.Context, id, decidedBy string) (SignupVerification, error)
 	RejectRegistration(ctx context.Context, id, decidedBy string) (SignupVerification, error)
 	ReleaseApproval(ctx context.Context, id string) error

@@ -287,11 +287,14 @@ func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssuePa
 	return m.rows[id].SignupVerification, nil
 }
 
-func (m *memVerificationStore) ListExpiredPendingApprovals(_ context.Context, limit int) ([]SignupVerification, error) {
+func (m *memVerificationStore) ListExpiringRegistrations(_ context.Context, limit int) ([]SignupVerification, error) {
 	var out []SignupVerification
 	for _, r := range m.rows {
-		if r.status == signupStatusPendingApproval && !r.ExpiresAt.After(m.now()) {
-			out = append(out, r.SignupVerification)
+		due := r.status == signupStatusPendingApproval && !r.ExpiresAt.After(m.now())
+		if due || r.status == signupStatusExpiring {
+			row := r.SignupVerification
+			row.Status = r.status
+			out = append(out, row)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -299,6 +302,20 @@ func (m *memVerificationStore) ListExpiredPendingApprovals(_ context.Context, li
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+func (m *memVerificationStore) BeginExpiry(_ context.Context, id, decidedBy string) (SignupVerification, error) {
+	if r, ok := m.rows[id]; ok && r.ExpiresAt.After(m.now()) {
+		return SignupVerification{}, ErrSignupVerificationNotFound
+	}
+	return m.decide(id, decidedBy, signupStatusExpiring)
+}
+
+func (m *memVerificationStore) CompleteExpiry(_ context.Context, id string) error {
+	if r, ok := m.rows[id]; ok && r.status == signupStatusExpiring {
+		r.status = signupStatusRejected
+	}
+	return nil
 }
 
 func (m *memVerificationStore) ListPendingApprovals(_ context.Context, offset, limit int) ([]SignupVerification, error) {

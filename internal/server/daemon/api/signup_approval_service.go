@@ -435,25 +435,35 @@ func (s *DaemonServer) AdminRejectRegistration(ctx context.Context, req *tenantv
 // existed has its account in the platform org: that org stays, and the
 // account stays deactivated, as before.
 func (s *DaemonServer) dropRejectedWorkspace(ctx context.Context, row SignupVerification) {
+	if err := s.releaseWorkspaceOrg(ctx, row); err != nil {
+		s.logger.ErrorContext(ctx,
+			"AdminRejectRegistration: could not remove the workspace org of the refused registration; remove it by hand",
+			"registration_id", row.ID, "owner_user_id", row.OwnerUserID, "error", err.Error())
+	}
+}
+
+// releaseWorkspaceOrg removes the tenant org of a registration that will not be
+// provisioned. An org that is already gone counts as removed, so a retry after
+// a partial failure succeeds.
+func (s *DaemonServer) releaseWorkspaceOrg(ctx context.Context, row SignupVerification) error {
 	if row.OwnerUserID == "" {
-		return
+		return nil
 	}
 	ctx = context.WithoutCancel(ctx)
 	orgID, err := s.idpAdminClient.OrgOfUser(ctx, row.OwnerUserID)
+	if errors.Is(err, idp.ErrNotFound) {
+		return nil
+	}
 	if err != nil {
-		s.logger.ErrorContext(ctx,
-			"AdminRejectRegistration: could not resolve the org of the refused owner; remove the workspace by hand",
-			"registration_id", row.ID, "owner_user_id", row.OwnerUserID, "error", err.Error())
-		return
+		return fmt.Errorf("resolve the org of the owner: %w", err)
 	}
 	if orgID == "" || orgID == os.Getenv(envIDPZitadelOrgID) {
-		return
+		return nil
 	}
-	if err := s.idpAdminClient.DeleteOrganization(ctx, orgID); err != nil {
-		s.logger.ErrorContext(ctx,
-			"AdminRejectRegistration: could not remove the workspace org of the refused registration; remove it by hand",
-			"registration_id", row.ID, "org_id", orgID, "error", err.Error())
+	if err := s.idpAdminClient.DeleteOrganization(ctx, orgID); err != nil && !errors.Is(err, idp.ErrNotFound) {
+		return fmt.Errorf("delete org %s: %w", orgID, err)
 	}
+	return nil
 }
 
 // signupDeciderID returns the acting administrator's subject. A decision with

@@ -1253,12 +1253,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			errors.New("state client not configured")); err != nil {
 			return nil, err
 		}
-
-		// Age out abandoned verification rows. Cancellation via ctx. The
-		// store is wired above exactly when the platform database is set.
-		if d.platformDB != nil {
-			go daemonSvc.RunSignupJanitor(ctx)
-		}
 	}
 
 	// ResetUserMFA (hosted#206): wired unconditionally, unlike the signup
@@ -1312,11 +1306,24 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if idpErr != nil {
 		return nil, fmt.Errorf("daemon: IdP admin client init failed: %w", idpErr)
 	}
+	if idpClient == nil && approvalSignup {
+		// The approval rung creates an org and an owner at registration and
+		// removes them when a registration is refused or expires. Without the
+		// client none of that can work.
+		return nil, fmt.Errorf("daemon: %s is set to the approval rung but the IdP admin client is not configured (GIBSON_IDP_PROVIDER)", signup.ConfigKnob)
+	}
 	if idpClient != nil {
 		daemonSvc.WithIdPAdminClient(idpClient)
 		d.logger.Info(ctx, "IdP admin client wired into TenantService")
 	} else {
 		d.logger.Info(ctx, "IdP admin client not configured (GIBSON_IDP_PROVIDER not set); TenantService agent-identity RPCs will return Unavailable")
+	}
+	// Age out abandoned verification rows and expire stale pending
+	// registrations. Cancellation via ctx. It starts here, after the IdP admin
+	// client is wired, because the expiry removes workspace orgs through it.
+	// The store is wired above exactly when the platform database is set.
+	if d.platformDB != nil {
+		go daemonSvc.RunSignupJanitor(ctx)
 	}
 	// tenantrole.Syncer (ADR-0093): the one writer of tenant-role tuples.
 	// SetTenantRole, TransferOwnership and AcceptInvitation are Unavailable
