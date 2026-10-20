@@ -167,7 +167,7 @@ func shortTargetWait(t *testing.T) {
 // The minter of a claimed fork mints a grant for the task of the dispatch,
 // and refuses before the daemon has a key or for a dispatch without scope.
 func TestNewForkGrantMinter(t *testing.T) {
-	d := ForkDispatch{SandboxID: "s", Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1"}
+	d := ForkDispatch{SandboxID: "s", Tenant: "acme", AgentName: "zerocool", MissionID: "m1", MissionRunID: "r1", TaskID: "t1"}
 	m := testMinter(t)
 	tok, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return m }).MintForkGrant(context.Background(), d)
 	if err != nil || tok == "" {

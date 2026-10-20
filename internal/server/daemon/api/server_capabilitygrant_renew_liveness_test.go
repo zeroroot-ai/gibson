@@ -49,7 +49,7 @@ func (v stubVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
 // liveLookup answers the run-liveness question from a fixed set.
 type liveLookup struct{ live map[string]bool }
 
-func (l liveLookup) IsMissionLive(missionID string) bool { return l.live[missionID] }
+func (l liveLookup) IsMissionRunLive(missionID, _ string) bool { return l.live[missionID] }
 
 func renewTestClaims() sdkcg.Claims {
 	return sdkcg.Claims{
@@ -258,5 +258,48 @@ func TestRenewCapabilityGrant_KeepsTheMissionRun(t *testing.T) {
 	}
 	if got := capabilitygrant.MissionRunOf(resp.GetCapabilityGrant()); got != "run-5" {
 		t.Fatalf("renewed grant mrid = %q, want run-5", got)
+	}
+}
+
+// runLookup knows one live run of one mission.
+type runLookup struct{ mission, run string }
+
+func (l runLookup) IsMissionRunLive(missionID, runID string) bool {
+	return missionID == l.mission && (runID == "" || runID == l.run)
+}
+
+// A grant of run 1 does not renew while only run 2 of the record is live
+// (gibson#1235). A grant of the live run renews.
+func TestRenewCapabilityGrant_RefusesTheGrantOfAnEndedRun(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	mint := func(run string) string {
+		tok, mintErr := m.Mint(capabilitygrant.MintRequest{
+			Subject: claims.Subject, Tenant: claims.Tenant.String(), MissionID: claims.MissionID,
+			TaskID: claims.TaskID, MissionRunID: run, AllowedRPCs: claims.AllowedRPCs, RecipientClass: "agent",
+		})
+		if mintErr != nil {
+			t.Fatalf("mint: %v", mintErr)
+		}
+		return tok
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: claims})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(runLookup{mission: "m1", run: "run-2"})
+
+	old := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", mint("run-1")))
+	_, err = s.RenewCapabilityGrant(old, renewRequest())
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("a grant of run 1 while run 2 is live: err = %v, want FailedPrecondition", err)
+	}
+	live := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", mint("run-2")))
+	if _, err = s.RenewCapabilityGrant(live, renewRequest()); err != nil {
+		t.Fatalf("a grant of the live run must renew: %v", err)
 	}
 }

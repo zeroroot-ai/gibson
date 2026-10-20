@@ -139,10 +139,7 @@ func (s *HarnessCallbackService) refuseWorkerClose(ctx context.Context, info *ha
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	runID := info.GetMissionRunId()
-	if runID == "" {
-		runID = info.GetTaskId()
-	}
+	runID := callerRun(ctx, info)
 	if runID == "" {
 		// A caller with no run backs no member.
 		return nil

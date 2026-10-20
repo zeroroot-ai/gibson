@@ -269,11 +269,22 @@ func TestCloseJob_RefusalsBeforeTheMemberLookup(t *testing.T) {
 		}
 	})
 
-	t.Run("the run of a member under the name task_id", func(t *testing.T) {
+	t.Run("the run of a member under the name mission_run_id", func(t *testing.T) {
 		driver := &fakeJobDriver{}
 		s := driverService(t, driver, jobs, liveMembers())
 		_, err := s.CloseJob(memberCtx("acme"), &harnesspb.CloseJobRequest{
-			Context: &harnesspb.ContextInfo{TaskId: "run-1"}, JobId: "job-1",
+			Context: &harnesspb.ContextInfo{MissionRunId: "run-1"}, JobId: "job-1",
+		})
+		if status.Code(err) != codes.PermissionDenied || len(driver.closed) != 0 {
+			t.Fatalf("err = %v, closes = %d; want PermissionDenied and no close", err, len(driver.closed))
+		}
+	})
+
+	t.Run("the run that the verified grant names", func(t *testing.T) {
+		driver := &fakeJobDriver{}
+		s := driverService(t, driver, jobs, liveMembers())
+		_, err := s.CloseJob(withGrantMissionRun(memberCtx("acme"), "run-1"), &harnesspb.CloseJobRequest{
+			Context: &harnesspb.ContextInfo{}, JobId: "job-1",
 		})
 		if status.Code(err) != codes.PermissionDenied || len(driver.closed) != 0 {
 			t.Fatalf("err = %v, closes = %d; want PermissionDenied and no close", err, len(driver.closed))

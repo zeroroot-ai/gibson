@@ -359,14 +359,14 @@ func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (str
 	if minter == nil {
 		return "", errors.New("harness: the daemon has no grant minter yet")
 	}
-	if d.Tenant == "" || d.MissionID == "" || d.MissionRunID == "" || d.AgentName == "" {
-		return "", errors.New("harness: the fork dispatch lacks the tenant, the mission, the run or the agent")
+	if d.Tenant == "" || d.MissionID == "" || d.MissionRunID == "" || d.AgentName == "" || d.TaskID == "" {
+		return "", errors.New("harness: the fork dispatch lacks the tenant, the mission, the run, the task or the agent")
 	}
 	tok, err := minter.Mint(capabilitygrant.MintRequest{
 		Subject:        "component:agent:" + d.AgentName,
 		Tenant:         d.Tenant,
 		MissionID:      d.MissionID,
-		TaskID:         d.MissionRunID,
+		TaskID:         d.TaskID,
 		MissionRunID:   d.MissionRunID,
 		RecipientClass: "agent",
 		AllowedRPCs:    taskGrantAllowedRPCs(),

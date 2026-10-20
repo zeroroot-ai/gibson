@@ -250,16 +250,3 @@ func TestGetHarness_RefusesACallbackOfAnotherTask(t *testing.T) {
 	require.NoError(t, err)
 	assert.Same(t, a, got)
 }
-
-// An agent that fills its context from the grant sends the run as the task. The
-// registry treats that as a callback with no task (gibson#1235).
-func TestCallbackHarnessRegistry_TheRunAsTaskIsNoTask(t *testing.T) {
-	registry := NewCallbackHarnessRegistry()
-	only := newRunHarness("run-1")
-	only.taskID = "task-a"
-	mustRegister(t, registry, "m1", "recon", only)
-
-	got, err := registry.Lookup("m1", "recon", "run-1", "run-1")
-	require.NoError(t, err)
-	assert.Same(t, only, got)
-}

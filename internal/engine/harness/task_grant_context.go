@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -34,4 +35,22 @@ func withTaskGrantClaims(ctx context.Context, claims sdkcg.Claims) context.Conte
 func TaskGrantClaimsFromContext(ctx context.Context) (sdkcg.Claims, bool) {
 	claims, ok := ctx.Value(taskGrantContextKey{}).(sdkcg.Claims)
 	return claims, ok
+}
+
+type grantRunContextKey struct{}
+
+// withGrantMissionRun records the mission run that the verified grant names.
+func withGrantMissionRun(ctx context.Context, run string) context.Context {
+	return context.WithValue(ctx, grantRunContextKey{}, run)
+}
+
+// callerRun returns the mission run of a callback. The run that the verified
+// grant names wins, because the caller cannot forge it. A request with no grant
+// names its run in the context of the request. The scope check has already
+// refused a request whose run differs from the run of its grant.
+func callerRun(ctx context.Context, info *harnesspb.ContextInfo) string {
+	if run, _ := ctx.Value(grantRunContextKey{}).(string); run != "" {
+		return run
+	}
+	return info.GetMissionRunId()
 }

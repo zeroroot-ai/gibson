@@ -933,7 +933,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	// The LLM slot pins of the node go on the work item, so an agent served
 	// with sdk.ServeAgent gets them on its completions (gibson#1203).
 	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "agent", name, component.WorkTypeAgentExecute, payload, nil,
-		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true})
+		WorkSlotPins(task.SlotOverrides), info, waitPolicy{bound: task.Timeout, livenessBounded: true}, task.ID.String())
 	if err != nil {
 		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
 			"agent": name, "status": "failed", "transport": "work_queue",
@@ -1071,7 +1071,7 @@ func (h *DefaultAgentHarness) callToolViaWorkQueue(
 	// (workCtx, AuthzContext, task CG-JWT, _system config injection, enqueue,
 	// wait) are shared across agent/tool/plugin via dispatchWorkAndWait; this
 	// wrapper only owns the tool-specific proto marshal/unmarshal + metrics.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, info, waitPolicy{})
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "tool", name, "execute_proto", inputJSON, nil, nil, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("tool work queue dispatch failed",
 			"tool", name, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1151,7 +1151,7 @@ func (h *DefaultAgentHarness) callPluginViaWorkQueue(
 	// Kind-uniform work-queue dispatch (gibson#663). The "method" goes in the
 	// work context; everything else (CG-JWT, AuthzContext, _system config
 	// injection, enqueue, wait) is shared via dispatchWorkAndWait.
-	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, info, waitPolicy{})
+	resultBytes, err := h.dispatchWorkAndWait(ctx, tenant, "plugin", name, "query_plugin", payload, map[string]string{"method": method}, nil, info, waitPolicy{}, "")
 	if err != nil {
 		h.logger.Error("plugin work queue dispatch failed",
 			"plugin", name, "method", method, "tenant", tenant, "instance_id", info.InstanceID, "error", err)
@@ -1210,7 +1210,14 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	slotPins map[string]agent.SlotConfig,
 	info component.ComponentInfo,
 	wait waitPolicy,
+	grantTask string,
 ) ([]byte, error) {
+	// The work item ID is also the task of the grant of a tool or a plugin. An
+	// agent dispatch names the task of the node (gibson#1229).
+	workID := fmt.Sprintf("%s-%s-%d", kind, name, time.Now().UnixNano())
+	if grantTask == "" {
+		grantTask = workID
+	}
 	workCtx := map[string]string{
 		"mission_id": h.missionCtx.ID.String(),
 		"agent":      h.missionCtx.CurrentAgent,
@@ -1239,7 +1246,7 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 	}
 
 	// Task-scoped capability-grant JWT for the component's harness callbacks.
-	if cgToken := h.mintCGForWork(name, kind); cgToken != "" {
+	if cgToken := h.mintCGForWork(name, kind, grantTask); cgToken != "" {
 		workCtx["capability_grant"] = cgToken
 	}
 
@@ -1262,7 +1269,6 @@ func (h *DefaultAgentHarness) dispatchWorkAndWait(
 		}
 	}
 
-	workID := fmt.Sprintf("%s-%s-%d", kind, name, time.Now().UnixNano())
 	workItem := component.WorkItem{
 		WorkID:   workID,
 		WorkType: workType,
@@ -2515,7 +2521,7 @@ func (h *DefaultAgentHarness) Resolver() protoresolver.ProtoResolver {
 // agents typically need on harness callbacks; per-component scoping
 // is a future iteration that needs the check-in declaration (ADR-0097)
 // on this code path. Spec: Requirement 13.1, 13.2.
-func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
+func (h *DefaultAgentHarness) mintCGForWork(componentName, kind, taskID string) string {
 	if h.cgMinter == nil {
 		return ""
 	}
@@ -2541,7 +2547,7 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind string) string {
 		CallingAgent:   callingAgent,
 		Tenant:         tenant,
 		MissionID:      h.missionCtx.ID.String(),
-		TaskID:         h.missionCtx.MissionRunID,
+		TaskID:         taskID,
 		MissionRunID:   h.missionCtx.MissionRunID,
 		RecipientClass: kind,
 		AllowedRPCs:    taskGrantAllowedRPCs(),

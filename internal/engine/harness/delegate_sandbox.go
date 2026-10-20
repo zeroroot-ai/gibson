@@ -165,7 +165,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 	// standing (ADR-0116). Reuses the work-item minter with recipient
 	// class "agent", so the sandboxed agent's callback subject matches the
 	// in-process delegation subject exactly.
-	grant := h.mintCGForWork(name, "agent")
+	grant := h.mintCGForWork(name, "agent", task.ID.String())
 
 	taskPayload, marshalErr := protojson.Marshal(agent.TaskToProto(task))
 	if marshalErr != nil {

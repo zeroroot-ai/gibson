@@ -511,7 +511,7 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 	h.missionCtx.CurrentAgent = "alpha"
 	v := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m })
 
-	toolGrant := h.mintCGForWork("nmap", "tool")
+	toolGrant := h.mintCGForWork("nmap", "tool", "work-1")
 	if run := capabilitygrant.MissionRunOf(toolGrant); run != "run-1" {
 		t.Fatalf("tool grant mrid = %q, want run-1", run)
 	}
@@ -519,12 +519,51 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 	if err != nil || caller != "alpha" {
 		t.Fatalf("tool grant: caller = %q, err = %v; want alpha", caller, err)
 	}
-	agentGrant := h.mintCGForWork("zerocool", "agent")
+	agentGrant := h.mintCGForWork("zerocool", "agent", "task-1")
 	if run := capabilitygrant.MissionRunOf(agentGrant); run != "run-1" {
 		t.Fatalf("agent grant mrid = %q, want run-1", run)
 	}
 	_, caller, err = v.VerifyCaller(context.Background(), agentGrant)
 	if err != nil || caller != "" {
 		t.Fatalf("agent grant: caller = %q, err = %v; want none", caller, err)
+	}
+}
+
+// jwtWithRun builds an unsigned three-part token whose payload names the run.
+func jwtWithRun(run string) string {
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT","kid":"k"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(`{"mrid":"` + run + `"}`))
+	return hdr + "." + body + ".sig"
+}
+
+// The mission ID is the same for every run of a record, so a callback that
+// names another run than its grant is refused (gibson#1235).
+func TestCheckTaskGrantScope_AnotherRunIsDenied(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
+	req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "m-1", MissionRunId: "run-2"}}
+	_, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("a callback of run 2 under the grant of run 1 must be PermissionDenied, got %v", err)
+	}
+}
+
+// The run of the verified grant is the run of the callback, whether or not the
+// request names it.
+func TestCheckTaskGrantScope_TheGrantsRunIsTheRunOfTheCallback(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
+	for name, requestRun := range map[string]string{"named": "run-1", "unnamed": ""} {
+		req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "m-1", MissionRunId: requestRun}}
+		ctx, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := callerRun(ctx, req.GetContext()); got != "run-1" {
+			t.Errorf("%s: callerRun = %q, want run-1", name, got)
+		}
+	}
+	// A request with no grant names its run itself.
+	info := &harnesspb.ContextInfo{MissionRunId: "run-9"}
+	if got := callerRun(context.Background(), info); got != "run-9" {
+		t.Errorf("no grant: callerRun = %q, want run-9", got)
 	}
 }

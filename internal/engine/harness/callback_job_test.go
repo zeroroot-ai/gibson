@@ -932,24 +932,24 @@ func TestMemberControl_DropsWhatNobodyTookInTime(t *testing.T) {
 	}
 }
 
-// TestPullJob_TheGrantsTaskIdNamesTheRun: the SDK fills ContextInfo from the
-// member's grant, whose task_id the daemon minted as the run id, so a member
-// that sends task_id and no mission_run_id is the member of that run
-// (gibson#13, run 35485807760).
-func TestPullJob_TheGrantsTaskIdNamesTheRun(t *testing.T) {
+// TestPullJob_TheGrantsRunNamesTheMember: the verified grant of a member names
+// its run in the claim mrid, so a member that sends no mission_run_id is the
+// member of that run. A request with no grant and no run is refused. When both
+// name a run, the scope check has already made them equal (gibson#1235).
+func TestPullJob_TheGrantsRunNamesTheMember(t *testing.T) {
 	jobs := newFakeJobs()
 	jobs.claim = openJob("j-1")
 	s := memberService(t, jobs, liveMembers(), &recordingMinter{})
-	info := &harnesspb.ContextInfo{TaskId: "run-1", MissionId: "bank-1", AgentName: "claude"}
-	res, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: info})
+	info := &harnesspb.ContextInfo{MissionId: "bank-1", AgentName: "claude"}
+	res, err := s.PullJob(withGrantMissionRun(memberCtx("acme"), "run-1"), &harnesspb.PullJobRequest{Context: info})
 	if err != nil {
-		t.Fatalf("PullJob with task_id: %v", err)
+		t.Fatalf("PullJob with the run of the grant: %v", err)
 	}
 	if res.GetJob().GetId() != "j-1" {
 		t.Fatalf("job = %v, want the member's queued job", res.GetJob())
 	}
-	both := &harnesspb.ContextInfo{MissionRunId: "run-1", TaskId: "other", MissionId: "bank-1"}
-	if _, err := s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: both}); err != nil {
-		t.Fatalf("mission_run_id must win when both are set: %v", err)
+	_, err = s.PullJob(memberCtx("acme"), &harnesspb.PullJobRequest{Context: info})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("PullJob with no run: err = %v, want InvalidArgument", err)
 	}
 }

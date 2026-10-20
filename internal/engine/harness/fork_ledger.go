@@ -23,7 +23,9 @@ type ForkDispatch struct {
 	MissionRunID string `json:"mission_run_id"`
 	AgentRunID   string `json:"agent_run_id"`
 	NodeID       string `json:"node_id"`
-	Model        string `json:"model"`
+	// TaskID is the id of the task of the fork. Its grant names it.
+	TaskID string `json:"task_id"`
+	Model  string `json:"model"`
 	// TaskB64 is the base64 protojson of the task of the fork.
 	TaskB64 string `json:"task_b64"`
 }

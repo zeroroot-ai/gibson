@@ -168,12 +168,6 @@ func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID, taskID str
 			return nil, fmt.Errorf("%w: run %s of mission %s, agent %s", ErrCallbackRunMismatch, runID, missionID, agentName)
 		}
 		keys = inRun
-		// A grant names its mission run in the claim task_id, so a callback of an
-		// agent that fills its context from the grant sends the run as the task.
-		// The run is not a task of the fan-out, so the callback names none.
-		if taskID == runID {
-			taskID = ""
-		}
 	} else {
 		runs := map[string]struct{}{}
 		for _, k := range keys {
