@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit/compliance"
 
 	"google.golang.org/grpc"
@@ -23,12 +24,12 @@ import (
 //
 // d.brainRegistry and d.domainPackCatalog must already be constructed by the
 // time this runs (the WorldService registration block builds brainRegistry;
-// newInfrastructure builds domainPackCatalog). Without an authorizer the
-// service is not registered — Unimplemented, never a fail-open catalog.
+// newInfrastructure builds domainPackCatalog). The daemon cannot start
+// without the authorizer or the platform database, so a missing one is an
+// error, and never a service that is silently Unimplemented.
 func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) error {
 	if d.authorizer == nil {
-		d.logger.Warn(ctx, "DomainPackService: no authorizer; not registering")
-		return nil
+		return errors.New("daemon: DomainPackService needs the authorizer")
 	}
 	if d.brainRegistry == nil {
 		return errors.New("daemon: DomainPackService needs the brain registry")
@@ -38,8 +39,7 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) e
 	}
 	imports, err := ontology.NewImportStore(d.platformDB)
 	if err != nil {
-		d.logger.Warn(ctx, "DomainPackService: not registered", "error", err.Error())
-		return nil
+		return fmt.Errorf("daemon: DomainPackService: %w", err)
 	}
 	tenantv1.RegisterDomainPackServiceServer(srv,
 		api.NewDomainPackService(d.brainRegistry, d.domainPackCatalog, d.authorizer, imports))
@@ -51,8 +51,7 @@ func (d *daemonImpl) registerDomainPack(ctx context.Context, srv *grpc.Server) e
 	// platform database.
 	reader, err := compliance.NewReader(d.platformDB, d.domainPackCatalog, api.BrainEnabledPacks{Registry: d.brainRegistry})
 	if err != nil {
-		d.logger.Warn(ctx, "ComplianceService: not registered", "error", err.Error())
-		return nil
+		return fmt.Errorf("daemon: ComplianceService: %w", err)
 	}
 	tenantv1.RegisterComplianceServiceServer(srv, api.NewComplianceService(reader))
 	d.logger.Info(ctx, "ComplianceService registered (ADR-0113)")

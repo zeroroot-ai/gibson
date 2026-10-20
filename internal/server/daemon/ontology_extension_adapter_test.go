@@ -37,10 +37,10 @@ func TestRegisterOntologyExtension_ServesWithBrainRegistry(t *testing.T) {
 	}
 }
 
-// TestRegisterOntologyExtension_SkipsWithoutBrainRegistry mirrors
-// TestRegisterDomainPack_SkipsWithoutBrainRegistry: never register a service
+// TestRegisterOntologyExtension_FailsWithoutBrainRegistry mirrors
+// TestRegisterDomainPack_FailsWithoutBrainRegistry: never register a service
 // backed by a nil registry.
-func TestRegisterOntologyExtension_SkipsWithoutBrainRegistry(t *testing.T) {
+func TestRegisterOntologyExtension_FailsWithoutBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger: testObservabilityLogger(),
 	}

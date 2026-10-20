@@ -90,15 +90,15 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 	}
 }
 
-func TestRegisterDomainPack_SkipsWithoutAuthorizer(t *testing.T) {
+func TestRegisterDomainPack_FailsWithoutAuthorizer(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 	}
 	srv := grpc.NewServer()
 
-	if err := d.registerDomainPack(context.Background(), srv); err != nil {
-		t.Fatalf("registerDomainPack: %v", err)
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without an authorizer")
 	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
@@ -106,7 +106,30 @@ func TestRegisterDomainPack_SkipsWithoutAuthorizer(t *testing.T) {
 	}
 }
 
-func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
+// Without the platform database the import store cannot start, so the
+// registration fails and neither service is silently missing.
+func TestRegisterDomainPack_FailsWithoutPlatformDB(t *testing.T) {
+	d := &daemonImpl{
+		logger:        testObservabilityLogger(),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
+		authorizer:    wiringAuthorizer{},
+	}
+	srv := grpc.NewServer()
+
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without the platform database")
+	}
+
+	info := srv.GetServiceInfo()
+	if _, ok := info[domainPackServiceName]; ok {
+		t.Fatal("DomainPackService must not be registered without the platform database")
+	}
+	if _, ok := info["gibson.tenant.v1.ComplianceService"]; ok {
+		t.Fatal("ComplianceService must not be registered without the platform database")
+	}
+}
+
+func TestRegisterDomainPack_FailsWithoutBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger:     testObservabilityLogger(),
 		authorizer: wiringAuthorizer{},
