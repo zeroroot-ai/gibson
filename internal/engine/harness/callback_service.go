@@ -728,7 +728,17 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 	// would take the run of run 2 (gibson#1217).
 	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName, contextInfo.MissionRunId, contextInfo.TaskId)
 	if err != nil {
-		if errors.Is(err, ErrCallbackRunMismatch) || errors.Is(err, ErrCallbackTaskMismatch) {
+		if errors.Is(err, ErrCallbackTaskMismatch) {
+			s.logger.Warn("callback of another task refused",
+				"mission_id", contextInfo.MissionId,
+				"agent_name", contextInfo.AgentName,
+				"callback_run_id", contextInfo.MissionRunId,
+				"callback_task_id", contextInfo.TaskId,
+				"error", err,
+			)
+			return nil, status.Errorf(codes.FailedPrecondition, "callback refused: %v", err)
+		}
+		if errors.Is(err, ErrCallbackRunMismatch) {
 			s.logger.Warn("callback of another run refused",
 				"mission_id", contextInfo.MissionId,
 				"agent_name", contextInfo.AgentName,

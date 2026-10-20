@@ -317,11 +317,11 @@ func makeRegistryKey(missionID, agentName string) string {
 // the registrations span more than one.
 var ErrCallbackRunMismatch = errors.New("callback does not match one run of the mission")
 
-// ErrHarnessWithoutRun reports a registration of a harness that has no mission
-// run. Every registration belongs to one run, so a lookup can tell the runs of
-// a mission apart (gibson#1217).
 // ErrCallbackTaskMismatch is the error of a callback whose task matches no
 // registration of its agent in the run.
 var ErrCallbackTaskMismatch = errors.New("callback does not match one task of the agent")
 
+// ErrHarnessWithoutRun reports a registration of a harness that has no mission
+// run. Every registration belongs to one run, so a lookup can tell the runs of
+// a mission apart (gibson#1217).
 var ErrHarnessWithoutRun = errors.New("harness has no mission run")

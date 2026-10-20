@@ -213,3 +213,17 @@ func TestCallbackHarnessRegistry_FanOutInstancesKeepTheirOwnHarness(t *testing.T
 	_, err = registry.Lookup("m1", "recon", "run-1", "task-c")
 	require.ErrorIs(t, err, ErrCallbackTaskMismatch)
 }
+
+// A callback that names a task no harness holds gets the harness that serves
+// every task, if the agent has one.
+func TestCallbackHarnessRegistry_UnknownTaskGetsTheNoTaskHarness(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	a, shared := newRunHarness("run-1"), newRunHarness("run-1")
+	a.taskID = "task-a"
+	mustRegister(t, registry, "m1", "recon", shared)
+	mustRegister(t, registry, "m1", "recon", a)
+
+	got, err := registry.Lookup("m1", "recon", "run-1", "task-z")
+	require.NoError(t, err)
+	assert.Same(t, shared, got)
+}
