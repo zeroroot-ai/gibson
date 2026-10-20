@@ -160,6 +160,30 @@ func TestDelegateToAgent_SandboxGetsTheScopeOfItsNode(t *testing.T) {
 	}
 }
 
+// TestDelegateToAgent_SandboxChildHarnessCarriesTheSlotPins: the child harness
+// of a sandboxed agent resolves its LLM slots with the pins of its node, so a
+// pinned Decider or agent slot reaches the model gate with the pin (gibson#1219).
+func TestDelegateToAgent_SandboxChildHarnessCarriesTheSlotPins(t *testing.T) {
+	launcher := &recordingLauncher{outcome: sandboxed.AgentRunResult{SandboxID: "sbx-1"}}
+	resolver := &stubSpecResolver{spec: sandboxed.AgentLaunchSpec{Image: "img", SandboxClass: "agent"}}
+	h := newSandboxDelegateHarness(launcher, resolver, successResultQueue(t), untrustedAgentInstances(), testMinter(t))
+	h.callbackManager = &registrarFake{}
+	var child MissionContext
+	h.factory = func(_ context.Context, mc MissionContext, _ TargetInfo) (AgentHarness, error) {
+		child = mc
+		return h, nil
+	}
+
+	task := agent.NewTask("probe", "goal")
+	task.SlotOverrides = map[string]*agent.SlotConfig{"primary": {Provider: "anthropic", Model: "claude-test"}}
+	_, _ = h.DelegateToAgent(callerCtx(t, "user-1", "zerocool-lab"), "zerocool", task)
+
+	pin := child.NodeSlotOverrides["primary"]
+	if pin == nil || pin.Provider != "anthropic" || pin.Model != "claude-test" {
+		t.Fatalf("child slot pins = %+v; want the pin of the node", child.NodeSlotOverrides)
+	}
+}
+
 // TestDelegateToAgent_SandboxChildHarnessFailureIsReported: when the child
 // harness cannot be built, nothing launches.
 func TestDelegateToAgent_SandboxChildHarnessFailureIsReported(t *testing.T) {
