@@ -100,6 +100,30 @@ func TestStore_ListAndListAll(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+// A page starts after the key, and the query holds the keyset predicate and no
+// OFFSET.
+func TestStore_ListPage(t *testing.T) {
+	ctx := context.Background()
+	store, mock := newMockStore(t)
+	cols := []string{"tenant_id", "connector_id", "phase", "discovered_tools", "last_error"}
+
+	mock.ExpectQuery(`ORDER BY tenant_id, connector_id LIMIT \$1`).WithArgs(2).
+		WillReturnRows(sqlmock.NewRows(cols).
+			AddRow("acme", "gitlab", "Pending", 0, "").
+			AddRow("globex", "slack", "Ready", 0, ""))
+	got, err := store.ListPage(ctx, nil, 2)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+
+	mock.ExpectQuery(`WHERE \(tenant_id, connector_id\) > \(\$2, \$3\)`).WithArgs(2, "globex", "slack").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("initech", "gitlab", "Ready", 0, ""))
+	got, err = store.ListPage(ctx, &PageKey{TenantID: "globex", ConnectorID: "slack"}, 2)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "initech", got[0].TenantID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestStore_ReportStatus(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)

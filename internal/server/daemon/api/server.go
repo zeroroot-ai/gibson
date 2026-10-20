@@ -85,6 +85,10 @@ type DaemonServer struct {
 	// daemon is the daemon instance this server exposes
 	daemon DaemonInterface
 
+	// pageKeys derives the page token key of each operator list RPC. Wired
+	// via WithPageTokenKEK; nil answers Unavailable.
+	pageKeys *pagetoken.Keys
+
 	// targetService backs the target CRUD RPCs (tenant-scoped, UUID-canonical).
 	// Wired via WithTargetService; nil until then (handlers fail Unavailable).
 	targetService *target.Service

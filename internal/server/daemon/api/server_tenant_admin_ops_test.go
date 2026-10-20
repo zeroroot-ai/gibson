@@ -13,6 +13,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
@@ -45,6 +46,7 @@ func newAdminOpsServer(t *testing.T) *DaemonServer {
 	srv.auditLogger = auditLoggerOver(t, &audittest.Recorder{})
 	// Through the setter, as grpc.go wires it.
 	srv.WithProvisionedOwnerInviter(&fakeOwnerInviter{})
+	withTestPageKey(t, srv)
 	return srv
 }
 
@@ -352,10 +354,10 @@ func TestListPendingTenantOps_ReturnsRows(t *testing.T) {
 	srv.platformDB = db
 
 	expectEnsureAdminOpsTable(mock)
-	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set", "audit_record_id"}).
-		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "team", true, "rec-1").
-		AddRow("op-2", "globex", "delete", "", false, "", "", false, "")
-	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,\\s+audit_record_id\\s+FROM tenant_admin_ops").
+	rows := sqlmock.NewRows([]string{"op_id", "tenant_id", "op_type", "display_name", "display_name_set", "owner_email", "tier", "tier_set", "audit_record_id", "created_at"}).
+		AddRow("op-1", "acme", "provision", "Acme Inc", true, "o@acme.test", "team", true, "rec-1", time.Now()).
+		AddRow("op-2", "globex", "delete", "", false, "", "", false, "", time.Now())
+	mock.ExpectQuery("SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,\\s+audit_record_id, created_at\\s+FROM tenant_admin_ops").
 		WillReturnRows(rows)
 
 	resp, err := srv.ListPendingTenantOps(context.Background(), &daemonoperatorv1.ListPendingTenantOpsRequest{})

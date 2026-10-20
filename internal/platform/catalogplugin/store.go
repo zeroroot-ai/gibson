@@ -119,30 +119,50 @@ ORDER BY plugin_id`
 	return out, nil
 }
 
-// ListAll returns every enabled plugin of every tenant, in (tenant, plugin)
-// order. It has no tenant predicate on purpose: only the tenant operator
-// reads it, through an RPC that every other caller is refused.
-func (s *Store) ListAll(ctx context.Context) ([]Plugin, error) {
-	const query = `
+// PageKey is the sort key of one plugin row. A page starts after it.
+type PageKey struct {
+	TenantID string
+	PluginID string
+}
+
+// ListPage returns at most limit enabled plugins of every tenant, in (tenant,
+// plugin) order, after the row that after names. A nil after starts at the
+// first row. It has no tenant predicate on purpose: only the tenant operator
+// reads it, through an RPC that every other caller is refused. The keyset
+// predicate makes a page independent of the rows that arrive or leave between
+// two pages.
+func (s *Store) ListPage(ctx context.Context, after *PageKey, limit int) ([]Plugin, error) {
+	query := `
 SELECT tenant_id, plugin_id, phase, last_error
 FROM   tenant_catalog_plugins
-ORDER BY tenant_id, plugin_id`
-	rows, err := s.db.QueryContext(ctx, query)
+ORDER BY tenant_id, plugin_id
+LIMIT  $1`
+	args := []any{limit}
+	if after != nil {
+		query = `
+SELECT tenant_id, plugin_id, phase, last_error
+FROM   tenant_catalog_plugins
+WHERE  (tenant_id, plugin_id) > ($2, $3)
+ORDER BY tenant_id, plugin_id
+LIMIT  $1`
+		args = append(args, after.TenantID, after.PluginID)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("catalogplugin: ListAll: %w", err)
+		return nil, fmt.Errorf("catalogplugin: ListPage: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	var out []Plugin
+	out := make([]Plugin, 0, limit)
 	for rows.Next() {
 		var p Plugin
 		if err := rows.Scan(&p.TenantID, &p.PluginID, &p.Phase, &p.LastError); err != nil {
-			return nil, fmt.Errorf("catalogplugin: ListAll: scan: %w", err)
+			return nil, fmt.Errorf("catalogplugin: ListPage: scan: %w", err)
 		}
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("catalogplugin: ListAll: %w", err)
+		return nil, fmt.Errorf("catalogplugin: ListPage: %w", err)
 	}
 	return out, nil
 }

@@ -87,22 +87,41 @@ func TestStore_List(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestStore_ListAll(t *testing.T) {
+// A page starts after the key, and the query holds the keyset predicate and no
+// OFFSET.
+func TestStore_ListPage(t *testing.T) {
 	ctx := context.Background()
 	store, mock := newMockStore(t)
+	cols := []string{"tenant_id", "plugin_id", "phase", "last_error"}
 
-	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").
-		WillReturnRows(sqlmock.NewRows([]string{"tenant_id", "plugin_id", "phase", "last_error"}).
+	mock.ExpectQuery(`ORDER BY tenant_id, plugin_id\s+LIMIT\s+\$1`).WithArgs(2).
+		WillReturnRows(sqlmock.NewRows(cols).
 			AddRow("acme", "github", "Ready", "").
 			AddRow("globex", "github", PhasePending, ""))
-	got, err := store.ListAll(ctx)
+	got, err := store.ListPage(ctx, nil, 2)
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, "globex", got[1].TenantID)
 
+	mock.ExpectQuery(`WHERE\s+\(tenant_id, plugin_id\) > \(\$2, \$3\)`).WithArgs(2, "globex", "github").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("globex", "slack", "Ready", ""))
+	got, err = store.ListPage(ctx, &PageKey{TenantID: "globex", PluginID: "github"}, 2)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+
 	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").WillReturnError(errors.New("db down"))
-	_, err = store.ListAll(ctx)
+	_, err = store.ListPage(ctx, nil, 2)
 	require.Error(t, err)
+
+	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").
+		WillReturnRows(sqlmock.NewRows([]string{"tenant_id"}).AddRow("acme"))
+	_, err = store.ListPage(ctx, nil, 2)
+	require.Error(t, err, "a scan failure must return an error")
+
+	mock.ExpectQuery("ORDER BY tenant_id, plugin_id").
+		WillReturnRows(sqlmock.NewRows(cols).AddRow("acme", "github", "Ready", "").RowError(0, errors.New("row")))
+	_, err = store.ListPage(ctx, nil, 2)
+	require.Error(t, err, "a row failure must return an error")
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

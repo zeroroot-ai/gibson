@@ -14,6 +14,7 @@ package api
 import (
 	"context"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
@@ -217,8 +218,8 @@ func TestListPendingTenantProvisioning_SelfHostedDrainsEverything(t *testing.T) 
 
 	expectEnsureTable(mock)
 	rows := sqlmock.NewRows([]string{
-		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id",
-	}).AddRow("acme", "u-2", "owner@acme.test", "Acme Inc", "enterprise-plus", "")
+		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at",
+	}).AddRow("acme", "u-2", "owner@acme.test", "Acme Inc", "enterprise-plus", "", time.Now())
 	mock.ExpectQuery("FROM pending_tenant_provisioning").WillReturnRows(rows)
 
 	resp, err := srv.ListPendingTenantProvisioning(context.Background(),

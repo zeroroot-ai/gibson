@@ -1519,6 +1519,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
 		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
 	}
+	// The page tokens of the operator list RPCs are signed with keys from the
+	// master KEK (ADR-0028, gibson#1261).
+	if err := wireOperatorPageTokens(ctx, daemonSvc, d.keyProvider); err != nil {
+		return nil, err
+	}
 	// The two belief trainer RPCs (ADR-0106, gibson#788). Each one serves only
 	// the trainer identity of the tenant in the request.
 	if d.brainRegistry != nil {

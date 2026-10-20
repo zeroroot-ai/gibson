@@ -28,12 +28,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/sdk/auth"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -294,40 +296,66 @@ func (r *tenantRequestRecord) failed(ctx context.Context, cause error) {
 // application to the Tenant CR (status=pending), in created_at order so a
 // tenant's ops apply in sequence. Operator-only (platform_operator on
 // system_tenant, enforced by ext-authz). The daemon never reads Kubernetes here.
-func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, _ *daemonoperatorv1.ListPendingTenantOpsRequest) (*daemonoperatorv1.ListPendingTenantOpsResponse, error) {
+func (s *DaemonServer) ListPendingTenantOps(ctx context.Context, req *daemonoperatorv1.ListPendingTenantOpsRequest) (*daemonoperatorv1.ListPendingTenantOpsResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
+	after, err := s.pageStart(pageScopePendingTenantOps, req.GetPageToken(), 2)
+	if err != nil {
+		return nil, err
+	}
+	var afterAt time.Time
+	if after != nil {
+		if afterAt, err = parseTimeKey(after[0]); err != nil {
+			return nil, err
+		}
+	}
 	if err := ensureTenantAdminOpsTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	const q = `
+	// The page is the rows after the last row of the previous page, oldest
+	// first. One more row than the page tells whether a next page exists.
+	size := pagetoken.Size(req.GetPageSize())
+	const cols = `
 		SELECT op_id, tenant_id, op_type, display_name, display_name_set, owner_email, tier, tier_set,
-		       audit_record_id
+		       audit_record_id, created_at
 		FROM tenant_admin_ops
-		WHERE status = 'pending'
-		ORDER BY created_at ASC
-	`
-	rows, err := db.QueryContext(ctx, q)
+		WHERE status = 'pending'`
+	const order = `
+		ORDER BY created_at ASC, op_id ASC
+		LIMIT $1`
+	q, args := cols+order, []any{size + 1}
+	if after != nil {
+		q = cols + ` AND (created_at, op_id) > ($2, $3)` + order
+		args = append(args, afterAt, after[1])
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "query tenant_admin_ops: %v", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	out := &daemonoperatorv1.ListPendingTenantOpsResponse{}
+	var createdAt []time.Time
 	for rows.Next() {
 		var op daemonoperatorv1.TenantOp
+		var created time.Time
 		if err := rows.Scan(
 			&op.OpId, &op.TenantId, &op.OpType, &op.DisplayName,
-			&op.DisplayNameSet, &op.OwnerEmail, &op.Tier, &op.TierSet, &op.AuditRecordId,
+			&op.DisplayNameSet, &op.OwnerEmail, &op.Tier, &op.TierSet, &op.AuditRecordId, &created,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan tenant_admin_op row: %v", err)
 		}
 		out.Ops = append(out.Ops, &op)
+		createdAt = append(createdAt, created)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, status.Errorf(codes.Internal, "iterate tenant_admin_op rows: %v", err)
+	}
+	if len(out.Ops) > size {
+		out.Ops = out.Ops[:size]
+		out.NextPageToken = s.pageToken(pageScopePendingTenantOps, timeKey(createdAt[size-1]), out.Ops[size-1].GetOpId())
 	}
 	return out, nil
 }
