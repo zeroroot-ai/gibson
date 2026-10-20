@@ -7,7 +7,7 @@
 # member, the job closes with a verdict, a stranger tenant cannot read it,
 # and the bank scales to zero with no sandbox left behind.
 #
-# Runs on main and on a schedule, never on a pull request (ADR-0080). It feeds
+# Runs on main and on dispatch, never on a pull request (ADR-0080). It feeds
 # the scorecard and blocks nothing.
 #
 # Two things a human must set once, and only a human can set them:
@@ -35,7 +35,7 @@ on:
       - 'internal/server/daemon/**'
       # The daemon's schema and the entitlements reader: a migration that
       # lags a reader failed every ceiling check on main and no run
-      # measured it until the next schedule (gibson#13, #174).
+      # measured it until the next run (gibson#13, #174).
       - 'pkg/platform/migrations/**'
       - 'pkg/billing/entitlements/**'
       - 'internal/platform/bank/**'
@@ -44,10 +44,6 @@ on:
       - 'tests/e2e/bank_test.go'
       - 'tests/e2e/helpers/**'
       - '.github/workflows/exit-test-bank.yml'
-  schedule:
-    # Daily. A dispatch path that isolates today and not tomorrow is the failure
-    # this catches; nothing else exercises it on a real launcher cluster.
-    - cron: '30 5 * * *'
   workflow_dispatch: {}
 
 concurrency:

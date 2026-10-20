@@ -41,10 +41,6 @@ on:
       - '.github/scripts/run-e2e-job.sh'
       - '.github/scripts/e2e-suite-verdict.sh'
       - '.github/workflows/exit-test-e2e-cluster.yml'
-  schedule:
-    # Daily, after the tool-dispatch run. A suite that ran yesterday and not
-    # today is the regression this catches.
-    - cron: '15 7 * * *'
   workflow_dispatch: {}
 
 # One run at a time, and a run that started finishes (gibson#151).

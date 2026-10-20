@@ -10,15 +10,13 @@
 # gibson-executor and stayed invisible to the catalog across two releases while
 # that gate was green (gibson#1675).
 #
-# This runs on a schedule rather than on a pull request, for the same reason the
+# This runs on dispatch rather than on a pull request, for the same reason the
 # exit tests do (ADR-0080): it measures the outside world, not the diff. A PR
 # cannot be responsible for gibson-executor cutting a release an hour later, and
 # putting a registry call on every PR would buy flakiness for no signal.
 name: executor-catalog staleness
 
 on:
-  schedule:
-    - cron: '30 5 * * *' # daily, before the working day
   workflow_dispatch:
 
 permissions:

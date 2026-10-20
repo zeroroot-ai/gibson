@@ -3,13 +3,13 @@ name: CodeQL
 # Epic: cicd-efficiency (board #44), slice S5, gibson#1130. Scanner cadence per
 # docs/architecture/CICD-CONTEXT.md decision #9: authoritative CodeQL analysis
 # runs on merge_group (the pre-merge gate) instead of on every pull_request/push,
-# plus a weekly deep scan. This is a real cut, not a duplicate: `push` here fired
+# plus a scan on dispatch. This is a real cut, not a duplicate: `push` here fired
 # on every commit landed to main, and `pull_request` fired on every PR push --
 # together the single largest per-PR minute cost after the image matrix.
 #
 # Fast per-PR signal is still available for security-critical paths (authz,
 # ext-authz, secrets handling) via a path-filtered pull_request trigger, since a
-# week-long lag on those specific diffs is undesirable even though the
+# lag on those specific diffs is undesirable even though the
 # authoritative gate is merge_group.
 #
 # Queue-entry compat (epic cicd-efficiency, board #44, merge-queue-entry
@@ -21,7 +21,7 @@ name: CodeQL
 # does the same path detection natively (git diff, no third-party action)
 # and the `analyze` job's job-level `if:` decides real-scan-vs-skip. Typical
 # PRs get a fast `skipped` conclusion; authz/ext-authz/secrets-touching PRs
-# still get the real scan; merge_group and the weekly schedule always get
+# still get the real scan; merge_group and workflow_dispatch always get
 # the real scan regardless of paths.
 on:
   pull_request:
@@ -29,14 +29,12 @@ on:
   # report against the transient `gh-readonly-queue/...` ref, and code scanning
   # retires an alert only when a newer analysis for the same category and ref
   # omits it. Without this trigger an alert already fixed in the source sat
-  # open for up to a week, until the weekly cron. This restores the one `push`
+  # open until the next scan. This restores the one `push`
   # trigger that the scanner-cadence cut above removed (coordinator decision,
   # 2026-10-13): the closing of an alert at merge is worth one scan per merge.
   push:
     branches: [main]
   merge_group:
-  schedule:
-    - cron: "0 8 * * 2"
   # Forces a scan of `refs/heads/main` on demand.
   workflow_dispatch:
 
@@ -70,11 +68,11 @@ env:
 
 jobs:
   # ---- cheap path-detection (pull_request only) ----
-  # merge_group and schedule always get the real scan, so this only needs to
+  # merge_group and workflow_dispatch always get the real scan, so this only needs to
   # run -- and only needs to gate anything -- on pull_request.
   changes:
     name: detect security-critical path changes
-    # lane-exception: change detection, not a gate. merge_group and schedule
+    # lane-exception: change detection, not a gate. merge_group and workflow_dispatch
     # always get the real scan, so there is nothing to compute there.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -109,12 +107,12 @@ jobs:
     name: CodeQL
     needs: changes
     # always() overrides the implicit success()-on-needs gate: `changes` is
-    # itself skipped on merge_group/schedule. The job always runs, so the
+    # itself skipped on merge_group/workflow_dispatch. The job always runs, so the
     # check `CodeQL / CodeQL (go)` always reports. A skipped calling job
     # reports only the name `CodeQL`, and the required check then waits for
     # ever. When `changes` fails, the job skips and the check stays absent.
     #
-    # `scan` is true on merge_group and schedule. On a pull_request it is true
+    # `scan` is true on merge_group and workflow_dispatch. On a pull_request it is true
     # only when the diff touches internal/platform/authz/, cmd/ext-authz/ or a
     # secrets/ path. With `scan: false` the shared job skips each step and
     # succeeds.

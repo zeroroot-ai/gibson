@@ -4,7 +4,7 @@
 #   brand-guard        fails on a retired brand string anywhere in the tracked tree
 #   link-check         fails on a broken link in any Markdown file
 #   exit-tests-off-pr  fails when an exit-test workflow has a pull request or
-#                      merge queue trigger, or has no schedule (ADR-0080)
+#                      merge queue trigger (ADR-0080)
 #
 # The reusables live in zeroroot-ai/.github. Neither needs a secret: the
 # checkout uses the calling repository's own GITHUB_TOKEN, and the scanners

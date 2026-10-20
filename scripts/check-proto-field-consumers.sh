@@ -33,11 +33,11 @@
 # those modules cannot import gibson's internal packages, so a generated copy
 # of the same message is the only way they could read it.
 #
-# WHY NIGHTLY, NOT THE MERGE GATE
+# WHY ON DISPATCH, NOT THE MERGE GATE
 #
 # The consumer set spans seven repositories. A PR gate would need every
-# checkout at every merge. ADR-0094 puts this layer on main and on a
-# schedule (.github/workflows/proto-field-consumers.yml). The fixture that
+# checkout at every merge. ADR-0094 puts this layer on main and on
+# dispatch (.github/workflows/proto-field-consumers.yml). The fixture that
 # proves the decision half can fail runs on every PR
 # (scripts/__tests__/check-proto-field-consumers.test.sh).
 #

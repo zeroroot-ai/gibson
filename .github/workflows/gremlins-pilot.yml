@@ -10,13 +10,12 @@
 # suite. A surviving mutant is a test gap: the wrong behavior produced
 # the same test outcome. Mutation score = killed/(killed+survived).
 #
-# Why monthly + not per-PR:
+# Why on demand + not per-PR:
 #   - gremlins runs the test suite once per mutant; ~5-15 min on the
 #     authz registry alone. Per-PR latency is unacceptable.
-#   - Mutation findings are slowly-drifting tech debt; monthly cadence
-#     matches their actual change rate. Cadence pruned weekly→monthly by
-#     .github#201 (cicd-efficiency epic, board #44) — workflow_dispatch
-#     still available for on-demand runs.
+#   - Mutation findings are slowly-drifting tech debt; a run on demand
+#     matches their actual change rate. No schedule triggers this workflow
+#     (owner order 2026-10-19). A person starts it with workflow_dispatch.
 #
 # Threshold: 80% mutation score. Below-threshold runs auto-file an
 # issue with the surviving mutant list — see the "auto-file issue" step
@@ -24,7 +23,7 @@
 # block other Monday work. The issue is the persistent signal.
 #
 # Acceptance per slice 5.12:
-#   - [x] Weekly schedule on gibson (pruned to monthly by .github#201, see above)
+#   - [x] On-demand run on gibson (workflow_dispatch)
 #   - [x] Scoped to internal/platform/authz/registry/ only
 #   - [x] Mutation score threshold 80% (configurable via env)
 #   - [x] Below-threshold auto-files an issue with surviving mutants
@@ -41,9 +40,6 @@
 name: gremlins-pilot
 
 on:
-  schedule:
-    # Monthly: 1st of the month at 09:00 UTC (pruned from weekly, .github#201).
-    - cron: "0 9 1 * *"
   # Manual trigger for ad-hoc baseline runs (and for the initial run
   # right after this workflow merges).
   workflow_dispatch:

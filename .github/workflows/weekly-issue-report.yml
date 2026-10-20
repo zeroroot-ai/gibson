@@ -9,9 +9,6 @@
 name: weekly-issue-report
 
 on:
-  schedule:
-    # Mondays 07:23 UTC. Off the hour, away from the peak of the scheduler.
-    - cron: "23 7 * * 1"
   workflow_dispatch:
   # A change of the script or of this file runs the self-test only. The write
   # step does not run on a pull request.

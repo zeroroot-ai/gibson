@@ -46,7 +46,7 @@ on:
       - 'internal/server/daemon/**'
       # The daemon's schema and the entitlements reader: a migration that
       # lags a reader failed every ceiling check on main and no run
-      # measured it until the next schedule (gibson#13, #174).
+      # measured it until the next run (gibson#13, #174).
       - 'pkg/platform/migrations/**'
       - 'pkg/billing/entitlements/**'
       - 'tests/e2e/tool_dispatch_test.go'
@@ -65,10 +65,6 @@ on:
       - 'operators/tenant/internal/controller/catalog_plugin_controller.go'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-tool-dispatch.yml'
-  schedule:
-    # Daily. A tool path that is gated today and not tomorrow is the failure
-    # this catches; nothing else exercises it on a real cluster.
-    - cron: '30 5 * * *'
   workflow_dispatch: {}
 
 # One run at a time, and a run that started finishes. With cancel-in-progress
