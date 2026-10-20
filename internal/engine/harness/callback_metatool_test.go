@@ -173,7 +173,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		},
 	}
-	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
+	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:github:create_issue"}`))
@@ -216,7 +216,7 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		},
 	}
-	contextInfo := &harnesspb.ContextInfo{MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
+	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
 
 	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))

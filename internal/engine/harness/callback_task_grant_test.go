@@ -71,7 +71,7 @@ func grantCtx(tenant, token string) context.Context {
 }
 
 func observeReq(mission string) *harnesspb.ObserveRequest {
-	return &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: mission, AgentName: "claude"}}
+	return &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: mission, AgentName: "claude"}}
 }
 
 const scopeMethod = "/gibson.harness.v1.HarnessCallbackService/Observe"

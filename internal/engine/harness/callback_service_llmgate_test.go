@@ -74,7 +74,7 @@ func TestLLMRPCs_ModelGateCodes(t *testing.T) {
 			commonpb.ErrorCode_ERROR_CODE_INTERNAL, codes.Internal},
 	}
 	msgs := []*harnesspb.LLMMessage{{Role: "user", Content: "hello"}}
-	info := &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"}
+	info := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "mission-A", AgentName: "recon-agent"}
 
 	for _, tc := range cases {
 		for _, midStream := range []bool{false, true} {

@@ -352,9 +352,10 @@ func TestCallbackServiceWithProtoResolver_Integration(t *testing.T) {
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: agentName,
-			MissionId: missionID,
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    agentName,
+			MissionId:    missionID,
 		},
 		Name:       "external-tool",
 		InputType:  "testtool.ToolInput",

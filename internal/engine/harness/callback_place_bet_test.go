@@ -88,7 +88,7 @@ func newPlaceBetService(t *testing.T, h *placeBetMockHarness, agentName string, 
 
 func placeBetRequest(missionID, agentName, hypothesisID, stakingAgent string, confidence float64, technique string) *harnesspb.PlaceBetRequest {
 	return &harnesspb.PlaceBetRequest{
-		Context: &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: agentName},
 		Bet: &harnesspb.Bet{
 			HypothesisId: hypothesisID,
 			StakingAgent: stakingAgent,
@@ -202,7 +202,7 @@ func TestPlaceBet_MissingBet_Rejected(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 	_, err := svc.PlaceBet(ctx, &harnesspb.PlaceBetRequest{
-		Context: &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "mission-A", AgentName: "recon-agent"},
 	})
 	require.Error(t, err)
 	assert.Equal(t, codes.InvalidArgument, status.Code(err))

@@ -67,7 +67,7 @@ func newObserveService(t *testing.T, h *observeMockHarness, got *[]observeCaptur
 
 func hostObservation(missionID, address string) *harnesspb.ObserveRequest {
 	return &harnesspb.ObserveRequest{
-		Context: &harnesspb.ContextInfo{MissionId: missionID, AgentName: "recon-agent"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: "recon-agent"},
 		Observation: &harnesspb.ObserveRequest_Host{
 			Host: &harnesspb.HostObservation{Address: address},
 		},

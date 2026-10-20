@@ -23,7 +23,7 @@ func observeRequestOfSize(t *testing.T, n int) *harnesspb.ObserveRequest {
 	t.Helper()
 	build := func(pad int) *harnesspb.ObserveRequest {
 		return &harnesspb.ObserveRequest{
-			Context: &harnesspb.ContextInfo{MissionId: "m1", AgentName: "probe", TaskId: "task-1"},
+			Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", AgentName: "probe", TaskId: "task-1"},
 			Observation: &harnesspb.ObserveRequest_Host{
 				Host: &harnesspb.HostObservation{
 					Address:    "10.0.0.1",
@@ -141,7 +141,7 @@ func TestObserveRejectsOverCountPerTask(t *testing.T) {
 
 	small := func() *harnesspb.ObserveRequest {
 		return &harnesspb.ObserveRequest{
-			Context: &harnesspb.ContextInfo{MissionId: "m1", AgentName: "probe", TaskId: "task-1"},
+			Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", AgentName: "probe", TaskId: "task-1"},
 			Observation: &harnesspb.ObserveRequest_Host{
 				Host: &harnesspb.HostObservation{Address: "10.0.0.1"},
 			},
@@ -191,15 +191,15 @@ func TestObserveRejectsOverCountPerTask(t *testing.T) {
 // explicit task id is still charged against something narrower than "all
 // traffic": the (mission, agent) pair the harness registry itself is keyed by.
 func TestObserveTaskKeyFallsBackToAgentRun(t *testing.T) {
-	explicit := observeTaskKey(&harnesspb.ContextInfo{MissionId: "m1", AgentName: "probe", TaskId: "task-1"})
+	explicit := observeTaskKey(&harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", AgentName: "probe", TaskId: "task-1"})
 	if explicit != "task-1" {
 		t.Errorf("observeTaskKey = %q, want the explicit task id", explicit)
 	}
-	fallback := observeTaskKey(&harnesspb.ContextInfo{MissionId: "m1", AgentName: "probe"})
+	fallback := observeTaskKey(&harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", AgentName: "probe"})
 	if fallback != "m1/probe" {
 		t.Errorf("observeTaskKey = %q, want the agent-run key", fallback)
 	}
-	if observeTaskKey(&harnesspb.ContextInfo{MissionId: "m1", AgentName: "recon"}) == fallback {
+	if observeTaskKey(&harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", AgentName: "recon"}) == fallback {
 		t.Error("two agents in one mission share a budget; they are different agent runs")
 	}
 }

@@ -177,9 +177,10 @@ func TestLLMCompleteWithTools_FeedsLLMCallSink(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	resp, err := svc.LLMCompleteWithTools(ctx, &harnesspb.LLMCompleteWithToolsRequest{
 		Context: &harnesspb.ContextInfo{
-			MissionId:  "mission-A",
-			AgentRunId: "agent-run-9",
-			AgentName:  "recon-agent",
+			MissionRunId: "run-1",
+			MissionId:    "mission-A",
+			AgentRunId:   "agent-run-9",
+			AgentName:    "recon-agent",
 		},
 		Slot:     "default",
 		Messages: []*harnesspb.LLMMessage{{Role: "user", Content: "scan"}},
@@ -189,8 +190,8 @@ func TestLLMCompleteWithTools_FeedsLLMCallSink(t *testing.T) {
 
 	require.Len(t, captured, 1)
 	assert.Equal(t, "mission-A", captured[0].call.MissionID)
-	// RunID falls back to agent_run_id when mission_run_id is unset.
-	assert.Equal(t, "agent-run-9", captured[0].call.RunID)
+	// A callback always names its run, and the call carries it.
+	assert.Equal(t, "run-1", captured[0].call.RunID)
 	assert.Equal(t, 11, captured[0].call.PromptTokens)
 }
 
@@ -261,7 +262,7 @@ func TestLLMStream_ErrorMidStream_NoCapture(t *testing.T) {
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	srv := &fakeLLMStreamServer{ctx: ctx}
 	err := svc.LLMStream(&harnesspb.LLMStreamRequest{
-		Context:  &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"},
+		Context:  &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "mission-A", AgentName: "recon-agent"},
 		Slot:     "default",
 		Messages: []*harnesspb.LLMMessage{{Role: "user", Content: "hello"}},
 	}, srv)
@@ -344,7 +345,7 @@ func TestLLMCompleteWithTools_CapturesToolCallsFullFidelity(t *testing.T) {
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	resp, err := svc.LLMCompleteWithTools(ctx, &harnesspb.LLMCompleteWithToolsRequest{
-		Context: &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "mission-A", AgentName: "recon-agent"},
 		Slot:    "default",
 		Messages: []*harnesspb.LLMMessage{
 			{Role: "user", Content: "scan 10.0.0.5"},
@@ -374,7 +375,7 @@ func TestLLMComplete_NoSink_NoPanic(t *testing.T) {
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
 	resp, err := svc.LLMComplete(ctx, &harnesspb.LLMCompleteRequest{
-		Context:  &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent"},
+		Context:  &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "mission-A", AgentName: "recon-agent"},
 		Slot:     "default",
 		Messages: []*harnesspb.LLMMessage{{Role: "user", Content: "hi"}},
 	})

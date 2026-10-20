@@ -83,7 +83,7 @@ func knowledgeService(t *testing.T, q *stubQuerier) (*HarnessCallbackService, *h
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, mid.String(), "recon-agent", h)
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
-	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
+	return svc, &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: mid.String(), AgentName: "recon-agent"}
 }
 
 func mustJSON(t *testing.T, v any) []byte {
@@ -422,7 +422,7 @@ func findingHandlerService(t *testing.T, cp MissionContextProvider, fs FindingSt
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, mid.String(), "recon-agent", &runHistoryHarness{observeMockHarness: h, runs: runs})
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
-	return svc, &harnesspb.ContextInfo{MissionId: mid.String(), AgentName: "recon-agent"}
+	return svc, &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: mid.String(), AgentName: "recon-agent"}
 }
 
 // runHistoryHarness overrides only GetMissionRunHistory. The daemon reads it
@@ -564,7 +564,7 @@ func TestKnowledgeErr(t *testing.T) {
 // naming it.
 func TestKnowledgeHandlers_RejectUnknownMission(t *testing.T) {
 	svc, _ := knowledgeService(t, &stubQuerier{})
-	stranger := &harnesspb.ContextInfo{MissionId: types.NewID().String(), AgentName: "recon-agent"}
+	stranger := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: types.NewID().String(), AgentName: "recon-agent"}
 
 	_, err := svc.GetFindings(acmeCtx(), &harnesspb.GetFindingsRequest{Context: stranger})
 	require.Error(t, err)
@@ -605,7 +605,7 @@ func TestDefaultAgentHarness_GetMissionRunHistoryPropagatesErrors(t *testing.T) 
 // every handler: a caller cannot reach another mission's knowledge by naming it.
 func TestKnowledgeHandlers_AllRejectUnknownMission(t *testing.T) {
 	svc, _ := knowledgeService(t, &stubQuerier{})
-	s := &harnesspb.ContextInfo{MissionId: types.NewID().String(), AgentName: "recon-agent"}
+	s := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: types.NewID().String(), AgentName: "recon-agent"}
 	ctx := acmeCtx()
 
 	calls := map[string]func() error{

@@ -32,6 +32,6 @@ func TestCallToolDiscoveryScopeCarriesTheCallerTenant(t *testing.T) {
 // A call with no tenant in its context gives a scope with no tenant. The
 // discovery processor then drops the discovery.
 func TestCallToolDiscoveryScopeWithNoTenantHasNoTenant(t *testing.T) {
-	ec := callToolDiscoveryScope(context.Background(), &harnesspb.ContextInfo{MissionId: "m"})
+	ec := callToolDiscoveryScope(context.Background(), &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m"})
 	assert.True(t, ec.TenantID.IsZero())
 }

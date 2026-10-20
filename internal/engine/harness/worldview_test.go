@@ -21,7 +21,7 @@ import (
 
 func worldViewRequest(missionID string, focus ...string) *harnesspb.WorldViewRequest {
 	return &harnesspb.WorldViewRequest{
-		Context: &harnesspb.ContextInfo{MissionId: missionID, AgentName: "recon-agent"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: "recon-agent"},
 		Focus:   focus,
 	}
 }
