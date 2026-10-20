@@ -700,7 +700,7 @@ vet-tags:
 # (gibson#1227). The package list comes from scripts/fixture-test-packages.sh.
 test-fixtures:
 	@bash scripts/fixture-test-packages.sh --selftest
-	$(GOTEST) -tags test_fixtures -count=1 $$(bash scripts/fixture-test-packages.sh)
+	@pkgs="$$(bash scripts/fixture-test-packages.sh)" || exit 1; $(GOTEST) -tags test_fixtures -count=1 $$pkgs
 
 # test-merge-queue: everything the merge_group lane runs that the pull_request
 # lane does not (gibson#1236). After the lane-parity fix that is just the heavy
