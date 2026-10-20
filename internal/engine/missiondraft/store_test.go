@@ -172,7 +172,7 @@ func TestListPage_WalkWithSavesBetweenPages(t *testing.T) {
 func TestListPage_SkipsAStaleIndexEntryAndFillsThePage(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	var ids []string
+	ids := make([]string, 0, 3)
 	for i := range 3 {
 		id, err := store.Save(ctx, "tenant-stale", fmt.Sprintf("d%d", i), "x", "", "")
 		require.NoError(t, err)
@@ -235,4 +235,28 @@ func TestListPage_ASaveAgainDuringTheWalkKeepsThePlace(t *testing.T) {
 	for _, id := range ids {
 		assert.Equal(t, 1, seen[id], "draft %s", id)
 	}
+}
+
+// A broken index or a hash of the wrong type is an error. A hash that is gone
+// is skipped, and the stale index entry is removed.
+func TestListPage_ReportsRedisErrors(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := goredis.NewClient(&goredis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	store := New(client, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+	ctx := context.Background()
+
+	// Two index entries. "a" has no hash. "b" holds a string, so HGET fails.
+	_, err := mr.ZAdd(indexKey("acme"), 1, "a")
+	require.NoError(t, err)
+	_, err = mr.ZAdd(indexKey("acme"), 2, "b")
+	require.NoError(t, err)
+	require.NoError(t, mr.Set(draftKey("acme", "b"), "not a hash"))
+	_, _, err = store.ListPage(ctx, "acme", "", 10)
+	require.ErrorContains(t, err, "failed to read draft time")
+
+	// Every command fails.
+	mr.SetError("redis down")
+	_, _, err = store.ListPage(ctx, "acme", "", 10)
+	require.ErrorContains(t, err, "failed to list draft index")
 }

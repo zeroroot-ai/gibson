@@ -196,7 +196,7 @@ func (s *RedisMissionDraftStore) ListPage(
 
 	drafts = make([]*MissionDraft, 0, limit)
 	for _, e := range entries {
-		if after != "" && !(e.createdAt < afterCreated || (e.createdAt == afterCreated && e.id < afterID)) {
+		if after != "" && (e.createdAt > afterCreated || (e.createdAt == afterCreated && e.id >= afterID)) {
 			continue
 		}
 		if len(drafts) == limit {

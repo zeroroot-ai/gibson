@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -359,7 +361,7 @@ func TestListModelResolutionEvents_RefusesAForgedAndACrossQueryToken(t *testing.
 type failingAuditQuery struct{}
 
 func (failingAuditQuery) ListAfter(context.Context, string, audit.Filters, string, int) ([]audit.PgEntry, bool, error) {
-	return nil, false, fmt.Errorf("boom")
+	return nil, false, errors.New("boom")
 }
 
 func TestListModelResolutionEvents_AnAuditFailureIsUnavailable(t *testing.T) {
@@ -427,4 +429,60 @@ func TestListOntologyExtensionProposals_RefusesAForgedAndACrossTenantToken(t *te
 	requireInvalidToken(t, err)
 	_, err = s.ListOntologyExtensionProposals(tenantCtx("acme"), &tenantv1.ListOntologyExtensionProposalsRequest{PageToken: "forged.token"})
 	requireInvalidToken(t, err)
+}
+
+// ----- ListMissionDrafts store errors -----
+
+// failingDraftStore answers every list with one error.
+type failingDraftStore struct {
+	missionDraftStoreIface
+	err error
+}
+
+func (f failingDraftStore) ListPage(context.Context, string, string, int) ([]*missiondraft.MissionDraft, string, error) {
+	return nil, "", f.err
+}
+
+func TestListMissionDrafts_StoreErrorsMapToStatus(t *testing.T) {
+	srv := newDraftTestServer(t)
+	srv.missionDraftStore = failingDraftStore{err: missiondraft.ErrBadPosition}
+	_, err := srv.ListMissionDrafts(draftCtx(), &tenantv1.ListMissionDraftsRequest{TenantId: "tenant-a"})
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	srv.missionDraftStore = failingDraftStore{err: errors.New("redis down")}
+	_, err = srv.ListMissionDrafts(draftCtx(), &tenantv1.ListMissionDraftsRequest{TenantId: "tenant-a"})
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+// ----- ListUsage scopes -----
+
+func TestListUsage_NonAdminCannotReadTeamAgentOrMissionScopes(t *testing.T) {
+	az := newFakeAuthorizer()
+	srv := NewDaemonServer(&mockDaemon{}, nil, nil).WithAuthorizer(az).WithPageKeys(testPageKeys(t))
+	srv.budgetEnforcer = &pagingUsageEnforcer{}
+	for _, scope := range []tenantv1.UsageScope{
+		tenantv1.UsageScope_USAGE_SCOPE_TEAM, tenantv1.UsageScope_USAGE_SCOPE_AGENT, tenantv1.UsageScope_USAGE_SCOPE_MISSION,
+	} {
+		_, err := srv.ListUsage(missionViewerCtx(), &tenantv1.ListUsageRequest{Scope: scope})
+		assert.Equal(t, codes.PermissionDenied, status.Code(err), scope.String())
+	}
+}
+
+func TestListUsage_AdminReadsTeamAgentAndMissionScopes(t *testing.T) {
+	az := newFakeAuthorizer()
+	enf := &pagingUsageEnforcer{rows: []*budget.Status{{SubjectID: "red"}, {SubjectID: "blue"}}}
+	srv := NewDaemonServer(&mockDaemon{}, nil, nil).WithAuthorizer(az).WithPageKeys(testPageKeys(t))
+	srv.budgetEnforcer = enf
+	ctx := adminTenantCtx(az, "acme", "owner-1")
+
+	team, err := srv.ListUsage(ctx, &tenantv1.ListUsageRequest{Scope: tenantv1.UsageScope_USAGE_SCOPE_TEAM, SubjectFilter: "red"})
+	require.NoError(t, err)
+	require.Len(t, team.GetRows(), 1)
+	assert.Equal(t, "red", team.GetRows()[0].GetSubjectId())
+
+	for _, scope := range []tenantv1.UsageScope{tenantv1.UsageScope_USAGE_SCOPE_AGENT, tenantv1.UsageScope_USAGE_SCOPE_MISSION} {
+		resp, err := srv.ListUsage(ctx, &tenantv1.ListUsageRequest{Scope: scope})
+		require.NoError(t, err)
+		assert.Empty(t, resp.GetRows(), scope.String())
+	}
 }
