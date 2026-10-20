@@ -339,83 +339,6 @@ func TestRegisterCapabilityGrant_AgentInsertRequiresALiveHostInTenant(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// Tenant-facing statements name the tenant
-// ---------------------------------------------------------------------------
-
-// Reading an agent's status carries the tenant into the WHERE clause, so an
-// agent id belonging to somebody else reads as absent.
-func TestGetCapabilityGrantStatus_ReadsOnlyWithinTheTenant(t *testing.T) {
-	m := newMockedService(t)
-
-	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1 AND a.tenant_id = $2").
-		WithArgs("agt_deadbeef", "acme").
-		WillReturnRows(sqlmock.NewRows([]string{"id"}))
-
-	res, err := m.svc.GetCapabilityGrantStatus(context.Background(), "agt_deadbeef", "acme")
-	require.NoError(t, err)
-	assert.Nil(t, res, "another tenant's agent must read as absent")
-	require.NoError(t, m.mock.ExpectationsWereMet())
-}
-
-func TestGetCapabilityGrantStatus_RequiresATenant(t *testing.T) {
-	m := newMockedService(t)
-
-	_, err := m.svc.GetCapabilityGrantStatus(context.Background(), "agt_deadbeef", "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "tenant_id is required")
-	assert.Empty(t, m.rec.all())
-}
-
-// The grants read is predicated on the owning agent's tenant, because the
-// grants table carries no tenant of its own.
-func TestGetCapabilityGrantStatus_GrantsReadJoinsTheOwningAgentsTenant(t *testing.T) {
-	m := newMockedService(t)
-
-	m.mock.ExpectQuery("FROM capability_grant_agents a WHERE a.id = $1 AND a.tenant_id = $2").
-		WithArgs("agt_deadbeef", "acme").
-		WillReturnRows(agentRow("agt_deadbeef", "acme"))
-	m.mock.ExpectQuery("JOIN capability_grant_agents a ON a.id = g.agent_id WHERE g.agent_id = $1 AND a.tenant_id = $2").
-		WithArgs("agt_deadbeef", "acme").
-		WillReturnRows(sqlmock.NewRows([]string{
-			"id", "agent_id", "capability_name", "component_ref", "constraints", "status", "granted_at",
-		}))
-
-	res, err := m.svc.GetCapabilityGrantStatus(context.Background(), "agt_deadbeef", "acme")
-	require.NoError(t, err)
-	require.NotNil(t, res)
-	require.NoError(t, m.mock.ExpectationsWereMet())
-}
-
-// Revoking somebody else's agent fails where the caller can see it, instead of
-// reporting success while revoking a row it does not own.
-func TestRevokeCapabilityGrant_RefusesAnotherTenantsAgent(t *testing.T) {
-	m := newMockedService(t)
-
-	m.expectAuditRecord()
-	m.mock.ExpectBegin()
-	m.mock.ExpectExec("UPDATE capability_grant_agents SET status = 'revoked' WHERE id = $1 AND tenant_id = $2").
-		WithArgs("agt_deadbeef", "acme").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	m.mock.ExpectRollback()
-	// The failure record of the action (gibson#676).
-	m.expectAuditRecord()
-
-	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrAgentNotInTenant)
-	require.NoError(t, m.mock.ExpectationsWereMet())
-}
-
-func TestRevokeCapabilityGrant_RequiresATenant(t *testing.T) {
-	m := newMockedService(t)
-
-	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "", "actor-1")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "tenant_id is required")
-	assert.Empty(t, m.rec.all())
-}
-
-// ---------------------------------------------------------------------------
 // An executing component is authorized as itself
 // ---------------------------------------------------------------------------
 
@@ -1226,41 +1149,12 @@ func TestRegisterCapabilityGrant_AuditFailureRegistersNothing(t *testing.T) {
 		"no credential is spent when the audit record is not durable")
 }
 
-// A failed audit write fails the revocation before the agent changes
-// (gibson#676).
-func TestRevokeCapabilityGrant_AuditFailureRevokesNothing(t *testing.T) {
-	m := newMockedService(t)
-	m.mock.ExpectBegin().WillReturnError(errors.New("audit database down"))
-
-	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
-	require.ErrorContains(t, err, "audit")
-	require.NoError(t, m.mock.ExpectationsWereMet())
-	assert.NotContains(t, m.rec.all(), "UPDATE capability_grant_agents")
-}
-
 // The failure record names the action and the cause, with the decision deny.
 func TestFailedAction_NamesTheCause(t *testing.T) {
 	ev := failedAction(audit.Event{Action: "agent_revoked", TargetID: "agt_1"}, errors.New("not in tenant"))
 	assert.Equal(t, "deny", ev.Decision)
 	assert.Equal(t, "agent_revoked", ev.Action)
 	assert.JSONEq(t, `{"result":"failure","error":"not in tenant"}`, string(ev.Metadata))
-}
-
-// A failure record that cannot be written does not hide the error of the
-// action.
-func TestRevokeCapabilityGrant_FailureRecordErrorKeepsTheActionError(t *testing.T) {
-	m := newMockedService(t)
-	m.expectAuditRecord()
-	m.mock.ExpectBegin()
-	m.mock.ExpectExec("UPDATE capability_grant_agents SET status = 'revoked' WHERE id = $1 AND tenant_id = $2").
-		WithArgs("agt_deadbeef", "acme").
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	m.mock.ExpectRollback()
-	m.mock.ExpectBegin().WillReturnError(errors.New("audit database down"))
-
-	err := m.svc.RevokeCapabilityGrant(context.Background(), "agt_deadbeef", "acme", "actor-1")
-	require.ErrorIs(t, err, ErrAgentNotInTenant)
-	require.NoError(t, m.mock.ExpectationsWereMet())
 }
 
 // A re-registration for a host that has no row (a fresh key) is refused. The

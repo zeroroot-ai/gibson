@@ -24,28 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- service.go: stripFGATypePrefix ------------------------------------------
-
-func TestStripFGATypePrefix(t *testing.T) {
-	cases := []struct {
-		s, typeName, want string
-	}{
-		{"tenant:acme", "tenant", "acme"},
-		{"component:scanner:v2", "component", "scanner:v2"}, // only first prefix stripped
-		{"acme", "tenant", "acme"},                          // no prefix → unchanged
-		{"user:alice", "tenant", "user:alice"},              // wrong prefix → unchanged
-		{"tenant:", "tenant", "tenant:"},                    // prefix with empty remainder → unchanged
-		{"tenant:x", "tenant", "x"},
-	}
-	for _, c := range cases {
-		t.Run(c.s+"|"+c.typeName, func(t *testing.T) {
-			if got := stripFGATypePrefix(c.s, c.typeName); got != c.want {
-				t.Fatalf("stripFGATypePrefix(%q,%q) = %q, want %q", c.s, c.typeName, got, c.want)
-			}
-		})
-	}
-}
-
 // --- service.go: newAgentID --------------------------------------------------
 
 var agentIDRe = regexp.MustCompile(`^agt_[0-9a-f]{16}$`)

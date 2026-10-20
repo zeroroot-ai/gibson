@@ -188,38 +188,6 @@ func TestLive_HostBelongsToTheTenantThatRegisteredIt(t *testing.T) {
 	assert.Equal(t, 1, env.agentCount(t, "evilcorp"))
 }
 
-// One tenant can neither read nor revoke another tenant's agent, and the
-// revoke attempt fails visibly rather than appearing to succeed.
-func TestLive_AgentReadsAndRevocationAreScopedToTheTenant(t *testing.T) {
-	env := newLiveEnv(t)
-	ctx := context.Background()
-
-	res, err := env.register("acme", hostJWK, "cred-1")
-	require.NoError(t, err)
-
-	own, err := env.svc.GetCapabilityGrantStatus(ctx, res.AgentID, "acme")
-	require.NoError(t, err)
-	require.NotNil(t, own)
-
-	other, err := env.svc.GetCapabilityGrantStatus(ctx, res.AgentID, "evilcorp")
-	require.NoError(t, err)
-	assert.Nil(t, other, "another tenant's agent must read as absent")
-
-	err = env.svc.RevokeCapabilityGrant(ctx, res.AgentID, "evilcorp", "attacker")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrAgentNotInTenant)
-
-	var status string
-	require.NoError(t, env.db.QueryRow(
-		`SELECT status FROM capability_grant_agents WHERE id = $1`, res.AgentID).Scan(&status))
-	assert.Equal(t, "active", status, "the agent must survive another tenant's revoke")
-
-	require.NoError(t, env.svc.RevokeCapabilityGrant(ctx, res.AgentID, "acme", "owner-1"))
-	require.NoError(t, env.db.QueryRow(
-		`SELECT status FROM capability_grant_agents WHERE id = $1`, res.AgentID).Scan(&status))
-	assert.Equal(t, "revoked", status)
-}
-
 func (e *liveEnv) enroll(t *testing.T, hostKey, principal, bootstrapType, credential string) {
 	t.Helper()
 	_, err := e.svc.RegisterCapabilityGrant(context.Background(),

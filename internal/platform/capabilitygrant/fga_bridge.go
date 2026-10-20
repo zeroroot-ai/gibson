@@ -200,40 +200,6 @@ func isComponentPrincipal(subject string) bool {
 	return false
 }
 
-// CheckExecution reports whether subjectFGA may execute componentRef.
-//
-// subjectFGA is a FULLY-QUALIFIED FGA subject — "user:<id>" for a human,
-// "agent_principal:<id>" (or the tool/plugin equivalents) for a component
-// acting for itself. Passing a bare id is a caller bug and is rejected, because
-// silently prefixing "user:" is how an executing component came to be checked
-// as though it were its enroller.
-//
-// A component principal and a human are evaluated against the same relation,
-// can_execute (ADR-0041). The grant is the approval, and no second
-// per-component enablement exists. componentRef must be in
-// "component:{name}" format.
-//
-// It delegates directly to the Authorizer.Check method without any local
-// caching — callers that need repeated checks should cache the result.
-func (b *FGABridge) CheckExecution(ctx context.Context, subjectFGA, componentRef string) (bool, error) {
-	if _, _, ok := parseComponentRef(componentRef); !ok {
-		return false, fmt.Errorf("capabilitygrant: malformed componentRef %q: expected \"component:{name}\"", componentRef)
-	}
-	if !strings.Contains(subjectFGA, ":") {
-		return false, fmt.Errorf("capabilitygrant: malformed subject %q: expected a typed FGA subject such as \"user:{id}\" or \"agent_principal:{id}\"", subjectFGA)
-	}
-
-	const relation = "can_execute"
-
-	allowed, err := b.authorizer.Check(ctx, subjectFGA, relation, componentRef)
-	if err != nil {
-		return false, fmt.Errorf("capabilitygrant: Check(%q, %q, %q) failed: %w",
-			subjectFGA, relation, componentRef, err)
-	}
-
-	return allowed, nil
-}
-
 // ResolveComponentCapabilities returns the capabilities a registered component
 // principal actually holds: the components that it can execute, read and
 // configure on its own grants, intersected with what the enrolling owner can

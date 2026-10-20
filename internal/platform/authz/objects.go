@@ -46,7 +46,7 @@ import (
 // "component:<kind>:<name>" (minted in internal/harness mintCGForWork). That
 // string is an identity-namespace value carried in the token's sub claim; the
 // FGA reference derived from a capability name is always the ComponentObject
-// form (see capabilitygrant.parseCapabilityName).
+// form.
 //
 // The (tool source → object, relation) mapping for the SearchTools catalog
 // filter lives in internal/catalog.FGAAuthorizer and is built on these
