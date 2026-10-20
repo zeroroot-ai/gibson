@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -201,7 +202,7 @@ func TestDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	env.svc.WithRunAuthorizer(fake)
 	callerWork := env.enqueueRun(t, victimTenant, "work-caller", "run-42")
 
-	entry := sourceRunEntry(env.svc, ctxForTenant(victimTenant), victimTenant, callerWork)
+	entry := sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, callerWork)
 	require.Contains(t, entry, authz.AuthzContextWorkKey)
 
 	// The delegated item goes through the same Enqueue as any other work item.
@@ -224,12 +225,12 @@ func TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant(t *testing.T) {
 	env := newWorkIDEnv(t)
 	foreign := env.enqueueRun(t, victimTenant, "work-foreign", "run-victim")
 
-	assert.Empty(t, sourceRunEntry(env.svc, ctxForTenant(attackerTenant), attackerTenant, foreign))
-	assert.Empty(t, sourceRunEntry(env.svc, ctxForTenant(victimTenant), victimTenant, "no-such-work"))
-	assert.Empty(t, sourceRunEntry(env.svc, ctxForTenant(victimTenant), victimTenant, ""))
+	assert.Empty(t, sourceRunEntry(ctxForTenant(attackerTenant), env.svc, attackerTenant, foreign))
+	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, "no-such-work"))
+	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, ""))
 
 	noRun := env.enqueueRun(t, victimTenant, "work-norun", "")
-	assert.Empty(t, sourceRunEntry(env.svc, ctxForTenant(victimTenant), victimTenant, noRun))
+	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, noRun))
 }
 
 // TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant proves that the run is
@@ -264,7 +265,7 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	require.NoError(t, NewRedisWorkContextRegistry(env.state).
 		RegisterWorkContext(context.Background(), source, "mission-7", tenant))
 
-	item := env.delegateAndClaimAs(t, grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), tenant, source)
+	item := env.delegateAndClaimAs(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), t, tenant, source)
 	assert.Contains(t, item.Context[authz.AuthzContextWorkKey], "run-42")
 	// The delegated item carries the mission of its caller.
 	assert.Equal(t, "mission-7", item.Context["mission_id"])
@@ -304,13 +305,13 @@ func TestDelegateToAgent_AFailedMissionLookupDelegatesWithNoMission(t *testing.T
 	require.NoError(t, closed.Close())
 	env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
 
-	item := env.delegateAndClaimAs(t, grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), tenant, source)
+	item := env.delegateAndClaimAs(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), t, tenant, source)
 	assert.NotContains(t, item.Context, "mission_id")
 }
 
 // sourceRunEntry is the authz context entry that the run of a source work item
 // gives, with the tenant check on the owner of the work item.
-func sourceRunEntry(svc *ComponentServiceServer, ctx context.Context, tenant, work string) map[string]string {
+func sourceRunEntry(ctx context.Context, svc *ComponentServiceServer, tenant, work string) map[string]string {
 	return authzContextEntry(svc.sourceWorkRun(ctx, tenant, work))
 }
 
@@ -331,7 +332,7 @@ func (fakeGrants) Verify(_ context.Context, token string) (sdkcg.Claims, error) 
 	}
 	tenant, err := auth.NewTenantID("test-tenant")
 	if err != nil {
-		return sdkcg.Claims{}, err
+		return sdkcg.Claims{}, fmt.Errorf("tenant: %w", err)
 	}
 	return sdkcg.Claims{Subject: "component:agent:caller", Tenant: tenant, MissionID: payload["mission_id"], TaskID: "t"}, nil
 }
@@ -353,11 +354,11 @@ func grantedCtx(ctx context.Context, mission, run string) context.Context {
 // claims from the real queue.
 func (e *workIDEnv) delegateAndClaim(t *testing.T, tenant, source string) *WorkItem {
 	t.Helper()
-	return e.delegateAndClaimAs(t, componentCtx("agent_principal:acct-1"), tenant, source)
+	return e.delegateAndClaimAs(componentCtx("agent_principal:acct-1"), t, tenant, source)
 }
 
 // delegateAndClaimAs is delegateAndClaim with the context of the caller.
-func (e *workIDEnv) delegateAndClaimAs(t *testing.T, callerCtx context.Context, tenant, source string) *WorkItem {
+func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, tenant, source string) *WorkItem {
 	t.Helper()
 	e.svc.WithCapabilityChecker(grantedChecker())
 	e.svc.WithGrantVerifier(fakeGrants{})
@@ -400,7 +401,7 @@ func (e *workIDEnv) delegateAndClaimAs(t *testing.T, callerCtx context.Context, 
 
 func TestDelegatedAuthzContext_WithoutARegistryTheAgentGetsNoRun(t *testing.T) {
 	svc := newParityServer()
-	assert.Empty(t, sourceRunEntry(svc, context.Background(), "test-tenant", "work-1"))
+	assert.Empty(t, sourceRunEntry(context.Background(), svc, "test-tenant", "work-1"))
 }
 
 // brokenRedisEnv returns a work-context registry and queue over a Redis that is
