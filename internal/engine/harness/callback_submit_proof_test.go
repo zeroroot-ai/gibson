@@ -165,7 +165,7 @@ func newSubmitProofService(
 
 func submitProofRequest(missionID, agentName, hypothesisID, technique, predicateName string, toolCallIDs ...string) *harnesspb.SubmitProofRequest {
 	return &harnesspb.SubmitProofRequest{
-		Context:       &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
+		Context:       &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: agentName},
 		HypothesisId:  hypothesisID,
 		Technique:     technique,
 		PredicateName: predicateName,

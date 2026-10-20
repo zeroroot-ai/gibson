@@ -87,9 +87,10 @@ func TestGetHarness_WithExplicitMissionId(t *testing.T) {
 
 	// Create ContextInfo with explicit MissionId
 	contextInfo := &harnesspb.ContextInfo{
-		TaskId:    "task-456",
-		AgentName: "test-agent",
-		MissionId: "mission-123",
+		MissionRunId: "run-1",
+		TaskId:       "task-456",
+		AgentName:    "test-agent",
+		MissionId:    "mission-123",
 	}
 
 	// Test getHarness — pass a tenant context matching the mock harness tenant.
@@ -113,9 +114,10 @@ func TestGetHarness_EmptyMissionId_ReturnsError(t *testing.T) {
 
 	// Create ContextInfo with empty MissionId
 	contextInfo := &harnesspb.ContextInfo{
-		TaskId:    "task-789",
-		AgentName: "test-agent",
-		MissionId: "", // Empty - should return error (legacy fallback removed)
+		MissionRunId: "run-1",
+		TaskId:       "task-789",
+		AgentName:    "test-agent",
+		MissionId:    "", // Empty - should return error (legacy fallback removed)
 	}
 
 	// Test getHarness
@@ -144,9 +146,10 @@ func TestGetHarness_LegacyTaskIdWithColon_NoLongerSupported(t *testing.T) {
 
 	// Create ContextInfo with legacy format (mission in TaskId) but no explicit MissionId
 	contextInfo := &harnesspb.ContextInfo{
-		TaskId:    "mission-abc:task-xyz", // Legacy format
-		AgentName: "test-agent",
-		MissionId: "", // Empty - legacy parsing no longer supported
+		MissionRunId: "run-1",
+		TaskId:       "mission-abc:task-xyz", // Legacy format
+		AgentName:    "test-agent",
+		MissionId:    "", // Empty - legacy parsing no longer supported
 	}
 
 	// Test getHarness
@@ -170,9 +173,10 @@ func TestGetHarness_MissionIdNotFound(t *testing.T) {
 
 	// Create ContextInfo with non-existent mission
 	contextInfo := &harnesspb.ContextInfo{
-		TaskId:    "task-999",
-		AgentName: "test-agent",
-		MissionId: "nonexistent-mission",
+		MissionRunId: "run-1",
+		TaskId:       "task-999",
+		AgentName:    "test-agent",
+		MissionId:    "nonexistent-mission",
 	}
 
 	// Test getHarness
@@ -196,9 +200,10 @@ func TestHarnessCallbackService_CreateMission(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.CreateMissionRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		TargetId: "target-456",
 		Name:     "test-mission",
@@ -221,9 +226,10 @@ func TestHarnessCallbackService_RunMission(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.RunMissionRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		MissionId: "target-mission-456",
 	}
@@ -244,9 +250,10 @@ func TestHarnessCallbackService_GetMissionStatus(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.GetMissionStatusRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		MissionId: "target-mission-456",
 	}
@@ -267,9 +274,10 @@ func TestHarnessCallbackService_WaitForMission(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.WaitForMissionRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		MissionId: "target-mission-456",
 		TimeoutMs: 30000,
@@ -291,9 +299,10 @@ func TestHarnessCallbackService_ListMissions(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.ListMissionsRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 	}
 
@@ -313,9 +322,10 @@ func TestHarnessCallbackService_CancelMission(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.CancelMissionRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		MissionId: "target-mission-456",
 	}
@@ -336,9 +346,10 @@ func TestHarnessCallbackService_GetMissionResults(t *testing.T) {
 	ctx := context.Background()
 	req := &harnesspb.GetMissionResultsRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: "test-agent",
-			MissionId: "mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    "test-agent",
+			MissionId:    "mission-123",
 		},
 		MissionId: "target-mission-456",
 	}
@@ -696,9 +707,10 @@ func TestCallToolProto_WithExternalAgentDynamicType(t *testing.T) {
 	inputJSON := []byte(`{"query": "test query", "limit": 10}`)
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: agentName,
-			MissionId: missionID,
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    agentName,
+			MissionId:    missionID,
 		},
 		Name:       "test-external-tool",
 		InputType:  "testtool.ToolInput",
@@ -802,9 +814,10 @@ func TestCallToolProto_InputJSONToTypedMessage(t *testing.T) {
 
 			req := &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
-					TaskId:    "task-123",
-					AgentName: agentName,
-					MissionId: missionID,
+					MissionRunId: "run-1",
+					TaskId:       "task-123",
+					AgentName:    agentName,
+					MissionId:    missionID,
 				},
 				Name:       "json-input-tool",
 				InputType:  "testtool.ToolInput",
@@ -890,9 +903,10 @@ func TestCallToolProto_OutputTypedMessageToJSON(t *testing.T) {
 
 			req := &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
-					TaskId:    "task-123",
-					AgentName: agentName,
-					MissionId: missionID,
+					MissionRunId: "run-1",
+					TaskId:       "task-123",
+					AgentName:    agentName,
+					MissionId:    missionID,
 				},
 				Name:       "output-tool",
 				InputType:  "testtool.ToolInput",
@@ -969,9 +983,10 @@ func TestCallToolProto_DiscoveryResultExtraction(t *testing.T) {
 
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId:    "task-123",
-			AgentName: agentName,
-			MissionId: missionID,
+			MissionRunId: "run-1",
+			TaskId:       "task-123",
+			AgentName:    agentName,
+			MissionId:    missionID,
 		},
 		Name:       "discovery-tool",
 		InputType:  "testtool.ToolInput",
@@ -1028,9 +1043,10 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			},
 			request: &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
-					TaskId:    "task-123",
-					AgentName: "test-agent",
-					MissionId: "mission-123",
+					MissionRunId: "run-1",
+					TaskId:       "task-123",
+					AgentName:    "test-agent",
+					MissionId:    "mission-123",
 				},
 				Name:       "nonexistent-tool",
 				InputType:  "testtool.ToolInput",
@@ -1057,9 +1073,10 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			},
 			request: &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
-					TaskId:    "task-123",
-					AgentName: "test-agent",
-					MissionId: "mission-123",
+					MissionRunId: "run-1",
+					TaskId:       "task-123",
+					AgentName:    "test-agent",
+					MissionId:    "mission-123",
 				},
 				Name:       "test-tool",
 				InputType:  "testtool.ToolInput",
@@ -1089,9 +1106,10 @@ func TestCallToolProto_ErrorCases(t *testing.T) {
 			},
 			request: &harnesspb.CallToolProtoRequest{
 				Context: &harnesspb.ContextInfo{
-					TaskId:    "task-123",
-					AgentName: "test-agent",
-					MissionId: "mission-123",
+					MissionRunId: "run-1",
+					TaskId:       "task-123",
+					AgentName:    "test-agent",
+					MissionId:    "mission-123",
 				},
 				Name:       "failing-tool",
 				InputType:  "testtool.ToolInput",

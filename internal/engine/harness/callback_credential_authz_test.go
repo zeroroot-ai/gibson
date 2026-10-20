@@ -138,7 +138,7 @@ func TestGetCredential_AllowedWithCanResolve(t *testing.T) {
 	ctx := callerCtx(t, "plugin_principal:plugin-github-1", "acme")
 	resp, err := s.GetCredential(ctx, &harnesspb.GetCredentialRequest{
 		Name:    "cred:openai-prod",
-		Context: &harnesspb.ContextInfo{MissionId: "m-1", AgentName: "a-1"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m-1", AgentName: "a-1"},
 	})
 
 	require.NoError(t, err, "a caller holding can_resolve must still be served — breaking secret "+
@@ -184,13 +184,13 @@ func TestGetCredential_DeniedForDifferentSecret(t *testing.T) {
 
 	_, err := s.GetCredential(ctx, &harnesspb.GetCredentialRequest{
 		Name:    "cred:openai-prod",
-		Context: &harnesspb.ContextInfo{MissionId: "m-1", AgentName: "a-1"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m-1", AgentName: "a-1"},
 	})
 	require.NoError(t, err, "the granted secret must be served")
 
 	_, err = s.GetCredential(ctx, &harnesspb.GetCredentialRequest{
 		Name:    "cred:stripe-live",
-		Context: &harnesspb.ContextInfo{MissionId: "m-1", AgentName: "a-1"},
+		Context: &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m-1", AgentName: "a-1"},
 	})
 	require.Error(t, err, "REGRESSION (gibson#1245): the decision must be per-SECRET. A caller granted "+
 		"one secret must not thereby read every secret in its tenant")

@@ -718,6 +718,12 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 		return nil, status.Error(codes.InvalidArgument, "missing agent_name in context info")
 	}
 
+	// The mission ID is the same for every run of a record, so a callback
+	// must name its run (gibson#1235).
+	if callerRun(ctx, contextInfo) == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing mission_run_id in context info - ensure agent SDK is v0.208.0+")
+	}
+
 	// Registry must be configured for mission-based lookup
 	if s.registry == nil {
 		return nil, status.Error(codes.Internal, "callback registry not configured")

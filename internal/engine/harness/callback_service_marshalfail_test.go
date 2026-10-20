@@ -67,7 +67,8 @@ func TestCallToolProto_FeedsToolCallSink_OnMarshalFailure(t *testing.T) {
 
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-1", AgentName: "test-agent", MissionId: "test-mission-123",
 			ToolExecutionId: "tool-exec-marshalfail",
 		},
 		Name:       "test-external-tool",

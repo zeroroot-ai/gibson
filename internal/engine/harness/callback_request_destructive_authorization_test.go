@@ -22,7 +22,7 @@ import (
 // shape (callback_submit_proof_test.go).
 func requestDestructiveAuthorizationRequest(missionID, agentName, hypothesisID, technique, predicateName, actionDescription string) *harnesspb.RequestDestructiveAuthorizationRequest {
 	return &harnesspb.RequestDestructiveAuthorizationRequest{
-		Context:           &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
+		Context:           &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: agentName},
 		HypothesisId:      hypothesisID,
 		Technique:         technique,
 		PredicateName:     predicateName,

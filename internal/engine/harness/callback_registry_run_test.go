@@ -46,13 +46,13 @@ func TestCallbackHarnessRegistry_UnregisterRemovesOnlyItsOwnRegistration(t *test
 	assert.Same(t, run2, got)
 
 	registry.Unregister(key1) // the deferred cleanup of run 1
-	got, err = registry.Lookup("m1", "recon", "", "")
+	got, err = registry.Lookup("m1", "recon", "run-2", "")
 	require.NoError(t, err)
 	assert.Same(t, run2, got, "the cleanup of run 1 removed the harness of run 2")
 	assert.Equal(t, 1, registry.Count())
 
 	registry.Unregister(key2)
-	_, err = registry.Lookup("m1", "recon", "", "")
+	_, err = registry.Lookup("m1", "recon", "run-2", "")
 	require.Error(t, err)
 	assert.Equal(t, 0, registry.Count())
 }
@@ -65,7 +65,7 @@ func TestCallbackHarnessRegistry_EarlierRegistrationSurvivesTheLaterOne(t *testi
 	key2 := mustRegister(t, registry, "m1", "recon", run2)
 
 	registry.Unregister(key2)
-	got, err := registry.Lookup("m1", "recon", "", "")
+	got, err := registry.Lookup("m1", "recon", "run-1", "")
 	require.NoError(t, err)
 	assert.Same(t, run1, got)
 	registry.Unregister(key1)
@@ -85,9 +85,8 @@ func TestGetHarness_RefusesACallbackOfAnotherRun(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
 
-	// The callback of run 2, and one that names no run while only run 2 is
-	// registered, still resolve.
-	for _, run := range []string{"run-2", ""} {
+	// The callback of run 2 still resolves.
+	for _, run := range []string{"run-2"} {
 		got, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{
 			MissionId: "m1", AgentName: "recon", MissionRunId: run,
 		})
@@ -114,8 +113,7 @@ func TestCallbackManager_UnregisterHarnessRemovesTheRegistration(t *testing.T) {
 }
 
 // A callback with no run ID cannot be tied to a run when two runs hold a
-// registration of the agent. The newest registration would be the wrong
-// harness for a late callback of the older run.
+// registration of the agent.
 func TestCallbackHarnessRegistry_EmptyRunWithTwoRunsIsRefused(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, "m1", "recon", newRunHarness("run-1"))
@@ -125,16 +123,14 @@ func TestCallbackHarnessRegistry_EmptyRunWithTwoRunsIsRefused(t *testing.T) {
 	require.ErrorIs(t, err, ErrCallbackRunMismatch)
 }
 
-// A callback with no run ID still works when the registrations are of one run.
-func TestCallbackHarnessRegistry_EmptyRunWithOneRunWorks(t *testing.T) {
+// A callback with no run ID is refused even when the registrations are of one
+// run (gibson#1235). The mission ID is the same for every run of a record.
+func TestCallbackHarnessRegistry_EmptyRunIsRefusedWithOneRun(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
-	first, second := newRunHarness("run-1"), newRunHarness("run-1")
-	mustRegister(t, registry, "m1", "recon", first)
-	mustRegister(t, registry, "m1", "recon", second)
+	mustRegister(t, registry, "m1", "recon", newRunHarness("run-1"))
 
-	got, err := registry.Lookup("m1", "recon", "", "")
-	require.NoError(t, err)
-	assert.Same(t, second, got, "one run: the newest registration serves")
+	_, err := registry.Lookup("m1", "recon", "", "")
+	require.ErrorIs(t, err, ErrCallbackRunMismatch)
 }
 
 // A callback that names its run gets the registration of that run, even when a
@@ -156,10 +152,8 @@ func TestCallbackHarnessRegistry_NamedRunPicksItsOwnRegistration(t *testing.T) {
 	require.ErrorIs(t, err, ErrCallbackRunMismatch)
 }
 
-// A late callback of run 1 that names no run is refused while run 1 and run 2
-// both hold a registration. Most agents send no run ID, so the harness of run 2
-// must not serve it.
-func TestGetHarness_RefusesAnEmptyRunCallbackWhenTwoRunsAreRegistered(t *testing.T) {
+// A callback that names no run is refused with InvalidArgument (gibson#1235).
+func TestGetHarness_RefusesACallbackWithNoRun(t *testing.T) {
 	registry := NewCallbackHarnessRegistry()
 	mustRegister(t, registry, "m1", "recon", newRunHarness("run-1"))
 	mustRegister(t, registry, "m1", "recon", newRunHarness("run-2"))
@@ -167,7 +161,7 @@ func TestGetHarness_RefusesAnEmptyRunCallbackWhenTwoRunsAreRegistered(t *testing
 
 	_, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1", AgentName: "recon"})
 	require.Error(t, err)
-	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
 }
 
 // mustRegister registers a harness and fails the test when the registry refuses it.
@@ -207,9 +201,10 @@ func TestCallbackHarnessRegistry_FanOutInstancesKeepTheirOwnHarness(t *testing.T
 	require.NoError(t, err)
 	assert.Same(t, b, got)
 
-	got, err = registry.Lookup("m1", "recon", "run-1", "")
-	require.NoError(t, err)
-	assert.Same(t, b, got, "a callback with no task gets the newest harness")
+	// A callback with no task cannot be told from its sibling. It is refused
+	// and does not get the newest harness (gibson#1235).
+	_, err = registry.Lookup("m1", "recon", "run-1", "")
+	require.ErrorIs(t, err, ErrCallbackTaskMismatch)
 	_, err = registry.Lookup("m1", "recon", "run-1", "task-c")
 	require.ErrorIs(t, err, ErrCallbackTaskMismatch)
 }
@@ -249,4 +244,16 @@ func TestGetHarness_RefusesACallbackOfAnotherTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Same(t, a, got)
+}
+
+// A callback with no task is served when the run holds one registration of the
+// agent.
+func TestCallbackHarnessRegistry_NoTaskWithOneRegistrationWorks(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	only := newRunHarness("run-1")
+	mustRegister(t, registry, "m1", "recon", only)
+
+	got, err := registry.Lookup("m1", "recon", "run-1", "")
+	require.NoError(t, err)
+	assert.Same(t, only, got)
 }

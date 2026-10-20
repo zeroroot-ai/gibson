@@ -125,7 +125,8 @@ func TestCallToolProto_FeedsToolCallSink_OnFailure(t *testing.T) {
 
 	req := &harnesspb.CallToolProtoRequest{
 		Context: &harnesspb.ContextInfo{
-			TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123",
+			MissionRunId: "run-1",
+			TaskId:       "task-1", AgentName: "test-agent", MissionId: "test-mission-123",
 			ToolExecutionId: "tool-exec-2",
 		},
 		Name:       "test-external-tool",
@@ -178,7 +179,7 @@ func TestCallToolProto_ToolCallIDFallsBackToFreshUUID(t *testing.T) {
 	)
 
 	req := &harnesspb.CallToolProtoRequest{
-		Context:    &harnesspb.ContextInfo{TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123"},
+		Context:    &harnesspb.ContextInfo{MissionRunId: "run-1", TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123"},
 		Name:       "test-external-tool",
 		InputType:  "testtool.ToolInput",
 		InputJson:  []byte(`{"query": "q", "limit": 1}`),
@@ -203,7 +204,7 @@ func TestCaptureToolCall_NoTenantInContext_NoOp(t *testing.T) {
 	svc := &HarnessCallbackService{
 		toolCallSink: func(context.Context, string, ToolCallRecord) { called = true },
 	}
-	svc.captureToolCall(context.Background(), &harnesspb.ContextInfo{MissionId: "m1"}, "nmap", "{}", "{}", "")
+	svc.captureToolCall(context.Background(), &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1"}, "nmap", "{}", "{}", "")
 	if called {
 		t.Fatal("captureToolCall must no-op when the context carries no tenant")
 	}
@@ -231,7 +232,7 @@ func TestCallToolProto_NoSink_NoPanic(t *testing.T) {
 	svc := NewHarnessCallbackServiceWithRegistry(slog.New(slog.NewTextHandler(os.Stdout, nil)), registry, testEventBus())
 
 	req := &harnesspb.CallToolProtoRequest{
-		Context:    &harnesspb.ContextInfo{TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123"},
+		Context:    &harnesspb.ContextInfo{MissionRunId: "run-1", TaskId: "task-1", AgentName: "test-agent", MissionId: "test-mission-123"},
 		Name:       "test-external-tool",
 		InputType:  "testtool.ToolInput",
 		InputJson:  []byte(`{"query": "q", "limit": 1}`),

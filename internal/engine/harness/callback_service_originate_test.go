@@ -84,9 +84,10 @@ func newOriginService(t *testing.T, mgr MissionOperator, missionID, agentName st
 func originRequest() *harnesspb.CreateMissionRequest {
 	return &harnesspb.CreateMissionRequest{
 		Context: &harnesspb.ContextInfo{
-			MissionId: originParentMissionID,
-			AgentName: "zerocool",
-			TaskId:    "task-1",
+			MissionRunId: "run-7",
+			MissionId:    originParentMissionID,
+			AgentName:    "zerocool",
+			TaskId:       "task-1",
 		},
 		TargetId: originTargetID,
 		Name:     "scan-customer-portal",

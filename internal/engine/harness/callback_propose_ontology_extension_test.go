@@ -75,7 +75,7 @@ func newProposeOntologyExtensionService(
 
 func proposeOntologyExtensionRequest(missionID, agentName string, kind harnesspb.OntologyExtensionKind, label, proposer, claim string) *harnesspb.ProposeOntologyExtensionRequest {
 	return &harnesspb.ProposeOntologyExtensionRequest{
-		Context:  &harnesspb.ContextInfo{MissionId: missionID, AgentName: agentName},
+		Context:  &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: missionID, AgentName: agentName},
 		Kind:     kind,
 		Label:    label,
 		Proposer: proposer,

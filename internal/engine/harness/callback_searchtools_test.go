@@ -97,7 +97,7 @@ func TestSearchTools_FiltersByCanInvokeAndMaps(t *testing.T) {
 func TestSearchTools_UnavailableWhenNotWired(t *testing.T) {
 	svc := &HarnessCallbackService{logger: slog.Default()}
 	_, err := svc.SearchTools(context.Background(),
-		&harnesspb.SearchToolsRequest{Context: &harnesspb.ContextInfo{MissionRunId: "run-1"}})
+		&harnesspb.SearchToolsRequest{Context: &harnesspb.ContextInfo{}})
 	if status.Code(err) != codes.Unavailable {
 		t.Fatalf("want Unavailable when not wired, got %v", err)
 	}
