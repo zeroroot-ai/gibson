@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"testing"
 
@@ -85,7 +84,7 @@ func TestLLMRPCs_ModelGateCodes(t *testing.T) {
 				registry := NewCallbackHarnessRegistry()
 				mustRegister(t, registry, "mission-A", "recon-agent", h)
 				svc := NewHarnessCallbackServiceWithRegistry(
-					slog.New(slog.NewTextHandler(io.Discard, nil)), registry, testEventBus())
+					slog.New(slog.DiscardHandler), registry, testEventBus())
 				ctx := auth.ContextWithTenantString(context.Background(), "acme")
 
 				c, err := svc.LLMComplete(ctx, &harnesspb.LLMCompleteRequest{Context: info, Slot: "default", Messages: msgs})
