@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
+	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
@@ -1747,16 +1748,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	logsQuerier := resolveLogsQuerier(d.logger.WithComponent("logs-service").Slog())
 	// The page tokens are signed with a key derived from the master KEK, which
 	// every daemon replica shares, so a token from one replica works on another.
-	if d.keyProvider == nil {
-		return nil, errors.New("daemon: LogsService needs the key provider to sign page tokens")
-	}
-	logsMasterKEK, kekErr := d.keyProvider.GetEncryptionKey(ctx)
-	if kekErr != nil {
-		return nil, fmt.Errorf("daemon: LogsService could not read the master KEK: %w", kekErr)
-	}
-	logsCursorKey, keyErr := deriveLogsCursorKey(logsMasterKEK)
+	logsCursorKey, keyErr := logsCursorKeyFromProvider(ctx, d.keyProvider)
 	if keyErr != nil {
-		return nil, fmt.Errorf("daemon: %w", keyErr)
+		return nil, keyErr
 	}
 	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, logsCursorKey, d.logger.WithComponent("logs-service").Slog()))
 	d.logger.Info(ctx, "registered LogsService gRPC endpoint")
@@ -3371,4 +3365,21 @@ func requireIDPAdminForApproval(idpConfigured, approvalSignup bool) error {
 		return fmt.Errorf("daemon: %s is set to the approval rung but the IdP admin client is not configured (GIBSON_IDP_PROVIDER)", signup.ConfigKnob)
 	}
 	return nil
+}
+
+// logsCursorKeyFromProvider derives the page token key of LogsService from the
+// master KEK of the key provider. The daemon refuses to start without it.
+func logsCursorKeyFromProvider(ctx context.Context, kp crypto.KeyProvider) ([]byte, error) {
+	if kp == nil {
+		return nil, errors.New("daemon: LogsService needs the key provider to sign page tokens")
+	}
+	masterKEK, err := kp.GetEncryptionKey(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: LogsService could not read the master KEK: %w", err)
+	}
+	key, err := deriveLogsCursorKey(masterKEK)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: %w", err)
+	}
+	return key, nil
 }

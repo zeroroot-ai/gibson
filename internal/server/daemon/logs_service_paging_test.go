@@ -6,6 +6,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -273,5 +275,56 @@ func TestLogsService_TieGroupAtThePageEdge(t *testing.T) {
 	sort.Strings(got)
 	if want := "a b1 b2 b3 c"; strings.Join(got, " ") != want {
 		t.Fatalf("lines = %v, want each of %q exactly once", got, want)
+	}
+}
+
+type stubKeyProvider struct {
+	key []byte
+	err error
+}
+
+func (s stubKeyProvider) GetEncryptionKey(context.Context) ([]byte, error) { return s.key, s.err }
+func (stubKeyProvider) Name() string                                       { return "stub" }
+func (stubKeyProvider) Health(context.Context) types.HealthStatus          { return types.HealthStatus{} }
+func (stubKeyProvider) Close() error                                       { return nil }
+
+// The daemon refuses to start LogsService without a master KEK it can use.
+func TestLogsCursorKeyFromProvider(t *testing.T) {
+	ctx := context.Background()
+	if _, err := logsCursorKeyFromProvider(ctx, nil); err == nil {
+		t.Error("no key provider must be refused")
+	}
+	if _, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{err: errors.New("vault down")}); err == nil {
+		t.Error("a KEK read failure must be refused")
+	}
+	if _, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{key: []byte("short")}); err == nil {
+		t.Error("a short KEK must be refused")
+	}
+	key, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{key: bytes.Repeat([]byte{3}, 32)})
+	if err != nil || len(key) != logsCursorKeyLen {
+		t.Fatalf("key: len %d, err %v", len(key), err)
+	}
+}
+
+func TestNewLogsServer_RefusesAShortKey(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("a short cursor key must panic at construction")
+		}
+	}()
+	NewLogsServer(&lokiFake{}, []byte("short"), nil)
+}
+
+func TestLogsPageSize(t *testing.T) {
+	for in, want := range map[int32]int{0: 100, -4: 100, 25: 25, 5000: lokilogs.MaxLimit} {
+		if got := logsPageSize(in); got != want {
+			t.Errorf("logsPageSize(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+func TestDecodeLogsCursor_RefusesATokenWithNoSignature(t *testing.T) {
+	if _, err := decodeLogsCursor(testLogsKey, logsQueryScope{}, "nodothere"); err == nil {
+		t.Error("a token with no signature part must be refused")
 	}
 }

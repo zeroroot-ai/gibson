@@ -224,8 +224,7 @@ func (c *Client) query(ctx context.Context, logql, tenantID string, start, end t
 		}
 	}
 	// Newest first (direction=backward). Lines with the same nanosecond sort by
-	// text, so that two queries order the ties alike and a page cursor can skip
-	// the ties it already returned.
+	// text, so that one result has one order.
 	sort.SliceStable(entries, func(i, j int) bool {
 		if entries[i].UnixNanos != entries[j].UnixNanos {
 			return entries[i].UnixNanos > entries[j].UnixNanos

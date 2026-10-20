@@ -87,3 +87,31 @@ func TestNewClient_RequiresBaseURL(t *testing.T) {
 		t.Fatal("expected error for empty BaseURL")
 	}
 }
+
+// A limit above MaxLimit is clamped, and lines of one nanosecond come back in
+// one order.
+func TestClient_ClampsTheLimitAndOrdersTies(t *testing.T) {
+	var gotLimit string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotLimit = r.URL.Query().Get("limit")
+		_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"streams","result":[` +
+			`{"stream":{},"values":[["5","b"],["5","a"],["9","z"]]}]}}`))
+	}))
+	defer ts.Close()
+
+	c, _ := NewClient(Config{BaseURL: ts.URL}, nil)
+	entries, err := c.QueryMissionLogs(context.Background(), MissionQuery{TenantID: "acme", MissionID: "m1", Limit: 50_000})
+	if err != nil {
+		t.Fatalf("QueryMissionLogs: %v", err)
+	}
+	if gotLimit != "1000" {
+		t.Errorf("limit sent to Loki = %q, want 1000", gotLimit)
+	}
+	var lines []string
+	for _, e := range entries {
+		lines = append(lines, e.Line)
+	}
+	if got := strings.Join(lines, ","); got != "z,a,b" {
+		t.Errorf("order = %s, want newest first and ties by text (z,a,b)", got)
+	}
+}
