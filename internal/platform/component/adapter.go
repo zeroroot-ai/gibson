@@ -21,25 +21,6 @@ import (
 	"github.com/zeroroot-ai/sdk/types"
 )
 
-// CallbackManager provides callback server functionality for agent harness operations.
-// External gRPC agents can connect back to the callback server to access LLM, tools,
-// memory, and other harness operations.
-//
-// This interface is implemented by harness.CallbackManager.
-// Note: The harness parameter uses any to avoid circular imports between component and harness.
-// The actual implementation expects harness.AgentHarness.
-type CallbackManager interface {
-	// RegisterHarnessForMission registers a harness for external agent execution within
-	// a mission context and returns the registration key.
-	RegisterHarnessForMission(missionID, agentName string, harness any) (string, error)
-
-	// UnregisterHarness removes a harness registration after task or mission completion.
-	UnregisterHarness(key string)
-
-	// CallbackEndpoint returns the advertised callback endpoint address.
-	CallbackEndpoint() string
-}
-
 // ComponentDiscovery provides a unified interface for discovering and connecting to
 // agents and tools registered in the component registry.
 //
@@ -133,10 +114,6 @@ func NewRegistryAdapter(reg ComponentRegistry) *RegistryAdapter {
 		registry: reg,
 		resolver: protoresolver.NewDefaultProtoResolver(protoresolver.DefaultConfig()),
 	}
-}
-
-// SetCallbackManager configures the callback manager for this adapter.
-func (a *RegistryAdapter) SetCallbackManager(cm CallbackManager) {
 }
 
 // SetAuthConfig configures authentication for callback connections.

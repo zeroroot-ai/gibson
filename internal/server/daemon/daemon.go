@@ -1144,10 +1144,6 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		d.logger.Info(ctx, "Timeline→lifecycle projector installed on brain registry")
 	}
 
-	// Wire callback manager to registry adapter for external agent callback support
-	regAdapter.SetCallbackManager(d.callback)
-	d.logger.Info(ctx, "wired callback manager to registry adapter")
-
 	// Share proto resolver between registry adapter and callback manager for unified caching
 	d.callback.SetProtoResolver(regAdapter.GetResolver())
 	d.logger.Info(ctx, "shared proto resolver with callback manager")
