@@ -30,7 +30,9 @@ func TestRegisterDomainPack_ServesWithRegistryAndAuthorizer(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; !ok {
 		t.Fatal("DomainPackService must be registered when a brain registry and authorizer are present")
@@ -51,7 +53,9 @@ func TestRegisterDomainPack_ConstructsCatalogWhenNil(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if d.domainPackCatalog == nil {
 		t.Fatal("registerDomainPack must construct a catalog when none is wired")
@@ -77,28 +81,55 @@ func TestRegisterDomainPack_ReusesWiredCatalog(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 
 	if d.domainPackCatalog != want {
 		t.Fatal("registerDomainPack must reuse the already-wired catalog, not replace it")
 	}
 }
 
-func TestRegisterDomainPack_SkipsWithoutAuthorizer(t *testing.T) {
+func TestRegisterDomainPack_FailsWithoutAuthorizer(t *testing.T) {
 	d := &daemonImpl{
 		logger:        testObservabilityLogger(),
 		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without an authorizer")
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
 		t.Fatal("DomainPackService must not be registered without an authorizer")
 	}
 }
 
-func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
+// Without the platform database the import store cannot start, so the
+// registration fails and neither service is silently missing.
+func TestRegisterDomainPack_FailsWithoutPlatformDB(t *testing.T) {
+	d := &daemonImpl{
+		logger:        testObservabilityLogger(),
+		brainRegistry: brain.NewRegistry(context.Background(), braintest.StoreFactory()),
+		authorizer:    wiringAuthorizer{},
+	}
+	srv := grpc.NewServer()
+
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without the platform database")
+	}
+
+	info := srv.GetServiceInfo()
+	if _, ok := info[domainPackServiceName]; ok {
+		t.Fatal("DomainPackService must not be registered without the platform database")
+	}
+	if _, ok := info["gibson.tenant.v1.ComplianceService"]; ok {
+		t.Fatal("ComplianceService must not be registered without the platform database")
+	}
+}
+
+func TestRegisterDomainPack_FailsWithoutBrainRegistry(t *testing.T) {
 	d := &daemonImpl{
 		logger:     testObservabilityLogger(),
 		authorizer: wiringAuthorizer{},
@@ -106,7 +137,9 @@ func TestRegisterDomainPack_SkipsWithoutBrainRegistry(t *testing.T) {
 	}
 	srv := grpc.NewServer()
 
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err == nil {
+		t.Fatal("registerDomainPack must fail without a brain registry")
+	}
 
 	if _, ok := srv.GetServiceInfo()[domainPackServiceName]; ok {
 		t.Fatal("DomainPackService must not be registered without a brain registry")
@@ -136,7 +169,9 @@ func TestRegisterDomainPack_RegistersTheComplianceService(t *testing.T) {
 		platformDB:    testPlatformDB(t),
 	}
 	srv := grpc.NewServer()
-	d.registerDomainPack(context.Background(), srv)
+	if err := d.registerDomainPack(context.Background(), srv); err != nil {
+		t.Fatalf("registerDomainPack: %v", err)
+	}
 	if _, ok := srv.GetServiceInfo()["gibson.tenant.v1.ComplianceService"]; !ok {
 		t.Fatal("ComplianceService must be registered with the Domain Pack service")
 	}

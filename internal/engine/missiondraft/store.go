@@ -27,6 +27,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,52 +147,135 @@ func (s *RedisMissionDraftStore) Save(ctx context.Context, tenantID, name, cueSo
 	return draftID, nil
 }
 
-// List returns all saved drafts for a tenant ordered by update time descending.
-// The YAML content is NOT included in list responses (only metadata).
-func (s *RedisMissionDraftStore) List(ctx context.Context, tenantID string) ([]*MissionDraft, error) {
+// ErrBadPosition reports a ListPage position that this store did not write.
+var ErrBadPosition = errors.New("missiondraft: the list position is not valid")
+
+// position names the place of a draft in the list: its creation time and its
+// id. Neither changes when a draft is saved again, so a draft keeps its place
+// during a walk. The list order is creation time descending, then id
+// descending. Save writes created_at as UTC RFC 3339, which sorts as text.
+func position(createdAt, id string) string {
+	return createdAt + "|" + id
+}
+
+func parsePosition(pos string) (createdAt, id string, err error) {
+	createdAt, id, ok := strings.Cut(pos, "|")
+	if !ok || createdAt == "" || id == "" {
+		return "", "", ErrBadPosition
+	}
+	return createdAt, id, nil
+}
+
+// ListPage returns up to limit saved drafts for a tenant, newest creation
+// first. The YAML content is NOT included (only metadata). after is the
+// position that the previous call returned as next, or empty for the first
+// page. next is empty on the last page. The call reads the index of ids and
+// the creation time of each, then the hashes of the drafts on the page only.
+// It never uses an offset, and a save of a draft does not change its place,
+// so a draft that is saved between two pages does not move the window.
+func (s *RedisMissionDraftStore) ListPage(
+	ctx context.Context, tenantID, after string, limit int,
+) (drafts []*MissionDraft, next string, err error) {
 	if tenantID == "" {
-		return nil, fmt.Errorf("tenant_id is required")
+		return nil, "", errors.New("tenant_id is required")
 	}
-
-	idx := indexKey(tenantID)
-
-	// Fetch draft IDs from the sorted set, newest first.
-	ids, err := s.client.ZRevRange(ctx, idx, 0, -1).Result()
-	if err == goredis.Nil || len(ids) == 0 {
-		return []*MissionDraft{}, nil
+	if limit <= 0 {
+		return nil, "", errors.New("limit must be positive")
 	}
+	var afterCreated, afterID string
+	if after != "" {
+		afterCreated, afterID, err = parsePosition(after)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	entries, err := s.sortedIndex(ctx, tenantID)
 	if err != nil {
+		return nil, "", err
+	}
+
+	drafts = make([]*MissionDraft, 0, limit)
+	for _, e := range entries {
+		if after != "" && (e.createdAt > afterCreated || (e.createdAt == afterCreated && e.id >= afterID)) {
+			continue
+		}
+		if len(drafts) == limit {
+			// A draft follows this page.
+			last := drafts[len(drafts)-1]
+			return drafts, position(last.CreatedAt, last.ID), nil
+		}
+		if d := s.loadDraft(ctx, tenantID, e.id); d != nil {
+			drafts = append(drafts, d)
+		}
+	}
+	return drafts, "", nil
+}
+
+// draftRef names one draft of the index: its creation time and its id.
+type draftRef struct{ createdAt, id string }
+
+// sortedIndex reads the ids of the tenant index and the creation time of each
+// in one pipeline. It returns them newest first, with the id as the tie
+// breaker. An index entry with no hash is removed.
+func (s *RedisMissionDraftStore) sortedIndex(ctx context.Context, tenantID string) ([]draftRef, error) {
+	idx := indexKey(tenantID)
+	ids, err := s.client.ZRange(ctx, idx, 0, -1).Result()
+	if err != nil && !errors.Is(err, goredis.Nil) {
 		return nil, fmt.Errorf("failed to list draft index: %w", err)
 	}
-
-	drafts := make([]*MissionDraft, 0, len(ids))
-	for _, id := range ids {
-		key := draftKey(tenantID, id)
-		fields, hErr := s.client.HGetAll(ctx, key).Result()
-		if hErr == goredis.Nil || len(fields) == 0 {
+	pipe := s.client.Pipeline()
+	created := make([]*goredis.StringCmd, len(ids))
+	for i, id := range ids {
+		created[i] = pipe.HGet(ctx, draftKey(tenantID, id), "created_at")
+	}
+	// A missing hash makes Exec report goredis.Nil. The cmds carry the verdict.
+	if _, execErr := pipe.Exec(ctx); execErr != nil && !errors.Is(execErr, goredis.Nil) {
+		return nil, fmt.Errorf("failed to read draft times: %w", execErr)
+	}
+	entries := make([]draftRef, 0, len(ids))
+	for i, id := range ids {
+		c, cErr := created[i].Result()
+		if errors.Is(cErr, goredis.Nil) {
 			// Draft removed; clean stale index entry.
 			_ = s.client.ZRem(ctx, idx, id)
 			continue
 		}
-		if hErr != nil {
-			s.logger.WarnContext(ctx, "missiondraft: failed to fetch draft",
-				slog.String("tenant_id", tenantID),
-				slog.String("draft_id", id),
-				slog.String("error", hErr.Error()),
-			)
-			continue
+		if cErr != nil {
+			return nil, fmt.Errorf("failed to read draft time: %w", cErr)
 		}
-		drafts = append(drafts, &MissionDraft{
-			ID:                  fields["id"],
-			Name:                fields["name"],
-			MissionDefinitionID: fields["mission_definition_id"],
-			CreatedAt:           fields["created_at"],
-			UpdatedAt:           fields["updated_at"],
-			// CUE source omitted from list responses.
-		})
+		entries = append(entries, draftRef{createdAt: c, id: id})
 	}
+	slices.SortFunc(entries, func(a, b draftRef) int {
+		if c := strings.Compare(b.createdAt, a.createdAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.id, a.id)
+	})
+	return entries, nil
+}
 
-	return drafts, nil
+// loadDraft reads the metadata of one draft. It returns nil when the draft is
+// gone or the read failed. The CUE source is omitted.
+func (s *RedisMissionDraftStore) loadDraft(ctx context.Context, tenantID, id string) *MissionDraft {
+	fields, err := s.client.HGetAll(ctx, draftKey(tenantID, id)).Result()
+	if err != nil {
+		s.logger.WarnContext(ctx, "missiondraft: failed to fetch draft",
+			slog.String("tenant_id", tenantID),
+			slog.String("draft_id", id),
+			slog.String("error", err.Error()),
+		)
+		return nil
+	}
+	if len(fields) == 0 {
+		return nil
+	}
+	return &MissionDraft{
+		ID:                  fields["id"],
+		Name:                fields["name"],
+		MissionDefinitionID: fields["mission_definition_id"],
+		CreatedAt:           fields["created_at"],
+		UpdatedAt:           fields["updated_at"],
+	}
 }
 
 // Get retrieves a single draft including its YAML content.

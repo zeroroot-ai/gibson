@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -262,7 +264,16 @@ func (s *DaemonServer) ListAccess(ctx context.Context, req *tenantv1.ListAccessR
 		}
 	}
 
-	return &tenantv1.ListAccessResponse{Grants: grants}, nil
+	// The key of a grant is its target. A subject holds one grant for each
+	// target, so the key is unique in the list.
+	page, err := pageOf(s.pageKeys, "tenant-access", req.GetPageSize(), req.GetPageToken(), tenantID,
+		req.GetSubjectKind().String(), req.GetSubjectId())
+	if err != nil {
+		return nil, err
+	}
+	pos := func(g *tenantv1.AccessGrant) string { return g.GetTargetKind().String() + "/" + g.GetTargetId() }
+	grants, next := pagetoken.Page(page, grants, pos)
+	return &tenantv1.ListAccessResponse{Grants: grants, NextPageToken: next}, nil
 }
 
 // ListModelResolutionEvents returns recent model_resolved events.
@@ -296,47 +307,88 @@ func (s *DaemonServer) ListModelResolutionEvents(ctx context.Context, req *tenan
 		filters.Until = &t
 	}
 
-	// Hard cap the dashboard page at 500 rows; operators who need more
-	// paginate by narrowing the time range.
-	rows, _, err := s.auditQuery.List(ctx, tenantID, filters, 500, 0)
+	page, err := pageOf(s.pageKeys, "tenant-model-resolution-events", req.GetPageSize(), req.GetPageToken(), tenantID,
+		req.GetUserId(), req.GetSlotName(),
+		strconv.FormatInt(req.GetStartTimeUnix(), 10), strconv.FormatInt(req.GetEndTimeUnix(), 10))
 	if err != nil {
-		s.logger.WarnContext(ctx, "model_access: audit query failed",
-			slog.String("error", err.Error()), slog.String("tenant", tenantID))
-		return &tenantv1.ListModelResolutionEventsResponse{}, nil
+		return nil, err
 	}
-
-	events := make([]*tenantv1.ModelResolutionEvent, 0, len(rows))
-	for _, r := range rows {
-		ev := &tenantv1.ModelResolutionEvent{
-			TenantId:      r.TenantID,
-			UserId:        r.ActorID,
-			TimestampUnix: r.CreatedAt.Unix(),
+	// The position is the audit.Position of the last row. The audit query reads
+	// it back, so the page does not use KeysetPage.
+	after, _ := page.After()
+	limit := page.Limit()
+	// The slot filter reads the metadata of each row, so it runs here and not
+	// in SQL. A selective slot makes a page cost several reads. Each page reads
+	// at most maxResolutionBatches batches, and a page that is short carries a
+	// token to go on.
+	events := make([]*tenantv1.ModelResolutionEvent, 0, limit)
+	lastPos, more := "", false
+	for batch := 0; batch < maxResolutionBatches && len(events) < limit; batch++ {
+		rows, hasMore, err := s.auditQuery.ListAfter(ctx, tenantID, filters, after, limit)
+		if err != nil {
+			// An empty page with no token reads as the end of the list, so a
+			// read error is an error.
+			s.logger.WarnContext(ctx, "model_access: audit query failed",
+				slog.String("error", err.Error()), slog.String("tenant", tenantID))
+			return nil, status_grpc.Error(codes.Unavailable, "audit log is not available; try again")
 		}
-		// target_id is of the form "provider/model" — split on the
-		// slash. Events from other sources (none today — model_resolved
-		// is emitted only by audit.EmitModelResolved) are tolerated.
-		if slash := strings.IndexByte(r.TargetID, '/'); slash > 0 {
-			ev.ChosenProvider = r.TargetID[:slash]
-			ev.ChosenModel = r.TargetID[slash+1:]
-		}
-		// Unmarshal the slot-resolution metadata embedded in the event
-		// to recover fields not captured by the base Event shape.
-		if len(r.Metadata) > 0 {
-			var meta audit.ModelResolutionEvent
-			if err := json.Unmarshal(r.Metadata, &meta); err == nil {
-				ev.MissionId = meta.MissionID
-				ev.RunId = meta.RunID
-				ev.AgentId = meta.AgentID
-				ev.SlotName = meta.SlotName
-				// Slot filter narrows client-side so we don't over-engineer the SQL.
-				if req.GetSlotName() != "" && meta.SlotName != req.GetSlotName() {
-					continue
-				}
+		more = hasMore
+		for i, r := range rows {
+			ev, keep := resolutionEvent(r, req.GetSlotName())
+			if !keep {
+				lastPos = audit.Position(r)
+				continue
+			}
+			events = append(events, ev)
+			lastPos = audit.Position(r)
+			if len(events) == limit {
+				more = more || i < len(rows)-1
+				break
 			}
 		}
-		events = append(events, ev)
+		if !more || len(rows) == 0 {
+			break
+		}
+		after = lastPos
 	}
-	return &tenantv1.ListModelResolutionEventsResponse{Events: events}, nil
+
+	return &tenantv1.ListModelResolutionEventsResponse{Events: events, NextPageToken: page.Token(lastPos, more)}, nil
+}
+
+// maxResolutionBatches bounds the audit reads of one ListModelResolutionEvents
+// page.
+const maxResolutionBatches = 10
+
+// resolutionEvent converts one audit row to a wire event. keep is false when
+// the row does not match the slot filter.
+func resolutionEvent(r audit.PgEntry, slotFilter string) (ev *tenantv1.ModelResolutionEvent, keep bool) {
+	ev = &tenantv1.ModelResolutionEvent{
+		TenantId:      r.TenantID,
+		UserId:        r.ActorID,
+		TimestampUnix: r.CreatedAt.Unix(),
+	}
+	// target_id is of the form "provider/model" — split on the
+	// slash. Events from other sources (none today — model_resolved
+	// is emitted only by audit.EmitModelResolved) are tolerated.
+	if slash := strings.IndexByte(r.TargetID, '/'); slash > 0 {
+		ev.ChosenProvider = r.TargetID[:slash]
+		ev.ChosenModel = r.TargetID[slash+1:]
+	}
+	// Unmarshal the slot-resolution metadata embedded in the event
+	// to recover fields not captured by the base Event shape.
+	if len(r.Metadata) > 0 {
+		var meta audit.ModelResolutionEvent
+		if err := json.Unmarshal(r.Metadata, &meta); err == nil {
+			ev.MissionId = meta.MissionID
+			ev.RunId = meta.RunID
+			ev.AgentId = meta.AgentID
+			ev.SlotName = meta.SlotName
+			if slotFilter != "" && meta.SlotName != slotFilter {
+				return nil, false
+			}
+		}
+	}
+	return ev, true
 }
 
 // timeNowUnix wraps time.Now().Unix() in a named helper so the value

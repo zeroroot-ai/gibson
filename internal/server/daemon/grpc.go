@@ -716,6 +716,14 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Create and register daemon service.
 	// Attach the quota manager so RunMission enforces per-tenant mission limits.
 	daemonSvc := api.NewDaemonServer(d, d.credentialHandler, d.logger.Slog())
+	// The list RPCs take their page token signers from the one key source.
+	// The daemon builds the page keys once. Every paged service takes its
+	// signers from them.
+	pageKeys, pageKeysErr := d.newPageKeys(ctx)
+	if pageKeysErr != nil {
+		return nil, pageKeysErr
+	}
+	daemonSvc.WithPageKeys(pageKeys)
 	// The Platform owner's health view asks the secret backend of the
 	// platform to answer (hosted#174, gibson#1078).
 	daemonSvc.WithSecretPlaneProbe(d.secretBackendProbe())
@@ -1519,13 +1527,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		daemonSvc.WithConnectorGrantRevoker(d.connectorAuthSrv)
 		daemonSvc.WithConnectorAuthStatusReader(d.connectorAuthSrv)
 	}
-	// The page tokens of the operator list RPCs are signed with the page token
-	// keys of the daemon (ADR-0028, gibson#1261).
-	operatorPageKeys, operatorKeysErr := d.newPageKeys(ctx)
-	if operatorKeysErr != nil {
-		return nil, operatorKeysErr
-	}
-	daemonSvc.WithPageKeys(operatorPageKeys)
 	// The two belief trainer RPCs (ADR-0106, gibson#788). Each one serves only
 	// the trainer identity of the tenant in the request.
 	if d.brainRegistry != nil {
@@ -1716,10 +1717,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
-	pageKeys, pageKeysErr := d.newPageKeys(ctx)
-	if pageKeysErr != nil {
-		return nil, pageKeysErr
-	}
 	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
@@ -1727,14 +1724,18 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// Pack catalog + enable/disable lifecycle (ADR-0133, gibson#381). Reuses
 	// d.brainRegistry (just constructed above) so an enabled pack folds into
 	// the SAME per-tenant World WorldService reads.
-	d.registerDomainPack(ctx, srv)
+	if err := d.registerDomainPack(ctx, srv); err != nil {
+		return nil, err
+	}
 	d.registerCatalogPlugin(ctx, srv)
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
 	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,
 	// ADR-0133, gibson#392). Reuses d.brainRegistry (just
 	// constructed above), same as DomainPackService.
-	d.registerOntologyExtension(ctx, srv)
+	if err := d.registerOntologyExtension(ctx, srv, pageKeys); err != nil {
+		return nil, err
+	}
 
 	// Register gibson.daemon.destructiveauthz.v1.DestructiveAuthorizationService
 	// — the daemon API backing the dashboard's destructive-action authorization
@@ -1756,11 +1757,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// (so the registry-coverage and dashboard contract hold) but every call returns
 	// codes.Unavailable.
 	logsQuerier := resolveLogsQuerier(d.logger.WithComponent("logs-service").Slog())
-	logsPageKeys, logsKeysErr := d.newPageKeys(ctx)
-	if logsKeysErr != nil {
-		return nil, logsKeysErr
-	}
-	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, logsPageKeys, d.logger.WithComponent("logs-service").Slog()))
+	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, pageKeys, d.logger.WithComponent("logs-service").Slog()))
 	d.logger.Info(ctx, "registered LogsService gRPC endpoint")
 
 	// Register gibson.daemon.agentconsole.v1.AgentConsoleService — the read-only,

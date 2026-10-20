@@ -15,7 +15,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -80,28 +82,13 @@ func NewQuery(db *sql.DB) *Query {
 	return &Query{db: db}
 }
 
-// List returns a paginated slice of audit entries for tenantID that match
-// filters, along with the total count of matching rows (before pagination).
-//
-// tenantID must be non-empty. limit controls the page size; offset the
-// starting row. Both are applied after filtering.
-//
-// Returns (entries, totalCount, error).
-func (q *Query) List(
-	ctx context.Context,
-	tenantID string,
-	filters Filters,
-	limit, offset int,
-) ([]PgEntry, int, error) {
-	if tenantID == "" {
-		return nil, 0, fmt.Errorf("audit.Query.List: tenantID must not be empty")
-	}
-
-	// Build WHERE clause dynamically from non-empty filter fields.
-	// $1 is always tenant_id.
+// buildWhere builds the WHERE clause of a list query from the non-empty
+// filter fields. $1 is always tenant_id. It returns the clause, its arguments
+// and the number of the next free parameter.
+func buildWhere(tenantID string, filters Filters) (where string, args []interface{}, nextParam int) {
 	conds := []string{"tenant_id = $1"}
-	args := []interface{}{tenantID}
-	nextParam := 2 // $2 onward for additional filters
+	args = []interface{}{tenantID}
+	nextParam = 2 // $2 onward for additional filters
 
 	addFilter := func(col, val string) {
 		conds = append(conds, fmt.Sprintf("%s = $%d", col, nextParam))
@@ -133,7 +120,27 @@ func (q *Query) List(
 		addTimeFilter("created_at", "<=", filters.Until)
 	}
 
-	where := strings.Join(conds, " AND ")
+	return strings.Join(conds, " AND "), args, nextParam
+}
+
+// List returns a paginated slice of audit entries for tenantID that match
+// filters, along with the total count of matching rows (before pagination).
+//
+// tenantID must be non-empty. limit controls the page size; offset the
+// starting row. Both are applied after filtering.
+//
+// Returns (entries, totalCount, error).
+func (q *Query) List(
+	ctx context.Context,
+	tenantID string,
+	filters Filters,
+	limit, offset int,
+) ([]PgEntry, int, error) {
+	if tenantID == "" {
+		return nil, 0, errors.New("audit.Query.List: tenantID must not be empty")
+	}
+
+	where, args, nextParam := buildWhere(tenantID, filters)
 
 	// Count query — same WHERE clause, no pagination.
 	countQuery := "SELECT COUNT(*) FROM audit_log WHERE " + where
@@ -172,7 +179,17 @@ LIMIT  $%d OFFSET $%d`,
 	}
 	defer rows.Close()
 
-	entries := make([]PgEntry, 0, limit)
+	entries, err := scanEntries(rows, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return entries, total, nil
+}
+
+// scanEntries reads every row of an audit_log select into entries.
+func scanEntries(rows *sql.Rows, capHint int) ([]PgEntry, error) {
+	entries := make([]PgEntry, 0, max(capHint, 0))
 	for rows.Next() {
 		var e PgEntry
 		var metaRaw []byte
@@ -188,7 +205,7 @@ LIMIT  $%d OFFSET $%d`,
 			&metaRaw,
 			&e.CreatedAt,
 		); err != nil {
-			return nil, 0, fmt.Errorf("audit.Query.List: scan row: %w", err)
+			return nil, fmt.Errorf("audit.Query.List: scan row: %w", err)
 		}
 		if len(metaRaw) > 0 {
 			e.Metadata = json.RawMessage(metaRaw)
@@ -198,8 +215,90 @@ LIMIT  $%d OFFSET $%d`,
 		entries = append(entries, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("audit.Query.List: rows iteration: %w", err)
+		return nil, fmt.Errorf("audit.Query.List: rows iteration: %w", err)
 	}
 
-	return entries, total, nil
+	return entries, nil
+}
+
+// ErrBadPosition reports a keyset position that Position did not write.
+var ErrBadPosition = errors.New("audit: the keyset position is not valid")
+
+// Position returns the keyset position of an entry: its time to the
+// microsecond (the precision of the column) and its id. The list order is
+// newest first, with the id as the tie breaker.
+func Position(e PgEntry) string {
+	return strconv.FormatInt(e.CreatedAt.UnixMicro(), 10) + "|" + e.ID
+}
+
+func parsePosition(pos string) (time.Time, int64, error) {
+	micros, id, ok := strings.Cut(pos, "|")
+	if !ok {
+		return time.Time{}, 0, ErrBadPosition
+	}
+	us, err := strconv.ParseInt(micros, 10, 64)
+	if err != nil {
+		return time.Time{}, 0, ErrBadPosition
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return time.Time{}, 0, ErrBadPosition
+	}
+	return time.UnixMicro(us).UTC(), n, nil
+}
+
+// ListAfter returns the next page of audit entries for tenantID that match
+// filters, newest first. after is the Position of the last entry that the
+// caller has, or empty for the first page. It never uses OFFSET, so a row that
+// arrives between two calls does not move the window. more is true when
+// another entry follows the page.
+func (q *Query) ListAfter(
+	ctx context.Context,
+	tenantID string,
+	filters Filters,
+	after string,
+	limit int,
+) (entries []PgEntry, more bool, err error) {
+	if tenantID == "" {
+		return nil, false, errors.New("audit.Query.ListAfter: tenantID must not be empty")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	where, args, nextParam := buildWhere(tenantID, filters)
+	if after != "" {
+		at, id, perr := parsePosition(after)
+		if perr != nil {
+			return nil, false, perr
+		}
+		where += " AND (created_at, id) < ($" + strconv.Itoa(nextParam) + ", $" + strconv.Itoa(nextParam+1) + ")"
+		args = append(args, at, id)
+		nextParam += 2
+	}
+	// One row more than the page tells whether another page follows. The query
+	// holds fixed column names and numbered placeholders only. Each value goes
+	// in args.
+	var sqlText strings.Builder
+	sqlText.WriteString("SELECT id, tenant_id, actor_id, actor_type, action, ")
+	sqlText.WriteString("target_type, target_id, COALESCE(decision, ''), metadata, created_at ")
+	sqlText.WriteString("FROM audit_log WHERE ")
+	sqlText.WriteString(where)
+	sqlText.WriteString(" ORDER BY created_at DESC, id DESC LIMIT $")
+	sqlText.WriteString(strconv.Itoa(nextParam))
+	args = append(args, limit+1)
+
+	rows, err := q.db.QueryContext(ctx, sqlText.String(), args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("audit.Query.ListAfter: query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	entries, err = scanEntries(rows, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(entries) > limit {
+		return entries[:limit], true, nil
+	}
+	return entries, false, nil
 }

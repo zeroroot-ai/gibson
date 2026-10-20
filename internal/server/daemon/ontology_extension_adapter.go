@@ -5,9 +5,11 @@ package daemon
 
 import (
 	"context"
+	"errors"
 
 	"google.golang.org/grpc"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
@@ -29,14 +31,17 @@ import (
 // shape exactly, minus the platform-catalog gate: an ontology proposal is
 // per-tenant agent-discovered content, not shipped catalog content, so no
 // CatalogGate applies here.
-func (d *daemonImpl) registerOntologyExtension(ctx context.Context, srv *grpc.Server) {
+func (d *daemonImpl) registerOntologyExtension(ctx context.Context, srv *grpc.Server, pageKeys *pagetoken.Keys) error {
 	if d.brainRegistry == nil {
-		d.logger.Warn(ctx, "OntologyExtensionService: no brain registry; not registering")
-		return
+		return errors.New("daemon: OntologyExtensionService needs the brain registry")
+	}
+	if pageKeys == nil {
+		return errors.New("daemon: OntologyExtensionService needs the page keys")
 	}
 	// A submitted fragment is one audit record in the platform database
 	// (gibson#712).
 	writer := newStartedAuditWriter(ctx, d.platformDB, d.logger.Slog())
-	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry, writer))
+	tenantv1.RegisterOntologyExtensionServiceServer(srv, api.NewOntologyExtensionService(d.brainRegistry, writer, pageKeys))
 	d.logger.Info(ctx, "OntologyExtensionService registered (ADR-0133, gibson#392)")
+	return nil
 }

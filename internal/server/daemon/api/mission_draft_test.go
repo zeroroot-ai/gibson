@@ -43,6 +43,7 @@ func newDraftTestServer(t *testing.T) *DaemonServer {
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	srv := &DaemonServer{logger: logger}
+	srv.WithPageKeys(testPageKeys(t))
 	srv.WithMissionDraftStore(missiondraft.New(client, logger))
 	// The registry grants the draft RPCs to writers, and the gate checks that
 	// relation: the test subject is a writer and nothing more.
@@ -224,6 +225,7 @@ func TestMissionDraft_TenantIsolation(t *testing.T) {
 func TestMissionDraft_StoreNotConfigured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 	srv := &DaemonServer{logger: logger}
+	srv.WithPageKeys(testPageKeys(t))
 	// missionDraftStore intentionally nil.
 
 	_, err := srv.SaveMissionDraft(context.Background(), &tenantv1.SaveMissionDraftRequest{
@@ -268,6 +270,7 @@ func TestMissionDraft_NoAuthorizer_FailsClosed(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
 	srv := &DaemonServer{logger: logger}
+	srv.WithPageKeys(testPageKeys(t))
 	srv.WithMissionDraftStore(missiondraft.New(client, logger))
 	// authorizer intentionally left nil.
 

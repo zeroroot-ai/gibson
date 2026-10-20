@@ -72,6 +72,7 @@ func newIntegServer(t *testing.T) *DaemonServer {
 	draftStore := missiondraft.New(client, integTestLogger)
 
 	srv := &DaemonServer{logger: integTestLogger}
+	srv.WithPageKeys(testPageKeys(t))
 	srv.WithMissionDraftStore(draftStore)
 	// The fake authorizer holds exact tuples, unlike the FGA model where admin
 	// implies writer: grant both, since the draft RPCs gate on writer (the

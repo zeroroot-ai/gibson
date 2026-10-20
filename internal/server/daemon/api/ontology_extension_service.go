@@ -16,6 +16,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -54,6 +55,9 @@ type OntologyExtensionService struct {
 
 	// audit writes the submitted fragment as one audit record (gibson#712).
 	audit FragmentAuditWriter
+
+	// pageKeys derives the signer of the page tokens of ListOntologyExtensionProposals.
+	pageKeys *pagetoken.Keys
 }
 
 // FragmentAuditWriter writes one audit record and returns its id.
@@ -67,9 +71,12 @@ type FragmentAuditWriter interface {
 const SubmittedFragmentAction = "ontology.extension.submitted"
 
 // NewOntologyExtensionService constructs the service over the given tenant
-// brain registry and the audit writer of submitted fragments.
-func NewOntologyExtensionService(registry *brain.Registry, fragments FragmentAuditWriter) *OntologyExtensionService {
-	return &OntologyExtensionService{registry: registry, audit: fragments}
+// brain registry, the audit writer of submitted fragments and the key source of
+// page tokens.
+func NewOntologyExtensionService(
+	registry *brain.Registry, fragments FragmentAuditWriter, pageKeys *pagetoken.Keys,
+) *OntologyExtensionService {
+	return &OntologyExtensionService{registry: registry, audit: fragments, pageKeys: pageKeys}
 }
 
 // engine resolves the caller's tenant from the ext-authz context and returns
@@ -112,13 +119,26 @@ func ontologyProposalKind(k tenantv1.OntologyProposalKind) (taxonomy.ProposalKin
 // tenant owner has full visibility into what agents are proposing
 // (ADR-0133's "the tenant owner seeing every proposal").
 func (s *OntologyExtensionService) ListOntologyExtensionProposals(
-	ctx context.Context, _ *tenantv1.ListOntologyExtensionProposalsRequest,
+	ctx context.Context, req *tenantv1.ListOntologyExtensionProposalsRequest,
 ) (*tenantv1.ListOntologyExtensionProposalsResponse, error) {
 	e, err := s.engine(ctx, "ListOntologyExtensionProposals")
 	if err != nil {
 		return nil, err
 	}
-	snapshot := e.OntologyProposals()
+	tenantID, ok := auth.TenantFromContext(ctx)
+	if !ok {
+		return nil, status_grpc.Error(codes.PermissionDenied, "ListOntologyExtensionProposals: missing tenant in context")
+	}
+	// The key of a proposal is its kind and its label, which name it.
+	page, err := pageOf(s.pageKeys, "tenant-ontology-proposals", req.GetPageSize(), req.GetPageToken(), tenantID.String())
+	if err != nil {
+		return nil, err
+	}
+	// The position of a proposal is its kind and its label, which name it.
+	pos := func(p brain.OntologyProposalSnapshot) string {
+		return strconv.Itoa(int(p.ProposalKind)) + "/" + p.Label
+	}
+	snapshot, next := pagetoken.Page(page, e.OntologyProposals(), pos)
 	out := make([]*tenantv1.OntologyExtensionProposal, 0, len(snapshot))
 	for _, p := range snapshot {
 		out = append(out, &tenantv1.OntologyExtensionProposal{
@@ -134,7 +154,7 @@ func (s *OntologyExtensionService) ListOntologyExtensionProposals(
 			TaxonomyVersion: int32Count(p.PromotedVersion),
 		})
 	}
-	return &tenantv1.ListOntologyExtensionProposalsResponse{OntologyProposals: out}, nil
+	return &tenantv1.ListOntologyExtensionProposalsResponse{OntologyProposals: out, NextPageToken: next}, nil
 }
 
 // proposalKindToWire converts the taxonomy vocabulary back to its wire
