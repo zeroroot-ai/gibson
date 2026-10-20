@@ -22,6 +22,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -300,6 +301,10 @@ type DaemonServer struct {
 	// stale enforcement.
 	// Spec: llm-user-attribution-governance (Requirement 4.6).
 	modelGateInvalidator modelGateInvalidator
+
+	// modelFilter decides which provider and model the calling user may use.
+	// ExecuteLLM denies every call while it is nil.
+	modelFilter modelgate.Filter
 
 	// secretPlaneProbe backs AdminGetPlatformHealth (hosted#174). Wired via
 	// WithSecretPlaneProbe. When nil the RPC reports the secret plane as
