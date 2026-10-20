@@ -47,6 +47,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
 	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
@@ -224,6 +225,11 @@ type daemonImpl struct {
 
 	// keyProvider provides access to encryption keys from secure storage
 	keyProvider crypto.KeyProvider
+
+	// pageKeys derives the signing key of each paged list from the master KEK
+	// (page_keys.go). One value serves every service, so a token of a list
+	// works on each replica. Built once by newPageKeys.
+	pageKeys *pagetoken.Keys
 
 	// cgMinter signs and verifies Capability-Grant bootstrap tokens (gibson#648,
 	// ADR-0045). Constructed from keyProvider during Start; nil when no key

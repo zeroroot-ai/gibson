@@ -30,13 +30,17 @@ var worldPagedRPCs = []string{
 	"ListLlmCalls", "ListMissions", "ListOpenBets", "ListReviewQueue",
 }
 
-// worldSigners derives the signer of each paged RPC from the master KEK.
-func worldSigners(keys *pagetoken.Keys) map[string]*pagetoken.Signer {
+// worldSigners derives the signer of each paged RPC from the page token keys.
+func worldSigners(keys *pagetoken.Keys) (map[string]*pagetoken.Signer, error) {
 	out := make(map[string]*pagetoken.Signer, len(worldPagedRPCs))
 	for _, rpc := range worldPagedRPCs {
-		out[rpc] = keys.Signer("world-" + rpc)
+		signer, err := keys.Signer("world-" + rpc)
+		if err != nil {
+			return nil, err
+		}
+		out[rpc] = signer
 	}
-	return out
+	return out, nil
 }
 
 // keySep joins the parts of a composite sort key. No part holds a NUL byte,
@@ -66,7 +70,10 @@ func (s *worldServer) pageOf(
 		return worldPage{}, status.Error(codes.PermissionDenied, "no tenant in context")
 	}
 	scope := append([]string{t.String(), rpc}, filters...)
-	signer := s.signers[rpc]
+	signer, ok := s.signers[rpc]
+	if !ok {
+		return worldPage{}, status.Errorf(codes.Internal, "no page token signer for %s", rpc)
+	}
 	after, hasAfter, err := signer.After(scope, token)
 	if err != nil {
 		return worldPage{}, status.Error(codes.InvalidArgument, err.Error())

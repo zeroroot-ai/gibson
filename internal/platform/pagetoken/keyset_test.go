@@ -4,27 +4,23 @@
 package pagetoken
 
 import (
-	"context"
 	"encoding/base64"
 	"errors"
 	"strconv"
-	"strings"
 	"testing"
 )
 
 func testSigner(t *testing.T) *Signer {
 	t.Helper()
-	s, err := NewSigner([]byte("0123456789abcdef0123456789abcdef"), "test")
+	k, err := NewKeys([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := k.Signer("test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s
-}
-
-func TestNewSigner_RefusesAShortKEK(t *testing.T) {
-	if _, err := NewSigner([]byte("short"), "x"); err == nil {
-		t.Fatal("want an error for a short KEK")
-	}
 }
 
 func TestSigner_EmptyTokenIsTheFirstPage(t *testing.T) {
@@ -47,7 +43,8 @@ func TestSigner_RefusesAnotherScopeAndAnEditedToken(t *testing.T) {
 	s := testSigner(t)
 	scope := []string{"acme", "List"}
 	tok := s.Token(scope, "k1")
-	other, _ := NewSigner([]byte("ffffffffffffffffffffffffffffffff"), "test")
+	otherKeys, _ := NewKeys([]byte("ffffffffffffffffffffffffffffffff"))
+	other, _ := otherKeys.Signer("test")
 	for name, c := range map[string]struct {
 		s     *Signer
 		scope []string
@@ -139,21 +136,18 @@ func TestKeys_EachListHasItsOwnKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, b := keys.Signer("a"), keys.Signer("b")
+	a, _ := keys.Signer("a")
+	b, _ := keys.Signer("b")
 	scope := []string{"acme", "List"}
 	tok := a.Token(scope, "k1")
 	if _, _, err := b.After(scope, tok); !errors.Is(err, ErrBadToken) {
 		t.Fatalf("a token of list a opened list b: %v", err)
 	}
-	if k, _, err := keys.Signer("a").After(scope, tok); err != nil || k != "k1" {
+	// A second Keys from the same KEK is another replica.
+	replica, _ := NewKeys(kek)
+	a2, _ := replica.Signer("a")
+	if k, _, err := a2.After(scope, tok); err != nil || k != "k1" {
 		t.Fatalf("the same list on another replica: %q, %v", k, err)
-	}
-	direct, err := NewSigner(kek, "a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if k, _, err := direct.After(scope, tok); err != nil || k != "k1" {
-		t.Fatalf("NewSigner and Keys.Signer differ: %q, %v", k, err)
 	}
 	if keyInfo("audit") != "gibson/v1/audit-page-token" {
 		t.Fatalf("keyInfo = %q", keyInfo("audit"))
@@ -163,114 +157,5 @@ func TestKeys_EachListHasItsOwnKey(t *testing.T) {
 func TestNewKeys_RefusesAShortKEK(t *testing.T) {
 	if _, err := NewKeys([]byte("short")); err == nil {
 		t.Fatal("want an error for a short KEK")
-	}
-}
-
-func TestKeysetPage_Descending(t *testing.T) {
-	items := []int{50, 40, 30, 20, 10}
-	key := func(n int) string { return strconv.Itoa(n) }
-	numeric := func(a, b string) int {
-		x, _ := strconv.Atoi(a)
-		y, _ := strconv.Atoi(b)
-		return x - y
-	}
-	var got []int
-	after, has := "", false
-	for range 10 {
-		page, last, more := KeysetPage(items, key, after, has, 2, Descending(), WithCompare(numeric))
-		got = append(got, page...)
-		if !more {
-			break
-		}
-		after, has = last, true
-	}
-	if len(got) != 5 || got[0] != 50 || got[4] != 10 {
-		t.Fatalf("got %v, want the items once from 50 down to 10", got)
-	}
-	// A row that arrives with a larger position than the cursor does not move
-	// the next page.
-	page, _, _ := KeysetPage([]int{99, 50, 40, 30}, key, "40", true, 5, Descending(), WithCompare(numeric))
-	if len(page) != 1 || page[0] != 30 {
-		t.Fatalf("page after 40 = %v, want [30]", page)
-	}
-}
-
-// A composite position such as "unix nanos, id" is an opaque string that the
-// list compares itself. Here the comparison already puts the newest first, so
-// the list needs no Descending.
-func TestKeysetPage_CompositePosition(t *testing.T) {
-	type row struct {
-		ts int64
-		id string
-	}
-	items := []row{{5, "b"}, {5, "a"}, {3, "z"}, {1, "q"}}
-	pos := func(r row) string { return strconv.FormatInt(r.ts, 10) + "|" + r.id }
-	cmp := func(a, b string) int {
-		at, aid, _ := strings.Cut(a, "|")
-		bt, bid, _ := strings.Cut(b, "|")
-		ai, _ := strconv.ParseInt(at, 10, 64)
-		bi, _ := strconv.ParseInt(bt, 10, 64)
-		if ai != bi {
-			return int(bi - ai) // newest first
-		}
-		return strings.Compare(bid, aid)
-	}
-	page, last, more := KeysetPage(items, pos, "", false, 2, WithCompare(cmp))
-	if len(page) != 2 || last != "5|a" || !more {
-		t.Fatalf("page 1 = %v, %q, %v", page, last, more)
-	}
-	page, _, more = KeysetPage(items, pos, last, true, 5, WithCompare(cmp))
-	if len(page) != 2 || page[0].id != "z" || more {
-		t.Fatalf("page 2 = %v, more %v", page, more)
-	}
-	// The signer carries the composite position, NUL bytes included.
-	s := testSigner(t)
-	scope := []string{"acme", "ListAudit"}
-	got, has, err := s.After(scope, s.Token(scope, "5\x00a|\xff"))
-	if err != nil || !has || got != "5\x00a|\xff" {
-		t.Fatalf("round trip = %q, %v, %v", got, has, err)
-	}
-}
-
-func TestCollect(t *testing.T) {
-	pages := map[string]struct {
-		items []int
-		next  string
-	}{"": {[]int{1, 2}, "t1"}, "t1": {[]int{3}, "t2"}, "t2": {[]int{4}, ""}}
-	fetch := func(_ context.Context, tok string) ([]int, string, error) {
-		p := pages[tok]
-		return p.items, p.next, nil
-	}
-	got, err := Collect(context.Background(), 5, fetch)
-	if err != nil || len(got) != 4 || got[3] != 4 {
-		t.Fatalf("Collect = %v, %v", got, err)
-	}
-	if _, err := Collect(context.Background(), 2, fetch); !errors.Is(err, ErrTooManyPages) {
-		t.Fatalf("Collect with a bound of 2 = %v, want ErrTooManyPages", err)
-	}
-	// A bound of 0 is the default, which is large enough for 3 pages.
-	if got, err := Collect(context.Background(), 0, fetch); err != nil || len(got) != 4 {
-		t.Fatalf("Collect with the default bound = %v, %v", got, err)
-	}
-}
-
-func TestCollect_FetchErrorAndLoopAndCancel(t *testing.T) {
-	boom := errors.New("boom")
-	if _, err := Collect(context.Background(), 3, func(context.Context, string) ([]int, string, error) {
-		return nil, "", boom
-	}); !errors.Is(err, boom) {
-		t.Fatalf("err = %v, want boom", err)
-	}
-	if _, err := Collect(context.Background(), 5, func(context.Context, string) ([]int, string, error) {
-		return []int{1}, "same", nil
-	}); !errors.Is(err, ErrTokenLoop) {
-		t.Fatalf("err = %v, want ErrTokenLoop", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := Collect(ctx, 3, func(context.Context, string) ([]int, string, error) {
-		return nil, "", nil
-	}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

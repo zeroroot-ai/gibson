@@ -56,7 +56,11 @@ func NewWorldServer(registry *brain.Registry, logger *slog.Logger, keys *pagetok
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &worldServer{registry: registry, logger: logger, signers: worldSigners(keys)}
+	signers, err := worldSigners(keys)
+	if err != nil {
+		panic("world server: " + err.Error())
+	}
+	return &worldServer{registry: registry, logger: logger, signers: signers}
 }
 
 // engine resolves the caller's tenant from context and returns its brain engine

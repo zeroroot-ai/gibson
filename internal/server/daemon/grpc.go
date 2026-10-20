@@ -41,7 +41,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/identity"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/platform/mailer"
-	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	"github.com/zeroroot-ai/gibson/internal/platform/signup"
@@ -1711,20 +1710,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		d.brainRegistry = brain.NewRegistry(ctx, d.brainStoreFactory(), brain.BeliefSystem)
 		wireBrainRegistry(ctx, d.brainRegistry, d.tenantBeliefs, beliefSchemaRegistry)
 	}
-	// The page tokens are signed with keys derived from the master KEK, which
-	// every daemon replica shares, so a token from one replica works on another.
-	if d.keyProvider == nil {
-		return nil, errors.New("daemon: WorldService needs the key provider to sign page tokens")
+	pageKeys, pageKeysErr := d.newPageKeys(ctx)
+	if pageKeysErr != nil {
+		return nil, pageKeysErr
 	}
-	worldMasterKEK, worldKEKErr := d.keyProvider.GetEncryptionKey(ctx)
-	if worldKEKErr != nil {
-		return nil, fmt.Errorf("daemon: WorldService could not read the master KEK: %w", worldKEKErr)
-	}
-	worldPageKeys, worldKeysErr := pagetoken.NewKeys(worldMasterKEK)
-	if worldKeysErr != nil {
-		return nil, fmt.Errorf("daemon: WorldService: %w", worldKeysErr)
-	}
-	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), worldPageKeys))
+	worldpb.RegisterWorldServiceServer(srv, NewWorldServer(d.brainRegistry, d.logger.WithComponent("world-service").Slog(), pageKeys))
 	d.logger.Info(ctx, "registered WorldService gRPC endpoint")
 
 	// Register gibson.tenant.v1.DomainPackService — the per-tenant Domain
