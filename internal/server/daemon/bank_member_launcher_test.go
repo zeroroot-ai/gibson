@@ -132,8 +132,13 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 	if err != nil {
 		t.Fatalf("the base grant must verify: %v", err)
 	}
-	if claims.MissionID != "bank-1" || claims.TaskID != launched.MissionRunID || claims.Tenant.String() != "acme" {
-		t.Errorf("grant scope = %+v, want the bank and the member's run", claims)
+	// A member serves many tasks, so its grant names the member as its task and
+	// the run of the member in the claim mrid.
+	if claims.MissionID != "bank-1" || claims.TaskID != "m-1" || claims.Tenant.String() != "acme" {
+		t.Errorf("grant scope = %+v, want the bank and the member", claims)
+	}
+	if run := capabilitygrant.MissionRunOf(req.Env["GIBSON_CG_JWT"]); run != launched.MissionRunID {
+		t.Errorf("grant mrid = %q, want the run of the member %q", run, launched.MissionRunID)
 	}
 	assertSameSet(t, claims.AllowedRPCs, harness.MemberBaseGrantRPCs())
 	for _, rpc := range claims.AllowedRPCs {

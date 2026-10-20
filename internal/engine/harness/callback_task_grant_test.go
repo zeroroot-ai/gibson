@@ -58,7 +58,7 @@ func grantClaims(t *testing.T, tenant, mission string) sdkcg.Claims {
 // the routing peek (not the signature) is what the test exercises.
 func compactJWT(typ string) string {
 	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"` + typ + `","kid":"k"}`))
-	body := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(`{"mrid":"run-1"}`))
 	return hdr + "." + body + ".sig"
 }
 
@@ -511,12 +511,147 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 	h.missionCtx.CurrentAgent = "alpha"
 	v := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m })
 
-	_, caller, err := v.VerifyCaller(context.Background(), h.mintCGForWork("nmap", "tool"))
+	toolGrant := h.mintCGForWork("nmap", "tool", "work-1")
+	if run := capabilitygrant.MissionRunOf(toolGrant); run != "run-1" {
+		t.Fatalf("tool grant mrid = %q, want run-1", run)
+	}
+	_, caller, err := v.VerifyCaller(context.Background(), toolGrant)
 	if err != nil || caller != "alpha" {
 		t.Fatalf("tool grant: caller = %q, err = %v; want alpha", caller, err)
 	}
-	_, caller, err = v.VerifyCaller(context.Background(), h.mintCGForWork("zerocool", "agent"))
+	agentGrant := h.mintCGForWork("zerocool", "agent", "task-1")
+	if run := capabilitygrant.MissionRunOf(agentGrant); run != "run-1" {
+		t.Fatalf("agent grant mrid = %q, want run-1", run)
+	}
+	_, caller, err = v.VerifyCaller(context.Background(), agentGrant)
 	if err != nil || caller != "" {
 		t.Fatalf("agent grant: caller = %q, err = %v; want none", caller, err)
+	}
+}
+
+// jwtWithRun builds an unsigned three-part token whose payload names the run.
+func jwtWithRun(run string) string {
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"JWT","kid":"k"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(`{"mrid":"` + run + `"}`))
+	return hdr + "." + body + ".sig"
+}
+
+// The mission ID is the same for every run of a record, so a callback that
+// names another run than its grant is refused (gibson#1235).
+func TestCheckTaskGrantScope_AnotherRunIsDenied(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
+	req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "m-1", MissionRunId: "run-2"}}
+	_, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("a callback of run 2 under the grant of run 1 must be PermissionDenied, got %v", err)
+	}
+}
+
+// The run of the verified grant is the run of the callback, whether or not the
+// request names it.
+func TestCheckTaskGrantScope_TheGrantsRunIsTheRunOfTheCallback(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
+	for name, requestRun := range map[string]string{"named": "run-1", "unnamed": ""} {
+		req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "m-1", MissionRunId: requestRun}}
+		ctx, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := callerRun(ctx, req.GetContext()); got != "run-1" {
+			t.Errorf("%s: callerRun = %q, want run-1", name, got)
+		}
+	}
+	// A request with no grant names its run itself.
+	info := &harnesspb.ContextInfo{MissionRunId: "run-9"}
+	if got := callerRun(context.Background(), info); got != "run-9" {
+		t.Errorf("no grant: callerRun = %q, want run-9", got)
+	}
+}
+
+// A grant with no run is not a grant that the daemon minted for a run.
+func TestCheckTaskGrantScope_AGrantWithNoRunIsDenied(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")}
+	_, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("")), observeReq("m-1"), getter(v), scopeMethod, nil)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("a grant with no run must be PermissionDenied, got %v", err)
+	}
+}
+
+// A fan-out runs two tasks of one agent in one run. The grant of task A selects
+// the harness of A, whatever task the body names (gibson#1229).
+func TestGetHarness_TheGrantDecidesTheTask(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	a, b := newRunHarness("run-1"), newRunHarness("run-1")
+	a.taskID, b.taskID = "task-a", "task-b"
+	mustRegister(t, registry, "m1", "recon", a)
+	mustRegister(t, registry, "m1", "recon", b)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	claims := grantClaims(t, "acme", "m1")
+	claims.TaskID = "task-a"
+	ctx := withGrantMissionRun(withTaskGrantClaims(testCtxWithTenant(), claims), "run-1")
+	got, err := service.getHarness(ctx, &harnesspb.ContextInfo{MissionId: "m1", AgentName: "recon", TaskId: "task-b"})
+	if err != nil || got != AgentHarness(a) {
+		t.Fatalf("getHarness = %v, %v, want the harness of task A", got, err)
+	}
+}
+
+// The turn grant of a bank member names the job as its task, and the member
+// driver puts the member as the task in the context. The grant decides, so the
+// callback reaches the harness of the member (gibson#1235).
+func TestGetHarness_ATurnGrantReachesTheMemberHarness(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	member := newRunHarness("run-1") // a member serves many tasks, so its harness names none
+	mustRegister(t, registry, "bank-1", "claude", member)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	claims := grantClaims(t, "acme", "bank-1")
+	claims.TaskID = "job-1"
+	ctx := withGrantMissionRun(withTaskGrantClaims(testCtxWithTenant(), claims), "run-1")
+	got, err := service.getHarness(ctx, &harnesspb.ContextInfo{MissionId: "bank-1", AgentName: "claude", TaskId: "member-1"})
+	if err != nil || got != AgentHarness(member) {
+		t.Fatalf("getHarness = %v, %v, want the harness of the member", got, err)
+	}
+}
+
+// The grant, not the body, picks the task and the run of a callback.
+func TestCheckTaskGrantScope_TheGrantPicksTheTaskAndTheRun(t *testing.T) {
+	v := &fakeGrantVerifier{claims: grantClaims(t, "acme", "m-1")} // task-1
+	req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "m-1", TaskId: "task-2"}}
+	ctx, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+	if err != nil {
+		t.Fatalf("the scope check refused a body task: %v", err)
+	}
+	if got := callerTask(ctx, req.GetContext()); got != "task-1" {
+		t.Errorf("callerTask = %q, want the task of the grant (task-1)", got)
+	}
+	if got := callerTask(context.Background(), req.GetContext()); got != "task-2" {
+		t.Errorf("no grant: callerTask = %q, want the body task (task-2)", got)
+	}
+}
+
+// A member takes a turn. The turn grant names the job as its task, and the
+// member driver puts the member as the task in the body. The scope check and
+// getHarness run together, as they do on the wire: the callback reaches the
+// harness of the member (gibson#1235).
+func TestTurnGrant_ScopeCheckAndGetHarnessReachTheMemberHarness(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	member := newRunHarness("run-1")
+	member.tenantID = "acme"
+	mustRegister(t, registry, "bank-1", "claude", member)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	claims := grantClaims(t, "acme", "bank-1")
+	claims.TaskID = "job-1"
+	v := &fakeGrantVerifier{claims: claims}
+	req := &harnesspb.ObserveRequest{Context: &harnesspb.ContextInfo{MissionId: "bank-1", AgentName: "claude", TaskId: "member-1"}}
+
+	ctx, err := checkTaskGrantScope(grantCtx("acme", jwtWithRun("run-1")), req, getter(v), scopeMethod, nil)
+	if err != nil {
+		t.Fatalf("the scope check refused a turn of the member: %v", err)
+	}
+	got, err := service.getHarness(ctx, req.GetContext())
+	if err != nil || got != AgentHarness(member) {
+		t.Fatalf("getHarness = %v, %v, want the harness of the member", got, err)
 	}
 }

@@ -101,32 +101,32 @@ func TestBindingRegistry_RegisterGetUnregister(t *testing.T) {
 	}
 }
 
-// IsMissionLive is the daemon's liveness source for capability-grant renewal
+// IsMissionRunLive is the daemon's liveness source for capability-grant renewal
 // (gibson#1602): a grant may be renewed only while the run that owns it is still
 // executing. The binding window is that run, so liveness must follow it exactly —
 // true from register, false again the moment the mission returns. A mission that
 // was never registered is not live, so an unknown id can never buy a renewal.
-func TestIsMissionLive_TracksTheBindingWindowExactly(t *testing.T) {
+func TestIsMissionRunLive_TracksTheBindingWindowExactly(t *testing.T) {
 	b := newBrainExecutor(nil, slog.Default())
 
-	if b.IsMissionLive("m1") {
+	if b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a mission that never launched must not be live")
 	}
-	if b.IsMissionLive("never-existed") {
+	if b.IsMissionRunLive("never-existed", "run-1") {
 		t.Fatal("an unknown mission id must not be live")
 	}
 
-	bind := &missionBinding{slot: "primary"}
+	bind := &missionBinding{slot: "primary", runID: "run-1"}
 	b.register("m1", bind)
-	if !b.IsMissionLive("m1") {
+	if !b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a registered mission must be live")
 	}
-	if b.IsMissionLive("m2") {
+	if b.IsMissionRunLive("m2", "run-1") {
 		t.Fatal("liveness must be per-mission, not global")
 	}
 
 	b.unregister("m1", bind)
-	if b.IsMissionLive("m1") {
+	if b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a returned mission must not stay live — renewal would outlive its run")
 	}
 }
@@ -315,5 +315,23 @@ func TestCatalog_BindingWithNoTenantGetsNothing(t *testing.T) {
 	}
 	if disc.sawTenant != "" {
 		t.Fatalf("tenantless binding reached the registry as tenant %q", disc.sawTenant)
+	}
+}
+
+// A grant of run 1 does not renew while run 2 of the same record is live. The
+// mission ID is the same for both runs, so the binding must be the binding of
+// the run that the grant names (gibson#1235).
+func TestIsMissionRunLive_FollowsTheRunNotTheRecord(t *testing.T) {
+	b := newBrainExecutor(nil, slog.Default())
+	b.register("m1", &missionBinding{slot: "primary", runID: "run-2"})
+
+	if b.IsMissionRunLive("m1", "run-1") {
+		t.Fatal("a grant of run 1 must not renew while run 2 is live")
+	}
+	if !b.IsMissionRunLive("m1", "run-2") {
+		t.Fatal("a grant of the live run must renew")
+	}
+	if b.IsMissionRunLive("m1", "") {
+		t.Fatal("a call with no run is never live")
 	}
 }

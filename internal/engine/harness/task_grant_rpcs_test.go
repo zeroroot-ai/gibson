@@ -137,7 +137,7 @@ func TestMintCGForWork_UsesTheDescriptorList(t *testing.T) {
 	h.missionCtx.ID = types.NewID()
 	h.missionCtx.TenantID = "acme"
 	h.missionCtx.MissionRunID = "run-1"
-	if tok := h.mintCGForWork("claude", "agent"); tok == "" {
+	if tok := h.mintCGForWork("claude", "agent", "task-1"); tok == "" {
 		t.Fatal("expected a minted task grant")
 	}
 }

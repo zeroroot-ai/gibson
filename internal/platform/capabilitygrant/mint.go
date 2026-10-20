@@ -265,6 +265,11 @@ func loadSigningKeys(ctx context.Context, cfg Config) (*SigningKeySet, error) {
 // that dispatched a tool or plugin grant.
 const CallingAgentClaim = "cag"
 
+// MissionRunClaim is the name of the signed claim that carries the mission run
+// of the grant. A mission ID is the same for every run of a record, so a
+// callback names its run, and the SDKs read it from this claim (gibson#1235).
+const MissionRunClaim = "mrid"
+
 // MintRequest carries the per-task scope.
 type MintRequest struct {
 	// Subject is the agent's Zitadel service-account ID. Required.
@@ -288,6 +293,10 @@ type MintRequest struct {
 	// TTL is the requested CG-JWT lifetime. Capped at MaxLifetime.
 	// Defaults to MaxLifetime when zero.
 	TTL time.Duration
+
+	// MissionRunID is the mission run that the grant serves. It travels as the
+	// signed claim "mrid". Every grant of a task that has a run sets it.
+	MissionRunID string
 
 	// CallingAgent names the agent that dispatched this grant to a tool or a
 	// plugin. It travels as the signed claim "cag". The daemon binds a
@@ -403,6 +412,9 @@ func (m *Minter) Mint(req MintRequest) (string, error) {
 	}
 	if req.CallingAgent != "" {
 		claims[CallingAgentClaim] = req.CallingAgent
+	}
+	if req.MissionRunID != "" {
+		claims[MissionRunClaim] = req.MissionRunID
 	}
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)

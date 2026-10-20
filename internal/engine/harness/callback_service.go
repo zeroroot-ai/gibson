@@ -727,7 +727,7 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 	// The mission ID is the same for every run of a record, so an agent of
 	// run 1 that still runs must not find the harness of run 2. Its evidence
 	// would take the run of run 2 (gibson#1217).
-	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName, contextInfo.MissionRunId, contextInfo.TaskId)
+	harness, err := s.registry.Lookup(contextInfo.MissionId, contextInfo.AgentName, callerRun(ctx, contextInfo), callerTask(ctx, contextInfo))
 	if err != nil {
 		if errors.Is(err, ErrCallbackTaskMismatch) {
 			s.logger.Warn("callback of another task refused",

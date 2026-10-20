@@ -115,13 +115,16 @@ func (b *brainExecutor) unregister(missionID string, bind *missionBinding) {
 	b.mu.Unlock()
 }
 
-// IsMissionLive reports whether this mission is executing right now. A binding
-// exists for exactly the window between the mission's launch and its return, so
-// it is the daemon's own answer to "is this run still going" — and it is what
-// bounds capability-grant renewal to the life of the run (gibson#1602).
-func (b *brainExecutor) IsMissionLive(missionID string) bool {
-	_, ok := b.get(missionID)
-	return ok
+// IsMissionRunLive reports whether this run of the mission is executing right
+// now. A binding exists for exactly the window between the launch of a run and
+// its return, so it is the daemon's own answer to "is this run still going", and
+// it is what bounds capability-grant renewal to the life of the run
+// (gibson#1602). The mission ID is the same for every run of a record, so the
+// binding must be the binding of this run: a grant of run 1 does not renew
+// while run 2 is live. A call with no run is never live.
+func (b *brainExecutor) IsMissionRunLive(missionID, runID string) bool {
+	bind, ok := b.get(missionID)
+	return ok && runID != "" && bind.runID == runID
 }
 
 func (b *brainExecutor) get(missionID string) (*missionBinding, bool) {

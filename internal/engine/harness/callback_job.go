@@ -197,26 +197,18 @@ const inboxPollInterval = 2 * time.Second
 // memberInboxBatch bounds one inbox read.
 const memberInboxBatch int32 = 20
 
-// callerMember resolves which member is calling, from the mission run on the
-// request context and never from the request body.
-//
-// The run arrives under one of two names. A member's base grant is minted
-// with task_id = the run id (bank_member_launcher.LaunchMember), and the SDK
-// fills ContextInfo from the grant's claims, so the run reaches the daemon
-// as context.task_id. A caller that knows the run by its own name sends
-// mission_run_id. Requiring the second alone refused every member's inbox
-// subscription (gibson#13, run 35485807760).
+// callerMember resolves which member is calling, from the mission run that
+// the verified grant names. A request with no grant names its run in the
+// context of the request. A member's base grant names the member as its task
+// and its run in the claim mrid (bank_member_launcher.LaunchMember).
 func (s *HarnessCallbackService) callerMember(ctx context.Context, info *harnesspb.ContextInfo) (tenantID, memberID, bankID string, err error) {
 	tenantID = auth.TenantStringFromContext(ctx)
 	if tenantID == "" || tenantID == auth.SystemTenantString {
 		return "", "", "", status.Error(codes.PermissionDenied, "no tenant in context")
 	}
-	runID := info.GetMissionRunId()
+	runID := callerRun(ctx, info)
 	if runID == "" {
-		runID = info.GetTaskId()
-	}
-	if runID == "" {
-		return "", "", "", status.Error(codes.InvalidArgument, "context.mission_run_id or context.task_id is required to identify the calling member")
+		return "", "", "", status.Error(codes.InvalidArgument, "the grant or context.mission_run_id must name the run of the calling member")
 	}
 	memberID, bankID, err = s.members.MemberByRun(ctx, tenantID, runID)
 	switch {
@@ -284,6 +276,8 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 	if err != nil {
 		return err
 	}
+	// callerMember resolved the member by this run, so the run is not empty.
+	runID := callerRun(ctx, req.GetContext())
 	inboxKey := tenantID + "/" + memberID
 	if _, taken := s.memberInboxes.LoadOrStore(inboxKey, struct{}{}); taken {
 		return status.Error(codes.AlreadyExists,
@@ -313,7 +307,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 			if _, sent := delivered[in.ID]; sent {
 				continue
 			}
-			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, in)
+			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, runID, in)
 			if gerr != nil {
 				return gerr
 			}
@@ -342,7 +336,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 // sat in a table between the send and the turn would be a standing credential
 // with a table for a home, and its lifetime would be the queue's depth rather
 // than the turn's.
-func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID string, in *job.Input) (*jobpb.Input, error) {
+func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID, runID string, in *job.Input) (*jobpb.Input, error) {
 	wire := &jobpb.Input{
 		Id: in.ID, JobId: in.JobID, Message: in.Message,
 		Sender: principal.ToProto(in.Sender), SentAt: timestamppb.New(in.SentAt),
@@ -360,6 +354,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 		Tenant:         tenantID,
 		MissionID:      j.BankID,
 		TaskID:         in.JobID,
+		MissionRunID:   runID, // the run of the member that takes the turn
 		RecipientClass: "agent",
 		AllowedRPCs:    TurnGrantRPCs(),
 	})

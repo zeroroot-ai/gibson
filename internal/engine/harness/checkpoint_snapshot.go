@@ -86,6 +86,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaRestore(
 			MissionRunID: dispatch.MissionRunID,
 			AgentRunID:   dispatch.AgentRunID,
 			NodeID:       task.NodeID,
+			TaskID:       task.ID.String(),
 			Model:        spec.Model,
 			TaskB64:      dispatch.TaskB64,
 		}, forkRecordTTL)

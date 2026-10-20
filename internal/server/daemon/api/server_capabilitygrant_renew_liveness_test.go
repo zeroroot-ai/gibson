@@ -5,6 +5,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -49,7 +50,9 @@ func (v stubVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
 // liveLookup answers the run-liveness question from a fixed set.
 type liveLookup struct{ live map[string]bool }
 
-func (l liveLookup) IsMissionLive(missionID string) bool { return l.live[missionID] }
+func (l liveLookup) IsMissionRunLive(missionID, runID string) bool {
+	return runID != "" && l.live[missionID]
+}
 
 func renewTestClaims() sdkcg.Claims {
 	return sdkcg.Claims{
@@ -77,9 +80,16 @@ func renewRequest() *daemonpb.RenewCapabilityGrantRequest {
 	}
 }
 
+// grantNamingRun is a token whose payload names the run. The verifier of these
+// tests is a stub, so the payload is all that the renewal reads.
+func grantNamingRun(run string) string {
+	enc := base64.RawURLEncoding.EncodeToString
+	return enc([]byte(`{"alg":"EdDSA"}`)) + "." + enc([]byte(`{"mrid":"`+run+`"}`)) + "." + enc([]byte("sig"))
+}
+
 func renewCtx() context.Context {
 	return metadata.NewIncomingContext(context.Background(),
-		metadata.Pairs("x-capability-grant", "a-verified-token"))
+		metadata.Pairs("x-capability-grant", grantNamingRun("run-1")))
 }
 
 func newRenewServer(t *testing.T, lookup LiveMissionLookup) *DaemonServer {
@@ -226,5 +236,91 @@ func TestRenewCapabilityGrant_KeepsTheCallingAgent(t *testing.T) {
 		VerifyCaller(context.Background(), resp.GetCapabilityGrant())
 	if err != nil || caller != "alpha" {
 		t.Fatalf("renewed grant: caller = %q, err = %v; want alpha", caller, err)
+	}
+}
+
+// A renewal keeps the mission run of the grant that it renews, so a renewed
+// grant still names its run (gibson#1235).
+func TestRenewCapabilityGrant_KeepsTheMissionRun(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	original, err := m.Mint(capabilitygrant.MintRequest{
+		Subject: claims.Subject, Tenant: claims.Tenant.String(), MissionID: claims.MissionID,
+		TaskID: claims.TaskID, MissionRunID: "run-5", AllowedRPCs: claims.AllowedRPCs, RecipientClass: "agent",
+	})
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: claims})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", original))
+	resp, err := s.RenewCapabilityGrant(ctx, renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if got := capabilitygrant.MissionRunOf(resp.GetCapabilityGrant()); got != "run-5" {
+		t.Fatalf("renewed grant mrid = %q, want run-5", got)
+	}
+}
+
+// runLookup knows one live run of one mission.
+type runLookup struct{ mission, run string }
+
+func (l runLookup) IsMissionRunLive(missionID, runID string) bool {
+	return missionID == l.mission && runID == l.run
+}
+
+// A grant of run 1 does not renew while only run 2 of the record is live
+// (gibson#1235). A grant of the live run renews.
+func TestRenewCapabilityGrant_RefusesTheGrantOfAnEndedRun(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	mint := func(run string) string {
+		tok, mintErr := m.Mint(capabilitygrant.MintRequest{
+			Subject: claims.Subject, Tenant: claims.Tenant.String(), MissionID: claims.MissionID,
+			TaskID: claims.TaskID, MissionRunID: run, AllowedRPCs: claims.AllowedRPCs, RecipientClass: "agent",
+		})
+		if mintErr != nil {
+			t.Fatalf("mint: %v", mintErr)
+		}
+		return tok
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: claims})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(runLookup{mission: "m1", run: "run-2"})
+
+	old := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", mint("run-1")))
+	_, err = s.RenewCapabilityGrant(old, renewRequest())
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("a grant of run 1 while run 2 is live: err = %v, want FailedPrecondition", err)
+	}
+	live := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", mint("run-2")))
+	if _, err = s.RenewCapabilityGrant(live, renewRequest()); err != nil {
+		t.Fatalf("a grant of the live run must renew: %v", err)
+	}
+}
+
+// A task grant that names no run cannot be bound to a run, so it cannot renew.
+func TestRenewCapabilityGrant_RefusesAGrantWithNoRun(t *testing.T) {
+	s := newRenewServer(t, liveLookup{live: map[string]bool{"m1": true}})
+	ctx := metadata.NewIncomingContext(context.Background(),
+		metadata.Pairs("x-capability-grant", "a-verified-token"))
+	_, err := s.RenewCapabilityGrant(ctx, renewRequest())
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("err = %v, want FailedPrecondition", err)
 	}
 }

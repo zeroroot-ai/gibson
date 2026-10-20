@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
@@ -94,6 +95,14 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 		return ctx, deny(ctx, logger, method, "task grant "+reason,
 			status.Error(codes.Unauthenticated, "task grant "+reason))
 	}
+	// Every task grant names its run. A grant with none is not a grant that this
+	// daemon minted for a run, and a restart ends every run, so no older grant
+	// is live.
+	grantRun := capabilitygrant.MissionRunOf(token)
+	if grantRun == "" {
+		return ctx, deny(ctx, logger, method, "task grant names no run",
+			status.Error(codes.PermissionDenied, "task grant names no mission run"))
+	}
 	if tenant := auth.TenantStringFromContext(ctx); tenant != claims.Tenant.String() {
 		return ctx, deny(ctx, logger, method, "task grant tenant does not match the request tenant",
 			status.Error(codes.PermissionDenied, "task grant is for another tenant"))
@@ -102,6 +111,13 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 		if info := carrier.GetContext(); info != nil && info.GetMissionId() != "" && info.GetMissionId() != claims.MissionID {
 			return ctx, deny(ctx, logger, method, "task grant mission does not match ContextInfo.mission_id",
 				status.Error(codes.PermissionDenied, "task grant is for another mission"))
+		}
+		// The mission ID is the same for every run of a record, so a grant that
+		// names its run is for that run. A callback that names another run
+		// would put its evidence on a run it does not serve.
+		if info := carrier.GetContext(); info != nil && info.GetMissionRunId() != "" && info.GetMissionRunId() != grantRun {
+			return ctx, deny(ctx, logger, method, "task grant run does not match ContextInfo.mission_run_id",
+				status.Error(codes.PermissionDenied, "task grant is for another run"))
 		}
 		// The grant names one agent. A request that names another agent
 		// would act as that agent: its harness, its fork and its next grant.
@@ -125,7 +141,7 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 	// The verified claims travel with the request. A handler that must know
 	// which job or which task a callback belongs to reads them from there,
 	// never from a request field the caller filled in.
-	return withTaskGrantClaims(ctx, claims), nil
+	return withGrantMissionRun(withTaskGrantClaims(ctx, claims), grantRun), nil
 }
 
 // CallerVerifier is a TaskGrantVerifier that also returns the calling agent
