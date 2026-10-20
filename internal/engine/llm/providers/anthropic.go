@@ -114,13 +114,10 @@ func (p *AnthropicProvider) seedDefaultChat(ctx context.Context, label string) e
 // a Google service-account JSON the tenant configured, plus the project and the
 // region. It drives the same Claude client as the Anthropic route.
 //
-// The service-account JSON reaches the Google auth library the way that library
-// reads it: from a file named by GOOGLE_APPLICATION_CREDENTIALS. The daemon
-// never writes that file — a sandboxed Claude Code member's driver does, from
-// the variable the launcher injects. In the daemon the credential is expected
-// to be present in the ambient environment already, so a config that names
-// neither is refused rather than constructed on whatever the pod happens to
-// carry.
+// The chat client is built from the service-account JSON of the config and from
+// nothing else. A config with no service-account JSON is refused. The
+// Application Default Credentials of the daemon are never a credential of a
+// tenant, so the client must never look for them.
 func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	return newVertexProvider(ctx, cfg, serviceAccountToken)
 }
@@ -134,6 +131,11 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			errors.New("vertex_project_id and vertex_region are both required")))
 	}
+	serviceAccount := cfg.Extra["google_application_credentials_json"]
+	if serviceAccount == "" {
+		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			errors.New("google_application_credentials_json is required: the daemon's own Google credentials are never used")))
+	}
 	if cfg.BaseURL != "" {
 		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
 			return nil, err
@@ -143,7 +145,7 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderVertex)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
-		return newVertexChatModel(ctx, project, region, model, client)
+		return newVertexChatModel(ctx, project, region, model, serviceAccount, client)
 	}
 	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
 		return listVertexModels(ctx, client, vertexListBase(cfg.BaseURL, region), project,
@@ -155,28 +157,22 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 	return p, nil
 }
 
-// newVertexChatModel builds the Vertex-backed Claude client.
-//
-// It exists to contain a panic. The Google auth the Vertex client uses resolves
-// Application Default Credentials eagerly and PANICS when it finds none — so a
-// tenant that configured Vertex on a daemon with no reachable Google credential
-// would take the process down rather than have its launch refused. The recover
-// is at this one boundary and turns the panic into the same auth error every
-// other provider returns.
-func newVertexChatModel(ctx context.Context, project, region, modelID string, client *http.Client) (model *einoclaude.ChatModel, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			model = nil
-			err = llm.NewAuthError(string(llm.ProviderVertex),
-				fmt.Errorf("google application default credentials are not available: %v", r))
-		}
-	}()
-	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		ByVertex:        true,
-		VertexProjectID: project,
-		VertexRegion:    region,
-		Model:           modelID,
-		HTTPClient:      client,
+// newVertexChatModel builds the Vertex-backed Claude client from the service
+// account JSON of the tenant. With the JSON set, the client builds its
+// credentials in memory and never looks for Application Default Credentials.
+func newVertexChatModel(
+	ctx context.Context, project, region, modelID, serviceAccount string, client *http.Client,
+) (*einoclaude.ChatModel, error) {
+	if serviceAccount == "" {
+		return nil, llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON"))
+	}
+	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
+		ByVertex:                 true,
+		VertexProjectID:          project,
+		VertexRegion:             region,
+		VertexServiceAccountJSON: []byte(serviceAccount),
+		Model:                    modelID,
+		HTTPClient:               client,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build the vertex client: %w", llm.TranslateError(string(llm.ProviderVertex), err))

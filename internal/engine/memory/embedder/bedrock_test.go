@@ -81,3 +81,22 @@ func TestBedrockEmbedder_UnknownModelFailsClosed(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown embedding model")
 }
+
+// A tenant Bedrock embedder config needs its own key pair. The daemon's AWS
+// environment, a missing pair and use_irsa never supply a credential.
+func TestBedrockEmbedder_NeverUsesTheAmbientCredentialChain(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIADAEMON")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "daemon-secret")
+	for name, extra := range map[string]map[string]string{
+		"use_irsa":    {"use_irsa": "true"},
+		"no key pair": {},
+		"only the id": {"aws_access_key_id": "AKIAEXAMPLE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, err := newBedrockEmbedder(Config{Kind: KindBedrock, Model: "amazon.titan-embed-text-v2:0", Extra: extra})
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "are both required", "the refusal must be about the key pair")
+			assert.Nil(t, e)
+		})
+	}
+}

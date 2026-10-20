@@ -82,8 +82,8 @@ type Config struct {
 	Region string
 
 	// Extra carries provider-specific credentials/options that do not map to the
-	// fields above — e.g. Bedrock's aws_access_key_id / aws_secret_access_key /
-	// use_irsa. Keys mirror the provider's CredentialField keys.
+	// fields above — e.g. Bedrock's aws_access_key_id / aws_secret_access_key.
+	// Keys mirror the provider's CredentialField keys.
 	Extra map[string]string
 
 	// AllowPrivateEndpoint disables the SSRF guard on BaseURL. The daemon sets

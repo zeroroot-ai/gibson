@@ -36,18 +36,11 @@ const defaultBedrockModelID = "anthropic.claude-3-sonnet-20240229-v1:0"
 // every Bedrock foundation model (Claude, Titan/Nova, Llama, Cohere, Mistral,
 // AI21), so the provider does not need per-family request shaping.
 //
-// Credential resolution (in order):
-//  1. use_irsa=true: skip static-key validation entirely; rely on the AWS SDK
-//     default credential chain (IRSA via OIDC token projection, EC2 instance
-//     profile, ECS task role, etc.). No access-key fields required or used.
-//  2. Static creds from cfg.Extra["aws_access_key_id"] / ["aws_secret_access_key"]
-//     (and optional ["aws_session_token"]). These are treated as a pair — both
-//     must be set or both empty.
-//  3. The AWS SDK default credential chain (shared config, IAM role, IRSA, etc.).
-//
-// The daemon's environment is never read for a static key: a config carrying
-// no credential of its own must not construct on the daemon's ambient keys and
-// then be registered as though the credential belonged to the caller.
+// Credentials come from cfg.Extra["aws_access_key_id"] and
+// ["aws_secret_access_key"] (and optional ["aws_session_token"]), and from
+// nothing else. A config with no key pair is refused. The AWS default
+// credential chain of the daemon (an IRSA role, an instance profile, the
+// environment) is never a credential of a tenant, so the provider never loads it.
 //
 // Region resolution: cfg.Extra["aws_region"] → AWS_REGION env → us-east-1.
 // Region is not a credential, so it is read from the environment unguarded.
@@ -79,28 +72,15 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 		awsconfig.WithRegion(region),
 	}
 
-	// When use_irsa=true the daemon runs inside EKS with a service-account IAM
-	// role annotation (or any other ambient credential source). Static key
-	// fields are irrelevant — skip both the mismatch guard and the explicit
-	// credentials provider so the AWS SDK default chain takes over.
-	useIRSA := cfg.Extra["use_irsa"] == "true"
-
-	if !useIRSA {
-		ak := cfg.Extra["aws_access_key_id"]
-		sk := cfg.Extra["aws_secret_access_key"]
-		st := cfg.Extra["aws_session_token"]
-
-		// If only one of ak/sk is set, that's a misconfiguration — fail loudly
-		// rather than silently falling through to the default chain.
-		if (ak == "") != (sk == "") {
-			return nil, llm.NewAuthError("bedrock",
-				errors.New("aws_access_key_id and aws_secret_access_key must both be set or both empty"))
-		}
-		if ak != "" && sk != "" {
-			loadOpts = append(loadOpts,
-				awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))
-		}
+	ak := cfg.Extra["aws_access_key_id"]
+	sk := cfg.Extra["aws_secret_access_key"]
+	st := cfg.Extra["aws_session_token"]
+	if ak == "" || sk == "" {
+		return nil, llm.NewAuthError("bedrock",
+			errors.New("aws_access_key_id and aws_secret_access_key are both required: the daemon's own AWS credentials are never used"))
 	}
+	loadOpts = append(loadOpts,
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
@@ -292,9 +272,8 @@ func (p *BedrockProvider) CredentialSchema() []llm.CredentialField { return Bedr
 func BedrockCredentialSchema() []llm.CredentialField {
 	return []llm.CredentialField{
 		{Key: "aws_region", Label: "AWS Region", Placeholder: "us-east-1", Help: "Defaults to AWS_REGION env or us-east-1.", Type: llm.FieldRegion},
-		{Key: "use_irsa", Label: "Use IAM role / IRSA", Secret: false, Help: "Select when the daemon runs in EKS with a service-account IAM role annotation. Leave static key fields blank.", Type: llm.FieldBool},
-		{Key: "aws_access_key_id", Label: "AWS Access Key ID", Secret: true, Help: "Leave blank to use the AWS SDK default credential chain (IAM role, IRSA, instance profile).", Type: llm.FieldPassword},
-		{Key: "aws_secret_access_key", Label: "AWS Secret Access Key", Secret: true, Type: llm.FieldPassword},
+		{Key: "aws_access_key_id", Label: "AWS Access Key ID", Required: true, Secret: true, Help: "The access key of your own AWS account. The daemon never uses its own AWS credentials.", Type: llm.FieldPassword},
+		{Key: "aws_secret_access_key", Label: "AWS Secret Access Key", Required: true, Secret: true, Type: llm.FieldPassword},
 		{Key: "aws_session_token", Label: "AWS Session Token", Secret: true, Help: "Only required for temporary credentials.", Type: llm.FieldPassword},
 	}
 }

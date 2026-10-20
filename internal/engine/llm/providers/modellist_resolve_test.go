@@ -347,7 +347,6 @@ func TestVertex_BadTenantJSONFailsAndTheDaemonCredentialIsNeverRead(t *testing.T
 
 	for name, js := range map[string]string{
 		"not json":        "{{{",
-		"empty":           "",
 		"wrong type":      `{"type":"external_account","audience":"x","credential_source":{"url":"http://169.254.169.254/"}}`,
 		"authorized user": `{"type":"authorized_user","client_id":"a","client_secret":"b","refresh_token":"c"}`,
 	} {
@@ -392,15 +391,36 @@ func TestVertexModelID_MapsToTheDocumentedForm(t *testing.T) {
 	assert.Empty(t, vertexModelID("", "1"))
 }
 
-func TestVertex_ConstructWithoutAGoogleCredentialRefusesOnlyWithASavedModel(t *testing.T) {
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "/nonexistent/creds.json")
+// A Vertex config with no service account JSON is refused, with or without a
+// saved model. The Application Default Credentials of the daemon are never a
+// credential of a tenant.
+func TestVertex_ConstructWithoutAServiceAccountIsRefused(t *testing.T) {
+	poisonedADC(t)
 	cfg := llm.ProviderConfig{Extra: map[string]string{"vertex_project_id": "p", "vertex_region": "us-east5"}}
 	_, err := NewVertexProvider(context.Background(), cfg)
-	require.NoError(t, err, "no saved model builds nothing, so no credential is read")
+	require.Error(t, err)
 
 	cfg.DefaultModel = "claude-x"
 	_, err = NewVertexProvider(context.Background(), cfg)
-	require.Error(t, err, "a saved model builds the client at once, as before")
+	require.Error(t, err)
+}
+
+// With the service account JSON of the tenant, the chat client builds its
+// credentials in memory. It never looks for the Application Default Credentials
+// of the daemon, which the test points at a file that fails a read.
+func TestVertex_ChatClientNeverReadsTheDaemonCredential(t *testing.T) {
+	poisonedADC(t)
+	tokenSrv := newFakeProviderAPI(t, func(w http.ResponseWriter, _ *http.Request) { reply(w, 200, `{}`) })
+	cfg := llm.ProviderConfig{
+		DefaultModel: "claude-x",
+		Extra: map[string]string{
+			"vertex_project_id": "p", "vertex_region": "us-east5",
+			"google_application_credentials_json": fakeServiceAccountJSON(t, tokenSrv.URL),
+		},
+	}
+	p, err := NewVertexProvider(context.Background(), cfg)
+	require.NoError(t, err, "the chat client must build from the tenant service account alone")
+	require.NotNil(t, p)
 }
 
 func TestCohere_FollowsNextPageToken(t *testing.T) {
