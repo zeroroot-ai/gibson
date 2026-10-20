@@ -720,7 +720,7 @@ func (s *HarnessCallbackService) getHarness(ctx context.Context, contextInfo *ha
 
 	// The mission ID is the same for every run of a record, so a callback
 	// must name its run (gibson#1235).
-	if contextInfo.MissionRunId == "" {
+	if callerRun(ctx, contextInfo) == "" {
 		return nil, status.Error(codes.InvalidArgument, "missing mission_run_id in context info - ensure agent SDK is v0.208.0+")
 	}
 
