@@ -240,13 +240,17 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 //
 // The work id arrives from the caller and only the tenant is checked against
 // its owner, so a same-tenant agent could name the work item of another
-// mission. The grant that the caller presents names its mission and its run.
-// A work item of another mission, or of another run, is refused. A caller with
-// no grant claim cannot be bound, so it gets no run and its delegated agent is
-// refused at Authorize (fail closed). Delegation itself is not blocked.
+// mission. The task grant that the caller presents, verified by the daemon,
+// names its mission and its run. A work item of another mission, or of another
+// run, is refused. A delegation that names a work item without a verified task
+// grant is refused. A delegation with no work item is not bound.
 func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sourceWorkID string) (mission, run string, err error) {
 	if sourceWorkID == "" {
 		return "", "", nil
+	}
+	grantMission, grantRun, err := s.callerTaskGrant(ctx, tenant)
+	if err != nil {
+		return "", "", err
 	}
 	if s.missionCtx != nil {
 		var resolveErr error
@@ -256,17 +260,15 @@ func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sou
 				"work_id", sourceWorkID, "error", resolveErr)
 		}
 	}
-	run = s.sourceWorkRun(ctx, tenant, sourceWorkID)
-
-	grantMission := callerGrantClaim(ctx, "mission_id")
-	if grantMission != "" && mission != "" && grantMission != mission {
+	if mission != "" && grantMission != mission {
 		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another mission")
 	}
-	grantRun := callerGrantClaim(ctx, "mrid")
-	if grantRun != "" && run != "" && grantRun != run {
+	run = s.sourceWorkRun(ctx, tenant, sourceWorkID)
+	if run != "" && grantRun != "" && grantRun != run {
 		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another run")
 	}
-	if grantMission == "" || grantMission != mission {
+	if mission == "" {
+		// The work item names no mission, so nothing binds its run to the grant.
 		run = ""
 	}
 	return mission, run, nil

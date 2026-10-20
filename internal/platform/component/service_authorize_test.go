@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // fakeRunAuthorizer records the run it is asked about and answers as told.
@@ -302,7 +304,7 @@ func TestDelegateToAgent_AFailedMissionLookupDelegatesWithNoMission(t *testing.T
 	require.NoError(t, closed.Close())
 	env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
 
-	item := env.delegateAndClaim(t, tenant, source)
+	item := env.delegateAndClaimAs(t, grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), tenant, source)
 	assert.NotContains(t, item.Context, "mission_id")
 }
 
@@ -312,12 +314,38 @@ func sourceRunEntry(svc *ComponentServiceServer, ctx context.Context, tenant, wo
 	return authzContextEntry(svc.sourceWorkRun(ctx, tenant, work))
 }
 
-// grantedCtx presents a capability grant that names a mission and a run.
-func grantedCtx(ctx context.Context, mission, run string) context.Context {
+// fakeGrants stands for the daemon verifier. It accepts a token that names a
+// tenant and a mission in its payload, and refuses a token whose signature
+// segment is "foreign" (a token that a component signed itself).
+type fakeGrants struct{}
+
+func (fakeGrants) Verify(_ context.Context, token string) (sdkcg.Claims, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[2] == base64.RawURLEncoding.EncodeToString([]byte("foreign")) {
+		return sdkcg.Claims{}, sdkcg.ErrUnknownKey
+	}
+	raw, _ := base64.RawURLEncoding.DecodeString(parts[1])
+	var payload map[string]string
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return sdkcg.Claims{}, sdkcg.ErrClaimsInvalid
+	}
+	tenant, err := auth.NewTenantID("test-tenant")
+	if err != nil {
+		return sdkcg.Claims{}, err
+	}
+	return sdkcg.Claims{Subject: "component:agent:caller", Tenant: tenant, MissionID: payload["mission_id"], TaskID: "t"}, nil
+}
+
+// grantToken builds a grant token with a typ, a mission, a run and a signature.
+func grantToken(typ, mission, run, signature string) string {
 	enc := base64.RawURLEncoding.EncodeToString
 	claims, _ := json.Marshal(map[string]string{"mission_id": mission, "mrid": run})
-	token := enc([]byte(`{"alg":"EdDSA"}`)) + "." + enc(claims) + "." + enc([]byte("sig"))
-	return metadata.NewIncomingContext(ctx, metadata.Pairs("x-capability-grant", token))
+	return enc([]byte(`{"alg":"EdDSA","typ":"`+typ+`"}`)) + "." + enc(claims) + "." + enc([]byte(signature))
+}
+
+// grantedCtx presents a task grant that names a mission and a run.
+func grantedCtx(ctx context.Context, mission, run string) context.Context {
+	return metadata.NewIncomingContext(ctx, metadata.Pairs("x-capability-grant", grantToken("JWT", mission, run, "sig")))
 }
 
 // delegateAndClaim delegates to "recon-agent" from the source work item with
@@ -332,6 +360,7 @@ func (e *workIDEnv) delegateAndClaim(t *testing.T, tenant, source string) *WorkI
 func (e *workIDEnv) delegateAndClaimAs(t *testing.T, callerCtx context.Context, tenant, source string) *WorkItem {
 	t.Helper()
 	e.svc.WithCapabilityChecker(grantedChecker())
+	e.svc.WithGrantVerifier(fakeGrants{})
 	e.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
 
 	type claimed struct {
@@ -415,11 +444,12 @@ func TestBindWorkRun_AnAuthzContextWithNoRunBindsNothing(t *testing.T) {
 	require.ErrorIs(t, err, ErrWorkRunUnknown)
 }
 
-// A same-tenant caller that names the work item of another mission is refused,
-// and it gets no run. A caller with no grant claim gets no run (gibson#1235).
-func TestDelegateToAgent_TheWorkItemIsBoundToTheMissionOfTheCaller(t *testing.T) {
+// A delegation from a work item is bound to the mission and the run of the
+// verified task grant of the caller (gibson#1235).
+func TestDelegateToAgent_TheWorkItemIsBoundToTheVerifiedGrantOfTheCaller(t *testing.T) {
 	env := newWorkIDEnv(t)
 	env.svc.WithCapabilityChecker(grantedChecker())
+	env.svc.WithGrantVerifier(fakeGrants{})
 	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
 	const tenant = "test-tenant"
 	foreign := env.enqueueRun(t, tenant, "work-foreign", "run-99")
@@ -429,19 +459,23 @@ func TestDelegateToAgent_TheWorkItemIsBoundToTheMissionOfTheCaller(t *testing.T)
 	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
 	require.NoError(t, err)
 	req := &componentpb.DelegateToAgentRequest{WorkId: foreign, AgentName: "recon-agent", TaskJson: taskJSON}
+	caller := componentCtx("agent_principal:acct-1")
+	with := func(values ...string) context.Context {
+		return metadata.NewIncomingContext(caller, metadata.Pairs("x-capability-grant", values[0]))
+	}
 
-	// The grant names mission-7. The work item belongs to mission-other.
-	_, err = env.svc.DelegateToAgent(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-7"), req)
-	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-
-	// The grant names the mission but another run.
-	_, err = env.svc.DelegateToAgent(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-other", "run-7"), req)
-	assert.Equal(t, codes.PermissionDenied, status.Code(err))
-
-	// No grant claim: the delegation goes on, with no run for the agent.
-	item := env.delegateAndClaimAs(t, componentCtx("agent_principal:acct-1"), tenant, foreign)
-	assert.NotContains(t, item.Context, authz.AuthzContextWorkKey)
-	execReq := &agentpb.ExecuteRequest{}
-	require.NoError(t, protojson.Unmarshal(item.Payload, execReq))
-	assert.Empty(t, execReq.GetMissionRunId())
+	cases := map[string]context.Context{
+		"a grant of another mission":              grantedCtx(caller, "mission-7", "run-7"),
+		"a grant of the mission, but another run": grantedCtx(caller, "mission-other", "run-7"),
+		"a token that a component signed itself":  with(grantToken("agent+jwt", "mission-other", "run-99", "sig")),
+		"a task grant with a foreign signature":   with(grantToken("JWT", "mission-other", "run-99", "foreign")),
+		"two grant headers": metadata.NewIncomingContext(caller, metadata.Pairs(
+			"x-capability-grant", grantToken("JWT", "mission-other", "run-99", "sig"),
+			"x-capability-grant", grantToken("JWT", "mission-other", "run-99", "sig"))),
+		"no grant with a work item": caller,
+	}
+	for name, ctx := range cases {
+		_, err := env.svc.DelegateToAgent(ctx, req)
+		assert.Equal(t, codes.PermissionDenied, status.Code(err), name)
+	}
 }

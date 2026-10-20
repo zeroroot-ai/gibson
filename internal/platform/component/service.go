@@ -141,6 +141,9 @@ const (
 // via auth.TenantStringFromContext and forwarded to both the registry and queue so
 // that data from different tenants is never commingled.
 type ComponentServiceServer struct {
+	// grantVerifier verifies the task grant that binds a delegation to its mission.
+	grantVerifier GrantVerifier
+
 	componentpb.UnimplementedComponentServiceServer
 
 	registry ComponentRegistry
