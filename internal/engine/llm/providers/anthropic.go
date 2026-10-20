@@ -13,6 +13,9 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+
 	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 	einomodel "github.com/cloudwego/eino/components/model"
 	einoschema "github.com/cloudwego/eino/schema"
@@ -80,10 +83,10 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderAnthropic)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
-		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client}
-		if cfg.BaseURL != "" {
-			claudeCfg.BaseURL = &baseURL
-		}
+		// The base URL is always explicit, so ANTHROPIC_BASE_URL never decides
+		// where the tenant key goes.
+		scrubAnthropicAmbient()
+		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client, BaseURL: &baseURL}
 		return einoclaude.NewChatModel(ctx, claudeCfg)
 	}
 	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
@@ -158,21 +161,42 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 }
 
 // newVertexChatModel builds the Vertex-backed Claude client from the service
-// account JSON of the tenant. With the JSON set, the client builds its
-// credentials in memory and never looks for Application Default Credentials.
+// account JSON of the tenant and from nothing else.
+//
+//   - Only the service_account credential type is accepted. The credential is
+//     parsed here with that type, so an external_account, authorized_user or
+//     impersonated_service_account document is refused before the client sees it.
+//     Those types make the daemon read a file or call a URL that the tenant chose.
+//   - The token call of the service account goes through the guarded client.
+//   - The Anthropic client is built after the ambient Anthropic defaults are
+//     removed, and the transport drops any API key header.
+//   - A panic in the client libraries becomes an auth error, never a crash.
 func newVertexChatModel(
 	ctx context.Context, project, region, modelID, serviceAccount string, client *http.Client,
-) (*einoclaude.ChatModel, error) {
+) (model *einoclaude.ChatModel, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			model = nil
+			err = llm.NewAuthError(string(llm.ProviderVertex), fmt.Errorf("the vertex client could not be built: %v", r))
+		}
+	}()
 	if serviceAccount == "" {
 		return nil, llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON"))
 	}
-	model, err := einoclaude.NewChatModel(ctx, &einoclaude.Config{
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
+	if _, credErr := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccount), google.ServiceAccount,
+		"https://www.googleapis.com/auth/cloud-platform"); credErr != nil {
+		return nil, llm.NewAuthError(string(llm.ProviderVertex),
+			fmt.Errorf("the credential must be a service account key: %w", credErr))
+	}
+	scrubAnthropicAmbient()
+	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
 		ByVertex:                 true,
 		VertexProjectID:          project,
 		VertexRegion:             region,
 		VertexServiceAccountJSON: []byte(serviceAccount),
 		Model:                    modelID,
-		HTTPClient:               client,
+		HTTPClient:               withoutAmbientAuth(client),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build the vertex client: %w", llm.TranslateError(string(llm.ProviderVertex), err))
