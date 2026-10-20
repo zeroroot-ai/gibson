@@ -6,6 +6,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
 )
 
@@ -159,7 +161,7 @@ func TestDecide_TheModelGateDeniesAPinnedDecider(t *testing.T) {
 type failingFilter struct{}
 
 func (failingFilter) Permitted(context.Context, []modelgate.Candidate) ([]modelgate.Candidate, error) {
-	return nil, errors.New("fga: connection refused")
+	return nil, fmt.Errorf("fga: connection refused: %w", authz.ErrFgaUnavailable)
 }
 
 func (failingFilter) InvalidateCache() {}
