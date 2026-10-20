@@ -18,11 +18,12 @@ import (
 // runHarness is a harness of one run of a mission.
 type runHarness struct {
 	tenantAwareMockHarness
-	runID string
+	runID  string
+	taskID string
 }
 
 func (h *runHarness) Mission() MissionContext {
-	return MissionContext{TenantID: h.tenantID, MissionRunID: h.runID}
+	return MissionContext{TenantID: h.tenantID, MissionRunID: h.runID, TaskID: h.taskID}
 }
 
 func newRunHarness(runID string) *runHarness {
@@ -40,18 +41,18 @@ func TestCallbackHarnessRegistry_UnregisterRemovesOnlyItsOwnRegistration(t *test
 	key2 := mustRegister(t, registry, "m1", "recon", run2)
 	require.NotEqual(t, key1, key2)
 
-	got, err := registry.Lookup("m1", "recon", "run-2")
+	got, err := registry.Lookup("m1", "recon", "run-2", "")
 	require.NoError(t, err)
 	assert.Same(t, run2, got)
 
 	registry.Unregister(key1) // the deferred cleanup of run 1
-	got, err = registry.Lookup("m1", "recon", "")
+	got, err = registry.Lookup("m1", "recon", "", "")
 	require.NoError(t, err)
 	assert.Same(t, run2, got, "the cleanup of run 1 removed the harness of run 2")
 	assert.Equal(t, 1, registry.Count())
 
 	registry.Unregister(key2)
-	_, err = registry.Lookup("m1", "recon", "")
+	_, err = registry.Lookup("m1", "recon", "", "")
 	require.Error(t, err)
 	assert.Equal(t, 0, registry.Count())
 }
@@ -64,7 +65,7 @@ func TestCallbackHarnessRegistry_EarlierRegistrationSurvivesTheLaterOne(t *testi
 	key2 := mustRegister(t, registry, "m1", "recon", run2)
 
 	registry.Unregister(key2)
-	got, err := registry.Lookup("m1", "recon", "")
+	got, err := registry.Lookup("m1", "recon", "", "")
 	require.NoError(t, err)
 	assert.Same(t, run1, got)
 	registry.Unregister(key1)
@@ -120,7 +121,7 @@ func TestCallbackHarnessRegistry_EmptyRunWithTwoRunsIsRefused(t *testing.T) {
 	mustRegister(t, registry, "m1", "recon", newRunHarness("run-1"))
 	mustRegister(t, registry, "m1", "recon", newRunHarness("run-2"))
 
-	_, err := registry.Lookup("m1", "recon", "")
+	_, err := registry.Lookup("m1", "recon", "", "")
 	require.ErrorIs(t, err, ErrCallbackRunMismatch)
 }
 
@@ -131,7 +132,7 @@ func TestCallbackHarnessRegistry_EmptyRunWithOneRunWorks(t *testing.T) {
 	mustRegister(t, registry, "m1", "recon", first)
 	mustRegister(t, registry, "m1", "recon", second)
 
-	got, err := registry.Lookup("m1", "recon", "")
+	got, err := registry.Lookup("m1", "recon", "", "")
 	require.NoError(t, err)
 	assert.Same(t, second, got, "one run: the newest registration serves")
 }
@@ -144,14 +145,14 @@ func TestCallbackHarnessRegistry_NamedRunPicksItsOwnRegistration(t *testing.T) {
 	mustRegister(t, registry, "m1", "recon", run1)
 	mustRegister(t, registry, "m1", "recon", run2)
 
-	got, err := registry.Lookup("m1", "recon", "run-1")
+	got, err := registry.Lookup("m1", "recon", "run-1", "")
 	require.NoError(t, err)
 	assert.Same(t, run1, got)
-	got, err = registry.Lookup("m1", "recon", "run-2")
+	got, err = registry.Lookup("m1", "recon", "run-2", "")
 	require.NoError(t, err)
 	assert.Same(t, run2, got)
 
-	_, err = registry.Lookup("m1", "recon", "run-3")
+	_, err = registry.Lookup("m1", "recon", "run-3", "")
 	require.ErrorIs(t, err, ErrCallbackRunMismatch)
 }
 
@@ -187,4 +188,28 @@ func TestCallbackHarnessRegistry_RegisterRefusesAHarnessWithoutARun(t *testing.T
 	require.ErrorIs(t, err, ErrHarnessWithoutRun)
 	assert.Empty(t, key)
 	assert.Equal(t, 0, registry.Count())
+}
+
+// A for_each fan-out runs two instances of one agent in one run. Each callback
+// gets the harness of its own instance, and a callback of a task that none registered is refused
+// (gibson#1229).
+func TestCallbackHarnessRegistry_FanOutInstancesKeepTheirOwnHarness(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	a, b := newRunHarness("run-1"), newRunHarness("run-1")
+	a.taskID, b.taskID = "task-a", "task-b"
+	mustRegister(t, registry, "m1", "recon", a)
+	mustRegister(t, registry, "m1", "recon", b)
+
+	got, err := registry.Lookup("m1", "recon", "run-1", "task-a")
+	require.NoError(t, err)
+	assert.Same(t, a, got, "the callback of task a got the newest harness")
+	got, err = registry.Lookup("m1", "recon", "run-1", "task-b")
+	require.NoError(t, err)
+	assert.Same(t, b, got)
+
+	got, err = registry.Lookup("m1", "recon", "run-1", "")
+	require.NoError(t, err)
+	assert.Same(t, b, got, "a callback with no task gets the newest harness")
+	_, err = registry.Lookup("m1", "recon", "run-1", "task-c")
+	require.ErrorIs(t, err, ErrCallbackTaskMismatch)
 }

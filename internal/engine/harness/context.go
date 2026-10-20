@@ -80,6 +80,11 @@ type MissionContext struct {
 	// of the node claims it (ADR-0169).
 	NodeID string `json:"-"`
 
+	// TaskID is the id of the task that this harness serves. A callback of
+	// the task names it, so the instances of a for_each fan-out of one agent
+	// each get their own harness (gibson#1229).
+	TaskID string `json:"-"`
+
 	// CreatedBy is the principal that created the mission (hosted#205). When
 	// it is a person, the harness factory puts that person on the context of
 	// every slot resolution of the run as the mission initiator, so the model

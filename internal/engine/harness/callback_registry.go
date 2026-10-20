@@ -33,7 +33,7 @@ import (
 //	defer registry.Unregister(key)
 //
 //	// External agent makes callback
-//	harness, err := registry.Lookup(missionID, agentName, runID)
+//	harness, err := registry.Lookup(missionID, agentName, runID, taskID)
 //	if err != nil {
 //	    return errors.New("harness not found")
 //	}
@@ -118,7 +118,7 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 	return key, nil
 }
 
-// Lookup retrieves a harness by mission ID, agent name and run ID.
+// Lookup retrieves a harness by mission ID, agent name, run ID and task ID.
 //
 // This method is called by the callback server when an external agent makes
 // a harness operation request. The callback includes the mission ID and agent
@@ -128,6 +128,7 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 //   - missionID: The mission ID provided by the external agent
 //   - agentName: The agent name provided by the external agent
 //   - runID: The mission run the callback names. It may be empty.
+//   - taskID: The task the callback names. It picks one instance of a fan-out.
 //
 // Returns:
 //   - AgentHarness: The registered harness instance
@@ -140,12 +141,12 @@ func (r *CallbackHarnessRegistry) Register(missionID, agentName string, harness 
 //
 // Example:
 //
-//	harness, err := registry.Lookup("mission-123", "recon-agent", "run-1")
+//	harness, err := registry.Lookup("mission-123", "recon-agent", "run-1", "task-1")
 //	if err != nil {
 //	    return status.Error(codes.NotFound, "harness not found")
 //	}
 //	return harness.Complete(ctx, slot, messages)
-func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (AgentHarness, error) {
+func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID, taskID string) (AgentHarness, error) {
 	agent := makeRegistryKey(missionID, agentName)
 
 	r.mu.RLock()
@@ -157,28 +158,54 @@ func (r *CallbackHarnessRegistry) Lookup(missionID, agentName, runID string) (Ag
 	}
 
 	if runID != "" {
-		// The callback names its run. Pick the newest registration of that
-		// run, even when a registration of a newer run exists.
-		for i := len(keys) - 1; i >= 0; i-- {
-			if h := r.harnesses[keys[i]]; h.Mission().MissionRunID == runID {
-				return h, nil
+		var inRun []string
+		for _, k := range keys {
+			if r.harnesses[k].Mission().MissionRunID == runID {
+				inRun = append(inRun, k)
 			}
 		}
-		return nil, fmt.Errorf("%w: run %s of mission %s, agent %s", ErrCallbackRunMismatch, runID, missionID, agentName)
+		if len(inRun) == 0 {
+			return nil, fmt.Errorf("%w: run %s of mission %s, agent %s", ErrCallbackRunMismatch, runID, missionID, agentName)
+		}
+		keys = inRun
+	} else {
+		runs := map[string]struct{}{}
+		for _, k := range keys {
+			runs[r.harnesses[k].Mission().MissionRunID] = struct{}{}
+		}
+		if len(runs) > 1 {
+			return nil, fmt.Errorf("%w: a callback with no run matches %d runs of mission %s, agent %s",
+				ErrCallbackRunMismatch, len(runs), missionID, agentName)
+		}
 	}
+	return r.selectTask(keys, taskID, missionID, agentName)
+}
 
-	// The callback names no run. When the registrations span more than one
-	// run, the callback cannot be tied to one of them, and the newest one
-	// would be the wrong harness for a late callback of an older run.
-	runs := map[string]struct{}{}
-	for _, k := range keys {
-		runs[r.harnesses[k].Mission().MissionRunID] = struct{}{}
+// selectTask picks one registration of a run by task. A for_each fan-out runs
+// several instances of one agent in one run, and each registers its own child
+// harness (gibson#1229). A callback that names a task gets the harness of that
+// task. A callback with no task gets the newest harness of the run.
+func (r *CallbackHarnessRegistry) selectTask(keys []string, taskID, missionID, agentName string) (AgentHarness, error) {
+	if taskID != "" {
+		for i := len(keys) - 1; i >= 0; i-- {
+			if r.harnesses[keys[i]].Mission().TaskID == taskID {
+				return r.harnesses[keys[i]], nil
+			}
+		}
 	}
-	if len(runs) > 1 {
-		return nil, fmt.Errorf("%w: a callback with no run matches %d runs of mission %s, agent %s",
-			ErrCallbackRunMismatch, len(runs), missionID, agentName)
+	// A harness with no task serves every task of its agent.
+	for i := len(keys) - 1; i >= 0; i-- {
+		if r.harnesses[keys[i]].Mission().TaskID == "" {
+			return r.harnesses[keys[i]], nil
+		}
 	}
-	return r.harnesses[keys[len(keys)-1]], nil
+	if taskID == "" {
+		// An agent that sends no task cannot be told from its siblings. It
+		// gets the newest harness of the run, as before.
+		return r.harnesses[keys[len(keys)-1]], nil
+	}
+	return nil, fmt.Errorf("%w: task %q of mission %s, agent %s matches none of %d registrations",
+		ErrCallbackTaskMismatch, taskID, missionID, agentName, len(keys))
 }
 
 // Unregister removes a harness from the registry.
@@ -293,4 +320,8 @@ var ErrCallbackRunMismatch = errors.New("callback does not match one run of the 
 // ErrHarnessWithoutRun reports a registration of a harness that has no mission
 // run. Every registration belongs to one run, so a lookup can tell the runs of
 // a mission apart (gibson#1217).
+// ErrCallbackTaskMismatch is the error of a callback whose task matches no
+// registration of its agent in the run.
+var ErrCallbackTaskMismatch = errors.New("callback does not match one task of the agent")
+
 var ErrHarnessWithoutRun = errors.New("harness has no mission run")

@@ -145,6 +145,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
 		childMissionCtx.NodeID = task.NodeID
+		childMissionCtx.TaskID = task.ID.String()
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
