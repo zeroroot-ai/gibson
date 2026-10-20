@@ -31,7 +31,7 @@ func TestMissionSlice_HoldsOneRun(t *testing.T) {
 		t.Fatalf("latest slice starts with %+v, want the projection of r2", latest[0])
 	}
 
-	first := MissionRunSlice(evs, "m", "r1")
+	first := missionSlice(evs, "m", "r1", true)
 	if len(first) != 5 {
 		t.Fatalf("run 1 slice = %d events, want 5 (%v)", len(first), first)
 	}
@@ -49,5 +49,25 @@ func TestMissionSlice_HoldsOneRun(t *testing.T) {
 	w := Replay("t", tl)
 	if wk := w.WorkSnapshot(); len(wk) != 1 || wk[0].State != WorkPending {
 		t.Fatalf("frame at 1 of run 2 work = %+v, want one pending item", wk)
+	}
+}
+
+// Each event that names its run gives that run to the slice.
+func TestExplicitRunID(t *testing.T) {
+	for _, ev := range []Event{
+		MissionProjected{RunID: "r"}, MissionStarted{RunID: "r"}, MissionDone{RunID: "r"},
+		MissionPauseRequested{RunID: "r"}, MissionResumed{RunID: "r"},
+		WorkDispatched{RunID: "r"}, WorkCompleted{RunID: "r"},
+		DecisionRequested{RunID: "r"}, DecisionCompleted{RunID: "r"},
+		HostObserved{MissionRunID: "r"}, FindingRaised{MissionRunID: "r"},
+		EntityObserved{MissionRunID: "r"}, LlmCallObserved{MissionRunID: "r"},
+		AgentToolCallObserved{MissionRunID: "r"},
+	} {
+		if got := explicitRunID(ev); got != "r" {
+			t.Errorf("%T: explicitRunID = %q, want r", ev, got)
+		}
+	}
+	if got := explicitRunID(TokenUsed{}); got != "" {
+		t.Errorf("an event with no run: explicitRunID = %q, want empty", got)
 	}
 }

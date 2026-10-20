@@ -45,7 +45,9 @@ package brain
 // run, or a frame would fold run 1 and run 2 one after the other
 // (gibson#1228). An empty missionID returns a copy of the whole slice (the
 // tenant-wide fold is unchanged). The result is deterministic, so folding it is
-// a stable replay frame.
+// a stable replay frame. A frame of an old run folds the late evidence of that
+// run with its mission link, though the live World detached it. That is the
+// true history of that run.
 func MissionSlice(events []Event, missionID string) []Event {
 	if missionID == "" {
 		return append([]Event(nil), events...)
@@ -53,15 +55,6 @@ func MissionSlice(events []Event, missionID string) []Event {
 	runID, found := latestMissionRun(events, missionID)
 	if !found {
 		return missionSlice(events, missionID, "", false)
-	}
-	return missionSlice(events, missionID, runID, true)
-}
-
-// MissionRunSlice returns the events attributable to one run of missionID, in
-// Timeline order. An empty missionID returns a copy of the whole slice.
-func MissionRunSlice(events []Event, missionID, runID string) []Event {
-	if missionID == "" {
-		return append([]Event(nil), events...)
 	}
 	return missionSlice(events, missionID, runID, true)
 }
