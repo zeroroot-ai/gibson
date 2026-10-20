@@ -60,7 +60,10 @@ func (l *AgentLauncher) buildEnv(ctx context.Context, spec AgentLaunchSpec, disp
 		env[envAgentModel] = spec.Model
 	}
 	// A member serves many tasks over its life, so it gets no task of its own.
-	if dispatch.TaskID != "" && spec.Mode != "member" {
+	// The free-form env of the manifest or the dispatch cannot give it one.
+	if spec.Mode == "member" {
+		delete(env, envAgentTaskID)
+	} else if dispatch.TaskID != "" {
 		env[envAgentTaskID] = dispatch.TaskID
 	}
 	if dispatch.TaskB64 != "" {
