@@ -127,24 +127,6 @@ func (h *CredentialHandler) GetByName(ctx context.Context, name string) (*Creden
 	}, nil
 }
 
-// GetDecrypted retrieves a credential with its plaintext value.
-// This method is for internal/dashboard operator use only — access is gated
-// by the existing FGA roles on the calling dashboard user's RPC path.
-//
-// SECURITY: never log or persist the returned secret string.
-func (h *CredentialHandler) GetDecrypted(ctx context.Context, name string) (*types.Credential, string, error) {
-	secret, err := h.service.Resolve(ctx, name)
-	if err != nil {
-		return nil, "", mapServiceError(err, "credential not found")
-	}
-
-	cred := &types.Credential{
-		ID:   types.NewID(),
-		Name: name,
-	}
-	return cred, string(secret), nil
-}
-
 // List retrieves credential names with optional filtering.
 func (h *CredentialHandler) List(ctx context.Context, filter *types.CredentialFilter) ([]*CredentialResponse, error) {
 	f := sdksecrets.Filter{}

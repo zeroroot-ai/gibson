@@ -238,7 +238,6 @@ internal/platform/component/types.go	ParseComponentStatus
 internal/platform/secrets/jwtsource/stub.go	AudienceCapturingJWTSource.Token
 internal/platform/secrets/jwtsource/stub.go	StaticJWTSource.Token
 internal/platform/tenantprovider/resolver.go	Resolver.Invalidate
-internal/server/daemon/api/llm_config.go	NewLLMConfigHandlerWithStore
 internal/server/daemon/api/server.go	containsString
 internal/server/daemon/api/server_alerts.go	alertDataKey
 internal/server/daemon/api/server_alerts.go	alertIndexKey

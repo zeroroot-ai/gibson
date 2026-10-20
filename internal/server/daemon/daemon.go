@@ -364,9 +364,6 @@ type daemonImpl struct {
 	// audience matters).
 	vaultJWTAudience string
 
-	// llmConfigHandler provides LLM provider configuration management (used by dashboard API)
-	llmConfigHandler *api.LLMConfigHandler
-
 	// componentAccessStore manages tenant opt-in and encrypted configuration for components of each kind.
 	// Initialized alongside credentialStore when a KeyProvider is configured.
 	// May be nil when no key provider is set (component access RPCs will return Unimplemented).
@@ -2370,12 +2367,6 @@ func formatDuration(d time.Duration) string {
 // Returns nil if the credential handler was not initialized (missing key provider).
 func (d *daemonImpl) CredentialHandler() *api.CredentialHandler {
 	return d.credentialHandler
-}
-
-// LLMConfigHandler returns the LLM config handler for dashboard API operations.
-// Returns nil if the LLM config handler was not initialized.
-func (d *daemonImpl) LLMConfigHandler() *api.LLMConfigHandler {
-	return d.llmConfigHandler
 }
 
 // withConnectionPointPeers returns allowed plus each configured connection

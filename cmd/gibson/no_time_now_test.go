@@ -69,7 +69,6 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 	allowlist := astchecks.Allowlist{
 		"internal/server/daemon/api/credentials.go :: time.Now()":                 astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "credential creation timestamp; credential rotation timestamp; credential timestamp"},
 		"internal/server/daemon/api/export_findings.go :: time.Now()":             astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "export-filename date stamp; wall-clock UTC; export-payload `exportedAt` field; wall-clock UTC"},
-		"internal/server/daemon/api/llm_config.go :: time.Now()":                  astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "LLM config metadata timestamp; LLM config `UpdatedAt` field; latency-measurement start for LLM probe; LLM `LastCheck` field; wall-clock"},
 		"internal/server/daemon/api/server.go :: time.Now()":                      astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "session ID generation uses wall-clock Unix epoch; Ping response `Timestamp` field; wall-clock Unix; latency-measurement start (QueryPlugin)"},
 		"internal/server/daemon/api/server_chat.go :: time.Now()":                 astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "conversation save `createdAt`/`updatedAt` Redis hash fields; wall-clock Unix; conversation save `updatedAt` refresh; wall-clock Unix"},
 		"internal/server/daemon/api/server_entitlements_audit.go :: time.Now()":   astchecks.Entry{Category: astchecks.CategoryDefensiveGuard, Reason: "audit-log timestamp; RFC3339Nano"},
@@ -117,7 +116,6 @@ func TestNoTimeNowInRPCHandlers(t *testing.T) {
 	calls := map[string]int{
 		"internal/server/daemon/api/credentials.go":                 4,
 		"internal/server/daemon/api/export_findings.go":             2,
-		"internal/server/daemon/api/llm_config.go":                  4,
 		"internal/server/daemon/api/server.go":                      3,
 		"internal/server/daemon/api/server_chat.go":                 2,
 		"internal/server/daemon/api/server_entitlements_audit.go":   1,

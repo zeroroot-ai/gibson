@@ -108,48 +108,6 @@ func (p ProviderType) IsSelfHosted() bool {
 	return selfHostedProviderTypes[p]
 }
 
-// LLMConfig contains the root LLM provider configuration.
-// It specifies which provider to use by default and provides
-// detailed configuration for each available provider.
-type LLMConfig struct {
-	DefaultProvider string                    `mapstructure:"default_provider" yaml:"default_provider" validate:"required"`
-	Providers       map[string]ProviderConfig `mapstructure:"providers" yaml:"providers" validate:"required,dive"`
-}
-
-// Validate performs validation on the LLMConfig.
-// It ensures that the default provider exists in the providers map
-// and that all provider configurations are valid.
-func (c *LLMConfig) Validate() error {
-	if c.DefaultProvider == "" {
-		return types.NewError(types.CONFIG_VALIDATION_FAILED, "default_provider cannot be empty")
-	}
-
-	if c.Providers == nil || len(c.Providers) == 0 {
-		return types.NewError(types.CONFIG_VALIDATION_FAILED, "providers map cannot be empty")
-	}
-
-	// Validate that default provider exists
-	if _, exists := c.Providers[c.DefaultProvider]; !exists {
-		return types.NewError(
-			types.CONFIG_VALIDATION_FAILED,
-			fmt.Sprintf("default_provider '%s' not found in providers map", c.DefaultProvider),
-		)
-	}
-
-	// Validate each provider configuration
-	for name, provider := range c.Providers {
-		if err := provider.Validate(); err != nil {
-			return types.WrapError(
-				types.CONFIG_VALIDATION_FAILED,
-				fmt.Sprintf("provider '%s' validation failed", name),
-				err,
-			)
-		}
-	}
-
-	return nil
-}
-
 // ProviderConfig contains configuration for a specific LLM provider.
 // It includes authentication credentials, API endpoints, available models,
 // and provider-specific options.
