@@ -121,9 +121,13 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		return nil, status.Errorf(codes.NotFound, "agent %q not available for tenant %q", req.GetAgentName(), tenant)
 	}
 
+	// The delegated agent acts for the mission run of its caller. The run goes
+	// in the request, so the agent sends it on every callback (gibson#1235).
+	sourceRun := s.sourceWorkRun(ctx, tenant, req.GetWorkId())
 	execReq := &agentpb.ExecuteRequest{
-		Task:      agent.TaskToProto(task),
-		TimeoutMs: task.Timeout.Milliseconds(),
+		Task:         agent.TaskToProto(task),
+		TimeoutMs:    task.Timeout.Milliseconds(),
+		MissionRunId: sourceRun,
 	}
 	payload, marshalErr := protojson.Marshal(execReq)
 	if marshalErr != nil {
@@ -153,7 +157,7 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	// The delegated agent acts for the mission run of its caller, so its own
 	// Authorize resolves to that run (D86). Without it every Authorize of a
 	// delegated agent is refused.
-	for k, v := range s.delegatedAuthzContext(ctx, tenant, req.GetWorkId()) {
+	for k, v := range authzContextEntry(sourceRun) {
 		workCtx[k] = v
 	}
 
@@ -237,20 +241,18 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	return &componentpb.DelegateToAgentResponse{ResultJson: resultJSON}, nil
 }
 
-// delegatedAuthzContext returns the work item context entry that gives a
-// delegated agent the mission run of its caller. The caller names its own work
-// item in the request, so the id is checked against the owner recorded at
-// enqueue before it selects a run: a caller cannot borrow the run of another
-// tenant's work item. When the work item is not the caller's, or has no run,
-// the entry is absent and the delegated agent has no run, so its Authorize is
-// refused (fail closed). Delegation itself is not blocked.
-func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
+// sourceWorkRun returns the mission run of the work item that the caller names
+// as its own. The caller names its own work item in the request, so the id is
+// checked against the owner recorded at enqueue before it selects a run: a
+// caller cannot borrow the run of another tenant's work item. It returns an
+// empty string when the work item is not the caller's or has no run.
+func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sourceWorkID string) string {
 	if sourceWorkID == "" {
-		return nil
+		return ""
 	}
 	// resolveWorkOwner refuses when no work-context registry is wired.
 	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
-		return nil
+		return ""
 	}
 	runID, err := s.workContext.WorkRun(ctx, sourceWorkID)
 	if err != nil {
@@ -258,6 +260,22 @@ func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tena
 			s.logger.WarnContext(ctx, "delegate to agent: cannot read the run of the source work item",
 				slog.String("work_id", sourceWorkID), slog.String("error", err.Error()))
 		}
+		return ""
+	}
+	return runID
+}
+
+// delegatedAuthzContext returns the work item context entry that gives a
+// delegated agent the mission run of its caller (see sourceWorkRun).
+func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
+	return authzContextEntry(s.sourceWorkRun(ctx, tenant, sourceWorkID))
+}
+
+// authzContextEntry is the work item context entry for a run. When the caller
+// has no run, the entry is absent and the delegated agent has no run, so its
+// Authorize is refused (fail closed). Delegation itself is not blocked.
+func authzContextEntry(runID string) map[string]string {
+	if runID == "" {
 		return nil
 	}
 	ac, err := json.Marshal(map[string]any{"run_id": runID, "issued_at": time.Now().Unix(), "ttl_seconds": authz.DefaultWorkTTLSeconds})

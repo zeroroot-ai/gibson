@@ -264,6 +264,10 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	assert.Contains(t, item.Context[authz.AuthzContextWorkKey], "run-42")
 	// The delegated item carries the mission of its caller.
 	assert.Equal(t, "mission-7", item.Context["mission_id"])
+	// The request carries the run too, so the agent sends it on its callbacks.
+	execReq := &agentpb.ExecuteRequest{}
+	require.NoError(t, protojson.Unmarshal(item.Payload, execReq))
+	assert.Equal(t, "run-42", execReq.GetMissionRunId())
 
 	run, err := NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), item.WorkID)
 	require.NoError(t, err)
