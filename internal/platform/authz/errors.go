@@ -103,16 +103,6 @@ func newInvalidArgumentError(msg string) error {
 	}
 }
 
-// IsUnavailable reports whether err is an FGA unavailability error.
-func IsUnavailable(err error) bool {
-	return errors.Is(err, ErrFgaUnavailable)
-}
-
-// IsTimeout reports whether err is an FGA timeout error.
-func IsTimeout(err error) bool {
-	return errors.Is(err, ErrFgaTimeout)
-}
-
 // IsInvalidArgument reports whether err is an invalid argument error.
 func IsInvalidArgument(err error) bool {
 	return errors.Is(err, ErrInvalidArgument)
