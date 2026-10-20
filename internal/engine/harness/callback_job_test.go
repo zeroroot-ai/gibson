@@ -322,6 +322,11 @@ func TestSubscribeInput_DeliversEachInputWithItsOwnTurnGrant(t *testing.T) {
 	if len(minter.reqs) != 2 {
 		t.Fatalf("minted %d grants, want one per input", len(minter.reqs))
 	}
+	for i, req := range minter.reqs {
+		if req.MissionRunID != "run-1" {
+			t.Errorf("turn grant %d carries run %q, want the run of the member (run-1)", i, req.MissionRunID)
+		}
+	}
 	if minter.reqs[0].Subject != "user:alice" {
 		t.Errorf("subject = %q; a turn carries the SENDER's authority, not the member's", minter.reqs[0].Subject)
 	}

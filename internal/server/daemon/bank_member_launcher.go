@@ -97,6 +97,7 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 		Tenant:         tenantID,
 		MissionID:      b.ID,
 		TaskID:         runID,
+		MissionRunID:   runID,
 		RecipientClass: "agent",
 		AllowedRPCs:    harness.MemberBaseGrantRPCs(),
 	})

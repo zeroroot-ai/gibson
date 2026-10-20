@@ -367,6 +367,7 @@ func (m *minterForkGrants) MintForkGrant(_ context.Context, d ForkDispatch) (str
 		Tenant:         d.Tenant,
 		MissionID:      d.MissionID,
 		TaskID:         d.MissionRunID,
+		MissionRunID:   d.MissionRunID,
 		RecipientClass: "agent",
 		AllowedRPCs:    taskGrantAllowedRPCs(),
 	})

@@ -430,3 +430,39 @@ func TestBuildJWKS_RejectsNoKeys(t *testing.T) {
 		t.Fatal("buildJWKS with no keys must refuse to render an empty JWK Set")
 	}
 }
+
+// A grant carries the mission run as a signed claim, and a grant without one
+// reads back as having none.
+func TestMinter_MissionRunClaim(t *testing.T) {
+	m, err := NewMinter(context.Background(), Config{
+		Issuer:      "https://test.daemon",
+		Audience:    "test-daemon",
+		KeyProvider: kpAdapter{[]byte(strings.Repeat("k", 32))},
+		KeyID:       "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := MintRequest{Subject: "component:agent:a", Tenant: "acme", MissionID: "m", TaskID: "t", AllowedRPCs: []string{"/x.S/Y"}}
+
+	with := req
+	with.MissionRunID = "run-9"
+	tok, err := m.Mint(with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := MissionRunOf(tok); got != "run-9" {
+		t.Errorf("MissionRunOf = %q, want run-9", got)
+	}
+
+	tok, err = m.Mint(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := MissionRunOf(tok); got != "" {
+		t.Errorf("a grant with no run: MissionRunOf = %q, want empty", got)
+	}
+	if got := MissionRunOf("not-a-token"); got != "" {
+		t.Errorf("a malformed token: MissionRunOf = %q, want empty", got)
+	}
+}

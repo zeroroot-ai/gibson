@@ -228,3 +228,35 @@ func TestRenewCapabilityGrant_KeepsTheCallingAgent(t *testing.T) {
 		t.Fatalf("renewed grant: caller = %q, err = %v; want alpha", caller, err)
 	}
 }
+
+// A renewal keeps the mission run of the grant that it renews, so a renewed
+// grant still names its run (gibson#1235).
+func TestRenewCapabilityGrant_KeepsTheMissionRun(t *testing.T) {
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatalf("NewMinter: %v", err)
+	}
+	claims := renewTestClaims()
+	original, err := m.Mint(capabilitygrant.MintRequest{
+		Subject: claims.Subject, Tenant: claims.Tenant.String(), MissionID: claims.MissionID,
+		TaskID: claims.TaskID, MissionRunID: "run-5", AllowedRPCs: claims.AllowedRPCs, RecipientClass: "agent",
+	})
+	if err != nil {
+		t.Fatalf("mint: %v", err)
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: claims})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", original))
+	resp, err := s.RenewCapabilityGrant(ctx, renewRequest())
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	if got := capabilitygrant.MissionRunOf(resp.GetCapabilityGrant()); got != "run-5" {
+		t.Fatalf("renewed grant mrid = %q, want run-5", got)
+	}
+}

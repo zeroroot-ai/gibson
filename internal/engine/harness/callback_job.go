@@ -284,6 +284,11 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 	if err != nil {
 		return err
 	}
+	// callerMember resolved the member by this run, so the run is not empty.
+	runID := req.GetContext().GetMissionRunId()
+	if runID == "" {
+		runID = req.GetContext().GetTaskId()
+	}
 	inboxKey := tenantID + "/" + memberID
 	if _, taken := s.memberInboxes.LoadOrStore(inboxKey, struct{}{}); taken {
 		return status.Error(codes.AlreadyExists,
@@ -313,7 +318,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 			if _, sent := delivered[in.ID]; sent {
 				continue
 			}
-			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, in)
+			wire, gerr := s.inputWithTurnGrant(ctx, tenantID, runID, in)
 			if gerr != nil {
 				return gerr
 			}
@@ -342,7 +347,7 @@ func (s *HarnessCallbackService) SubscribeInput(req *harnesspb.SubscribeInputReq
 // sat in a table between the send and the turn would be a standing credential
 // with a table for a home, and its lifetime would be the queue's depth rather
 // than the turn's.
-func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID string, in *job.Input) (*jobpb.Input, error) {
+func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantID, runID string, in *job.Input) (*jobpb.Input, error) {
 	wire := &jobpb.Input{
 		Id: in.ID, JobId: in.JobID, Message: in.Message,
 		Sender: principal.ToProto(in.Sender), SentAt: timestamppb.New(in.SentAt),
@@ -360,6 +365,7 @@ func (s *HarnessCallbackService) inputWithTurnGrant(ctx context.Context, tenantI
 		Tenant:         tenantID,
 		MissionID:      j.BankID,
 		TaskID:         in.JobID,
+		MissionRunID:   runID, // the run of the member that takes the turn
 		RecipientClass: "agent",
 		AllowedRPCs:    TurnGrantRPCs(),
 	})

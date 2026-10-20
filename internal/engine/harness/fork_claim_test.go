@@ -173,6 +173,9 @@ func TestNewForkGrantMinter(t *testing.T) {
 	if err != nil || tok == "" {
 		t.Fatalf("MintForkGrant = %q, %v", tok, err)
 	}
+	if run := capabilitygrant.MissionRunOf(tok); run != "r1" {
+		t.Fatalf("fork grant mrid = %q, want r1", run)
+	}
 	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return nil }).MintForkGrant(context.Background(), d); err == nil {
 		t.Error("no minter: want an error")
 	}

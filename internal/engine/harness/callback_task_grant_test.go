@@ -511,11 +511,19 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 	h.missionCtx.CurrentAgent = "alpha"
 	v := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m })
 
-	_, caller, err := v.VerifyCaller(context.Background(), h.mintCGForWork("nmap", "tool"))
+	toolGrant := h.mintCGForWork("nmap", "tool")
+	if run := capabilitygrant.MissionRunOf(toolGrant); run != "run-1" {
+		t.Fatalf("tool grant mrid = %q, want run-1", run)
+	}
+	_, caller, err := v.VerifyCaller(context.Background(), toolGrant)
 	if err != nil || caller != "alpha" {
 		t.Fatalf("tool grant: caller = %q, err = %v; want alpha", caller, err)
 	}
-	_, caller, err = v.VerifyCaller(context.Background(), h.mintCGForWork("zerocool", "agent"))
+	agentGrant := h.mintCGForWork("zerocool", "agent")
+	if run := capabilitygrant.MissionRunOf(agentGrant); run != "run-1" {
+		t.Fatalf("agent grant mrid = %q, want run-1", run)
+	}
+	_, caller, err = v.VerifyCaller(context.Background(), agentGrant)
 	if err != nil || caller != "" {
 		t.Fatalf("agent grant: caller = %q, err = %v; want none", caller, err)
 	}

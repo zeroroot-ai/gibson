@@ -95,7 +95,16 @@ func (v *LocalVerifier) VerifyCaller(ctx context.Context, token string) (sdkcg.C
 
 // callingAgentOf reads the claim "cag" from the payload of a token whose
 // signature was verified. A token it cannot read has no calling agent.
-func callingAgentOf(token string) string {
+func callingAgentOf(token string) string { return stringClaimOf(token, CallingAgentClaim) }
+
+// MissionRunOf reads the claim "mrid" from the payload of a token whose
+// signature was verified. A token it cannot read, and a grant minted before the
+// claim existed, has no run.
+func MissionRunOf(token string) string { return stringClaimOf(token, MissionRunClaim) }
+
+// stringClaimOf reads one string claim from the payload of a token. The caller
+// has verified the signature.
+func stringClaimOf(token, name string) string {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return ""
@@ -108,8 +117,8 @@ func callingAgentOf(token string) string {
 	if json.Unmarshal(raw, &p) != nil {
 		return ""
 	}
-	cag, _ := p[CallingAgentClaim].(string)
-	return cag
+	v, _ := p[name].(string)
+	return v
 }
 
 // minterKeys adapts the Minter's key set to the SDK's JWKSFetcher.
