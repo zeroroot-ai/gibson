@@ -127,6 +127,9 @@ type memVerificationStore struct {
 	issuePendingErr   error
 	listPendingErr    error
 	claimApprovalErr  error
+	listExpiringErr   error
+	beginExpiryErr    error
+	completeExpiryErr error
 	releaseCalls      []string
 	nextRegistrationN int
 }
@@ -288,6 +291,9 @@ func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssuePa
 }
 
 func (m *memVerificationStore) ListExpiringRegistrations(_ context.Context, limit int) ([]SignupVerification, error) {
+	if m.listExpiringErr != nil {
+		return nil, m.listExpiringErr
+	}
 	var out []SignupVerification
 	for _, r := range m.rows {
 		due := r.status == signupStatusPendingApproval && !r.ExpiresAt.After(m.now())
@@ -305,6 +311,9 @@ func (m *memVerificationStore) ListExpiringRegistrations(_ context.Context, limi
 }
 
 func (m *memVerificationStore) BeginExpiry(_ context.Context, id, decidedBy string) (SignupVerification, error) {
+	if m.beginExpiryErr != nil {
+		return SignupVerification{}, m.beginExpiryErr
+	}
 	if r, ok := m.rows[id]; ok && r.ExpiresAt.After(m.now()) {
 		return SignupVerification{}, ErrSignupVerificationNotFound
 	}
@@ -312,6 +321,9 @@ func (m *memVerificationStore) BeginExpiry(_ context.Context, id, decidedBy stri
 }
 
 func (m *memVerificationStore) CompleteExpiry(_ context.Context, id string) error {
+	if m.completeExpiryErr != nil {
+		return m.completeExpiryErr
+	}
 	if r, ok := m.rows[id]; ok && r.status == signupStatusExpiring {
 		r.status = signupStatusRejected
 	}

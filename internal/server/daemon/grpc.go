@@ -1306,11 +1306,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if idpErr != nil {
 		return nil, fmt.Errorf("daemon: IdP admin client init failed: %w", idpErr)
 	}
-	if idpClient == nil && approvalSignup {
-		// The approval rung creates an org and an owner at registration and
-		// removes them when a registration is refused or expires. Without the
-		// client none of that can work.
-		return nil, fmt.Errorf("daemon: %s is set to the approval rung but the IdP admin client is not configured (GIBSON_IDP_PROVIDER)", signup.ConfigKnob)
+	if err := requireIDPAdminForApproval(idpClient != nil, approvalSignup); err != nil {
+		return nil, err
 	}
 	if idpClient != nil {
 		daemonSvc.WithIdPAdminClient(idpClient)
@@ -3356,4 +3353,15 @@ func authorizePeersOrTrainers(peers tlsconfig.Authorizer, td spiffeid.TrustDomai
 		}
 		return nil
 	}
+}
+
+// requireIDPAdminForApproval refuses to start the approval rung without the
+// IdP admin client. The rung creates an org and an owner at registration and
+// removes them when a registration is refused or expires. Without the client
+// none of that can work.
+func requireIDPAdminForApproval(idpConfigured, approvalSignup bool) error {
+	if approvalSignup && !idpConfigured {
+		return fmt.Errorf("daemon: %s is set to the approval rung but the IdP admin client is not configured (GIBSON_IDP_PROVIDER)", signup.ConfigKnob)
+	}
+	return nil
 }

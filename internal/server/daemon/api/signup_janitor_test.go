@@ -182,3 +182,119 @@ func TestSweep_PurgeFailureDoesNotSkipExpiry(t *testing.T) {
 		t.Fatalf("status = %q, want %q even though the purge failed", got, signupStatusRejected)
 	}
 }
+
+// Each failure of the expiry steps is logged and the sweep goes on. Nothing
+// panics, and the row stays where the failure left it.
+func TestSweep_ExpiryFailuresAreLoggedAndSurvived(t *testing.T) {
+	t.Run("listing fails", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		registerPending(t, h)
+		h.advance(SignupRegistrationTTL + time.Hour)
+		h.store.listExpiringErr = errors.New("read failed")
+		h.srv.sweepSignupVerifications(context.Background())
+		if len(h.idp.deletedOrgs) != 0 {
+			t.Fatalf("deleted orgs = %v, want none when the list failed", h.idp.deletedOrgs)
+		}
+	})
+
+	t.Run("claim fails", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		regID := registerPending(t, h)
+		h.advance(SignupRegistrationTTL + time.Hour)
+		h.store.beginExpiryErr = errors.New("write failed")
+		h.srv.sweepSignupVerifications(context.Background())
+		if got := h.store.rows[regID].status; got != signupStatusPendingApproval {
+			t.Fatalf("status = %q, want it unclaimed", got)
+		}
+		if len(h.idp.deletedOrgs) != 0 {
+			t.Fatalf("an org was deleted before the claim: %v", h.idp.deletedOrgs)
+		}
+	})
+
+	t.Run("audit write fails", func(t *testing.T) {
+		h, auditWriter := newApprovalHarness(t)
+		regID := registerPending(t, h)
+		h.advance(SignupRegistrationTTL + time.Hour)
+		auditWriter.syncErr = errors.New("audit down")
+		h.srv.sweepSignupVerifications(context.Background())
+		if got := h.store.rows[regID].status; got != signupStatusRejected {
+			t.Fatalf("status = %q, want the expiry to finish despite the audit failure", got)
+		}
+	})
+
+	t.Run("completion fails", func(t *testing.T) {
+		h, _ := newApprovalHarness(t)
+		regID := registerPending(t, h)
+		h.advance(SignupRegistrationTTL + time.Hour)
+		h.store.completeExpiryErr = errors.New("write failed")
+		h.srv.sweepSignupVerifications(context.Background())
+		if got := h.store.rows[regID].status; got != signupStatusExpiring {
+			t.Fatalf("status = %q, want expiring so the next sweep retries", got)
+		}
+		h.store.completeExpiryErr = nil
+		h.srv.sweepSignupVerifications(context.Background())
+		if got := h.store.rows[regID].status; got != signupStatusRejected {
+			t.Fatalf("status after the retry = %q, want rejected", got)
+		}
+	})
+}
+
+// An administrator who claims the registration first wins. A later sweep past
+// the TTL neither deletes the org nor changes the row (gibson#1191).
+func TestSweep_AdminApprovalWinsTheRace(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	if _, err := h.store.ClaimApproval(context.Background(), regID, "admin-1"); err != nil {
+		t.Fatalf("ClaimApproval: %v", err)
+	}
+	h.advance(SignupRegistrationTTL + time.Hour)
+
+	h.srv.sweepSignupVerifications(context.Background())
+
+	if got := h.store.rows[regID].status; got != signupStatusConsumed {
+		t.Fatalf("status = %q, want %q", got, signupStatusConsumed)
+	}
+	if len(h.idp.deletedOrgs) != 0 {
+		t.Fatalf("the janitor deleted orgs %v after an administrator approved", h.idp.deletedOrgs)
+	}
+}
+
+// The janitor loses the claim to an administrator who decides between its
+// listing and its claim: the claim finds nothing and no org goes.
+func TestSweep_LosingTheClaimDeletesNothing(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+	h.store.beginExpiryErr = ErrSignupVerificationNotFound
+
+	h.srv.sweepSignupVerifications(context.Background())
+
+	if got := h.store.rows[regID].status; got != signupStatusPendingApproval {
+		t.Fatalf("status = %q, want it left to the administrator", got)
+	}
+	if len(h.idp.deletedOrgs) != 0 {
+		t.Fatalf("deleted orgs = %v, want none", h.idp.deletedOrgs)
+	}
+}
+
+// releaseWorkspaceOrg reports an identity provider failure to its caller.
+func TestReleaseWorkspaceOrg_Failures(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	row := SignupVerification{ID: "r1", OwnerUserID: "user-1"}
+
+	h.idp.orgOfUserErr = errors.New("zitadel down")
+	if err := h.srv.releaseWorkspaceOrg(context.Background(), row); err == nil {
+		t.Error("a failed org lookup must be reported")
+	}
+
+	h.idp.orgOfUserErr = nil
+	h.idp.orgByUser = map[string]string{"user-1": "org-1"}
+	h.idp.deleteOrgErr = errors.New("zitadel down")
+	if err := h.srv.releaseWorkspaceOrg(context.Background(), row); err == nil {
+		t.Error("a failed org delete must be reported")
+	}
+
+	if err := h.srv.releaseWorkspaceOrg(context.Background(), SignupVerification{}); err != nil {
+		t.Errorf("a registration with no owner has no org to remove: %v", err)
+	}
+}

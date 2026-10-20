@@ -896,6 +896,15 @@ func TestApprovalStoreFailsClosedWithoutADatabase(t *testing.T) {
 	if _, err := s.RejectRegistration(context.Background(), "x", "admin-1"); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("RejectRegistration error = %v, want ErrSignupStoreUnavailable", err)
 	}
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("ListExpiringRegistrations error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if _, err := s.BeginExpiry(context.Background(), "x", "system"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("BeginExpiry error = %v, want ErrSignupStoreUnavailable", err)
+	}
+	if err := s.CompleteExpiry(context.Background(), "x"); !errors.Is(err, ErrSignupStoreUnavailable) {
+		t.Errorf("CompleteExpiry error = %v, want ErrSignupStoreUnavailable", err)
+	}
 	if err := s.ReleaseApproval(context.Background(), "x"); !errors.Is(err, ErrSignupStoreUnavailable) {
 		t.Errorf("ReleaseApproval error = %v, want ErrSignupStoreUnavailable", err)
 	}
@@ -965,5 +974,19 @@ func TestBeginAndCompleteExpiry(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+// A row error that surfaces while the janitor reads is reported.
+func TestListExpiringRegistrations_RowErrorIsReported(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at", "status",
+		}).AddRow("reg-1", "a", "a@example.com", "Acme", "team", "A", "L", "u", now, now, "expiring").
+			RowError(0, errors.New("broken row")))
+	if _, err := s.ListExpiringRegistrations(context.Background(), 0); err == nil {
+		t.Fatal("a row error must be reported")
 	}
 }
