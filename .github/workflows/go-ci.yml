@@ -246,6 +246,23 @@ jobs:
           cache: true
       - run: go vet ${{ matrix.build_tags && format('-tags={0}', matrix.build_tags) || '' }} ./...
 
+  # ---- tests that only build under test_fixtures (both lanes) ----
+  # gibson#1227: no job ran `go test -tags=test_fixtures`, so the tests behind
+  # that tag could never fail. vet-tags only compiles them. The package list
+  # comes from the files themselves (scripts/fixture-test-packages.sh).
+  fixture-tests:
+    needs: changes
+    if: github.event_name == 'merge_group' || (github.event_name == 'pull_request' && needs.changes.outputs.go == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make test-fixtures
+
   # ---- gibson-specific lint (pull_request) ----
   # Kept native (not delegated to the reusable's golangci-lint step) so the
   # Makefile-pinned golangci-lint version and toolchain stay the single
@@ -578,6 +595,7 @@ jobs:
       - fast
       - heavy
       - vet-tags
+      - fixture-tests
       - lint
       - deadcode
       - coverage

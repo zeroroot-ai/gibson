@@ -696,6 +696,12 @@ vet-tags:
 	done
 	@echo "vet-tags PASSED"
 
+# test-fixtures: run the tests that only build under the test_fixtures tag
+# (gibson#1227). The package list comes from scripts/fixture-test-packages.sh.
+test-fixtures:
+	@bash scripts/fixture-test-packages.sh --selftest
+	$(GOTEST) -tags test_fixtures -count=1 $$(bash scripts/fixture-test-packages.sh)
+
 # test-merge-queue: everything the merge_group lane runs that the pull_request
 # lane does not (gibson#1236). After the lane-parity fix that is just the heavy
 # tier — module-wide `go test -race` per build-tag variant. Run it before
