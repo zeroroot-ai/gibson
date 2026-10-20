@@ -448,3 +448,27 @@ func TestParseTerminalResult_NoResultLine(t *testing.T) {
 		}
 	}
 }
+
+// The task ID of the dispatch reaches the agent in the environment, so the
+// agent can send it on each callback (gibson#1229).
+func TestBuildEnv_CarriesTheTaskID(t *testing.T) {
+	l := &AgentLauncher{}
+	env := l.buildEnv(context.Background(), AgentLaunchSpec{}, AgentDispatch{TaskID: "task-7"})
+	if got := env[envAgentTaskID]; got != "task-7" {
+		t.Fatalf("%s = %q, want task-7", envAgentTaskID, got)
+	}
+	// A dispatch cannot forge it through its free-form env.
+	env = l.buildEnv(context.Background(), AgentLaunchSpec{}, AgentDispatch{TaskID: "task-7", Env: map[string]string{envAgentTaskID: "forged"}})
+	if got := env[envAgentTaskID]; got != "task-7" {
+		t.Fatalf("a forged env won: %q", got)
+	}
+}
+
+// A member serves many tasks, so it gets no task ID in its environment.
+func TestBuildEnv_MemberGetsNoTaskID(t *testing.T) {
+	l := &AgentLauncher{}
+	env := l.buildEnv(context.Background(), AgentLaunchSpec{Mode: "member"}, AgentDispatch{TaskID: "task-7"})
+	if _, has := env[envAgentTaskID]; has {
+		t.Fatalf("a member got %s", envAgentTaskID)
+	}
+}

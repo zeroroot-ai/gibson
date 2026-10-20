@@ -145,6 +145,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		childMissionCtx.NodeSlotOverrides = task.SlotOverrides
 		childMissionCtx.NodeNetwork = task.Network
 		childMissionCtx.NodeID = task.NodeID
+		childMissionCtx.TaskID = task.ID.String()
 		childHarness, cerr := h.factory(ctx, childMissionCtx, h.targetInfo)
 		if cerr != nil {
 			return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
@@ -178,6 +179,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaSandbox(
 		MissionID:        h.missionCtx.ID.String(),
 		MissionRunID:     h.missionCtx.MissionRunID,
 		AgentRunID:       h.missionCtx.AgentRunID,
+		TaskID:           task.ID.String(),
 		TaskB64:          base64.StdEncoding.EncodeToString(taskPayload),
 		// Live-console scope (ADR-0116 S11): the customer tenant that owns this
 		// mission run and the agent name, so the running instance is enumerable
