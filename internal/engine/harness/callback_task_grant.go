@@ -112,13 +112,6 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 			return ctx, deny(ctx, logger, method, "task grant mission does not match ContextInfo.mission_id",
 				status.Error(codes.PermissionDenied, "task grant is for another mission"))
 		}
-		// A fan-out runs several tasks of one agent in one run, and each grant
-		// names one task. A callback that names a sibling task would reach the
-		// harness of the sibling.
-		if info := carrier.GetContext(); info != nil && info.GetTaskId() != "" && claims.TaskID != "" && info.GetTaskId() != claims.TaskID {
-			return ctx, deny(ctx, logger, method, "task grant task does not match ContextInfo.task_id",
-				status.Error(codes.PermissionDenied, "task grant is for another task"))
-		}
 		// The mission ID is the same for every run of a record, so a grant that
 		// names its run is for that run. A callback that names another run
 		// would put its evidence on a run it does not serve.

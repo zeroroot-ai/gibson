@@ -54,3 +54,15 @@ func callerRun(ctx context.Context, info *harnesspb.ContextInfo) string {
 	}
 	return info.GetMissionRunId()
 }
+
+// callerTask returns the task of a callback. The task of the verified grant
+// wins, as the run does, because the caller cannot forge it: a fan-out grant
+// for task A selects the harness of A whatever task the body names, and the
+// turn grant of a member names the job whatever task the member driver puts in
+// the context. A request with no grant names its task in the context.
+func callerTask(ctx context.Context, info *harnesspb.ContextInfo) string {
+	if claims, ok := TaskGrantClaimsFromContext(ctx); ok && claims.TaskID != "" {
+		return claims.TaskID
+	}
+	return info.GetTaskId()
+}
