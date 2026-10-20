@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/idp"
+	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 )
 
 // TestRunSignupJanitor_SweepsOnceThenStopsOnCancellation proves the two
@@ -296,5 +297,38 @@ func TestReleaseWorkspaceOrg_Failures(t *testing.T) {
 
 	if err := h.srv.releaseWorkspaceOrg(context.Background(), SignupVerification{}); err != nil {
 		t.Errorf("a registration with no owner has no org to remove: %v", err)
+	}
+}
+
+// An operator moves the rung away from approval. Rows that wait or expire still
+// free their workspace names (gibson#1191).
+func TestSweep_ExpiryFollowsTheRowsNotThePolicy(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+	h.srv.signupPolicy = signup.PolicySelfServe
+
+	h.srv.sweepSignupVerifications(context.Background())
+
+	if got := h.store.rows[regID].status; got != signupStatusRejected {
+		t.Fatalf("status = %q, want %q after the policy changed", got, signupStatusRejected)
+	}
+	if len(h.idp.deletedOrgs) != 1 {
+		t.Fatalf("deleted orgs = %v, want the workspace org freed", h.idp.deletedOrgs)
+	}
+}
+
+// With no identity provider client the removal reports an error, and the row
+// stays expiring for a later sweep.
+func TestSweep_NoIdentityProviderLeavesTheRowExpiring(t *testing.T) {
+	h, _ := newApprovalHarness(t)
+	regID := registerPending(t, h)
+	h.advance(SignupRegistrationTTL + time.Hour)
+	h.srv.idpAdminClient = nil
+
+	h.srv.sweepSignupVerifications(context.Background())
+
+	if got := h.store.rows[regID].status; got != signupStatusExpiring {
+		t.Fatalf("status = %q, want %q", got, signupStatusExpiring)
 	}
 }

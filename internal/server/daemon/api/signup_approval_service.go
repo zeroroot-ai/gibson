@@ -449,6 +449,9 @@ func (s *DaemonServer) releaseWorkspaceOrg(ctx context.Context, row SignupVerifi
 	if row.OwnerUserID == "" {
 		return nil
 	}
+	if s.idpAdminClient == nil {
+		return errors.New("identity provider not configured")
+	}
 	ctx = context.WithoutCancel(ctx)
 	orgID, err := s.idpAdminClient.OrgOfUser(ctx, row.OwnerUserID)
 	if errors.Is(err, idp.ErrNotFound) {
