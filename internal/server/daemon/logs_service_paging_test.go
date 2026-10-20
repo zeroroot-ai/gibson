@@ -6,7 +6,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,13 +15,21 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
-var testLogsKey = bytes.Repeat([]byte{7}, logsCursorKeyLen)
+// testLogsKeys returns the page token keys of a test server.
+func testLogsKeys(t *testing.T, fill byte) *pagetoken.Keys {
+	t.Helper()
+	keys, err := pagetoken.NewKeys(bytes.Repeat([]byte{fill}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
+}
 
 // lokiFake behaves like Loki for the three things that matter to paging:
 // start is inclusive, end is exclusive, the newest lines come first, and a
@@ -123,7 +130,7 @@ func TestLogsService_WalkReturnsEveryLineOnce(t *testing.T) {
 					}
 				}
 			}
-			srv := NewLogsServer(f, testLogsKey, nil)
+			srv := NewLogsServer(f, testLogsKeys(t, 7), nil)
 
 			seen := map[string]int{}
 			token := ""
@@ -164,7 +171,7 @@ func TestLogsService_WalkReturnsEveryLineOnce(t *testing.T) {
 func TestLogsService_RefusesAForgedToken(t *testing.T) {
 	now := time.Now().UTC()
 	f := &lokiFake{lines: seedLines(50, now)}
-	srv := NewLogsServer(f, testLogsKey, nil)
+	srv := NewLogsServer(f, testLogsKeys(t, 7), nil)
 
 	first, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10})
 	if err != nil || first.GetNextPageToken() == "" {
@@ -204,7 +211,7 @@ func TestLogsService_RefusesAForgedToken(t *testing.T) {
 			return status.Code(err)
 		},
 		"a token of another key": func() codes.Code {
-			other := NewLogsServer(f, bytes.Repeat([]byte{9}, logsCursorKeyLen), nil)
+			other := NewLogsServer(f, testLogsKeys(t, 9), nil)
 			_, err := other.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10, PageToken: token})
 			return status.Code(err)
 		},
@@ -216,27 +223,13 @@ func TestLogsService_RefusesAForgedToken(t *testing.T) {
 	}
 }
 
-func TestDeriveLogsCursorKey(t *testing.T) {
-	if _, err := deriveLogsCursorKey([]byte("short")); err == nil {
-		t.Fatal("a short master KEK must be refused")
-	}
-	a, err := deriveLogsCursorKey(bytes.Repeat([]byte{1}, 32))
-	if err != nil || len(a) != logsCursorKeyLen {
-		t.Fatalf("derive: %v, len %d", err, len(a))
-	}
-	b, _ := deriveLogsCursorKey(bytes.Repeat([]byte{1}, 32))
-	if !bytes.Equal(a, b) {
-		t.Fatal("the same master KEK must give the same key on every replica")
-	}
-}
-
 func TestLogsService_TooManyTiesIsRefused(t *testing.T) {
 	now := time.Now().UTC().UnixNano()
 	lines := make([]lokilogs.Entry, 0, 1200)
 	for i := range 1200 {
 		lines = append(lines, lokilogs.Entry{UnixNanos: now, Line: fmt.Sprintf("tie-%04d", i)})
 	}
-	srv := NewLogsServer(&lokiFake{lines: lines}, testLogsKey, nil)
+	srv := NewLogsServer(&lokiFake{lines: lines}, testLogsKeys(t, 7), nil)
 	_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 500})
 	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "share one timestamp") {
 		t.Fatalf("err = %v, want FailedPrecondition about ties", err)
@@ -253,7 +246,7 @@ func TestLogsService_TieGroupAtThePageEdge(t *testing.T) {
 		{UnixNanos: at(2), Line: "b1"}, {UnixNanos: at(2), Line: "b2"}, {UnixNanos: at(2), Line: "b3"},
 		{UnixNanos: at(3), Line: "c"},
 	}}
-	srv := NewLogsServer(f, testLogsKey, nil)
+	srv := NewLogsServer(f, testLogsKeys(t, 7), nil)
 
 	var got []string
 	token := ""
@@ -278,41 +271,13 @@ func TestLogsService_TieGroupAtThePageEdge(t *testing.T) {
 	}
 }
 
-type stubKeyProvider struct {
-	key []byte
-	err error
-}
-
-func (s stubKeyProvider) GetEncryptionKey(context.Context) ([]byte, error) { return s.key, s.err }
-func (stubKeyProvider) Name() string                                       { return "stub" }
-func (stubKeyProvider) Health(context.Context) types.HealthStatus          { return types.HealthStatus{} }
-func (stubKeyProvider) Close() error                                       { return nil }
-
-// The daemon refuses to start LogsService without a master KEK it can use.
-func TestLogsCursorKeyFromProvider(t *testing.T) {
-	ctx := context.Background()
-	if _, err := logsCursorKeyFromProvider(ctx, nil); err == nil {
-		t.Error("no key provider must be refused")
-	}
-	if _, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{err: errors.New("vault down")}); err == nil {
-		t.Error("a KEK read failure must be refused")
-	}
-	if _, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{key: []byte("short")}); err == nil {
-		t.Error("a short KEK must be refused")
-	}
-	key, err := logsCursorKeyFromProvider(ctx, stubKeyProvider{key: bytes.Repeat([]byte{3}, 32)})
-	if err != nil || len(key) != logsCursorKeyLen {
-		t.Fatalf("key: len %d, err %v", len(key), err)
-	}
-}
-
-func TestNewLogsServer_RefusesAShortKey(t *testing.T) {
+func TestNewLogsServer_RefusesNoKeys(t *testing.T) {
 	defer func() {
 		if recover() == nil {
-			t.Error("a short cursor key must panic at construction")
+			t.Error("no page token keys must panic at construction")
 		}
 	}()
-	NewLogsServer(&lokiFake{}, []byte("short"), nil)
+	NewLogsServer(&lokiFake{}, nil, nil)
 }
 
 func TestLogsPageSize(t *testing.T) {
@@ -324,7 +289,20 @@ func TestLogsPageSize(t *testing.T) {
 }
 
 func TestDecodeLogsCursor_RefusesATokenWithNoSignature(t *testing.T) {
-	if _, err := decodeLogsCursor(testLogsKey, logsQueryScope{}, "nodothere"); err == nil {
+	signer, err := testLogsKeys(t, 7).Signer("logs-QueryMissionLogs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeLogsCursor(signer, logsQueryScope{}, "nodothere"); err == nil {
 		t.Error("a token with no signature part must be refused")
+	}
+	// A signed position that is not a cursor is refused too.
+	for _, pos := range []string{"nocolon", "x:1", "1:y"} {
+		if _, err := decodeLogsCursor(signer, logsQueryScope{}, signer.Token(logsQueryScope{}.fields(), pos)); err == nil {
+			t.Errorf("position %q must be refused", pos)
+		}
+	}
+	if _, err := decodeLogsCursor(signer, logsQueryScope{}, ""); err == nil {
+		t.Error("an empty token has no cursor")
 	}
 }

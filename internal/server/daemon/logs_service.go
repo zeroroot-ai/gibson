@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -64,24 +65,32 @@ type logsServer struct {
 	logspb.UnimplementedLogsServiceServer
 
 	querier lokilogs.Querier
-	// cursorKey signs the page tokens (logs_cursor.go).
-	cursorKey []byte
-	logger    *slog.Logger
+	// signers sign the page tokens of each query kind (logs_cursor.go).
+	signers map[string]*pagetoken.Signer
+	logger  *slog.Logger
 }
 
 // NewLogsServer constructs the LogsService backed by a Loki log querier.
-// cursorKey signs the page tokens. Get it from deriveLogsCursorKey.
-func NewLogsServer(querier lokilogs.Querier, cursorKey []byte, logger *slog.Logger) logspb.LogsServiceServer {
+// keys derives the signing key of the page tokens, one for each query.
+func NewLogsServer(querier lokilogs.Querier, keys *pagetoken.Keys, logger *slog.Logger) logspb.LogsServiceServer {
 	if querier == nil {
 		panic("logs server: querier cannot be nil")
 	}
-	if len(cursorKey) < logsCursorKeyLen {
-		panic("logs server: cursor key is too short")
+	if keys == nil {
+		panic("logs server: page token keys cannot be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &logsServer{querier: querier, cursorKey: cursorKey, logger: logger}
+	signers := make(map[string]*pagetoken.Signer, 2)
+	for kind, list := range map[string]string{"mission": "logs-QueryMissionLogs", "daemon": "logs-QueryDaemonLogs"} {
+		signer, err := keys.Signer(list)
+		if err != nil {
+			panic("logs server: " + err.Error())
+		}
+		signers[kind] = signer
+	}
+	return &logsServer{querier: querier, signers: signers, logger: logger}
 }
 
 // tenant resolves the caller's tenant from context. Cross-tenant access is
@@ -98,9 +107,13 @@ func (s *logsServer) tenant(ctx context.Context) (string, error) {
 // page checks the token of a request and runs the paged Loki query. It
 // returns the page and the token of the next page ("" for the last page).
 func (s *logsServer) page(sc logsQueryScope, token string, pageSize int, reqStart, reqEnd time.Time, fetch logsFetch) ([]*logspb.LogEntry, string, error) {
+	signer, ok := s.signers[sc.kind]
+	if !ok {
+		return nil, "", status.Errorf(codes.Internal, "no page token signer for %s logs", sc.kind)
+	}
 	var cur *logsCursor
 	if token != "" {
-		c, err := decodeLogsCursor(s.cursorKey, sc, token)
+		c, err := decodeLogsCursor(signer, sc, token)
 		if err != nil {
 			return nil, "", status.Error(codes.InvalidArgument, err.Error())
 		}
@@ -116,7 +129,7 @@ func (s *logsServer) page(sc logsQueryScope, token string, pageSize int, reqStar
 	}
 	next := ""
 	if more {
-		next = logsCursor{endNanos: nextEnd, startNanos: w.start.UnixNano()}.encode(s.cursorKey, sc)
+		next = signer.Token(sc.fields(), logsCursor{endNanos: nextEnd, startNanos: w.start.UnixNano()}.position())
 	}
 	return toProto(page), next, nil
 }
