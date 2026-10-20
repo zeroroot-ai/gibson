@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"testing"
 )
 
@@ -27,7 +28,7 @@ func TestMapSDKError_StatusDecidesTheClass(t *testing.T) {
 		{http.StatusNotFound, `{"code":"store_id_not_found","message":"no store"}`, ErrFgaNotFound, false},
 	}
 	for _, tc := range cases {
-		t.Run(fmt.Sprint(tc.status), func(t *testing.T) {
+		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
 			capture := &capturedWrite{}
 			srv := fgaWriteServer(t, tc.status, tc.body, capture)
 			defer srv.Close()
