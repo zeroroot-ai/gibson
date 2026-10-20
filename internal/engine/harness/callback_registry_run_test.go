@@ -227,3 +227,26 @@ func TestCallbackHarnessRegistry_UnknownTaskGetsTheNoTaskHarness(t *testing.T) {
 	require.NoError(t, err)
 	assert.Same(t, shared, got)
 }
+
+// A callback that names a task no harness serves is refused with
+// FailedPrecondition, and the task of a registered instance still resolves
+// (gibson#1229).
+func TestGetHarness_RefusesACallbackOfAnotherTask(t *testing.T) {
+	registry := NewCallbackHarnessRegistry()
+	a := newRunHarness("run-1")
+	a.taskID = "task-a"
+	mustRegister(t, registry, "m1", "recon", a)
+	service := NewHarnessCallbackServiceWithRegistry(slog.New(slog.DiscardHandler), registry, testEventBus())
+
+	_, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{
+		MissionId: "m1", AgentName: "recon", MissionRunId: "run-1", TaskId: "task-z",
+	})
+	require.Error(t, err)
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+
+	got, err := service.getHarness(testCtxWithTenant(), &harnesspb.ContextInfo{
+		MissionId: "m1", AgentName: "recon", MissionRunId: "run-1", TaskId: "task-a",
+	})
+	require.NoError(t, err)
+	assert.Same(t, a, got)
+}
