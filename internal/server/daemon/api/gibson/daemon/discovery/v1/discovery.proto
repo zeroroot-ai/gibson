@@ -275,7 +275,9 @@ message PermissionRequest {
   string target_kind = 2 [(buf.validate.field).string = { max_len: 1024 }]; // "plugin" | "tool" | "agent"
   string action = 3 [(buf.validate.field).string = { max_len: 4096 }]; // "read" | "write" | "execute"
   bool required = 4;
-  string justification = 5 [(buf.validate.field).string = { max_len: 16777216 }];
+  // Removed: no consumer reads it, and no code sets it (D77).
+  reserved 5;
+  reserved "justification";
 }
 
 message SlotInfo {
