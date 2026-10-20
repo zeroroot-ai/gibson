@@ -3,7 +3,7 @@ module github.com/zeroroot-ai/gibson/plugins/gitlab
 go 1.27.2
 
 require (
-	github.com/zeroroot-ai/sdk v0.205.1
+	github.com/zeroroot-ai/sdk v0.208.0
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 )
 
