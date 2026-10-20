@@ -24,6 +24,7 @@ name: security
 on:
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 concurrency:
   group: security-${{ github.ref }}
