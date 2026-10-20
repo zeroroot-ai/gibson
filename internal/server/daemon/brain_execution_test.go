@@ -109,24 +109,24 @@ func TestBindingRegistry_RegisterGetUnregister(t *testing.T) {
 func TestIsMissionRunLive_TracksTheBindingWindowExactly(t *testing.T) {
 	b := newBrainExecutor(nil, slog.Default())
 
-	if b.IsMissionRunLive("m1", "") {
+	if b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a mission that never launched must not be live")
 	}
-	if b.IsMissionRunLive("never-existed", "") {
+	if b.IsMissionRunLive("never-existed", "run-1") {
 		t.Fatal("an unknown mission id must not be live")
 	}
 
-	bind := &missionBinding{slot: "primary"}
+	bind := &missionBinding{slot: "primary", runID: "run-1"}
 	b.register("m1", bind)
-	if !b.IsMissionRunLive("m1", "") {
+	if !b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a registered mission must be live")
 	}
-	if b.IsMissionRunLive("m2", "") {
+	if b.IsMissionRunLive("m2", "run-1") {
 		t.Fatal("liveness must be per-mission, not global")
 	}
 
 	b.unregister("m1", bind)
-	if b.IsMissionRunLive("m1", "") {
+	if b.IsMissionRunLive("m1", "run-1") {
 		t.Fatal("a returned mission must not stay live — renewal would outlive its run")
 	}
 }
@@ -331,7 +331,7 @@ func TestIsMissionRunLive_FollowsTheRunNotTheRecord(t *testing.T) {
 	if !b.IsMissionRunLive("m1", "run-2") {
 		t.Fatal("a grant of the live run must renew")
 	}
-	if !b.IsMissionRunLive("m1", "") {
-		t.Fatal("a grant with no run claim is judged by the record")
+	if b.IsMissionRunLive("m1", "") {
+		t.Fatal("a call with no run is never live")
 	}
 }

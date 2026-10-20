@@ -58,7 +58,7 @@ func grantClaims(t *testing.T, tenant, mission string) sdkcg.Claims {
 // the routing peek (not the signature) is what the test exercises.
 func compactJWT(typ string) string {
 	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"EdDSA","typ":"` + typ + `","kid":"k"}`))
-	body := base64.RawURLEncoding.EncodeToString([]byte(`{}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(`{"mrid":"run-1"}`))
 	return hdr + "." + body + ".sig"
 }
 

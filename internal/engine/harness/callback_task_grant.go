@@ -95,7 +95,14 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 		return ctx, deny(ctx, logger, method, "task grant "+reason,
 			status.Error(codes.Unauthenticated, "task grant "+reason))
 	}
+	// Every task grant names its run. A grant with none is not a grant that this
+	// daemon minted for a run, and a restart ends every run, so no older grant
+	// is live.
 	grantRun := capabilitygrant.MissionRunOf(token)
+	if grantRun == "" {
+		return ctx, deny(ctx, logger, method, "task grant names no run",
+			status.Error(codes.PermissionDenied, "task grant names no mission run"))
+	}
 	if tenant := auth.TenantStringFromContext(ctx); tenant != claims.Tenant.String() {
 		return ctx, deny(ctx, logger, method, "task grant tenant does not match the request tenant",
 			status.Error(codes.PermissionDenied, "task grant is for another tenant"))
@@ -105,10 +112,17 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 			return ctx, deny(ctx, logger, method, "task grant mission does not match ContextInfo.mission_id",
 				status.Error(codes.PermissionDenied, "task grant is for another mission"))
 		}
+		// A fan-out runs several tasks of one agent in one run, and each grant
+		// names one task. A callback that names a sibling task would reach the
+		// harness of the sibling.
+		if info := carrier.GetContext(); info != nil && info.GetTaskId() != "" && claims.TaskID != "" && info.GetTaskId() != claims.TaskID {
+			return ctx, deny(ctx, logger, method, "task grant task does not match ContextInfo.task_id",
+				status.Error(codes.PermissionDenied, "task grant is for another task"))
+		}
 		// The mission ID is the same for every run of a record, so a grant that
 		// names its run is for that run. A callback that names another run
 		// would put its evidence on a run it does not serve.
-		if info := carrier.GetContext(); info != nil && info.GetMissionRunId() != "" && grantRun != "" && info.GetMissionRunId() != grantRun {
+		if info := carrier.GetContext(); info != nil && info.GetMissionRunId() != "" && info.GetMissionRunId() != grantRun {
 			return ctx, deny(ctx, logger, method, "task grant run does not match ContextInfo.mission_run_id",
 				status.Error(codes.PermissionDenied, "task grant is for another run"))
 		}

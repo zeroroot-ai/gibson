@@ -56,7 +56,7 @@ import (
 // exists for exactly the window the run is executing.
 type LiveMissionLookup interface {
 	// IsMissionRunLive reports whether this run of the mission is running now.
-	// An empty run is judged by the mission record alone.
+	// An empty run is never live.
 	IsMissionRunLive(missionID, runID string) bool
 }
 
@@ -182,6 +182,8 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		return nil, status.Error(codes.FailedPrecondition,
 			"capability-grant renewal not enabled on this daemon: no mission-run liveness source is wired, so renewal cannot be bounded to a live run")
 	}
+	// Every task grant names its run. A grant with none cannot be bound to a
+	// run, so it cannot renew.
 	if !s.liveMissions.IsMissionRunLive(claims.MissionID, capabilitygrant.MissionRunOf(cgToken)) {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
