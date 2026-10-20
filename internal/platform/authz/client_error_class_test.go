@@ -26,6 +26,8 @@ func TestMapSDKError_StatusDecidesTheClass(t *testing.T) {
 		{http.StatusUnauthorized, `{"code":"auth_failed","message":"bad token"}`, ErrFgaUnauthenticated, false},
 		{http.StatusForbidden, `{"code":"forbidden","message":"no"}`, ErrFgaUnauthenticated, false},
 		{http.StatusNotFound, `{"code":"store_id_not_found","message":"no store"}`, ErrFgaNotFound, false},
+		{http.StatusTooManyRequests, `{"code":"rate_limit","message":"slow down"}`, ErrFgaUnavailable, true},
+		{http.StatusServiceUnavailable, `{"code":"unavailable","message":"down"}`, ErrFgaUnavailable, true},
 	}
 	for _, tc := range cases {
 		t.Run(strconv.Itoa(tc.status), func(t *testing.T) {
@@ -41,7 +43,7 @@ func TestMapSDKError_StatusDecidesTheClass(t *testing.T) {
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("status %d: want %v, got %v", tc.status, tc.want, err)
 			}
-			if errors.Is(err, ErrFgaUnavailable) || errors.Is(err, ErrFgaTimeout) {
+			if !tc.retryable && (errors.Is(err, ErrFgaUnavailable) || errors.Is(err, ErrFgaTimeout)) {
 				t.Fatalf("status %d: a permanent error must not read as an outage: %v", tc.status, err)
 			}
 		})

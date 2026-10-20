@@ -119,9 +119,9 @@ func (d *daemonImpl) initAuthorizer(ctx context.Context) error {
 	}
 
 	// Connectivity probe: call Check with the system platform_operator tuple.
-	// Both true and false are valid results — we only care that the call succeeds.
-	_, probeErr := a.Check(ctx, "user:_system", "platform_operator", "system_tenant:_system")
-	if probeErr != nil && (authz.IsUnavailable(probeErr) || authz.IsTimeout(probeErr)) {
+	// Both true and false are valid results. Any error fails the probe, because a
+	// bad token or a wrong store ID is as fatal as an outage.
+	if probeErr := authz.Probe(ctx, a); probeErr != nil {
 		_ = a.Close()
 		return fmt.Errorf(
 			"authorization service: connectivity probe to %s failed (FGA is required — no fallback): %w",

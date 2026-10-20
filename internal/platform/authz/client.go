@@ -315,15 +315,6 @@ func mapSDKError(err error) error {
 	if errors.As(err, &notFoundErr) {
 		return &FgaError{Sentinel: ErrFgaNotFound, Message: "FGA store or resource not found", Cause: err}
 	}
-	var apiErr fgasdk.FgaApiError
-	if errors.As(err, &apiErr) {
-		switch apiErr.ResponseStatusCode() {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			return &FgaError{Sentinel: ErrFgaUnauthenticated, Message: "FGA rejected the credentials", Cause: err}
-		case http.StatusNotFound:
-			return &FgaError{Sentinel: ErrFgaNotFound, Message: "FGA store or resource not found", Cause: err}
-		}
-	}
 
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {

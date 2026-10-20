@@ -110,14 +110,10 @@ func (d *daemonImpl) newPlatformReadinessProbes() []pcreadiness.Probe {
 		probes = append(probes, &platformReadinessProbe{
 			name: "authz_fga",
 			check: func(ctx context.Context) error {
-				// Check a known-nonexistent tuple: any transport error
-				// surfaces as unhealthy; a well-formed FGA response (even
-				// denied) means FGA is reachable → healthy.
-				_, err := a.Check(ctx, "user:_probe", "member", "tenant:_probe")
-				if err != nil && (authz.IsUnavailable(err) || authz.IsTimeout(err)) {
-					return fmt.Errorf("fga connectivity probe failed: %w", err)
-				}
-				return nil
+				// Check a known-nonexistent tuple: any error surfaces as
+				// unhealthy, including a bad token or a wrong store ID. A
+				// well-formed FGA response (even denied) is healthy.
+				return authz.Probe(ctx, a)
 			},
 		})
 	}
