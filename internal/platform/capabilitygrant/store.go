@@ -16,8 +16,6 @@
 //   - No retries. Callers own retry decisions.
 //   - Fail fast on database errors. Every method returns the raw error.
 //   - Parameterised queries only ($1, $2, …). No string interpolation.
-//   - Cascade revocations (RevokeAgent, RevokeHost) run in a single
-//     database transaction so partial revocations cannot occur.
 //
 // Tenant scoping — two deliberately different shapes:
 //
@@ -551,22 +549,11 @@ WHERE  id = $1`
 // GetAgent resolves an agent by the id a CREDENTIAL claims (the agent+jwt
 // kid/sub), for signature verification and key serving. The tenant on the
 // returned row is the answer, not an input, so this takes no tenant argument
-// and MUST NOT serve a tenant-facing read — use GetAgentInTenant for anything a
-// request can name.
+// and MUST NOT serve a tenant-facing read. Use AgentByPrincipal, which takes the
+// tenant, for anything a request can name.
 // Returns (nil, nil) when no record exists.
 func (s *CapabilityGrantStore) GetAgent(ctx context.Context, agentID string) (*Agent, error) {
 	return s.getAgent(ctx, agentID, "")
-}
-
-// GetAgentInTenant retrieves the agent with the given ID from within tenantID.
-// An agent belonging to any other tenant reads as absent, so a caller that
-// supplies an id it does not own learns nothing about it.
-// Returns (nil, nil) when no such agent exists in that tenant.
-func (s *CapabilityGrantStore) GetAgentInTenant(ctx context.Context, tenantID, agentID string) (*Agent, error) {
-	if tenantID == "" {
-		return nil, fmt.Errorf("capabilitygrant: GetAgentInTenant %q: tenant is required", agentID)
-	}
-	return s.getAgent(ctx, agentID, tenantID)
 }
 
 // AgentByPrincipal returns the active agent enrolled under principalRef in
@@ -695,109 +682,6 @@ func scanAgent(row *sql.Row) (*Agent, error) {
 	return &ag, nil
 }
 
-// ListAgentsByTenant returns a paginated slice of agents belonging to the
-// given tenant, along with the total count of matching rows (for pagination
-// metadata). Rows are ordered by created_at descending (newest first).
-func (s *CapabilityGrantStore) ListAgentsByTenant(
-	ctx context.Context,
-	tenantID string,
-	limit, offset int,
-) ([]Agent, int, error) {
-	const countQuery = `SELECT COUNT(*) FROM capability_grant_agents WHERE tenant_id = $1`
-
-	var total int
-	if err := s.db.QueryRowContext(ctx, countQuery, tenantID).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("capabilitygrant: ListAgentsByTenant %q: count: %w", tenantID, err)
-	}
-	if total == 0 {
-		return nil, 0, nil
-	}
-
-	const listQuery = `
-SELECT id, host_id, tenant_id, COALESCE(user_id, ''), name, mode,
-       public_key_jwk, status, session_ttl_s, max_lifetime_s,
-       last_active_at, expires_at, created_at
-FROM   capability_grant_agents
-WHERE  tenant_id = $1
-ORDER BY created_at DESC
-LIMIT  $2 OFFSET $3`
-
-	rows, err := s.db.QueryContext(ctx, listQuery, tenantID, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("capabilitygrant: ListAgentsByTenant %q: query: %w", tenantID, err)
-	}
-	defer rows.Close()
-
-	var agents []Agent
-	for rows.Next() {
-		var ag Agent
-		var jwk []byte
-		var lastActive sql.NullTime
-		var expiresAt sql.NullTime
-
-		if err := rows.Scan(
-			&ag.ID,
-			&ag.HostID,
-			&ag.TenantID,
-			&ag.UserID,
-			&ag.Name,
-			&ag.Mode,
-			&jwk,
-			&ag.Status,
-			&ag.SessionTTL,
-			&ag.MaxLifetime,
-			&lastActive,
-			&expiresAt,
-			&ag.CreatedAt,
-		); err != nil {
-			return nil, 0, fmt.Errorf("capabilitygrant: ListAgentsByTenant %q: scan: %w", tenantID, err)
-		}
-		ag.PublicKeyJWK = json.RawMessage(jwk)
-		if lastActive.Valid {
-			ag.LastActiveAt = &lastActive.Time
-		}
-		if expiresAt.Valid {
-			ag.ExpiresAt = &expiresAt.Time
-		}
-		agents = append(agents, ag)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("capabilitygrant: ListAgentsByTenant %q: rows: %w", tenantID, err)
-	}
-	return agents, total, nil
-}
-
-// UpdateAgentStatus sets the status column for the given agent within
-// tenantID. It reports ErrAgentNotInTenant when the agent is not that tenant's,
-// so a status write aimed at another tenant's agent fails loudly instead of
-// silently updating nothing (or, before the predicate existed, updating it).
-func (s *CapabilityGrantStore) UpdateAgentStatus(ctx context.Context, tenantID, agentID, status string) error {
-	const query = `UPDATE capability_grant_agents SET status = $3 WHERE id = $1 AND tenant_id = $2`
-	res, err := s.db.ExecContext(ctx, query, agentID, tenantID, status)
-	if err != nil {
-		return fmt.Errorf("capabilitygrant: UpdateAgentStatus %q → %q: %w", agentID, status, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("capabilitygrant: UpdateAgentStatus %q: rows affected: %w", agentID, err)
-	}
-	if n == 0 {
-		return ErrAgentNotInTenant
-	}
-	return nil
-}
-
-// UpdateAgentLastActive stamps last_active_at = now() for the agent a verified
-// credential just identified. Like GetAgent it takes no tenant: the caller is
-// the verifier, which has already resolved the row this id names.
-func (s *CapabilityGrantStore) UpdateAgentLastActive(ctx context.Context, agentID string) error {
-	const query = `UPDATE capability_grant_agents SET last_active_at = now() WHERE id = $1`
-	if _, err := s.db.ExecContext(ctx, query, agentID); err != nil {
-		return fmt.Errorf("capabilitygrant: UpdateAgentLastActive %q: %w", agentID, err)
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Grant operations
 // ---------------------------------------------------------------------------
@@ -861,10 +745,9 @@ ORDER BY g.granted_at ASC`
 // capability_grant_agents.principal_ref to get there.
 //
 // Both status predicates matter: a revoked agent's grants are not
-// individually revoked (RevokeAgent flips the agent row and cascades via
-// RevokeCapabilityGrant, but a grant tied to a since-revoked agent must not
-// read as active either way), and a grant can be individually revoked while
-// its agent stays active. Either one being non-active is a "no."
+// individually revoked when an agent is revoked, but a grant tied to a
+// since-revoked agent must not read as active either way, and a grant can be
+// individually revoked while its agent stays active. Either one being non-active is a "no."
 func (s *CapabilityGrantStore) HasActiveGrant(ctx context.Context, tenantID, principalRef, capabilityName string) (bool, error) {
 	if tenantID == "" {
 		return false, errors.New("capabilitygrant: HasActiveGrant: tenant is required")
@@ -941,118 +824,6 @@ LIMIT 1`
 // ---------------------------------------------------------------------------
 // Cascade revocations
 // ---------------------------------------------------------------------------
-
-// RevokeAgent sets the agent's status to 'revoked' and revokes all of its
-// grants in a single transaction, within tenantID.
-//
-// It reports ErrAgentNotInTenant when the agent is not that tenant's: a
-// revocation aimed at somebody else's agent must fail where the caller can see
-// it, not appear to succeed.
-func (s *CapabilityGrantStore) RevokeAgent(ctx context.Context, tenantID, agentID string) error {
-	if tenantID == "" {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: tenant is required", agentID)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: begin tx: %w", agentID, err)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	var res sql.Result
-	if res, err = tx.ExecContext(ctx,
-		`UPDATE capability_grant_agents SET status = 'revoked' WHERE id = $1 AND tenant_id = $2`,
-		agentID, tenantID,
-	); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: update agent: %w", agentID, err)
-	}
-	var n int64
-	if n, err = res.RowsAffected(); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: rows affected: %w", agentID, err)
-	}
-	if n == 0 {
-		err = ErrAgentNotInTenant
-		return err
-	}
-
-	if _, err = tx.ExecContext(ctx, `
-UPDATE capability_grant_grants
-SET    status = 'revoked'
-WHERE  agent_id = $1
-  AND  EXISTS (SELECT 1 FROM capability_grant_agents a
-               WHERE a.id = $1 AND a.tenant_id = $2)`,
-		agentID, tenantID,
-	); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: update grants: %w", agentID, err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeAgent %q: commit: %w", agentID, err)
-	}
-	return nil
-}
-
-// RevokeHost sets the host's status to 'revoked', revokes all agents that
-// belong to the host, and revokes all grants belonging to those agents — all
-// in a single transaction, within tenantID.
-//
-// It reports ErrHostNotInTenant when the host is not that tenant's.
-func (s *CapabilityGrantStore) RevokeHost(ctx context.Context, tenantID, hostID string) error {
-	if tenantID == "" {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: tenant is required", hostID)
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: begin tx: %w", hostID, err)
-	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	var res sql.Result
-	if res, err = tx.ExecContext(ctx,
-		`UPDATE capability_grant_hosts SET status = 'revoked', updated_at = now() WHERE id = $1 AND tenant_id = $2`,
-		hostID, tenantID,
-	); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: update host: %w", hostID, err)
-	}
-	var n int64
-	if n, err = res.RowsAffected(); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: rows affected: %w", hostID, err)
-	}
-	if n == 0 {
-		err = ErrHostNotInTenant
-		return err
-	}
-
-	// Revoke grants for all agents under this host in one UPDATE via a subquery.
-	if _, err = tx.ExecContext(ctx, `
-UPDATE capability_grant_grants
-SET    status = 'revoked'
-WHERE  agent_id IN (SELECT id FROM capability_grant_agents
-                    WHERE host_id = $1 AND tenant_id = $2)`,
-		hostID, tenantID,
-	); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: update grants: %w", hostID, err)
-	}
-
-	if _, err = tx.ExecContext(ctx,
-		`UPDATE capability_grant_agents SET status = 'revoked' WHERE host_id = $1 AND tenant_id = $2`,
-		hostID, tenantID,
-	); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: update agents: %w", hostID, err)
-	}
-
-	if err = tx.Commit(); err != nil {
-		return fmt.Errorf("capabilitygrant: RevokeHost %q: commit: %w", hostID, err)
-	}
-	return nil
-}
 
 // ---------------------------------------------------------------------------
 // Nullable helpers

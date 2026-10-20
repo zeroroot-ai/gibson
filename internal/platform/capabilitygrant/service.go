@@ -105,7 +105,7 @@ func capsWithinCeiling(caps []Capability, ceiling []string) []Capability {
 // ONLY way to obtain one is for the credential that minted this registration
 // to have named it. That is exactly "a capability-grant bit, not a standing
 // tuple": the bit lives on the Grant row this one registration writes, and
-// revoking the agent (RevokeAgent) removes it with everything else. No FGA
+// revoking the agent removes it with everything else. No FGA
 // tuple is ever written for either name.
 //
 // Must run AFTER capsWithinCeiling so the narrowing pass never sees — and so
@@ -149,7 +149,6 @@ type CapabilityGrantService struct {
 	fgaBridge   *FGABridge
 	authorizer  authz.Authorizer
 	auditWriter *audit.Writer
-	auditQuery  *audit.Query
 	logger      *slog.Logger
 }
 
@@ -161,15 +160,12 @@ type CapabilityGrantServiceConfig struct {
 	// FGABridge resolves FGA capabilities and checks execution permissions. Required.
 	FGABridge *FGABridge
 
-	// Authorizer is used for FGA write/delete operations in BatchGrantComponentAccessV2
-	// and for listing objects in ListComponentGrants. Required.
+	// Authorizer is used for the FGA tuple writes and deletes of plugin SVID
+	// enrollment. Required.
 	Authorizer authz.Authorizer
 
 	// AuditWriter is the async Postgres audit writer. Required.
 	AuditWriter *audit.Writer
-
-	// AuditQuery is the synchronous Postgres audit reader. Required.
-	AuditQuery *audit.Query
 
 	// Logger is the structured logger. If nil, slog.Default() is used.
 	Logger *slog.Logger
@@ -190,9 +186,6 @@ func NewCapabilityGrantService(cfg CapabilityGrantServiceConfig) *CapabilityGran
 	if cfg.AuditWriter == nil {
 		panic("capabilitygrant: CapabilityGrantService: AuditWriter must not be nil")
 	}
-	if cfg.AuditQuery == nil {
-		panic("capabilitygrant: CapabilityGrantService: AuditQuery must not be nil")
-	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
@@ -202,7 +195,6 @@ func NewCapabilityGrantService(cfg CapabilityGrantServiceConfig) *CapabilityGran
 		fgaBridge:   cfg.FGABridge,
 		authorizer:  cfg.Authorizer,
 		auditWriter: cfg.AuditWriter,
-		auditQuery:  cfg.AuditQuery,
 		logger:      logger.With("component", "capabilitygrant.service"),
 	}
 }

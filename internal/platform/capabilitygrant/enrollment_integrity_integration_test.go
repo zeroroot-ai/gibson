@@ -101,7 +101,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 		FGABridge:   NewFGABridge(fga, &mockRegistry{}, noopLogger()),
 		Authorizer:  fga,
 		AuditWriter: audit.NewWriter(db, noopLogger()),
-		AuditQuery:  audit.NewQuery(db),
 		Logger:      slog.New(slog.DiscardHandler),
 	})
 	return &liveEnv{db: db, svc: svc}
@@ -147,11 +146,12 @@ func TestLive_CredentialBuysExactlyOneIdentity(t *testing.T) {
 // Registering after a revocation does not bring the host back to life.
 func TestLive_RevokedHostIsNotResurrectedByRegistering(t *testing.T) {
 	env := newLiveEnv(t)
-	store := NewCapabilityGrantStore(env.db)
 
 	res, err := env.register("acme", hostJWK, "cred-1")
 	require.NoError(t, err)
-	require.NoError(t, store.RevokeHost(context.Background(), "acme", res.HostID))
+	_, err = env.db.Exec(`UPDATE capability_grant_hosts SET status = 'revoked' WHERE id = $1 AND tenant_id = $2`,
+		res.HostID, "acme")
+	require.NoError(t, err)
 
 	_, err = env.register("acme", hostJWK, "cred-2")
 	require.Error(t, err, "a revoked host must not be re-activated by registering again")

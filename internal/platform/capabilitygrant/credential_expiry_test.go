@@ -131,25 +131,6 @@ func TestStore_EveryTenantFacingStatementNamesTheTenant(t *testing.T) {
 		drive    func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock)
 	}{
 		{
-			name:     "GetAgentInTenant",
-			fragment: "a.tenant_id = $2",
-			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("FROM capability_grant_agents").
-					WillReturnRows(agentRow("agt_1", "acme"))
-				_, err := s.GetAgentInTenant(ctx, "acme", "agt_1")
-				require.NoError(t, err)
-			},
-		},
-		{
-			name:     "UpdateAgentStatus",
-			fragment: "tenant_id = $2",
-			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
-				mock.ExpectExec("UPDATE capability_grant_agents").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				require.NoError(t, s.UpdateAgentStatus(ctx, "acme", "agt_1", "revoked"))
-			},
-		},
-		{
 			name:     "GetGrants",
 			fragment: "a.tenant_id = $2",
 			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
@@ -160,53 +141,6 @@ func TestStore_EveryTenantFacingStatementNamesTheTenant(t *testing.T) {
 					}))
 				_, err := s.GetGrants(ctx, "acme", "agt_1")
 				require.NoError(t, err)
-			},
-		},
-		{
-			name:     "ListAgentsByTenant",
-			fragment: "tenant_id = $1",
-			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT COUNT(*)").
-					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-				mock.ExpectQuery("FROM capability_grant_agents").
-					WillReturnRows(sqlmock.NewRows([]string{
-						"id", "host_id", "tenant_id", "user_id", "name", "mode",
-						"public_key_jwk", "status", "session_ttl_s", "max_lifetime_s",
-						"last_active_at", "expires_at", "created_at",
-					}).AddRow(
-						"agt_1", "host-1", "acme", "owner-1", "a", "autonomous",
-						[]byte(agentJWK), "active", 3600, 86400, nil, nil, time.Now(),
-					))
-				_, _, err := s.ListAgentsByTenant(ctx, "acme", 10, 0)
-				require.NoError(t, err)
-			},
-		},
-		{
-			name:     "RevokeAgent",
-			fragment: "tenant_id = $2",
-			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
-				mock.ExpectBegin()
-				mock.ExpectExec("UPDATE capability_grant_agents").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("UPDATE capability_grant_grants").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectCommit()
-				require.NoError(t, s.RevokeAgent(ctx, "acme", "agt_1"))
-			},
-		},
-		{
-			name:     "RevokeHost",
-			fragment: "tenant_id = $2",
-			drive: func(t *testing.T, s *CapabilityGrantStore, mock sqlmock.Sqlmock) {
-				mock.ExpectBegin()
-				mock.ExpectExec("UPDATE capability_grant_hosts").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("UPDATE capability_grant_grants").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectExec("UPDATE capability_grant_agents").
-					WillReturnResult(sqlmock.NewResult(0, 1))
-				mock.ExpectCommit()
-				require.NoError(t, s.RevokeHost(ctx, "acme", "host-1"))
 			},
 		},
 		{

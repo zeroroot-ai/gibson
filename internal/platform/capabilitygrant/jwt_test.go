@@ -29,10 +29,6 @@ type fakeStore struct {
 	agents map[string]*Agent
 	hosts  map[string]*Host
 
-	// lastActiveUpdated records agent IDs passed to UpdateAgentLastActive.
-	lastActiveUpdated []string
-	// updateErr, if non-nil, is returned by UpdateAgentLastActive.
-	updateErr error
 	// getAgentErr, if non-nil, is returned by GetAgent.
 	getAgentErr error
 	// getHostErr, if non-nil, is returned by GetHost.
@@ -62,13 +58,6 @@ func (s *fakeStore) GetHost(_ context.Context, hostID string) (*Host, error) {
 		return nil, s.getHostErr
 	}
 	return s.hosts[hostID], nil
-}
-
-func (s *fakeStore) UpdateAgentLastActive(_ context.Context, agentID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastActiveUpdated = append(s.lastActiveUpdated, agentID)
-	return s.updateErr
 }
 
 func (s *fakeStore) addAgent(a *Agent) {

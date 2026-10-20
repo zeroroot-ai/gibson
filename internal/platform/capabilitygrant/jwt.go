@@ -61,10 +61,6 @@ type agentLookup interface {
 	// GetHost retrieves a host record by its ID.
 	// Returns (nil, nil) when no host with the given ID exists.
 	GetHost(ctx context.Context, hostID string) (*Host, error)
-
-	// UpdateAgentLastActive sets last_active_at = now() for the given agent.
-	// This is best-effort; callers must not rely on it succeeding.
-	UpdateAgentLastActive(ctx context.Context, agentID string) error
 }
 
 // ---------------------------------------------------------------------------

@@ -1026,7 +1026,6 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 					FGABridge:   fgaBridge,
 					Authorizer:  d.authorizer,
 					AuditWriter: auditWriter,
-					AuditQuery:  auditQuery,
 					Logger:      d.logger.Slog(),
 				})
 				daemonSvc.WithCapabilityGrantService(capabilityGrantSvc)
