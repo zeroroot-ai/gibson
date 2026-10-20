@@ -93,6 +93,8 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
 	})}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
+	h.missionCtx.MissionRunID = "run-7"
+	h.missionCtx.AgentRunID = "agent-run-3"
 
 	ctx := callerCtx(t, "user-remote", "zerocool-lab")
 	task := agent.NewTask("probe", "Fetch https://google.com")
@@ -123,6 +125,10 @@ func TestDelegateToAgent_DispatchesToRemoteComponentOverTheWorkQueue(t *testing.
 	}
 	if got := req.GetTask().GetGoal(); got != "Fetch https://google.com" {
 		t.Errorf("dispatched goal = %q, want the task's", got)
+	}
+	// The run travels in the request, so the agent sends it on its callbacks.
+	if req.GetMissionRunId() != "run-7" || req.GetAgentRunId() != "agent-run-3" {
+		t.Errorf("request run ids = %q/%q, want run-7/agent-run-3", req.GetMissionRunId(), req.GetAgentRunId())
 	}
 }
 

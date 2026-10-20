@@ -121,39 +121,37 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 		return nil, status.Errorf(codes.NotFound, "agent %q not available for tenant %q", req.GetAgentName(), tenant)
 	}
 
+	// Bind the delegated work item to the mission of the caller, then take its
+	// run. The work id comes from the caller, so a caller that names the work
+	// item of another mission gets no run. The run goes in the request, so the
+	// agent sends it on every callback (gibson#1235). The agent run of the
+	// request stays empty: it is the caller's agent run, and a delegation
+	// starts a new one.
+	sourceMission, sourceRun, bindErr := s.bindSourceWork(ctx, tenant, req.GetWorkId())
+	if bindErr != nil {
+		return nil, bindErr
+	}
 	execReq := &agentpb.ExecuteRequest{
-		Task:      agent.TaskToProto(task),
-		TimeoutMs: task.Timeout.Milliseconds(),
+		Task:         agent.TaskToProto(task),
+		TimeoutMs:    task.Timeout.Milliseconds(),
+		MissionRunId: sourceRun,
 	}
 	payload, marshalErr := protojson.Marshal(execReq)
 	if marshalErr != nil {
 		return nil, status.Errorf(codes.Internal, "failed to marshal delegated task: %v", marshalErr)
 	}
 
-	// Best-effort lineage: resolve the caller's own mission (from its own
-	// work_id) so the delegated work item's context carries it, mirroring
-	// dispatchWorkAndWait's workCtx["mission_id"]. A resolver miss or nil
-	// resolver never blocks dispatch — CallTool's work item context has the
-	// same "best-effort" shape for source_work_id.
 	workCtx := map[string]string{
 		"source_work_id": req.GetWorkId(),
 		"caller_tenant":  tenant,
 	}
-	if s.missionCtx != nil && req.GetWorkId() != "" {
-		missionID, resolveErr := s.missionCtx.ResolveMissionForWork(ctx, req.GetWorkId(), tenant)
-		if resolveErr != nil {
-			s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
-				"work_id", req.GetWorkId(), "error", resolveErr)
-		}
-		if missionID != "" {
-			workCtx["mission_id"] = missionID
-		}
+	if sourceMission != "" {
+		workCtx["mission_id"] = sourceMission
 	}
-
 	// The delegated agent acts for the mission run of its caller, so its own
 	// Authorize resolves to that run (D86). Without it every Authorize of a
 	// delegated agent is refused.
-	for k, v := range s.delegatedAuthzContext(ctx, tenant, req.GetWorkId()) {
+	for k, v := range authzContextEntry(sourceRun) {
 		workCtx[k] = v
 	}
 
@@ -237,20 +235,52 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 	return &componentpb.DelegateToAgentResponse{ResultJson: resultJSON}, nil
 }
 
-// delegatedAuthzContext returns the work item context entry that gives a
-// delegated agent the mission run of its caller. The caller names its own work
-// item in the request, so the id is checked against the owner recorded at
-// enqueue before it selects a run: a caller cannot borrow the run of another
-// tenant's work item. When the work item is not the caller's, or has no run,
-// the entry is absent and the delegated agent has no run, so its Authorize is
-// refused (fail closed). Delegation itself is not blocked.
-func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tenant, sourceWorkID string) map[string]string {
+// bindSourceWork binds the work item that the caller names to the mission of
+// the caller. It returns the mission and the mission run of that work item.
+//
+// The work id arrives from the caller and only the tenant is checked against
+// its owner, so a same-tenant agent could name the work item of another
+// mission. The task grant that the caller presents, verified by the daemon,
+// names its mission and its run. A work item of another mission, or of another
+// run, is refused. A delegation that names a work item without a verified task
+// grant is refused. A delegation with no work item is not bound.
+func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sourceWorkID string) (mission, run string, err error) {
 	if sourceWorkID == "" {
-		return nil
+		return "", "", nil
 	}
+	grantMission, grantRun, err := s.callerTaskGrant(ctx, tenant)
+	if err != nil {
+		return "", "", err
+	}
+	if s.missionCtx != nil {
+		var resolveErr error
+		mission, resolveErr = s.missionCtx.ResolveMissionForWork(ctx, sourceWorkID, tenant)
+		if resolveErr != nil {
+			s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
+				"work_id", sourceWorkID, "error", resolveErr)
+		}
+	}
+	if mission != "" && grantMission != mission {
+		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another mission")
+	}
+	run = s.sourceWorkRun(ctx, tenant, sourceWorkID)
+	if run != "" && grantRun != "" && grantRun != run {
+		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another run")
+	}
+	if mission == "" {
+		// The work item names no mission, so nothing binds its run to the grant.
+		run = ""
+	}
+	return mission, run, nil
+}
+
+// sourceWorkRun returns the mission run of the work item that the caller names
+// as its own, when the owner recorded at enqueue is the caller tenant. It
+// returns an empty string when the work item is not the caller's or has no run.
+func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sourceWorkID string) string {
 	// resolveWorkOwner refuses when no work-context registry is wired.
 	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
-		return nil
+		return ""
 	}
 	runID, err := s.workContext.WorkRun(ctx, sourceWorkID)
 	if err != nil {
@@ -258,6 +288,16 @@ func (s *ComponentServiceServer) delegatedAuthzContext(ctx context.Context, tena
 			s.logger.WarnContext(ctx, "delegate to agent: cannot read the run of the source work item",
 				slog.String("work_id", sourceWorkID), slog.String("error", err.Error()))
 		}
+		return ""
+	}
+	return runID
+}
+
+// authzContextEntry is the work item context entry for a run. When the caller
+// has no run, the entry is absent and the delegated agent has no run, so its
+// Authorize is refused (fail closed). Delegation itself is not blocked.
+func authzContextEntry(runID string) map[string]string {
+	if runID == "" {
 		return nil
 	}
 	ac, err := json.Marshal(map[string]any{"run_id": runID, "issued_at": time.Now().Unix(), "ttl_seconds": authz.DefaultWorkTTLSeconds})

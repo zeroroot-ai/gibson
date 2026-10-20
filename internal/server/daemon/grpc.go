@@ -1900,6 +1900,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// resolver each of those saw no mission (gibson#1209).
 			compSvc.WithWorkContextStore(d.stateClient, d.logger.WithComponent("mission-context").Slog())
 
+			// Verify the task grant that binds a delegation to its mission with the
+			// daemon's own keys, so a token that a component signed itself names no
+			// mission (gibson#1235).
+			compSvc.WithGrantVerifier(d.taskGrantVerifier())
+
 			// Wire the decision of the callback path into ComponentService.Authorize,
 			// so the pull transport and the callback transport run one FGA check
 			// (D86). Without it Authorize refuses every request.

@@ -887,6 +887,10 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	req := &agentpb.ExecuteRequest{
 		Task:      agent.TaskToProto(task),
 		TimeoutMs: task.Timeout.Milliseconds(),
+		// The run travels in the request, so an agent that serves the work
+		// item sends it on every callback (gibson#1235).
+		MissionRunId: h.missionCtx.MissionRunID,
+		AgentRunId:   h.missionCtx.AgentRunID,
 	}
 	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
 		req.TraceId = spanCtx.TraceID().String()
