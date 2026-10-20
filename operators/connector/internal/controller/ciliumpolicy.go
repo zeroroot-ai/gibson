@@ -29,8 +29,9 @@ import (
 //
 // The owned NetworkPolicy (networkpolicy.go) has no public egress rule. Allow
 // rules union, so an allow-all rule there would win over this list. A
-// connector with an empty list therefore reaches no public host. The ToolHive
-// host list of the connector stays as the second layer (egressprofile.go).
+// connector with an empty list therefore reaches no public host. This policy
+// is the one layer that limits egress, because ToolHive v0.12.1 reads no
+// per-connector host list.
 
 // ciliumEgressPolicyName is the name of the egress policy of a connector.
 func ciliumEgressPolicyName(ci *connectorv1alpha1.ConnectorInstance) string {

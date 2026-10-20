@@ -4,7 +4,7 @@
 // Package controller reconciles a ConnectorInstance into ToolHive resources
 // (ADR-0114). The operator wraps ToolHive: it owns an MCPServer (a hosted
 // container connector) or an MCPRemoteProxy (a vendor-hosted one), the
-// NetworkPolicy that confines it, and the egress-profile ConfigMap. The
+// NetworkPolicy and CiliumNetworkPolicy that confine it. The
 // connector's credential Secret is written by the daemon from the tenant
 // secret store (ADR-0061); the operator only references it. ToolHive is
 // never a product surface.
@@ -220,11 +220,6 @@ func (r *ConnectorInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	// configured secret store and writes the <connector>-connector-cred Secret
 	// beside this CR, with an ownerReference to it (ADR-0061). The operator
 	// has no secret-store client by design; it only references the Secret.
-
-	// Confine egress to the vendor hosts, when declared (ADR-0114).
-	if err := r.reconcileEgressProfile(ctx, &ci); err != nil {
-		return failed("EgressProfile", err)
-	}
 
 	// Reconcile the ToolHive resource the ConnectorInstance owns.
 	th, err := r.desiredToolHive(&ci)
@@ -527,9 +522,8 @@ func (r *ConnectorInstanceReconciler) desiredToolHive(
 		// public address. The host list is NOT applied to the MCPServer: ToolHive v0.12.1 reads a "configmap" profile
 		// from an operator-local path (/etc/toolhive/profiles/<key>), not from
 		// the referenced tenant ConfigMap, so a per-connector custom profile
-		// breaks the run-config validation. reconcileEgressProfile still records
-		// the intent in an owned ConfigMap; wire it into permissionProfile once
-		// ToolHive resolves a per-MCPServer ConfigMap profile.
+		// breaks the run-config validation. Add a ToolHive host list as a
+		// second layer when a ToolHive version resolves a per-MCPServer profile.
 		permProfile := map[string]interface{}{"type": "builtin", "name": "network"}
 		spec := map[string]interface{}{
 			"image":             ci.Spec.Image,

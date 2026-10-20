@@ -348,6 +348,30 @@ func TestReconcile_HostedCreatesResources(t *testing.T) {
 	}
 }
 
+// TestReconcile_WritesNoEgressConfigMap guards gibson#1240. ToolHive v0.12.1
+// reads no per-connector profile, so a ConfigMap of the egress list is a dead
+// write. The Cilium policy is the one layer that limits egress.
+func TestReconcile_WritesNoEgressConfigMap(t *testing.T) {
+	ci := hostedInstance("hosted-fixture", "tenant-acme")
+	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
+	r := newReconciler(t, ci)
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
+
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: key}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	var cms corev1.ConfigMapList
+	if err := r.List(ctx, &cms); err != nil {
+		t.Fatalf("list configmaps: %v", err)
+	}
+	for _, cm := range cms.Items {
+		if strings.HasSuffix(cm.Name, "-egress") {
+			t.Errorf("configmap %q is a dead egress profile write", cm.Name)
+		}
+	}
+}
+
 // TestReconcile_NotFoundIsNoOp returns cleanly when the instance is gone.
 func TestReconcile_NotFoundIsNoOp(t *testing.T) {
 	r := newReconciler(t)
@@ -493,41 +517,6 @@ func TestReconcile_DeletionOutsideTenantNamespaceNeverInventsATenant(t *testing.
 	}
 }
 
-// TestReconcileEgressProfile covers the no-op path (no egress allow-list) and
-// the create path (a profile ConfigMap is written), then the update path.
-func TestReconcileEgressProfile(t *testing.T) {
-	ctx := context.Background()
-
-	// No-op: no egress allow-list means no ConfigMap.
-	r := newReconciler(t)
-	ci := hostedInstance("hosted-fixture", "tenant-acme")
-	if err := r.reconcileEgressProfile(ctx, ci); err != nil {
-		t.Fatalf("reconcileEgressProfile no-op: %v", err)
-	}
-	var cm corev1.ConfigMap
-	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: egressProfileName(ci)}, &cm); !apierrors.IsNotFound(err) {
-		t.Fatalf("expected no ConfigMap, got err=%v", err)
-	}
-
-	// Create: an egress allow-list writes the profile ConfigMap.
-	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
-	if err := r.reconcileEgressProfile(ctx, ci); err != nil {
-		t.Fatalf("reconcileEgressProfile create: %v", err)
-	}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: "tenant-acme", Name: egressProfileName(ci)}, &cm); err != nil {
-		t.Fatalf("egress ConfigMap not created: %v", err)
-	}
-	if cm.Data[egressProfileKey] == "" {
-		t.Error("profile payload must be written")
-	}
-
-	// Update: a second reconcile with a changed allow-list updates in place.
-	ci.Spec.EgressAllow = []string{"api.osv.dev:443", "extra.example.com:443"}
-	if err := r.reconcileEgressProfile(ctx, ci); err != nil {
-		t.Fatalf("reconcileEgressProfile update: %v", err)
-	}
-}
-
 // TestReconcileNetworkPolicy renders and applies the owned NetworkPolicy, then
 // updates it on a second pass.
 func TestReconcileNetworkPolicy(t *testing.T) {
@@ -558,9 +547,6 @@ func TestHelpers(t *testing.T) {
 		t.Errorf("credentialSecretName = %q", got)
 	}
 	ci := hostedInstance("hosted-fixture", "tenant-acme")
-	if hasEgressProfile(ci) {
-		t.Error("no egress allow-list means hasEgressProfile is false")
-	}
 	np := desiredNetworkPolicy(ci)
 	if np.Name != "connector-hosted-fixture" {
 		t.Errorf("networkpolicy name = %q", np.Name)
@@ -731,16 +717,6 @@ func TestReconcileNetworkPolicy_CreateError(t *testing.T) {
 	}
 }
 
-// TestReconcileEgressProfile_CreateError wraps a client write failure.
-func TestReconcileEgressProfile_CreateError(t *testing.T) {
-	ci := hostedInstance("hosted-fixture", "tenant-acme")
-	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
-	r := failingReconciler(t)
-	if err := r.reconcileEgressProfile(context.Background(), ci); err == nil {
-		t.Error("a failed egress ConfigMap create must surface an error")
-	}
-}
-
 // TestReconcile_NetworkPolicyErrorIsFailed records a Failed phase when the very
 // first owned resource cannot be written.
 func TestReconcile_NetworkPolicyErrorIsFailed(t *testing.T) {
@@ -788,20 +764,6 @@ func failCreateOfKind(t *testing.T, kind string, seed ...client.Object) *Connect
 		}).
 		Build()
 	return &ConnectorInstanceReconciler{Audit: (&audittest.Sink{}).Emitter(t), Client: cl, Scheme: s, ProxyAuth: testProxyAuth}
-}
-
-// TestReconcile_EgressErrorIsFailed fails the egress-profile step.
-func TestReconcile_EgressErrorIsFailed(t *testing.T) {
-	ci := hostedInstance("hosted-fixture", "tenant-acme")
-	ci.Finalizers = []string{finalizer}
-	ci.Spec.EgressAllow = []string{"api.osv.dev:443"}
-	r := failCreateOfKind(t, "ConfigMap", ci)
-	key := types.NamespacedName{Namespace: "tenant-acme", Name: "hosted-fixture"}
-
-	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: key}); err == nil {
-		t.Fatal("a failed egress step must return an error")
-	}
-	assertFailed(t, r, key)
 }
 
 // TestReconcile_ApplyToolHiveErrorIsFailed fails the ToolHive apply step.
@@ -856,9 +818,6 @@ func TestReconcileHelpers_GetErrorsAreWrapped(t *testing.T) {
 	r := failGetReconciler(t)
 	if err := r.reconcileNetworkPolicy(ctx, ci); err == nil {
 		t.Error("a failed NetworkPolicy read must surface an error")
-	}
-	if err := r.reconcileEgressProfile(ctx, ci); err == nil {
-		t.Error("a failed egress read must surface an error")
 	}
 }
 
