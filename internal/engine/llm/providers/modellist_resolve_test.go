@@ -447,3 +447,30 @@ func TestListURLs(t *testing.T) {
 	assert.Equal(t, "https://router.huggingface.co/v1", huggingFaceRouterURL)
 	assert.Equal(t, "https://h/v1/models", openAIModelsURL("https://h/v1/"))
 }
+
+// A caller that passed the cache check before an earlier flight stored its list
+// reaches the flight after that flight ended. It must take the stored list and
+// not fetch again. This was the cause of two list requests where one was
+// expected (gibson#1260).
+func TestModelCache_ALateCallerTakesTheListThatTheEarlierFlightStored(t *testing.T) {
+	c := &modelCache{}
+	c.models = []llm.ModelInfo{{Name: "m1"}}
+	c.loaded = time.Now()
+
+	fetched := 0
+	got, err := c.refresh(context.Background(), func(context.Context) ([]llm.ModelInfo, error) {
+		fetched++
+		return []llm.ModelInfo{{Name: "m2"}}, nil
+	})
+	require.NoError(t, err)
+	assert.Zero(t, fetched, "a fresh stored list must not be fetched again")
+	assert.Equal(t, []llm.ModelInfo{{Name: "m1"}}, got)
+
+	c.loaded = time.Now().Add(-2 * modelListCacheTTL)
+	_, err = c.refresh(context.Background(), func(context.Context) ([]llm.ModelInfo, error) {
+		fetched++
+		return []llm.ModelInfo{{Name: "m2"}}, nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, fetched, "a stale list is fetched once")
+}

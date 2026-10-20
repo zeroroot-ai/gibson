@@ -69,18 +69,7 @@ func (c *modelCache) get(ctx context.Context, provider string, fetch func(ctx co
 	c.mu.Unlock()
 
 	ch := c.group.DoChan("list", func() (any, error) {
-		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerListTimeout)
-		defer cancel()
-		models, err := fetch(fetchCtx)
-		if err != nil {
-			return nil, err
-		}
-		models = finalizeModelList(models)
-		c.mu.Lock()
-		c.models = models
-		c.loaded = time.Now()
-		c.mu.Unlock()
-		return models, nil
+		return c.refresh(ctx, fetch)
 	})
 
 	select {
@@ -101,6 +90,33 @@ func (c *modelCache) get(ctx context.Context, provider string, fetch func(ctx co
 		models, _ := res.Val.([]llm.ModelInfo)
 		return slices.Clone(models), nil
 	}
+}
+
+// refresh runs inside the single flight. A caller can pass the cache check, and
+// then reach the flight after an earlier flight ended and stored its list. The
+// group forgets a key when its flight ends, so that caller would start a second
+// fetch. The check below makes it take the list that the first flight stored.
+func (c *modelCache) refresh(ctx context.Context, fetch func(ctx context.Context) ([]llm.ModelInfo, error)) (any, error) {
+	c.mu.Lock()
+	if c.models != nil && time.Since(c.loaded) < modelListCacheTTL {
+		models := c.models
+		c.mu.Unlock()
+		return models, nil
+	}
+	c.mu.Unlock()
+
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), providerListTimeout)
+	defer cancel()
+	models, err := fetch(fetchCtx)
+	if err != nil {
+		return nil, err
+	}
+	models = finalizeModelList(models)
+	c.mu.Lock()
+	c.models = models
+	c.loaded = time.Now()
+	c.mu.Unlock()
+	return models, nil
 }
 
 // finalizeModelList marks what the provider did not report. A window of zero is
