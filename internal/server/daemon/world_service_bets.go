@@ -44,7 +44,7 @@ func betLabelTargetID(hypothesisID string) string {
 // (Hypothesis.Confidence), not a reconciled market stake read back from
 // BeliefSubstrate — that reconciliation is a pre-existing, tracked gap
 // (gibson#273) this RPC does not close.
-func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsRequest) (*worldpb.ListOpenBetsResponse, error) {
+func (s *worldServer) ListOpenBets(ctx context.Context, req *worldpb.ListOpenBetsRequest) (*worldpb.ListOpenBetsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
@@ -55,11 +55,22 @@ func (s *worldServer) ListOpenBets(ctx context.Context, _ *worldpb.ListOpenBetsR
 		settled[st.HypothesisID] = true
 	}
 
-	resp := &worldpb.ListOpenBetsResponse{}
+	pg, err := s.pageOf(ctx, "ListOpenBets", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	var open []brain.HypothesisSnapshot
 	for _, h := range e.Hypotheses() {
-		if h.HypothesisID == "" || settled[h.HypothesisID] {
-			continue
+		if h.HypothesisID != "" && !settled[h.HypothesisID] {
+			open = append(open, h)
 		}
+	}
+	page, next := worldKeyedPage(s, pg, open, func(h brain.HypothesisSnapshot) string {
+		return worldKey(h.HypothesisID, h.ScopeID, h.Claim)
+	})
+
+	resp := &worldpb.ListOpenBetsResponse{NextPageToken: next}
+	for _, h := range page {
 		evidence := make([]*worldpb.ReferencedEntityView, 0, len(h.References))
 		for _, r := range h.References {
 			evidence = append(evidence, &worldpb.ReferencedEntityView{

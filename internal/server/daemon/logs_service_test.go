@@ -36,7 +36,7 @@ func (f *fakeLogsQuerier) QueryDaemonLogs(_ context.Context, q lokilogs.DaemonQu
 // and passes it to the querier; a request with no tenant is PermissionDenied.
 func TestLogsService_TenantScopedRead(t *testing.T) {
 	fake := &fakeLogsQuerier{}
-	srv := NewLogsServer(fake, testLogsKey, nil)
+	srv := NewLogsServer(fake, testLogsKeys(t, 7), nil)
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
@@ -78,7 +78,7 @@ func TestLogsService_TenantScopedRead(t *testing.T) {
 // to Loki is exactly the context tenant, regardless of request fields.
 func TestLogsService_CannotReadAnotherTenant(t *testing.T) {
 	fake := &fakeLogsQuerier{}
-	srv := NewLogsServer(fake, testLogsKey, nil)
+	srv := NewLogsServer(fake, testLogsKeys(t, 7), nil)
 
 	// Caller is tenant "alpha".
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("alpha"))
@@ -99,7 +99,7 @@ func TestLogsService_CannotReadAnotherTenant(t *testing.T) {
 
 // TestLogsService_MissionIDRequired: QueryMissionLogs rejects an empty mission_id.
 func TestLogsService_MissionIDRequired(t *testing.T) {
-	srv := NewLogsServer(&fakeLogsQuerier{}, testLogsKey, nil)
+	srv := NewLogsServer(&fakeLogsQuerier{}, testLogsKeys(t, 7), nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	if _, err := srv.QueryMissionLogs(tctx, &logspb.QueryMissionLogsRequest{}); status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("want InvalidArgument for empty mission_id, got %v", err)
@@ -109,7 +109,7 @@ func TestLogsService_MissionIDRequired(t *testing.T) {
 // TestLogsService_BackendUnavailable: when the querier reports Loki unavailable
 // the handler returns codes.Unavailable (the dashboard degrades cleanly).
 func TestLogsService_BackendUnavailable(t *testing.T) {
-	srv := NewLogsServer(unavailableLogsQuerier{}, testLogsKey, nil)
+	srv := NewLogsServer(unavailableLogsQuerier{}, testLogsKeys(t, 7), nil)
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 
 	if _, err := srv.QueryMissionLogs(tctx, &logspb.QueryMissionLogsRequest{MissionId: "m1"}); status.Code(err) != codes.Unavailable {

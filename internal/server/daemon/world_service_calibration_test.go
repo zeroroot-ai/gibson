@@ -22,7 +22,7 @@ func TestGetCalibration_TenantScoped(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	reg.For("acme").Submit(brain.BetSettledTrue{HypothesisID: "h1", Technique: "sqli"})
 
@@ -66,7 +66,7 @@ func TestGetCalibration_ReturnsWellFormedEmptyReport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	resp, err := srv.GetCalibration(tctx, &worldpb.GetCalibrationRequest{})
@@ -91,7 +91,7 @@ func TestGetCalibration_BinsOverride(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 
 	tctx := auth.WithTenant(context.Background(), auth.MustNewTenantID("acme"))
 	resp, err := srv.GetCalibration(tctx, &worldpb.GetCalibrationRequest{Bins: 4})

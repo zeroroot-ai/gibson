@@ -52,15 +52,16 @@ func MissionSlice(events []Event, missionID string) []Event {
 	if missionID == "" {
 		return append([]Event(nil), events...)
 	}
-	runID, found := latestMissionRun(events, missionID)
+	runID, found := LatestMissionRun(events, missionID)
 	if !found {
 		return missionSlice(events, missionID, "", false)
 	}
 	return missionSlice(events, missionID, runID, true)
 }
 
-// latestMissionRun returns the run of the last projection of missionID.
-func latestMissionRun(events []Event, missionID string) (runID string, found bool) {
+// LatestMissionRun returns the run of the last projection of missionID. found
+// is false when the history holds no projection of the mission.
+func LatestMissionRun(events []Event, missionID string) (runID string, found bool) {
 	for _, ev := range events {
 		if p, ok := ev.(MissionProjected); ok && p.ID == missionID {
 			runID, found = p.RunID, true

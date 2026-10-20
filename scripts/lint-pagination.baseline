@@ -35,11 +35,3 @@ gibson/tenant/v1/provider.proto ListProviders
 gibson/tenant/v1/tenant.proto ListMissionDrafts
 gibson/tenant/v1/usage.proto ListUsage
 gibson/tenant/v1/user.proto ResolveUsers
-gibson/world/v1/world.proto GetTimeline
-gibson/world/v1/world.proto ListFindings
-gibson/world/v1/world.proto ListHosts
-gibson/world/v1/world.proto ListLabels
-gibson/world/v1/world.proto ListLlmCalls
-gibson/world/v1/world.proto ListMissions
-gibson/world/v1/world.proto ListOpenBets
-gibson/world/v1/world.proto ListReviewQueue

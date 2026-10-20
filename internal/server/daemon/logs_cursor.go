@@ -4,18 +4,10 @@
 package daemon
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
-	"fmt"
-	"io"
 	"strconv"
 	"strings"
 	"time"
-
-	"golang.org/x/crypto/hkdf"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -37,30 +29,12 @@ import (
 // that another tenant or another query holds, or that anyone edited, is
 // refused.
 
-// logsCursorInfo is the HKDF info of the page token key.
-const logsCursorInfo = "gibson/v1/logs-page-token"
-
-// logsCursorKeyLen is the length of the page token key.
-const logsCursorKeyLen = 32
-
 // errBadLogsCursor reports a page token that this daemon did not sign for this
 // query.
 var errBadLogsCursor = errors.New("page_token is not valid for this query")
 
 // errTooManyTies reports more lines at one nanosecond than one query returns.
 var errTooManyTies = errors.New("too many log lines share one timestamp to page past them")
-
-// deriveLogsCursorKey derives the page token key from the master KEK.
-func deriveLogsCursorKey(masterKEK []byte) ([]byte, error) {
-	if len(masterKEK) < logsCursorKeyLen {
-		return nil, fmt.Errorf("logs page token key: master KEK is too short (%d bytes, minimum %d)", len(masterKEK), logsCursorKeyLen)
-	}
-	key := make([]byte, logsCursorKeyLen)
-	if _, err := io.ReadFull(hkdf.New(sha256.New, masterKEK, nil, []byte(logsCursorInfo)), key); err != nil {
-		return nil, fmt.Errorf("logs page token key: %w", err)
-	}
-	return key, nil
-}
 
 // logsCursor is the position of the next page.
 type logsCursor struct {
@@ -79,48 +53,34 @@ type logsQueryScope struct {
 	end       int64 // the end of the request, before any default
 }
 
-func (sc logsQueryScope) mac(key, payload []byte) []byte {
-	m := hmac.New(sha256.New, key)
-	// Length-prefix each field so two scopes cannot produce one byte string.
-	for _, f := range []string{sc.tenant, sc.kind, sc.missionID, sc.level,
-		strconv.FormatInt(sc.start, 10), strconv.FormatInt(sc.end, 10)} {
-		_, _ = fmt.Fprintf(m, "%d:%s|", len(f), f)
-	}
-	_, _ = m.Write(payload)
-	return m.Sum(nil)
+// fields lists the parts of the scope that a token signs.
+func (sc logsQueryScope) fields() []string {
+	return []string{sc.tenant, sc.kind, sc.missionID, sc.level,
+		strconv.FormatInt(sc.start, 10), strconv.FormatInt(sc.end, 10)}
 }
 
-// encode signs the cursor for the scope.
-func (c logsCursor) encode(key []byte, sc logsQueryScope) string {
-	payload := make([]byte, logsCursorPayloadLen)
-	binary.BigEndian.PutUint64(payload[0:8], uint64(c.endNanos))    //nolint:gosec // a Unix nanosecond is positive
-	binary.BigEndian.PutUint64(payload[8:16], uint64(c.startNanos)) //nolint:gosec // a Unix nanosecond is positive
-	enc := base64.RawURLEncoding
-	return enc.EncodeToString(payload) + "." + enc.EncodeToString(sc.mac(key, payload))
+// position is the cursor as the opaque position that the signer carries.
+func (c logsCursor) position() string {
+	return strconv.FormatInt(c.endNanos, 10) + ":" + strconv.FormatInt(c.startNanos, 10)
 }
 
-// logsCursorPayloadLen is the length of the signed part of a token.
-const logsCursorPayloadLen = 16
-
-// decodeLogsCursor checks the signature of a token and returns its cursor.
-func decodeLogsCursor(key []byte, sc logsQueryScope, token string) (logsCursor, error) {
-	pStr, sStr, ok := strings.Cut(token, ".")
-	if !ok {
+// decodeLogsCursor checks the signature of a token with the signer and
+// returns its cursor.
+func decodeLogsCursor(signer *pagetoken.Signer, sc logsQueryScope, token string) (logsCursor, error) {
+	pos, ok, err := signer.After(sc.fields(), token)
+	if err != nil || !ok {
 		return logsCursor{}, errBadLogsCursor
 	}
-	enc := base64.RawURLEncoding
-	payload, err := enc.DecodeString(pStr)
-	if err != nil || len(payload) != logsCursorPayloadLen {
+	endStr, startStr, found := strings.Cut(pos, ":")
+	if !found {
 		return logsCursor{}, errBadLogsCursor
 	}
-	sig, err := enc.DecodeString(sStr)
-	if err != nil || !hmac.Equal(sig, sc.mac(key, payload)) {
+	end, endErr := strconv.ParseInt(endStr, 10, 64)
+	start, startErr := strconv.ParseInt(startStr, 10, 64)
+	if endErr != nil || startErr != nil {
 		return logsCursor{}, errBadLogsCursor
 	}
-	return logsCursor{
-		endNanos:   int64(binary.BigEndian.Uint64(payload[0:8])),  //nolint:gosec // written by encode
-		startNanos: int64(binary.BigEndian.Uint64(payload[8:16])), //nolint:gosec // written by encode
-	}, nil
+	return logsCursor{endNanos: end, startNanos: start}, nil
 }
 
 // logsPageSize returns the size of one page: 0 means the default, and a size

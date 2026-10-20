@@ -308,17 +308,61 @@ message LlmCallView {
   int32 completion_tokens = 6;
 }
 
-message ListMissionsRequest {}
-message ListMissionsResponse { repeated MissionView missions = 1; }
+message ListMissionsRequest {
+  // page_size is the most missions one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListMissionsResponse {
+  repeated MissionView missions = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
-message ListHostsRequest {}
-message ListHostsResponse { repeated HostView hosts = 1; }
+message ListHostsRequest {
+  // page_size is the most hosts one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListHostsResponse {
+  repeated HostView hosts = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
-message ListFindingsRequest {}
-message ListFindingsResponse { repeated FindingView findings = 1; }
+message ListFindingsRequest {
+  // page_size is the most findings one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListFindingsResponse {
+  repeated FindingView findings = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
-message ListLlmCallsRequest {}
-message ListLlmCallsResponse { repeated LlmCallView llm_calls = 1; }
+message ListLlmCallsRequest {
+  // page_size is the most LLM calls one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListLlmCallsResponse {
+  repeated LlmCallView llm_calls = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
 // LlmMessage is one prompt message in an LlmCall transcript.
 message LlmMessage {
@@ -346,8 +390,17 @@ message GetLlmCallResponse { LlmCallDetail call = 1; }
 
 message GetTimelineRequest {
   string mission_id = 1 [(buf.validate.field).string = { max_len: 1024 }];
+  // page_size is the most events one page returns. Zero means 100.
+  int32 page_size = 2 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first event. The pages follow the event seq, never the time.
+  string page_token = 3 [(buf.validate.field).string = { max_len: 1024 }];
 }
-message GetTimelineResponse { repeated TimelineEvent events = 1; }
+message GetTimelineResponse {
+  repeated TimelineEvent events = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
 // GetFrameAtRequest scrubs to a Timeline position: fold the first `seq` events.
 // Optional mission_id scopes the fold to one mission's slice of the Timeline
@@ -412,8 +465,19 @@ message ReviewItem {
   LabelView label = 8;    // the applied label (set iff labelled)
 }
 
-message ListReviewQueueRequest {}
-message ListReviewQueueResponse { repeated ReviewItem items = 1; }
+message ListReviewQueueRequest {
+  // page_size is the most items one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListReviewQueueResponse {
+  repeated ReviewItem items = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
 // SubmitLabelRequest applies a label to a surfaced item. The daemon stamps the
 // caller's user id server-side from context — the client does not supply it, so a
@@ -430,8 +494,19 @@ message SubmitLabelRequest {
 }
 message SubmitLabelResponse {}
 
-message ListLabelsRequest {}
-message ListLabelsResponse { repeated LabelView labels = 1; }
+message ListLabelsRequest {
+  // page_size is the most labels one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+message ListLabelsResponse {
+  repeated LabelView labels = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
+}
 
 // GetCalibrationRequest asks for the tenant's reliability/calibration report.
 message GetCalibrationRequest {
@@ -484,7 +559,14 @@ message GetCalibrationResponse {
 
 // ListOpenBetsRequest takes no fields: the caller's tenant resolves the same
 // way it does for every other WorldService read.
-message ListOpenBetsRequest {}
+message ListOpenBetsRequest {
+  // page_size is the most bets one page returns. Zero means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts at
+  // the first page. A token only works for the tenant and the request that
+  // got it.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 
 // ReferencedEntityView is an entity a bet's claim is about, by Taxonomy label
 // and identity properties — the same by-label-and-properties addressing
@@ -514,6 +596,8 @@ message OpenBet {
 
 message ListOpenBetsResponse {
   repeated OpenBet bets = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }
 
 // ListProofReviewsRequest pages through the proofs that wait for a review,

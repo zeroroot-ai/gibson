@@ -260,7 +260,7 @@ func TestTenantBeliefs_AReplayReadsThePinnedVersion(t *testing.T) {
 	store.makeCurrent("acme", 1)
 	b := testTenantBeliefs(t, testSchema(t), store)
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
-	srv := NewWorldServer(reg, nil)
+	srv := NewWorldServer(reg, nil, testWorldKeys(t))
 	eng := reg.For("acme")
 
 	// The mission start records the pin, as executeMission does.

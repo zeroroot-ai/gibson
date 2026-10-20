@@ -19,11 +19,13 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	worldpb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/world/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -34,17 +36,31 @@ type worldServer struct {
 
 	registry *brain.Registry
 	logger   *slog.Logger
+	// signers sign the page tokens of the list RPCs, one for each RPC
+	// (world_service_paging.go).
+	signers map[string]*pagetoken.Signer
 }
 
 // NewWorldServer constructs the WorldService backed by the per-tenant brain registry.
-func NewWorldServer(registry *brain.Registry, logger *slog.Logger) *worldServer {
+// keys derives the signing key of the page tokens. The daemon builds it from
+// the master KEK, so a token from one replica works on another.
+//
+//nolint:revive // the daemon and its tests use the concrete type
+func NewWorldServer(registry *brain.Registry, logger *slog.Logger, keys *pagetoken.Keys) *worldServer {
 	if registry == nil {
 		panic("world server: registry cannot be nil")
+	}
+	if keys == nil {
+		panic("world server: page token keys cannot be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &worldServer{registry: registry, logger: logger}
+	signers, err := worldSigners(keys)
+	if err != nil {
+		panic("world server: " + err.Error())
+	}
+	return &worldServer{registry: registry, logger: logger, signers: signers}
 }
 
 // engine resolves the caller's tenant from context and returns its brain engine
@@ -62,13 +78,18 @@ func (s *worldServer) engine(ctx context.Context) (*brain.Engine, error) {
 	return eng, nil
 }
 
-func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {
+func (s *worldServer) ListMissions(ctx context.Context, req *worldpb.ListMissionsRequest) (*worldpb.ListMissionsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListMissionsResponse{}
-	for _, m := range e.Missions() {
+	pg, err := s.pageOf(ctx, "ListMissions", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.Missions(), func(m brain.MissionSnapshot) string { return m.ID })
+	resp := &worldpb.ListMissionsResponse{NextPageToken: next}
+	for _, m := range page {
 		resp.Missions = append(resp.Missions, &worldpb.MissionView{
 			Id: m.ID, Goal: m.Goal, Status: string(m.Status), Reason: m.Reason,
 			BeliefModel: m.BeliefModel,
@@ -77,13 +98,20 @@ func (s *worldServer) ListMissions(ctx context.Context, _ *worldpb.ListMissionsR
 	return resp, nil
 }
 
-func (s *worldServer) ListHosts(ctx context.Context, _ *worldpb.ListHostsRequest) (*worldpb.ListHostsResponse, error) {
+func (s *worldServer) ListHosts(ctx context.Context, req *worldpb.ListHostsRequest) (*worldpb.ListHostsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListHostsResponse{}
-	for _, h := range e.Hosts() {
+	pg, err := s.pageOf(ctx, "ListHosts", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.Hosts(), func(h brain.HostSnapshot) string {
+		return worldKey(h.ScopeID, h.Address, h.SSHHostKey, strconv.FormatUint(h.ID, 10))
+	})
+	resp := &worldpb.ListHostsResponse{NextPageToken: next}
+	for _, h := range page {
 		ports := make([]int32, len(h.OpenPorts))
 		for i, p := range h.OpenPorts {
 			ports[i] = int32(p)
@@ -100,13 +128,18 @@ func (s *worldServer) ListHosts(ctx context.Context, _ *worldpb.ListHostsRequest
 	return resp, nil
 }
 
-func (s *worldServer) ListFindings(ctx context.Context, _ *worldpb.ListFindingsRequest) (*worldpb.ListFindingsResponse, error) {
+func (s *worldServer) ListFindings(ctx context.Context, req *worldpb.ListFindingsRequest) (*worldpb.ListFindingsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListFindingsResponse{}
-	for _, f := range e.Findings() {
+	pg, err := s.pageOf(ctx, "ListFindings", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.Findings(), func(f brain.FindingSnapshot) string { return f.ID })
+	resp := &worldpb.ListFindingsResponse{NextPageToken: next}
+	for _, f := range page {
 		resp.Findings = append(resp.Findings, &worldpb.FindingView{
 			Id: f.ID, Title: f.Title, ScopeId: f.ScopeID, Address: f.Address, Severity: f.Severity,
 		})
@@ -114,13 +147,18 @@ func (s *worldServer) ListFindings(ctx context.Context, _ *worldpb.ListFindingsR
 	return resp, nil
 }
 
-func (s *worldServer) ListLlmCalls(ctx context.Context, _ *worldpb.ListLlmCallsRequest) (*worldpb.ListLlmCallsResponse, error) {
+func (s *worldServer) ListLlmCalls(ctx context.Context, req *worldpb.ListLlmCallsRequest) (*worldpb.ListLlmCallsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListLlmCallsResponse{}
-	for _, c := range e.LlmCalls() {
+	pg, err := s.pageOf(ctx, "ListLlmCalls", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.LlmCalls(), func(c brain.LlmCallSnapshot) string { return c.CallID })
+	resp := &worldpb.ListLlmCallsResponse{NextPageToken: next}
+	for _, c := range page {
 		resp.LlmCalls = append(resp.LlmCalls, &worldpb.LlmCallView{
 			CallId:           c.CallID,
 			RunId:            c.RunID,
@@ -171,12 +209,28 @@ func (s *worldServer) GetTimeline(ctx context.Context, req *worldpb.GetTimelineR
 	// timeline and its GetFrameAt frames share one indexing.
 	// The events come from the full history of the tenant, not from the
 	// in-memory tail of the engine (ADR-0163, gibson#786).
-	events, err := e.MissionHistory(ctx, req.GetMissionId())
+	events, runID, runFound, err := e.MissionHistoryRun(ctx, req.GetMissionId())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "the Timeline history is not available: %v", err)
 	}
-	resp := &worldpb.GetTimelineResponse{}
-	for i, ev := range events {
+	// The slice of a mission holds its latest run. A new run changes what an
+	// index of the slice points to, so the run is part of the token scope: a
+	// token of an old run gives InvalidArgument and the client starts again.
+	runScope := "no-run"
+	if runFound {
+		runScope = "run:" + runID
+	}
+	pg, err := s.pageOf(ctx, "GetTimeline", req.GetPageSize(), req.GetPageToken(), req.GetMissionId(), runScope)
+	if err != nil {
+		return nil, err
+	}
+	start, end, next, err := s.seqWindow(pg, len(events))
+	if err != nil {
+		return nil, err
+	}
+	resp := &worldpb.GetTimelineResponse{NextPageToken: next}
+	for i := start; i < end; i++ {
+		ev := events[i]
 		resp.Events = append(resp.Events, &worldpb.TimelineEvent{
 			Seq:     uint64(i),
 			Kind:    ev.Kind(),
@@ -297,13 +351,20 @@ func (s *worldServer) GetFrameAt(ctx context.Context, req *worldpb.GetFrameAtReq
 // ListReviewQueue returns the tenant's HITL review queue — surfaced surprises +
 // Findings with any applied label (ADR-0106). Read-only projection; never gates
 // a mission.
-func (s *worldServer) ListReviewQueue(ctx context.Context, _ *worldpb.ListReviewQueueRequest) (*worldpb.ListReviewQueueResponse, error) {
+func (s *worldServer) ListReviewQueue(ctx context.Context, req *worldpb.ListReviewQueueRequest) (*worldpb.ListReviewQueueResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListReviewQueueResponse{}
-	for _, it := range e.ReviewQueue() {
+	pg, err := s.pageOf(ctx, "ListReviewQueue", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.ReviewQueue(), func(it brain.ReviewItem) string {
+		return worldKey(it.Kind, it.TargetID)
+	})
+	resp := &worldpb.ListReviewQueueResponse{NextPageToken: next}
+	for _, it := range page {
 		item := &worldpb.ReviewItem{
 			TargetId: it.TargetID,
 			Kind:     it.Kind,
@@ -352,13 +413,18 @@ func (s *worldServer) SubmitLabel(ctx context.Context, req *worldpb.SubmitLabelR
 
 // ListLabels returns the tenant's pooled review labels (ADR-0106) — the HITL
 // training signal the offline trainer consumes alongside auto-outcomes.
-func (s *worldServer) ListLabels(ctx context.Context, _ *worldpb.ListLabelsRequest) (*worldpb.ListLabelsResponse, error) {
+func (s *worldServer) ListLabels(ctx context.Context, req *worldpb.ListLabelsRequest) (*worldpb.ListLabelsResponse, error) {
 	e, err := s.engine(ctx)
 	if err != nil {
 		return nil, err
 	}
-	resp := &worldpb.ListLabelsResponse{}
-	for _, l := range e.Labels() {
+	pg, err := s.pageOf(ctx, "ListLabels", req.GetPageSize(), req.GetPageToken())
+	if err != nil {
+		return nil, err
+	}
+	page, next := worldKeyedPage(s, pg, e.Labels(), func(l brain.LabelSnapshot) string { return l.TargetID })
+	resp := &worldpb.ListLabelsResponse{NextPageToken: next}
+	for _, l := range page {
 		resp.Labels = append(resp.Labels, labelView(l))
 	}
 	return resp, nil
