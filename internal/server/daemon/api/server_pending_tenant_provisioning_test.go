@@ -6,24 +6,48 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 )
 
 func newPendingServer() *DaemonServer {
-	return &DaemonServer{
+	srv := &DaemonServer{
 		logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}
+	withTestPageKeys(srv)
+	return srv
+}
+
+// withTestPageKeys gives srv a page token key source over a fixed KEK.
+func withTestPageKeys(srv *DaemonServer) {
+	keys, err := pagetoken.NewKeys(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		panic(err)
+	}
+	srv.WithPageKeys(keys)
+}
+
+// withTestPageKey gives srv the page token keys of the operator lists, unless
+// it has them.
+func withTestPageKey(t *testing.T, srv *DaemonServer) {
+	t.Helper()
+	if srv.pageKeys != nil {
+		return
+	}
+	withTestPageKeys(srv)
 }
 
 // expectEnsureTable matches the CREATE TABLE IF NOT EXISTS guard that every
@@ -135,10 +159,10 @@ func TestListPendingTenantProvisioning_ReturnsRows(t *testing.T) {
 	// The drain gate is inert here because the entitlements knob is unset
 	// (self-hosted posture).
 	rows := sqlmock.NewRows([]string{
-		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id",
+		"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at",
 	}).
-		AddRow("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "rec-1").
-		AddRow("globex", "u-2", "ceo@globex.test", "Globex", "org", "")
+		AddRow("acme", "u-1", "owner@acme.test", "Acme Inc", "team", "rec-1", time.Now()).
+		AddRow("globex", "u-2", "ceo@globex.test", "Globex", "org", "", time.Now())
 	mock.ExpectQuery("FROM pending_tenant_provisioning").
 		WillReturnRows(rows)
 

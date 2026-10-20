@@ -144,6 +144,28 @@ func (s *Store) ListAll(ctx context.Context) ([]Connector, error) {
 		`SELECT `+selectColumns+` FROM tenant_connectors ORDER BY tenant_id, connector_id`)
 }
 
+// PageKey is the sort key of one connector row. A page starts after it.
+type PageKey struct {
+	TenantID    string
+	ConnectorID string
+}
+
+// ListPage returns at most limit enabled connectors of every tenant, in
+// (tenant, connector) order, after the row that after names. A nil after
+// starts at the first row. It has no tenant predicate on purpose: only the
+// connector operator reads it, through an RPC that every other caller is
+// refused. The keyset predicate makes a page independent of the rows that
+// arrive or leave between two pages.
+func (s *Store) ListPage(ctx context.Context, after *PageKey, limit int) ([]Connector, error) {
+	if after == nil {
+		return s.query(ctx, "ListPage",
+			`SELECT `+selectColumns+` FROM tenant_connectors ORDER BY tenant_id, connector_id LIMIT $1`, limit)
+	}
+	return s.query(ctx, "ListPage",
+		`SELECT `+selectColumns+` FROM tenant_connectors WHERE (tenant_id, connector_id) > ($2, $3) `+
+			`ORDER BY tenant_id, connector_id LIMIT $1`, limit, after.TenantID, after.ConnectorID)
+}
+
 func (s *Store) query(ctx context.Context, op, query string, args ...any) ([]Connector, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {

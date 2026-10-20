@@ -10,11 +10,7 @@ gibson/daemon/discovery/v1/discovery.proto ListLLMSlots
 gibson/daemon/discovery/v1/discovery.proto ListPlugins
 gibson/daemon/discovery/v1/discovery.proto ListReportSurfaces
 gibson/daemon/discovery/v1/discovery.proto ListTools
-gibson/daemon/operator/v1/operator.proto ListDesiredCatalogPlugins
-gibson/daemon/operator/v1/operator.proto ListDesiredConnectors
 gibson/daemon/operator/v1/operator.proto ListFeatureTuples
-gibson/daemon/operator/v1/operator.proto ListPendingTenantOps
-gibson/daemon/operator/v1/operator.proto ListPendingTenantProvisioning
 gibson/session/v1/session.proto ListMySessions
 gibson/tenant/v1/admin_tenant.proto AdminGetPlatformHealth
 gibson/tenant/v1/budget.proto ListBudgets

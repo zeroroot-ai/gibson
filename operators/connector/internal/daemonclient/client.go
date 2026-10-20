@@ -20,6 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
@@ -95,13 +96,22 @@ func (c *Client) AuthStatus(ctx context.Context, tenantID, connector string) (*t
 }
 
 // ListDesiredConnectors pulls every connector that a tenant enabled, with the
-// fields of the catalog entry (gibson#662).
+// fields of the catalog entry (gibson#662). It walks every page, so a
+// reconcile sees each connector.
 func (c *Client) ListDesiredConnectors(ctx context.Context) ([]*daemonoperatorv1.DesiredConnector, error) {
-	resp, err := c.operator.ListDesiredConnectors(ctx, &daemonoperatorv1.ListDesiredConnectorsRequest{})
+	all, err := pagetoken.Collect(ctx, 0,
+		func(ctx context.Context, token string) ([]*daemonoperatorv1.DesiredConnector, string, error) {
+			resp, err := c.operator.ListDesiredConnectors(ctx,
+				&daemonoperatorv1.ListDesiredConnectorsRequest{PageSize: pagetoken.MaxSize, PageToken: token})
+			if err != nil {
+				return nil, "", fmt.Errorf("fetch page: %w", err)
+			}
+			return resp.GetConnectors(), resp.GetNextPageToken(), nil
+		})
 	if err != nil {
 		return nil, fmt.Errorf("list desired connectors: %w", err)
 	}
-	return resp.GetConnectors(), nil
+	return all, nil
 }
 
 // ReportConnectorStatus reports the state of one ConnectorInstance to the

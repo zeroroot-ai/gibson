@@ -552,12 +552,21 @@ message PendingTenant {
 }
 
 // ListPendingTenantProvisioningRequest queries the pending queue. No filters
-// today — the daemon returns every row still in status=pending.
-message ListPendingTenantProvisioningRequest {}
+// today — the daemon returns the rows still in status=pending, one page at a
+// time, oldest first (ADR-0028).
+message ListPendingTenantProvisioningRequest {
+  // page_size is the most items on one page. 0 means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts the list.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
 
 // ListPendingTenantProvisioningResponse carries the pending records.
 message ListPendingTenantProvisioningResponse {
   repeated PendingTenant pending = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }
 
 // AckTenantProvisionedRequest marks a tenant's pending record done after the
@@ -676,13 +685,22 @@ message TenantOp {
 }
 
 // ListPendingTenantOpsRequest queries the pending admin-op queue. No filters
-// today — the daemon returns every row still in status=pending.
-message ListPendingTenantOpsRequest {}
+// today — the daemon returns the rows still in status=pending, one page at a
+// time, oldest first (ADR-0028).
+message ListPendingTenantOpsRequest {
+  // page_size is the most items on one page. 0 means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts the list.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
+
 
 // ListPendingTenantOpsResponse carries the pending admin-op records in
 // created_at order.
 message ListPendingTenantOpsResponse {
   repeated TenantOp ops = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }
 
 // AckTenantOpRequest marks an admin-op record done after the operator applied it.
@@ -775,7 +793,14 @@ message StoreBeliefArtifactResponse {
 // Connectors for each tenant (gibson#662)
 // ---------------------------------------------------------------------------
 
-message ListDesiredConnectorsRequest {}
+// ListDesiredConnectorsRequest asks for one page of the desired connectors,
+// in (tenant_id, connector_id) order (ADR-0028).
+message ListDesiredConnectorsRequest {
+  // page_size is the most items on one page. 0 means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts the list.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 
 // DesiredConnector is one connector the platform must run: the catalog
 // connector connector_id, for the tenant tenant_id. The other fields come
@@ -802,6 +827,8 @@ message DesiredConnector {
 
 message ListDesiredConnectorsResponse {
   repeated DesiredConnector connectors = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }
 
 message ReportConnectorStatusRequest {
@@ -865,7 +892,14 @@ message GetConnectorCredentialResponse {
 // Catalog plugins for each tenant (gibson#815)
 // ---------------------------------------------------------------------------
 
-message ListDesiredCatalogPluginsRequest {}
+// ListDesiredCatalogPluginsRequest asks for one page of the desired plugins,
+// in (tenant_id, plugin_id) order (ADR-0028).
+message ListDesiredCatalogPluginsRequest {
+  // page_size is the most items on one page. 0 means 100.
+  int32 page_size = 1 [(buf.validate.field).int32 = { gte: 0, lte: 1000 }];
+  // page_token is the next_page_token of the previous page. Empty starts the list.
+  string page_token = 2 [(buf.validate.field).string = { max_len: 1024 }];
+}
 
 // DesiredCatalogPlugin is one instance the platform must run: the catalog
 // plugin plugin_id, for the tenant tenant_id.
@@ -884,6 +918,8 @@ message DesiredCatalogPlugin {
 
 message ListDesiredCatalogPluginsResponse {
   repeated DesiredCatalogPlugin plugins = 1;
+  // next_page_token continues the list. Empty means this is the last page.
+  string next_page_token = 2;
 }
 
 message ReportCatalogPluginStatusRequest {

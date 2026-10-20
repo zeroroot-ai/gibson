@@ -23,10 +23,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/plans"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/pkg/billing/entitlements"
@@ -177,21 +179,46 @@ func workspaceNameTaken(msg string) error {
 // a pending row whose tier does not resolve to a canonical plan is withheld:
 // an unrecognised tier cannot be priced, so it fails closed. Withheld rows stay
 // in the queue and are logged.
-func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
+func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, req *daemonoperatorv1.ListPendingTenantProvisioningRequest) (*daemonoperatorv1.ListPendingTenantProvisioningResponse, error) {
 	db := s.entitlementsDB()
 	if db == nil {
 		return nil, status.Error(codes.Unavailable, "platform Postgres not configured")
 	}
+	sg, err := s.pageSigner(pageScopePendingTenantProvisioning)
+	if err != nil {
+		return nil, err
+	}
+	after, err := pageStart(sg, pageScopePendingTenantProvisioning, req.GetPageToken(), 2)
+	if err != nil {
+		return nil, err
+	}
+	var afterAt time.Time
+	if after != nil {
+		if afterAt, err = parseTimeKey(after[0]); err != nil {
+			return nil, err
+		}
+	}
 	if err := ensurePendingTenantProvisioningTable(ctx, db); err != nil {
 		return nil, status.Errorf(codes.Internal, "ensure table: %v", err)
 	}
-	const q = `
-		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier, audit_record_id
+	// The page is the rows after the last row of the previous page, oldest
+	// first. One more row than the page tells whether a next page exists. A
+	// row that the plan withholds still counts as a row of its page, so the
+	// next token moves past it.
+	size := pagetoken.Size(req.GetPageSize())
+	const cols = `
+		SELECT tenant_id, owner_user_id, owner_email, workspace_name, tier, audit_record_id, created_at
 		FROM pending_tenant_provisioning
-		WHERE status = 'pending'
-		ORDER BY created_at ASC
-	`
-	rows, err := db.QueryContext(ctx, q)
+		WHERE status = 'pending'`
+	const order = `
+		ORDER BY created_at ASC, tenant_id ASC
+		LIMIT $1`
+	q, args := cols+order, []any{size + 1}
+	if after != nil {
+		q = cols + ` AND (created_at, tenant_id) > ($2, $3)` + order
+		args = append(args, afterAt, after[1])
+	}
+	rows, err := db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "query pending_tenant_provisioning: %v", err)
 	}
@@ -200,14 +227,24 @@ func (s *DaemonServer) ListPendingTenantProvisioning(ctx context.Context, _ *dae
 	enforce := entitlements.Required()
 
 	out := &daemonoperatorv1.ListPendingTenantProvisioningResponse{}
+	scanned := 0
+	var lastKey [2]string
 	for rows.Next() {
 		var p daemonoperatorv1.PendingTenant
+		var created time.Time
 		if err := rows.Scan(
 			&p.TenantId, &p.OwnerUserId, &p.OwnerEmail,
-			&p.WorkspaceName, &p.Tier, &p.AuditRecordId,
+			&p.WorkspaceName, &p.Tier, &p.AuditRecordId, &created,
 		); err != nil {
 			return nil, status.Errorf(codes.Internal, "scan pending row: %v", err)
 		}
+		if scanned == size {
+			// The extra row only shows that a next page exists.
+			out.NextPageToken = pageToken(sg, pageScopePendingTenantProvisioning, lastKey[0], lastKey[1])
+			break
+		}
+		scanned++
+		lastKey = [2]string{timeKey(created), p.GetTenantId()}
 		if reason, withhold := withholdPendingTenant(p.GetTier(), enforce); withhold {
 			s.logger.Warn("pending tenant withheld from provisioning drain",
 				"tenant_id", p.GetTenantId(),

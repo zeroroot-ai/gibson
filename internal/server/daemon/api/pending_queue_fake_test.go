@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // fakePendingQueue is an in-memory pending_tenant_provisioning table behind a
@@ -25,11 +27,18 @@ type fakePendingQueue struct {
 	rows []fakeQueueRow
 	// insertErr, when set, fails each insert.
 	insertErr error
+	// clock counts the inserts. It makes the created_at of each row.
+	clock int
 }
+
+// fakeQueueEpoch is the created_at of the row before the first one.
+var fakeQueueEpoch = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // fakeQueueRow is one queued tenant.
 type fakeQueueRow struct {
 	tenantID, ownerUserID, ownerEmail, workspaceName, tier, status, auditRecordID string
+	// createdAt grows with each insert, like the created_at default of the table.
+	createdAt time.Time
 }
 
 // row returns the queued row of tenantID.
@@ -63,6 +72,7 @@ func withPendingQueue(t *testing.T, srv *DaemonServer) *fakePendingQueue {
 	}
 	t.Cleanup(func() { _ = db.Close(); fakeQueues.Delete(name) })
 	srv.platformDB = db
+	withTestPageKey(t, srv)
 	return q
 }
 
@@ -112,8 +122,10 @@ func (c *fakeQueueConn) ExecContext(_ context.Context, query string, args []driv
 				return driver.RowsAffected(0), nil
 			}
 		}
+		c.q.clock++
 		c.q.rows = append(c.q.rows, fakeQueueRow{
-			tenantID: id, ownerUserID: argString(args, 1), ownerEmail: argString(args, 2),
+			createdAt: fakeQueueEpoch.Add(time.Duration(c.q.clock) * time.Microsecond),
+			tenantID:  id, ownerUserID: argString(args, 1), ownerEmail: argString(args, 2),
 			workspaceName: argString(args, 3), tier: argString(args, 4), status: argString(args, 5),
 			auditRecordID: argString(args, 10),
 		})
@@ -135,15 +147,45 @@ func (c *fakeQueueConn) QueryContext(_ context.Context, query string, args []dri
 		}
 		return out, nil
 	case strings.Contains(query, "FROM pending_tenant_provisioning") && strings.Contains(query, "status = 'pending'"):
-		out := &fakeQueueRows{cols: []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id"}}
-		for _, r := range c.q.rows {
-			if r.status == "pending" {
-				out.vals = append(out.vals, []driver.Value{r.tenantID, r.ownerUserID, r.ownerEmail, r.workspaceName, r.tier, r.auditRecordID})
-			}
-		}
-		return out, nil
+		return c.listPending(query, args), nil
 	}
 	return nil, fmt.Errorf("fake queue: unexpected query %q", query)
+}
+
+// listPending answers the operator list as Postgres does: the pending rows
+// after the keyset key, in (created_at, tenant_id) order, at most $1 of them.
+func (c *fakeQueueConn) listPending(query string, args []driver.NamedValue) driver.Rows {
+	keyset := strings.Contains(query, "(created_at, tenant_id) > ($2, $3)")
+	var afterAt time.Time
+	var afterID string
+	if keyset {
+		afterAt, _ = args[1].Value.(time.Time)
+		afterID = argString(args, 2)
+	}
+	var rows []fakeQueueRow
+	for _, r := range c.q.rows {
+		if r.status != "pending" {
+			continue
+		}
+		if keyset && !r.createdAt.After(afterAt) && (!r.createdAt.Equal(afterAt) || r.tenantID <= afterID) {
+			continue
+		}
+		rows = append(rows, r)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if !rows[i].createdAt.Equal(rows[j].createdAt) {
+			return rows[i].createdAt.Before(rows[j].createdAt)
+		}
+		return rows[i].tenantID < rows[j].tenantID
+	})
+	if limit, ok := args[0].Value.(int64); ok {
+		rows = rows[:min(limit, int64(len(rows)))]
+	}
+	out := &fakeQueueRows{cols: []string{"tenant_id", "owner_user_id", "owner_email", "workspace_name", "tier", "audit_record_id", "created_at"}}
+	for _, r := range rows {
+		out.vals = append(out.vals, []driver.Value{r.tenantID, r.ownerUserID, r.ownerEmail, r.workspaceName, r.tier, r.auditRecordID, r.createdAt})
+	}
+	return out
 }
 
 type fakeQueueRows struct {

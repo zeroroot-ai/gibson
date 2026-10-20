@@ -27,6 +27,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	grpcstatus "google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	operatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/gibson/operators/internal/audit"
 	"github.com/zeroroot-ai/gibson/operators/tenant/internal/clients"
@@ -212,23 +213,31 @@ func (c *EntitlementsGRPCClient) ListPendingTenantProvisioning(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.ListPendingTenantProvisioning(authedCtx,
-		&operatorv1.ListPendingTenantProvisioningRequest{})
-	if err := translateGRPCError("list-pending-tenant-provisioning", err); err != nil {
-		return nil, err
-	}
-	out := make([]PendingTenant, 0, len(resp.GetPending()))
-	for _, p := range resp.GetPending() {
-		out = append(out, PendingTenant{
-			TenantID:      p.GetTenantId(),
-			OwnerUserID:   p.GetOwnerUserId(),
-			OwnerEmail:    p.GetOwnerEmail(),
-			WorkspaceName: p.GetWorkspaceName(),
-			Tier:          p.GetTier(),
-			AuditRecordID: p.GetAuditRecordId(),
+	// The reconcile sees every pending tenant, so it walks every page.
+	all, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]PendingTenant, string, error) {
+			resp, err := c.client.ListPendingTenantProvisioning(ctx,
+				&operatorv1.ListPendingTenantProvisioningRequest{PageSize: pagetoken.MaxSize, PageToken: token})
+			if err := translateGRPCError("list-pending-tenant-provisioning", err); err != nil {
+				return nil, "", err
+			}
+			out := make([]PendingTenant, 0, len(resp.GetPending()))
+			for _, p := range resp.GetPending() {
+				out = append(out, PendingTenant{
+					TenantID:      p.GetTenantId(),
+					OwnerUserID:   p.GetOwnerUserId(),
+					OwnerEmail:    p.GetOwnerEmail(),
+					WorkspaceName: p.GetWorkspaceName(),
+					Tier:          p.GetTier(),
+					AuditRecordID: p.GetAuditRecordId(),
+				})
+			}
+			return out, resp.GetNextPageToken(), nil
 		})
+	if err != nil {
+		return nil, fmt.Errorf("list-pending-tenant-provisioning: %w", err)
 	}
-	return out, nil
+	return all, nil
 }
 
 // AckTenantProvisioned marks a pending record done after the operator has
@@ -328,26 +337,34 @@ func (c *EntitlementsGRPCClient) ListPendingTenantOps(ctx context.Context) ([]Te
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.ListPendingTenantOps(authedCtx,
-		&operatorv1.ListPendingTenantOpsRequest{})
-	if err := translateGRPCError("list-pending-tenant-ops", err); err != nil {
-		return nil, err
-	}
-	out := make([]TenantAdminOp, 0, len(resp.GetOps()))
-	for _, op := range resp.GetOps() {
-		out = append(out, TenantAdminOp{
-			OpID:           op.GetOpId(),
-			TenantID:       op.GetTenantId(),
-			OpType:         op.GetOpType(),
-			DisplayName:    op.GetDisplayName(),
-			DisplayNameSet: op.GetDisplayNameSet(),
-			OwnerEmail:     op.GetOwnerEmail(),
-			Tier:           op.GetTier(),
-			TierSet:        op.GetTierSet(),
-			AuditRecordID:  op.GetAuditRecordId(),
+	// The reconcile sees every pending op, so it walks every page.
+	all, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]TenantAdminOp, string, error) {
+			resp, err := c.client.ListPendingTenantOps(ctx,
+				&operatorv1.ListPendingTenantOpsRequest{PageSize: pagetoken.MaxSize, PageToken: token})
+			if err := translateGRPCError("list-pending-tenant-ops", err); err != nil {
+				return nil, "", err
+			}
+			out := make([]TenantAdminOp, 0, len(resp.GetOps()))
+			for _, op := range resp.GetOps() {
+				out = append(out, TenantAdminOp{
+					OpID:           op.GetOpId(),
+					TenantID:       op.GetTenantId(),
+					OpType:         op.GetOpType(),
+					DisplayName:    op.GetDisplayName(),
+					DisplayNameSet: op.GetDisplayNameSet(),
+					OwnerEmail:     op.GetOwnerEmail(),
+					Tier:           op.GetTier(),
+					TierSet:        op.GetTierSet(),
+					AuditRecordID:  op.GetAuditRecordId(),
+				})
+			}
+			return out, resp.GetNextPageToken(), nil
 		})
+	if err != nil {
+		return nil, fmt.Errorf("list-pending-tenant-ops: %w", err)
 	}
-	return out, nil
+	return all, nil
 }
 
 // AckTenantOp marks an admin-op record done after the operator has applied it to
@@ -433,20 +450,29 @@ func (c *EntitlementsGRPCClient) ListDesiredCatalogPlugins(ctx context.Context) 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.client.ListDesiredCatalogPlugins(authedCtx, &operatorv1.ListDesiredCatalogPluginsRequest{})
+	// The reconcile sees every desired plugin, so it walks every page.
+	all, err := pagetoken.Collect(authedCtx, 0,
+		func(ctx context.Context, token string) ([]DesiredCatalogPlugin, string, error) {
+			resp, err := c.client.ListDesiredCatalogPlugins(ctx,
+				&operatorv1.ListDesiredCatalogPluginsRequest{PageSize: pagetoken.MaxSize, PageToken: token})
+			if err != nil {
+				return nil, "", fmt.Errorf("fetch page: %w", err)
+			}
+			out := make([]DesiredCatalogPlugin, 0, len(resp.GetPlugins()))
+			for _, p := range resp.GetPlugins() {
+				out = append(out, DesiredCatalogPlugin{
+					TenantID:    p.GetTenantId(),
+					PluginID:    p.GetPluginId(),
+					Image:       p.GetImage(),
+					EgressAllow: p.GetEgressAllow(),
+				})
+			}
+			return out, resp.GetNextPageToken(), nil
+		})
 	if err != nil {
 		return nil, fmt.Errorf("list desired catalog plugins: %w", err)
 	}
-	out := make([]DesiredCatalogPlugin, 0, len(resp.GetPlugins()))
-	for _, p := range resp.GetPlugins() {
-		out = append(out, DesiredCatalogPlugin{
-			TenantID:    p.GetTenantId(),
-			PluginID:    p.GetPluginId(),
-			Image:       p.GetImage(),
-			EgressAllow: p.GetEgressAllow(),
-		})
-	}
-	return out, nil
+	return all, nil
 }
 
 // ReportCatalogPluginStatus reports the state of one tenant's plugin instance

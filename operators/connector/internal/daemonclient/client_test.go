@@ -86,6 +86,26 @@ func dialFake(t *testing.T, svc *fakeOperatorService) *Client {
 	return NewWithConn(conn)
 }
 
+// dialPaged serves any operator service over bufconn and returns a Client on it.
+func dialPaged(t *testing.T, svc daemonoperatorv1.DaemonOperatorServiceServer) *Client {
+	t.Helper()
+	lis := bufconn.Listen(1 << 20)
+	srv := grpc.NewServer()
+	daemonoperatorv1.RegisterDaemonOperatorServiceServer(srv, svc)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return lis.DialContext(ctx) }),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return NewWithConn(conn)
+}
+
 func TestRevoke_CarriesTenantAndConnector(t *testing.T) {
 	svc := &fakeOperatorService{}
 	c := dialFake(t, svc)
