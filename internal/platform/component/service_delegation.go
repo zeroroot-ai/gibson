@@ -243,7 +243,8 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 // mission. The task grant that the caller presents, verified by the daemon,
 // names its mission and its run. A work item of another mission, or of another
 // run, is refused. A delegation that names a work item without a verified task
-// grant is refused. A delegation with no work item is not bound.
+// grant is refused. So is one whose mission or run cannot be resolved. A
+// delegation with no work item is not bound.
 func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sourceWorkID string) (mission, run string, err error) {
 	if sourceWorkID == "" {
 		return "", "", nil
@@ -252,24 +253,24 @@ func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sou
 	if err != nil {
 		return "", "", err
 	}
-	if s.missionCtx != nil {
-		var resolveErr error
-		mission, resolveErr = s.missionCtx.ResolveMissionForWork(ctx, sourceWorkID, tenant)
-		if resolveErr != nil {
-			s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
-				"work_id", sourceWorkID, "error", resolveErr)
-		}
+	// The work item must belong to the mission and the run of the grant. A
+	// lookup that fails, or that finds no mission, cannot prove it, so the
+	// delegation is refused (fail closed).
+	if s.missionCtx == nil {
+		return "", "", status.Error(codes.PermissionDenied, "the mission of the work item cannot be resolved")
 	}
-	if mission != "" && grantMission != mission {
-		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another mission")
+	mission, resolveErr := s.missionCtx.ResolveMissionForWork(ctx, sourceWorkID, tenant)
+	if resolveErr != nil {
+		s.logger.WarnContext(ctx, "delegate to agent: mission of the work item not resolved",
+			"work_id", sourceWorkID, "error", resolveErr)
+		return "", "", status.Error(codes.PermissionDenied, "the mission of the work item cannot be resolved")
+	}
+	if mission == "" || mission != grantMission {
+		return "", "", status.Error(codes.PermissionDenied, "the work item does not belong to the mission of the grant")
 	}
 	run = s.sourceWorkRun(ctx, tenant, sourceWorkID)
-	if run != "" && grantRun != "" && grantRun != run {
-		return "", "", status.Error(codes.PermissionDenied, "the work item belongs to another run")
-	}
-	if mission == "" {
-		// The work item names no mission, so nothing binds its run to the grant.
-		run = ""
+	if run == "" || run != grantRun {
+		return "", "", status.Error(codes.PermissionDenied, "the work item does not belong to the run of the grant")
 	}
 	return mission, run, nil
 }

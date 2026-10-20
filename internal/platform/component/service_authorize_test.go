@@ -286,27 +286,79 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls)
 }
 
-// A mission lookup that fails does not stop the delegation. The delegated item
-// then carries no mission.
-func TestDelegateToAgent_AFailedMissionLookupDelegatesWithNoMission(t *testing.T) {
-	env := newWorkIDEnv(t)
-	env.svc.WithRunAuthorizer(&fakeRunAuthorizer{allowed: true, reason: "fga_allow"})
+// A delegation from a work item is refused when its mission cannot be proved:
+// a lookup that fails, a work item with no mission, a daemon with no resolver, a
+// work item with no run, and a grant with no run (gibson#1235).
+func TestDelegateToAgent_ARefusalWhenTheMissionOrTheRunCannotBeProved(t *testing.T) {
 	const tenant = "test-tenant"
-	source := env.enqueueRun(t, tenant, "work-source", "run-42")
-	// The source has a mission, so only the failed lookup can drop it.
-	require.NoError(t, NewRedisWorkContextRegistry(env.state).
-		RegisterWorkContext(context.Background(), source, "mission-7", tenant))
-
-	// A resolver over a closed state client fails each lookup.
-	cfg := state.DefaultConfig()
-	cfg.URL = "redis://" + env.mr.Addr()
-	closed, err := state.NewStateClient(cfg)
+	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
 	require.NoError(t, err)
-	require.NoError(t, closed.Close())
-	env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
 
-	item := env.delegateAndClaimAs(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), t, tenant, source)
-	assert.NotContains(t, item.Context, "mission_id")
+	newEnv := func(t *testing.T) *workIDEnv {
+		env := newWorkIDEnv(t)
+		env.svc.WithCapabilityChecker(grantedChecker())
+		env.svc.WithGrantVerifier(fakeGrants{})
+		env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
+		return env
+	}
+	call := func(env *workIDEnv, ctx context.Context, work string) error {
+		_, callErr := env.svc.DelegateToAgent(ctx, &componentpb.DelegateToAgentRequest{
+			WorkId: work, AgentName: "recon-agent", TaskJson: taskJSON,
+		})
+		return callErr
+	}
+	caller := componentCtx("agent_principal:acct-1")
+
+	t.Run("a lookup that fails", func(t *testing.T) {
+		env := newEnv(t)
+		source := env.enqueueRun(t, tenant, "work-source", "run-42")
+		require.NoError(t, NewRedisWorkContextRegistry(env.state).
+			RegisterWorkContext(context.Background(), source, "mission-7", tenant))
+		cfg := state.DefaultConfig()
+		cfg.URL = "redis://" + env.mr.Addr()
+		closed, stateErr := state.NewStateClient(cfg)
+		require.NoError(t, stateErr)
+		require.NoError(t, closed.Close())
+		env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", "run-42"), source)))
+	})
+
+	t.Run("a work item with no mission", func(t *testing.T) {
+		env := newEnv(t)
+		source := env.enqueueRun(t, tenant, "work-source", "run-42")
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", "run-42"), source)))
+	})
+
+	t.Run("a daemon with no mission resolver", func(t *testing.T) {
+		env := newEnv(t)
+		env.svc.missionCtx = nil
+		source := env.enqueueRun(t, tenant, "work-source", "run-42")
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", "run-42"), source)))
+	})
+
+	t.Run("a grant with no run", func(t *testing.T) {
+		env := newEnv(t)
+		source := env.enqueueRun(t, tenant, "work-source", "run-42")
+		require.NoError(t, NewRedisWorkContextRegistry(env.state).
+			RegisterWorkContext(context.Background(), source, "mission-7", tenant))
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", ""), source)))
+	})
+
+	t.Run("a work item of another run than the grant", func(t *testing.T) {
+		env := newEnv(t)
+		source := env.enqueueRun(t, tenant, "work-source", "run-42")
+		require.NoError(t, NewRedisWorkContextRegistry(env.state).
+			RegisterWorkContext(context.Background(), source, "mission-7", tenant))
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", "run-99"), source)))
+	})
+
+	t.Run("a work item with no run", func(t *testing.T) {
+		env := newEnv(t)
+		source := env.enqueueRun(t, tenant, "work-source", "")
+		require.NoError(t, NewRedisWorkContextRegistry(env.state).
+			RegisterWorkContext(context.Background(), source, "mission-7", tenant))
+		assert.Equal(t, codes.PermissionDenied, status.Code(call(env, grantedCtx(caller, "mission-7", "run-42"), source)))
+	})
 }
 
 // sourceRunEntry is the authz context entry that the run of a source work item

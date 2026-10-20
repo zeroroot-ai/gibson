@@ -62,7 +62,13 @@ func (s *ComponentServiceServer) callerTaskGrant(ctx context.Context, tenant str
 	if claims.Tenant.String() != tenant {
 		return deny("the grant is for another tenant")
 	}
-	return claims.MissionID, grantPayloadClaim(parts[1], missionRunClaim), nil
+	// Every task grant names its run. A grant with none is not a grant that
+	// this daemon minted for a run.
+	run = grantPayloadClaim(parts[1], missionRunClaim)
+	if run == "" {
+		return deny("the grant names no mission run")
+	}
+	return claims.MissionID, run, nil
 }
 
 // tokenHeaderType reads the typ of a token header. It routes only: the
