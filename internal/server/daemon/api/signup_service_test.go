@@ -287,6 +287,20 @@ func (m *memVerificationStore) IssuePendingApproval(_ context.Context, p IssuePa
 	return m.rows[id].SignupVerification, nil
 }
 
+func (m *memVerificationStore) ListExpiredPendingApprovals(_ context.Context, limit int) ([]SignupVerification, error) {
+	var out []SignupVerification
+	for _, r := range m.rows {
+		if r.status == signupStatusPendingApproval && !r.ExpiresAt.After(m.now()) {
+			out = append(out, r.SignupVerification)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func (m *memVerificationStore) ListPendingApprovals(_ context.Context, offset, limit int) ([]SignupVerification, error) {
 	if m.listPendingErr != nil {
 		return nil, m.listPendingErr

@@ -900,3 +900,38 @@ func TestApprovalStoreFailsClosedWithoutADatabase(t *testing.T) {
 		t.Errorf("ReleaseApproval error = %v, want ErrSignupStoreUnavailable", err)
 	}
 }
+
+// The janitor reads only the registrations past their expiry, capped.
+func TestListExpiredPendingApprovals_ReadsOnlyExpiredRows(t *testing.T) {
+	s, mock, now := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification\s+WHERE status = 'pending_approval' AND expires_at <= \$1`).
+		WithArgs(now, SignupApprovalPageSize).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "attempt_id", "email", "workspace_name", "tier",
+			"owner_first_name", "owner_last_name", "owner_user_id", "created_at", "expires_at",
+		}).AddRow("reg-1", "attempt-1", "a@example.com", "Acme", "team", "Ada", "L", "user-1", now, now))
+
+	rows, err := s.ListExpiredPendingApprovals(context.Background(), 10_000)
+	if err != nil {
+		t.Fatalf("ListExpiredPendingApprovals: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ID != "reg-1" || rows[0].Status != signupStatusPendingApproval {
+		t.Fatalf("rows = %+v, want reg-1 pending", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet expectations: %v", err)
+	}
+}
+
+func TestListExpiredPendingApprovals_FailuresAreReported(t *testing.T) {
+	s, mock, _ := newMockStore(t)
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).WillReturnError(errors.New("read failed"))
+	if _, err := s.ListExpiredPendingApprovals(context.Background(), 0); err == nil {
+		t.Fatal("a query failure must be reported")
+	}
+	mock.ExpectQuery(`SELECT .* FROM signup_verification`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("reg-1"))
+	if _, err := s.ListExpiredPendingApprovals(context.Background(), 0); err == nil {
+		t.Fatal("an unreadable row must be reported")
+	}
+}

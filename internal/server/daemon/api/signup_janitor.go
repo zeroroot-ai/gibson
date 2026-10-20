@@ -14,7 +14,10 @@ package api
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // signupJanitorInterval is how often the sweep runs. Rows self-describe their
@@ -58,5 +61,47 @@ func (s *DaemonServer) sweepSignupVerifications(ctx context.Context) {
 	if expired > 0 || deleted > 0 {
 		s.logger.InfoContext(ctx, "signup janitor: swept signup_verification",
 			"expired", expired, "deleted", deleted)
+	}
+	s.expireStalePendingRegistrations(ctx)
+}
+
+// signupJanitorDecider names the janitor in the audit record of a registration
+// it rejects.
+const signupJanitorDecider = "system:signup-janitor"
+
+// expireStalePendingRegistrations rejects each registration that waited past
+// SignupRegistrationTTL and frees its workspace name (gibson#1191).
+//
+// It takes the same steps as AdminRejectRegistration: claim the decision, write
+// the audit record, remove the workspace org. The claim has the one-decision
+// predicate, so an administrator who decides the row at the same moment wins or
+// loses cleanly and the row is never decided twice.
+func (s *DaemonServer) expireStalePendingRegistrations(ctx context.Context) {
+	if s.idpAdminClient == nil {
+		return
+	}
+	rows, err := s.signupVerifications.ListExpiredPendingApprovals(ctx, SignupApprovalPageSize)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "signup janitor: listing expired registrations failed", "error", err.Error())
+		return
+	}
+	for _, r := range rows {
+		row, err := s.signupVerifications.RejectRegistration(ctx, r.ID, signupJanitorDecider)
+		if err != nil {
+			// Not found means an administrator decided it first.
+			if !errors.Is(err, ErrSignupVerificationNotFound) {
+				s.logger.ErrorContext(ctx, "signup janitor: rejecting an expired registration failed",
+					"registration_id", r.ID, "error", err.Error())
+			}
+			continue
+		}
+		if err := s.recordRegistrationDecision(ctx, signupJanitorDecider, row,
+			"signup_registration.expired", "no decision before the registration expired", uuid.NewString()); err != nil {
+			s.logger.ErrorContext(ctx, "signup janitor: the audit record of an expiry could not be written",
+				"registration_id", row.ID, "error", err.Error())
+		}
+		s.dropRejectedWorkspace(ctx, row)
+		s.logger.InfoContext(ctx, "signup janitor: expired registration rejected, workspace name freed",
+			"registration_id", row.ID)
 	}
 }

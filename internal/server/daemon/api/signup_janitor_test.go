@@ -85,3 +85,39 @@ func TestSweepSignupVerifications_ErrorIsLoggedAndSwallowed(t *testing.T) {
 			store.rows["r1"].status, signupStatusPending)
 	}
 }
+
+// TestSweep_ExpiredPendingRegistrationFreesItsWorkspaceName proves gibson#1191:
+// a registration nobody decided gives its workspace name back after its TTL.
+func TestSweep_ExpiredPendingRegistrationFreesItsWorkspaceName(t *testing.T) {
+	h, auditWriter := newApprovalHarness(t)
+	regID := registerPending(t, h)
+
+	// Still inside the TTL: nothing happens.
+	h.advance(SignupRegistrationTTL - time.Hour)
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusPendingApproval {
+		t.Fatalf("status inside the TTL = %q, want it still pending", got)
+	}
+	if len(h.idp.deletedOrgs) != 0 {
+		t.Fatalf("orgs deleted inside the TTL: %v", h.idp.deletedOrgs)
+	}
+
+	// Past the TTL: the registration is rejected and the org is removed.
+	h.advance(2 * time.Hour)
+	h.srv.sweepSignupVerifications(context.Background())
+	if got := h.store.rows[regID].status; got != signupStatusRejected {
+		t.Fatalf("status after the TTL = %q, want %q", got, signupStatusRejected)
+	}
+	if len(h.idp.deletedOrgs) != 1 || h.idp.deletedOrgs[0] != "org-1" {
+		t.Fatalf("deleted orgs = %v, want the workspace org freed", h.idp.deletedOrgs)
+	}
+	var audited bool
+	for _, ev := range auditWriter.events {
+		if ev.Action == "signup_registration.expired" && ev.ActorID == signupJanitorDecider {
+			audited = true
+		}
+	}
+	if !audited {
+		t.Error("an expiry must leave an audit record naming the janitor")
+	}
+}

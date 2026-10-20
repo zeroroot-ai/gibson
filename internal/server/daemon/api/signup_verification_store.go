@@ -58,14 +58,15 @@ const (
 	SignupRowRetention = 7 * 24 * time.Hour
 
 	// SignupRegistrationTTL is how long a registration awaiting an
-	// administrator's decision is considered current.
+	// administrator's decision keeps its workspace name (gibson#1191).
 	//
 	// It is generous because the thing it waits for is a person, and people
-	// take days. The janitor does NOT sweep on it: a registration that aged
-	// out would take a decision away from an administrator who had not made
-	// one, and would strand the deactivated account it names. Clearing the
-	// queue is a rejection, which is exactly the human decision this rung is
-	// built around.
+	// take days. After it, the signup janitor rejects the registration as the
+	// system and frees the workspace name, the same way an administrator's
+	// rejection does. Zitadel keeps org names unique, so without this bound an
+	// unauthenticated caller could hold a name for as long as nobody decides.
+	// PurgeExpired does not touch these rows: the rejection needs the identity
+	// provider, which only the server holds.
 	SignupRegistrationTTL = 30 * 24 * time.Hour
 )
 
@@ -738,6 +739,46 @@ func (s *SignupVerificationStore) ListPendingApprovals(ctx context.Context, offs
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read pending registrations: %w", err)
+	}
+	return out, nil
+}
+
+// ListExpiredPendingApprovals returns up to limit registrations that wait for a
+// decision and are past their expiry, oldest first (gibson#1191).
+func (s *SignupVerificationStore) ListExpiredPendingApprovals(ctx context.Context, limit int) ([]SignupVerification, error) {
+	db, err := s.handle()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > SignupApprovalPageSize {
+		limit = SignupApprovalPageSize
+	}
+	const q = `
+		SELECT id, attempt_id, email, workspace_name, tier,
+		       owner_first_name, owner_last_name, owner_user_id, created_at, expires_at
+		  FROM signup_verification
+		 WHERE status = 'pending_approval' AND expires_at <= $1
+		 ORDER BY expires_at ASC, id ASC
+		 LIMIT $2
+	`
+	rows, err := db.QueryContext(ctx, q, s.clock(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list expired pending registrations: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []SignupVerification
+	for rows.Next() {
+		var r SignupVerification
+		if err := rows.Scan(&r.ID, &r.AttemptID, &r.Email, &r.WorkspaceName, &r.Tier,
+			&r.OwnerFirstName, &r.OwnerLastName, &r.OwnerUserID, &r.CreatedAt, &r.ExpiresAt); err != nil {
+			return nil, fmt.Errorf("scan expired pending registration: %w", err)
+		}
+		r.Status = signupStatusPendingApproval
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read expired pending registrations: %w", err)
 	}
 	return out, nil
 }
