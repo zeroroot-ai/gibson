@@ -1745,7 +1745,20 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// (so the registry-coverage and dashboard contract hold) but every call returns
 	// codes.Unavailable.
 	logsQuerier := resolveLogsQuerier(d.logger.WithComponent("logs-service").Slog())
-	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, d.logger.WithComponent("logs-service").Slog()))
+	// The page tokens are signed with a key derived from the master KEK, which
+	// every daemon replica shares, so a token from one replica works on another.
+	if d.keyProvider == nil {
+		return nil, errors.New("daemon: LogsService needs the key provider to sign page tokens")
+	}
+	logsMasterKEK, kekErr := d.keyProvider.GetEncryptionKey(ctx)
+	if kekErr != nil {
+		return nil, fmt.Errorf("daemon: LogsService could not read the master KEK: %w", kekErr)
+	}
+	logsCursorKey, keyErr := deriveLogsCursorKey(logsMasterKEK)
+	if keyErr != nil {
+		return nil, fmt.Errorf("daemon: %w", keyErr)
+	}
+	logspb.RegisterLogsServiceServer(srv, NewLogsServer(logsQuerier, logsCursorKey, d.logger.WithComponent("logs-service").Slog()))
 	d.logger.Info(ctx, "registered LogsService gRPC endpoint")
 
 	// Register gibson.daemon.agentconsole.v1.AgentConsoleService — the read-only,

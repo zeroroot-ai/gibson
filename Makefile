@@ -243,6 +243,7 @@ lint: $(GOLANGCI_LINT)
 	@echo "Running linter (blocking; new since $(LINT_BASE))..."
 	$(GOLANGCI_LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 	@bash scripts/check-fga-model-headers.sh
+	@bash scripts/__tests__/lint-pagination.test.sh
 	@node scripts/lint-pagination.mjs
 	@node scripts/lint-allowed-identities.mjs
 

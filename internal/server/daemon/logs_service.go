@@ -23,7 +23,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/observability/lokilogs"
-	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	logspb "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/logs/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -65,18 +64,24 @@ type logsServer struct {
 	logspb.UnimplementedLogsServiceServer
 
 	querier lokilogs.Querier
-	logger  *slog.Logger
+	// cursorKey signs the page tokens (logs_cursor.go).
+	cursorKey []byte
+	logger    *slog.Logger
 }
 
 // NewLogsServer constructs the LogsService backed by a Loki log querier.
-func NewLogsServer(querier lokilogs.Querier, logger *slog.Logger) logspb.LogsServiceServer {
+// cursorKey signs the page tokens. Get it from deriveLogsCursorKey.
+func NewLogsServer(querier lokilogs.Querier, cursorKey []byte, logger *slog.Logger) logspb.LogsServiceServer {
 	if querier == nil {
 		panic("logs server: querier cannot be nil")
+	}
+	if len(cursorKey) < logsCursorKeyLen {
+		panic("logs server: cursor key is too short")
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &logsServer{querier: querier, logger: logger}
+	return &logsServer{querier: querier, cursorKey: cursorKey, logger: logger}
 }
 
 // tenant resolves the caller's tenant from context. Cross-tenant access is
@@ -90,6 +95,34 @@ func (s *logsServer) tenant(ctx context.Context) (string, error) {
 	return t.String(), nil
 }
 
+// plan checks the token of a request, plans the Loki query of the page,
+// and returns the cursor and the scope for the response token.
+func (s *logsServer) plan(sc logsQueryScope, token string, pageSize int, reqStart, reqEnd time.Time) (*logsCursor, logsWindow, error) {
+	var cur *logsCursor
+	if token != "" {
+		c, err := decodeLogsCursor(s.cursorKey, sc, token)
+		if err != nil {
+			return nil, logsWindow{}, status.Error(codes.InvalidArgument, err.Error())
+		}
+		cur = &c
+	}
+	w, err := planLogsPage(cur, reqStart, reqEnd, pageSize, time.Now().UTC())
+	if err != nil {
+		return nil, logsWindow{}, status.Error(codes.FailedPrecondition, err.Error())
+	}
+	return cur, w, nil
+}
+
+// finish cuts the page out of the lines and signs the token of the next page.
+func (s *logsServer) finish(sc logsQueryScope, cur *logsCursor, w logsWindow, pageSize int, entries []lokilogs.Entry) ([]*logspb.LogEntry, string) {
+	page, next := cutLogsPage(entries, cur, w.start.UnixNano(), pageSize)
+	token := ""
+	if next != nil {
+		token = next.encode(s.cursorKey, sc)
+	}
+	return toProto(page), token
+}
+
 func (s *logsServer) QueryMissionLogs(ctx context.Context, req *logspb.QueryMissionLogsRequest) (*logspb.QueryMissionLogsResponse, error) {
 	tenant, err := s.tenant(ctx)
 	if err != nil {
@@ -98,25 +131,23 @@ func (s *logsServer) QueryMissionLogs(ctx context.Context, req *logspb.QueryMiss
 	if req.GetMissionId() == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "mission_id is required")
 	}
-	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	sc := logsQueryScope{
+		tenant: tenant, kind: "mission", missionID: req.GetMissionId(),
+		start: req.GetStartUnixNanos(), end: req.GetEndUnixNanos(),
+	}
+	pageSize := logsPageSize(req.GetPageSize())
+	cur, w, err := s.plan(sc, req.GetPageToken(), pageSize, nanosToTime(req.GetStartUnixNanos()), nanosToTime(req.GetEndUnixNanos()))
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, err
 	}
 	entries, err := s.querier.QueryMissionLogs(ctx, lokilogs.MissionQuery{
-		TenantID:  tenant,
-		MissionID: req.GetMissionId(),
-		Start:     nanosToTime(req.GetStartUnixNanos()),
-		End:       nanosToTime(req.GetEndUnixNanos()),
-		Limit:     offset + limit,
+		TenantID: tenant, MissionID: req.GetMissionId(), Start: w.start, End: w.end, Limit: w.limit,
 	})
 	if err != nil {
 		return nil, lokiErr(err)
 	}
-	page := logsPage(entries, offset, limit)
-	return &logspb.QueryMissionLogsResponse{
-		Entries:       toProto(page),
-		NextPageToken: pagetoken.Next(offset, limit, len(page), -1),
-	}, nil
+	page, token := s.finish(sc, cur, w, pageSize, entries)
+	return &logspb.QueryMissionLogsResponse{Entries: page, NextPageToken: token}, nil
 }
 
 func (s *logsServer) QueryDaemonLogs(ctx context.Context, req *logspb.QueryDaemonLogsRequest) (*logspb.QueryDaemonLogsResponse, error) {
@@ -124,35 +155,23 @@ func (s *logsServer) QueryDaemonLogs(ctx context.Context, req *logspb.QueryDaemo
 	if err != nil {
 		return nil, err
 	}
-	offset, limit, err := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
+	sc := logsQueryScope{
+		tenant: tenant, kind: "daemon", missionID: req.GetMissionId(), level: levelString(req.GetLevel()),
+		start: req.GetStartUnixNanos(), end: req.GetEndUnixNanos(),
+	}
+	pageSize := logsPageSize(req.GetPageSize())
+	cur, w, err := s.plan(sc, req.GetPageToken(), pageSize, nanosToTime(req.GetStartUnixNanos()), nanosToTime(req.GetEndUnixNanos()))
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, err
 	}
 	entries, err := s.querier.QueryDaemonLogs(ctx, lokilogs.DaemonQuery{
-		TenantID:  tenant,
-		Level:     levelString(req.GetLevel()),
-		MissionID: req.GetMissionId(),
-		Start:     nanosToTime(req.GetStartUnixNanos()),
-		End:       nanosToTime(req.GetEndUnixNanos()),
-		Limit:     offset + limit,
+		TenantID: tenant, Level: sc.level, MissionID: req.GetMissionId(), Start: w.start, End: w.end, Limit: w.limit,
 	})
 	if err != nil {
 		return nil, lokiErr(err)
 	}
-	page := logsPage(entries, offset, limit)
-	return &logspb.QueryDaemonLogsResponse{
-		Entries:       toProto(page),
-		NextPageToken: pagetoken.Next(offset, limit, len(page), -1),
-	}, nil
-}
-
-// logsPage cuts the page [offset, offset+limit) from the newest-first entries
-// that Loki returned for a query of offset+limit lines.
-func logsPage(entries []lokilogs.Entry, offset, limit int) []lokilogs.Entry {
-	if offset >= len(entries) {
-		return nil
-	}
-	return entries[offset:min(offset+limit, len(entries))]
+	page, token := s.finish(sc, cur, w, pageSize, entries)
+	return &logspb.QueryDaemonLogsResponse{Entries: page, NextPageToken: token}, nil
 }
 
 // nanosToTime converts a Unix-nanos field to a time.Time; 0 -> zero value

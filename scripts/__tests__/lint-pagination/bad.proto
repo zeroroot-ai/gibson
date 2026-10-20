@@ -1,0 +1,14 @@
+syntax = "proto3";
+package fixture.v1;
+
+service FixtureService {
+  // A read that is not named List and returns a repeated field with no paging.
+  rpc FetchThings(FetchThingsRequest) returns (FetchThingsResponse);
+  // A request with a limit field.
+  rpc CountThings(CountThingsRequest) returns (CountThingsResponse);
+}
+
+message FetchThingsRequest { string kind = 1; }
+message FetchThingsResponse { repeated string things = 1; }
+message CountThingsRequest { int32 limit = 1; }
+message CountThingsResponse { int32 count = 1; }
