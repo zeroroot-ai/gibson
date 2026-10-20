@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/zeroroot-ai/gibson/internal/platform/signup"
 )
 
 // signupJanitorInterval is how often the sweep runs. Rows self-describe their
@@ -64,12 +62,11 @@ func (s *DaemonServer) sweepSignupVerifications(ctx context.Context) {
 		s.logger.InfoContext(ctx, "signup janitor: swept signup_verification",
 			"expired", expired, "deleted", deleted)
 	}
-	// Only the approval rung has registrations that wait for a decision. The
-	// daemon refuses to start on that rung without the identity provider
-	// client (grpc.go), so the client is present here.
-	if s.signupPolicy == signup.PolicyApproval {
-		s.expireStalePendingRegistrations(ctx)
-	}
+	// The step follows the rows, not the policy. An operator who moves the
+	// signup rung away from approval leaves pending and expiring rows behind,
+	// and each of them still holds a workspace name. With no such row the step
+	// is one empty query.
+	s.expireStalePendingRegistrations(ctx)
 }
 
 // signupJanitorDecider names the janitor in the audit record of a registration
