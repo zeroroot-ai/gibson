@@ -33,4 +33,21 @@ node lint-pagination.mjs --root "$TMP/good" --baseline "$TMP/stale" >/dev/null 2
 printf 'bad.proto FetchThings\nbad.proto CountThings\n' > "$TMP/known"
 node lint-pagination.mjs --root "$TMP/bad" --baseline "$TMP/known" >/dev/null 2>&1 || fail "a baselined violation failed"
 
+# 5. A baseline entry that the base branch did not have fails: it cannot grow.
+printf 'bad.proto FetchThings\n' > "$TMP/prev"
+node lint-pagination.mjs --root "$TMP/bad" --baseline "$TMP/known" --prev-baseline "$TMP/prev" >/dev/null 2>&1 && fail "a grown baseline passed"
+
+# 6. One object with a repeated attribute is not a collection.
+mkdir "$TMP/obj"
+cat > "$TMP/obj/obj.proto" <<'PROTO'
+syntax = "proto3";
+service S { rpc DescribeThing(Req) returns (Thing); rpc GetThings(Req) returns (Things); }
+message Req { string id = 1; }
+message Thing { string name = 1; repeated string tags = 2; }
+message Things { repeated string names = 1; }
+PROTO
+out="$(node lint-pagination.mjs --root "$TMP/obj" --baseline "$TMP/empty" 2>&1)" && fail "a pure collection named Get passed"
+grep -q "obj.proto GetThings" <<<"$out" || fail "GetThings (all fields repeated) was not caught: $out"
+grep -q "DescribeThing" <<<"$out" && fail "DescribeThing (one object) was flagged: $out"
+
 echo "lint-pagination.test: PASS"

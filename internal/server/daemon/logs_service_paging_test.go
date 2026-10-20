@@ -50,11 +50,14 @@ func (f *lokiFake) query(start, end time.Time, limit int) []lokilogs.Entry {
 		}
 		out = append(out, e)
 	}
+	// Loki picks the lines of a tie group that fill the limit in its own
+	// order. This fake uses the reverse of the order that the client sorts by,
+	// so a page that ends inside a tie group loses lines and repeats others.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].UnixNanos != out[j].UnixNanos {
 			return out[i].UnixNanos > out[j].UnixNanos
 		}
-		return out[i].Line < out[j].Line
+		return out[i].Line > out[j].Line
 	})
 	return out[:min(limit, len(out))]
 }
@@ -173,39 +176,39 @@ func TestLogsService_RefusesAForgedToken(t *testing.T) {
 
 	edited := []byte(token)
 	edited[0] ^= 1
-	cases := map[string]func() error{
-		"another tenant": func() error {
+	cases := map[string]func() codes.Code{
+		"another tenant": func() codes.Code {
 			_, err := srv.QueryMissionLogs(logsCtx("evil"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10, PageToken: token})
-			return err
+			return status.Code(err)
 		},
-		"another mission": func() error {
+		"another mission": func() codes.Code {
 			_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m2", PageSize: 10, PageToken: token})
-			return err
+			return status.Code(err)
 		},
-		"another query": func() error {
+		"another query": func() codes.Code {
 			_, err := srv.QueryDaemonLogs(logsCtx("acme"), &logspb.QueryDaemonLogsRequest{PageSize: 10, PageToken: token})
-			return err
+			return status.Code(err)
 		},
-		"another time range": func() error {
+		"another time range": func() codes.Code {
 			_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10, StartUnixNanos: 5, PageToken: token})
-			return err
+			return status.Code(err)
 		},
-		"an edited token": func() error {
+		"an edited token": func() codes.Code {
 			_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10, PageToken: string(edited)})
-			return err
+			return status.Code(err)
 		},
-		"a made-up token": func() error {
+		"a made-up token": func() codes.Code {
 			_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageToken: "AAAA.BBBB"})
-			return err
+			return status.Code(err)
 		},
-		"a token of another key": func() error {
+		"a token of another key": func() codes.Code {
 			other := NewLogsServer(f, bytes.Repeat([]byte{9}, logsCursorKeyLen), nil)
 			_, err := other.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 10, PageToken: token})
-			return err
+			return status.Code(err)
 		},
 	}
 	for name, run := range cases {
-		if code := status.Code(run()); code != codes.InvalidArgument {
+		if code := run(); code != codes.InvalidArgument {
 			t.Errorf("%s: code = %v, want InvalidArgument", name, code)
 		}
 	}
@@ -227,22 +230,48 @@ func TestDeriveLogsCursorKey(t *testing.T) {
 
 func TestLogsService_TooManyTiesIsRefused(t *testing.T) {
 	now := time.Now().UTC().UnixNano()
-	var lines []lokilogs.Entry
+	lines := make([]lokilogs.Entry, 0, 1200)
 	for i := range 1200 {
 		lines = append(lines, lokilogs.Entry{UnixNanos: now, Line: fmt.Sprintf("tie-%04d", i)})
 	}
 	srv := NewLogsServer(&lokiFake{lines: lines}, testLogsKey, nil)
+	_, err := srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 500})
+	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "share one timestamp") {
+		t.Fatalf("err = %v, want FailedPrecondition about ties", err)
+	}
+}
+
+// A tie group that spans the page edge is moved whole to the next page, and a
+// group that fills a page is read with a larger Loki limit.
+func TestLogsService_TieGroupAtThePageEdge(t *testing.T) {
+	base := time.Now().UTC().Add(-time.Minute).Truncate(time.Millisecond)
+	at := func(ms int) int64 { return base.Add(time.Duration(ms) * time.Millisecond).UnixNano() }
+	f := &lokiFake{lines: []lokilogs.Entry{
+		{UnixNanos: at(1), Line: "a"},
+		{UnixNanos: at(2), Line: "b1"}, {UnixNanos: at(2), Line: "b2"}, {UnixNanos: at(2), Line: "b3"},
+		{UnixNanos: at(3), Line: "c"},
+	}}
+	srv := NewLogsServer(f, testLogsKey, nil)
+
+	var got []string
 	token := ""
-	var err error
-	for range 5 {
-		var r *logspb.QueryMissionLogsResponse
-		r, err = srv.QueryMissionLogs(logsCtx("acme"), &logspb.QueryMissionLogsRequest{MissionId: "m1", PageSize: 500, PageToken: token})
-		if err != nil || r.GetNextPageToken() == "" {
+	for range 10 {
+		r, err := srv.QueryDaemonLogs(logsCtx("acme"), &logspb.QueryDaemonLogsRequest{
+			PageSize: 2, PageToken: token, StartUnixNanos: base.UnixNano() - 1,
+		})
+		if err != nil {
+			t.Fatalf("page: %v", err)
+		}
+		for _, e := range r.GetEntries() {
+			got = append(got, e.GetLine())
+		}
+		if r.GetNextPageToken() == "" {
 			break
 		}
 		token = r.GetNextPageToken()
 	}
-	if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), "share one timestamp") {
-		t.Fatalf("err = %v, want FailedPrecondition about ties", err)
+	sort.Strings(got)
+	if want := "a b1 b2 b3 c"; strings.Join(got, " ") != want {
+		t.Fatalf("lines = %v, want each of %q exactly once", got, want)
 	}
 }

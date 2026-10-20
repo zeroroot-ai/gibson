@@ -9,9 +9,10 @@
 #   1 Preflight        — kubectl context must be `kind-gibson` (NOT
 #                        `kind-gibson-customer`); grpcurl + kubectl + jq
 #                        on PATH.
-#   2 Deploy           — make restart-daemon in zeroroot-ai/hosted against
-#                        the kind cluster. Wait for daemon readiness via
-#                        kubectl wait.
+#   2 Deploy           — the daemon runs the build under test. Roll it out
+#                        through the chart (zeroroot-ai/charts) and the Argo
+#                        tree, never with a hand edit. Wait for daemon
+#                        readiness via kubectl wait.
 #   3 Mission #1       — trigger via gibson-cli (or direct gRPC) and wait
 #                        for completion. Assert Neo4j now contains
 #                        Mission/Technique/Finding nodes.

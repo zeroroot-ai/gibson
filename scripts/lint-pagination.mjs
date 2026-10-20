@@ -9,15 +9,22 @@
  * RPC, whatever its name:
  *
  *   1. The request message has no field named "limit" or "offset".
- *   2. When the response message has a top-level repeated field, the request
- *      has page_size and page_token, and the response has next_page_token.
+ *   2. When the RPC returns a collection, the request has page_size and
+ *      page_token, and the response has next_page_token.
+ *
+ * An RPC returns a collection when its name starts with List, Query or Search,
+ * or when every field of its response is repeated (or a map). A response with
+ * one object and a repeated attribute, such as a Describe or Get of one thing,
+ * is not a collection.
  *
  * A violation fails the run (exit 1), unless the RPC is in the baseline file
  * (scripts/lint-pagination.baseline). The baseline holds the RPCs that broke
  * the rules before this check covered them. Each line is "<proto path> <Rpc>".
  * The key is content, never a line number. The baseline can only shrink:
  * an entry for an RPC that now passes, or that no longer exists, fails the
- * run, so a fixed RPC leaves the file in the same PR.
+ * run, so a fixed RPC leaves the file in the same PR. With --prev-baseline
+ * <file> (the baseline of the base branch), a key that the base does not hold
+ * also fails, so the baseline cannot grow.
  *
  * Usage:
  *   node scripts/lint-pagination.mjs
@@ -38,6 +45,7 @@ function arg(name, fallback) {
 
 const PROTO_ROOT = arg('--root', join(REPO_ROOT, 'internal/server/daemon/api'));
 const BASELINE = arg('--baseline', join(__dirname, 'lint-pagination.baseline'));
+const PREV_BASELINE = arg('--prev-baseline', null);
 
 /** Collect all *.proto file paths under dir. */
 function findProtos(dir) {
@@ -87,6 +95,26 @@ function messageBody(text, name) {
   return body;
 }
 
+/** Return the field declarations of a message body: [{ repeated, name }]. */
+function fieldsOf(body) {
+  const fields = [];
+  for (const stmt of body.split(';')) {
+    const m = /^\s*(repeated\s+|map\s*<[^>]*>\s+)?(?!reserved\b|option\b|oneof\b)[\w.]+\s+(\w+)\s*=\s*\d+/.exec(stmt);
+    const mapField = /^\s*map\s*<[^>]*>\s+(\w+)\s*=\s*\d+/.exec(stmt);
+    if (mapField) fields.push({ repeated: true, name: mapField[1] });
+    else if (m) fields.push({ repeated: Boolean(m[1]), name: m[2] });
+  }
+  return fields;
+}
+
+/** True when the RPC returns a collection (see the header). */
+function returnsCollection(rpcName, respBody) {
+  if (!/\brepeated\b|\bmap\s*</.test(respBody)) return false;
+  if (/^(List|Query|Search)/.test(rpcName)) return true;
+  const fields = fieldsOf(respBody).filter((f) => f.name !== 'next_page_token');
+  return fields.length > 0 && fields.every((f) => f.repeated);
+}
+
 const hasField = (body, field) => new RegExp(`\\b${field}\\s*=\\s*\\d+`).test(body);
 
 /** Return the violations of every unary RPC in one proto text. */
@@ -100,7 +128,7 @@ export function checkProto(text) {
       found.push({ rpc: rpc.name, why: 'the request has a limit or offset field; use page_size and page_token' });
       continue;
     }
-    if (resp !== null && /\brepeated\b/.test(resp)) {
+    if (resp !== null && returnsCollection(rpc.name, resp)) {
       const ok = req !== null && hasField(req, 'page_size') && hasField(req, 'page_token') &&
         hasField(resp, 'next_page_token');
       if (!ok) {
@@ -123,6 +151,7 @@ function readBaseline(file) {
 // ---------------------------------------------------------------------------
 
 const baseline = readBaseline(BASELINE);
+const prev = PREV_BASELINE ? readBaseline(PREV_BASELINE) : null;
 const live = new Set();
 let failures = 0;
 
@@ -141,6 +170,15 @@ for (const key of baseline) {
   if (!live.has(key)) {
     console.error(`[lint-pagination] baseline entry "${key}" no longer violates the rules or no longer exists. Delete it from ${relative(REPO_ROOT, BASELINE)}.`);
     failures++;
+  }
+}
+
+if (prev) {
+  for (const key of baseline) {
+    if (!prev.has(key)) {
+      console.error(`[lint-pagination] baseline entry "${key}" is new. The baseline can only shrink. Page the RPC instead.`);
+      failures++;
+    }
   }
 }
 
