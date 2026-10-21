@@ -14,6 +14,7 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
@@ -123,6 +124,34 @@ func (s *DaemonServer) WithBudgetEnforcer(e budgetEnforcerIface) *DaemonServer {
 func (s *DaemonServer) WithModelGateInvalidator(inv modelGateInvalidator) *DaemonServer {
 	s.modelGateInvalidator = inv
 	return s
+}
+
+// WithModelFilter wires the model gate that ExecuteLLM asks before it calls a
+// provider. Without a filter, ExecuteLLM denies every call.
+func (s *DaemonServer) WithModelFilter(f modelgate.Filter) *DaemonServer {
+	s.modelFilter = f
+	return s
+}
+
+// checkModelGate asks the model gate whether the caller may use the provider and
+// model of this call. It is the same check that slot resolution runs. Any
+// missing filter, error or empty answer is a denial.
+func (s *DaemonServer) checkModelGate(ctx context.Context, provider, model string) error {
+	if s.modelFilter == nil {
+		return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the model gate is not configured")
+	}
+	permitted, err := s.modelFilter.Permitted(ctx, []modelgate.Candidate{{Provider: provider, Model: model}})
+	if err != nil {
+		if modelgate.CouldNotDecide(err) {
+			return status_grpc.Errorf(codes.Unavailable, "model_access_denied: the model gate could not decide")
+		}
+		return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the model gate could not check access")
+	}
+	if len(permitted) != 1 {
+		return status_grpc.Errorf(codes.PermissionDenied,
+			"model_access_denied: not permitted to use model %q on provider %q", model, provider)
+	}
+	return nil
 }
 
 // WithAuditQuery wires the audit-log read backend for
@@ -301,6 +330,15 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 		return nil, status_grpc.Errorf(codes.Internal, "failed to construct LLM provider")
 	}
 	// dec is no longer needed after prov is built.
+
+	// 5b. Model gate: the caller must hold can_use on the model or the provider.
+	// It is the check that slot resolution runs for missions, and it names the
+	// provider the same way: by prov.Name(), the name that the registry holds
+	// and that the default grant is written for. The configured name of the
+	// provider is not that name. Building the provider makes no network call.
+	if gateErr := s.checkModelGate(ctx, prov.Name(), provCfg.DefaultModel); gateErr != nil {
+		return nil, gateErr
+	}
 
 	// 6. Translate request messages.
 	msgs := protoMessagesToLLM(req.GetMessages())

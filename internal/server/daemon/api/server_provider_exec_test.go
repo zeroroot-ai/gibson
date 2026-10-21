@@ -16,8 +16,10 @@ import (
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
@@ -135,8 +137,26 @@ func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConf
 		// The budget enforcer is required: the daemon wires it at start.
 		budgetEnforcer: &stubBudgetEnforcer{},
 	}
-	return s
+	// The model gate is required: ExecuteLLM denies every call without it.
+	return s.WithModelFilter(gateStub{permit: true})
 }
+
+// gateStub is a modelgate.Filter with a fixed answer.
+type gateStub struct {
+	permit bool
+	err    error
+}
+
+func (g gateStub) Permitted(_ context.Context, c []modelgate.Candidate) ([]modelgate.Candidate, error) {
+	if g.err != nil {
+		return nil, g.err
+	}
+	if g.permit {
+		return c, nil
+	}
+	return nil, nil
+}
+func (gateStub) InvalidateCache() {}
 
 // knownDecryptedConfig returns a DecryptedConfig that exercises the
 // api_key / base_url / extra credential path.
@@ -712,6 +732,7 @@ func TestWithProviderFactory_ReplacesDefault(t *testing.T) {
 		logger:          slog.Default(),
 		providerFactory: providerFactoryFunc, // default
 		budgetEnforcer:  &stubBudgetEnforcer{},
+		modelFilter:     gateStub{permit: true},
 	}
 	called := false
 	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
@@ -967,4 +988,86 @@ func TestExecuteLLM_PerCallCap_noCapNoChange(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 8192, capturedReq.MaxTokens,
 		"no cap in context: MaxTokens must pass through unchanged")
+}
+
+// TestExecuteLLM_ModelGate proves that ExecuteLLM asks the model gate before it
+// builds a provider, and that every answer but an explicit permit is a denial.
+func TestExecuteLLM_ModelGate(t *testing.T) {
+	cases := []struct {
+		name   string
+		filter modelgate.Filter
+		want   codes.Code
+	}{
+		{"no grant", gateStub{permit: false}, codes.PermissionDenied},
+		{"no filter wired", nil, codes.PermissionDenied},
+		{"gate error", gateStub{err: errors.New("bad request")}, codes.PermissionDenied},
+		{"gate outage", gateStub{err: authz.ErrFgaUnavailable}, codes.Unavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &stubProviderConfigStore{
+				resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+					return knownDecryptedConfig(), nil
+				},
+			}
+			called := false
+			s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+				return &stubMockProvider{completeFunc: func(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
+					called = true
+					return &llm.CompletionResponse{}, nil
+				}}, nil
+			})
+			s.modelFilter = tc.filter
+
+			_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+				ProviderName: "my-openai",
+				Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+			})
+			require.Error(t, err)
+			assert.Equal(t, tc.want, status_grpc.Code(err))
+			assert.False(t, called, "a denied call must not reach the provider")
+		})
+	}
+}
+
+// onlyProviderGate permits one provider name and records what it was asked.
+type onlyProviderGate struct {
+	allow string
+	asked []modelgate.Candidate
+}
+
+func (g *onlyProviderGate) Permitted(_ context.Context, c []modelgate.Candidate) ([]modelgate.Candidate, error) {
+	g.asked = append(g.asked, c...)
+	for _, cand := range c {
+		if cand.Provider == g.allow {
+			return c, nil
+		}
+	}
+	return nil, nil
+}
+func (*onlyProviderGate) InvalidateCache() {}
+
+// The gate names the provider as the slot path does: by the name of the built
+// provider, which is the name the default grant is written for. The configured
+// name of the provider (here "my-openai") is not that name. A member with only
+// the default grant must be allowed.
+func TestExecuteLLM_ModelGateNamesTheProviderAsTheSlotPathDoes(t *testing.T) {
+	store := &stubProviderConfigStore{
+		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
+			return knownDecryptedConfig(), nil
+		},
+	}
+	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
+		return &stubMockProvider{}, nil // Name() is "stub"
+	})
+	gate := &onlyProviderGate{allow: "stub"}
+	s.modelFilter = gate
+
+	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai",
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	require.Len(t, gate.asked, 1)
+	assert.Equal(t, "stub", gate.asked[0].Provider, "the gate must be asked about the provider name, not the configured name")
 }

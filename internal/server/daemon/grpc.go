@@ -920,14 +920,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// denies every model (hosted#358). The audit emission needs an
 	// auditWriter and is skipped without one.
 	// Spec: llm-user-attribution-governance (Requirement 4).
+	filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
+	// ExecuteLLM asks the same filter before it calls a provider. Expose the
+	// filter's cache-invalidation hook so grant/revoke take effect within
+	// milliseconds rather than the filter's 30s TTL.
+	daemonSvc.WithModelFilter(filter)
+	daemonSvc.WithModelGateInvalidator(filter)
 	if d.infrastructure != nil {
 		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {
-			filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
 			dsm.WithModelFilter(filter)
-			// Expose the filter's cache-invalidation hook so
-			// grant/revoke take effect within milliseconds rather
-			// than the filter's 30s TTL.
-			daemonSvc.WithModelGateInvalidator(filter)
 			d.logger.Info(ctx, "modelgate filter wired into slot resolver (spec: llm-user-attribution-governance)")
 			// Emit a model_resolved event for every resolution, allowed or
 			// denied.
