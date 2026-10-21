@@ -294,6 +294,25 @@ func (s *HarnessCallbackService) policyFromState(ctx context.Context, state *Run
 	return metatool.MissionPolicy{Blocked: blocked, RunActive: runActiveCheck(state.Status)}, nil
 }
 
+// storedBlockedTools reads the deny list of the mission of a callback from its
+// stored definition. It is the one source of the deny list: the native tool
+// path, the plugin path and invoke_tool all read it here. An unwired source and
+// an unreadable list are errors, and the caller refuses the call.
+func (s *HarnessCallbackService) storedBlockedTools(ctx context.Context, contextInfo *harnesspb.ContextInfo) ([]string, error) {
+	if s.missionBlockedTools == nil {
+		return nil, errors.New("the mission deny list source is not wired")
+	}
+	missionID := contextInfo.GetMissionId()
+	if missionID == "" {
+		return nil, errors.New("the callback names no mission")
+	}
+	blocked, err := s.missionBlockedTools(ctx, auth.TenantStringFromContext(ctx), missionID)
+	if err != nil {
+		return nil, fmt.Errorf("read the deny list of mission %q: %w", missionID, err)
+	}
+	return blocked, nil
+}
+
 // MissionPolicyForRun returns the mission policy of a run of the tenant, for a
 // path that has no harness of its own, such as ComponentService.CallTool. A run
 // of another tenant is refused.

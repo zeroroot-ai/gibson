@@ -498,13 +498,6 @@ func TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable(t *testing.T) {
 	}
 }
 
-// blockedToolHarness is a harness whose mission deny list names the test tool.
-type blockedToolHarness struct{ *mockHarnessWithResolver }
-
-func (h blockedToolHarness) Mission() MissionContext {
-	return MissionContext{TenantID: "test-tenant", MissionRunID: "run-1", BlockedTools: []string{"test-external-tool"}}
-}
-
 // TestInvokeNativeTool_Refusals covers the refusals before and after the
 // hand-off to the tool call handler. Each one leaves exactly one record.
 func TestInvokeNativeTool_Refusals(t *testing.T) {
@@ -541,11 +534,10 @@ func TestInvokeNativeTool_Refusals(t *testing.T) {
 	t.Run("a tool on the mission deny list is refused", func(t *testing.T) {
 		var captured []capturedTool
 		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
-		blocked := blockedToolHarness{harness}
-		registry := NewCallbackHarnessRegistry()
-		mustRegister(t, registry, contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
-		svc.registry = registry
-		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, blocked, "test-external-tool", "native:test-external-tool", []byte(`{}`))
+		svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) {
+			return []string{"test-external-tool"}, nil
+		}
+		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, harness, "test-external-tool", "native:test-external-tool", []byte(`{}`))
 		if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
 			t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
 		}
@@ -726,5 +718,71 @@ func TestMissionPolicyForRun_RefusesARunOfAnotherTenant(t *testing.T) {
 	}
 	if _, err := svc.MissionPolicyForRun(context.Background(), "other-tenant", "run-1"); err == nil {
 		t.Fatal("a run of another tenant must be refused")
+	}
+}
+
+// The native tool path reads the same stored deny list. An entry in the other
+// spelling blocks the tool, and a list that cannot be read, or no source, refuses
+// the call before the tool runs.
+func TestCallToolProto_TheNativePathReadsTheStoredDenyList(t *testing.T) {
+	call := func(svc *HarnessCallbackService, ci *harnesspb.ContextInfo) *harnesspb.CallToolProtoResponse {
+		resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+			Context: ci, Name: "test-external-tool", InputType: "testtool.ToolInput", OutputType: "testtool.ToolOutput", InputJson: []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("CallToolProto: %v", err)
+		}
+		return resp
+	}
+	var captured []capturedTool
+	svc, _, ci := newStreamCaptureSvc(t, &captured, nil)
+
+	var gotTenant, gotMission string
+	svc.missionBlockedTools = func(_ context.Context, tenant, mission string) ([]string, error) {
+		gotTenant, gotMission = tenant, mission
+		return []string{"NATIVE:test-external-tool"}, nil
+	}
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("a blocked tool: code = %v, want PERMISSION_DENIED", got)
+	}
+	if gotTenant != "test-tenant" || gotMission != "test-mission-123" {
+		t.Errorf("the list was read for %q/%q", gotTenant, gotMission)
+	}
+
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") }
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("an unreadable list: code = %v, want UNAVAILABLE", got)
+	}
+	svc.missionBlockedTools = nil
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("no source: code = %v, want UNAVAILABLE", got)
+	}
+}
+
+// The direct plugin path reads the stored deny list too, and refuses when it
+// cannot read it.
+func TestQueryPlugin_ReadsTheStoredDenyList(t *testing.T) {
+	var captured []capturedTool
+	svc, _, ci := newStreamCaptureSvc(t, &captured, nil)
+	query := func() *harnesspb.QueryPluginResponse {
+		resp, err := svc.QueryPlugin(testCtxWithTenant(), &harnesspb.QueryPluginRequest{Context: ci, Name: "gitlab", Method: "create_issue"})
+		if err != nil {
+			t.Fatalf("QueryPlugin: %v", err)
+		}
+		return resp
+	}
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) {
+		return []string{"mcp__gitlab__create_issue"}, nil
+	}
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("a blocked plugin method: code = %v, want PERMISSION_DENIED", got)
+	}
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") }
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("an unreadable list: code = %v, want UNAVAILABLE", got)
+	}
+	svc.missionBlockedTools = nil
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("no source: code = %v, want UNAVAILABLE", got)
 	}
 }
