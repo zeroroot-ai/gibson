@@ -46,6 +46,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -415,5 +416,82 @@ type B struct {
 	sort.Strings(got)
 	if strings.Join(got, ",") != "ComponentService,DaemonService,Plain" {
 		t.Errorf("embeddedServices = %v", got)
+	}
+}
+
+// baselineEntries returns the RPC lines of the text of a baseline file.
+func baselineEntries(text string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out[line] = struct{}{}
+	}
+	return out
+}
+
+// baselineGrowth returns the entries of head that base does not hold, sorted.
+// The baseline may only shrink, so a head with any such entry fails. A swap of
+// one entry for another keeps the count and still fails.
+func baselineGrowth(base, head map[string]struct{}) []string {
+	var added []string
+	for entry := range head {
+		if _, ok := base[entry]; !ok {
+			added = append(added, entry)
+		}
+	}
+	sort.Strings(added)
+	return added
+}
+
+// TestEveryRegisteredRPCBaselineNeverGrows is the ratchet of the baseline. The
+// baseline lists the RPCs with no handler test and may only shrink, but nothing
+// stopped a pull request from regenerating it and adding lines. This test reads
+// the baseline of origin/main and fails when the baseline of the branch holds an
+// entry that main does not.
+//
+// The walker job sets RPC_BASELINE_REQUIRE=1 after it fetched main. In that job
+// a base that cannot be read fails the test, so the guard never skips there. In
+// another lane, or on a machine with no origin/main, the test skips.
+func TestEveryRegisteredRPCBaselineNeverGrows(t *testing.T) {
+	root := repoRoot(t)
+	rel := "internal/platform/authz/registry/" + baselineFileName
+	out, err := exec.Command("git", "-C", root, "show", "origin/main:"+rel).Output() //nolint:gosec // fixed arguments, a constant path under the module root
+	if err != nil {
+		if os.Getenv("RPC_BASELINE_REQUIRE") == "1" {
+			t.Fatalf("the baseline of origin/main could not be read (%v). The walker job must fetch main first", err)
+		}
+		t.Skipf("no origin/main to compare with (%v); the walker job requires it", err)
+	}
+	head, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // a constant path under the module root
+	if err != nil {
+		t.Fatalf("reading %s: %v", rel, err)
+	}
+	if added := baselineGrowth(baselineEntries(string(out)), baselineEntries(string(head))); len(added) > 0 {
+		t.Errorf("the baseline holds %d entr(y/ies) that origin/main does not. The baseline may only shrink: write the handler test instead of adding the line.\n  %s",
+			len(added), strings.Join(added, "\n  "))
+	}
+}
+
+// The failing fixture of the ratchet: growth fails, a swap fails, a shrink and
+// no change pass.
+func TestBaselineGrowth_Fixture(t *testing.T) {
+	base := baselineEntries("# header\n/a.v1.S/M1\n/a.v1.S/M2\n")
+	for name, tc := range map[string]struct {
+		head string
+		want []string
+	}{
+		"no change":   {"/a.v1.S/M1\n/a.v1.S/M2\n", nil},
+		"a shrink":    {"/a.v1.S/M1\n", nil},
+		"a new entry": {"/a.v1.S/M1\n/a.v1.S/M2\n/a.v1.S/M3\n", []string{"/a.v1.S/M3"}},
+		"a swap":      {"/a.v1.S/M1\n/a.v1.S/M9\n", []string{"/a.v1.S/M9"}},
+		"comments":    {"# changed header\n\n/a.v1.S/M1\n", nil},
+	} {
+		got := baselineGrowth(base, baselineEntries(tc.head))
+		if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+			t.Errorf("%s: growth = %v, want %v", name, got, tc.want)
+		}
 	}
 }

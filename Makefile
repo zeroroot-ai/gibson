@@ -504,7 +504,7 @@ check-noun-contract:
 # test and is not in the shrinking baseline. Pure unit test — no infra needed.
 check-rpc-test-walker:
 	@echo "Running per-RPC test walker (authz-deny + handler-test coverage)..."
-	$(GOTEST) -count=1 -run 'TestEveryRegisteredRPC' ./internal/platform/authz/registry/
+	$(GOTEST) -count=1 -run 'TestEveryRegisteredRPC|TestBaselineGrowth' ./internal/platform/authz/registry/
 	@echo "check-rpc-test-walker PASSED"
 
 # check-critical-paths: pure-unit guard that every named Tier-3 critical-path
