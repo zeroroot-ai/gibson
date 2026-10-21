@@ -394,7 +394,15 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # The baseline of the walker may only shrink. The ratchet test compares it
+      # with the baseline of main, so main must be here, and the test fails when
+      # it is not (RPC_BASELINE_REQUIRE).
+      - name: Fetch main for the baseline ratchet
+        run: git fetch --no-tags origin main:refs/remotes/origin/main
+
       - name: Run per-RPC test walker
+        env:
+          RPC_BASELINE_REQUIRE: "1"
         run: make check-rpc-test-walker
 
   authz-registry-drift:
