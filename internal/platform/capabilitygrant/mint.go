@@ -80,6 +80,7 @@ import (
 	"golang.org/x/crypto/hkdf"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // MaxLifetime is the upper bound enforced by Mint on the requested
@@ -268,7 +269,7 @@ const CallingAgentClaim = "cag"
 // MissionRunClaim is the name of the signed claim that carries the mission run
 // of the grant. A mission ID is the same for every run of a record, so a
 // callback names its run, and the SDKs read it from this claim (gibson#1235).
-const MissionRunClaim = "mrid"
+const MissionRunClaim = sdkcg.MissionRunClaim
 
 // MintRequest carries the per-task scope.
 type MintRequest struct {

@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // memberSandboxClient records the one launch a member test makes.
@@ -137,7 +138,7 @@ func TestMemberLauncher_LaunchesWithTheBaseGrantAndTheMemberContract(t *testing.
 	if claims.MissionID != "bank-1" || claims.TaskID != "m-1" || claims.Tenant.String() != "acme" {
 		t.Errorf("grant scope = %+v, want the bank and the member", claims)
 	}
-	if run := capabilitygrant.MissionRunOf(req.Env["GIBSON_CG_JWT"]); run != launched.MissionRunID {
+	if run := sdkcg.MissionRunOf(req.Env["GIBSON_CG_JWT"]); run != launched.MissionRunID {
 		t.Errorf("grant mrid = %q, want the run of the member %q", run, launched.MissionRunID)
 	}
 	assertSameSet(t, claims.AllowedRPCs, harness.MemberBaseGrantRPCs())

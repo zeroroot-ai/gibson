@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"github.com/zeroroot-ai/sdk/fork"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -173,7 +174,7 @@ func TestNewForkGrantMinter(t *testing.T) {
 	if err != nil || tok == "" {
 		t.Fatalf("MintForkGrant = %q, %v", tok, err)
 	}
-	if run := capabilitygrant.MissionRunOf(tok); run != "r1" {
+	if run := sdkcg.MissionRunOf(tok); run != "r1" {
 		t.Fatalf("fork grant mrid = %q, want r1", run)
 	}
 	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return nil }).MintForkGrant(context.Background(), d); err == nil {
