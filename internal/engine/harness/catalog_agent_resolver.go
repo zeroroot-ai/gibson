@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -225,6 +226,15 @@ func (r *CatalogAgentResolver) ResolveAgentLaunchSpec(ctx context.Context, req A
 			spec.Env[k] = v
 		}
 	}
+	// The subscription shape sets no model credential. The block check in
+	// resolveShapeEnv covers the manifest credentials. This check covers the
+	// whole launch environment, the static manifest env included, so the claim
+	// holds for what the sandbox really receives and not for one source of it.
+	if shape == componentcatalog.LoginShapeSubscription {
+		if err := refuseModelCredentialInEnv(agentName, spec.Env); err != nil {
+			return sandboxed.AgentLaunchSpec{}, err
+		}
+	}
 	// The enrollment's runtime cap (AgentEnrollmentSpec.maxRuntime,
 	// gibson#597), reported by the tenant-operator. A cap nothing reported
 	// leaves the dispatch's own bound and the launcher default in force.
@@ -299,8 +309,27 @@ func (r *CatalogAgentResolver) resolveShapeEnv(
 // front of a person's own sign-in. They may never be set under the
 // subscription shape.
 var modelCredentialEnvs = map[string]bool{
-	"ANTHROPIC_API_KEY":    true,
-	"ANTHROPIC_AUTH_TOKEN": true,
+	"ANTHROPIC_API_KEY":         true,
+	"ANTHROPIC_AUTH_TOKEN":      true,
+	"ANTHROPIC_FOUNDRY_API_KEY": true,
+}
+
+// refuseModelCredentialInEnv refuses a launch environment that holds a model
+// credential or a route flag. It runs on the final environment of a launch
+// under the subscription shape.
+func refuseModelCredentialInEnv(agentName string, env map[string]string) error {
+	names := make([]string, 0, len(env))
+	for k := range env {
+		if modelCredentialEnvs[k] || strings.HasPrefix(k, "CLAUDE_CODE_USE_") {
+			names = append(names, k)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+	return fmt.Errorf("%q: the %s shape must set no model credential, but the launch environment holds %s: %w",
+		agentName, componentcatalog.LoginShapeSubscription, strings.Join(names, ", "), ErrSubscriptionShapeCredential)
 }
 
 func refuseModelCredential(agentName string, req componentcatalog.CredentialRequirement) error {
