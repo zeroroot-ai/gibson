@@ -40,12 +40,17 @@ func (d *daemonImpl) storedBlockedTools(ctx context.Context, tenant, missionID s
 	if err != nil {
 		return nil, fmt.Errorf("read mission %s: %w", missionID, err)
 	}
+	return blockedToolsOf(rec)
+}
+
+// blockedToolsOf reads the deny list from the stored definition of a mission.
+func blockedToolsOf(rec *mission.Mission) ([]string, error) {
 	if rec.MissionDefinitionJSON == "" {
 		return nil, nil // a mission with no stored definition has no constraints
 	}
 	def, err := mission.UnmarshalDefinitionJSON([]byte(rec.MissionDefinitionJSON))
 	if err != nil {
-		return nil, fmt.Errorf("parse the definition of mission %s: %w", missionID, err)
+		return nil, fmt.Errorf("parse the definition of mission %s: %w", rec.ID, err)
 	}
 	return def.GetConstraints().GetBlockedTools(), nil
 }

@@ -204,3 +204,16 @@ func TestMatchBlocked_BothSpellingsMatchBothWays(t *testing.T) {
 		t.Error("a bare native name must still match itself")
 	}
 }
+
+// A native id that the check denies is recorded as a failure and returned.
+func TestCall_ADeniedNativeIDIsRecorded(t *testing.T) {
+	obs := &seqObserver{}
+	h := NewHandler(nil, allowAll(), &seqQuerier{obs: obs})
+	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record})
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("err = %v, want ErrUnauthorized", err)
+	}
+	if len(obs.recorded) != 1 || len(obs.events) != 1 || obs.events[0] != "result" {
+		t.Fatalf("recorded = %v, events = %v", obs.recorded, obs.events)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -385,4 +386,88 @@ func TestPollWork_RecordsTheClaimant(t *testing.T) {
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
 	_, err = env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{WorkId: "work-poll-claim", Result: []byte(`{}`)})
 	require.NoError(t, err)
+}
+
+// A server with no connector caller, a call with a body that is not a JSON
+// object, and a caller with no identity are each refused before any call.
+func TestCallTool_ConnectorCallInputRefusals(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+
+	env.srv.connectorCaller = nil
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	assert.Equal(t, codes.Unimplemented, status.Code(err))
+	env.srv.WithConnectorCaller(env.caller)
+
+	req := connectorReq("")
+	req.InputJson = `[1,2]`
+	_, err = env.srv.CallTool(agentCtx("agent_principal:42"), req)
+	assert.Equal(t, codes.InvalidArgument, status.Code(err))
+
+	_, err = env.srv.CallTool(auth.ContextWithTenantString(context.Background(), "test-tenant"), connectorReq(""))
+	assert.Equal(t, codes.Unauthenticated, status.Code(err))
+	assert.Empty(t, env.caller.calls)
+}
+
+// A result that cannot be encoded is an internal error.
+func TestCallTool_AnUnencodableResultIsAnInternalError(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.caller.result = make(chan int)
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	assert.Equal(t, codes.Internal, status.Code(err))
+}
+
+// failingRun is a registry whose run lookup fails with an error that is not
+// "unknown".
+type failingRun struct{ *RedisWorkContextRegistry }
+
+func (failingRun) WorkRun(context.Context, string) (string, error) {
+	return "", errors.New("redis down")
+}
+
+// A run lookup that fails refuses the call, and a mission lookup that fails
+// does not stop it: the record then names no mission.
+func TestCallTool_RunAndMissionLookupFailures(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.claim(t, "work-9", "agent_principal:42")
+
+	env.srv.WithWorkContextRegistry(failingRun{env.reg})
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
+	assert.Equal(t, codes.Internal, status.Code(err))
+	env.srv.WithWorkContextRegistry(env.reg)
+
+	closed := newWorkIDEnv(t)
+	require.NoError(t, closed.state.Close())
+	env.srv.WithMissionContextResolver(NewMissionContextResolver(closed.state, nil))
+	_, err = env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
+	require.NoError(t, err)
+	for _, ev := range env.rec.Events() {
+		assert.NotContains(t, string(ev.Metadata), "mission_id")
+	}
+}
+
+// failSecondWrite is a durable writer that accepts the intent record and
+// refuses the result record.
+type failSecondWrite struct {
+	audittest.Recorder
+	writes int
+}
+
+func (w *failSecondWrite) WriteSync(ctx context.Context, ev audit.Event) error {
+	w.writes++
+	if w.writes > 1 {
+		return errors.New("audit database down")
+	}
+	if err := w.Recorder.WriteSync(ctx, ev); err != nil {
+		return fmt.Errorf("record: %w", err)
+	}
+	return nil
+}
+
+// A result record that cannot be written is logged and does not change the
+// answer of a call that happened.
+func TestCallTool_AFailedResultRecordDoesNotChangeTheAnswer(t *testing.T) {
+	env := newConnectorEnv(t, true, func(*audittest.Recorder) audit.DurableWriter { return &failSecondWrite{} })
+	resp, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"demo"}`, resp.GetOutputJson())
 }
