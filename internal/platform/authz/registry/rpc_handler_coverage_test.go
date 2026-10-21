@@ -114,7 +114,7 @@ func scanModule(t *testing.T, root string) (handlerTests, serviceDirs) {
 		}
 		f, perr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if perr != nil {
-			return nil // an unparseable file is ignored
+			return nil //nolint:nilerr // an unparseable file is ignored, as before
 		}
 		dir := filepath.Dir(path)
 		if strings.HasSuffix(path, "_test.go") {
