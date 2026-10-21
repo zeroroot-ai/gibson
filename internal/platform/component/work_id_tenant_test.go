@@ -70,6 +70,23 @@ func newWorkIDEnv(t *testing.T) *workIDEnv {
 	return &workIDEnv{svc: svc, queue: queue, state: sc, mr: mr}
 }
 
+// claimedBy records subject as the claimant of workID and returns ctx carrying
+// that identity, the way PollWork and a later RPC of one component do.
+func (e *workIDEnv) claimedBy(t *testing.T, ctx context.Context, workID, subject string) context.Context {
+	t.Helper()
+	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), workID, subject))
+	return withSubject(ctx, subject)
+}
+
+// withSubject adds an identity with subject to ctx and keeps its tenant.
+func withSubject(ctx context.Context, subject string) context.Context {
+	tenant := auth.SystemTenant
+	if name := auth.TenantStringFromContext(ctx); name != systemTenant {
+		tenant, _ = auth.NewTenantID(name)
+	}
+	return auth.WithIdentity(ctx, auth.Identity{Subject: subject, Tenant: tenant})
+}
+
 // enqueueFor dispatches a work item on tenant's stream and returns its work id,
 // which is what a component polling that stream would receive.
 func (e *workIDEnv) enqueueFor(t *testing.T, tenant, workID string) string {
@@ -145,6 +162,7 @@ func TestSubmitResult_AcceptsOwningTenant(t *testing.T) {
 	workID := env.enqueueFor(t, victimTenant, "work-owner-1")
 
 	ctx := auth.ContextWithTenantString(context.Background(), victimTenant)
+	ctx = env.claimedBy(t, ctx, workID, "component-1")
 	resp, err := env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{
 		WorkId: workID,
 		Result: []byte(`{"ok":true}`),
@@ -168,6 +186,7 @@ func TestSubmitResult_AcceptsSharedComponentIdentity(t *testing.T) {
 	ctx := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
 	require.Equal(t, systemTenant, auth.TenantStringFromContext(ctx),
 		"the context must actually carry the system tenant, or this test proves nothing")
+	ctx = env.claimedBy(t, ctx, workID, "component-1")
 
 	resp, err := env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{
 		WorkId: workID,
@@ -498,6 +517,7 @@ func TestSubmitResult_ScopesDiscoveryToTheWorkOwner(t *testing.T) {
 	workID := env.enqueueFor(t, victimTenant, "work-discovery-1")
 
 	ctx := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
+	ctx = env.claimedBy(t, ctx, workID, "component-1")
 	_, err := env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{
 		WorkId: workID,
 		Result: discoveryPayload(t),
@@ -525,6 +545,7 @@ func TestSubmitResult_SkipsDiscoveryWhenTheOwnerIsNotGraphAddressable(t *testing
 	workID := env.enqueueFor(t, systemTenant, "work-discovery-2")
 
 	ctx := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
+	ctx = env.claimedBy(t, ctx, workID, "component-1")
 	_, err := env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{
 		WorkId: workID,
 		Result: discoveryPayload(t),

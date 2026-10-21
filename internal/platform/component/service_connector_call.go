@@ -18,18 +18,22 @@ import (
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
-// Audit names of a connector tool call. The action is the one name that a
-// reader of the audit trail filters on. The resource is the connector.
-const (
-	connectorCallAction   = "connector.tool.call"
-	connectorCallResource = "connector"
-)
+// MissionPolicySource returns the mission policy of a run: its deny list and
+// whether it may call tools.
+type MissionPolicySource func(ctx context.Context, runID string) (metatool.MissionPolicy, error)
 
 // WithConnectorCaller wires the one MCP client of the daemon as the caller of
 // connector tools. ListTools returns the id mcp:<connector>:<tool> for each
 // connector tool, and CallTool takes that id back (ADR-0065).
 func (s *ComponentServiceServer) WithConnectorCaller(c metatool.ConnectorCaller) *ComponentServiceServer {
 	s.connectorCaller = c
+	return s
+}
+
+// WithMissionPolicy wires the source of the mission policy of a run. A
+// connector call that names a work item takes the policy of its run.
+func (s *ComponentServiceServer) WithMissionPolicy(src MissionPolicySource) *ComponentServiceServer {
+	s.missionPolicy = src
 	return s
 }
 
@@ -42,10 +46,11 @@ func connectorToolID(name string) (toolid.ID, bool) {
 	return tid, true
 }
 
-// callConnectorTool serves CallTool for an mcp:<connector>:<tool> id. It runs
-// the same checks and the same MCP client as the invoke_tool meta-tool: the
-// can_execute check on the connector, then one call of the daemon to the
-// connector. It writes one audit record for the call, whatever its result.
+// callConnectorTool serves CallTool for an mcp:<connector>:<tool> id. The call
+// itself is the one function that invoke_tool also uses, metatool.Handler.Call:
+// the mission policy, the can_execute check on the connector, the intent
+// record, the dispatch, and the result record. This function adds what only
+// this path has: the claim check of the work id that the caller names.
 func (s *ComponentServiceServer) callConnectorTool(
 	ctx context.Context,
 	tenant string,
@@ -67,76 +72,95 @@ func (s *ComponentServiceServer) callConnectorTool(
 		return nil, status.Errorf(codes.InvalidArgument, "input_json must be a JSON object: %v", err)
 	}
 
-	handler := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller)
-	if _, err := handler.Authorize(ctx, caller, tid.Canonical()); err != nil {
-		s.auditConnectorCall(ctx, tenant, req, tid, err)
-		if errors.Is(err, metatool.ErrUnauthorized) {
-			return nil, status.Errorf(codes.PermissionDenied, "not authorized to call %s", tid.Canonical())
+	call := metatool.Call{
+		Caller:   caller,
+		ID:       tid.Canonical(),
+		Args:     args,
+		ArgsJSON: []byte(req.InputJson),
+		Observer: connectorAuditObserver{s: s},
+	}
+	// A work id names a mission. The caller must have claimed the work item
+	// before the id selects a mission or a run, or an agent could name the work
+	// of another mission.
+	if req.WorkId != "" {
+		if _, err := s.resolveClaimedWork(ctx, tenant, req.WorkId); err != nil {
+			return nil, err
 		}
-		return nil, status.Errorf(codes.Internal, "authorization check failed for %s", tid.Canonical())
+		call.WorkID = req.WorkId
+		missionID, mErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
+		if mErr != nil {
+			s.logger.WarnContext(ctx, "call tool: mission lookup failed", slog.String("work_id", req.WorkId), slog.String("error", mErr.Error()))
+		}
+		call.MissionID = missionID
+		policy, pErr := s.policyOfWork(ctx, req.WorkId)
+		if pErr != nil {
+			return nil, pErr
+		}
+		call.Policy = policy
 	}
 
-	result, err := handler.Dispatch(ctx, caller, tid, args)
-	s.auditConnectorCall(ctx, tenant, req, tid, err)
-	if err != nil {
+	result, err := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller).Call(ctx, call)
+	switch {
+	case err == nil:
+		out, mErr := json.Marshal(result)
+		if mErr != nil {
+			return nil, status.Errorf(codes.Internal, "encode the connector result: %v", mErr)
+		}
+		return &componentpb.CallToolResponse{OutputJson: string(out)}, nil
+	case errors.Is(err, metatool.ErrBlocked), errors.Is(err, metatool.ErrRunInactive), errors.Is(err, metatool.ErrUnauthorized):
+		return nil, status.Errorf(codes.PermissionDenied, "the call of %s is not allowed", tid.Canonical())
+	case errors.Is(err, metatool.ErrAuditUnavailable):
+		s.logger.ErrorContext(ctx, "call tool: refused, the audit record could not be written", slog.String("error", err.Error()))
+		return nil, status.Error(codes.Unavailable, "the audit record of the call could not be written")
+	default:
 		s.logger.WarnContext(ctx, "call tool: connector call failed",
 			slog.String("tenant", tenant), slog.String("tool", tid.Canonical()), slog.String("error", err.Error()))
 		return &componentpb.CallToolResponse{Error: &componentpb.ComponentError{
 			Code: "[CONNECTOR_CALL_FAILED]", Message: err.Error(),
 		}}, nil
 	}
-	out, err := json.Marshal(result)
+}
+
+// policyOfWork returns the mission policy of the run of a work item. A work
+// item with no run has no mission policy. A server that cannot read the policy
+// of a run refuses the call: an unread policy is not an empty one.
+func (s *ComponentServiceServer) policyOfWork(ctx context.Context, workID string) (metatool.MissionPolicy, error) {
+	run, err := s.workContext.WorkRun(ctx, workID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "encode the connector result: %v", err)
+		if errors.Is(err, ErrWorkRunUnknown) {
+			return metatool.MissionPolicy{}, nil
+		}
+		return metatool.MissionPolicy{}, status.Errorf(codes.Internal, "failed to resolve the run of work %q", workID)
 	}
-	return &componentpb.CallToolResponse{OutputJson: string(out)}, nil
+	if s.missionPolicy == nil {
+		return metatool.MissionPolicy{}, status.Error(codes.FailedPrecondition, "the mission policy source is not configured")
+	}
+	policy, err := s.missionPolicy(ctx, run)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "call tool: the mission policy of the run could not be read",
+			slog.String("run_id", run), slog.String("error", err.Error()))
+		return metatool.MissionPolicy{}, status.Error(codes.Unavailable, "the mission policy of the run could not be read")
+	}
+	return policy, nil
 }
 
-// auditConnectorCall writes the audit record of one connector tool call. The
-// actor is the identity on the context: for an enrolled agent, its agent
-// principal with the actor source "agent". The target is the connector. A call
-// that carries a work id also names the mission of that work, under mission_id.
-// A failed write is logged and never changes the result of the call, which has
-// already happened.
-func (s *ComponentServiceServer) auditConnectorCall(
-	ctx context.Context,
-	tenant string,
-	req *componentpb.CallToolRequest,
-	tid toolid.ID,
-	callErr error,
-) {
-	details := map[string]any{"tool": tid.Tool}
-	if req.WorkId != "" {
-		details["work_id"] = req.WorkId
-		missionID, err := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
-		if err != nil {
-			s.logger.WarnContext(ctx, "call tool: mission lookup for the audit record failed",
-				slog.String("work_id", req.WorkId), slog.String("error", err.Error()))
-		}
-		if missionID != "" {
-			details["mission_id"] = missionID
-		}
-	}
-	result := "success"
-	if callErr != nil {
-		result = "failure"
-		details["error"] = connectorCallErrorClass(callErr)
-	}
-	if _, err := s.auditLog.RecordWithResult(ctx, connectorCallAction, connectorCallResource, tid.Connector, result, details); err != nil {
-		s.logger.ErrorContext(ctx, "call tool: the audit record of a connector call was not written",
-			slog.String("tenant", tenant), slog.String("connector", tid.Connector), slog.String("error", err.Error()))
-	}
+// connectorAuditObserver writes the audit records of a connector call made
+// through CallTool. The actor is the identity of the caller: for an enrolled
+// agent, its agent principal with the actor source agent.
+type connectorAuditObserver struct{ s *ComponentServiceServer }
+
+var _ metatool.CallObserver = connectorAuditObserver{}
+
+func (o connectorAuditObserver) Intent(ctx context.Context, rec metatool.CallRecord) error {
+	return metatool.AuditRecorder{Log: o.s.auditLog}.Intent(ctx, rec)
 }
 
-// connectorCallErrorClass names why a call failed without the text of the
-// error, which can hold what the connector returned.
-func connectorCallErrorClass(err error) string {
-	switch {
-	case errors.Is(err, metatool.ErrUnauthorized):
-		return "unauthorized"
-	case errors.Is(err, ErrUnknownConnector):
-		return "unknown_connector"
-	default:
-		return "failed"
+func (o connectorAuditObserver) Result(ctx context.Context, rec metatool.CallRecord, _ []byte, callErr error) {
+	if rec.Connector == "" {
+		return
+	}
+	if err := (metatool.AuditRecorder{Log: o.s.auditLog}).Result(ctx, rec, callErr); err != nil {
+		o.s.logger.ErrorContext(ctx, "call tool: the result audit record of a connector call was not written",
+			slog.String("tenant", rec.Tenant), slog.String("connector", rec.Connector), slog.String("error", err.Error()))
 	}
 }

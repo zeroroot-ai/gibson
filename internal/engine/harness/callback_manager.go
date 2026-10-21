@@ -6,6 +6,8 @@ package harness
 import (
 	"context"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -526,6 +528,16 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 	}
 }
 
+// SetConnectorAudit sets the audit logger that records each connector call of
+// invoke_tool. Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetConnectorAudit(l *audit.AuditLogger) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithConnectorAudit(l)(m.server.service)
+	}
+}
+
 // SetBeliefSubstrate sets the belief substrate on the callback service,
 // wiring PlaceBet to persist staked bets (ADR-0122, ADR-0129,
 // gibson#273/#278). Call after NewCallbackManager, before Start().
@@ -663,6 +675,12 @@ func (m *CallbackManager) SetProtoResolver(resolver protoresolver.ProtoResolver)
 // transport decide the same way (D86).
 func (m *CallbackManager) RunAuthorizer() *HarnessCallbackService {
 	return m.server.Service()
+}
+
+// MissionPolicyForRun returns the mission policy of a run, for the paths that
+// run a connector call without a harness of their own.
+func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, runID string) (metatool.MissionPolicy, error) {
+	return m.server.Service().MissionPolicyForRun(ctx, runID)
 }
 
 // SetAuthzStore wires the RunAuthzLookup into the callback service so that the

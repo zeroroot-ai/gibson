@@ -209,6 +209,20 @@ func (r *CallbackHarnessRegistry) selectTask(keys []string, taskID, missionID, a
 		ErrCallbackTaskMismatch, taskID, missionID, agentName, len(keys))
 }
 
+// BlockedToolsForRun returns the mission deny list of the harnesses that run
+// under runID. Two harnesses of one run share one mission, so the lists are
+// the same. It returns nil when no harness runs under runID.
+func (r *CallbackHarnessRegistry) BlockedToolsForRun(runID string) []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, h := range r.harnesses {
+		if m := h.Mission(); m.MissionRunID == runID && len(m.BlockedTools) > 0 {
+			return append([]string(nil), m.BlockedTools...)
+		}
+	}
+	return nil
+}
+
 // Unregister removes a harness from the registry.
 //
 // This should be called when an agent execution completes (whether successful

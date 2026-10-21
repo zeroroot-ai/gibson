@@ -159,6 +159,10 @@ type ComponentServiceServer struct {
 	// connector tool call.
 	connectorCaller metatool.ConnectorCaller
 
+	// missionPolicy returns the mission policy of a run for a connector call
+	// that names a work item. Nil refuses such a call.
+	missionPolicy MissionPolicySource
+
 	// Harness proxy dependencies.
 	//
 	// llmCompleter routes LLM completions back to Gibson's provider system.
@@ -1070,6 +1074,10 @@ func (s *ComponentServiceServer) PollWork(
 		slog.String("work_type", item.WorkType),
 	)
 
+	// Record the principal that claimed the work item. A later RPC that names
+	// the work id must come from that principal.
+	s.bindWorkClaim(ctx, item.WorkID)
+
 	// Register the work-item→mission mapping so that MemoryGet/MemorySet/
 	// MemorySearch can resolve the correct per-mission namespace later.
 	// This is best-effort: if it fails we still return the work item; the
@@ -1210,7 +1218,7 @@ func (s *ComponentServiceServer) SubmitResult(
 		return nil, status.Error(codes.InvalidArgument, "work_id is required")
 	}
 
-	workOwner, err := s.resolveWorkOwner(ctx, tenant, req.WorkId)
+	workOwner, err := s.resolveClaimedWork(ctx, tenant, req.WorkId)
 	if err != nil {
 		return nil, err
 	}

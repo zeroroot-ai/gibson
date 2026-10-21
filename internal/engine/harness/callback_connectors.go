@@ -7,6 +7,7 @@ import (
 	"context"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 )
 
 // ConnectorClient is what the meta-tools need from the one MCP client of the
@@ -22,5 +23,14 @@ type ConnectorClient interface {
 func WithConnectors(c ConnectorClient) CallbackServiceOption {
 	return func(s *HarnessCallbackService) {
 		s.connectors = c
+	}
+}
+
+// WithConnectorAudit wires the audit logger that records each connector call
+// of invoke_tool. A daemon with none refuses a connector call, because no call
+// happens without its record.
+func WithConnectorAudit(l *audit.AuditLogger) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.connectorAudit = l
 	}
 }
