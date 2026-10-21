@@ -10,8 +10,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
+
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 
 	einoclaude "github.com/cloudwego/eino-ext/components/model/claude"
 	einomodel "github.com/cloudwego/eino/components/model"
@@ -80,10 +84,9 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderAnthropic)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
-		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client}
-		if cfg.BaseURL != "" {
-			claudeCfg.BaseURL = &baseURL
-		}
+		// The base URL is always explicit, so ANTHROPIC_BASE_URL never decides
+		// where the tenant key goes.
+		claudeCfg := &einoclaude.Config{APIKey: apiKey, Model: model, HTTPClient: client, BaseURL: &baseURL}
 		return einoclaude.NewChatModel(ctx, claudeCfg)
 	}
 	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
@@ -114,36 +117,54 @@ func (p *AnthropicProvider) seedDefaultChat(ctx context.Context, label string) e
 // a Google service-account JSON the tenant configured, plus the project and the
 // region. It drives the same Claude client as the Anthropic route.
 //
-// The service-account JSON reaches the Google auth library the way that library
-// reads it: from a file named by GOOGLE_APPLICATION_CREDENTIALS. The daemon
-// never writes that file — a sandboxed Claude Code member's driver does, from
-// the variable the launcher injects. In the daemon the credential is expected
-// to be present in the ambient environment already, so a config that names
-// neither is refused rather than constructed on whatever the pod happens to
-// carry.
+// The chat client is built from the service-account JSON of the config and from
+// nothing else. A config with no service-account JSON is refused. The
+// Application Default Credentials of the daemon are never a credential of a
+// tenant, so the client must never look for them.
 func NewVertexProvider(ctx context.Context, cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	return newVertexProvider(ctx, cfg, serviceAccountToken)
 }
 
+// vertexNamePattern is a plain Google Cloud project id or region name.
+var vertexNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-]*$`)
+
 // newVertexProvider is NewVertexProvider with the token source injected, so a
 // test can mint a fixed token.
 func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertexTokenFunc) (*AnthropicProvider, error) {
+	return newVertexProviderWithClient(ctx, cfg, token, guardedHTTPClient(cfg))
+}
+
+// newVertexProviderWithClient is newVertexProvider with the HTTP client
+// injected, so a test can point every connection at a fake.
+func newVertexProviderWithClient(
+	ctx context.Context, cfg llm.ProviderConfig, token vertexTokenFunc, client *http.Client,
+) (*AnthropicProvider, error) {
 	project := cfg.Extra["vertex_project_id"]
 	region := cfg.Extra["vertex_region"]
 	if project == "" || region == "" {
 		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			errors.New("vertex_project_id and vertex_region are both required")))
 	}
+	serviceAccount := cfg.Extra["google_application_credentials_json"]
+	if serviceAccount == "" {
+		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			errors.New("google_application_credentials_json is required: the daemon's own Google credentials are never used")))
+	}
+	// The region and the project name a host and a path of the Vertex request.
+	// Anything but a plain name could move the request to another host.
+	if !vertexNamePattern.MatchString(region) || !vertexNamePattern.MatchString(project) {
+		return nil, fmt.Errorf("construct the vertex provider: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			errors.New("vertex_project_id and vertex_region may hold only letters, digits and hyphens")))
+	}
 	if cfg.BaseURL != "" {
 		if err := validateLLMEndpoint(cfg.BaseURL, cfg.AllowPrivateEndpoint); err != nil {
 			return nil, err
 		}
 	}
-	client := guardedHTTPClient(cfg)
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderVertex)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {
-		return newVertexChatModel(ctx, project, region, model, client)
+		return newVertexChatModel(ctx, project, region, model, serviceAccount, client)
 	}
 	p.list = func(ctx context.Context) ([]llm.ModelInfo, error) {
 		return listVertexModels(ctx, client, vertexListBase(cfg.BaseURL, region), project,
@@ -155,28 +176,43 @@ func newVertexProvider(ctx context.Context, cfg llm.ProviderConfig, token vertex
 	return p, nil
 }
 
-// newVertexChatModel builds the Vertex-backed Claude client.
+// newVertexChatModel builds the Vertex-backed Claude client from the service
+// account JSON of the tenant and from nothing else.
 //
-// It exists to contain a panic. The Google auth the Vertex client uses resolves
-// Application Default Credentials eagerly and PANICS when it finds none — so a
-// tenant that configured Vertex on a daemon with no reachable Google credential
-// would take the process down rather than have its launch refused. The recover
-// is at this one boundary and turns the panic into the same auth error every
-// other provider returns.
-func newVertexChatModel(ctx context.Context, project, region, modelID string, client *http.Client) (model *einoclaude.ChatModel, err error) {
+//   - Only the service_account credential type is accepted. The credential is
+//     parsed here with that type, so an external_account, authorized_user or
+//     impersonated_service_account document is refused before the client sees it.
+//     Those types make the daemon read a file or call a URL that the tenant chose.
+//   - The token call of the service account goes through the guarded client.
+//   - The transport drops any API key header, so an ambient Anthropic default
+//     cannot put a key on the request. The daemon refuses to start with such a
+//     default set (SecureAnthropicEnvironment).
+//   - A panic in the client libraries becomes an auth error, never a crash.
+func newVertexChatModel(
+	ctx context.Context, project, region, modelID, serviceAccount string, client *http.Client,
+) (model *einoclaude.ChatModel, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			model = nil
-			err = llm.NewAuthError(string(llm.ProviderVertex),
-				fmt.Errorf("google application default credentials are not available: %v", r))
+			err = llm.NewAuthError(string(llm.ProviderVertex), fmt.Errorf("the vertex client could not be built: %v", r))
 		}
 	}()
+	if serviceAccount == "" {
+		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON")))
+	}
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
+	if _, credErr := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccount), google.ServiceAccount,
+		"https://www.googleapis.com/auth/cloud-platform"); credErr != nil {
+		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			fmt.Errorf("the credential must be a service account key: %w", credErr)))
+	}
 	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		ByVertex:        true,
-		VertexProjectID: project,
-		VertexRegion:    region,
-		Model:           modelID,
-		HTTPClient:      client,
+		ByVertex:                 true,
+		VertexProjectID:          project,
+		VertexRegion:             region,
+		VertexServiceAccountJSON: []byte(serviceAccount),
+		Model:                    modelID,
+		HTTPClient:               withoutAmbientAuth(client),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build the vertex client: %w", llm.TranslateError(string(llm.ProviderVertex), err))

@@ -19,8 +19,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 
@@ -131,10 +129,10 @@ func TestMission_ListOutageDoesNotBreakAMissionOnAWindowlessProvider(t *testing.
 
 func newSlot(name string) agent.SlotDefinition { return agent.SlotDefinition{Name: name} }
 
-// writeFakeServiceAccount writes a service-account key file that the Google
-// auth library accepts without any network call, and points the Application
-// Default Credentials at it.
-func writeFakeServiceAccount(t *testing.T) {
+// fakeServiceAccount returns a service-account key document that the Google
+// auth library accepts without any network call. The tenant provider config
+// carries it, as the daemon never uses a credential of its own.
+func fakeServiceAccount(t *testing.T) string {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
@@ -150,16 +148,16 @@ func writeFakeServiceAccount(t *testing.T) {
 		"token_uri":      "https://oauth2.googleapis.com/token",
 	})
 	require.NoError(t, err)
-	path := filepath.Join(t.TempDir(), "sa.json")
-	require.NoError(t, os.WriteFile(path, doc, 0o600))
-	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", path)
+	return string(doc)
 }
 
 func TestMission_VertexResolvesASlotFromTheSavedModelWithNoList(t *testing.T) {
-	writeFakeServiceAccount(t)
 	p, err := providers.NewVertexProvider(context.Background(), llm.ProviderConfig{
 		DefaultModel: "claude-sonnet-4-5@20250929",
-		Extra:        map[string]string{"vertex_project_id": "proj", "vertex_region": "us-east5"},
+		Extra: map[string]string{
+			"vertex_project_id": "proj", "vertex_region": "us-east5",
+			"google_application_credentials_json": fakeServiceAccount(t),
+		},
 	})
 	require.NoError(t, err)
 	reg := llm.NewLLMRegistry()

@@ -375,3 +375,20 @@ func Test_run_dumpFGAModelError(t *testing.T) {
 		t.Errorf("stderr should name dump-fga-model; got %q", stderr.String())
 	}
 }
+
+// The daemon refuses to start when an ANTHROPIC_ variable is set. An Anthropic
+// default of its own environment must never reach a tenant request.
+func Test_run_refusesAnAnthropicEnvironment(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "platform-key")
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"--config", filepath.Join(t.TempDir(), "absent.yaml")}, &stdout, &stderr,
+		fakeFactory(&fakeDaemon{}),
+		passthroughJWTSourceFactory(&fakeJWTSource{}),
+	)
+	if code != 1 {
+		t.Fatalf("expected exit 1, got %d\nstderr: %s", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "ANTHROPIC_API_KEY") {
+		t.Errorf("stderr must name the variable, got: %s", stderr.String())
+	}
+}

@@ -61,6 +61,7 @@ func TestNewBedrockProvider_DefaultsToUSEast1(t *testing.T) {
 	cfg := llm.ProviderConfig{
 		Type:         llm.ProviderBedrock,
 		DefaultModel: "anthropic.claude-3-sonnet-20240229-v1:0",
+		Extra:        map[string]string{"aws_access_key_id": "AKIAEXAMPLE", "aws_secret_access_key": "secret"},
 	}
 	p, err := NewBedrockProvider(cfg)
 	require.NoError(t, err)
@@ -74,39 +75,36 @@ func TestBedrockCredentialSchema(t *testing.T) {
 		keys[f.Key] = f
 	}
 	require.Contains(t, keys, "aws_region")
-	require.Contains(t, keys, "use_irsa")
+	assert.NotContains(t, keys, "use_irsa", "the daemon's own AWS credentials are never a tenant credential")
 	require.Contains(t, keys, "aws_access_key_id")
 	require.Contains(t, keys, "aws_secret_access_key")
 	require.Contains(t, keys, "aws_session_token")
 
-	// Access key & secret must be Secret=true; region and use_irsa are not secrets.
+	// Access key & secret must be Secret=true; region is not a secret.
 	assert.True(t, keys["aws_access_key_id"].Secret)
 	assert.True(t, keys["aws_secret_access_key"].Secret)
 	assert.True(t, keys["aws_session_token"].Secret)
 	assert.False(t, keys["aws_region"].Secret)
-	assert.False(t, keys["use_irsa"].Secret)
 }
 
-func TestBedrockProvider_IRSA_SkipsStaticKeyValidation(t *testing.T) {
-	// With use_irsa=true, the constructor must NOT reject a config that has no
-	// static credentials — the IRSA / default credential chain provides them at
-	// runtime. We clear env vars so no ambient credentials can influence the
-	// mismatch guard either.
-	t.Setenv("AWS_ACCESS_KEY_ID", "")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
-	cfg := llm.ProviderConfig{
-		Type:         llm.ProviderBedrock,
-		DefaultModel: "anthropic.claude-3-sonnet-20240229-v1:0",
-		Extra: map[string]string{
-			"use_irsa":   "true",
-			"aws_region": "us-east-1",
-		},
-	}
-	_, err := NewBedrockProvider(cfg)
-	// Construction itself should not fail due to missing static credentials.
-	// Any error here must NOT be the "must both be set or both empty" mismatch guard.
-	if err != nil && strings.Contains(err.Error(), "must both be set") {
-		t.Fatalf("IRSA path should not require static credentials: %v", err)
+// A config that asks for the credential chain of the daemon, or that names no
+// key pair, is refused. The chain of the daemon (an IRSA role, an instance
+// profile, the environment) is never a credential of a tenant.
+func TestBedrockProvider_NeverUsesTheAmbientCredentialChain(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIADAEMON")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "daemon-secret")
+	for name, extra := range map[string]map[string]string{
+		"use_irsa":     {"use_irsa": "true", "aws_region": "us-east-1"},
+		"no key pair":  {"aws_region": "us-east-1"},
+		"only the key": {"aws_access_key_id": "AKIAEXAMPLE"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p, err := NewBedrockProvider(llm.ProviderConfig{
+				Type: llm.ProviderBedrock, DefaultModel: "anthropic.claude-3-sonnet-20240229-v1:0", Extra: extra,
+			})
+			require.Error(t, err)
+			assert.Nil(t, p)
+		})
 	}
 }
 

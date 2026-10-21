@@ -27,8 +27,9 @@ type bedrockInvoker interface {
 
 // bedrockEmbedder speaks AWS Bedrock's InvokeModel API against Amazon Titan Text
 // Embeddings models. Titan embeds a single document per call, so EmbedBatch
-// iterates. Credential resolution mirrors the LLM Bedrock provider: IRSA, static
-// keys from Extra, env vars, then the AWS default chain.
+// iterates. Credential resolution mirrors the LLM Bedrock provider: static
+// keys from Extra only. The environment and the AWS default chain of the
+// daemon are never read.
 type bedrockEmbedder struct {
 	client  bedrockInvoker
 	region  string
@@ -37,7 +38,7 @@ type bedrockEmbedder struct {
 }
 
 // newBedrockEmbedder builds the Bedrock/Titan backend. The model must be known
-// (its dimension sizes the index); credentials follow the AWS chain.
+// (its dimension sizes the index); credentials are the key pair of the config.
 func newBedrockEmbedder(cfg Config) (Embedder, error) {
 	model, err := cfg.requireModel("bedrock")
 	if err != nil {
@@ -50,19 +51,19 @@ func newBedrockEmbedder(cfg Config) (Embedder, error) {
 
 	region := firstNonEmptyStr(cfg.Region, extra(cfg, "aws_region"), os.Getenv("AWS_REGION"), "us-east-1")
 
-	loadOpts := []func(*awsconfig.LoadOptions) error{awsconfig.WithRegion(region)}
-	if extra(cfg, "use_irsa") != "true" {
-		ak := firstNonEmptyStr(extra(cfg, "aws_access_key_id"), os.Getenv("AWS_ACCESS_KEY_ID"))
-		sk := firstNonEmptyStr(extra(cfg, "aws_secret_access_key"), os.Getenv("AWS_SECRET_ACCESS_KEY"))
-		st := firstNonEmptyStr(extra(cfg, "aws_session_token"), os.Getenv("AWS_SESSION_TOKEN"))
-		if (ak == "") != (sk == "") {
-			return nil, types.NewError(ErrCodeInvalidConfig,
-				"bedrock: aws_access_key_id and aws_secret_access_key must both be set or both empty")
-		}
-		if ak != "" && sk != "" {
-			loadOpts = append(loadOpts,
-				awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))
-		}
+	// The credential is the key pair of the config and nothing else. The AWS
+	// default chain of the daemon (an IRSA role, an instance profile, the
+	// environment) is never a credential of a tenant.
+	ak := extra(cfg, "aws_access_key_id")
+	sk := extra(cfg, "aws_secret_access_key")
+	st := extra(cfg, "aws_session_token")
+	if ak == "" || sk == "" {
+		return nil, types.NewError(ErrCodeInvalidConfig,
+			"bedrock: aws_access_key_id and aws_secret_access_key are both required; the daemon's own AWS credentials are never used")
+	}
+	loadOpts := []func(*awsconfig.LoadOptions) error{
+		awsconfig.WithRegion(region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)),
 	}
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), loadOpts...)

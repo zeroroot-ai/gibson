@@ -149,11 +149,11 @@ func TestKeylessConfig_DoesNotConstructOnDaemonEnv(t *testing.T) {
 // daemon's environment used to be adopted as the caller's own and tripped the
 // "both or neither" check. The env is not read at all, so no half-populated
 // static credential pair is ever assembled and the SDK default chain applies.
-func TestBedrock_KeylessConfig_DoesNotReadDaemonEnv(t *testing.T) {
+func TestBedrock_KeylessConfig_IsRefusedAndDoesNotReadDaemonEnv(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "AKIADAEMONOPERATOR")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "")
 	t.Setenv("AWS_REGION", "us-east-1")
 
 	_, err := NewBedrockProvider(llm.ProviderConfig{Type: llm.ProviderBedrock})
-	require.NoError(t, err, "the daemon's ambient access key must not be adopted as the caller's credential")
+	require.Error(t, err, "the daemon's ambient access key must not be adopted as the caller's credential")
 }

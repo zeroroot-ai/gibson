@@ -5,10 +5,7 @@
 # charts#303): each name that reaches os.Getenv, os.LookupEnv, a reader
 # helper, a getenv parameter or an env struct tag, from every tracked Go file
 # that is not a test (gibson#1128). zeroroot-ai/charts vendors this file.
-AWS_ACCESS_KEY_ID
 AWS_REGION
-AWS_SECRET_ACCESS_KEY
-AWS_SESSION_TOKEN
 BELIEF_BASE_MODEL
 BELIEF_TRAINER_IMAGE
 BOOTSTRAP_ADMIN_EMAIL
