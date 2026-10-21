@@ -95,3 +95,44 @@
 #   them as unimplemented until their slice lands.
 #   the same name: the walker matches a handler test by METHOD name, so one
 # This set may only SHRINK: write a Test<Method>[_Scenario] test, then delete
+
+# ---------------------------------------------------------------------------
+# RPCs that had a test of the same name on another service. The walker keys by
+# service and method now, so each line is a handler with no test of its own.
+# Write a Test<Method> test in the package of the service, then delete the line.
+/gibson.agent.v1.AgentService/Execute
+/gibson.agent.v1.AgentService/Health
+/gibson.component.v1.ComponentService/CancelMission
+/gibson.component.v1.ComponentService/FindSimilarAttacks
+/gibson.component.v1.ComponentService/FindSimilarFindings
+/gibson.component.v1.ComponentService/GetAttackChains
+/gibson.component.v1.ComponentService/GetCredential
+/gibson.component.v1.ComponentService/GetFindings
+/gibson.component.v1.ComponentService/GetMissionResults
+/gibson.component.v1.ComponentService/GetMissionStatus
+/gibson.component.v1.ComponentService/GetRelatedFindings
+/gibson.component.v1.ComponentService/ListMissions
+/gibson.component.v1.ComponentService/QueryNodes
+/gibson.component.v1.ComponentService/QueryPlugin
+/gibson.component.v1.ComponentService/RunMission
+/gibson.daemon.discovery.v1.DiscoveryService/ListAgents
+/gibson.daemon.discovery.v1.DiscoveryService/ListPlugins
+/gibson.daemon.discovery.v1.DiscoveryService/ListTools
+/gibson.daemon.discovery.v1.DiscoveryService/WhoAmI
+/gibson.daemon.v1.DaemonService/GetAgentStatus
+/gibson.daemon.v1.DaemonService/ListAgents
+/gibson.daemon.v1.DaemonService/ListPlugins
+/gibson.daemon.v1.DaemonService/ListTools
+/gibson.daemon.v1.DaemonService/Ping
+/gibson.daemon.v1.DaemonService/QueryPlugin
+/gibson.daemon.v1.DaemonService/StopMission
+/gibson.daemon.v1.DaemonService/Subscribe
+/gibson.harness.v1.HarnessCallbackService/ApplicationFindings
+/gibson.harness.v1.HarnessCallbackService/ListAgents
+/gibson.harness.v1.HarnessCallbackService/ListTools
+/gibson.tenant.v1.BudgetService/GetBudget
+/gibson.tenant.v1.BudgetService/SetBudget
+/gibson.tenant.v1.UserService/GetUserProfile
+/gibson.tenant.v1.UserService/UpdateUserProfile
+/gibson.tool.v1.ToolService/Execute
+/gibson.tool.v1.ToolService/Health
