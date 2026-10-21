@@ -312,6 +312,10 @@ var modelCredentialEnvs = map[string]bool{
 	"ANTHROPIC_API_KEY":         true,
 	"ANTHROPIC_AUTH_TOKEN":      true,
 	"ANTHROPIC_FOUNDRY_API_KEY": true,
+	// A header value or a base URL can carry a credential or send the model
+	// call to another host, so neither may reach a subscription member.
+	"ANTHROPIC_CUSTOM_HEADERS": true,
+	"ANTHROPIC_BASE_URL":       true,
 }
 
 // refuseModelCredentialInEnv refuses a launch environment that holds a model

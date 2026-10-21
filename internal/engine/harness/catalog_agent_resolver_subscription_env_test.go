@@ -53,7 +53,7 @@ func TestResolveAgentLaunchSpec_ShippedClaudeManifestSubscriptionHoldsNoModelCre
 // manifest cannot slip a model credential past the subscription shape through
 // its static env. This is the failing fixture of the final environment check.
 func TestResolveAgentLaunchSpec_SubscriptionRefusesAStaticModelCredential(t *testing.T) {
-	for _, name := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY", "CLAUDE_CODE_USE_BEDROCK"} {
+	for _, name := range []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_FOUNDRY_API_KEY", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK"} {
 		t.Run(name, func(t *testing.T) {
 			entry := componentcatalog.AgentEntry{
 				ID: "claude", Image: "ghcr.io/x/c@sha256:abc",
