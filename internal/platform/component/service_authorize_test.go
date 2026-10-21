@@ -427,7 +427,7 @@ func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, 
 	t.Helper()
 	// The caller claimed the source work item.
 	if id, err := auth.IdentityFromContext(callerCtx); err == nil {
-		require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), source, id.Subject))
+		require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(callerCtx, source, id.Subject))
 	}
 	e.svc.WithCapabilityChecker(grantedChecker())
 	e.svc.WithGrantVerifier(fakeGrants{})
@@ -466,7 +466,7 @@ func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, 
 	require.NoError(t, c.err)
 	require.NotNil(t, c.item)
 	// The delegated agent claimed its work item, as PollWork records.
-	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), c.item.WorkID, testClaimant))
+	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(callerCtx, c.item.WorkID, testClaimant))
 	return c.item
 }
 
