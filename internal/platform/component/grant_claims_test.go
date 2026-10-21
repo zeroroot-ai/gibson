@@ -49,11 +49,4 @@ func TestCallerTaskGrant(t *testing.T) {
 			t.Errorf("%s: err = %v, want PermissionDenied", name, err)
 		}
 	}
-
-	if got := grantPayloadClaim("%%%", "mrid"); got != "" {
-		t.Errorf("a payload that is no base64: claim = %q, want empty", got)
-	}
-	if got := grantPayloadClaim("bm9wZQ", "mrid"); got != "" {
-		t.Errorf("a payload that is no JSON: claim = %q, want empty", got)
-	}
 }

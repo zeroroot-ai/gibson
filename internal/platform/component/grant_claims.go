@@ -16,9 +16,6 @@ import (
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
-// missionRunClaim is the signed claim that names the mission run of a grant.
-const missionRunClaim = "mrid"
-
 // GrantVerifier verifies a capability grant that the daemon minted. The daemon
 // verifier answers for its own signing keys only, so a token that a component
 // signed itself is refused.
@@ -63,12 +60,12 @@ func (s *ComponentServiceServer) callerTaskGrant(ctx context.Context, tenant str
 		return deny("the grant is for another tenant")
 	}
 	// Every task grant names its run. A grant with none is not a grant that
-	// this daemon minted for a run.
-	run = grantPayloadClaim(parts[1], missionRunClaim)
-	if run == "" {
+	// this daemon minted for a run. The SDK reads the claim, in the same
+	// verification that checked the signature.
+	if claims.MissionRunID == "" {
 		return deny("the grant names no mission run")
 	}
-	return claims.MissionID, run, nil
+	return claims.MissionID, claims.MissionRunID, nil
 }
 
 // tokenHeaderType reads the typ of a token header. It routes only: the
@@ -85,19 +82,4 @@ func tokenHeaderType(segment string) string {
 		return ""
 	}
 	return header.Typ
-}
-
-// grantPayloadClaim reads one string claim from a payload segment of a token
-// whose signature passed.
-func grantPayloadClaim(segment, name string) string {
-	raw, err := base64.RawURLEncoding.DecodeString(segment)
-	if err != nil {
-		return ""
-	}
-	var payload map[string]any
-	if json.Unmarshal(raw, &payload) != nil {
-		return ""
-	}
-	claim, _ := payload[name].(string)
-	return claim
 }

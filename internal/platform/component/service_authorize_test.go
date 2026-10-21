@@ -386,7 +386,7 @@ func (fakeGrants) Verify(_ context.Context, token string) (sdkcg.Claims, error) 
 	if err != nil {
 		return sdkcg.Claims{}, fmt.Errorf("tenant: %w", err)
 	}
-	return sdkcg.Claims{Subject: "component:agent:caller", Tenant: tenant, MissionID: payload["mission_id"], TaskID: "t"}, nil
+	return sdkcg.Claims{Subject: "component:agent:caller", Tenant: tenant, MissionID: payload["mission_id"], MissionRunID: payload["mrid"], TaskID: "t"}, nil
 }
 
 // grantToken builds a grant token with a typ, a mission, a run and a signature.
