@@ -1856,11 +1856,12 @@ func (s *ComponentServiceServer) SubmitFinding(
 
 	// A finding may be submitted outside any work item (work_id empty), in which
 	// case it is simply tenant-ambient. When a work id IS supplied it selects the
-	// mission the finding is attributed to, so the caller must own it. The owner's
-	// name is not needed here — the submitter's World sink scopes the finding —
-	// but the ownership check is, and it fails the RPC when it does not hold.
+	// mission the finding is attributed to, so the caller must have claimed it.
+	// The owner's name is not needed here — the submitter's World sink scopes the
+	// finding — but the claim check is, and it fails the RPC when it does not
+	// hold.
 	if req.WorkId != "" {
-		if _, ownerErr := s.resolveWorkOwner(ctx, tenant, req.WorkId); ownerErr != nil {
+		if _, ownerErr := s.resolveClaimedWork(ctx, tenant, req.WorkId); ownerErr != nil {
 			return nil, ownerErr
 		}
 	}

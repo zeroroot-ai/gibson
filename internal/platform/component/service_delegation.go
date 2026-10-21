@@ -238,9 +238,9 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 // bindSourceWork binds the work item that the caller names to the mission of
 // the caller. It returns the mission and the mission run of that work item.
 //
-// The work id arrives from the caller and only the tenant is checked against
-// its owner, so a same-tenant agent could name the work item of another
-// mission. The task grant that the caller presents, verified by the daemon,
+// The work id arrives from the caller, so the caller must have claimed the
+// work item, and a same-tenant agent cannot name the work item of another
+// agent. The task grant that the caller presents, verified by the daemon,
 // names its mission and its run. A work item of another mission, or of another
 // run, is refused. A delegation that names a work item without a verified task
 // grant is refused. So is one whose mission or run cannot be resolved. A
@@ -248,6 +248,9 @@ func (s *ComponentServiceServer) DelegateToAgent(ctx context.Context, req *compo
 func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sourceWorkID string) (mission, run string, err error) {
 	if sourceWorkID == "" {
 		return "", "", nil
+	}
+	if _, err := s.resolveClaimedWork(ctx, tenant, sourceWorkID); err != nil {
+		return "", "", err
 	}
 	grantMission, grantRun, err := s.callerTaskGrant(ctx, tenant)
 	if err != nil {
@@ -279,8 +282,8 @@ func (s *ComponentServiceServer) bindSourceWork(ctx context.Context, tenant, sou
 // as its own, when the owner recorded at enqueue is the caller tenant. It
 // returns an empty string when the work item is not the caller's or has no run.
 func (s *ComponentServiceServer) sourceWorkRun(ctx context.Context, tenant, sourceWorkID string) string {
-	// resolveWorkOwner refuses when no work-context registry is wired.
-	if _, err := s.resolveWorkOwner(ctx, tenant, sourceWorkID); err != nil {
+	// resolveClaimedWork refuses when no work-context registry is wired.
+	if _, err := s.resolveClaimedWork(ctx, tenant, sourceWorkID); err != nil {
 		return ""
 	}
 	runID, err := s.workContext.WorkRun(ctx, sourceWorkID)

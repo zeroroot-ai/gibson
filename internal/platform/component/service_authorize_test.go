@@ -59,11 +59,17 @@ func (e *workIDEnv) enqueueRun(t *testing.T, tenant, workID, runID string) strin
 	}
 	_, err := e.queue.Enqueue(t.Context(), tenant, "tool", "nmap", item)
 	require.NoError(t, err)
+	// The component of these tests claimed the work item.
+	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), workID, testClaimant))
 	return workID
 }
 
+// testClaimant is the principal that claims the work items of these tests and
+// that ctxForTenant calls as.
+const testClaimant = "component-1"
+
 func ctxForTenant(tenant string) context.Context {
-	return auth.ContextWithTenantString(context.Background(), tenant)
+	return withSubject(auth.ContextWithTenantString(context.Background(), tenant), testClaimant)
 }
 
 func TestAuthorize_RunsTheDecisionOfTheCallbackPathOnTheRunOfTheWorkItem(t *testing.T) {
@@ -210,6 +216,7 @@ func TestDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 		WorkID: "work-delegated", WorkType: WorkTypeAgentExecute, Context: entry,
 	})
 	require.NoError(t, err)
+	require.NoError(t, NewRedisWorkContextRegistry(env.state).BindWorkClaim(context.Background(), "work-delegated", testClaimant))
 
 	resp, err := env.svc.Authorize(ctxForTenant(victimTenant), &componentpb.AuthorizeRequest{
 		WorkId: "work-delegated", Action: "execute", Resource: "tool:nmap",
@@ -242,7 +249,7 @@ func TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant(t *testing.T) {
 	env.svc.WithRunAuthorizer(fake)
 	workID := env.enqueueRun(t, victimTenant, "work-shared", "run-42")
 
-	resp, err := env.svc.Authorize(auth.ContextWithTenant(context.Background(), auth.SystemTenant), &componentpb.AuthorizeRequest{
+	resp, err := env.svc.Authorize(withSubject(auth.ContextWithTenant(context.Background(), auth.SystemTenant), testClaimant), &componentpb.AuthorizeRequest{
 		WorkId: workID, Action: "execute", Resource: "tool:nmap",
 	})
 
@@ -418,6 +425,10 @@ func (e *workIDEnv) delegateAndClaim(t *testing.T, tenant, source string) *WorkI
 // delegateAndClaimAs is delegateAndClaim with the context of the caller.
 func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, tenant, source string) *WorkItem {
 	t.Helper()
+	// The caller claimed the source work item.
+	if id, err := auth.IdentityFromContext(callerCtx); err == nil {
+		require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), source, id.Subject))
+	}
 	e.svc.WithCapabilityChecker(grantedChecker())
 	e.svc.WithGrantVerifier(fakeGrants{})
 	e.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
@@ -454,6 +465,8 @@ func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, 
 	c := <-got
 	require.NoError(t, c.err)
 	require.NotNil(t, c.item)
+	// The delegated agent claimed its work item, as PollWork records.
+	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), c.item.WorkID, testClaimant))
 	return c.item
 }
 

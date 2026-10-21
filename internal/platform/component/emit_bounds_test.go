@@ -42,6 +42,14 @@ func (ownEveryWorkItem) WorkRun(context.Context, string) (string, error) {
 	return "", ErrWorkRunUnknown
 }
 
+// ownEveryWorkItem also reports that the principal of the emit bounds tests
+// claimed every work item.
+func (ownEveryWorkItem) BindWorkClaim(context.Context, string, string) error { return nil }
+
+func (ownEveryWorkItem) WorkClaimant(context.Context, string) (string, error) {
+	return "agent_principal:bounds", nil
+}
+
 func (o ownEveryWorkItem) WorkOwner(context.Context, string) (string, error) {
 	return o.tenant, nil
 }
