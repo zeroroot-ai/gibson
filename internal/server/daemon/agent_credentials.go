@@ -93,6 +93,15 @@ func (s *providerCredentialSource) ResolveProviderCredential(ctx context.Context
 	if value == "" {
 		return "", fmt.Errorf("%w: provider %q carries no %q", harness.ErrTenantCredentialMissing, candidates[0].Name, key)
 	}
+	// The sandbox receives the value as it is read here. A value that does not
+	// pass the check, whoever wrote it, refuses the launch.
+	if key == llm.CustomHeadersKey {
+		canonical, cerr := llm.CanonicalCustomHeaders(value)
+		if cerr != nil {
+			return "", fmt.Errorf("provider %q: %w", candidates[0].Name, cerr)
+		}
+		return canonical, nil
+	}
 	return value, nil
 }
 

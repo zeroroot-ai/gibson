@@ -183,3 +183,29 @@ func TestTenantCredentialResolver_BindsOnceTheDaemonHasPoolAndBroker(t *testing.
 		t.Fatalf("store=%v err=%v, want a store once both dependencies exist", store, err)
 	}
 }
+
+// The sandbox receives custom_headers as this source reads it. A stored value
+// that fails the check refuses the launch, whoever wrote it, and a good value
+// reaches the sandbox in its canonical form.
+func TestProviderCredentialSource_ChecksCustomHeaders(t *testing.T) {
+	anthropic := &providerconfig.ProviderConfig{Name: "anthropic-prod", Type: llm.ProviderType("anthropic"), Enabled: true}
+	source := func(value string) *providerCredentialSource {
+		return &providerCredentialSource{store: &fakeProviderStore{
+			configs: []*providerconfig.ProviderConfig{anthropic},
+			secrets: map[string]map[string]string{"anthropic-prod": {"api_key": "k", llm.CustomHeadersKey: value}},
+		}}
+	}
+	got, err := source(" ANTHROPIC-WORKSPACE-ID:wrkspc_1 ").ResolveProviderCredential(context.Background(), "acme", "anthropic", llm.CustomHeadersKey)
+	if err != nil || got != "anthropic-workspace-id: wrkspc_1" {
+		t.Fatalf("got %q, %v; want the canonical value", got, err)
+	}
+	for _, bad := range []string{"x-api-key: other", "anthropic-workspace-id: a b", "X-Other: v\nanthropic-workspace-id: wrkspc_1"} {
+		got, err := source(bad).ResolveProviderCredential(context.Background(), "acme", "anthropic", llm.CustomHeadersKey)
+		if err == nil || got != "" {
+			t.Errorf("value %q: got %q, %v; want a refusal", bad, got, err)
+		}
+		if errors.Is(err, harness.ErrTenantCredentialMissing) {
+			t.Errorf("value %q: a bad value must not read as a missing optional field", bad)
+		}
+	}
+}

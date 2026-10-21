@@ -4,6 +4,7 @@
 package providerconfig
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -42,5 +43,32 @@ func TestCheckCredentials_RefusesWhatTheAllowlistRefuses(t *testing.T) {
 	plain := &ProviderConfigInput{Type: llm.ProviderOpenAI, Credentials: map[string]string{"api_key": "k"}}
 	if out, err := checkCredentials(plain); err != nil || out != plain {
 		t.Errorf("an input with no header field must pass unchanged: %v", err)
+	}
+}
+
+// Create and Update run the check before they reach the database. The store
+// here cannot reach Postgres, so a bad value that is refused with
+// ErrInvalidCredentials was refused by the check and by nothing else, and a
+// good value passes the check and fails later for another cause.
+func TestBrokerStore_CreateAndUpdateRunTheCredentialCheck(t *testing.T) {
+	store := newUnreachableStore(t)
+	ctx := context.Background()
+	input := func(headers string) *ProviderConfigInput {
+		return &ProviderConfigInput{
+			Name: "exit-anthropic", Type: llm.ProviderAnthropic,
+			Credentials: map[string]string{"api_key": "k", llm.CustomHeadersKey: headers},
+		}
+	}
+	for op, run := range map[string]func(*ProviderConfigInput) error{
+		"Create": func(in *ProviderConfigInput) error { _, err := store.Create(ctx, "tenant-a", in); return err },
+		"Update": func(in *ProviderConfigInput) error { _, err := store.Update(ctx, "tenant-a", in.Name, in); return err },
+	} {
+		if err := run(input("x-api-key: other")); !errors.Is(err, ErrInvalidCredentials) {
+			t.Errorf("%s with a bad header: err = %v, want ErrInvalidCredentials", op, err)
+		}
+		err := run(input("anthropic-workspace-id: wrkspc_1"))
+		if err == nil || errors.Is(err, ErrInvalidCredentials) {
+			t.Errorf("%s with a good header: err = %v, want a database error", op, err)
+		}
 	}
 }

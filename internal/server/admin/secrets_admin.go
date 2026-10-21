@@ -270,6 +270,10 @@ func (s *SecretsAdminServer) SetSecret(ctx context.Context, req *secretsv1.SetSe
 	return &secretsv1.SetSecretResponse{Metadata: s.buildMetadata(ctx, tenant, stored)}, nil
 }
 
+// providerCredPrefix starts the name of each secret that the provider store
+// owns.
+const providerCredPrefix = "provider_cred:"
+
 // RotateSecret writes a new value to an existing secret. It additionally
 // emits a secret_rotated audit event so the dashboard's audit page shows
 // rotations distinctly from initial creates.
@@ -287,6 +291,13 @@ func (s *SecretsAdminServer) RotateSecret(ctx context.Context, req *secretsv1.Ro
 
 	callerReq := req.GetName()
 	storedReq := toStoredName(callerReq)
+
+	// A provider credential changes through the provider store only, which
+	// checks each field before it stores it.
+	if strings.HasPrefix(callerReq, providerCredPrefix) || strings.HasPrefix(storedReq, providerCredPrefix) {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"secret %q belongs to a provider; change it through the provider settings", callerReq)
+	}
 
 	// Existence precondition — Rotate refuses to create a new secret.
 	names, err := s.service.List(ctx, sdksecrets.Filter{Prefix: storedReq, Limit: 1})
