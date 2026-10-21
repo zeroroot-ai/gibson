@@ -1401,6 +1401,12 @@ func (s *ComponentServiceServer) Complete(
 
 	// The mission of the work item, for attribution. Missing context is not
 	// an error: the completion then carries no mission id.
+	// The work id selects the mission of the usage record and the slot pin, so
+	// the caller must have claimed the work item.
+	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
+	if claimErr != nil {
+		return nil, claimErr
+	}
 	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		// Log and continue; the lookup is best-effort.
@@ -1413,7 +1419,7 @@ func (s *ComponentServiceServer) Complete(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
 	if pinErr != nil {
 		return nil, pinErr
 	}
@@ -1503,6 +1509,12 @@ func (s *ComponentServiceServer) CompleteStream(
 
 	// The mission of the work item, for attribution. Missing context is not
 	// an error: the completion then carries no mission id.
+	// The work id selects the mission of the usage record and the slot pin, so
+	// the caller must have claimed the work item.
+	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
+	if claimErr != nil {
+		return claimErr
+	}
 	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "complete stream: mission context lookup failed; using tenant defaults",
@@ -1514,7 +1526,7 @@ func (s *ComponentServiceServer) CompleteStream(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
 	if pinErr != nil {
 		return pinErr
 	}
@@ -1856,11 +1868,12 @@ func (s *ComponentServiceServer) SubmitFinding(
 
 	// A finding may be submitted outside any work item (work_id empty), in which
 	// case it is simply tenant-ambient. When a work id IS supplied it selects the
-	// mission the finding is attributed to, so the caller must own it. The owner's
-	// name is not needed here — the submitter's World sink scopes the finding —
-	// but the ownership check is, and it fails the RPC when it does not hold.
+	// mission the finding is attributed to, so the caller must have claimed it.
+	// The owner's name is not needed here — the submitter's World sink scopes the
+	// finding — but the claim check is, and it fails the RPC when it does not
+	// hold.
 	if req.WorkId != "" {
-		if _, ownerErr := s.resolveWorkOwner(ctx, tenant, req.WorkId); ownerErr != nil {
+		if _, ownerErr := s.resolveClaimedWork(ctx, tenant, req.WorkId); ownerErr != nil {
 			return nil, ownerErr
 		}
 	}

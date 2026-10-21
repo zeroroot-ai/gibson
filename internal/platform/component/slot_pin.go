@@ -103,7 +103,8 @@ func slotPinFrom(ctx context.Context) *agent.SlotConfig {
 
 // nodeSlotPin returns the pin of slot for the work item workID.
 //
-// The pin applies only when the caller is the tenant that owns the work item.
+// The caller has claimed the work item (claimedWorkOwner), and owner is the
+// tenant that owns it. The pin applies only when the caller is that tenant.
 // A pin names a provider of the owning tenant's set, and a completion
 // resolves its slot in the caller's set, so a shared (_system) component that
 // serves the work of a tenant gets no pin: its completion keeps the _system
@@ -112,27 +113,13 @@ func slotPinFrom(ctx context.Context) *agent.SlotConfig {
 // a pin never falls back to the default in silence.
 // A server with no work-context registry cannot tell whether a pin exists, so
 // a completion with a work id is refused, as SubmitResult refuses it.
-func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, workID, slot string) (*agent.SlotConfig, error) {
+func (s *ComponentServiceServer) nodeSlotPin(ctx context.Context, tenant, owner, workID, slot string) (*agent.SlotConfig, error) {
 	if workID == "" {
 		return nil, nil
 	}
-	if s.workContext == nil {
-		s.logger.ErrorContext(ctx, "llm: work-context registry not wired; refusing a completion with a work id",
-			slog.String("tenant", tenant), slog.String("work_id", workID))
-		return nil, status.Error(codes.FailedPrecondition, "work-context registry is not configured")
-	}
-	owner, err := s.workContext.WorkOwner(ctx, workID)
-	if err != nil {
-		if errors.Is(err, ErrWorkOwnerUnknown) {
-			return nil, nil
-		}
-		// The server cannot tell whether the node pinned the slot. A pin never
-		// falls back to the default in silence, so the completion is refused.
-		s.logger.WarnContext(ctx, "llm: the owner of the work item could not be read; refusing the completion",
-			slog.String("tenant", tenant), slog.String("work_id", workID), slog.String("slot", slot),
-			slog.String("error", err.Error()))
-		return nil, status.Error(codes.Unavailable, "the work item could not be read, try again")
-	}
+	// owner is the tenant that owns the work item, resolved with the claim of
+	// the caller (claimedWorkOwner), so a work item of another agent never
+	// reaches this function.
 	if owner != tenant {
 		if tenant == auth.SystemTenantString {
 			// A shared component resolves in the _system provider set, so a

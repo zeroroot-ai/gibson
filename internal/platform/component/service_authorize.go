@@ -36,7 +36,7 @@ func (s *ComponentServiceServer) WithRunAuthorizer(a RunAuthorizer) *ComponentSe
 // resource. It is the pull-transport twin of HarnessCallbackService.Authorize.
 //
 // Flow:
-//  1. Confirm the caller owns the work item (resolveWorkOwner).
+//  1. Confirm the caller claimed the work item (resolveClaimedWork).
 //  2. Read the mission run bound to the work item at enqueue. The request names
 //     no run, so a caller cannot ask about a run that is not its own.
 //  3. Run the decision of the callback path on that run.
@@ -50,7 +50,7 @@ func (s *ComponentServiceServer) Authorize(
 		return nil, status.Error(codes.InvalidArgument, "authorize: work_id, action and resource are required")
 	}
 	tenant := auth.TenantStringFromContext(ctx)
-	owner, err := s.resolveWorkOwner(ctx, tenant, req.GetWorkId())
+	owner, err := s.resolveClaimedWork(ctx, tenant, req.GetWorkId())
 	if err != nil {
 		return nil, err
 	}

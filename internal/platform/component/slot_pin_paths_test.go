@@ -81,13 +81,29 @@ func TestCompleteStream_UsesTheSlotPinOfTheDispatchingNode(t *testing.T) {
 	env.pinnedProv.streamChunks = []llm.StreamChunk{{Delta: llm.StreamDelta{Content: "ok"}, FinishReason: llm.FinishReasonStop}}
 	env.dispatchAgentWork(t, adapterTestTenant, "work-stream-1", fastPin)
 
-	ctx := auth.ContextWithTenantString(context.Background(), adapterTestTenant)
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), adapterTestTenant), testClaimant)
 	stream := &completeStream{ctx: ctx}
 	require.NoError(t, env.svc.CompleteStream(&componentpb.CompleteStreamRequest{
 		WorkId: "work-stream-1", Slot: "fast", Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
 	}, stream))
 	assert.NotEmpty(t, stream.sent)
 	assert.Equal(t, 1, env.pinnedProv.calls, "the pinned provider serves the stream")
+	assert.Zero(t, env.defaultProv.calls)
+}
+
+// CompleteStream refuses a work id that another agent claimed.
+func TestCompleteStream_AWorkIDOfAnotherAgentIsRefused(t *testing.T) {
+	env := newSlotPinEnv(t)
+	env.dispatchAgentWork(t, adapterTestTenant, "work-stream-2", fastPin)
+
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), adapterTestTenant), "component-2")
+	stream := &completeStream{ctx: ctx}
+	err := env.svc.CompleteStream(&componentpb.CompleteStreamRequest{
+		WorkId: "work-stream-2", Slot: "fast", Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
+	}, stream)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Empty(t, stream.sent)
+	assert.Zero(t, env.pinnedProv.calls)
 	assert.Zero(t, env.defaultProv.calls)
 }
 
@@ -168,16 +184,23 @@ func TestWorkSlotPins_BindAndLookupPaths(t *testing.T) {
 	})
 }
 
-// A registry that cannot read the owner refuses the completion: the server
-// cannot tell whether the node pinned the slot.
-func TestNodeSlotPin_AnOwnerReadFailureRefuses(t *testing.T) {
+// A registry that cannot read the owner refuses the completion before the pin
+// is read: the server cannot tell who claimed the work item.
+func TestClaimedWorkOwner_AnOwnerReadFailureRefuses(t *testing.T) {
 	sc := brokenStateClient(t)
 	base := newWorkIDEnv(t)
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(sc))
-	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, "w", "fast")
-	assert.Equal(t, codes.Unavailable, status.Code(err))
-	assert.Nil(t, pin)
+	owner, err := svc.claimedWorkOwner(withSubject(ctxForTenant(adapterTestTenant), testClaimant), adapterTestTenant, "w")
+	require.Error(t, err)
+	assert.Empty(t, owner)
+}
+
+// A completion with no work id has no owner and no claim to check.
+func TestClaimedWorkOwner_NoWorkIDHasNoOwner(t *testing.T) {
+	owner, err := (&ComponentServiceServer{}).claimedWorkOwner(context.Background(), adapterTestTenant, "")
+	require.NoError(t, err)
+	assert.Empty(t, owner)
 }
 
 // failingPinRegistry owns every work item and fails each pin read.
@@ -192,7 +215,7 @@ func TestNodeSlotPin_APinReadFailureRefuses(t *testing.T) {
 	base := newWorkIDEnv(t)
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), nil, nil, nil, nil).
 		WithWorkContextRegistry(failingPinRegistry{ownEveryWorkItem{tenant: adapterTestTenant}})
-	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, "w", "fast")
+	pin, err := svc.nodeSlotPin(context.Background(), adapterTestTenant, adapterTestTenant, "w", "fast")
 	assert.Equal(t, codes.Unavailable, status.Code(err))
 	assert.Nil(t, pin)
 }
@@ -241,4 +264,36 @@ func TestResolveMissionForWork(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "mission-1", got)
 	})
+}
+
+// CompleteWithTools and CompleteStructured refuse a work id that another agent
+// claimed, before any provider is called.
+func TestCompleteWithToolsAndStructured_AWorkIDOfAnotherAgentIsRefused(t *testing.T) {
+	env := newSlotPinEnv(t)
+	completer := &countingToolCompleter{}
+	env.svc.WithLLMToolCompleter(completer)
+	env.dispatchAgentWork(t, adapterTestTenant, "work-tools-1", fastPin)
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), adapterTestTenant), "component-2")
+	messages := []*componentpb.LLMMessage{{Role: "user", Content: "hello"}}
+
+	_, err := env.svc.CompleteWithTools(ctx, &componentpb.CompleteWithToolsRequest{WorkId: "work-tools-1", Slot: "fast", Messages: messages})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = env.svc.CompleteStructured(ctx, &componentpb.CompleteStructuredRequest{
+		WorkId: "work-tools-1", Slot: "fast", Messages: messages, SchemaJson: `{"type":"object"}`,
+	})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Zero(t, completer.calls, "the completer must not run for a foreign work id")
+}
+
+// countingToolCompleter counts the calls that reach the completer.
+type countingToolCompleter struct{ calls int }
+
+func (c *countingToolCompleter) CompleteWithTools(context.Context, string, string, string, string, string, int32, float32) (content, finishReason, modelUsed string, promptTokens, completionTokens int32, toolCallsJSON string, err error) { //nolint:gocritic // the LLMToolCompleter interface fixes these results
+	c.calls++
+	return "", "", "", 0, 0, "", nil
+}
+
+func (c *countingToolCompleter) CompleteStructured(context.Context, string, string, string, string, string, int32, float32) (resultJSON string, promptTokens, completionTokens int32, err error) {
+	c.calls++
+	return "", 0, 0, nil
 }

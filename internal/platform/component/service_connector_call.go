@@ -181,24 +181,31 @@ func (s *ComponentServiceServer) policyOfRun(ctx context.Context, tenant, runID 
 }
 
 // optionalGrantRun returns the mission run that the verified task grant of the
-// caller names. A caller with no task grant, such as an enrolled agent on its
-// host key, has no run and gets an empty answer. A task grant that does not
-// verify refuses the call.
+// caller names. A caller with no task grant has no run and gets an empty
+// answer. A task grant that does not verify refuses the call.
 func (s *ComponentServiceServer) optionalGrantRun(ctx context.Context, tenant string) (string, error) {
+	_, run, err := s.optionalTaskGrant(ctx, tenant)
+	return run, err
+}
+
+// optionalTaskGrant returns the mission and the mission run that the verified
+// task grant of the caller names. A caller with no task grant, such as an
+// enrolled agent on its host key, has none and gets empty answers. A task grant
+// that does not verify refuses the call.
+func (s *ComponentServiceServer) optionalTaskGrant(ctx context.Context, tenant string) (mission, run string, err error) {
 	md, _ := metadata.FromIncomingContext(ctx)
 	values := md.Get("x-capability-grant")
 	switch len(values) {
 	case 0:
-		return "", nil
+		return "", "", nil
 	case 1:
 		token := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(values[0], "Bearer "), "bearer "))
 		parts := strings.Split(token, ".")
 		if len(parts) != 3 || tokenHeaderType(parts[0]) != "JWT" {
-			return "", nil // a component grant names no run
+			return "", "", nil // a component grant names no run
 		}
 	}
-	_, run, err := s.callerTaskGrant(ctx, tenant)
-	return run, err
+	return s.callerTaskGrant(ctx, tenant)
 }
 
 // connectorAuditObserver writes the audit records of a connector call made

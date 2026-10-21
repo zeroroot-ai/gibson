@@ -14,6 +14,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -24,6 +25,7 @@ import (
 type slotPinEnv struct {
 	svc         *ComponentServiceServer
 	queue       WorkQueue
+	state       *state.StateClient
 	defaultProv *mockLLMProvider
 	pinnedProv  *mockLLMProvider
 }
@@ -45,7 +47,7 @@ func newSlotPinEnv(t *testing.T) *slotPinEnv {
 
 	svc := NewComponentServiceServer(&noopRegistry{}, base.queue, testLogger(), adapter, nil, nil, nil).
 		WithWorkContextRegistry(NewRedisWorkContextRegistry(base.state))
-	return &slotPinEnv{svc: svc, queue: base.queue, defaultProv: defaultProv, pinnedProv: pinnedProv}
+	return &slotPinEnv{svc: svc, queue: base.queue, state: base.state, defaultProv: defaultProv, pinnedProv: pinnedProv}
 }
 
 // dispatchAgentWork enqueues agent work for tenant with the given slot pins,
@@ -58,11 +60,13 @@ func (e *slotPinEnv) dispatchAgentWork(t *testing.T, tenant, workID string, pins
 		SlotPins: pins,
 	})
 	require.NoError(t, err)
+	// The agent of these tests claimed the work item.
+	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(context.Background(), workID, testClaimant))
 }
 
 func (e *slotPinEnv) complete(t *testing.T, tenant, workID, slot string) error {
 	t.Helper()
-	ctx := auth.ContextWithTenantString(context.Background(), tenant)
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), tenant), testClaimant)
 	_, err := e.svc.Complete(ctx, &componentpb.CompleteRequest{
 		WorkId:   workID,
 		Slot:     slot,
@@ -97,15 +101,32 @@ func TestComplete_AnUnpinnedSlotKeepsTheTenantDefault(t *testing.T) {
 	assert.Zero(t, env.pinnedProv.calls)
 }
 
-// A work id of another tenant gives no pin: the caller gets its own tenant
-// default, never the slot choice of another tenant's node.
-func TestComplete_AWorkIDOfAnotherTenantGivesNoPin(t *testing.T) {
+// A work id of another tenant is refused: the caller never gets the slot choice
+// of another tenant's node, and no provider serves the completion.
+func TestComplete_AWorkIDOfAnotherTenantIsRefused(t *testing.T) {
 	env := newSlotPinEnv(t)
 	env.dispatchAgentWork(t, "other-tenant", "work-pin-3", fastPin)
 
-	require.NoError(t, env.complete(t, adapterTestTenant, "work-pin-3", "fast"))
+	err := env.complete(t, adapterTestTenant, "work-pin-3", "fast")
 
-	assert.Equal(t, 1, env.defaultProv.calls)
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Zero(t, env.defaultProv.calls)
+	assert.Zero(t, env.pinnedProv.calls)
+}
+
+// A work id that another agent of the same tenant claimed is refused too: the
+// work id selects the pin and the mission of the usage record.
+func TestComplete_AWorkIDOfAnotherAgentIsRefused(t *testing.T) {
+	env := newSlotPinEnv(t)
+	env.dispatchAgentWork(t, adapterTestTenant, "work-pin-6", fastPin)
+
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), adapterTestTenant), "component-2")
+	_, err := env.svc.Complete(ctx, &componentpb.CompleteRequest{
+		WorkId: "work-pin-6", Slot: "fast", Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
+	})
+
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Zero(t, env.defaultProv.calls)
 	assert.Zero(t, env.pinnedProv.calls)
 }
 
@@ -116,7 +137,7 @@ func TestComplete_ASharedComponentGetsNoPinOfTheTenant(t *testing.T) {
 	env := newSlotPinEnv(t)
 	env.dispatchAgentWork(t, "owner-tenant", "work-pin-4", fastPin)
 
-	ctx := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
+	ctx := withSubject(auth.ContextWithTenant(context.Background(), auth.SystemTenant), testClaimant)
 	_, err := env.svc.Complete(ctx, &componentpb.CompleteRequest{
 		WorkId:   "work-pin-4",
 		Slot:     "fast",

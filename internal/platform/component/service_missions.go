@@ -87,15 +87,28 @@ func (s *ComponentServiceServer) CreateMission(ctx context.Context, req *compone
 		return nil, status.Error(codes.Unauthenticated, "caller identity unavailable")
 	}
 
-	// The parent is whatever mission the caller's CURRENT work item belongs
-	// to. A work id the caller does not own resolves to "" here, not to
-	// someone else's mission, and origination is then refused for want of a
-	// parent — the same answer a caller with no work item at all gets.
+	// The parent is the mission of the caller's current work item, which the
+	// caller must have claimed, or the mission of its own run, which the
+	// verified task grant names. A work id that another agent claimed is
+	// refused. A grant and a work item of different missions are refused.
+	if _, claimErr := s.claimedWorkOwner(ctx, tenant, req.GetWorkId()); claimErr != nil {
+		return nil, claimErr
+	}
 	parentMissionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant)
 	if resolveErr != nil {
 		s.logger.ErrorContext(ctx, "CreateMission: failed to resolve the caller's work context",
 			"tenant", tenant, "work_id", req.GetWorkId(), "error", resolveErr)
 		return nil, status.Error(codes.Internal, "failed to resolve the calling work context")
+	}
+	grantMission, _, grantErr := s.optionalTaskGrant(ctx, tenant)
+	if grantErr != nil {
+		return nil, grantErr
+	}
+	if grantMission != "" {
+		if parentMissionID != "" && parentMissionID != grantMission {
+			return nil, status.Error(codes.PermissionDenied, "the work item belongs to another mission than the grant")
+		}
+		parentMissionID = grantMission
 	}
 
 	missionJSON, err := s.missionMgr.OriginateMission(ctx, OriginateMissionRequest{
@@ -209,9 +222,11 @@ func (s *ComponentServiceServer) GetMissionRunHistory(ctx context.Context, req *
 	if err != nil {
 		return nil, err
 	}
-	// Same resolution as CreateMission's parent lookup, and the same refusal:
-	// a work id belonging to another tenant resolves to "", so the answer is
-	// "no such history", never someone else's.
+	// The work id must be one that the caller claimed. A work id of another
+	// agent is refused and never answered with whether it has a mission.
+	if _, claimErr := s.claimedWorkOwner(ctx, tenant, req.GetWorkId()); claimErr != nil {
+		return nil, claimErr
+	}
 	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.GetWorkId(), tenant)
 	if resolveErr != nil {
 		s.logger.ErrorContext(ctx, "GetMissionRunHistory: failed to resolve the caller's work context",

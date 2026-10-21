@@ -66,6 +66,12 @@ func (s *ComponentServiceServer) CompleteWithTools(
 		slog.Int("tool_count", len(req.Tools)),
 	)
 
+	// The work id selects the mission of the usage record and the slot pin, so
+	// the caller must have claimed the work item.
+	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
+	if claimErr != nil {
+		return nil, claimErr
+	}
 	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeWithTools: mission context lookup failed; using tenant defaults",
@@ -76,7 +82,7 @@ func (s *ComponentServiceServer) CompleteWithTools(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
 	if pinErr != nil {
 		return nil, pinErr
 	}
@@ -155,6 +161,12 @@ func (s *ComponentServiceServer) CompleteStructured(
 		slog.String("slot", req.Slot),
 	)
 
+	// The work id selects the mission of the usage record and the slot pin, so
+	// the caller must have claimed the work item.
+	owner, claimErr := s.claimedWorkOwner(ctx, tenant, req.WorkId)
+	if claimErr != nil {
+		return nil, claimErr
+	}
 	missionID, resolveErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
 	if resolveErr != nil {
 		s.logger.WarnContext(ctx, "completeStructured: mission context lookup failed; using tenant defaults",
@@ -165,7 +177,7 @@ func (s *ComponentServiceServer) CompleteStructured(
 	}
 
 	// The slot pin of the mission node that dispatched this work (gibson#1203).
-	pin, pinErr := s.nodeSlotPin(ctx, tenant, req.WorkId, req.Slot)
+	pin, pinErr := s.nodeSlotPin(ctx, tenant, owner, req.WorkId, req.Slot)
 	if pinErr != nil {
 		return nil, pinErr
 	}
