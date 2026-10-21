@@ -136,10 +136,9 @@ func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConf
 		providerFactory: factory,
 		// The budget enforcer is required: the daemon wires it at start.
 		budgetEnforcer: &stubBudgetEnforcer{},
-		// The model gate is required: ExecuteLLM denies every call without it.
-		modelFilter: gateStub{permit: true},
 	}
-	return s
+	// The model gate is required: ExecuteLLM denies every call without it.
+	return s.WithModelFilter(gateStub{permit: true})
 }
 
 // gateStub is a modelgate.Filter with a fixed answer.

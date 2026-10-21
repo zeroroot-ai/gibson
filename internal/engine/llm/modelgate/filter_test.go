@@ -6,6 +6,7 @@ package modelgate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/zeroroot-ai/sdk/auth"
@@ -280,5 +281,35 @@ func TestUnnameableCandidate(t *testing.T) {
 	got, err := NewFGAFilter(fga, nil, 0).Permitted(initiatorCtx(t, "alice"), []Candidate{{Provider: "anthropic", Model: "bad#member"}, opus})
 	if err != nil || len(got) != 1 || got[0] != opus {
 		t.Errorf("Permitted = %v, %v; want only the nameable candidate", got, err)
+	}
+}
+
+// TestCouldNotDecide holds the line between a transient failure of the
+// authorizer, which a caller may retry, and every other error, which is final.
+func TestCouldNotDecide(t *testing.T) {
+	other := errors.New("bad request")
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"fga unavailable", authz.ErrFgaUnavailable, true},
+		{"fga timeout", authz.ErrFgaTimeout, true},
+		{"context canceled", context.Canceled, true},
+		{"deadline exceeded", context.DeadlineExceeded, true},
+		{"wrapped fga unavailable", fmt.Errorf("check: %w", authz.ErrFgaUnavailable), true},
+		{"wrapped fga timeout", fmt.Errorf("check: %w", authz.ErrFgaTimeout), true},
+		{"wrapped context canceled", fmt.Errorf("check: %w", context.Canceled), true},
+		{"wrapped deadline exceeded", fmt.Errorf("check: %w", context.DeadlineExceeded), true},
+		{"other error", other, false},
+		{"wrapped other error", fmt.Errorf("check: %w", other), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := CouldNotDecide(tc.err); got != tc.want {
+				t.Fatalf("CouldNotDecide(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
