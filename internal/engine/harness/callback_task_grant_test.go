@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -37,7 +38,32 @@ func (f *fakeGrantVerifier) Verify(_ context.Context, token string) (sdkcg.Claim
 	if f.err != nil {
 		return sdkcg.Claims{}, f.err
 	}
-	return f.claims, nil
+	// The real verifier reads the run from the signed claim. The test tokens
+	// carry a bare payload, so the fake reads the claim of that payload.
+	claims := f.claims
+	if claims.MissionRunID == "" {
+		claims.MissionRunID = testTokenRun(token)
+	}
+	return claims, nil
+}
+
+// testTokenRun reads the mrid claim of the unsigned payload of a test token.
+func testTokenRun(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Run string `json:"mrid"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	return payload.Run
 }
 
 func grantClaims(t *testing.T, tenant, mission string) sdkcg.Claims {
@@ -430,12 +456,21 @@ type callerGrantVerifier struct {
 	caller string
 }
 
-func (c callerGrantVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
-	return c.claims, nil
+func (c callerGrantVerifier) Verify(_ context.Context, token string) (sdkcg.Claims, error) {
+	return c.withRun(token), nil
 }
 
-func (c callerGrantVerifier) VerifyCaller(context.Context, string) (sdkcg.Claims, string, error) {
-	return c.claims, c.caller, nil
+func (c callerGrantVerifier) VerifyCaller(_ context.Context, token string) (sdkcg.Claims, string, error) {
+	return c.withRun(token), c.caller, nil
+}
+
+// withRun fills the run claim, as the real verifier does.
+func (c callerGrantVerifier) withRun(token string) sdkcg.Claims {
+	claims := c.claims
+	if claims.MissionRunID == "" {
+		claims.MissionRunID = testTokenRun(token)
+	}
+	return claims
 }
 
 // The agent name of a request that carries a tool or plugin grant must be the
@@ -512,7 +547,7 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 	v := capabilitygrant.NewLocalVerifier(func() *capabilitygrant.Minter { return m })
 
 	toolGrant := h.mintCGForWork("nmap", "tool", "work-1")
-	if run := capabilitygrant.MissionRunOf(toolGrant); run != "run-1" {
+	if run := sdkcg.MissionRunOf(toolGrant); run != "run-1" {
 		t.Fatalf("tool grant mrid = %q, want run-1", run)
 	}
 	_, caller, err := v.VerifyCaller(context.Background(), toolGrant)
@@ -520,7 +555,7 @@ func TestMintCGForWork_ToolGrantCarriesTheCallingAgent(t *testing.T) {
 		t.Fatalf("tool grant: caller = %q, err = %v; want alpha", caller, err)
 	}
 	agentGrant := h.mintCGForWork("zerocool", "agent", "task-1")
-	if run := capabilitygrant.MissionRunOf(agentGrant); run != "run-1" {
+	if run := sdkcg.MissionRunOf(agentGrant); run != "run-1" {
 		t.Fatalf("agent grant mrid = %q, want run-1", run)
 	}
 	_, caller, err = v.VerifyCaller(context.Background(), agentGrant)

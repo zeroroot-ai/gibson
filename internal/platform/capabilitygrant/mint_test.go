@@ -451,7 +451,7 @@ func TestMinter_MissionRunClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := MissionRunOf(tok); got != "run-9" {
+	if got := capabilitygrant.MissionRunOf(tok); got != "run-9" {
 		t.Errorf("MissionRunOf = %q, want run-9", got)
 	}
 
@@ -459,10 +459,10 @@ func TestMinter_MissionRunClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := MissionRunOf(tok); got != "" {
+	if got := capabilitygrant.MissionRunOf(tok); got != "" {
 		t.Errorf("a grant with no run: MissionRunOf = %q, want empty", got)
 	}
-	if got := MissionRunOf("not-a-token"); got != "" {
+	if got := capabilitygrant.MissionRunOf("not-a-token"); got != "" {
 		t.Errorf("a malformed token: MissionRunOf = %q, want empty", got)
 	}
 }

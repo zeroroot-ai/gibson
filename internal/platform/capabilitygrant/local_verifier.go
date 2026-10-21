@@ -97,11 +97,6 @@ func (v *LocalVerifier) VerifyCaller(ctx context.Context, token string) (sdkcg.C
 // signature was verified. A token it cannot read has no calling agent.
 func callingAgentOf(token string) string { return stringClaimOf(token, CallingAgentClaim) }
 
-// MissionRunOf reads the claim "mrid" from the payload of a token whose
-// signature was verified. A token it cannot read, and a grant minted before the
-// claim existed, has no run.
-func MissionRunOf(token string) string { return stringClaimOf(token, MissionRunClaim) }
-
 // stringClaimOf reads one string claim from the payload of a token. The caller
 // has verified the signature.
 func stringClaimOf(token, name string) string {

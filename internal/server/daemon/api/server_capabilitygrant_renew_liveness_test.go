@@ -6,6 +6,7 @@ package api
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -43,8 +44,37 @@ type stubVerifier struct {
 	err    error
 }
 
-func (v stubVerifier) Verify(context.Context, string) (sdkcg.Claims, error) {
-	return v.claims, v.err
+func (v stubVerifier) Verify(_ context.Context, token string) (sdkcg.Claims, error) {
+	return v.withRun(token), v.err
+}
+
+// withRun fills the run claim from the payload of the token, as the real
+// verifier does from the signed claim.
+func (v stubVerifier) withRun(token string) sdkcg.Claims {
+	claims := v.claims
+	if claims.MissionRunID == "" {
+		claims.MissionRunID = stubTokenRun(token)
+	}
+	return claims
+}
+
+// stubTokenRun reads the mrid claim of the unsigned payload of a test token.
+func stubTokenRun(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Run string `json:"mrid"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	return payload.Run
 }
 
 // liveLookup answers the run-liveness question from a fixed set.
@@ -206,8 +236,8 @@ type callerVerifierStub struct {
 	caller string
 }
 
-func (v callerVerifierStub) VerifyCaller(context.Context, string) (sdkcg.Claims, string, error) {
-	return v.claims, v.caller, v.err
+func (v callerVerifierStub) VerifyCaller(_ context.Context, token string) (sdkcg.Claims, string, error) {
+	return v.withRun(token), v.caller, v.err
 }
 
 // The renewal of a tool or plugin grant keeps its calling agent, and it
@@ -266,7 +296,7 @@ func TestRenewCapabilityGrant_KeepsTheMissionRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renew: %v", err)
 	}
-	if got := capabilitygrant.MissionRunOf(resp.GetCapabilityGrant()); got != "run-5" {
+	if got := sdkcg.MissionRunOf(resp.GetCapabilityGrant()); got != "run-5" {
 		t.Fatalf("renewed grant mrid = %q, want run-5", got)
 	}
 }

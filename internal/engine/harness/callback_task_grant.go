@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
@@ -98,7 +97,7 @@ func checkTaskGrantScope(ctx context.Context, req any, get func() TaskGrantVerif
 	// Every task grant names its run. A grant with none is not a grant that this
 	// daemon minted for a run, and a restart ends every run, so no older grant
 	// is live.
-	grantRun := capabilitygrant.MissionRunOf(token)
+	grantRun := claims.MissionRunID
 	if grantRun == "" {
 		return ctx, deny(ctx, logger, method, "task grant names no run",
 			status.Error(codes.PermissionDenied, "task grant names no mission run"))

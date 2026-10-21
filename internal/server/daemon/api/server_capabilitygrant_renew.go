@@ -184,7 +184,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	}
 	// Every task grant names its run. A grant with none cannot be bound to a
 	// run, so it cannot renew.
-	if !s.liveMissions.IsMissionRunLive(claims.MissionID, capabilitygrant.MissionRunOf(cgToken)) {
+	if !s.liveMissions.IsMissionRunLive(claims.MissionID, claims.MissionRunID) {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
 	}
@@ -211,7 +211,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		Tenant:         claims.Tenant.String(),
 		MissionID:      claims.MissionID,
 		TaskID:         claims.TaskID,
-		MissionRunID:   capabilitygrant.MissionRunOf(cgToken), // the renewal keeps the run of the grant
+		MissionRunID:   claims.MissionRunID, // the renewal keeps the run of the grant
 		AllowedRPCs:    claims.AllowedRPCs,
 		RecipientClass: recipientClassFromSubject(claims.Subject),
 	})
