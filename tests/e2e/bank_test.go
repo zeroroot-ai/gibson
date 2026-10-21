@@ -24,6 +24,9 @@
 //   - DAEMON_GRPC_ADDR (the test-mode daemon, authz off)
 //   - EXIT_TEST_ANTHROPIC_API_KEY (a real key; the test skips without it and
 //     says so, because only a human can set the repository secret)
+//   - EXIT_TEST_ANTHROPIC_WORKSPACE_ID (the workspace of the key). The key is an
+//     organization user key and works only with the header
+//     "anthropic-workspace-id: <id>". The test fails when it is empty.
 package e2e
 
 import (
@@ -61,6 +64,9 @@ func TestBank(t *testing.T) {
 		t.Skip("EXIT_TEST_ANTHROPIC_API_KEY is not set: the bank exit test needs a real key, which only a human can add as a repository secret (gibson#1718). Nothing was tested.")
 	}
 
+	workspaceID := os.Getenv("EXIT_TEST_ANTHROPIC_WORKSPACE_ID")
+	require.NotEmpty(t, workspaceID, "EXIT_TEST_ANTHROPIC_WORKSPACE_ID is not set: the key works only with the header anthropic-workspace-id")
+
 	clients, err := helpers.NewGRPCClients()
 	require.NoError(t, err, "dial daemon at DAEMON_GRPC_ADDR")
 	t.Cleanup(func() { _ = clients.Close() })
@@ -72,7 +78,13 @@ func TestBank(t *testing.T) {
 	t.Run("the key goes into the tenant's provider configuration through the RPC", func(t *testing.T) {
 		_, err := providers.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
 			Name: bankProviderName, Type: "anthropic", SetAsDefault: true,
-			Credentials: map[string]string{"api_key": key},
+			// custom_headers reaches the daemon's Anthropic client and the
+			// sandbox variable ANTHROPIC_CUSTOM_HEADERS, so every caller of
+			// the key sends the workspace header.
+			Credentials: map[string]string{
+				"api_key":        key,
+				"custom_headers": "anthropic-workspace-id: " + workspaceID,
+			},
 		}})
 		if status.Code(err) == codes.AlreadyExists {
 			err = nil

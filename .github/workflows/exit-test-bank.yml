@@ -10,9 +10,14 @@
 # Runs on main and on dispatch, never on a pull request (ADR-0080). It feeds
 # the scorecard and blocks nothing.
 #
-# Two things a human must set once, and only a human can set them:
+# Three things a human must set once, and only a human can set them:
 #   1. the repository variable EXIT_TEST_BANK_ENABLED = true
 #   2. the repository secret   EXIT_TEST_ANTHROPIC_API_KEY = a real key
+#   3. the repository variable EXIT_TEST_ANTHROPIC_WORKSPACE_ID = the workspace
+#      of the key. The key is an organization user key. It works only with the
+#      header "anthropic-workspace-id: <id>". The test sends the id as the
+#      field custom_headers of the tenant provider. The daemon client and the
+#      sandbox variable ANTHROPIC_CUSTOM_HEADERS read that one field.
 # The variable is the gate, because GitHub does not allow the secrets context
 # in a job-level `if` (measured on this repository 2026-09-02: the run ends in
 # a startup failure). Only a job-level gate makes the RUN conclusion "skipped",
@@ -21,7 +26,7 @@
 #
 # So the board reads one of three honest states:
 #   variable unset            -> the job is skipped, the run is skipped, SKIPPED
-#   variable set, key missing -> the first step fails and says so, FAIL
+#   variable set, key or workspace id missing -> the first step fails and says so, FAIL
 #   both set                  -> the real test runs, PASS or FAIL
 # ----------------------------------------------------------------------------
 name: exit-test-bank
@@ -75,6 +80,7 @@ jobs:
     if: ${{ vars.EXIT_TEST_BANK_ENABLED == 'true' }}
     env:
       EXIT_TEST_ANTHROPIC_API_KEY: ${{ secrets.EXIT_TEST_ANTHROPIC_API_KEY }}
+      EXIT_TEST_ANTHROPIC_WORKSPACE_ID: ${{ vars.EXIT_TEST_ANTHROPIC_WORKSPACE_ID }}
     steps:
       # The variable says the test is on. If the key is missing, the test
       # cannot run, and saying so with a failure is the honest report.
@@ -84,7 +90,11 @@ jobs:
             echo "::error title=exit-test-bank cannot run::EXIT_TEST_BANK_ENABLED is true but the repository secret EXIT_TEST_ANTHROPIC_API_KEY is empty. Add the key under Settings > Secrets and variables > Actions, or unset the variable."
             exit 1
           fi
-          echo "the key is set"
+          if [ -z "${EXIT_TEST_ANTHROPIC_WORKSPACE_ID}" ]; then
+            echo "::error title=exit-test-bank cannot run::EXIT_TEST_BANK_ENABLED is true but the repository variable EXIT_TEST_ANTHROPIC_WORKSPACE_ID is empty. The key works only with the header anthropic-workspace-id. Add the workspace id under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          echo "the key and the workspace id are set"
       - name: Checkout gibson
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -358,8 +368,13 @@ jobs:
       - name: Run the bank exit test in-cluster
         env:
           EXIT_TEST_ANTHROPIC_API_KEY: ${{ secrets.EXIT_TEST_ANTHROPIC_API_KEY }}
+          EXIT_TEST_ANTHROPIC_WORKSPACE_ID: ${{ vars.EXIT_TEST_ANTHROPIC_WORKSPACE_ID }}
         run: |
           set -euo pipefail
+          if [ -z "${EXIT_TEST_ANTHROPIC_WORKSPACE_ID}" ]; then
+            echo "::error::EXIT_TEST_ANTHROPIC_WORKSPACE_ID is empty; the key works only with the header anthropic-workspace-id"
+            exit 1
+          fi
           pw=$(kubectl -n "$NS" get secret gibson-redis-stack -o jsonpath='{.data.redis-password}' | base64 -d)
           if [ -z "$pw" ]; then
             echo "::error::gibson-redis-stack has no redis-password; the fixture helpers cannot authenticate"
@@ -369,7 +384,8 @@ jobs:
           kubectl -n "$NS" delete secret gibson-e2e-runner-env --ignore-not-found
           kubectl -n "$NS" create secret generic gibson-e2e-runner-env \
             --from-literal=REDIS_PASSWORD="$pw" \
-            --from-literal=EXIT_TEST_ANTHROPIC_API_KEY="$EXIT_TEST_ANTHROPIC_API_KEY"
+            --from-literal=EXIT_TEST_ANTHROPIC_API_KEY="$EXIT_TEST_ANTHROPIC_API_KEY" \
+            --from-literal=EXIT_TEST_ANTHROPIC_WORKSPACE_ID="$EXIT_TEST_ANTHROPIC_WORKSPACE_ID"
 
           kubectl -n "$NS" delete job gibson-e2e-bank --ignore-not-found
           cat <<EOF | kubectl -n "$NS" apply -f -
@@ -437,6 +453,11 @@ jobs:
                           secretKeyRef:
                             name: gibson-e2e-runner-env
                             key: EXIT_TEST_ANTHROPIC_API_KEY
+                      - name: EXIT_TEST_ANTHROPIC_WORKSPACE_ID
+                        valueFrom:
+                          secretKeyRef:
+                            name: gibson-e2e-runner-env
+                            key: EXIT_TEST_ANTHROPIC_WORKSPACE_ID
                     volumeMounts:
                       - name: spire-agent-socket
                         mountPath: /run/spire/sockets

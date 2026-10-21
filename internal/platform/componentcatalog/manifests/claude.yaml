@@ -58,7 +58,16 @@ spec:
   credentials:
     - shape: api_key
       provider: anthropic
-      env: ANTHROPIC_API_KEY
+      envs:
+        - key: api_key
+          env: ANTHROPIC_API_KEY
+        # An organization user key works only with the header
+        # "anthropic-workspace-id: <id>". The value is in the Claude Code
+        # format for ANTHROPIC_CUSTOM_HEADERS. A plain workspace key has no
+        # such field, so the field is optional.
+        - key: custom_headers
+          env: ANTHROPIC_CUSTOM_HEADERS
+          optional: true
     - shape: bedrock
       provider: bedrock
       envs:

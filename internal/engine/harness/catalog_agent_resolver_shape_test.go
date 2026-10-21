@@ -261,3 +261,43 @@ func TestIsInstanceMode(t *testing.T) {
 		t.Error("daemon is not an instance mode")
 	}
 }
+
+// TestResolveAgentLaunchSpec_ShippedClaudeManifestCarriesCustomHeaders: an
+// organization user key works only with the header anthropic-workspace-id. The
+// shipped claude manifest must carry the tenant field custom_headers into the
+// sandbox as ANTHROPIC_CUSTOM_HEADERS, and a plain key must still launch.
+func TestResolveAgentLaunchSpec_ShippedClaudeManifestCarriesCustomHeaders(t *testing.T) {
+	entry, ok := componentcatalog.LookupAgent("claude")
+	if !ok {
+		t.Fatal("the claude manifest is not in the embedded catalog")
+	}
+	const header = "anthropic-workspace-id: wrkspc_test"
+	cases := []struct {
+		name   string
+		values map[string]string
+		want   string
+	}{
+		{"header set", map[string]string{"acme|anthropic|api_key": "sk-ant", "acme|anthropic|custom_headers": header}, header},
+		{"header absent", map[string]string{"acme|anthropic|api_key": "sk-ant"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &CatalogAgentResolver{
+				sandboxClass: "agent",
+				lookup:       func(string) (componentcatalog.AgentEntry, bool) { return entry, true },
+				credentials:  &stubCredentialSource{values: tc.values},
+			}
+			spec, err := r.ResolveAgentLaunchSpec(auth.ContextWithTenantString(context.Background(), "acme"),
+				AgentLaunchRequest{AgentName: "claude", LoginShape: componentcatalog.LoginShapeAPIKey})
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if spec.Env["ANTHROPIC_API_KEY"] != "sk-ant" {
+				t.Fatalf("ANTHROPIC_API_KEY = %q", spec.Env["ANTHROPIC_API_KEY"])
+			}
+			if got := spec.Env["ANTHROPIC_CUSTOM_HEADERS"]; got != tc.want {
+				t.Fatalf("ANTHROPIC_CUSTOM_HEADERS = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
