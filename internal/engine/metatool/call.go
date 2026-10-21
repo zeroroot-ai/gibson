@@ -69,10 +69,11 @@ type MissionPolicy struct {
 
 // CheckRun applies the run check of the policy.
 func (p MissionPolicy) CheckRun(ctx context.Context) error {
-	if p.RunActive == nil {
-		return nil
+	var err error
+	if p.RunActive != nil {
+		err = p.RunActive(ctx)
 	}
-	return p.RunActive(ctx)
+	return err
 }
 
 // CallRecord names one connector call for the observer.

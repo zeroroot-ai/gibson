@@ -112,9 +112,9 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	switch req.GetName() {
 	case metatool.SearchToolsName:
-		if err := policy.CheckRun(ctx); err != nil { //nolint:nilerr // the denial is the response, not a transport error
+		if err := policy.CheckRun(ctx); err != nil {
 			// gibson:no-tool-executed — denied before the search.
-			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
+			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil //nolint:nilerr // the denial is the response, not a transport error
 		}
 		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
 	case metatool.InvokeToolName:

@@ -93,45 +93,8 @@ func (s *ComponentServiceServer) callConnectorTool(
 		Recorder: s.toolCallRecorder,
 		Observer: connectorAuditObserver{s: s},
 	}
-	// The run of the call. A work id names a mission run, and so does a task
-	// grant. The caller must have claimed the work item before its id selects a
-	// mission or a run, or an agent could name the work of another mission.
-	var workRun string
-	if req.WorkId != "" {
-		if _, err := s.resolveClaimedWork(ctx, tenant, req.WorkId); err != nil {
-			return nil, err
-		}
-		call.WorkID = req.WorkId
-		missionID, mErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
-		if mErr != nil {
-			s.logger.WarnContext(ctx, "call tool: mission lookup failed", slog.String("work_id", req.WorkId), slog.String("error", mErr.Error()))
-		}
-		call.MissionID = missionID
-		run, rErr := s.workContext.WorkRun(ctx, req.WorkId)
-		if rErr != nil && !errors.Is(rErr, ErrWorkRunUnknown) {
-			return nil, status.Errorf(codes.Internal, "failed to resolve the run of work %q", req.WorkId)
-		}
-		workRun = run
-	}
-	grantRun, gErr := s.optionalGrantRun(ctx, tenant)
-	if gErr != nil {
-		return nil, gErr
-	}
-	if workRun != "" && grantRun != "" && workRun != grantRun {
-		return nil, status.Error(codes.PermissionDenied, "the work item belongs to another run than the grant")
-	}
-	call.RunID = workRun
-	if call.RunID == "" {
-		call.RunID = grantRun
-	}
-	// A call with no run keeps the can_execute check only. A call with a run
-	// takes the policy of that run, and a policy that cannot be read refuses it.
-	if call.RunID != "" {
-		policy, pErr := s.policyOfRun(ctx, tenant, call.RunID)
-		if pErr != nil {
-			return nil, pErr
-		}
-		call.Policy = policy
+	if err := s.bindCallRun(ctx, tenant, req, &call); err != nil {
+		return nil, err
 	}
 
 	result, err := metatool.NewHandler(nil, catalog.NewFGAAuthorizer(s.authorizer), s.connectorCaller).Call(ctx, call)
@@ -154,6 +117,52 @@ func (s *ComponentServiceServer) callConnectorTool(
 			Code: "[CONNECTOR_CALL_FAILED]", Message: err.Error(),
 		}}, nil
 	}
+}
+
+// bindCallRun sets the work item, the mission, the run and the mission policy of
+// a call. A work id names a mission run, and so does a task grant. The caller
+// must have claimed the work item before its id selects a mission or a run, or
+// an agent could name the work of another mission. A call with no run keeps the
+// can_execute check only. A call with a run takes the policy of that run, and a
+// policy that cannot be read refuses it.
+func (s *ComponentServiceServer) bindCallRun(ctx context.Context, tenant string, req *componentpb.CallToolRequest, call *metatool.Call) error {
+	var workRun string
+	if req.WorkId != "" {
+		if _, err := s.resolveClaimedWork(ctx, tenant, req.WorkId); err != nil {
+			return err
+		}
+		call.WorkID = req.WorkId
+		missionID, mErr := resolveMissionContext(ctx, s.missionCtx, req.WorkId, tenant)
+		if mErr != nil {
+			s.logger.WarnContext(ctx, "call tool: mission lookup failed", slog.String("work_id", req.WorkId), slog.String("error", mErr.Error()))
+		}
+		call.MissionID = missionID
+		run, rErr := s.workContext.WorkRun(ctx, req.WorkId)
+		if rErr != nil && !errors.Is(rErr, ErrWorkRunUnknown) {
+			return status.Errorf(codes.Internal, "failed to resolve the run of work %q", req.WorkId)
+		}
+		workRun = run
+	}
+	grantRun, gErr := s.optionalGrantRun(ctx, tenant)
+	if gErr != nil {
+		return gErr
+	}
+	if workRun != "" && grantRun != "" && workRun != grantRun {
+		return status.Error(codes.PermissionDenied, "the work item belongs to another run than the grant")
+	}
+	call.RunID = workRun
+	if call.RunID == "" {
+		call.RunID = grantRun
+	}
+	if call.RunID == "" {
+		return nil
+	}
+	policy, pErr := s.policyOfRun(ctx, tenant, call.RunID)
+	if pErr != nil {
+		return pErr
+	}
+	call.Policy = policy
+	return nil
 }
 
 // policyOfRun returns the mission policy of a run. A server that cannot read
