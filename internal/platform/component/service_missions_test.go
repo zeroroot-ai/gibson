@@ -314,12 +314,8 @@ func TestCreateMission_ResolvesNoParentFromAnUnknownWorkID(t *testing.T) {
 		WorkId: "some-other-tenants-work-id",
 	})
 
-	require.NoError(t, err)
-	require.Len(t, mgr.originated, 1)
-	assert.Empty(t, mgr.originated[0].ParentMissionID,
-		"an unresolvable work id must not become a parent mission id")
-	assert.Equal(t, "some-other-tenants-work-id", mgr.originated[0].ParentWorkID,
-		"the raw work id is still recorded as lineage — it is just not authority")
+	require.Error(t, err, "a work id that nothing claimed is refused")
+	assert.Empty(t, mgr.originated, "an unresolvable work id must not become a parent mission id")
 }
 
 func TestCreateMission_SurfacesTheSeamsOwnStatusCode(t *testing.T) {
@@ -352,7 +348,7 @@ func TestGetMissionRunHistory_RefusesAWorkIDThatResolvesToNoMission(t *testing.T
 		&componentpb.GetMissionRunHistoryRequest{WorkId: "not-mine"})
 
 	require.Error(t, err)
-	assert.Equal(t, codes.NotFound, status.Code(err))
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err), "no registry, so no claim can be proved")
 	assert.Empty(t, mgr.missionIDs,
 		"an unresolvable work id must never reach the run store as a mission id")
 }
@@ -460,13 +456,20 @@ func createMissionFromWork(t *testing.T, workTenant string) *recordingMissionMan
 	sc, err := state.NewStateClient(cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
-	require.NoError(t, NewRedisWorkContextRegistry(sc).
-		RegisterWorkContext(context.Background(), "work-1", "parent-mission", workTenant))
+	reg := NewRedisWorkContextRegistry(sc)
+	require.NoError(t, reg.RegisterWorkContext(context.Background(), "work-1", "parent-mission", workTenant))
+	require.NoError(t, sc.Client().Set(context.Background(), workOwnerKey("work-1"), workTenant, workOwnerTTL).Err())
+	require.NoError(t, reg.BindWorkClaim(context.Background(), "work-1", "agent_principal:abc"))
 
 	mgr := &recordingMissionManager{payload: []byte(`{}`)}
 	svc := missionServer(mgr, originateChecker("grant-1")).WithWorkContextStore(sc, testLogger())
 
 	_, err = svc.CreateMission(componentCtx("agent_principal:abc"), &componentpb.CreateMissionRequest{WorkId: "work-1"})
+	if workTenant != "test-tenant" {
+		require.Equal(t, codes.PermissionDenied, status.Code(err))
+		require.Empty(t, mgr.originated)
+		return mgr
+	}
 	require.NoError(t, err)
 	require.Len(t, mgr.originated, 1)
 	return mgr
@@ -479,8 +482,49 @@ func TestCreateMission_TheWorkItemsMissionIsTheParent(t *testing.T) {
 	assert.Equal(t, "parent-mission", mgr.originated[0].ParentMissionID)
 }
 
-// A work item of another tenant gives no parent mission.
-func TestCreateMission_AnotherTenantsWorkItemGivesNoParent(t *testing.T) {
+// A work item of another tenant is refused, and nothing is originated.
+func TestCreateMission_AnotherTenantsWorkItemIsRefused(t *testing.T) {
 	mgr := createMissionFromWork(t, "other-tenant")
-	assert.Empty(t, mgr.originated[0].ParentMissionID)
+	assert.Empty(t, mgr.originated)
+}
+
+// A work item that another agent of the tenant claimed is refused for
+// CreateMission and for GetMissionRunHistory, and the mission of that work is
+// not answered.
+func TestMissionRPCs_AWorkItemOfAnotherAgentIsRefused(t *testing.T) {
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sc.Close() })
+	reg := NewRedisWorkContextRegistry(sc)
+	require.NoError(t, reg.RegisterWorkContext(context.Background(), "work-1", "parent-mission", "test-tenant"))
+	require.NoError(t, sc.Client().Set(context.Background(), workOwnerKey("work-1"), "test-tenant", workOwnerTTL).Err())
+	require.NoError(t, reg.BindWorkClaim(context.Background(), "work-1", "agent_principal:owner"))
+
+	mgr := &recordingMissionManager{payload: []byte(`{}`)}
+	svc := missionServer(mgr, originateChecker("grant-1")).WithWorkContextStore(sc, testLogger())
+
+	_, err = svc.CreateMission(componentCtx("agent_principal:intruder"), &componentpb.CreateMissionRequest{WorkId: "work-1"})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Empty(t, mgr.originated)
+
+	_, err = svc.GetMissionRunHistory(componentCtx("agent_principal:intruder"), &componentpb.GetMissionRunHistoryRequest{WorkId: "work-1"})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Empty(t, mgr.missionIDs)
+
+	// The claimant gets its answer.
+	_, err = svc.GetMissionRunHistory(componentCtx("agent_principal:owner"), &componentpb.GetMissionRunHistoryRequest{WorkId: "work-1"})
+	require.NoError(t, err)
+
+	// A task grant of another mission than the work item is refused, and a
+	// grant with no work item gives the parent.
+	svc.WithGrantVerifier(fakeGrants{})
+	_, err = svc.CreateMission(grantedCtx(componentCtx("agent_principal:owner"), "other-mission", "run-1"), &componentpb.CreateMissionRequest{WorkId: "work-1"})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = svc.CreateMission(grantedCtx(componentCtx("agent_principal:owner"), "grant-mission", "run-1"), &componentpb.CreateMissionRequest{})
+	require.NoError(t, err)
+	require.Len(t, mgr.originated, 1)
+	assert.Equal(t, "grant-mission", mgr.originated[0].ParentMissionID)
 }

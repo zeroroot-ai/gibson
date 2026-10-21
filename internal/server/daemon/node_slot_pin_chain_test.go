@@ -117,7 +117,11 @@ type chainEnv struct {
 	def     *servingProvider
 	pinned  *servingProvider
 	manager *DaemonSlotManager
+	claims  *component.RedisWorkContextRegistry
 }
+
+// chainClaimant is the principal that claims the work items of these tests.
+const chainClaimant = "agent_principal:chain"
 
 func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 	t.Helper()
@@ -149,9 +153,10 @@ func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 			return manager, registry, nil
 		})
 	queue := component.NewRedisWorkQueue(client)
+	claims := component.NewRedisWorkContextRegistry(sc)
 	svc := component.NewComponentServiceServer(component.NewRedisComponentRegistry(client, time.Minute), queue, logger, adapter, nil, nil, nil).
-		WithWorkContextRegistry(component.NewRedisWorkContextRegistry(sc))
-	return &chainEnv{svc: svc, queue: queue, def: def, pinned: pinned, manager: manager}
+		WithWorkContextRegistry(claims)
+	return &chainEnv{svc: svc, queue: queue, def: def, pinned: pinned, manager: manager, claims: claims}
 }
 
 // dispatchNode runs one mission with one AGENT node that has the given slot
@@ -201,11 +206,18 @@ func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) 
 		SlotPins: gibsonharness.WorkSlotPins(task.SlotOverrides),
 	})
 	require.NoError(t, err)
+	// The served agent claimed its work item, as PollWork records.
+	require.NoError(t, e.claims.BindWorkClaim(context.Background(), workID, chainClaimant))
 	return workID
 }
 
 func (e *chainEnv) complete(workID, slot string) error {
-	ctx := auth.ContextWithTenantString(context.Background(), chainTenant)
+	tid, tidErr := auth.NewTenantID(chainTenant)
+	if tidErr != nil {
+		return fmt.Errorf("tenant: %w", tidErr)
+	}
+	ctx := auth.WithIdentity(auth.ContextWithTenantString(context.Background(), chainTenant),
+		auth.Identity{Subject: chainClaimant, Tenant: tid})
 	if _, err := e.svc.Complete(ctx, &componentpb.CompleteRequest{
 		WorkId:   workID,
 		Slot:     slot,

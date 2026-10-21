@@ -55,8 +55,12 @@ func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// The component claimed the work item, as PollWork records.
+	registry := component.NewRedisWorkContextRegistry(sc)
+	require.NoError(t, registry.BindWorkClaim(context.Background(), "work-1", e2eClaimant))
+
 	ask := func(ctx context.Context, resource string) (*componentpb.AuthorizeResponse, error) {
-		return svc.Authorize(ctx, &componentpb.AuthorizeRequest{WorkId: "work-1", Action: "execute", Resource: resource})
+		return svc.Authorize(withClaimant(ctx), &componentpb.AuthorizeRequest{WorkId: "work-1", Action: "execute", Resource: resource})
 	}
 	system := auth.ContextWithTenant(context.Background(), auth.SystemTenant)
 
@@ -84,7 +88,8 @@ func TestComponentServiceAuthorize_RunsTheRealDecision(t *testing.T) {
 			Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-other","issued_at":1,"ttl_seconds":600}`},
 		})
 		require.NoError(t, err)
-		_, err = svc.Authorize(authzCtx("tenant-alpha"), &componentpb.AuthorizeRequest{
+		require.NoError(t, registry.BindWorkClaim(context.Background(), "work-2", e2eClaimant))
+		_, err = svc.Authorize(withClaimant(authzCtx("tenant-alpha")), &componentpb.AuthorizeRequest{
 			WorkId: "work-2", Action: "execute", Resource: "tool:nmap",
 		})
 		assert.Equal(t, codes.NotFound, grpcCode(err))
@@ -112,4 +117,16 @@ func TestCallbackManager_RunAuthorizerIsTheCallbackService(t *testing.T) {
 	allowed, _, err := m.RunAuthorizer().AuthorizeRun(context.Background(), "t", "r", "execute", "tool:nmap")
 	require.NoError(t, err)
 	assert.True(t, allowed)
+}
+
+// e2eClaimant is the principal that claimed the work items of these tests.
+const e2eClaimant = "agent_principal:e2e"
+
+// withClaimant adds the identity of the claimant to ctx and keeps its tenant.
+func withClaimant(ctx context.Context) context.Context {
+	tenant := auth.SystemTenant
+	if name := auth.TenantStringFromContext(ctx); name != auth.SystemTenantString {
+		tenant, _ = auth.NewTenantID(name)
+	}
+	return auth.WithIdentity(ctx, auth.Identity{Subject: e2eClaimant, Tenant: tenant})
 }
