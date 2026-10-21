@@ -12,7 +12,6 @@
 /gibson.component.v1.ComponentService/GetPluginConfig
 /gibson.component.v1.ComponentService/GetTaxonomySchema
 /gibson.component.v1.ComponentService/ListAvailablePlugins
-/gibson.component.v1.ComponentService/QueryPlugin
 /gibson.component.v1.ComponentService/QueueToolWork
 /gibson.component.v1.ComponentService/ReportStepHints
 /gibson.component.v1.ComponentService/TestPluginConnection
@@ -37,7 +36,6 @@
 /gibson.daemon.v1.DaemonService/GetTarget
 /gibson.daemon.v1.DaemonService/ListTargets
 /gibson.daemon.v1.DaemonService/PauseMission
-/gibson.daemon.v1.DaemonService/QueryPlugin
 /gibson.daemon.v1.DaemonService/StartComponent
 /gibson.daemon.v1.DaemonService/Status
 /gibson.daemon.v1.DaemonService/StopComponent
@@ -46,7 +44,6 @@
 /gibson.harness.v1.HarnessCallbackService/GenerateNodeID
 /gibson.harness.v1.HarnessCallbackService/GetPlanContext
 /gibson.harness.v1.HarnessCallbackService/GetTaxonomySchema
-/gibson.harness.v1.HarnessCallbackService/QueryPlugin
 /gibson.harness.v1.HarnessCallbackService/QueueToolWork
 /gibson.harness.v1.HarnessCallbackService/RecordSpan
 /gibson.harness.v1.HarnessCallbackService/RecordSpans

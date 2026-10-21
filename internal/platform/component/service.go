@@ -31,6 +31,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
@@ -153,6 +154,18 @@ type ComponentServiceServer struct {
 	// connectorTools lists the connector tools of a tenant for ListTools
 	// (ADR-0065). Nil lists no connector tools.
 	connectorTools ConnectorToolSource
+
+	// connectorCaller calls a connector tool for CallTool. Nil refuses a
+	// connector tool call.
+	connectorCaller metatool.ConnectorCaller
+
+	// missionPolicy returns the mission policy of a run for a connector call
+	// that names a work item. Nil refuses such a call.
+	missionPolicy MissionPolicySource
+
+	// toolCallRecorder is the flight recorder of connector calls. Nil refuses
+	// a connector call.
+	toolCallRecorder metatool.FlightRecorder
 
 	// Harness proxy dependencies.
 	//
@@ -1065,6 +1078,10 @@ func (s *ComponentServiceServer) PollWork(
 		slog.String("work_type", item.WorkType),
 	)
 
+	// Record the principal that claimed the work item. A later RPC that names
+	// the work id must come from that principal.
+	s.bindWorkClaim(ctx, item.WorkID)
+
 	// Register the work-item→mission mapping so that MemoryGet/MemorySet/
 	// MemorySearch can resolve the correct per-mission namespace later.
 	// This is best-effort: if it fails we still return the work item; the
@@ -1205,7 +1222,7 @@ func (s *ComponentServiceServer) SubmitResult(
 		return nil, status.Error(codes.InvalidArgument, "work_id is required")
 	}
 
-	workOwner, err := s.resolveWorkOwner(ctx, tenant, req.WorkId)
+	workOwner, err := s.resolveClaimedWork(ctx, tenant, req.WorkId)
 	if err != nil {
 		return nil, err
 	}
@@ -1564,6 +1581,12 @@ func (s *ComponentServiceServer) CallTool(
 	}
 	if req.InputJson == "" {
 		return nil, status.Error(codes.InvalidArgument, "input_json is required")
+	}
+
+	// A connector tool id goes to the MCP client of the daemon, not to a work
+	// queue (ADR-0065).
+	if tid, ok := connectorToolID(req.ToolName); ok {
+		return s.callConnectorTool(ctx, tenant, req, tid)
 	}
 
 	// Discover tool: tenant-scoped first, then _system fallback (handled by Discover).

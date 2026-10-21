@@ -1145,8 +1145,15 @@ type discardEventBus struct{}
 
 func (discardEventBus) Publish(context.Context, interface{}) error { return nil }
 
-// testEventBus returns the option that gives a test service its event bus.
-func testEventBus() CallbackServiceOption { return WithEventBus(discardEventBus{}) }
+// testEventBus returns the option that gives a test service its event bus and a
+// source of the mission deny list that blocks nothing. A service with no such
+// source refuses each tool call, so a test that wants a deny list sets its own.
+func testEventBus() CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		WithEventBus(discardEventBus{})(s)
+		WithMissionBlockedTools(noBlockedTools)(s)
+	}
+}
 
 // TestNewHarnessCallbackService_RequiresAnEventBus proves that no callback
 // service exists without its event bus (gibson#681). publishEvent then needs

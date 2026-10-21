@@ -731,6 +731,11 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err != nil {
 		return nil, err
 	}
+	// The connector calls of invoke_tool write their audit records through the
+	// same logger as the rest of the daemon.
+	if d.callback != nil {
+		d.callback.SetConnectorAudit(auditLogger)
+	}
 	// The record and the quota of the components that agents enroll
 	// (gibson#33). A bad quota value stops the daemon.
 	producedLimit, err := api.ProducedComponentLimitFromEnv()
@@ -2000,7 +2005,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			// An agent enrolls a component that it produced through the
 			// identity provisioning of the tenant-admin surface (gibson#33).
 			compSvc.WithProducedComponentEnroller(producedEnroller{srv: daemonSvc})
-			compSvc.WithConnectorTools(d.connectorMCPClient())
+			compSvc.WithConnectorTools(d.connectorMCPClient()).WithConnectorCaller(d.connectorMCPClient())
+			if d.callback != nil {
+				// A connector call that names a work item takes the mission
+				// policy of its run, the same policy as invoke_tool.
+				compSvc.WithMissionPolicy(d.callback.MissionPolicyForRun)
+				compSvc.WithToolCallRecorder(d.callback.RecordToolCall)
+			}
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 
 			// Wire the ontology reasoner so RegisterComponent can call

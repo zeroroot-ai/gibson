@@ -161,6 +161,31 @@ func toolCallSinkIsRecordedDelegation(fd *ast.FuncDecl, call *ast.CallExpr) bool
 	return ok && x.Name == fd.Recv.List[0].Names[0].Name
 }
 
+// toolCallSinkIsObservedMetatoolCall reports whether call is
+// `<x>.Call(ctx, metatool.Call{..., Recorder: ...})`. That one function runs
+// the whole connector call, and its observer writes the flight recorder record
+// of each outcome. A call with no Recorder key records nothing, so it does not
+// count.
+func toolCallSinkIsObservedMetatoolCall(call *ast.CallExpr) bool {
+	if toolCallSinkCalleeName(call) != "Call" {
+		return false
+	}
+	for _, arg := range call.Args {
+		cl, ok := arg.(*ast.CompositeLit)
+		if !ok || toolCallSinkTypeName(cl.Type) != "Call" {
+			continue
+		}
+		for _, elt := range cl.Elts {
+			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				if key, ok := kv.Key.(*ast.Ident); ok && key.Name == "Recorder" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 // scanToolCallSinkFunc applies the completeness rule to one function.
 func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, fd *ast.FuncDecl) []toolCallSinkViolation {
 	var (
@@ -180,7 +205,7 @@ func scanToolCallSinkFunc(fset *token.FileSet, file *ast.File, filename string, 
 
 		switch node := n.(type) {
 		case *ast.CallExpr:
-			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc || toolCallSinkIsRecordedDelegation(fd, node) {
+			if toolCallSinkCalleeName(node) == toolCallSinkCaptureFunc || toolCallSinkIsRecordedDelegation(fd, node) || toolCallSinkIsObservedMetatoolCall(node) {
 				if c, ok := toolCallSinkCaptureScope(stack); ok {
 					captures = append(captures, c)
 				}
@@ -640,5 +665,46 @@ func TestToolCallSinkCompleteness_AllowsADominatingCapture(t *testing.T) {
 	}
 	if len(violations) != 0 {
 		t.Fatalf("each return has a capture on its path, got: %v", violations)
+	}
+}
+
+const toolCallSinkUnobservedMetatoolFixture = `package harness
+
+func (s *HarnessCallbackService) bypassingMetaCall() (*harnesspb.CallToolProtoResponse, error) {
+	result, err := h.Call(ctx, metatool.Call{Caller: caller, ID: id})
+	if err != nil {
+		return metaToolErr(code, err.Error()), nil
+	}
+	return marshalMetaResult(s, result)
+}
+`
+
+const toolCallSinkObservedMetatoolFixture = `package harness
+
+func (s *HarnessCallbackService) recordedMetaCall() (*harnesspb.CallToolProtoResponse, error) {
+	result, err := h.Call(ctx, metatool.Call{Caller: caller, ID: id, Recorder: rec})
+	if err != nil {
+		return metaToolErr(code, err.Error()), nil
+	}
+	return marshalMetaResult(s, result)
+}
+`
+
+// A metatool call with no recorder records nothing, so the guard must catch the
+// failure and the success return. A call with a recorder is recorded.
+func TestToolCallSinkCompleteness_MetatoolCallNeedsARecorder(t *testing.T) {
+	violations, err := scanToolCallSinkCompleteness("unobserved_fixture.go", []byte(toolCallSinkUnobservedMetatoolFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 2 {
+		t.Fatalf("guard must catch both returns of a call with no recorder, got %d: %v", len(violations), violations)
+	}
+	violations, err = scanToolCallSinkCompleteness("observed_fixture.go", []byte(toolCallSinkObservedMetatoolFixture))
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Fatalf("a call with a recorder is recorded: %v", violations)
 	}
 }

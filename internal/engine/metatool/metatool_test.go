@@ -63,7 +63,7 @@ func TestInvoke_AuthorizedDecodesAndDispatches(t *testing.T) {
 	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q)
 
 	args := map[string]any{"title": "broken pipeline"}
-	got, err := h.Invoke(context.Background(), catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "mcp:gitlab:create_issue", args)
+	got, err := invoke(h, catalog.Caller{Subject: "user:alice", Tenant: "acme"}, "mcp:gitlab:create_issue", args)
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestInvoke_UnauthorizedDeniedNotDispatched(t *testing.T) {
 	q := &fakeQuerier{}
 	h := NewHandler(nil, allowAll( /* nothing allowed */ ), q)
 
-	_, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:github:create_issue", nil)
+	_, err := invoke(h, catalog.Caller{}, "mcp:github:create_issue", nil)
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("want ErrUnauthorized, got %v", err)
 	}
@@ -100,7 +100,7 @@ func TestInvoke_AuthzErrorSurfacesNotDispatched(t *testing.T) {
 	q := &fakeQuerier{}
 	boom := errors.New("fga down")
 	h := NewHandler(nil, fakeAuthz{err: boom}, q)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, boom) {
+	if _, err := invoke(h, catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, boom) {
 		t.Fatalf("want authz error surfaced, got %v", err)
 	}
 	if q.gotName != "" {
@@ -113,7 +113,7 @@ func TestInvoke_AuthzErrorSurfacesNotDispatched(t *testing.T) {
 func TestInvoke_ToleratesFlattenedForm(t *testing.T) {
 	q := &fakeQuerier{}
 	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), q)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp__gitlab__create_issue", nil); err != nil {
+	if _, err := invoke(h, catalog.Caller{}, "mcp__gitlab__create_issue", nil); err != nil {
 		t.Fatalf("Invoke flattened: %v", err)
 	}
 	if q.gotName != "gitlab" || q.gotMethod != "create_issue" {
@@ -153,14 +153,14 @@ func TestAuthorize_NativeToolNotEnabledIsRefused(t *testing.T) {
 // With no connector dispatch wired, an mcp id fails closed.
 func TestInvoke_ConnectorToolWithNoDispatchFailsClosed(t *testing.T) {
 	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), nil)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
+	if _, err := invoke(h, catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
 		t.Fatal("want a configuration error, got nil")
 	}
 }
 
 func TestInvoke_RejectsMalformedId(t *testing.T) {
 	h := NewHandler(nil, allowAll(), &fakeQuerier{})
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "not-a-real-id", nil); err == nil {
+	if _, err := invoke(h, catalog.Caller{}, "not-a-real-id", nil); err == nil {
 		t.Fatal("want error for malformed id, got nil")
 	}
 }
@@ -168,14 +168,14 @@ func TestInvoke_RejectsMalformedId(t *testing.T) {
 func TestInvoke_PropagatesQuerierError(t *testing.T) {
 	wantErr := errors.New("plugin boom")
 	h := NewHandler(nil, allowAll("mcp:gitlab:create_issue"), &fakeQuerier{err: wantErr})
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, wantErr) {
+	if _, err := invoke(h, catalog.Caller{}, "mcp:gitlab:create_issue", nil); !errors.Is(err, wantErr) {
 		t.Fatalf("want querier error propagated, got %v", err)
 	}
 }
 
 func TestInvoke_NilConfigFailsClosed(t *testing.T) {
 	h := NewHandler(&fakeSearcher{}, nil, nil)
-	if _, err := h.Invoke(context.Background(), catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
+	if _, err := invoke(h, catalog.Caller{}, "mcp:gitlab:create_issue", nil); err == nil {
 		t.Fatal("want configuration error with nil querier/authz, got nil")
 	}
 }
@@ -203,4 +203,14 @@ func TestSearch_NilSearcherFailsClosed(t *testing.T) {
 	if _, err := h.Search(context.Background(), catalog.Caller{}, catalog.Query{}); err == nil {
 		t.Fatal("want configuration error with nil searcher, got nil")
 	}
+}
+
+type nopObserver struct{}
+
+func (nopObserver) Intent(context.Context, CallRecord) error          { return nil }
+func (nopObserver) Result(context.Context, CallRecord, []byte, error) {}
+
+// invoke runs one call with no policy and an observer that records nothing.
+func invoke(h *Handler, caller catalog.Caller, id string, args map[string]any) (any, error) {
+	return h.Call(context.Background(), Call{Caller: caller, ID: id, Args: args, Observer: nopObserver{}, Recorder: func(context.Context, CallRecord, []byte, string) {}})
 }

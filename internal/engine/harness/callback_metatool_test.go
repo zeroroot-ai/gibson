@@ -7,6 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/zeroroot-ai/gibson/internal/engine/state"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit/audittest"
 	"log/slog"
 	"math"
 	"testing"
@@ -45,7 +49,29 @@ func (f *mtQuerier) CallConnectorTool(_ context.Context, _, connector, tool stri
 	return f.ret, nil
 }
 
-func newSvc() *HarnessCallbackService { return &HarnessCallbackService{logger: slog.Default()} }
+func noBlockedTools(context.Context, string, string) ([]string, error) { return nil, nil }
+
+func newSvc(t *testing.T) *HarnessCallbackService {
+	t.Helper()
+	return &HarnessCallbackService{logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{})}
+}
+
+// newConnectorAudit builds an audit logger over a miniredis tail and the given
+// durable writer.
+func newConnectorAudit(t *testing.T, durable audit.DurableWriter) *audit.AuditLogger {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	cfg := state.DefaultConfig()
+	cfg.URL = "redis://" + mr.Addr()
+	sc, err := state.NewStateClient(cfg)
+	if err != nil {
+		t.Fatalf("state client: %v", err)
+	}
+	t.Cleanup(func() { _ = sc.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return audit.NewAuditLogger(ctx, sc, durable, slog.New(slog.DiscardHandler))
+}
 
 // search_tools returns candidates with their canonical id and the tool's own
 // input schema embedded verbatim (not re-encoded as a string).
@@ -55,7 +81,7 @@ func TestMetaSearch_MapsCandidatesAndEmbedsRawSchema(t *testing.T) {
 			Description: "open an issue", InputSchema: []byte(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
 	}}, mtAuthz{}, nil)
 
-	resp, err := newSvc().metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, []byte(`{"query":"issue","limit":3}`))
+	resp, err := newSvc(t).metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, []byte(`{"query":"issue","limit":3}`))
 	if err != nil {
 		t.Fatalf("metaSearch: %v", err)
 	}
@@ -85,7 +111,7 @@ func TestMetaInvoke_DispatchesAndWrapsResult(t *testing.T) {
 	q := &mtQuerier{ret: map[string]any{"number": 7}}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -116,7 +142,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
-		logger: slog.Default(),
+		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		},
@@ -125,7 +151,7 @@ func TestMetaInvoke_FeedsToolCallSink_OnSuccess(t *testing.T) {
 		MissionId: "m1", MissionRunId: "run-1", ToolExecutionId: "tool-exec-meta-1",
 	}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -168,14 +194,14 @@ func TestMetaInvoke_FeedsToolCallSink_OnFailure(t *testing.T) {
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
-		logger: slog.Default(),
+		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		},
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-2"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -211,14 +237,14 @@ func TestMetaInvoke_RecordsSuccessEvenWhenResultIsNotJSONMarshalable(t *testing.
 
 	var captured []capturedTool
 	svc := &HarnessCallbackService{
-		logger: slog.Default(),
+		logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{}),
 		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
 			captured = append(captured, capturedTool{tenant: tn, call: call})
 		},
 	}
 	contextInfo := &harnesspb.ContextInfo{MissionRunId: "run-1", MissionId: "m1", ToolExecutionId: "tool-exec-meta-3"}
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -250,7 +276,7 @@ func TestMetaInvoke_UnauthorizedIsPermissionDenied(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"mcp:github:create_issue"}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -269,8 +295,8 @@ func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 	q := &mtQuerier{}
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
 
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Tenant: "acme"},
-		[]string{"mcp:gitlab:create_issue"},
+	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{Subject: "user:u-1", Tenant: "acme"},
+		metatool.MissionPolicy{Blocked: []string{"mcp:gitlab:create_issue"}},
 		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -285,23 +311,23 @@ func TestMetaInvoke_BlockedByMissionPolicy(t *testing.T) {
 
 func TestMatchBlocked(t *testing.T) {
 	blocked := []string{"mcp:gitlab:create_issue", "NMAP"}
-	if id, ok := matchBlocked(blocked, "mcp:slack:post"); ok {
+	if id, ok := metatool.MatchBlocked(blocked, "mcp:slack:post"); ok {
 		t.Fatalf("unexpected match: %s", id)
 	}
-	if _, ok := matchBlocked(blocked, "mcp:gitlab:create_issue"); !ok {
+	if _, ok := metatool.MatchBlocked(blocked, "mcp:gitlab:create_issue"); !ok {
 		t.Fatal("should match exact canonical id")
 	}
-	if _, ok := matchBlocked(blocked, "native:nmap", "nmap"); !ok {
+	if _, ok := metatool.MatchBlocked(blocked, "native:nmap", "nmap"); !ok {
 		t.Fatal("should match case-insensitively across candidates")
 	}
-	if _, ok := matchBlocked(nil, "anything"); ok {
+	if _, ok := metatool.MatchBlocked(nil, "anything"); ok {
 		t.Fatal("empty blocklist must never match")
 	}
 }
 
 func TestMetaInvoke_MissingIdIsInvalidArgument(t *testing.T) {
 	h := metatool.NewHandler(nil, mtAuthz{}, &mtQuerier{})
-	resp, err := newSvc().metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, nil, []byte(`{"args":{}}`))
+	resp, err := newSvc(t).metaInvoke(context.Background(), nil, h, nil, catalog.Caller{}, metatool.MissionPolicy{}, []byte(`{"args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
 	}
@@ -346,7 +372,7 @@ func TestMetaInvoke_NativeToolRunsThroughTheDirectHandler(t *testing.T) {
 	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"native:test-external-tool","args":{"query":"q","limit":2}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -376,7 +402,7 @@ func TestMetaInvoke_NativeToolNotEnabledIsRefused(t *testing.T) {
 	svc, native, contextInfo := newNativeMetaSvc(t, &captured, nil)
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{}}, &mtQuerier{})
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"native:test-external-tool","args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -396,7 +422,7 @@ func TestMetaInvoke_NativeToolFailureIsRecordedOnce(t *testing.T) {
 	svc, native, contextInfo := newNativeMetaSvc(t, &captured, errors.New("tool boom"))
 	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"native:test-external-tool": true}}, &mtQuerier{})
 
-	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Tenant: "acme"}, nil,
+	resp, err := svc.metaInvoke(testCtxWithTenant(), contextInfo, h, native, catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
 		[]byte(`{"id":"native:test-external-tool","args":{}}`))
 	if err != nil {
 		t.Fatalf("metaInvoke: %v", err)
@@ -418,7 +444,9 @@ func invokeNativeThroughCallToolProto(t *testing.T, captured *[]capturedTool, al
 	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:tool/test-external-tool": allow}}
 	svc.componentAuthorizer = authzer
 	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{{Kind: "tool", Name: "test-external-tool"}}}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 
 	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
 		Context:   contextInfo,
@@ -470,13 +498,6 @@ func TestInvokeTool_RefusesANativeToolThatTheTenantDidNotEnable(t *testing.T) {
 	}
 }
 
-// blockedToolHarness is a harness whose mission deny list names the test tool.
-type blockedToolHarness struct{ *mockHarnessWithResolver }
-
-func (h blockedToolHarness) Mission() MissionContext {
-	return MissionContext{TenantID: "test-tenant", MissionRunID: "run-1", BlockedTools: []string{"test-external-tool"}}
-}
-
 // TestInvokeNativeTool_Refusals covers the refusals before and after the
 // hand-off to the tool call handler. Each one leaves exactly one record.
 func TestInvokeNativeTool_Refusals(t *testing.T) {
@@ -513,11 +534,10 @@ func TestInvokeNativeTool_Refusals(t *testing.T) {
 	t.Run("a tool on the mission deny list is refused", func(t *testing.T) {
 		var captured []capturedTool
 		svc, harness, contextInfo := newNativeMetaSvc(t, &captured, nil)
-		blocked := blockedToolHarness{harness}
-		registry := NewCallbackHarnessRegistry()
-		mustRegister(t, registry, contextInfo.GetMissionId(), contextInfo.GetAgentName(), blocked)
-		svc.registry = registry
-		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, blocked, "test-external-tool", "native:test-external-tool", []byte(`{}`))
+		svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) {
+			return []string{"test-external-tool"}, nil
+		}
+		resp, err := svc.invokeNativeTool(testCtxWithTenant(), contextInfo, harness, "test-external-tool", "native:test-external-tool", []byte(`{}`))
 		if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
 			t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
 		}
@@ -537,7 +557,9 @@ func TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead(t *testing.T) {
 	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{
 		{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue"}}},
 	}}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 	var called []string
 	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
 	pluginCalls := 0
@@ -572,7 +594,9 @@ func TestInvokeTool_AnMCPIdWithNoClientFailsClosed(t *testing.T) {
 	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
 	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
 	svc.componentRegistry = fakeSearchReg{}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 
 	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
 		Context:   contextInfo,
@@ -584,5 +608,181 @@ func TestInvokeTool_AnMCPIdWithNoClientFailsClosed(t *testing.T) {
 	}
 	if len(captured) != 1 {
 		t.Errorf("captured %d records; want 1", len(captured))
+	}
+}
+
+type refusingDurable struct{ audittest.Recorder }
+
+func (*refusingDurable) WriteSync(context.Context, audit.Event) error {
+	return errors.New("audit database down")
+}
+
+// A write failure of the intent record refuses an invoke_tool connector call.
+// The connector is not called and the flight recorder holds the refusal.
+func TestMetaInvoke_AnAuditWriteFailureRefusesTheCall(t *testing.T) {
+	q := &mtQuerier{ret: map[string]any{"number": 7}}
+	h := metatool.NewHandler(nil, mtAuthz{allow: map[string]bool{"mcp:gitlab:create_issue": true}}, q)
+	var captured []capturedTool
+	svc := &HarnessCallbackService{
+		logger:         slog.Default(),
+		connectorAudit: newConnectorAudit(t, &refusingDurable{}),
+		toolCallSink: func(_ context.Context, tn string, call ToolCallRecord) {
+			captured = append(captured, capturedTool{tenant: tn, call: call})
+		},
+	}
+	resp, err := svc.metaInvoke(testCtxWithTenant(), &harnesspb.ContextInfo{MissionId: "m1", MissionRunId: "run-1"}, h, nil,
+		catalog.Caller{Subject: "user:u-1", Tenant: "acme"}, metatool.MissionPolicy{},
+		[]byte(`{"id":"mcp:gitlab:create_issue","args":{"title":"x"}}`))
+	if err != nil {
+		t.Fatalf("metaInvoke: %v", err)
+	}
+	if resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("want UNAVAILABLE, got %v", resp.GetError())
+	}
+	if q.gotName != "" {
+		t.Fatalf("the connector was called (%s) with no intent record", q.gotName)
+	}
+	if len(captured) != 1 {
+		t.Fatalf("captured %d records, want the one refusal", len(captured))
+	}
+}
+
+// storedPolicySvc builds a service whose invoke_tool reaches a connector, with
+// the given source of the stored mission deny list.
+func storedPolicySvc(t *testing.T, src MissionBlockedToolsSource) (*HarnessCallbackService, *harnesspb.ContextInfo, *[]string) {
+	t.Helper()
+	var captured []capturedTool
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentRegistry = fakeSearchReg{}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{RunID: "run-1", MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = src
+	called := []string{}
+	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
+	return svc, contextInfo, &called
+}
+
+func invokeGitlab(svc *HarnessCallbackService, contextInfo *harnesspb.ContextInfo) (*harnesspb.CallToolProtoResponse, error) {
+	return svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{}}`),
+	})
+}
+
+// The deny list comes from the stored definition of the mission. An entry in
+// the other spelling of the id blocks the call.
+func TestInvokeTool_TheDenyListComesFromTheStoredMission(t *testing.T) {
+	var gotTenant, gotMission string
+	svc, contextInfo, called := storedPolicySvc(t, func(_ context.Context, tenant, mission string) ([]string, error) {
+		gotTenant, gotMission = tenant, mission
+		return []string{"mcp__gitlab__create_issue"}, nil
+	})
+	resp, err := invokeGitlab(svc, contextInfo)
+	if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
+	}
+	if len(*called) != 0 {
+		t.Fatalf("a blocked tool reached the connector: %v", *called)
+	}
+	if gotTenant != "test-tenant" || gotMission != "mission-1" {
+		t.Errorf("the deny list was read for %q/%q, want the tenant and the mission of the run", gotTenant, gotMission)
+	}
+}
+
+// A deny list that cannot be read refuses the call. An unwired source does too.
+func TestInvokeTool_AnUnreadableDenyListRefusesTheCall(t *testing.T) {
+	for name, src := range map[string]MissionBlockedToolsSource{
+		"the read fails": func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") },
+		"no source":      nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, contextInfo, called := storedPolicySvc(t, src)
+			resp, err := invokeGitlab(svc, contextInfo)
+			if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+				t.Fatalf("resp = %v, err = %v; want UNAVAILABLE", resp, err)
+			}
+			if len(*called) != 0 {
+				t.Fatalf("the connector was called with no deny list: %v", *called)
+			}
+		})
+	}
+}
+
+// The policy of a run of another tenant is refused.
+func TestMissionPolicyForRun_RefusesARunOfAnotherTenant(t *testing.T) {
+	svc, _, _ := storedPolicySvc(t, noBlockedTools)
+	if _, err := svc.MissionPolicyForRun(context.Background(), "test-tenant", "run-1"); err != nil {
+		t.Fatalf("own run: %v", err)
+	}
+	if _, err := svc.MissionPolicyForRun(context.Background(), "other-tenant", "run-1"); err == nil {
+		t.Fatal("a run of another tenant must be refused")
+	}
+}
+
+// The native tool path reads the same stored deny list. An entry in the other
+// spelling blocks the tool, and a list that cannot be read, or no source, refuses
+// the call before the tool runs.
+func TestCallToolProto_TheNativePathReadsTheStoredDenyList(t *testing.T) {
+	call := func(svc *HarnessCallbackService, ci *harnesspb.ContextInfo) *harnesspb.CallToolProtoResponse {
+		resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+			Context: ci, Name: "test-external-tool", InputType: "testtool.ToolInput", OutputType: "testtool.ToolOutput", InputJson: []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatalf("CallToolProto: %v", err)
+		}
+		return resp
+	}
+	var captured []capturedTool
+	svc, _, ci := newStreamCaptureSvc(t, &captured, nil)
+
+	var gotTenant, gotMission string
+	svc.missionBlockedTools = func(_ context.Context, tenant, mission string) ([]string, error) {
+		gotTenant, gotMission = tenant, mission
+		return []string{"NATIVE:test-external-tool"}, nil
+	}
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("a blocked tool: code = %v, want PERMISSION_DENIED", got)
+	}
+	if gotTenant != "test-tenant" || gotMission != "test-mission-123" {
+		t.Errorf("the list was read for %q/%q", gotTenant, gotMission)
+	}
+
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") }
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("an unreadable list: code = %v, want UNAVAILABLE", got)
+	}
+	svc.missionBlockedTools = nil
+	if got := call(svc, ci).GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("no source: code = %v, want UNAVAILABLE", got)
+	}
+}
+
+// The direct plugin path reads the stored deny list too, and refuses when it
+// cannot read it.
+func TestQueryPlugin_ReadsTheStoredDenyList(t *testing.T) {
+	var captured []capturedTool
+	svc, _, ci := newStreamCaptureSvc(t, &captured, nil)
+	query := func() *harnesspb.QueryPluginResponse {
+		resp, err := svc.QueryPlugin(testCtxWithTenant(), &harnesspb.QueryPluginRequest{Context: ci, Name: "gitlab", Method: "create_issue"})
+		if err != nil {
+			t.Fatalf("QueryPlugin: %v", err)
+		}
+		return resp
+	}
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) {
+		return []string{"mcp__gitlab__create_issue"}, nil
+	}
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("a blocked plugin method: code = %v, want PERMISSION_DENIED", got)
+	}
+	svc.missionBlockedTools = func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") }
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("an unreadable list: code = %v, want UNAVAILABLE", got)
+	}
+	svc.missionBlockedTools = nil
+	if got := query().GetError().GetCode(); got != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+		t.Fatalf("no source: code = %v, want UNAVAILABLE", got)
 	}
 }

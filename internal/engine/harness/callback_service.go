@@ -22,8 +22,10 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/infra/queue"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
@@ -234,6 +236,14 @@ type HarnessCallbackService struct {
 	// Tests that build the service directly without it MUST NOT exercise
 	// Authorize.
 	authzStore RunAuthzLookup
+
+	// connectorAudit records each connector call of invoke_tool. Nil refuses a
+	// connector call.
+	connectorAudit *audit.AuditLogger
+
+	// missionBlockedTools reads the deny list of a mission from its stored
+	// definition. Nil refuses a connector call.
+	missionBlockedTools MissionBlockedToolsSource
 
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
 	// One-code-path slice deploy#195: required for any callback service that
@@ -1294,7 +1304,20 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// Mission-level blocked_tools denial (MissionConstraints.blocked_tools),
 	// matched against the raw name and the canonical native id. The daemon
 	// enforces this at dispatch so it fails closed regardless of the agent.
-	if blockedID, blockedOK := matchBlocked(harness.Mission().BlockedTools, req.Name, "native:"+req.Name); blockedOK {
+	// The list is read from the stored mission, as for invoke_tool, and a list
+	// that cannot be read refuses the call.
+	blockedTools, blockedErr := s.storedBlockedTools(ctx, req.Context)
+	if blockedErr != nil {
+		s.logger.ErrorContext(ctx, "tool call refused: the mission deny list could not be read", "tool", req.Name, "err", blockedErr)
+		// gibson:no-tool-executed — no deny list, so nothing ran.
+		return &harnesspb.CallToolProtoResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "the mission policy could not be loaded",
+			},
+		}, nil
+	}
+	if blockedID, blockedOK := metatool.MatchBlocked(blockedTools, req.Name, "native:"+req.Name); blockedOK {
 		s.publishEvent(ctx, "tool.call.blocked", map[string]interface{}{
 			"tool_name":  req.Name,
 			"mission_id": req.Context.MissionId,
@@ -1755,7 +1778,18 @@ func (s *HarnessCallbackService) QueryPlugin(ctx context.Context, req *harnesspb
 	// matched by the canonical connector id (mcp:<name>:<method>) and the bare
 	// connector name. Without this, a PLUGIN node or an agent calling QueryPlugin
 	// directly would sidestep the invoke_tool deny check — so enforce here too.
-	if blockedID, blockedOK := matchBlocked(harness.Mission().BlockedTools, "mcp:"+req.Name+":"+req.Method, req.Name); blockedOK {
+	// The list comes from the stored mission, and an unreadable list refuses.
+	blockedTools, blockedErr := s.storedBlockedTools(ctx, req.Context)
+	if blockedErr != nil {
+		s.logger.ErrorContext(ctx, "plugin query refused: the mission deny list could not be read", "plugin", req.Name, "err", blockedErr)
+		return &harnesspb.QueryPluginResponse{
+			Error: &harnesspb.HarnessError{
+				Code:    commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE,
+				Message: "the mission policy could not be loaded",
+			},
+		}, nil
+	}
+	if blockedID, blockedOK := metatool.MatchBlocked(blockedTools, "mcp:"+req.Name+":"+req.Method, req.Name); blockedOK {
 		return &harnesspb.QueryPluginResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED,

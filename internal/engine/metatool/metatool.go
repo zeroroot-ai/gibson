@@ -84,16 +84,6 @@ func (h *Handler) Search(ctx context.Context, caller catalog.Caller, q catalog.Q
 	return h.search.Search(ctx, caller, q)
 }
 
-// Invoke runs the invocation meta-tool for an mcp id: Authorize, then
-// Dispatch.
-func (h *Handler) Invoke(ctx context.Context, caller catalog.Caller, id string, args map[string]any) (any, error) {
-	tid, err := h.Authorize(ctx, caller, id)
-	if err != nil {
-		return nil, err
-	}
-	return h.Dispatch(ctx, caller, tid, args)
-}
-
 // Authorize decodes the canonical id and re-checks can_execute (ADR-0067: on
 // the connector component for an mcp tool, on the tool component for a
 // native tool). A caller may pass an id that it never got from search_tools,
