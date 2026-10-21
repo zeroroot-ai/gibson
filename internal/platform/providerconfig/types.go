@@ -30,6 +30,10 @@ var (
 	// llm.SupportedProviderTypes().
 	ErrUnsupportedType = errors.New("unsupported provider type")
 
+	// ErrInvalidCredentials is returned when a credential field fails its
+	// check. The message never holds the value.
+	ErrInvalidCredentials = errors.New("invalid provider credentials")
+
 	// ErrKeyProviderUnset is returned by NewStore when kp is nil, and returned
 	// by write operations at runtime when no KeyProvider was configured.
 	ErrKeyProviderUnset = errors.New("key provider is not configured — set security.key_provider in gibson.yaml")

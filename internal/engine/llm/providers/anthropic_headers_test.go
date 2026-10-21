@@ -11,24 +11,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
-func TestParseCustomHeaders(t *testing.T) {
-	h, err := parseCustomHeaders("anthropic-workspace-id: wrkspc_1\n\n X-Other :v:w \n")
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	if got := h.Get("anthropic-workspace-id"); got != "wrkspc_1" {
-		t.Errorf("workspace header = %q", got)
-	}
-	if got := h.Get("X-Other"); got != "v:w" {
-		t.Errorf("X-Other = %q", got)
-	}
-	for _, bad := range []string{"no colon here", ": value", "X-Api-Key: other", "Authorization: Bearer x"} {
-		if _, err := parseCustomHeaders(bad); err == nil {
-			t.Errorf("want an error for %q", bad)
-		}
-	}
-}
-
 func TestWithCustomHeaders_SendsTheHeaderAndKeepsTheClient(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -62,7 +44,7 @@ func TestWithCustomHeaders_SendsTheHeaderAndKeepsTheClient(t *testing.T) {
 func TestNewAnthropicProvider_RefusesBadCustomHeaders(t *testing.T) {
 	_, err := NewAnthropicProvider(llm.ProviderConfig{
 		Type: llm.ProviderAnthropic, APIKey: "k",
-		Extra: map[string]string{customHeadersKey: "not a header line"},
+		Extra: map[string]string{llm.CustomHeadersKey: "not a header line"},
 	})
 	if err == nil {
 		t.Fatal("want an error for a malformed custom_headers value")

@@ -183,6 +183,10 @@ func (s *brokerBackedStore) Create(ctx context.Context, tenantID string, input *
 	if err := validateType(input.Type); err != nil {
 		return nil, err
 	}
+	input, err := checkCredentials(input)
+	if err != nil {
+		return nil, err
+	}
 
 	conn, err := s.acquireConn(ctx, tenantID)
 	if err != nil {
@@ -210,6 +214,10 @@ func (s *brokerBackedStore) Create(ctx context.Context, tenantID string, input *
 
 func (s *brokerBackedStore) Update(ctx context.Context, tenantID, name string, input *ProviderConfigInput) (*ProviderConfig, error) {
 	if err := validateType(input.Type); err != nil {
+		return nil, err
+	}
+	input, err := checkCredentials(input)
+	if err != nil {
 		return nil, err
 	}
 
