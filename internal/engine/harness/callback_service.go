@@ -356,13 +356,16 @@ func (s *HarnessCallbackService) observeCounter() *emitbounds.TaskCounter {
 	return s.observeCounts
 }
 
-// observeTaskKey names the task an observation is charged against. ContextInfo
-// carries an explicit task id; when the emitter omits it, the agent run — the
-// (mission, agent) pair the harness registry itself is keyed by — is the task.
-// An emitter that supplies neither is charged against one shared bucket, which
-// is the strict reading and the right way to fail.
-func observeTaskKey(info *harnesspb.ContextInfo) string {
-	if id := info.GetTaskId(); id != "" {
+// observeTaskKey names the task an observation is charged against. The task of
+// the verified grant decides it, as it decides the harness (callerTask), so an
+// emitter cannot spread its observations over many body task ids to dodge the
+// cap. A request with no grant names its task in ContextInfo. When no task is
+// named, the agent run — the (mission, agent) pair the harness registry itself
+// is keyed by — is the task. An emitter that supplies neither is charged
+// against one shared bucket, which is the strict reading and the right way to
+// fail.
+func observeTaskKey(ctx context.Context, info *harnesspb.ContextInfo) string {
+	if id := callerTask(ctx, info); id != "" {
 		return id
 	}
 	return info.GetMissionId() + "/" + info.GetAgentName()
@@ -966,7 +969,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 		"slot":           req.Slot,
 		"mission_id":     req.Context.MissionId,
 		"agent_name":     req.Context.AgentName,
-		"task_id":        req.Context.TaskId,
+		"task_id":        callerTask(ctx, req.Context),
 		"message_count":  len(req.Messages),
 		"parent_span_id": req.Context.SpanId, // Agent's span ID becomes LLM call's parent
 	})
@@ -999,7 +1002,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 			"slot":           req.Slot,
 			"mission_id":     req.Context.MissionId,
 			"agent_name":     req.Context.AgentName,
-			"task_id":        req.Context.TaskId,
+			"task_id":        callerTask(ctx, req.Context),
 			"error":          err.Error(),
 			"parent_span_id": req.Context.SpanId,
 		})
@@ -1017,7 +1020,7 @@ func (s *HarnessCallbackService) LLMComplete(ctx context.Context, req *harnesspb
 		"slot":              req.Slot,
 		"mission_id":        req.Context.MissionId,
 		"agent_name":        req.Context.AgentName,
-		"task_id":           req.Context.TaskId,
+		"task_id":           callerTask(ctx, req.Context),
 		"finish_reason":     string(resp.FinishReason),
 		"prompt_tokens":     resp.Usage.PromptTokens,
 		"completion_tokens": resp.Usage.CompletionTokens,
@@ -1312,7 +1315,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		"tool_name":      req.Name,
 		"mission_id":     req.Context.MissionId,
 		"agent_name":     req.Context.AgentName,
-		"task_id":        req.Context.TaskId,
+		"task_id":        callerTask(ctx, req.Context),
 		"parent_span_id": req.Context.SpanId,
 		"input_type":     req.InputType,
 		"output_type":    req.OutputType,
@@ -1380,7 +1383,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			"tool_name":      req.Name,
 			"mission_id":     req.Context.MissionId,
 			"agent_name":     req.Context.AgentName,
-			"task_id":        req.Context.TaskId,
+			"task_id":        callerTask(ctx, req.Context),
 			"error":          err.Error(),
 			"parent_span_id": req.Context.SpanId,
 		})
@@ -1457,7 +1460,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		"tool_name":      req.Name,
 		"mission_id":     req.Context.MissionId,
 		"agent_name":     req.Context.AgentName,
-		"task_id":        req.Context.TaskId,
+		"task_id":        callerTask(ctx, req.Context),
 		"parent_span_id": req.Context.SpanId,
 	})
 
@@ -1537,7 +1540,7 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harness
 		"tool_name":      req.ToolName,
 		"mission_id":     req.Context.MissionId,
 		"agent_name":     req.Context.AgentName,
-		"task_id":        req.Context.TaskId,
+		"task_id":        callerTask(ctx, req.Context),
 		"parent_span_id": req.Context.SpanId,
 		"input_type":     req.InputType,
 		"output_type":    req.OutputType,
@@ -3131,7 +3134,7 @@ func (s *HarnessCallbackService) Observe(ctx context.Context, req *harnesspb.Obs
 			},
 		}, nil
 	}
-	if err := s.observeCounter().Admit(observeTaskKey(req.GetContext())); err != nil {
+	if err := s.observeCounter().Admit(observeTaskKey(ctx, req.GetContext())); err != nil {
 		s.logger.Warn("observation rejected by emit bounds",
 			"mission_id", req.GetContext().GetMissionId(),
 			"task_id", req.GetContext().GetTaskId(),
