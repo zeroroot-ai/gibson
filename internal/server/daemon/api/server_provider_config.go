@@ -64,6 +64,8 @@ func toGRPCProviderError(op string, err error) error {
 		return status_grpc.Errorf(codes.AlreadyExists, "provider already exists")
 	case errors.Is(err, providerconfig.ErrUnsupportedType):
 		return status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
+	case errors.Is(err, providerconfig.ErrInvalidCredentials):
+		return status_grpc.Errorf(codes.InvalidArgument, "%s", err.Error())
 	case errors.Is(err, providerconfig.ErrKeyProviderUnset):
 		return status_grpc.Errorf(codes.FailedPrecondition,
 			"daemon `security.key_provider` not configured — provider storage is disabled")

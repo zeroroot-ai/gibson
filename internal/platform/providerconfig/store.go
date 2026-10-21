@@ -58,6 +58,36 @@ func validateType(t llm.ProviderType) error {
 	return fmt.Errorf("%w: %q (supported: %s)", ErrUnsupportedType, t, joinTypes(llm.SupportedProviderTypes()))
 }
 
+// checkCredentials validates the credential fields that carry more than a
+// secret. The field custom_headers belongs to the anthropic type only, and its
+// value must pass the allowlist. It returns a copy of the input that holds the
+// value in its canonical form, so the store and the sandbox that reads it hold
+// a checked value and nothing else.
+func checkCredentials(input *ProviderConfigInput) (*ProviderConfigInput, error) {
+	raw, present := input.Credentials[llm.CustomHeadersKey]
+	if !present {
+		return input, nil
+	}
+	if input.Type != llm.ProviderAnthropic {
+		return nil, fmt.Errorf("%w: the field %s is for the anthropic type only", ErrInvalidCredentials, llm.CustomHeadersKey)
+	}
+	canonical, err := llm.CanonicalCustomHeaders(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidCredentials, err)
+	}
+	out := *input
+	out.Credentials = make(map[string]string, len(input.Credentials))
+	for k, v := range input.Credentials {
+		out.Credentials[k] = v
+	}
+	if canonical == "" {
+		delete(out.Credentials, llm.CustomHeadersKey)
+	} else {
+		out.Credentials[llm.CustomHeadersKey] = canonical
+	}
+	return &out, nil
+}
+
 func joinTypes(types []llm.ProviderType) string {
 	ss := make([]string, len(types))
 	for i, t := range types {

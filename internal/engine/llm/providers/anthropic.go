@@ -73,7 +73,10 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 		}
 		baseURL = cfg.BaseURL
 	}
-	client := guardedHTTPClient(cfg)
+	client, err := withCustomHeaders(guardedHTTPClient(cfg), cfg.Extra[llm.CustomHeadersKey])
+	if err != nil {
+		return nil, fmt.Errorf("construct the anthropic provider: %w", llm.NewAuthError("anthropic", err))
+	}
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderAnthropic)}
 	p.buildChat = func(ctx context.Context, model string) (*einoclaude.ChatModel, error) {

@@ -750,3 +750,25 @@ func TestRotateSecret_ListingBoundPluginsFailureIsLoggedNotFatal(t *testing.T) {
 		t.Fatalf("nothing to publish when the listing fails, got %+v", pub.events)
 	}
 }
+
+// A secret of the provider store changes through that store only. Rotate
+// refuses it even when it exists, and the stored value stays as it was.
+func TestRotateSecret_RefusesAProviderCredential(t *testing.T) {
+	srv, broker, _, rotated, _ := newTestServer(t)
+	ctx := ctxWithTenant(t, "acme")
+	broker.store["provider_cred:exit-anthropic:custom_headers"] = []byte("anthropic-workspace-id: wrkspc_1")
+
+	_, err := srv.RotateSecret(ctx, &secretsv1.RotateSecretRequest{
+		Name:  "provider_cred:exit-anthropic:custom_headers",
+		Value: []byte("x-api-key: other"),
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("want InvalidArgument, got %v", err)
+	}
+	if got := string(broker.store["provider_cred:exit-anthropic:custom_headers"]); got != "anthropic-workspace-id: wrkspc_1" {
+		t.Errorf("the stored value changed to %q", got)
+	}
+	if len(rotated.events) != 0 {
+		t.Errorf("a refused rotation must emit no event, got %+v", rotated.events)
+	}
+}
