@@ -6,6 +6,7 @@ package providerconfig
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
@@ -60,8 +61,14 @@ func TestBrokerStore_CreateAndUpdateRunTheCredentialCheck(t *testing.T) {
 		}
 	}
 	for op, run := range map[string]func(*ProviderConfigInput) error{
-		"Create": func(in *ProviderConfigInput) error { _, err := store.Create(ctx, "tenant-a", in); return err },
-		"Update": func(in *ProviderConfigInput) error { _, err := store.Update(ctx, "tenant-a", in.Name, in); return err },
+		"Create": func(in *ProviderConfigInput) error {
+			_, err := store.Create(ctx, "tenant-a", in)
+			return fmt.Errorf("create: %w", err)
+		},
+		"Update": func(in *ProviderConfigInput) error {
+			_, err := store.Update(ctx, "tenant-a", in.Name, in)
+			return fmt.Errorf("update: %w", err)
+		},
 	} {
 		if err := run(input("x-api-key: other")); !errors.Is(err, ErrInvalidCredentials) {
 			t.Errorf("%s with a bad header: err = %v, want ErrInvalidCredentials", op, err)

@@ -42,7 +42,7 @@ func withCustomHeaders(client *http.Client, raw string) (*http.Client, error) {
 	}
 	headers, err := llm.ParseCustomHeaders(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read the custom headers: %w", err)
 	}
 	next := client.Transport
 	if next == nil {
