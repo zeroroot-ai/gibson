@@ -1,6 +1,6 @@
 module github.com/zeroroot-ai/gibson/plugins/gitlab
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/zeroroot-ai/sdk v0.208.0

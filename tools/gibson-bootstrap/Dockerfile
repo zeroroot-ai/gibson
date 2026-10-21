@@ -18,7 +18,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.2-alpine@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
+FROM ghcr.io/zeroroot-ai/mirror/golang:1.27.3-alpine@sha256:f2c872bcee949b7be9c490efd02b48a8a2fbf947cdf533f1c58525ec9d8170fd AS builder
 
 # git is required by the Go toolchain for the `direct` proxy fallback.
 RUN apk add --no-cache git ca-certificates
