@@ -206,3 +206,22 @@ func TestVertex_RefusesAProjectOrRegionThatIsNotAPlainName(t *testing.T) {
 		})
 	}
 }
+
+// The Vertex client takes a service account key and nothing else. A missing key
+// and a document of another credential type are refused before any client is
+// built.
+func TestNewVertexChatModel_NeedsAServiceAccountKey(t *testing.T) {
+	client := &http.Client{Transport: http.DefaultTransport}
+	for name, doc := range map[string]string{
+		"no key":                    "",
+		"an authorized user":        `{"type":"authorized_user","client_id":"x","client_secret":"y","refresh_token":"z"}`,
+		"an external account":       `{"type":"external_account","audience":"a","subject_token_type":"t","token_url":"http://x","credential_source":{"file":"/etc/passwd"}}`,
+		"a document that is no key": `not json`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			m, err := newVertexChatModel(context.Background(), "proj", "us-east5", "claude-x", doc, client)
+			require.Error(t, err)
+			assert.Nil(t, m)
+		})
+	}
+}

@@ -100,3 +100,11 @@ func TestBedrockEmbedder_NeverUsesTheAmbientCredentialChain(t *testing.T) {
 		})
 	}
 }
+
+// A config with its own key pair builds an embedder, with no AWS environment.
+func TestBedrockEmbedder_BuildsFromTheKeyPairOfTheConfig(t *testing.T) {
+	e, err := newBedrockEmbedder(Config{Kind: KindBedrock, Model: "amazon.titan-embed-text-v2:0",
+		Extra: map[string]string{"aws_access_key_id": "AKIAEXAMPLE", "aws_secret_access_key": "secret", "aws_session_token": "tok"}})
+	require.NoError(t, err)
+	assert.NotNil(t, e)
+}
