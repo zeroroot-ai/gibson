@@ -57,7 +57,11 @@ func (t headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			req.Header.Add(name, v)
 		}
 	}
-	return t.next.RoundTrip(req)
+	resp, err := t.next.RoundTrip(req)
+	if err != nil {
+		return nil, fmt.Errorf("round trip with custom headers: %w", err)
+	}
+	return resp, nil
 }
 
 // withCustomHeaders makes the client send the headers of raw on each request.

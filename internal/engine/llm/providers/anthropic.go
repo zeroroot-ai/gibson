@@ -75,7 +75,7 @@ func NewAnthropicProvider(cfg llm.ProviderConfig) (*AnthropicProvider, error) {
 	}
 	client, err := withCustomHeaders(guardedHTTPClient(cfg), cfg.Extra[customHeadersKey])
 	if err != nil {
-		return nil, llm.NewAuthError("anthropic", err)
+		return nil, fmt.Errorf("construct the anthropic provider: %w", llm.NewAuthError("anthropic", err))
 	}
 
 	p := &AnthropicProvider{config: cfg, name: string(llm.ProviderAnthropic)}
