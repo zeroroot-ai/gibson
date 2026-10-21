@@ -638,6 +638,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithJobSurface(&lazyJobSurface{daemon: d}),
 		harness.WithJobDriver(&lazyJobDriver{daemon: d}),
 		harness.WithConnectors(d.connectorMCPClient()),
+		harness.WithMissionBlockedTools(d.storedBlockedTools),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),

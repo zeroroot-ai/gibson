@@ -2010,6 +2010,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				// A connector call that names a work item takes the mission
 				// policy of its run, the same policy as invoke_tool.
 				compSvc.WithMissionPolicy(d.callback.MissionPolicyForRun)
+				compSvc.WithToolCallRecorder(d.callback.RecordToolCall)
 			}
 			d.logger.Info(ctx, "FGA authorizer wired into ComponentService for ownership tuple writes")
 

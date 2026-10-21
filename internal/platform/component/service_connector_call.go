@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
@@ -18,9 +21,9 @@ import (
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 )
 
-// MissionPolicySource returns the mission policy of a run: its deny list and
-// whether it may call tools.
-type MissionPolicySource func(ctx context.Context, runID string) (metatool.MissionPolicy, error)
+// MissionPolicySource returns the mission policy of a run of the tenant: the
+// deny list of its stored mission and whether the run may call tools.
+type MissionPolicySource func(ctx context.Context, tenant, runID string) (metatool.MissionPolicy, error)
 
 // WithConnectorCaller wires the one MCP client of the daemon as the caller of
 // connector tools. ListTools returns the id mcp:<connector>:<tool> for each
@@ -30,8 +33,15 @@ func (s *ComponentServiceServer) WithConnectorCaller(c metatool.ConnectorCaller)
 	return s
 }
 
+// WithToolCallRecorder wires the flight recorder of connector calls. A server
+// with none refuses a connector call (ADR-0131).
+func (s *ComponentServiceServer) WithToolCallRecorder(r metatool.FlightRecorder) *ComponentServiceServer {
+	s.toolCallRecorder = r
+	return s
+}
+
 // WithMissionPolicy wires the source of the mission policy of a run. A
-// connector call that names a work item takes the policy of its run.
+// connector call that belongs to a run takes the policy of that run.
 func (s *ComponentServiceServer) WithMissionPolicy(src MissionPolicySource) *ComponentServiceServer {
 	s.missionPolicy = src
 	return s
@@ -63,6 +73,9 @@ func (s *ComponentServiceServer) callConnectorTool(
 	if s.auditLog == nil {
 		return nil, status.Error(codes.FailedPrecondition, "the audit log is not wired on this server")
 	}
+	if s.toolCallRecorder == nil {
+		return nil, status.Error(codes.FailedPrecondition, "the flight recorder is not wired on this server")
+	}
 	caller, err := s.catalogCaller(ctx, tenant)
 	if err != nil {
 		return nil, err
@@ -77,11 +90,13 @@ func (s *ComponentServiceServer) callConnectorTool(
 		ID:       tid.Canonical(),
 		Args:     args,
 		ArgsJSON: []byte(req.InputJson),
+		Recorder: s.toolCallRecorder,
 		Observer: connectorAuditObserver{s: s},
 	}
-	// A work id names a mission. The caller must have claimed the work item
-	// before the id selects a mission or a run, or an agent could name the work
-	// of another mission.
+	// The run of the call. A work id names a mission run, and so does a task
+	// grant. The caller must have claimed the work item before its id selects a
+	// mission or a run, or an agent could name the work of another mission.
+	var workRun string
 	if req.WorkId != "" {
 		if _, err := s.resolveClaimedWork(ctx, tenant, req.WorkId); err != nil {
 			return nil, err
@@ -92,7 +107,27 @@ func (s *ComponentServiceServer) callConnectorTool(
 			s.logger.WarnContext(ctx, "call tool: mission lookup failed", slog.String("work_id", req.WorkId), slog.String("error", mErr.Error()))
 		}
 		call.MissionID = missionID
-		policy, pErr := s.policyOfWork(ctx, req.WorkId)
+		run, rErr := s.workContext.WorkRun(ctx, req.WorkId)
+		if rErr != nil && !errors.Is(rErr, ErrWorkRunUnknown) {
+			return nil, status.Errorf(codes.Internal, "failed to resolve the run of work %q", req.WorkId)
+		}
+		workRun = run
+	}
+	grantRun, gErr := s.optionalGrantRun(ctx, tenant)
+	if gErr != nil {
+		return nil, gErr
+	}
+	if workRun != "" && grantRun != "" && workRun != grantRun {
+		return nil, status.Error(codes.PermissionDenied, "the work item belongs to another run than the grant")
+	}
+	call.RunID = workRun
+	if call.RunID == "" {
+		call.RunID = grantRun
+	}
+	// A call with no run keeps the can_execute check only. A call with a run
+	// takes the policy of that run, and a policy that cannot be read refuses it.
+	if call.RunID != "" {
+		policy, pErr := s.policyOfRun(ctx, tenant, call.RunID)
 		if pErr != nil {
 			return nil, pErr
 		}
@@ -121,27 +156,40 @@ func (s *ComponentServiceServer) callConnectorTool(
 	}
 }
 
-// policyOfWork returns the mission policy of the run of a work item. A work
-// item with no run has no mission policy. A server that cannot read the policy
-// of a run refuses the call: an unread policy is not an empty one.
-func (s *ComponentServiceServer) policyOfWork(ctx context.Context, workID string) (metatool.MissionPolicy, error) {
-	run, err := s.workContext.WorkRun(ctx, workID)
-	if err != nil {
-		if errors.Is(err, ErrWorkRunUnknown) {
-			return metatool.MissionPolicy{}, nil
-		}
-		return metatool.MissionPolicy{}, status.Errorf(codes.Internal, "failed to resolve the run of work %q", workID)
-	}
+// policyOfRun returns the mission policy of a run. A server that cannot read
+// the policy refuses the call: an unread policy is not an empty one.
+func (s *ComponentServiceServer) policyOfRun(ctx context.Context, tenant, runID string) (metatool.MissionPolicy, error) {
 	if s.missionPolicy == nil {
 		return metatool.MissionPolicy{}, status.Error(codes.FailedPrecondition, "the mission policy source is not configured")
 	}
-	policy, err := s.missionPolicy(ctx, run)
+	policy, err := s.missionPolicy(ctx, tenant, runID)
 	if err != nil {
 		s.logger.ErrorContext(ctx, "call tool: the mission policy of the run could not be read",
-			slog.String("run_id", run), slog.String("error", err.Error()))
+			slog.String("run_id", runID), slog.String("error", err.Error()))
 		return metatool.MissionPolicy{}, status.Error(codes.Unavailable, "the mission policy of the run could not be read")
 	}
 	return policy, nil
+}
+
+// optionalGrantRun returns the mission run that the verified task grant of the
+// caller names. A caller with no task grant, such as an enrolled agent on its
+// host key, has no run and gets an empty answer. A task grant that does not
+// verify refuses the call.
+func (s *ComponentServiceServer) optionalGrantRun(ctx context.Context, tenant string) (string, error) {
+	md, _ := metadata.FromIncomingContext(ctx)
+	values := md.Get("x-capability-grant")
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		token := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(values[0], "Bearer "), "bearer "))
+		parts := strings.Split(token, ".")
+		if len(parts) != 3 || tokenHeaderType(parts[0]) != "JWT" {
+			return "", nil // a component grant names no run
+		}
+	}
+	_, run, err := s.callerTaskGrant(ctx, tenant)
+	return run, err
 }
 
 // connectorAuditObserver writes the audit records of a connector call made
@@ -152,7 +200,10 @@ type connectorAuditObserver struct{ s *ComponentServiceServer }
 var _ metatool.CallObserver = connectorAuditObserver{}
 
 func (o connectorAuditObserver) Intent(ctx context.Context, rec metatool.CallRecord) error {
-	return metatool.AuditRecorder{Log: o.s.auditLog}.Intent(ctx, rec)
+	if err := (metatool.AuditRecorder{Log: o.s.auditLog}).Intent(ctx, rec); err != nil {
+		return fmt.Errorf("audit intent of %s: %w", rec.Canonical, err)
+	}
+	return nil
 }
 
 func (o connectorAuditObserver) Result(ctx context.Context, rec metatool.CallRecord, _ []byte, callErr error) {

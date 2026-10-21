@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -50,6 +51,12 @@ type connectorEnv struct {
 	caller *fakeConnectorCaller
 	reg    *RedisWorkContextRegistry
 	policy metatool.MissionPolicy
+	// policyRuns lists the runs whose policy the server read.
+	policyRuns []string
+	// policyErr makes the source of the policy fail.
+	policyErr error
+	// recorded holds the flight recorder records of the calls.
+	recorded []metatool.CallRecord
 }
 
 // newConnectorEnv wires a server for connector calls over a real work context
@@ -77,7 +84,14 @@ func newConnectorEnv(t *testing.T, allow bool, durable func(*audittest.Recorder)
 	srv.WithConnectorCaller(env.caller)
 	srv.WithWorkContextRegistry(env.reg)
 	srv.WithMissionContextResolver(NewMissionContextResolver(sc, nil))
-	srv.WithMissionPolicy(func(context.Context, string) (metatool.MissionPolicy, error) { return env.policy, nil })
+	srv.WithMissionPolicy(func(_ context.Context, _, run string) (metatool.MissionPolicy, error) {
+		env.policyRuns = append(env.policyRuns, run)
+		return env.policy, env.policyErr
+	})
+	srv.WithToolCallRecorder(func(_ context.Context, rec metatool.CallRecord, _ []byte, _ string) {
+		env.recorded = append(env.recorded, rec)
+	})
+	srv.WithGrantVerifier(fakeGrants{})
 	env.srv = srv
 	return env
 }
@@ -96,21 +110,17 @@ func connectorReq(workID string) *componentpb.CallToolRequest {
 	return &componentpb.CallToolRequest{ToolName: "mcp:gitlab:get_project", InputJson: `{"id":"g/p"}`, WorkId: workID}
 }
 
-// records returns the result and the details of each audit record.
-func records(t *testing.T, rec *audittest.Recorder) []struct {
+type auditRecord struct {
 	Result  string         `json:"result"`
 	Details map[string]any `json:"details"`
-} {
+}
+
+// records returns the result and the details of each audit record.
+func records(t *testing.T, rec *audittest.Recorder) []auditRecord {
 	t.Helper()
-	var out []struct {
-		Result  string         `json:"result"`
-		Details map[string]any `json:"details"`
-	}
+	out := make([]auditRecord, 0, len(rec.Events()))
 	for _, ev := range rec.Events() {
-		var m struct {
-			Result  string         `json:"result"`
-			Details map[string]any `json:"details"`
-		}
+		var m auditRecord
 		require.NoError(t, json.Unmarshal(ev.Metadata, &m))
 		out = append(out, m)
 	}
@@ -201,7 +211,7 @@ func TestCallTool_AnInactiveRunIsRefused(t *testing.T) {
 // A write failure of the intent record refuses the call: no call happens
 // without a record.
 func TestCallTool_AnAuditWriteFailureRefusesTheCall(t *testing.T) {
-	env := newConnectorEnv(t, true, func(r *audittest.Recorder) audit.DurableWriter { return &refusingWriter{} })
+	env := newConnectorEnv(t, true, func(*audittest.Recorder) audit.DurableWriter { return &refusingWriter{} })
 	env.claim(t, "work-9", "agent_principal:42")
 
 	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
@@ -250,7 +260,7 @@ func TestCallTool_ConnectorCallFailureIsRecorded(t *testing.T) {
 func TestSubmitResult_AForeignClaimantIsRefused(t *testing.T) {
 	env := newWorkIDEnv(t)
 	workID := env.enqueueFor(t, victimTenant, "work-claimed-1")
-	_ = env.claimedBy(t, auth.ContextWithTenantString(context.Background(), victimTenant), workID, "component-1")
+	_ = env.claimedBy(auth.ContextWithTenantString(context.Background(), victimTenant), t, workID, "component-1")
 
 	other := withSubject(auth.ContextWithTenantString(context.Background(), victimTenant), "component-2")
 	_, err := env.svc.SubmitResult(other, &componentpb.SubmitResultRequest{WorkId: workID, Result: []byte(`{}`)})
@@ -261,4 +271,118 @@ func TestSubmitResult_AForeignClaimantIsRefused(t *testing.T) {
 	_, err = env.svc.SubmitResult(auth.ContextWithTenantString(context.Background(), victimTenant),
 		&componentpb.SubmitResultRequest{WorkId: workID, Result: []byte(`{}`)})
 	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+// CallTool writes the flight recorder record of a connector call, ADR-0131: for
+// a success, with the mission and the run of the work item, and for a denial.
+func TestCallTool_ConnectorCallIsRecordedByTheFlightRecorder(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.claim(t, "work-9", "agent_principal:42")
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
+	require.NoError(t, err)
+	require.Len(t, env.recorded, 1)
+	assert.Equal(t, "mcp:gitlab:get_project", env.recorded[0].Canonical)
+	assert.Equal(t, "mission-7", env.recorded[0].MissionID)
+	assert.Equal(t, "run-1", env.recorded[0].RunID)
+
+	denied := newConnectorEnv(t, false, nil)
+	_, err = denied.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Len(t, denied.recorded, 1, "a denied call is recorded too")
+
+	// A server with no recorder refuses the call.
+	env.srv.toolCallRecorder = nil
+	_, err = env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// A verified task grant that names a run brings the policy of that run even
+// when the request names no work id: a blocked tool is refused.
+func TestCallTool_AGrantThatNamesARunBringsItsPolicy(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.policy = metatool.MissionPolicy{Blocked: []string{"mcp__gitlab__get_project"}}
+
+	ctx := grantedCtx(agentCtx("agent_principal:42"), "mission-7", "run-1")
+	_, err := env.srv.CallTool(ctx, connectorReq(""))
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Equal(t, []string{"run-1"}, env.policyRuns)
+	assert.Empty(t, env.caller.calls)
+
+	// An inactive run is refused too.
+	env.policy = metatool.MissionPolicy{RunActive: func(context.Context) error { return metatool.ErrRunInactive }}
+	_, err = env.srv.CallTool(ctx, connectorReq(""))
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+// A call with no work id and no run in the grant keeps the can_execute check
+// only: the policy is not read. A component grant names no run.
+func TestCallTool_ACallWithNoRunKeepsCanExecuteOnly(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.policy = metatool.MissionPolicy{Blocked: []string{"mcp:gitlab:get_project"}}
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq(""))
+	require.NoError(t, err)
+
+	component := metadata.NewIncomingContext(agentCtx("agent_principal:42"),
+		metadata.Pairs("x-capability-grant", grantToken("component", "", "", "sig")))
+	_, err = env.srv.CallTool(component, connectorReq(""))
+	require.NoError(t, err)
+	assert.Empty(t, env.policyRuns, "no run, so no policy")
+
+	// A task grant that does not verify refuses the call.
+	bad := metadata.NewIncomingContext(agentCtx("agent_principal:42"),
+		metadata.Pairs("x-capability-grant", grantToken("JWT", "mission-7", "run-1", "foreign")))
+	_, err = env.srv.CallTool(bad, connectorReq(""))
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+}
+
+// A policy that cannot be read refuses a call that belongs to a run.
+func TestCallTool_AnUnreadablePolicyRefusesTheCall(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.claim(t, "work-9", "agent_principal:42")
+	env.policyErr = errors.New("store down")
+	_, err := env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
+	assert.Equal(t, codes.Unavailable, status.Code(err))
+	assert.Empty(t, env.caller.calls)
+
+	env.policyErr = nil
+	env.srv.missionPolicy = nil
+	_, err = env.srv.CallTool(agentCtx("agent_principal:42"), connectorReq("work-9"))
+	assert.Equal(t, codes.FailedPrecondition, status.Code(err))
+}
+
+// A grant and a work item that name different runs are refused.
+func TestCallTool_AGrantAndAWorkItemOfDifferentRunsAreRefused(t *testing.T) {
+	env := newConnectorEnv(t, true, nil)
+	env.claim(t, "work-9", "agent_principal:42")
+	ctx := grantedCtx(agentCtx("agent_principal:42"), "mission-7", "run-2")
+	_, err := env.srv.CallTool(ctx, connectorReq("work-9"))
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	assert.Empty(t, env.caller.calls)
+}
+
+// PollWork records the principal that claimed the work item. A later call that
+// names the work id needs it, so a PollWork that does not record it fails this.
+func TestPollWork_RecordsTheClaimant(t *testing.T) {
+	env := newWorkIDEnv(t)
+	env.svc.registry = &pollRegistry{info: ComponentInfo{Kind: "tool", Name: "nmap", InstanceID: "inst-own"}}
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "tool", "nmap", WorkItem{
+		WorkID: "work-poll-claim", WorkType: "execute", Context: map[string]string{"mission_id": "mission-2"},
+	})
+	require.NoError(t, err)
+
+	ctx := withSubject(auth.ContextWithTenantString(context.Background(), victimTenant), "agent_principal:poller")
+	resp, err := env.svc.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: "inst-own", TimeoutMs: 100})
+	require.NoError(t, err)
+	require.Equal(t, "work-poll-claim", resp.WorkId)
+
+	claimant, err := NewRedisWorkContextRegistry(env.state).WorkClaimant(context.Background(), "work-poll-claim")
+	require.NoError(t, err)
+	assert.Equal(t, "agent_principal:poller", claimant)
+
+	// The poller can then submit its result, and another principal cannot.
+	_, err = env.svc.SubmitResult(withSubject(auth.ContextWithTenantString(context.Background(), victimTenant), "agent_principal:other"),
+		&componentpb.SubmitResultRequest{WorkId: "work-poll-claim", Result: []byte(`{}`)})
+	assert.Equal(t, codes.PermissionDenied, status.Code(err))
+	_, err = env.svc.SubmitResult(ctx, &componentpb.SubmitResultRequest{WorkId: "work-poll-claim", Result: []byte(`{}`)})
+	require.NoError(t, err)
 }

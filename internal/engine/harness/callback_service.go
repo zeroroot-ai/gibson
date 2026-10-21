@@ -241,6 +241,10 @@ type HarnessCallbackService struct {
 	// connector call.
 	connectorAudit *audit.AuditLogger
 
+	// missionBlockedTools reads the deny list of a mission from its stored
+	// definition. Nil refuses a connector call.
+	missionBlockedTools MissionBlockedToolsSource
+
 	// componentAuthorizer is the FGA-backed authorizer for component authz decisions.
 	// One-code-path slice deploy#195: required for any callback service that
 	// will actually serve Authorize calls. The daemon wires this in setup

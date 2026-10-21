@@ -24,21 +24,34 @@ var ErrRunInactive = errors.New("metatool: the mission run is not active")
 // written. The call does not happen.
 var ErrAuditUnavailable = errors.New("metatool: the audit record could not be written")
 
+// blockedKey is the form in which a tool id is compared with the deny list. An
+// mcp id has two spellings (mcp:<connector>:<tool> and mcp__<connector>__<tool>),
+// so both the entry of the list and the requested id go to the canonical form
+// first. Any other name, such as a bare native tool name, is compared as it is.
+func blockedKey(id string) string {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if tid, err := decodeID(id); err == nil {
+		id = tid.Canonical()
+	}
+	return id
+}
+
 // MatchBlocked reports the first candidate tool id that appears in the
-// mission-level deny list, matched case-insensitively. It is the one place that
-// blocked_tools is compared, so each path agrees.
+// mission-level deny list. Both sides are canonicalized, so the two spellings
+// of an mcp id match in both directions. It is the one place that blocked_tools
+// is compared, so each path agrees.
 func MatchBlocked(blocked []string, candidates ...string) (string, bool) {
 	if len(blocked) == 0 {
 		return "", false
 	}
 	set := make(map[string]struct{}, len(blocked))
 	for _, b := range blocked {
-		if b = strings.ToLower(strings.TrimSpace(b)); b != "" {
-			set[b] = struct{}{}
+		if k := blockedKey(b); k != "" {
+			set[k] = struct{}{}
 		}
 	}
 	for _, c := range candidates {
-		if _, ok := set[strings.ToLower(strings.TrimSpace(c))]; ok {
+		if _, ok := set[blockedKey(c)]; ok {
 			return c, true
 		}
 	}
@@ -72,14 +85,20 @@ type CallRecord struct {
 	Tool      string
 	ArgsJSON  []byte
 	// WorkID and MissionID are set only after the caller proved that it claimed
-	// the work item.
+	// the work item. RunID is the mission run of the call.
 	WorkID    string
 	MissionID string
+	RunID     string
 }
 
-// CallObserver records a call. Intent runs before the call and refuses it when
-// it fails. Result runs after the call, whatever the outcome, and also after a
-// refusal that follows the intent.
+// FlightRecorder receives the record of each call, ADR-0131: a call is recorded
+// whatever its outcome, so the agent never gets the result of a tool without an
+// independent record of it.
+type FlightRecorder func(ctx context.Context, rec CallRecord, resultJSON []byte, errText string)
+
+// CallObserver writes the audit records of a call. Intent runs before the call
+// and refuses it when it fails. Result runs after the call, whatever the
+// outcome, and also after a refusal that follows the intent.
 type CallObserver interface {
 	Intent(ctx context.Context, rec CallRecord) error
 	Result(ctx context.Context, rec CallRecord, resultJSON []byte, callErr error)
@@ -97,7 +116,11 @@ type Call struct {
 	Policy    MissionPolicy
 	WorkID    string
 	MissionID string
-	Observer  CallObserver
+	RunID     string
+	// Recorder writes the flight recorder record of the call. It is required.
+	Recorder FlightRecorder
+	// Observer writes the audit records of the call. It is required.
+	Observer CallObserver
 }
 
 // Call runs one tool call of an agent from start to end: the mission policy,
@@ -108,11 +131,9 @@ type Call struct {
 // A native id is authorized and then returned as ErrNativeID, because the tool
 // call handler of the harness owns a native call and its record.
 func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
-	if c.Observer == nil {
-		return nil, errors.New("metatool: a call needs an observer")
+	if c.Observer == nil || c.Recorder == nil {
+		return nil, errors.New("metatool: a call needs an observer and a flight recorder")
 	}
-	// The flattened form of an id (mcp__<connector>__<tool>) names the same
-	// tool, so the deny list is compared with the canonical form of either.
 	tid, derr := decodeID(c.ID)
 	canon := c.ID
 	if derr == nil {
@@ -136,17 +157,25 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 	}
 	rec := CallRecord{
 		Tenant: c.Caller.Tenant, Subject: c.Caller.Subject, Canonical: canon,
-		ArgsJSON: argsJSON, WorkID: c.WorkID, MissionID: c.MissionID,
+		ArgsJSON: argsJSON, WorkID: c.WorkID, MissionID: c.MissionID, RunID: c.RunID,
 	}
 
+	finish := func(resultJSON []byte, err error) {
+		errText := ""
+		if err != nil {
+			errText = err.Error()
+		}
+		c.Recorder(ctx, rec, resultJSON, errText)
+		c.Observer.Result(ctx, rec, resultJSON, err)
+	}
 	if derr != nil {
-		c.Observer.Result(ctx, rec, nil, derr)
+		finish(nil, derr)
 		return nil, derr
 	}
 	rec.Connector, rec.Tool = tid.Connector, tid.Tool
 	if tid.Source != toolid.SourceMCP {
 		if _, err := h.Authorize(ctx, c.Caller, c.ID); err != nil {
-			c.Observer.Result(ctx, rec, nil, err)
+			finish(nil, err)
 			return nil, err
 		}
 		return nil, ErrNativeID
@@ -155,7 +184,7 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 	// No call happens without its record.
 	if err := c.Observer.Intent(ctx, rec); err != nil {
 		refused := fmt.Errorf("%w: %w", ErrAuditUnavailable, err)
-		c.Observer.Result(ctx, rec, nil, refused)
+		finish(nil, refused)
 		return nil, refused
 	}
 
@@ -170,7 +199,7 @@ func (h *Handler) Call(ctx context.Context, c Call) (any, error) {
 		// record then holds no payload.
 		resultJSON, _ = json.Marshal(result)
 	}
-	c.Observer.Result(ctx, rec, resultJSON, err)
+	finish(resultJSON, err)
 	if err != nil {
 		return nil, err
 	}

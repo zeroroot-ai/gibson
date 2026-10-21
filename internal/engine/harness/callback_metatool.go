@@ -95,7 +95,12 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 		// gibson:no-tool-executed — no resolvable run state, so nothing ran.
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, "run authz state not found"), nil
 	}
-	policy := metatool.MissionPolicy{Blocked: h.Mission().BlockedTools, RunActive: runActiveCheck(state.Status)}
+	policy, err := s.policyFromState(ctx, state)
+	if err != nil {
+		s.logger.ErrorContext(ctx, "meta-tool: the mission policy could not be loaded", "run_id", runID, "err", err)
+		// gibson:no-tool-executed — no policy, so nothing ran.
+		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the mission policy could not be loaded"), nil
+	}
 
 	authorizer := catalog.NewFGAAuthorizer(s.componentAuthorizer)
 	handler := metatool.NewHandler(
@@ -107,7 +112,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 
 	switch req.GetName() {
 	case metatool.SearchToolsName:
-		if err := policy.CheckRun(ctx); err != nil {
+		if err := policy.CheckRun(ctx); err != nil { //nolint:nilerr // the denial is the response, not a transport error
 			// gibson:no-tool-executed — denied before the search.
 			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
 		}
@@ -203,7 +208,14 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		ArgsJSON:  argsJSON,
 		Policy:    policy,
 		MissionID: contextInfo.GetMissionId(),
-		Observer:  &harnessCallObserver{s: s, contextInfo: contextInfo},
+		RunID:     callerRun(ctx, contextInfo),
+		// Flight recorder completeness (ADR-0131): invoke_tool dispatches a
+		// real catalog tool through the same trust boundary as a native
+		// CallToolProto call, so each call is recorded, a failed one too.
+		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
+			s.captureToolCall(rctx, contextInfo, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+		},
+		Observer: &harnessCallObserver{s: s},
 	})
 	switch {
 	case err == nil:
@@ -252,9 +264,40 @@ func runActiveCheck(status string) func(context.Context) error {
 	}
 }
 
-// MissionPolicyForRun returns the mission policy of a run, for a path that has
-// no harness of its own, such as ComponentService.CallTool.
-func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, runID string) (metatool.MissionPolicy, error) {
+// MissionBlockedToolsSource reads the deny list of a mission from its stored
+// definition. It reads the record of the tenant, not the memory of this replica.
+type MissionBlockedToolsSource func(ctx context.Context, tenant, missionID string) ([]string, error)
+
+// WithMissionBlockedTools wires the source of the mission deny list. A daemon
+// with none refuses a connector call, because an unread deny list is not an
+// empty one.
+func WithMissionBlockedTools(src MissionBlockedToolsSource) CallbackServiceOption {
+	return func(s *HarnessCallbackService) {
+		s.missionBlockedTools = src
+	}
+}
+
+// policyFromState builds the mission policy of the run in state: its active
+// check from the run record, and its deny list from the stored definition of
+// its mission. It fails when either cannot be read.
+func (s *HarnessCallbackService) policyFromState(ctx context.Context, state *RunAuthzState) (metatool.MissionPolicy, error) {
+	if s.missionBlockedTools == nil {
+		return metatool.MissionPolicy{}, errors.New("the mission deny list source is not wired")
+	}
+	if state.MissionID == "" {
+		return metatool.MissionPolicy{}, fmt.Errorf("run %q names no mission", state.RunID)
+	}
+	blocked, err := s.missionBlockedTools(ctx, state.TenantID, state.MissionID)
+	if err != nil {
+		return metatool.MissionPolicy{}, fmt.Errorf("read the deny list of mission %q: %w", state.MissionID, err)
+	}
+	return metatool.MissionPolicy{Blocked: blocked, RunActive: runActiveCheck(state.Status)}, nil
+}
+
+// MissionPolicyForRun returns the mission policy of a run of the tenant, for a
+// path that has no harness of its own, such as ComponentService.CallTool. A run
+// of another tenant is refused.
+func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant, runID string) (metatool.MissionPolicy, error) {
 	if s.authzStore == nil {
 		return metatool.MissionPolicy{}, errors.New("the run authz store is not wired")
 	}
@@ -262,18 +305,23 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, runID 
 	if err != nil {
 		return metatool.MissionPolicy{}, fmt.Errorf("read the authz state of run %q: %w", runID, err)
 	}
-	policy := metatool.MissionPolicy{RunActive: runActiveCheck(state.Status)}
-	if s.registry != nil {
-		policy.Blocked = s.registry.BlockedToolsForRun(runID)
+	if state.TenantID != tenant {
+		return metatool.MissionPolicy{}, fmt.Errorf("run %q does not belong to the tenant", runID)
 	}
-	return policy, nil
+	return s.policyFromState(ctx, state)
 }
 
-// harnessCallObserver records an invoke_tool call of the harness: the flight
-// recorder record of the result, and the intent and result audit records.
+// RecordToolCall writes the flight recorder record of a tool call that has no
+// harness callback context, such as a connector call through
+// ComponentService.CallTool. The tenant is on ctx.
+func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
+	s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+}
+
+// harnessCallObserver writes the intent and result audit records of an
+// invoke_tool call of the harness.
 type harnessCallObserver struct {
-	s           *HarnessCallbackService
-	contextInfo *harnesspb.ContextInfo
+	s *HarnessCallbackService
 }
 
 var _ metatool.CallObserver = (*harnessCallObserver)(nil)
@@ -292,18 +340,13 @@ func auditCtx(ctx context.Context, rec metatool.CallRecord) context.Context {
 }
 
 func (o *harnessCallObserver) Intent(ctx context.Context, rec metatool.CallRecord) error {
-	return metatool.AuditRecorder{Log: o.s.connectorAudit}.Intent(auditCtx(ctx, rec), rec)
+	if err := (metatool.AuditRecorder{Log: o.s.connectorAudit}).Intent(auditCtx(ctx, rec), rec); err != nil {
+		return fmt.Errorf("audit intent of %s: %w", rec.Canonical, err)
+	}
+	return nil
 }
 
-func (o *harnessCallObserver) Result(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, callErr error) {
-	// Flight recorder completeness (ADR-0131): invoke_tool dispatches a real
-	// catalog tool through the same trust boundary as a native CallToolProto
-	// call, so each call is recorded, a failed one too.
-	errText := ""
-	if callErr != nil {
-		errText = callErr.Error()
-	}
-	o.s.captureToolCall(ctx, o.contextInfo, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+func (o *harnessCallObserver) Result(ctx context.Context, rec metatool.CallRecord, _ []byte, callErr error) {
 	if rec.Connector == "" {
 		return
 	}

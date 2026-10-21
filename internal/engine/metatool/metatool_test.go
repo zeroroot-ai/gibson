@@ -212,5 +212,5 @@ func (nopObserver) Result(context.Context, CallRecord, []byte, error) {}
 
 // invoke runs one call with no policy and an observer that records nothing.
 func invoke(h *Handler, caller catalog.Caller, id string, args map[string]any) (any, error) {
-	return h.Call(context.Background(), Call{Caller: caller, ID: id, Args: args, Observer: nopObserver{}})
+	return h.Call(context.Background(), Call{Caller: caller, ID: id, Args: args, Observer: nopObserver{}, Recorder: func(context.Context, CallRecord, []byte, string) {}})
 }

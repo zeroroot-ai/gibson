@@ -49,6 +49,8 @@ func (f *mtQuerier) CallConnectorTool(_ context.Context, _, connector, tool stri
 	return f.ret, nil
 }
 
+func noBlockedTools(context.Context, string, string) ([]string, error) { return nil, nil }
+
 func newSvc(t *testing.T) *HarnessCallbackService {
 	t.Helper()
 	return &HarnessCallbackService{logger: slog.Default(), connectorAudit: newConnectorAudit(t, &audittest.Recorder{})}
@@ -442,8 +444,9 @@ func invokeNativeThroughCallToolProto(t *testing.T, captured *[]capturedTool, al
 	authzer := &fakeSearchAuthz{allow: map[string]bool{"component:tool/test-external-tool": allow}}
 	svc.componentAuthorizer = authzer
 	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{{Kind: "tool", Name: "test-external-tool"}}}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
 	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 
 	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
 		Context:   contextInfo,
@@ -562,8 +565,9 @@ func TestInvokeTool_AnMCPIdReachesTheConnectorThatTheCheckRead(t *testing.T) {
 	svc.componentRegistry = fakeSearchReg{comps: []component.ComponentInfo{
 		{Kind: "plugin", Name: "gitlab", Methods: []component.MethodInfo{{Name: "create_issue"}}},
 	}}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
 	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 	var called []string
 	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
 	pluginCalls := 0
@@ -598,8 +602,9 @@ func TestInvokeTool_AnMCPIdWithNoClientFailsClosed(t *testing.T) {
 	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
 	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
 	svc.componentRegistry = fakeSearchReg{}
-	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
 	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = noBlockedTools
 
 	resp, err := svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
 		Context:   contextInfo,
@@ -647,5 +652,79 @@ func TestMetaInvoke_AnAuditWriteFailureRefusesTheCall(t *testing.T) {
 	}
 	if len(captured) != 1 {
 		t.Fatalf("captured %d records, want the one refusal", len(captured))
+	}
+}
+
+// storedPolicySvc builds a service whose invoke_tool reaches a connector, with
+// the given source of the stored mission deny list.
+func storedPolicySvc(t *testing.T, src MissionBlockedToolsSource) (*HarnessCallbackService, *harnesspb.ContextInfo, *[]string) {
+	t.Helper()
+	var captured []capturedTool
+	svc, _, contextInfo := newStreamCaptureSvc(t, &captured, nil)
+	svc.componentAuthorizer = &fakeSearchAuthz{allow: map[string]bool{"component:connector/gitlab": true}}
+	svc.componentRegistry = fakeSearchReg{}
+	svc.authzStore = fakeSearchAuthzStore{state: &RunAuthzState{RunID: "run-1", MissionID: "mission-1", UserID: "alice", TenantID: "test-tenant", Status: "active"}}
+	svc.connectorAudit = newConnectorAudit(t, &audittest.Recorder{})
+	svc.missionBlockedTools = src
+	called := []string{}
+	svc.connectors = fakeConnectors{result: map[string]any{"iid": 7}, called: &called}
+	return svc, contextInfo, &called
+}
+
+func invokeGitlab(svc *HarnessCallbackService, contextInfo *harnesspb.ContextInfo) (*harnesspb.CallToolProtoResponse, error) {
+	return svc.CallToolProto(testCtxWithTenant(), &harnesspb.CallToolProtoRequest{
+		Context:   contextInfo,
+		Name:      metatool.InvokeToolName,
+		InputJson: []byte(`{"id":"mcp:gitlab:create_issue","args":{}}`),
+	})
+}
+
+// The deny list comes from the stored definition of the mission. An entry in
+// the other spelling of the id blocks the call.
+func TestInvokeTool_TheDenyListComesFromTheStoredMission(t *testing.T) {
+	var gotTenant, gotMission string
+	svc, contextInfo, called := storedPolicySvc(t, func(_ context.Context, tenant, mission string) ([]string, error) {
+		gotTenant, gotMission = tenant, mission
+		return []string{"mcp__gitlab__create_issue"}, nil
+	})
+	resp, err := invokeGitlab(svc, contextInfo)
+	if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED {
+		t.Fatalf("resp = %v, err = %v; want PERMISSION_DENIED", resp, err)
+	}
+	if len(*called) != 0 {
+		t.Fatalf("a blocked tool reached the connector: %v", *called)
+	}
+	if gotTenant != "test-tenant" || gotMission != "mission-1" {
+		t.Errorf("the deny list was read for %q/%q, want the tenant and the mission of the run", gotTenant, gotMission)
+	}
+}
+
+// A deny list that cannot be read refuses the call. An unwired source does too.
+func TestInvokeTool_AnUnreadableDenyListRefusesTheCall(t *testing.T) {
+	for name, src := range map[string]MissionBlockedToolsSource{
+		"the read fails": func(context.Context, string, string) ([]string, error) { return nil, errors.New("redis down") },
+		"no source":      nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, contextInfo, called := storedPolicySvc(t, src)
+			resp, err := invokeGitlab(svc, contextInfo)
+			if err != nil || resp.GetError().GetCode() != commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE {
+				t.Fatalf("resp = %v, err = %v; want UNAVAILABLE", resp, err)
+			}
+			if len(*called) != 0 {
+				t.Fatalf("the connector was called with no deny list: %v", *called)
+			}
+		})
+	}
+}
+
+// The policy of a run of another tenant is refused.
+func TestMissionPolicyForRun_RefusesARunOfAnotherTenant(t *testing.T) {
+	svc, _, _ := storedPolicySvc(t, noBlockedTools)
+	if _, err := svc.MissionPolicyForRun(context.Background(), "test-tenant", "run-1"); err != nil {
+		t.Fatalf("own run: %v", err)
+	}
+	if _, err := svc.MissionPolicyForRun(context.Background(), "other-tenant", "run-1"); err == nil {
+		t.Fatal("a run of another tenant must be refused")
 	}
 }

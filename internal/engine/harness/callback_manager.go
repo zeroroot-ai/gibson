@@ -679,8 +679,24 @@ func (m *CallbackManager) RunAuthorizer() *HarnessCallbackService {
 
 // MissionPolicyForRun returns the mission policy of a run, for the paths that
 // run a connector call without a harness of their own.
-func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, runID string) (metatool.MissionPolicy, error) {
-	return m.server.Service().MissionPolicyForRun(ctx, runID)
+func (m *CallbackManager) MissionPolicyForRun(ctx context.Context, tenant, runID string) (metatool.MissionPolicy, error) {
+	return m.server.Service().MissionPolicyForRun(ctx, tenant, runID)
+}
+
+// RecordToolCall writes the flight recorder record of a tool call that has no
+// harness callback context.
+func (m *CallbackManager) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) {
+	m.server.Service().RecordToolCall(ctx, rec, resultJSON, errText)
+}
+
+// SetMissionBlockedTools sets the source of the mission deny list on the
+// callback service. Call after NewCallbackManager, before Start(). Thread-safe.
+func (m *CallbackManager) SetMissionBlockedTools(src MissionBlockedToolsSource) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithMissionBlockedTools(src)(m.server.service)
+	}
 }
 
 // SetAuthzStore wires the RunAuthzLookup into the callback service so that the

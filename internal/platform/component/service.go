@@ -163,6 +163,10 @@ type ComponentServiceServer struct {
 	// that names a work item. Nil refuses such a call.
 	missionPolicy MissionPolicySource
 
+	// toolCallRecorder is the flight recorder of connector calls. Nil refuses
+	// a connector call.
+	toolCallRecorder metatool.FlightRecorder
+
 	// Harness proxy dependencies.
 	//
 	// llmCompleter routes LLM completions back to Gibson's provider system.

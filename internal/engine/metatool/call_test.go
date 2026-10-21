@@ -14,10 +14,15 @@ import (
 // seqObserver records the order of the events of a call and can refuse the
 // intent.
 type seqObserver struct {
+	recorded  []string
 	events    []string
 	intentErr error
 	last      CallRecord
 	resultErr error
+}
+
+func (o *seqObserver) record(_ context.Context, rec CallRecord, _ []byte, errText string) {
+	o.recorded = append(o.recorded, rec.Canonical+"|"+errText)
 }
 
 func (o *seqObserver) Intent(_ context.Context, rec CallRecord) error {
@@ -49,7 +54,7 @@ func TestCall_IntentThenDispatchThenResult(t *testing.T) {
 	obs := &seqObserver{}
 	q := &seqQuerier{obs: obs}
 	h := NewHandler(nil, allowAll("mcp:gitlab:get_project"), q)
-	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", WorkID: "w1", MissionID: "m1", Observer: obs})
+	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", WorkID: "w1", MissionID: "m1", Observer: obs, Recorder: obs.record})
 	if err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -66,7 +71,7 @@ func TestCall_AFailedIntentRecordRefusesTheCall(t *testing.T) {
 	obs := &seqObserver{intentErr: errors.New("audit database down")}
 	q := &seqQuerier{obs: obs}
 	h := NewHandler(nil, allowAll("mcp:gitlab:get_project"), q)
-	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs})
+	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs, Recorder: obs.record})
 	if !errors.Is(err, ErrAuditUnavailable) {
 		t.Fatalf("err = %v, want ErrAuditUnavailable", err)
 	}
@@ -83,7 +88,7 @@ func TestCall_ABlockedToolIsRefusedBeforeAnything(t *testing.T) {
 	h := NewHandler(nil, allowAll("mcp:gitlab:get_project"), q)
 	for _, id := range []string{"mcp:gitlab:get_project", "mcp__gitlab__get_project"} {
 		_, err := h.Call(context.Background(), Call{
-			Caller: callerAlice, ID: id, Observer: obs,
+			Caller: callerAlice, ID: id, Observer: obs, Recorder: obs.record,
 			Policy: MissionPolicy{Blocked: []string{"MCP:gitlab:get_project"}},
 		})
 		if !errors.Is(err, ErrBlocked) {
@@ -101,7 +106,7 @@ func TestCall_AnInactiveRunIsRefused(t *testing.T) {
 	q := &seqQuerier{obs: obs}
 	h := NewHandler(nil, allowAll("mcp:gitlab:get_project"), q)
 	_, err := h.Call(context.Background(), Call{
-		Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs,
+		Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs, Recorder: obs.record,
 		Policy: MissionPolicy{RunActive: func(context.Context) error { return ErrRunInactive }},
 	})
 	if !errors.Is(err, ErrRunInactive) || q.calls != 0 {
@@ -114,7 +119,7 @@ func TestCall_ADeniedCallIsRecordedAndNotDispatched(t *testing.T) {
 	obs := &seqObserver{}
 	q := &seqQuerier{obs: obs}
 	h := NewHandler(nil, allowAll(), q)
-	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs})
+	_, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs, Recorder: obs.record})
 	if !errors.Is(err, ErrUnauthorized) || q.calls != 0 {
 		t.Fatalf("err = %v, calls = %d", err, q.calls)
 	}
@@ -127,7 +132,7 @@ func TestCall_ADeniedCallIsRecordedAndNotDispatched(t *testing.T) {
 func TestCall_ANativeIDIsHandedBack(t *testing.T) {
 	obs := &seqObserver{}
 	h := NewHandler(nil, allowAll("native:nmap"), &seqQuerier{obs: obs})
-	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "native:nmap", Observer: obs}); !errors.Is(err, ErrNativeID) {
+	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record}); !errors.Is(err, ErrNativeID) {
 		t.Fatalf("err = %v, want ErrNativeID", err)
 	}
 	if len(obs.events) != 0 {
@@ -137,7 +142,65 @@ func TestCall_ANativeIDIsHandedBack(t *testing.T) {
 
 func TestCall_NeedsAnObserver(t *testing.T) {
 	h := NewHandler(nil, allowAll(), nil)
-	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:x"}); err == nil {
+	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:x", Recorder: func(context.Context, CallRecord, []byte, string) {}}); err == nil {
 		t.Fatal("want an error with no observer")
+	}
+}
+
+// A call is recorded by the flight recorder whatever its outcome: a success, a
+// denial and a refused intent. A native id is not, because the harness owns it.
+func TestCall_TheFlightRecorderSeesEachOutcome(t *testing.T) {
+	obs := &seqObserver{}
+	q := &seqQuerier{obs: obs}
+	h := NewHandler(nil, allowAll("mcp:gitlab:get_project"), q)
+	call := Call{Caller: callerAlice, ID: "mcp:gitlab:get_project", Observer: obs, Recorder: obs.record}
+
+	if _, err := h.Call(context.Background(), call); err != nil {
+		t.Fatalf("success: %v", err)
+	}
+	obs.intentErr = errors.New("down")
+	if _, err := h.Call(context.Background(), call); !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("refused intent: %v", err)
+	}
+	obs.intentErr = nil
+	denied := NewHandler(nil, allowAll(), q)
+	if _, err := denied.Call(context.Background(), call); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("denied: %v", err)
+	}
+	if len(obs.recorded) != 3 || obs.recorded[0] != "mcp:gitlab:get_project|" {
+		t.Fatalf("recorded = %v, want three records, the first with no error", obs.recorded)
+	}
+	// A native id leaves no record here.
+	obs.recorded = nil
+	nat := NewHandler(nil, allowAll("native:nmap"), q)
+	if _, err := nat.Call(context.Background(), Call{Caller: callerAlice, ID: "native:nmap", Observer: obs, Recorder: obs.record}); !errors.Is(err, ErrNativeID) {
+		t.Fatalf("native: %v", err)
+	}
+	if len(obs.recorded) != 0 {
+		t.Fatalf("a native id was recorded: %v", obs.recorded)
+	}
+}
+
+// Both spellings of an mcp id match in both directions: an entry written as
+// mcp__c__t blocks mcp:c:t, and the reverse.
+func TestMatchBlocked_BothSpellingsMatchBothWays(t *testing.T) {
+	cases := []struct {
+		entry, id string
+	}{
+		{"mcp:gitlab:get_project", "mcp__gitlab__get_project"},
+		{"mcp__gitlab__get_project", "mcp:gitlab:get_project"},
+		{"MCP__GitLab__Get_Project", "mcp:gitlab:get_project"},
+		{"mcp:gitlab:get_project", "mcp:gitlab:get_project"},
+	}
+	for _, tc := range cases {
+		if _, ok := MatchBlocked([]string{tc.entry}, tc.id); !ok {
+			t.Errorf("entry %q did not block id %q", tc.entry, tc.id)
+		}
+	}
+	if _, ok := MatchBlocked([]string{"mcp__gitlab__get_project"}, "mcp:gitlab:other"); ok {
+		t.Error("another tool must not match")
+	}
+	if _, ok := MatchBlocked([]string{"nmap"}, "native:nmap", "nmap"); !ok {
+		t.Error("a bare native name must still match itself")
 	}
 }
