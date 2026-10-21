@@ -156,7 +156,7 @@ func run(
 	// the daemon's own environment. Refuse to start with one set, and give the
 	// Anthropic SDK an empty profile directory (before any client exists).
 	if err := providers.SecureAnthropicEnvironment(); err != nil {
-		fmt.Fprintf(stderr, "gibson: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "gibson: %v\n", err)
 		return 1
 	}
 

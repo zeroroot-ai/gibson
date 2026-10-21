@@ -76,8 +76,8 @@ func NewBedrockProvider(cfg llm.ProviderConfig) (*BedrockProvider, error) {
 	sk := cfg.Extra["aws_secret_access_key"]
 	st := cfg.Extra["aws_session_token"]
 	if ak == "" || sk == "" {
-		return nil, llm.NewAuthError("bedrock",
-			errors.New("aws_access_key_id and aws_secret_access_key are both required: the daemon's own AWS credentials are never used"))
+		return nil, fmt.Errorf("construct the bedrock provider: %w", llm.NewAuthError("bedrock",
+			errors.New("aws_access_key_id and aws_secret_access_key are both required: the daemon's own AWS credentials are never used")))
 	}
 	loadOpts = append(loadOpts,
 		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(ak, sk, st)))

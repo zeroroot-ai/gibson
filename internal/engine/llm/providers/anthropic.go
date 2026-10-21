@@ -198,13 +198,13 @@ func newVertexChatModel(
 		}
 	}()
 	if serviceAccount == "" {
-		return nil, llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON"))
+		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON")))
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
 	if _, credErr := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccount), google.ServiceAccount,
 		"https://www.googleapis.com/auth/cloud-platform"); credErr != nil {
-		return nil, llm.NewAuthError(string(llm.ProviderVertex),
-			fmt.Errorf("the credential must be a service account key: %w", credErr))
+		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			fmt.Errorf("the credential must be a service account key: %w", credErr)))
 	}
 	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
 		ByVertex:                 true,
