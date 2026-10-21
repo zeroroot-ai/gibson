@@ -62,12 +62,16 @@ func TestBrokerStore_CreateAndUpdateRunTheCredentialCheck(t *testing.T) {
 	}
 	for op, run := range map[string]func(*ProviderConfigInput) error{
 		"Create": func(in *ProviderConfigInput) error {
-			_, err := store.Create(ctx, "tenant-a", in)
-			return fmt.Errorf("create: %w", err)
+			if _, err := store.Create(ctx, "tenant-a", in); err != nil {
+				return fmt.Errorf("create: %w", err)
+			}
+			return nil
 		},
 		"Update": func(in *ProviderConfigInput) error {
-			_, err := store.Update(ctx, "tenant-a", in.Name, in)
-			return fmt.Errorf("update: %w", err)
+			if _, err := store.Update(ctx, "tenant-a", in.Name, in); err != nil {
+				return fmt.Errorf("update: %w", err)
+			}
+			return nil
 		},
 	} {
 		if err := run(input("x-api-key: other")); !errors.Is(err, ErrInvalidCredentials) {
