@@ -291,7 +291,14 @@ func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 // work item with no run, and a grant with no run (gibson#1235).
 // delegateOnce delegates from the work item to "recon-agent" and returns the
 // error of the call.
+//
+// The call has a short deadline. A delegation that the daemon should refuse
+// would otherwise wait for an agent that never claims the work item, and a
+// regression would fail on the timeout of the whole test binary and not in
+// seconds.
 func delegateOnce(ctx context.Context, env *workIDEnv, work string, taskJSON []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	_, err := env.svc.DelegateToAgent(ctx, &componentpb.DelegateToAgentRequest{
 		WorkId: work, AgentName: "recon-agent", TaskJson: taskJSON,
 	})
