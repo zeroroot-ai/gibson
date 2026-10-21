@@ -8,8 +8,12 @@ package registry_test
 //
 // It enumerates every registered gRPC RPC (registry.Registry) and asserts a
 // handler test exists for it. "Handler test exists" is detected structurally:
-// a Go test function named Test<Method> or Test<Method>_<Scenario> somewhere
-// in the module. This is the convention every handler test in this repo
+// a Go test function named Test<Method> or Test<Method>_<Scenario> in the
+// directory of a package that implements the service of that RPC. A package
+// implements a service when one of its non-test files embeds
+// Unimplemented<Service>Server. The service counts, because the same method
+// name exists on several services (QueryPlugin is on three), and a test of one
+// handler must not cover the others. This is the convention every handler test in this repo
 // already follows (TestCreateAgentIdentity_HappyPath,
 // TestListMissions_NotProvisioned..., TestRevokeMySession_RequiresSessionID).
 //
@@ -43,7 +47,6 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -78,13 +81,22 @@ var skipDirs = map[string]struct{}{
 	"node_modules": {},
 }
 
-// collectTestFuncNames walks root and returns the set of test function names
-// (the identifier after "Test") declared in every _test.go file. Parsing is
+// handlerTests maps a test function name (the identifier after "Test") to the
+// directories whose _test.go files declare it.
+type handlerTests map[string]map[string]struct{}
+
+// serviceDirs maps a service short name (for example "ComponentService") to the
+// directories of the packages that implement it.
+type serviceDirs map[string]map[string]struct{}
+
+// scanModule walks root once. It returns the test function names with their
+// directories, and the directories that implement each service. Parsing is
 // name-only; bodies and imports are irrelevant, so a syntax error in one file
 // is skipped rather than failing the whole walk.
-func collectTestFuncNames(t *testing.T, root string) map[string]struct{} {
+func scanModule(t *testing.T, root string) (handlerTests, serviceDirs) {
 	t.Helper()
-	names := map[string]struct{}{}
+	tests := handlerTests{}
+	services := serviceDirs{}
 	fset := token.NewFileSet()
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -97,38 +109,92 @@ func collectTestFuncNames(t *testing.T, root string) map[string]struct{} {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, "_test.go") {
+		if !strings.HasSuffix(path, ".go") {
 			return nil
 		}
 		f, perr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if perr != nil {
-			// Unparseable test file — ignore for name collection.
+			return nil //nolint:nilerr // an unparseable file is ignored, as before
+		}
+		dir := filepath.Dir(path)
+		if strings.HasSuffix(path, "_test.go") {
+			addTestFuncs(tests, f, dir)
 			return nil
 		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Name == nil {
-				continue
+		for _, svc := range embeddedServices(f) {
+			if services[svc] == nil {
+				services[svc] = map[string]struct{}{}
 			}
-			name := fn.Name.Name
-			if !strings.HasPrefix(name, "Test") || len(name) <= len("Test") {
-				continue
-			}
-			// Must be a real test signature: func TestXxx(t *testing.T).
-			if !isTestSignature(fn) {
-				continue
-			}
-			names[strings.TrimPrefix(name, "Test")] = struct{}{}
+			services[svc][dir] = struct{}{}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walking %s: %v", root, err)
 	}
-	if len(names) == 0 {
+	if len(tests) == 0 {
 		t.Fatalf("found no test functions under %s — scan is misconfigured", root)
 	}
-	return names
+	if len(services) == 0 {
+		t.Fatalf("found no service implementation under %s — scan is misconfigured", root)
+	}
+	return tests, services
+}
+
+// addTestFuncs records the test functions of one _test.go file.
+func addTestFuncs(tests handlerTests, f *ast.File, dir string) {
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name == nil {
+			continue
+		}
+		name := fn.Name.Name
+		if !strings.HasPrefix(name, "Test") || len(name) <= len("Test") || !isTestSignature(fn) {
+			continue
+		}
+		short := strings.TrimPrefix(name, "Test")
+		if tests[short] == nil {
+			tests[short] = map[string]struct{}{}
+		}
+		tests[short][dir] = struct{}{}
+	}
+}
+
+// embeddedServices returns the services whose Unimplemented<Service>Server a
+// struct of the file embeds. An embedded field of that name is how a package
+// declares that it implements the service.
+func embeddedServices(f *ast.File) []string {
+	var out []string
+	ast.Inspect(f, func(n ast.Node) bool {
+		st, ok := n.(*ast.StructType)
+		if !ok {
+			return true
+		}
+		for _, field := range st.Fields.List {
+			if len(field.Names) != 0 {
+				continue
+			}
+			name := toolEmbeddedName(field.Type)
+			if strings.HasPrefix(name, "Unimplemented") && strings.HasSuffix(name, "Server") {
+				out = append(out, strings.TrimSuffix(strings.TrimPrefix(name, "Unimplemented"), "Server"))
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// toolEmbeddedName returns the type name of an embedded field.
+func toolEmbeddedName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.SelectorExpr:
+		return t.Sel.Name
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return toolEmbeddedName(t.X)
+	}
+	return ""
 }
 
 // isTestSignature reports whether fn looks like func TestX(*testing.T). It
@@ -161,16 +227,34 @@ func methodShortName(fullMethod string) string {
 	return fullMethod[i+1:]
 }
 
-// hasHandlerTest reports whether any collected test name matches the repo
-// convention Test<Method> or Test<Method>_<Scenario> for the given method.
-func hasHandlerTest(method string, testNames map[string]struct{}) bool {
-	if _, ok := testNames[method]; ok {
-		return true
+// serviceShortName returns the service from a full "/pkg.Service/Method" key.
+func serviceShortName(fullMethod string) string {
+	parts := strings.Split(strings.TrimPrefix(fullMethod, "/"), "/")
+	if len(parts) < 2 {
+		return ""
 	}
-	re := regexp.MustCompile("^" + regexp.QuoteMeta(method) + "_")
-	for n := range testNames {
-		if re.MatchString(n) {
-			return true
+	return parts[0][strings.LastIndex(parts[0], ".")+1:]
+}
+
+// testNameMatches reports whether a collected name follows the repo convention
+// Test<Method> or Test<Method>_<Scenario> for the method.
+func testNameMatches(method, name string) bool {
+	return name == method || strings.HasPrefix(name, method+"_")
+}
+
+// hasHandlerTest reports whether a handler test exists for the RPC: a test
+// named for its method, in a directory that implements its service.
+func hasHandlerTest(fullMethod string, tests handlerTests, services serviceDirs) bool {
+	method := methodShortName(fullMethod)
+	impl := services[serviceShortName(fullMethod)]
+	for name, dirs := range tests {
+		if !testNameMatches(method, name) {
+			continue
+		}
+		for dir := range dirs {
+			if _, ok := impl[dir]; ok {
+				return true
+			}
 		}
 	}
 	return false
@@ -179,12 +263,12 @@ func hasHandlerTest(method string, testNames map[string]struct{}) bool {
 // TestEveryRegisteredRPCHasHandlerTest is the ratcheting handler-test gate.
 func TestEveryRegisteredRPCHasHandlerTest(t *testing.T) {
 	root := repoRoot(t)
-	testNames := collectTestFuncNames(t, root)
+	tests, services := scanModule(t, root)
 
 	// Compute the current set of registered methods lacking a handler test.
 	currentGaps := map[string]struct{}{}
 	for fullMethod := range registry.Registry {
-		if !hasHandlerTest(methodShortName(fullMethod), testNames) {
+		if !hasHandlerTest(fullMethod, tests, services) {
 			currentGaps[fullMethod] = struct{}{}
 		}
 	}
@@ -273,5 +357,63 @@ func writeBaseline(t *testing.T, path string, gaps map[string]struct{}) {
 	body := strings.Join(lines, "\n") + "\n"
 	if err := os.WriteFile(path, []byte(header+body), 0o644); err != nil {
 		t.Fatalf("writing baseline %s: %v", path, err)
+	}
+}
+
+// The failing fixture of the service key. QueryPlugin exists on three services.
+// A test of the handler of one service must not make the others count as
+// tested, so a test in the directory of another service covers nothing.
+func TestHasHandlerTest_KeysByServiceAndMethod(t *testing.T) {
+	tests := handlerTests{
+		"QueryPlugin":        {"internal/engine/harness": {}},
+		"CallTool_Connector": {"internal/platform/component": {}},
+	}
+	services := serviceDirs{
+		"HarnessCallbackService": {"internal/engine/harness": {}},
+		"ComponentService":       {"internal/platform/component": {}},
+		"DaemonService":          {"internal/server/daemon/api": {}},
+	}
+	for _, tc := range []struct {
+		rpc  string
+		want bool
+	}{
+		{"/gibson.harness.v1.HarnessCallbackService/QueryPlugin", true},
+		{"/gibson.component.v1.ComponentService/QueryPlugin", false},
+		{"/gibson.daemon.v1.DaemonService/QueryPlugin", false},
+		{"/gibson.component.v1.ComponentService/CallTool", true},
+		{"/gibson.harness.v1.HarnessCallbackService/CallTool", false},
+		{"/gibson.unknown.v1.UnknownService/QueryPlugin", false},
+	} {
+		if got := hasHandlerTest(tc.rpc, tests, services); got != tc.want {
+			t.Errorf("hasHandlerTest(%s) = %v, want %v", tc.rpc, got, tc.want)
+		}
+	}
+}
+
+// A package implements a service when a struct of a non-test file embeds
+// Unimplemented<Service>Server, with a package qualifier or a pointer or none.
+func TestEmbeddedServices(t *testing.T) {
+	const src = `package p
+
+type A struct {
+	pb.UnimplementedComponentServiceServer
+	name string
+}
+
+type B struct {
+	*pb.UnimplementedDaemonServiceServer
+	UnimplementedPlainServer
+	pb.Other
+	Unimplemented pb.X
+}
+`
+	f, err := parser.ParseFile(token.NewFileSet(), "p.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := embeddedServices(f)
+	sort.Strings(got)
+	if strings.Join(got, ",") != "ComponentService,DaemonService,Plain" {
+		t.Errorf("embeddedServices = %v", got)
 	}
 }
