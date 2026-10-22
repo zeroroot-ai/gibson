@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.162.0](https://github.com/zeroroot-ai/gibson/compare/v0.161.3...v0.162.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **api:** page the tenant list RPCs with page_size and page_token ([#1265](https://github.com/zeroroot-ai/gibson/issues/1265))
+* **api:** page ListTenantUsage and ListPendingDestructiveActions ([#1281](https://github.com/zeroroot-ai/gibson/issues/1281))
+
+### Features
+
+* **api:** page ListTenantUsage and ListPendingDestructiveActions ([#1281](https://github.com/zeroroot-ai/gibson/issues/1281)) ([4c7e11f](https://github.com/zeroroot-ai/gibson/commit/4c7e11f9a0ce66275d4bcbf2c7b765d06478c553)), closes [#1261](https://github.com/zeroroot-ai/gibson/issues/1261)
+* **api:** page the tenant list RPCs with page_size and page_token ([#1265](https://github.com/zeroroot-ai/gibson/issues/1265)) ([b62fe62](https://github.com/zeroroot-ai/gibson/commit/b62fe6227d712e4cd186b1f013c26d4d2b1a921b))
+* **capabilitygrant:** carry the mission run as a signed claim in every task grant ([#1277](https://github.com/zeroroot-ai/gibson/issues/1277)) ([d971a77](https://github.com/zeroroot-ai/gibson/commit/d971a77c1264cc02c4a6cbb7e0b991a9976ac9e5))
+* **component:** let CallTool take a connector tool id through one audited call function ([#1288](https://github.com/zeroroot-ai/gibson/issues/1288)) ([32c87ec](https://github.com/zeroroot-ai/gibson/commit/32c87ecacb5a2ed6d532c36bcb618f928b3b5aa2))
+* **logs:** page the log queries with page_size and page_token ([#1252](https://github.com/zeroroot-ai/gibson/issues/1252)) ([64019de](https://github.com/zeroroot-ai/gibson/commit/64019de7a574010c5f4b8935ff70cdf88a10b60c))
+* **operator:** page the four operator list RPCs with signed keyset tokens ([#1266](https://github.com/zeroroot-ai/gibson/issues/1266)) ([142724d](https://github.com/zeroroot-ai/gibson/commit/142724deab28f38164f8a28d6be7e12075f17894))
+* **world:** page the unbounded WorldService lists ([#1263](https://github.com/zeroroot-ai/gibson/issues/1263)) ([e178d18](https://github.com/zeroroot-ai/gibson/commit/e178d182bcf1db47fc4a76e89409ae7a78ee968f))
+
+
+### Bug Fixes
+
+* **api:** refuse a model grant target that matches nothing ([#1269](https://github.com/zeroroot-ai/gibson/issues/1269)) ([ea1b735](https://github.com/zeroroot-ai/gibson/commit/ea1b735b14d3d9303c25e5efaed509b0892b0b34))
+* **authz:** an FGA 401, 403 or 404 is a permanent error, not an outage ([#1250](https://github.com/zeroroot-ai/gibson/issues/1250)) ([5509d82](https://github.com/zeroroot-ai/gibson/commit/5509d8255c30514dde176562512bece5a879c5d5))
+* **ci:** send the Anthropic workspace header on every call of the bank exit test key ([#1285](https://github.com/zeroroot-ai/gibson/issues/1285)) ([1b218e6](https://github.com/zeroroot-ai/gibson/commit/1b218e6ee2f937bb0fc533a6287c7575c46d5d30))
+* **component:** a model gate denial reaches the agent as PermissionDenied ([#1242](https://github.com/zeroroot-ai/gibson/issues/1242)) ([e80e4f8](https://github.com/zeroroot-ai/gibson/commit/e80e4f8484ade3de183d7909b8bf561791fa514f))
+* **component:** check the claimant of the work item in the agent RPCs that name one ([#1293](https://github.com/zeroroot-ai/gibson/issues/1293)) ([a82d98e](https://github.com/zeroroot-ai/gibson/commit/a82d98e23bf7f7d14036483d3be24f94a664057a))
+* **daemon:** a later run of a child record reserves its budget again ([#1275](https://github.com/zeroroot-ai/gibson/issues/1275)) ([47f2da9](https://github.com/zeroroot-ai/gibson/commit/47f2da94f2bb22b823e2eb4a1892922f87cf9a00))
+* **daemon:** the ExecuteLLM RPC asks the model gate before it calls a provider ([#1300](https://github.com/zeroroot-ai/gibson/issues/1300)) ([8905bab](https://github.com/zeroroot-ai/gibson/commit/8905bab68902dd41fa21e02b44b3b6dc3c0819da))
+* **daemon:** the model gate marks only an authorizer outage as retryable ([#1237](https://github.com/zeroroot-ai/gibson/issues/1237)) ([dd01eb4](https://github.com/zeroroot-ai/gibson/commit/dd01eb4b006dd5d57b559f86309753622e74aa44))
+* **harness:** a subscription member launch holds no model credential, asserted on the shipped manifest ([#1286](https://github.com/zeroroot-ai/gibson/issues/1286)) ([5e4c1f8](https://github.com/zeroroot-ai/gibson/commit/5e4c1f877a90992b3504d5162d163d55abbeb1d3))
+* **harness:** drop the run label from the tool compliance counters ([#1248](https://github.com/zeroroot-ai/gibson/issues/1248)) ([c8f384b](https://github.com/zeroroot-ai/gibson/commit/c8f384bec13e059b9967b36c1b4e7c5e658fd9c6)), closes [#1232](https://github.com/zeroroot-ai/gibson/issues/1232)
+* **harness:** refuse a callback with no run ID and an ambiguous callback with no task ([#1274](https://github.com/zeroroot-ai/gibson/issues/1274)) ([4a40d88](https://github.com/zeroroot-ai/gibson/commit/4a40d88bb49147481d9cfdf12b2cc4002d8e0821))
+* **harness:** select the child harness by task in a for_each fan-out ([#1244](https://github.com/zeroroot-ai/gibson/issues/1244)) ([18363bf](https://github.com/zeroroot-ai/gibson/commit/18363bf50200b939db7861edcb5e97e337389976))
+* **harness:** send the mission run in the work queue ExecuteRequest ([#1278](https://github.com/zeroroot-ai/gibson/issues/1278)) ([080dc0d](https://github.com/zeroroot-ai/gibson/commit/080dc0db03c19be19bb102d5075de7e152c9ae7e))
+* **proto:** reserve PermissionRequest.justification, which has no consumer ([#1268](https://github.com/zeroroot-ai/gibson/issues/1268)) ([ca52026](https://github.com/zeroroot-ai/gibson/commit/ca52026739fba61c908fccebb880c4838c8a4bac))
+* **providers:** a tenant provider config never uses the credentials of the daemon ([#1299](https://github.com/zeroroot-ai/gibson/issues/1299)) ([9130a8f](https://github.com/zeroroot-ai/gibson/commit/9130a8f991d4b5be0e7b7f9628328fc9a85b088c))
+* **providers:** the model list cache fetches once for a late caller ([#1267](https://github.com/zeroroot-ai/gibson/issues/1267)) ([2d570b9](https://github.com/zeroroot-ai/gibson/commit/2d570b917ac6b5b8b41e5f82312f017b07a42be1)), closes [#1260](https://github.com/zeroroot-ai/gibson/issues/1260)
+* **rework:** keep the quota and child reservation of run 2 when run 1 ends ([#1259](https://github.com/zeroroot-ai/gibson/issues/1259)) ([fae2601](https://github.com/zeroroot-ai/gibson/commit/fae26014882029e6de5f451b40bc37feb2ef1bc5))
+* **rework:** refuse a delegation whose mission or run cannot be proved ([#1284](https://github.com/zeroroot-ai/gibson/issues/1284)) ([9606d80](https://github.com/zeroroot-ai/gibson/commit/9606d80355816f4cdafc679d26710d7e601ffdcc))
+* **rework:** slice mission history frames by run ([#1241](https://github.com/zeroroot-ai/gibson/issues/1241)) ([9f53e43](https://github.com/zeroroot-ai/gibson/commit/9f53e437fef8db5179f691679bb1c2efd305bd2f))
+* **rework:** the task of the grant keys the observe cap and the published events ([#1283](https://github.com/zeroroot-ai/gibson/issues/1283)) ([cc3c3b0](https://github.com/zeroroot-ai/gibson/commit/cc3c3b0e6b298badddf7e1b865e6cfdc8cf947d6))
+* **sandboxed:** a member gets no GIBSON_TASK_ID, even from a free-form env ([#1271](https://github.com/zeroroot-ai/gibson/issues/1271)) ([1b8603b](https://github.com/zeroroot-ai/gibson/commit/1b8603bcf855dc1b72c95ac2406e4bbd9499eacc)), closes [#1229](https://github.com/zeroroot-ai/gibson/issues/1229)
+* **signup:** expire a stale pending registration and free its workspace name ([#1243](https://github.com/zeroroot-ai/gibson/issues/1243)) ([b569c58](https://github.com/zeroroot-ai/gibson/commit/b569c58123b6863db0be3a25663d9aab6a263ec8))
+* **signup:** run the registration expiry whenever rows need it ([#1264](https://github.com/zeroroot-ai/gibson/issues/1264)) ([5623c8e](https://github.com/zeroroot-ai/gibson/commit/5623c8ef19f5faffc03861eb06bdebec025ead41))
+
 ## [0.161.3](https://github.com/zeroroot-ai/gibson/compare/v0.161.2...v0.161.3) (2026-10-19)
 
 
