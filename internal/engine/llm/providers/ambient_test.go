@@ -319,7 +319,7 @@ func TestVertexTransport_Rewrite(t *testing.T) {
 		rt := vertexTransport{project: "proj", region: "us-east5", inner: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			b, _ := io.ReadAll(r.Body)
 			got = seen{path: r.URL.Path, body: string(b)}
-			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
 		})}
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://x.example"+path, strings.NewReader(body))
 		require.NoError(t, err)
