@@ -6,12 +6,15 @@ package providers
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -115,10 +118,11 @@ func TestVertex_CompleteCarriesOnlyTheTenantToken(t *testing.T) {
 		return dialer.DialContext(ctx, network, vertex.Listener.Addr().String())
 	}
 	client := &http.Client{Transport: transport}
-	// The Vertex client of the eino library takes no HTTP client, so it uses the
-	// default transport of the process. Point that at the fake for this test.
+	// The default transport of the process must carry nothing of the tenant's
+	// traffic: the chat call goes through the client above and nowhere else
+	// (gibson#1273). Any request on the default transport fails the test.
 	oldDefault := http.DefaultTransport
-	http.DefaultTransport = transport
+	http.DefaultTransport = failingTransport{t: t}
 	t.Cleanup(func() { http.DefaultTransport = oldDefault })
 
 	p, err := newVertexProviderWithClient(context.Background(), llm.ProviderConfig{
@@ -225,3 +229,130 @@ func TestNewVertexChatModel_NeedsAServiceAccountKey(t *testing.T) {
 		})
 	}
 }
+
+// failingTransport fails the test for each request it gets.
+type failingTransport struct{ t *testing.T }
+
+func (f failingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	f.t.Errorf("a request left through the default transport of the process: %s %s", req.Method, req.URL)
+	return nil, errors.New("the default transport must not be used")
+}
+
+// countingTransport counts the requests that pass through it.
+type countingTransport struct {
+	inner http.RoundTripper
+	hosts *sync.Map
+	n     *atomic.Int64
+}
+
+func (c countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	c.hosts.Store(req.URL.Host, true)
+	return c.inner.RoundTrip(req) //nolint:wrapcheck // a test double
+}
+
+// A Vertex chat request passes through the HTTP client that the provider was
+// built with, the guarded client in production (gibson#1273). The token call
+// and the chat call both count. The default transport gets none.
+func TestVertex_ChatRequestPassesThroughTheGuardedClient(t *testing.T) {
+	poisonedADC(t)
+	var vertexHit atomic.Bool
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"access_token":"tenant-token","token_type":"Bearer","expires_in":3600}`)
+	}))
+	t.Cleanup(tokenSrv.Close)
+	vertex := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vertexHit.Store(true)
+		assert.Contains(t, r.URL.Path, "/projects/proj/locations/us-east5/publishers/anthropic/models/claude-x:rawPredict")
+		reply(w, 200, anthropicReply)
+	}))
+	t.Cleanup(vertex.Close)
+
+	tokenHost := strings.TrimPrefix(tokenSrv.URL, "http://")
+	transport := http.DefaultTransport.(*http.Transport).Clone()      //nolint:forcetypeassert // the default transport is an *http.Transport
+	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // a test server with a throwaway certificate
+	dialer := &net.Dialer{}
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr == tokenHost {
+			return dialer.DialContext(ctx, network, addr)
+		}
+		return dialer.DialContext(ctx, network, vertex.Listener.Addr().String())
+	}
+	var count atomic.Int64
+	hosts := &sync.Map{}
+	client := &http.Client{Transport: countingTransport{inner: transport, hosts: hosts, n: &count}}
+	oldDefault := http.DefaultTransport
+	http.DefaultTransport = failingTransport{t: t}
+	t.Cleanup(func() { http.DefaultTransport = oldDefault })
+
+	p, err := newVertexProviderWithClient(context.Background(), llm.ProviderConfig{
+		DefaultModel: "claude-x",
+		Extra: map[string]string{
+			"vertex_project_id": "proj", "vertex_region": "us-east5",
+			"google_application_credentials_json": fakeServiceAccountJSON(t, tokenSrv.URL),
+		},
+	}, serviceAccountToken, client)
+	require.NoError(t, err)
+	before := count.Load()
+
+	_, err = p.Complete(context.Background(), llm.CompletionRequest{
+		Model: "claude-x", Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}}, MaxTokens: 16,
+	})
+	require.NoError(t, err)
+	assert.True(t, vertexHit.Load(), "the chat call must reach the Vertex host")
+	assert.Greater(t, count.Load(), before, "the chat call must pass through the client of the provider")
+	_, seenVertexHost := hosts.Load("us-east5-aiplatform.googleapis.com")
+	assert.True(t, seenVertexHost, "the chat call must go to the fixed Vertex host of the region")
+}
+
+// The Vertex rewrite moves the model into the path, picks the streaming
+// method, adds the version and refuses a model name that could move the
+// request.
+func TestVertexTransport_Rewrite(t *testing.T) {
+	type seen struct {
+		path string
+		body string
+	}
+	run := func(t *testing.T, path, body string) (seen, error) {
+		t.Helper()
+		var got seen
+		rt := vertexTransport{project: "proj", region: "us-east5", inner: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			b, _ := io.ReadAll(r.Body)
+			got = seen{path: r.URL.Path, body: string(b)}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
+		})}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://x.example"+path, strings.NewReader(body))
+		require.NoError(t, err)
+		resp, err := rt.RoundTrip(req)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		return got, err
+	}
+	t.Run("a message call", func(t *testing.T) {
+		got, err := run(t, "/v1/messages", `{"model":"claude-x@1","stream":false,"max_tokens":1}`)
+		require.NoError(t, err)
+		assert.Equal(t, "/v1/projects/proj/locations/us-east5/publishers/anthropic/models/claude-x@1:rawPredict", got.path)
+		assert.Contains(t, got.body, `"anthropic_version":"vertex-2023-10-16"`)
+		assert.NotContains(t, got.body, `"model"`)
+	})
+	t.Run("a streaming call", func(t *testing.T) {
+		got, err := run(t, "/v1/messages", `{"model":"claude-x","stream":true}`)
+		require.NoError(t, err)
+		assert.True(t, strings.HasSuffix(got.path, "claude-x:streamRawPredict"), got.path)
+	})
+	t.Run("a model name that moves the request", func(t *testing.T) {
+		for _, m := range []string{"../x", "a/b", "a?b", "a#b"} {
+			_, err := run(t, "/v1/messages", `{"model":"`+m+`"}`)
+			require.Error(t, err, m)
+		}
+	})
+	t.Run("no model", func(t *testing.T) {
+		_, err := run(t, "/v1/messages", `{"max_tokens":1}`)
+		require.Error(t, err)
+	})
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
