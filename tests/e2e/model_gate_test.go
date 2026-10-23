@@ -56,6 +56,16 @@ const (
 	modelGateTenant = "primary"
 	// modelGateProvider is the fixture provider type and its registry name.
 	modelGateProvider = "mock-llm-e2e-test"
+	// modelGateUngrantedProvider is the name of a second provider of the
+	// tenant, and modelGateUngrantedType is its type, which is also the name
+	// the gate checks (prov.Name()). The runner revokes the grant of the
+	// tenant on it, so the plain member meets a provider with no grant
+	// (gibson#1257). The host never resolves, and the gate refuses the call
+	// before the provider is used.
+	modelGateUngrantedProvider = "model-gate-ungranted"
+	modelGateUngrantedType     = "ollama"
+	// modelGateModel is the default model of the mock provider.
+	modelGateModel = "mock-model"
 	// modelGateAgent is the outside agent that this suite serves. The name is
 	// in no catalog, so an unattested registration may take it.
 	modelGateAgent = "e2e-model-probe"
@@ -214,13 +224,20 @@ func tenantProviderGrant(tenant string) *tenantv1.AccessGrant {
 // on the mock provider, as the Model Access page lists it.
 func tenantHoldsProviderGrant(t *testing.T, ctx context.Context, access tenantv1.ModelAccessServiceClient) bool {
 	t.Helper()
+	return tenantHoldsGrantOn(t, ctx, access, modelGateProvider)
+}
+
+// tenantHoldsGrantOn reports whether the tenant's members hold can_use on the
+// named provider.
+func tenantHoldsGrantOn(t *testing.T, ctx context.Context, access tenantv1.ModelAccessServiceClient, provider string) bool {
+	t.Helper()
 	list, err := access.ListAccess(ctx, &tenantv1.ListAccessRequest{
 		SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
 		SubjectId:   modelGateTenant,
 	})
 	require.NoError(t, err, "ListAccess for the tenant")
 	for _, g := range list.GetGrants() {
-		if g.GetTargetKind() == tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER && g.GetTargetId() == modelGateProvider {
+		if g.GetTargetKind() == tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER && g.GetTargetId() == provider {
 			return true
 		}
 	}
@@ -248,6 +265,19 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 	}})
 	if status.Code(err) != codes.AlreadyExists {
 		require.NoError(t, err, "CreateProvider(%s)", modelGateProvider)
+	}
+
+	// The second provider: the plain member of the tenant meets it with no
+	// grant (gibson#1257). It exists before the first mission so that the
+	// default grant of the tenant meets it as well, and the last step of this
+	// test revokes that grant.
+	_, err = providers.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
+		Name: modelGateUngrantedProvider, Type: modelGateUngrantedType,
+		DefaultModel: "ungranted-model", DefaultModelContextWindow: 8192,
+		Credentials: map[string]string{"base_url": "http://ungranted.invalid:11434"},
+	}})
+	if status.Code(err) != codes.AlreadyExists {
+		require.NoError(t, err, "CreateProvider(%s)", modelGateUngrantedProvider)
 	}
 
 	// The probe agent: an outside agent of the tenant, enabled in the
@@ -323,5 +353,63 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		require.Greater(t, repliesAfter, repliesBefore, "the agent's completion must be served again")
 		reply, _ := probe.last()
 		require.Equal(t, helpers.MockProviderDeterministicResponse, reply)
+	})
+
+	// The member job (TestModelGate_PlainMemberGrantPath) runs after this
+	// test. It needs the second provider to hold no grant, so the runner
+	// removes the grant of the tenant on it, when it holds one.
+	t.Run("the second provider is left with no grant for the member", func(t *testing.T) {
+		if tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType) {
+			_, err := access.RevokeAccess(ctx, &tenantv1.RevokeAccessRequest{
+				SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
+				SubjectId:   modelGateTenant,
+				TargetKind:  tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER,
+				TargetId:    modelGateUngrantedType,
+			})
+			require.NoError(t, err, "RevokeAccess of the tenant grant on the second provider")
+		}
+		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType),
+			"the second provider holds no grant of the tenant")
+		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the mock provider still holds its grant")
+	})
+}
+
+// executeLLMOnce asks the daemon for one completion on the named provider.
+func executeLLMOnce(ctx context.Context, providers tenantv1.ProviderServiceClient, provider, model string) (*tenantv1.ExecuteLLMResponse, error) {
+	return providers.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: provider,
+		Model:        model,
+		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "Say the deterministic reply."}},
+	})
+}
+
+// TestModelGate_PlainMemberGrantPath is the plain-member part of the model-gate
+// exit test (gibson#1257). It runs as the e2e-member identity: a member of the
+// tenant with no admin relation (the fixture seed writes the member tuple
+// only). It calls ExecuteLLM, the one RPC the policy of that identity holds.
+// The call on the mock provider is allowed through the default grant of the
+// tenant. The call on the second provider is refused by the model gate,
+// because the tenant grant on it was revoked. It runs after
+// TestModelGate_DefaultGrantRevokeAndGrantAgain in exit-test-model-gate.yml,
+// which creates both providers and sets both grants.
+func TestModelGate_PlainMemberGrantPath(t *testing.T) {
+	checkTestFixturesEnabled(t)
+	clients, err := helpers.NewGRPCClients()
+	require.NoError(t, err, "dial daemon at DAEMON_GRPC_ADDR")
+	t.Cleanup(func() { _ = clients.Close() })
+	ctx := auth.ContextWithTenantString(context.Background(), modelGateTenant)
+	providers := tenantv1.NewProviderServiceClient(clients.Conn())
+
+	t.Run("a granted provider is allowed", func(t *testing.T) {
+		resp, err := executeLLMOnce(ctx, providers, modelGateProvider, modelGateModel)
+		require.NoError(t, err, "the plain member must get a completion through the default grant")
+		require.Equal(t, helpers.MockProviderDeterministicResponse, resp.GetContent())
+	})
+
+	t.Run("a provider with no grant is refused by the model gate", func(t *testing.T) {
+		_, err := executeLLMOnce(ctx, providers, modelGateUngrantedProvider, "ungranted-model")
+		require.Error(t, err, "the plain member must not get a completion on a provider with no grant")
+		require.Equal(t, codes.PermissionDenied, status.Code(err), "the refusal is a denial: %v", err)
+		require.Contains(t, err.Error(), modelGateDenied, "the refusal must name the model gate")
 	})
 }

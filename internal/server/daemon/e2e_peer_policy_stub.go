@@ -37,3 +37,9 @@ func e2ePeerTenant(string, grpcmetadata.MD, spiffeid.TrustDomain) auth.TenantID 
 func e2eRunnerTenancy(*slog.Logger, spiffeid.TrustDomain) (user, tenant string, ok bool) {
 	return "", "", false
 }
+
+// e2eMemberTenancy names no membership in a production build: there is no
+// member identity to make a member of anything.
+func e2eMemberTenancy(*slog.Logger, spiffeid.TrustDomain) (user, tenant string, ok bool) {
+	return "", "", false
+}

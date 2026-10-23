@@ -6,6 +6,10 @@
 # that grant on the Model Access page, the same mission is refused, and the
 # refusal names the gate. A new grant gives the mission a model again.
 #
+# The plain member part (gibson#1257): a second identity, a plain member of the
+# tenant with no admin relation, calls ExecuteLLM. The call on the granted
+# provider is allowed and the call on a provider with no grant is refused.
+#
 # The steps:
 #   1. The kind bring-up and the test-mode daemon of
 #      exit-test-belief-training.yml, copied. ONE bring-up path.
@@ -43,6 +47,7 @@ on:
       - 'internal/platform/component/llm_adapter.go'
       - 'internal/platform/component/slot_pin.go'
       - 'tests/e2e/model_gate_test.go'
+      - '.github/scripts/run-e2e-job.sh'
       - 'tests/e2e/fixtures/providers/mock-llm/**'
       - '.github/workflows/exit-test-model-gate.yml'
   workflow_dispatch: {}
@@ -192,7 +197,7 @@ jobs:
         run: |
           set -euo pipefail
           kubectl -n argocd patch application gibson --type json -p '[
-              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n"},
+              {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"model-gate","forceString":true}},
               {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
@@ -228,6 +233,17 @@ jobs:
           set -o pipefail
           gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate 'TestModelGate_DefaultGrantRevokeAndGrantAgain$' 20m \
             2>&1 | tee "$E2E_OUT/model-gate.log"
+
+      # gibson#1257: one RPC as a plain member (the e2e-member identity, a
+      # member tuple and no admin). It is allowed on the granted provider and
+      # refused on the provider with no grant. It needs the providers and the
+      # grants that the step above sets, so it runs after it.
+      - name: A plain member gets what its grant allows
+        run: |
+          set -o pipefail
+          E2E_RUNNER_COMPONENT=e2e-member \
+            gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate-member 'TestModelGate_PlainMemberGrantPath$' 10m \
+            2>&1 | tee "$E2E_OUT/model-gate-member.log"
 
       - name: Upload the logs
         if: always()
