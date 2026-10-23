@@ -14,13 +14,20 @@ import (
 )
 
 // seedE2ERunnerTenancy makes the exit-test runner a member and an admin of the
-// platform tenant at boot, when the fixture build names one
-// (e2eRunnerTenancy). A production build names none, so this writes nothing
-// there. A failed seed is logged: the runner then stops at the dispatch gate,
-// and the daemon log says why (gibson#14).
+// platform tenant at boot, and the exit-test member a plain member of it, when
+// the fixture build names them (e2eRunnerTenancy, e2eMemberTenancy). A
+// production build names none, so this writes nothing there. A failed seed is
+// logged: the runner then stops at the dispatch gate, and the daemon log says
+// why (gibson#14).
 func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger, td spiffeid.TrustDomain) {
-	if user, tenant, ok := e2eRunnerTenancy(logger, td); ok && authorizer != nil {
-		seedTenantMembership(ctx, authorizer, user, tenant, logger)
+	if authorizer == nil {
+		return
+	}
+	if user, tenant, ok := e2eRunnerTenancy(logger, td); ok {
+		seedTenantMembership(ctx, authorizer, user, tenant, runnerTenantRelations, logger)
+	}
+	if user, tenant, ok := e2eMemberTenancy(logger, td); ok {
+		seedTenantMembership(ctx, authorizer, user, tenant, memberTenantRelations, logger)
 	}
 }
 
@@ -33,12 +40,18 @@ func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logg
 // catalog enablement, so each gate under test still decides.
 var runnerTenantRelations = []string{"member", "admin"}
 
+// memberTenantRelations are the roles the exit-test member holds on its
+// tenant. It is a plain member: no admin relation, no model grant and no
+// catalog enablement of its own, so the grant path under test decides for it
+// the way it decides for a member on the dashboard (gibson#1257).
+var memberTenantRelations = []string{"member"}
+
 // seedTenantMembership is the seed's write and its report: a role that cannot
 // be written is logged, and the caller keeps booting.
-func seedTenantMembership(ctx context.Context, authorizer authz.Authorizer, user, tenant string, logger *slog.Logger) {
-	for _, relation := range runnerTenantRelations {
+func seedTenantMembership(ctx context.Context, authorizer authz.Authorizer, user, tenant string, relations []string, logger *slog.Logger) {
+	for _, relation := range relations {
 		if err := ensureTenantRole(ctx, authorizer, user, relation, tenant, logger); err != nil {
-			logger.Warn("test fixtures: e2e runner tenancy seed failed; every run it starts stops at the dispatch gate",
+			logger.Warn("test fixtures: e2e tenancy seed failed; every run it starts stops at the dispatch gate",
 				"tenant", tenant, "relation", relation, "error", err)
 		}
 	}

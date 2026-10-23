@@ -74,12 +74,12 @@ func TestSeedE2ERunnerTenancy_ProductionBuildWritesNothing(t *testing.T) {
 func TestSeedTenantMembership_LogsAFailedWrite(t *testing.T) {
 	var buf bytes.Buffer
 	fa := &fakeAuthorizer{deny: true, writeErr: context.DeadlineExceeded}
-	seedTenantMembership(context.Background(), fa, "user:zeroroot.ai/platform/e2e-runner", "primary", slog.New(slog.NewTextHandler(&buf, nil)))
+	seedTenantMembership(context.Background(), fa, "user:zeroroot.ai/platform/e2e-runner", "primary", runnerTenantRelations, slog.New(slog.NewTextHandler(&buf, nil)))
 	if !strings.Contains(buf.String(), "seed failed") {
 		t.Fatalf("a failed seed must be logged, or the runner silently stops at the gate; got: %s", buf.String())
 	}
 	fa = &fakeAuthorizer{deny: true}
-	seedTenantMembership(context.Background(), fa, "user:zeroroot.ai/platform/e2e-runner", "primary", slog.Default())
+	seedTenantMembership(context.Background(), fa, "user:zeroroot.ai/platform/e2e-runner", "primary", runnerTenantRelations, slog.Default())
 	if len(fa.written) != 2 {
 		t.Fatalf("wrote %v, want the member and the admin tuple", fa.written)
 	}
@@ -91,7 +91,7 @@ func TestSeedE2ERunnerTenancy_NilAuthorizerSeedsNothing(t *testing.T) {
 	seedE2ERunnerTenancy(context.Background(), nil, slog.Default(), testTD) // must not panic
 }
 
-func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMember(t *testing.T) {
+func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMemberAndTheMemberAMember(t *testing.T) {
 	if !isTestFixturesBuild {
 		t.Skip("production build")
 	}
@@ -102,8 +102,9 @@ func TestSeedE2ERunnerTenancy_FixtureBuildMakesTheRunnerAMember(t *testing.T) {
 	want := []authz.Tuple{
 		{User: "user:example.org/platform/e2e-runner", Relation: "member", Object: "tenant:primary"},
 		{User: "user:example.org/platform/e2e-runner", Relation: "admin", Object: "tenant:primary"},
+		{User: "user:example.org/platform/e2e-member", Relation: "member", Object: "tenant:primary"},
 	}
-	if len(fa.written) != 2 || fa.written[0] != want[0] || fa.written[1] != want[1] {
+	if len(fa.written) != 3 || fa.written[0] != want[0] || fa.written[1] != want[1] || fa.written[2] != want[2] {
 		t.Fatalf("wrote %v, want exactly %v: the gate's caller shape is user:<svid without scheme> (callbackFGAUser)", fa.written, want)
 	}
 }

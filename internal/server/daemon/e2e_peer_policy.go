@@ -36,6 +36,20 @@ import (
 // and lists it in allowedPeerIDs for the kind test profile only.
 func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2e-runner") }
 
+// e2eMemberSVID is the identity of the exit-test member: a plain member of the
+// e2e tenant with no admin relation (gibson#1257). The deploy chart registers a
+// ClusterSPIFFEID that mints exactly this ID, and lists it in allowedPeerIDs
+// for the kind test profile only, the way it lists the runner.
+func e2eMemberSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2e-member") }
+
+// e2eMemberMethods are the only methods the exit-test member may call. The
+// member exists to show what a plain member gets, so it holds one RPC: the
+// model-gate check of ExecuteLLM, which allows a granted provider and refuses
+// a provider with no grant.
+var e2eMemberMethods = map[string]bool{
+	"/gibson.tenant.v1.ProviderService/ExecuteLLM": true,
+}
+
 // e2ePeerMethodPolicies grants the exit-test runner the methods its assertions
 // need, and only those.
 //
@@ -49,6 +63,7 @@ func e2eRunnerSVID(td spiffeid.TrustDomain) string { return platformSVID(td, "e2
 // test read on every run since it landed (gibson#13, run 35436962740).
 func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 	return map[string]map[string]bool{
+		e2eMemberSVID(td): e2eMemberMethods,
 		e2eRunnerSVID(td): {
 			// Per-tenant enablement — the gate the tool/agent tests toggle.
 			"/gibson.tenant.v1.MembershipService/SetCatalogEnabled": true,
@@ -129,8 +144,8 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 	}
 }
 
-// e2ePeerTenant is the tenant the exit-test runner asserts for a tenant-scoped
-// RPC. A direct-dial SPIFFE peer gets an identity with no tenant (its SVID
+// e2ePeerTenant is the tenant the exit-test runner and the exit-test member
+// assert for a tenant-scoped RPC. A direct-dial SPIFFE peer gets an identity with no tenant (its SVID
 // names a platform component, not a tenant), and the suite's assertions are
 // tenant-scoped by design: it enables a tool for one tenant and proves the
 // other is denied. So the runner, and only the runner, carries the tenant in
@@ -139,7 +154,7 @@ func e2ePeerMethodPolicies(td spiffeid.TrustDomain) map[string]map[string]bool {
 // is asking and this file exists only in the fixture build. A malformed or
 // absent header yields the zero tenant, which the handler refuses as before.
 func e2ePeerTenant(svid string, md grpcmetadata.MD, td spiffeid.TrustDomain) auth.TenantID {
-	if svid != e2eRunnerSVID(td) {
+	if svid != e2eRunnerSVID(td) && svid != e2eMemberSVID(td) {
 		return auth.TenantID{}
 	}
 	vals := md.Get(auth.HeaderTenant)
@@ -158,6 +173,23 @@ func e2ePeerTenant(svid string, md grpcmetadata.MD, td spiffeid.TrustDomain) aut
 // IdentityComponent branch give a SPIFFE subject with no principal type.
 func e2eRunnerFGAUser(td spiffeid.TrustDomain) string {
 	return "user:" + strings.TrimPrefix(e2eRunnerSVID(td), "spiffe://")
+}
+
+// e2eMemberFGAUser is the member's FGA subject, in the shape of e2eRunnerFGAUser.
+func e2eMemberFGAUser(td spiffeid.TrustDomain) string {
+	return "user:" + strings.TrimPrefix(e2eMemberSVID(td), "spiffe://")
+}
+
+// e2eMemberTenancy names the membership the exit-test member holds: its FGA
+// user and the platform tenant, under the same two gates as e2eRunnerTenancy.
+// The member holds the one member tuple and nothing else, so each grant it
+// meets is the grant of a plain member (gibson#1257).
+func e2eMemberTenancy(logger *slog.Logger, td spiffeid.TrustDomain) (user, tenant string, ok bool) {
+	_, tenant, ok = e2eRunnerTenancy(logger, td)
+	if !ok {
+		return "", "", false
+	}
+	return e2eMemberFGAUser(td), tenant, true
 }
 
 // e2eRunnerTenancy names the membership the exit-test runner holds: its FGA

@@ -199,14 +199,14 @@ func TestSpiffePeerMethodPolicies_OnlyOperatorsArePoliced(t *testing.T) {
 	policies := spiffePeerMethodPolicies(testTD, api.ConnectionPointCallers{})
 
 	// In a PRODUCTION build exactly three peers are policed. A test_fixtures
-	// build adds the exit-test runner and nothing else — that identity does not
+	// build adds the exit-test runner and the exit-test member and nothing else — that identity does not
 	// exist in the production binary at all (e2e_peer_policy_stub.go), which is
 	// what keeps this invariant meaningful where it matters. Assert the exact
 	// membership rather than only the count, so a future extra peer in either
 	// build has to be added here deliberately.
 	want := []string{tenantOperatorSVID(testTD), connectorOperatorSVID(testTD), platformOperatorSVID(testTD)}
 	if isTestFixturesBuild {
-		want = append(want, "spiffe://example.org/platform/e2e-runner")
+		want = append(want, "spiffe://example.org/platform/e2e-runner", "spiffe://example.org/platform/e2e-member")
 	}
 	got := make([]string, 0, len(policies))
 	for id := range policies {
