@@ -146,3 +146,30 @@ func TestSeedE2ERunnerTenancy_FixtureBuildGates(t *testing.T) {
 		}
 	})
 }
+
+func TestSeedWhenNamed(t *testing.T) {
+	user := "user:example.org/platform/e2e-member"
+	t.Run("a named membership is seeded with its own relations", func(t *testing.T) {
+		fa := &fakeAuthorizer{deny: true}
+		seedWhenNamed(context.Background(), fa, slog.Default(), user, "primary", memberTenantRelations, true)
+		want := []authz.Tuple{{User: user, Relation: "member", Object: "tenant:primary"}}
+		if len(fa.written) != 1 || fa.written[0] != want[0] {
+			t.Fatalf("wrote %v, want exactly %v: the member holds no admin relation", fa.written, want)
+		}
+	})
+	t.Run("an unnamed membership writes nothing", func(t *testing.T) {
+		fa := &fakeAuthorizer{deny: true}
+		seedWhenNamed(context.Background(), fa, slog.Default(), user, "primary", memberTenantRelations, false)
+		if len(fa.written) != 0 || len(fa.checks) != 0 {
+			t.Fatalf("an unnamed membership must touch nothing: wrote %v, checked %v", fa.written, fa.checks)
+		}
+	})
+}
+
+func TestTenantRelations_OnlyTheRunnerIsAnAdmin(t *testing.T) {
+	for _, r := range memberTenantRelations {
+		if r == "admin" {
+			t.Fatal("the exit-test member must hold no admin relation")
+		}
+	}
+}

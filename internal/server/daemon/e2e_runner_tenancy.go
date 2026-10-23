@@ -23,12 +23,22 @@ func seedE2ERunnerTenancy(ctx context.Context, authorizer authz.Authorizer, logg
 	if authorizer == nil {
 		return
 	}
-	if user, tenant, ok := e2eRunnerTenancy(logger, td); ok {
-		seedTenantMembership(ctx, authorizer, user, tenant, runnerTenantRelations, logger)
+	user, tenant, ok := e2eRunnerTenancy(logger, td)
+	seedWhenNamed(ctx, authorizer, logger, user, tenant, runnerTenantRelations, ok)
+	user, tenant, ok = e2eMemberTenancy(logger, td)
+	seedWhenNamed(ctx, authorizer, logger, user, tenant, memberTenantRelations, ok)
+}
+
+// seedWhenNamed seeds the membership when the fixture build named one, and
+// writes nothing when it did not.
+func seedWhenNamed(
+	ctx context.Context, authorizer authz.Authorizer, logger *slog.Logger,
+	user, tenant string, relations []string, named bool,
+) {
+	if !named {
+		return
 	}
-	if user, tenant, ok := e2eMemberTenancy(logger, td); ok {
-		seedTenantMembership(ctx, authorizer, user, tenant, memberTenantRelations, logger)
-	}
+	seedTenantMembership(ctx, authorizer, user, tenant, relations, logger)
 }
 
 // runnerTenantRelations are the roles the exit-test runner holds on its
