@@ -101,9 +101,5 @@ func (t vertexTransport) rewrite(req *http.Request, raw []byte) ([]byte, error) 
 			t.project, t.region)
 		req.URL.RawPath = ""
 	}
-	out, err := json.Marshal(fields)
-	if err != nil {
-		return nil, fmt.Errorf("write the vertex request body: %w", err)
-	}
-	return out, nil
+	return json.Marshal(fields) //nolint:wrapcheck // a map of valid raw JSON always marshals
 }

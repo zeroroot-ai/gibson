@@ -17,6 +17,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -319,6 +320,11 @@ func TestVertexTransport_Rewrite(t *testing.T) {
 		rt := vertexTransport{project: "proj", region: "us-east5", inner: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			b, _ := io.ReadAll(r.Body)
 			got = seen{path: r.URL.Path, body: string(b)}
+			// A retry or a redirect reads the body again through GetBody.
+			again, gerr := r.GetBody()
+			require.NoError(t, gerr)
+			second, _ := io.ReadAll(again)
+			require.Equal(t, b, second)
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}}, nil
 		})}
 		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://x.example"+path, strings.NewReader(body))
@@ -347,6 +353,26 @@ func TestVertexTransport_Rewrite(t *testing.T) {
 			require.Error(t, err, m)
 		}
 	})
+	t.Run("a count tokens call", func(t *testing.T) {
+		got, err := run(t, "/v1/messages/count_tokens", `{"messages":[]}`)
+		require.NoError(t, err)
+		assert.Equal(t, "/v1/projects/proj/locations/us-east5/publishers/anthropic/models/count-tokens:rawPredict", got.path)
+	})
+	t.Run("a body that is no JSON object", func(t *testing.T) {
+		_, err := run(t, "/v1/messages", `not json`)
+		require.Error(t, err)
+	})
+	t.Run("a body that cannot be read", func(t *testing.T) {
+		rt := vertexTransport{project: "p", region: "r", inner: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("a request with an unreadable body must not be sent")
+			return nil, nil
+		})}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "https://x.example/v1/messages",
+			io.NopCloser(iotest.ErrReader(errors.New("broken"))))
+		require.NoError(t, err)
+		_, err = rt.RoundTrip(req)
+		require.Error(t, err)
+	})
 	t.Run("no model", func(t *testing.T) {
 		_, err := run(t, "/v1/messages", `{"max_tokens":1}`)
 		require.Error(t, err)
@@ -356,3 +382,28 @@ func TestVertexTransport_Rewrite(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The chat host is a fixed Google host of the region.
+func TestVertexChatBase(t *testing.T) {
+	for region, want := range map[string]string{
+		"global":   "https://aiplatform.googleapis.com/",
+		"us":       "https://aiplatform.us.rep.googleapis.com/",
+		"eu":       "https://aiplatform.eu.rep.googleapis.com/",
+		"us-east5": "https://us-east5-aiplatform.googleapis.com/",
+	} {
+		assert.Equal(t, want, vertexChatBase(region), region)
+	}
+}
+
+// A client with no transport of its own would send through the default
+// transport of the process, so the chat client refuses it.
+func TestNewVertexChatModel_NeedsAClientWithATransport(t *testing.T) {
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, http.StatusOK, `{"access_token":"t","token_type":"Bearer","expires_in":3600}`)
+	}))
+	t.Cleanup(tokenSrv.Close)
+	m, err := newVertexChatModel(context.Background(), "proj", "us-east5", "claude-x",
+		fakeServiceAccountJSON(t, tokenSrv.URL), &http.Client{})
+	require.Error(t, err)
+	assert.Nil(t, m)
+}
