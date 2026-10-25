@@ -102,6 +102,37 @@ run_selftest() {
     echo "selftest SKIP: no user systemd session, so the hard cap does not apply here"
   fi
 
+  # 6. Each scope has a name of its own. A nested run keeps the PID of the run
+  #    around it (exec), so a name made from the PID alone repeats while the
+  #    outer scope is still loaded (gibson#1313). A fake systemd-run records the
+  #    --unit of each call. The case fails when a call has no --unit or when two
+  #    calls get the same one.
+  mkdir "$tmp/bin"
+  cat >"$tmp/bin/systemd-run" <<'STUB'
+#!/usr/bin/env bash
+unit=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --unit=*) unit="${1#--unit=}" ;;
+    -p) shift ;;
+    --user|--scope|--quiet) ;;
+    *) break ;;
+  esac
+  shift
+done
+echo "$unit" >>"$FAKE_UNITS"
+exec "$@"
+STUB
+  chmod +x "$tmp/bin/systemd-run"
+  : >"$tmp/units"
+  "${clean[@]}" PATH="$tmp/bin:$PATH" FAKE_UNITS="$tmp/units" bash "$self" bash "$self" true
+  if [ "$(wc -l <"$tmp/units")" -eq 2 ] && ! grep -qx '' "$tmp/units" \
+    && [ "$(sort -u "$tmp/units" | wc -l)" -eq 2 ] && ! grep -qv '^run-capped-.*\.scope$' "$tmp/units"; then
+    echo "selftest PASS: each scope has a unit name of its own"
+  else
+    echo "selftest FAIL: scope unit names are missing or repeat: $(tr '\n' ',' <"$tmp/units")" >&2; fails=1
+  fi
+
   return "$fails"
 }
 
@@ -161,7 +192,12 @@ fi
 # No systemd-run → the lock, the floor and the -p bound are the levers; run with them.
 if ! command -v systemd-run >/dev/null 2>&1; then exec "$@"; fi
 
-exec systemd-run --user --scope --quiet \
+# Each scope gets its own unit name. Without --unit, systemd names the scope
+# from the PID and a number. A nested run has the PID of the run around it
+# (exec), and on Ubuntu 26.04 the made-up name repeats while the outer scope is
+# still loaded, so systemd refuses to start the inner scope (gibson#1313).
+unit="run-capped-$$-$(date +%s%N)-${RANDOM}.scope"
+exec systemd-run --user --scope --quiet --unit="$unit" \
   -p CPUQuota="${CAP_CPU:-300%}" \
   -p MemoryMax="${CAP_MEM:-10G}" \
   -p MemorySwapMax=0 \
