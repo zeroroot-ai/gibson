@@ -8,6 +8,12 @@
 #                            (default: the image's ENTRYPOINT, e2e.test). The
 #                            cluster e2e lane (exit-test-e2e-cluster.yml) bakes
 #                            a second binary, secrets.test, into the same image.
+#        E2E_RUNNER_COMPONENT optional: the identity the Job runs as, one of the
+#                            chart components e2e-runner (default) or
+#                            e2e-member. It names the ServiceAccount
+#                            (<release>-<component>) and the component label,
+#                            so the SPIRE entry of that component mints the
+#                            SVID of the Job (gibson#1257).
 #        E2E_RUNNER_ENV_FILE optional: a KEY=VALUE file whose entries reach the
 #                            Job's environment through the same Secret that
 #                            carries REDIS_PASSWORD, so a suite's own settings
@@ -24,6 +30,11 @@
 # (ghcr.io/zeroroot-ai/gibson-e2e-runner:local).
 set -euo pipefail
 
+COMPONENT="${E2E_RUNNER_COMPONENT:-e2e-runner}"
+case "$COMPONENT" in
+  e2e-runner|e2e-member) ;;
+  *) echo "::error::E2E_RUNNER_COMPONENT must be e2e-runner or e2e-member, got: $COMPONENT"; exit 1;;
+esac
 JOB="${1:?job name}"
 TEST_RUN="${2:?-test.run regex}"
 TEST_TIMEOUT="${3:?-test.timeout}"
@@ -72,7 +83,7 @@ spec:
         # every dial to the daemon in "i/o timeout" (run 34154995591).
         app.kubernetes.io/name: gibson-workloads
         app.kubernetes.io/instance: ${RELEASE}
-        app.kubernetes.io/component: e2e-runner
+        app.kubernetes.io/component: ${COMPONENT}
         # The Cilium policy of the chart (D76, charts#394) admits a pod by its
         # network labels. The runner dials the daemon (net-role platform) and
         # Redis (client-redis), nothing else.
@@ -80,7 +91,7 @@ spec:
         gibson.zeroroot.ai/client-redis: "true"
     spec:
       restartPolicy: Never
-      serviceAccountName: ${RELEASE}-e2e-runner
+      serviceAccountName: ${RELEASE}-${COMPONENT}
       # The gibson namespace enforces the restricted Pod Security level
       # (hosted#599, gibson#1105). 65532 is the user of the distroless
       # runner image.
