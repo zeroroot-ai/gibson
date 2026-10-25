@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go build -a -ldflags '-s -w' -o manager operators/platform/cmd/main.go
 
 # Distroless static base — minimal, nonroot, no shell, no package manager.
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

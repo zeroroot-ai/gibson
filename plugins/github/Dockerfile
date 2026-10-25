@@ -31,7 +31,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 # static-debian13:nonroot index below ships 2026c-0+deb13u1. Move the digest
 # here when a scanner names a package in this image; never dismiss the alert.
 # Same fix shape as cve-triage#34 and gibson#462.
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88 AS runtime
 
 COPY --from=builder /out/github /github
 # The Elastic License 2.0 requires the notice to travel with a

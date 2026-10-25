@@ -74,7 +74,7 @@ RUN mkdir -p /rootfs/etc/gibson/sa-identity-map \
 # 2026c-0+deb12u1 as the fix, so the ext-authz vulnerability scan stayed
 # red on it (hosted#198); Debian 13 ships tzdata 2026c-0+deb13u1.
 # ============================================================================
-FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3 AS runtime
+FROM ghcr.io/zeroroot-ai/mirror/distroless-static:nonroot@sha256:d62067879de890a1def9da0e7766b7d20810a5e5555cef8506b752437d7a3e88 AS runtime
 
 # Copy the binary and CA certificates from the builder.
 COPY --from=builder /out/ext-authz /usr/local/bin/ext-authz
