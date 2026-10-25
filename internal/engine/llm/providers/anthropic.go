@@ -176,6 +176,10 @@ func newVertexProviderWithClient(
 	return p, nil
 }
 
+// vertexAuthPlaceholder is the bearer word the Anthropic client holds on the
+// Vertex route. The transport replaces it with the Google token.
+const vertexAuthPlaceholder = "replaced-by-the-vertex-transport"
+
 // newVertexChatModel builds the Vertex-backed Claude client from the service
 // account JSON of the tenant and from nothing else.
 //
@@ -183,7 +187,12 @@ func newVertexProviderWithClient(
 //     parsed here with that type, so an external_account, authorized_user or
 //     impersonated_service_account document is refused before the client sees it.
 //     Those types make the daemon read a file or call a URL that the tenant chose.
-//   - The token call of the service account goes through the guarded client.
+//   - Every request goes through the guarded client: the token call of the
+//     service account and each chat call. The Vertex branch of the eino library
+//     takes no HTTP client, so it would use the default transport of the process.
+//     This function therefore builds the client as a direct Anthropic client
+//     that points at the Vertex host, with a transport that does the Vertex
+//     rewrite and adds the Google token (vertexTransport).
 //   - The transport drops any API key header, so an ambient Anthropic default
 //     cannot put a key on the request. The daemon refuses to start with such a
 //     default set (SecureAnthropicEnvironment).
@@ -201,18 +210,33 @@ func newVertexChatModel(
 		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex), errors.New("no service account JSON")))
 	}
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, client)
-	if _, credErr := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccount), google.ServiceAccount,
-		"https://www.googleapis.com/auth/cloud-platform"); credErr != nil {
+	creds, credErr := google.CredentialsFromJSONWithType(ctx, []byte(serviceAccount), google.ServiceAccount,
+		"https://www.googleapis.com/auth/cloud-platform")
+	if credErr != nil {
 		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex),
 			fmt.Errorf("the credential must be a service account key: %w", credErr)))
 	}
+	base := client.Transport
+	if base == nil {
+		return nil, fmt.Errorf("build the vertex client: %w", llm.NewAuthError(string(llm.ProviderVertex),
+			errors.New("the HTTP client has no transport of its own")))
+	}
+	chat := *client
+	chat.Transport = vertexTransport{
+		project: project,
+		region:  region,
+		inner:   &oauth2.Transport{Source: creds.TokenSource, Base: base},
+	}
+	baseURL := vertexChatBase(region)
 	model, err = einoclaude.NewChatModel(ctx, &einoclaude.Config{
-		ByVertex:                 true,
-		VertexProjectID:          project,
-		VertexRegion:             region,
-		VertexServiceAccountJSON: []byte(serviceAccount),
-		Model:                    modelID,
-		HTTPClient:               withoutAmbientAuth(client),
+		BaseURL: &baseURL,
+		Model:   modelID,
+		// The Anthropic client sends nothing without a credential of its own.
+		// This one is a fixed word and no secret. The transport replaces it
+		// with the Google token on each request (vertexTransport). Its use
+		// also keeps the client from reading any default of the environment.
+		AuthToken:  vertexAuthPlaceholder,
+		HTTPClient: withoutAmbientAuth(&chat),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build the vertex client: %w", llm.TranslateError(string(llm.ProviderVertex), err))
