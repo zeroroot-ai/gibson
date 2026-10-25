@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.162.1](https://github.com/zeroroot-ai/gibson/compare/v0.162.0...v0.162.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **catalog:** pin the claude agent image to claude-member v0.6.3 ([#1311](https://github.com/zeroroot-ai/gibson/issues/1311)) ([427bce8](https://github.com/zeroroot-ai/gibson/commit/427bce8590d0abfde39cc72d22654dcabd0f5953))
+* **image:** every distroless runtime takes the current Debian 13 static digest ([#1304](https://github.com/zeroroot-ai/gibson/issues/1304)) ([64d02ff](https://github.com/zeroroot-ai/gibson/commit/64d02ff6cf428fc826575ef9aa6241cfdb00aaf4))
+* **providers:** the Vertex chat client uses the guarded HTTP client ([#1303](https://github.com/zeroroot-ai/gibson/issues/1303)) ([f96b388](https://github.com/zeroroot-ai/gibson/commit/f96b3885f58469ba2ed9c76745feb9d619572ab1))
+
 ## [0.162.0](https://github.com/zeroroot-ai/gibson/compare/v0.161.3...v0.162.0) (2026-10-21)
 
 
