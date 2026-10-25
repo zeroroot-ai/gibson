@@ -13,7 +13,7 @@ description: >-
 # decision S6, gibson#865). The catalog holds no "*".
 spec:
   runtime: setec
-  image: ghcr.io/zeroroot-ai/zerocool-agent@sha256:37f6fecc5577de79c7632e03361d23f98cbe16abe7855f0913c5b35dcaf877ab
+  image: ghcr.io/zeroroot-ai/zerocool-agent@sha256:4c2c27f6b94926d0f8148f22b4baa3be1793460c4a8687df42fa6c325ddc3b46
   dispatchMode: sandboxed
   # Untrusted: the agent reads content the platform does not control, so it
   # runs only in a sandbox.
