@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.6.0...gibson-bootstrap-v1.6.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **image:** every distroless runtime takes the current Debian 13 static digest ([#1304](https://github.com/zeroroot-ai/gibson/issues/1304)) ([64d02ff](https://github.com/zeroroot-ai/gibson/commit/64d02ff6cf428fc826575ef9aa6241cfdb00aaf4))
+
 ## [1.6.0](https://github.com/zeroroot-ai/gibson/compare/gibson-bootstrap-v1.5.4...gibson-bootstrap-v1.6.0) (2026-10-01)
 
 
