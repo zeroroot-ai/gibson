@@ -138,6 +138,7 @@ func newRenewServer(t *testing.T, lookup LiveMissionLookup) *DaemonServer {
 	s.WithRenewalForkGuard(forkGuardStub{})
 	if lookup != nil {
 		s.WithLiveMissionLookup(lookup)
+		s.WithLiveMemberLookup(memberLookup{})
 	}
 	return s
 }
@@ -254,6 +255,7 @@ func TestRenewCapabilityGrant_KeepsTheCallingAgent(t *testing.T) {
 	s := &DaemonServer{}
 	s.WithCGRenewal(m, callerVerifierStub{stubVerifier: stubVerifier{claims: claims}, caller: "alpha"})
 	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+	s.WithLiveMemberLookup(memberLookup{})
 	s.WithRenewalForkGuard(forkGuardStub{})
 	req := renewRequest()
 	req.AgentId = "component:tool:nmap"
@@ -290,6 +292,7 @@ func TestRenewCapabilityGrant_KeepsTheMissionRun(t *testing.T) {
 	s.WithCGRenewal(m, stubVerifier{claims: claims})
 	s.WithRenewalForkGuard(forkGuardStub{})
 	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+	s.WithLiveMemberLookup(memberLookup{})
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", original))
 	resp, err := s.RenewCapabilityGrant(ctx, renewRequest())
@@ -332,6 +335,7 @@ func TestRenewCapabilityGrant_RefusesTheGrantOfAnEndedRun(t *testing.T) {
 	s.WithCGRenewal(m, stubVerifier{claims: claims})
 	s.WithRenewalForkGuard(forkGuardStub{})
 	s.WithLiveMissionLookup(runLookup{mission: "m1", run: "run-2"})
+	s.WithLiveMemberLookup(memberLookup{})
 
 	old := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-capability-grant", mint("run-1")))
 	_, err = s.RenewCapabilityGrant(old, renewRequest())
@@ -397,5 +401,24 @@ func TestRenewCapabilityGrant_RefusesWhenTheMemberLookupSaysNo(t *testing.T) {
 				t.Fatalf("error should say why: %v", err)
 			}
 		})
+	}
+}
+
+func TestRenewCapabilityGrant_RefusesWhenTheMemberLookupIsUnwired(t *testing.T) {
+	// Like the mission lookup, the member lookup is required. A server without
+	// it cannot tell the base grant of a member from an ended run.
+	m, err := capabilitygrant.NewMinter(context.Background(), capabilitygrant.Config{
+		Issuer: "gibson-test", Audience: "gibson-harness", KeyID: "k1", KeyProvider: fakeKeyProvider{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &DaemonServer{}
+	s.WithCGRenewal(m, stubVerifier{claims: renewTestClaims()})
+	s.WithRenewalForkGuard(forkGuardStub{})
+	s.WithLiveMissionLookup(liveLookup{live: map[string]bool{"m1": true}})
+	_, err = s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if got := status.Code(err); got != codes.FailedPrecondition || !strings.Contains(err.Error(), "bank-member liveness") {
+		t.Fatalf("want FailedPrecondition naming the member liveness source, got %v", err)
 	}
 }
