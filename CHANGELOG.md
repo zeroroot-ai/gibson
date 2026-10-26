@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.163.1](https://github.com/zeroroot-ai/gibson/compare/v0.163.0...v0.163.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **brain:** give a tool node the network of its node ([#1323](https://github.com/zeroroot-ai/gibson/issues/1323)) ([38fd375](https://github.com/zeroroot-ai/gibson/commit/38fd37501ddad3cfc693fd3eec41bc30d1ee7544))
+* **daemon:** the base grant of a live bank member renews ([#1326](https://github.com/zeroroot-ai/gibson/issues/1326)) ([1493141](https://github.com/zeroroot-ai/gibson/commit/1493141c832520c5cfcae4de2ee06d702977ec74))
+
 ## [0.163.0](https://github.com/zeroroot-ai/gibson/compare/v0.162.2...v0.163.0) (2026-10-26)
 
 
