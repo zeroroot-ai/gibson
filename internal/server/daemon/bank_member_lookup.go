@@ -15,6 +15,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/bank"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
 )
 
@@ -42,6 +43,30 @@ func (l *bankMemberLookup) MemberByRun(ctx context.Context, tenantID, missionRun
 		return "", "", fmt.Errorf("resolve the member of run %s: %w", missionRunID, err)
 	}
 	return m.ID, m.BankID, nil
+}
+
+// bankMemberLiveness answers whether a run backs a live member of a bank. It is
+// what lets the base grant of a member renew: a member has no mission binding,
+// so its liveness is its row in the bank store.
+type bankMemberLiveness struct {
+	banks func() (bank.Store, error)
+}
+
+var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
+
+// IsMemberRunLive is true when runID backs a member of bankID whose state is
+// not dead. A store error is not live: a grant that cannot be shown to belong to
+// a live member does not renew, and the member's next heartbeat retries.
+func (l *bankMemberLiveness) IsMemberRunLive(ctx context.Context, tenantID, bankID, runID string) bool {
+	store, err := l.banks()
+	if err != nil {
+		return false
+	}
+	m, err := store.MemberByRun(ctx, tenantID, runID)
+	if err != nil {
+		return false
+	}
+	return m.BankID == bankID && m.State != bank.MemberDead
 }
 
 // The three seams below are read lazily.

@@ -354,3 +354,45 @@ func TestRenewCapabilityGrant_RefusesAGrantWithNoRun(t *testing.T) {
 		t.Fatalf("err = %v, want FailedPrecondition", err)
 	}
 }
+
+// memberLookup answers the liveness of a bank member's run from a fixed set,
+// keyed by "tenant/bank/run".
+type memberLookup struct{ live map[string]bool }
+
+func (l memberLookup) IsMemberRunLive(_ context.Context, tenantID, bankID, runID string) bool {
+	return l.live[tenantID+"/"+bankID+"/"+runID]
+}
+
+func TestRenewCapabilityGrant_RenewsTheBaseGrantOfALiveBankMember(t *testing.T) {
+	// A bank member runs under a run id of its own, and the brain executor never
+	// binds it. Without the member lookup its renewal was refused, so every
+	// member lost its grant 30 minutes after launch and the daemon replaced it.
+	s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+	s.WithLiveMemberLookup(memberLookup{live: map[string]bool{"acme/m1/run-1": true}})
+
+	resp, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+	if err != nil {
+		t.Fatalf("the grant of a live member must renew: %v", err)
+	}
+	if resp.GetCapabilityGrant() == "" {
+		t.Fatal("want a fresh grant, got an empty one")
+	}
+}
+
+func TestRenewCapabilityGrant_RefusesAMemberGrantOfADeadMemberOrAnotherBank(t *testing.T) {
+	cases := map[string]memberLookup{
+		"the member is gone or dead":               {live: map[string]bool{}},
+		"the run backs a member of another bank":   {live: map[string]bool{"acme/other-bank/run-1": true}},
+		"the run backs a member of another tenant": {live: map[string]bool{"globex/m1/run-1": true}},
+	}
+	for name, lookup := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newRenewServer(t, liveLookup{live: map[string]bool{}})
+			s.WithLiveMemberLookup(lookup)
+			_, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
+			if got := status.Code(err); got != codes.FailedPrecondition {
+				t.Fatalf("code = %s (%v), want FailedPrecondition", got, err)
+			}
+		})
+	}
+}

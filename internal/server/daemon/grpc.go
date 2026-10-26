@@ -791,6 +791,15 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	} else {
 		d.logger.Error(ctx, "brain executor NOT wired — capability-grant renewal will refuse every request")
 	}
+	// A bank member is not a mission, so the brain executor never calls its run
+	// live. Its base grant renews while the member's row says the member lives
+	// (ADR-0119). Read lazily: the data-plane pool is built after this wiring.
+	daemonSvc.WithLiveMemberLookup(&bankMemberLiveness{banks: func() (bank.Store, error) {
+		if d.pool == nil {
+			return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+		}
+		return bank.NewPostgresStore(d.pool), nil
+	}})
 	// platformDB is always non-nil after Start() (gibson#246): initPlatformPostgres
 	// is fatal on failure, so the entitlements RPCs always have a real pool.
 	daemonSvc.WithPlatformDB(d.platformDB)

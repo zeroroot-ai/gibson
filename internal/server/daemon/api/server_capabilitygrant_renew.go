@@ -60,6 +60,19 @@ type LiveMissionLookup interface {
 	IsMissionRunLive(missionID, runID string) bool
 }
 
+// LiveMemberLookup reports whether a bank member's run is still a live member.
+//
+// A bank member is a long-lived sandbox. Its base grant names the bank as the
+// mission and a run id minted for the member, and no mission binding exists for
+// that run, so LiveMissionLookup can never call it live. Without this lookup the
+// base grant of every member expired 30 minutes after launch, because renewal
+// was refused, and the daemon replaced the member each time (ADR-0119).
+type LiveMemberLookup interface {
+	// IsMemberRunLive reports whether runID backs a member of bankID that the
+	// daemon has not declared dead.
+	IsMemberRunLive(ctx context.Context, tenantID, bankID, runID string) bool
+}
+
 // CGJWTVerifier abstracts the verification path. Implementations
 // fetch the daemon's own JWKS (in-process direct-signature check is
 // cheaper than a JWKS round-trip when the minter is local). Wired
@@ -91,6 +104,13 @@ func (s *DaemonServer) WithCGRenewal(minter *capabilitygrant.Minter, verifier CG
 // gate, so RenewCapabilityGrant refuses rather than renewing blind.
 func (s *DaemonServer) WithLiveMissionLookup(l LiveMissionLookup) *DaemonServer {
 	s.liveMissions = l
+	return s
+}
+
+// WithLiveMemberLookup wires the liveness source for the grant of a bank member.
+// A grant is live when either source says so.
+func (s *DaemonServer) WithLiveMemberLookup(l LiveMemberLookup) *DaemonServer {
+	s.liveMembers = l
 	return s
 }
 
@@ -184,7 +204,7 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 	}
 	// Every task grant names its run. A grant with none cannot be bound to a
 	// run, so it cannot renew.
-	if !s.liveMissions.IsMissionRunLive(claims.MissionID, claims.MissionRunID) {
+	if !s.liveMissions.IsMissionRunLive(claims.MissionID, claims.MissionRunID) && !s.isLiveMember(ctx, claims) {
 		return nil, status.Error(codes.FailedPrecondition,
 			"mission run has ended; a task grant cannot be renewed past its run (re-dispatch the task)")
 	}
@@ -231,6 +251,17 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 		CapabilityGrant: fresh,
 		ExpiresAtUnix:   expUnix,
 	}, nil
+}
+
+// isLiveMember reports whether the grant is the base grant of a live bank
+// member. The grant names the bank as its mission, so a grant of a mission run
+// that merely shares a bank id cannot pass: the run must back a member of that
+// bank.
+func (s *DaemonServer) isLiveMember(ctx context.Context, claims sdkcg.Claims) bool {
+	if s.liveMembers == nil || claims.MissionRunID == "" {
+		return false
+	}
+	return s.liveMembers.IsMemberRunLive(ctx, claims.Tenant.String(), claims.MissionID, claims.MissionRunID)
 }
 
 // capabilityGrantHeader pulls the X-Capability-Grant header out of

@@ -199,3 +199,34 @@ func TestLazyJobDriver_RefusesUntilTheJobServiceIsUp(t *testing.T) {
 		t.Errorf("job service calls = %d, want 3", stub.calls)
 	}
 }
+
+// TestBankMemberLiveness: a run is live when it backs a member of the named
+// bank that is not dead. It is what lets a member's base grant renew.
+func TestBankMemberLiveness(t *testing.T) {
+	ctx := context.Background()
+	banks := newFakeBankStore()
+	banks.members["bank-1"] = []*bank.Member{
+		{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle},
+		{ID: "m-2", BankID: "bank-1", MissionRunID: "run-2", State: bank.MemberDead},
+		{ID: "m-3", BankID: "bank-1", MissionRunID: "run-3", State: bank.MemberNeedsSignIn},
+	}
+	live := &bankMemberLiveness{banks: func() (bank.Store, error) { return banks, nil }}
+	for _, c := range []struct {
+		bank, run string
+		want      bool
+	}{
+		{"bank-1", "run-1", true},
+		{"bank-1", "run-3", true},  // a member waiting for a sign-in still reports and must renew
+		{"bank-1", "run-2", false}, // dead
+		{"bank-2", "run-1", false}, // the run backs a member of another bank
+		{"bank-1", "run-9", false}, // backs no member
+	} {
+		if got := live.IsMemberRunLive(ctx, "acme", c.bank, c.run); got != c.want {
+			t.Errorf("IsMemberRunLive(%s, %s) = %v, want %v", c.bank, c.run, got, c.want)
+		}
+	}
+	broken := &bankMemberLiveness{banks: func() (bank.Store, error) { return nil, errors.New("postgres is down") }}
+	if broken.IsMemberRunLive(ctx, "acme", "bank-1", "run-1") {
+		t.Error("a store failure is not live")
+	}
+}
