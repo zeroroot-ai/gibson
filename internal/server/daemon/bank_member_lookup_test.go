@@ -244,4 +244,19 @@ func TestBankMemberLiveness(t *testing.T) {
 	if broken.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
 		t.Error("a store failure is not live")
 	}
+	// The member is found but its bank cannot be read: the subject cannot be
+	// checked, so the grant does not renew.
+	banks.getErr = errors.New("bank read failed")
+	if live.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
+		t.Error("a bank that cannot be read is not live")
+	}
+	// With a pool the lookup reads the Postgres store.
+	store, err := newBankMemberLiveness(&daemonImpl{pool: &mockPool{conn: minimalConn()}}).banks()
+	if err != nil || store == nil {
+		t.Errorf("with a pool the lookup reads the bank store: %v", err)
+	}
+	// While the data-plane pool is down no grant is live.
+	if newBankMemberLiveness(&daemonImpl{}).IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
+		t.Error("a daemon with no pool serves no banks, so no grant is live")
+	}
 }

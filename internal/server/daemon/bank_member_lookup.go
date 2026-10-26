@@ -59,6 +59,18 @@ type bankMemberLiveness struct {
 
 var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
 
+// newBankMemberLiveness reads the bank store per call. The data-plane pool is
+// built after the renewal is wired, so a store captured at wiring time would
+// capture nothing. While the pool is down no grant is live.
+func newBankMemberLiveness(d *daemonImpl) *bankMemberLiveness {
+	return &bankMemberLiveness{banks: func() (bank.Store, error) {
+		if d.pool == nil {
+			return nil, errUnavailable("the data-plane pool is not up, so this daemon serves no banks")
+		}
+		return bank.NewPostgresStore(d.pool), nil
+	}}
+}
+
 // IsMemberBaseGrantLive is true only for the base grant of a member that is not
 // dead. The grant must name the member's bank as its mission, the member as its
 // task and the bank's agent as its subject. A turn grant of the same member has
