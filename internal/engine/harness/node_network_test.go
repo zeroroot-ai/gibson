@@ -116,6 +116,36 @@ func TestManifestTool_GetsTheNetworkOfItsNode(t *testing.T) {
 	}
 }
 
+// TestManifestTool_ToolNodeGetsTheNetworkOnItsContext: a tool node has no child
+// harness, so its scope comes on the context of the call. That scope wins over
+// the scope of an enclosing agent node, and a context without one keeps it.
+func TestManifestTool_ToolNodeGetsTheNetworkOnItsContext(t *testing.T) {
+	plain := &DefaultAgentHarness{}
+	ctx := WithNodeNetwork(context.Background(), &agent.NodeNetwork{Targets: []string{"10.60.0.66:6443"}})
+	spec, ok := plain.sandboxedToolSpecFromManifest(ctx, "nmap")
+	if !ok {
+		t.Fatal("nmap must be a sandboxed manifest tool")
+	}
+	if spec.NetworkMode != sandboxed.NetworkModeAllowList {
+		t.Fatalf("mode = %q; want %q", spec.NetworkMode, sandboxed.NetworkModeAllowList)
+	}
+	if want := []sandboxed.EgressRule{{Host: "10.60.0.66", Port: 6443}}; !reflect.DeepEqual(spec.Egress, want) {
+		t.Fatalf("egress = %+v; want %+v", spec.Egress, want)
+	}
+
+	inAgent := &DefaultAgentHarness{missionCtx: MissionContext{
+		NodeNetwork: &agent.NodeNetwork{Targets: []string{"10.1.2.3:443"}},
+	}}
+	spec, _ = inAgent.sandboxedToolSpecFromManifest(ctx, "nmap")
+	if want := []sandboxed.EgressRule{{Host: "10.60.0.66", Port: 6443}}; !reflect.DeepEqual(spec.Egress, want) {
+		t.Fatalf("the tool node scope must win: egress = %+v; want %+v", spec.Egress, want)
+	}
+	spec, _ = inAgent.sandboxedToolSpecFromManifest(WithNodeNetwork(context.Background(), nil), "nmap")
+	if want := []sandboxed.EgressRule{{Host: "10.1.2.3", Port: 443}}; !reflect.DeepEqual(spec.Egress, want) {
+		t.Fatalf("a nil tool node scope must keep the agent node scope: egress = %+v; want %+v", spec.Egress, want)
+	}
+}
+
 // TestDelegateToAgent_SandboxGetsTheScopeOfItsNode: the agent sandbox of a
 // node gets the scope of the node with the callback endpoint, and its child
 // harness is registered for the run with the same scope.

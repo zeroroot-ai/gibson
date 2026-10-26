@@ -309,9 +309,12 @@ func (b *brainExecutor) dispatchTool(bind *missionBinding, req brain.DispatchReq
 	if instTarget := instanceTargetID(req.WorkID); instTarget != "" {
 		h = h.ForTarget(instTarget)
 	}
+	// The sandbox of the tool gets the network of its node, as an agent node's
+	// sandbox does (owner decision S6, gibson#865).
+	ctx := gibsonharness.WithNodeNetwork(bind.ctx, req.Network)
 	toolReq := &toolpb.ExecuteRequest{InputJson: req.Input}
 	toolResp := &toolpb.ExecuteResponse{}
-	if err := h.CallToolProto(bind.ctx, req.Target, toolReq, toolResp); err != nil {
+	if err := h.CallToolProto(ctx, req.Target, toolReq, toolResp); err != nil {
 		return "", fmt.Errorf("tool %q: %w", req.Target, err)
 	}
 	if e := toolResp.GetError(); e != nil && e.GetMessage() != "" {

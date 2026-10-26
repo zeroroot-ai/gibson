@@ -1890,7 +1890,7 @@ func (h *DefaultAgentHarness) sandboxedToolSpecFromManifest(ctx context.Context,
 		OutputProtoType: entry.OutputProtoType,
 	}
 	// A tool that runs inside a node gets the network of that node (S6).
-	if n := h.missionCtx.NodeNetwork; n != nil {
+	if n := toolNetwork(ctx, h.missionCtx.NodeNetwork); n != nil {
 		spec.NetworkMode, spec.Egress = nodeNetworkScope(n, connectorProxyGuard(ctx))
 	}
 	return spec, true

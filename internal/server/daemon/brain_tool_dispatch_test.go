@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
@@ -36,6 +37,9 @@ type toolHarness struct {
 	// forTargetID records what dispatchTool asked the harness to re-scope to, so
 	// a test can assert a for_each instance is dispatched against its own target.
 	forTargetID string
+
+	// gotNetwork is the node network on the context of the call.
+	gotNetwork *agent.NodeNetwork
 }
 
 // ForTarget records the request and returns the same stub, so the assertions
@@ -46,8 +50,9 @@ func (h *toolHarness) ForTarget(targetID string) gibsonharness.AgentHarness {
 	return h
 }
 
-func (h *toolHarness) CallToolProto(_ context.Context, name string, request proto.Message, response proto.Message) error {
+func (h *toolHarness) CallToolProto(ctx context.Context, name string, request, response proto.Message) error {
 	h.gotName = name
+	h.gotNetwork = gibsonharness.NodeNetworkFromContext(ctx)
 	if req, ok := request.(*toolpb.ExecuteRequest); ok {
 		h.gotInput = req.GetInputJson()
 	}
@@ -253,5 +258,29 @@ func TestDispatchTool_OrdinaryNodeDoesNotRescope(t *testing.T) {
 	if h.forTargetID != "" {
 		t.Errorf("ForTarget was called with %q for a non-instance node; it must not "+
 			"be called at all", h.forTargetID)
+	}
+}
+
+// A tool node gets the network of its node, as an agent node does. Before this,
+// dispatchTool dropped req.Network, so the tool sandbox took the default mode of
+// its class instead of the targets bound to the node.
+func TestDispatchTool_PassesTheNodeNetworkToTheTool(t *testing.T) {
+	h := &toolHarness{output: `{"status":200}`}
+	b := newBrainExecutor(nil, slog.Default())
+	bind := &missionBinding{ctx: context.Background(), harness: h}
+	network := &agent.NodeNetwork{Targets: []string{"10.60.0.66:6443"}}
+
+	if _, err := b.dispatchTool(bind, brain.DispatchRequest{
+		WorkID:  "scan",
+		Kind:    "tool",
+		Target:  "nmap",
+		Input:   `{}`,
+		Network: network,
+	}); err != nil {
+		t.Fatalf("dispatchTool: %v", err)
+	}
+
+	if h.gotNetwork != network {
+		t.Errorf("the tool call carried network %+v, want %+v", h.gotNetwork, network)
 	}
 }
