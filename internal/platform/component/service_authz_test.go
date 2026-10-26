@@ -144,7 +144,7 @@ func TestRegisterComponent_FGAWriteFailure_DoesNotFailRegistration(t *testing.T)
 	svc := newAuthzServer(mock)
 
 	ctx := auth.ContextWithTenantString(context.Background(), "acme")
-	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "gitlab"))
+	resp, err := svc.RegisterComponent(ctx, minimalRegisterReq("plugin", "jira"))
 
 	// Registration must succeed even when FGA is unavailable.
 	require.NoError(t, err, "registration must succeed even when FGA write fails")

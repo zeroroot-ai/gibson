@@ -1,0 +1,32 @@
+# GitLab plugin — the first-party Go plugin in plugins/gitlab of this repo,
+# hosted as a SVID pod beside Envoy (ADR-0066).
+#
+# Listing it here is what lets its check-in bind can_resolve on the secret it
+# declares (cred:gitlab_token): the daemon writes that binding only for a
+# component carrying platform_enabled, which the startup seeder grants to a
+# catalog entry whose image passes release-signature verification (gibson#554,
+# ADR-0097). A plugin outside this table gets no binding from its own
+# declaration; a tenant admin grants it.
+#
+# The image workflow (.github/workflows/gibson-images.yml) builds and signs the
+# plugin image and writes the image line below through a pull request, with
+# the source tree it built from (gibson#790). No person edits the image line.
+# The first digest below is the image that workflow built and signed from
+# this tree on main (run 40239580081).
+# plugin-source-tree: be51f446f31b6c4a2ed127a7e8e6c269b89dc45f
+id: gitlab
+kind: plugin
+displayName: GitLab
+description: >-
+  Curated read/write over the GitLab REST API: projects and issues,
+  authenticated with the tenant's GitLab token.
+egressAllow:
+  - gitlab.com:443
+spec:
+  runtime: pod
+  image: ghcr.io/zeroroot-ai/gibson-plugin-gitlab@sha256:797bdf4e5c0178eee136556646988018ace2b63224cfaf96e4c9e18956096df5
+  # Trusted, and four facts make it so. We wrote the code. The image is signed
+  # and pinned by digest. The plugin passes the content it handles through and
+  # does not execute or interpret it. Its egress is the one host above. An
+  # entry for which one of these is false states untrusted.
+  contentTrust: trusted
