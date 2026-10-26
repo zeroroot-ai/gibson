@@ -420,3 +420,130 @@ func TestEnsure_NoScheduleNoBackup(t *testing.T) {
 		}
 	}
 }
+
+// attempt is attempt n of the test tenant, as Velero leaves it: the given
+// phase, created age ago, and ended ended ago (no completion time when
+// ended is zero).
+func attempt(n int, phase string, age, ended time.Duration) *unstructured.Unstructured {
+	b := Build(AttemptName(tenantFixture(), n), testVeleroNS, tenantFixture(), testTemplate())
+	b.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-age)))
+	if phase != "" {
+		_ = unstructured.SetNestedField(b.Object, phase, "status", "phase")
+	}
+	if ended != 0 {
+		_ = unstructured.SetNestedField(b.Object, time.Now().Add(-ended).UTC().Format(time.RFC3339),
+			"status", "completionTimestamp")
+	}
+	return b
+}
+
+func attemptExists(t *testing.T, c client.Client, n int) bool {
+	t.Helper()
+	b := &unstructured.Unstructured{}
+	b.SetGroupVersionKind(backupGVK)
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: testVeleroNS, Name: AttemptName(tenantFixture(), n)}, b)
+	if apierrors.IsNotFound(err) {
+		return false
+	}
+	if err != nil {
+		t.Fatalf("get attempt %d: %v", n, err)
+	}
+	return true
+}
+
+// The first attempt keeps the name that a backup had before attempts
+// existed, so a failed backup of an older operator is attempt 1.
+func TestAttemptName_FirstAttemptIsTheOldName(t *testing.T) {
+	if got, want := AttemptName(tenantFixture(), 1), "tenant-final-"+testUID; got != want {
+		t.Fatalf("attempt 1 = %q, want %q", got, want)
+	}
+	if got, want := AttemptName(tenantFixture(), 2), "tenant-final-"+testUID+"-2"; got != want {
+		t.Fatalf("attempt 2 = %q, want %q", got, want)
+	}
+	if BackupName(tenantFixture()) != AttemptName(tenantFixture(), 1) {
+		t.Fatal("BackupName is not attempt 1")
+	}
+}
+
+// hosted#23: a failed last backup kept the delete, and the CPU of the tenant,
+// for ever. RetryDelay after the failure, the next pass takes attempt 2.
+func TestEnsure_FailedAttemptIsTakenAgainAfterTheDelay(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture(),
+		attempt(1, "PartiallyFailed", RetryDelay+2*time.Minute, RetryDelay+time.Minute)).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if done || err != nil {
+		t.Fatalf("done=%v err=%v, want a new attempt and waiting", done, err)
+	}
+	if !attemptExists(t, c, 2) {
+		t.Fatal("no attempt 2 after the delay")
+	}
+}
+
+// Inside the delay, the failure is an error and no attempt is taken. The
+// delay starts when Velero ended the backup, not when it was created.
+func TestEnsure_FailedAttemptWaitsForTheDelay(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture(),
+		attempt(1, "PartiallyFailed", 2*RetryDelay, time.Minute)).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if done || !errors.Is(err, ErrBackupFailed) {
+		t.Fatalf("done=%v err=%v, want ErrBackupFailed and not done", done, err)
+	}
+	if attemptExists(t, c, 2) {
+		t.Fatal("attempt 2 started inside the delay")
+	}
+}
+
+// A later attempt that completed lets the delete go on, whatever came before.
+func TestEnsure_LaterAttemptComplete(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture(),
+		attempt(1, "PartiallyFailed", time.Hour, time.Hour), attempt(2, "Completed", time.Minute, time.Minute)).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if !done || err != nil {
+		t.Fatalf("done=%v err=%v, want done", done, err)
+	}
+}
+
+// The newest attempt decides: a Completed attempt 1 does not hide a running
+// attempt 2, and a failed attempt 1 does not hide a running attempt 2.
+func TestEnsure_TheNewestAttemptDecides(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture(),
+		attempt(1, "Failed", time.Hour, time.Hour), attempt(2, "InProgress", time.Minute, 0)).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if done || err != nil {
+		t.Fatalf("done=%v err=%v, want waiting on attempt 2", done, err)
+	}
+	if attemptExists(t, c, 3) {
+		t.Fatal("attempt 3 started while attempt 2 runs")
+	}
+}
+
+// After MaxAttempts failed attempts, no attempt is taken, and the delete
+// stops for a person.
+func TestEnsure_NoAttemptAfterTheLast(t *testing.T) {
+	objs := []client.Object{tenantNamespace(), scheduleFixture()}
+	for n := 1; n <= MaxAttempts; n++ {
+		objs = append(objs, attempt(n, "PartiallyFailed", 3*RetryDelay, 2*RetryDelay))
+	}
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(objs...).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if done || !errors.Is(err, ErrBackupFailed) {
+		t.Fatalf("done=%v err=%v, want ErrBackupFailed", done, err)
+	}
+	if attemptExists(t, c, MaxAttempts+1) {
+		t.Fatal("an attempt past MaxAttempts started")
+	}
+}
+
+// A backup that does not finish in time is a failed attempt too, so it does
+// not hold the delete for ever either.
+func TestEnsure_UnfinishedAttemptIsTakenAgain(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(tenantNamespace(), scheduleFixture(),
+		attempt(1, "InProgress", Timeout+RetryDelay+time.Minute, 0)).Build()
+	done, err := newTaker(t, c).Ensure(context.Background(), tenantFixture())
+	if done || err != nil {
+		t.Fatalf("done=%v err=%v, want a new attempt and waiting", done, err)
+	}
+	if !attemptExists(t, c, 2) {
+		t.Fatal("no attempt 2 after the time limit and the delay")
+	}
+}

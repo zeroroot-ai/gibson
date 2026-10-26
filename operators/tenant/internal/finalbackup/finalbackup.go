@@ -7,9 +7,15 @@
 // The tenant reconciler calls Ensure at the start of each delete pass, before
 // it deletes a child resource. Ensure never blocks: it creates the Backup on
 // the first pass and reads its phase on each later pass. The delete flow goes
-// on only after the phase is Completed. A failed backup, a backup that does
-// not finish in time, and a Velero API that does not answer are all errors,
-// so the flow removes nothing.
+// on only after the phase of one attempt is Completed. A failed backup, a
+// backup that does not finish in time, and a Velero API that does not answer
+// are all errors, so the flow removes nothing.
+//
+// A failed attempt is not the end. RetryDelay after it, Ensure takes a new
+// attempt, up to MaxAttempts. Before, the only way on was a person who
+// deleted the failed Backup object, so each failed delete kept the workloads
+// and the volumes of the tenant for ever (hosted#23: the staging node ran out
+// of CPU on the Neo4j pods of three such tenants).
 //
 // Ensure writes the audit record of the backup before it creates the Backup,
 // and creates nothing when the record cannot be written (gibson#583).
@@ -61,6 +67,15 @@ const (
 	AnnotationTenantUID = "gibson.zeroroot.ai/tenant-uid"
 
 	phaseCompleted = "Completed"
+
+	// MaxAttempts is the number of backups that a delete takes before it
+	// stops for a person.
+	MaxAttempts = 5
+
+	// RetryDelay is the time from a failed attempt to the next one. It gives
+	// Velero and the tenant workloads time to recover: a pre-hook fails on a
+	// Neo4j pod that has no node yet.
+	RetryDelay = 15 * time.Minute
 )
 
 // failedPhases are the Velero phases from which a backup never becomes
@@ -84,9 +99,10 @@ var (
 // this one Schedule by name.
 const ScheduleName = "platform-hourly"
 
-// ErrBackupFailed reports a last backup that Velero did not complete. To try
-// again, an operator deletes the failed Backup object. The next delete pass
-// then creates a new one.
+// ErrBackupFailed reports a last backup that Velero did not complete. Ensure
+// takes a new attempt RetryDelay later, up to MaxAttempts. After the last
+// attempt, a person reads the Backup objects of the tenant, and deletes the
+// failed ones to start a new set of attempts.
 var ErrBackupFailed = errors.New("the last backup of the tenant did not complete")
 
 // Taker takes the last backup of a tenant.
@@ -113,10 +129,21 @@ func New(c client.Client, veleroNamespace string, auditEmitter *audit.SagaEmitte
 	return &Taker{client: c, namespace: veleroNamespace, audit: auditEmitter, now: time.Now}, nil
 }
 
-// BackupName returns the name of the last backup of a tenant. The name comes
-// from the UID of the Tenant object, so each delete has exactly one backup.
+// BackupName returns the name of the first attempt of the last backup of a
+// tenant. The name comes from the UID of the Tenant object, so each delete
+// has its own backups.
 func BackupName(tenant *gibsonv1alpha1.Tenant) string {
-	return "tenant-final-" + string(tenant.UID)
+	return AttemptName(tenant, 1)
+}
+
+// AttemptName returns the name of attempt n (1 to MaxAttempts) of the last
+// backup of a tenant. The first attempt has no suffix, so a backup written
+// before attempts existed is attempt 1.
+func AttemptName(tenant *gibsonv1alpha1.Tenant, n int) string {
+	if n <= 1 {
+		return "tenant-final-" + string(tenant.UID)
+	}
+	return "tenant-final-" + string(tenant.UID) + "-" + strconv.Itoa(n)
 }
 
 // TenantNamespace returns the namespace that holds the workloads and the
@@ -130,10 +157,13 @@ func TenantNamespace(tenantName string) string {
 //   - The tenant namespace does not exist, or it is already in deletion: true.
 //     No data exists that a backup could hold, or a delete pass that came
 //     earlier already passed this gate.
-//   - No backup exists: Ensure creates it and reports false.
-//   - The backup is Completed: true.
-//   - The backup is not finished: false, or an error after Timeout.
-//   - The backup failed, or the Velero API gave an error: an error.
+//   - No backup exists: Ensure creates attempt 1 and reports false.
+//   - The newest attempt is Completed: true.
+//   - The newest attempt is not finished: false, and a failure after Timeout.
+//   - The newest attempt failed: an error. RetryDelay after the failure,
+//     Ensure creates the next attempt and reports false. After MaxAttempts
+//     failed attempts it creates none.
+//   - The Velero API gave an error: an error.
 func (t *Taker) Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool, error) {
 	if tenant.UID == "" {
 		return false, errors.New("finalbackup: the tenant has no UID")
@@ -150,35 +180,69 @@ func (t *Taker) Ensure(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (bool
 		return true, nil
 	}
 
-	name := BackupName(tenant)
-	backup := &unstructured.Unstructured{}
-	backup.SetGroupVersionKind(backupGVK)
-	err := t.client.Get(ctx, client.ObjectKey{Namespace: t.namespace, Name: name}, backup)
-	if apierrors.IsNotFound(err) {
-		return false, t.create(ctx, name, tenant)
-	}
+	n, backup, err := t.newestAttempt(ctx, tenant)
 	if err != nil {
-		return false, t.fail("read", fmt.Errorf("finalbackup: read Backup %s/%s: %w", t.namespace, name, err))
+		return false, err
 	}
+	if backup == nil {
+		return false, t.create(ctx, AttemptName(tenant, 1), tenant)
+	}
+	name := backup.GetName()
 
 	phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase")
-	switch {
-	case phase == phaseCompleted:
+	if phase == phaseCompleted {
 		return true, nil
-	case failedPhases[phase]:
-		return false, t.fail("backup_failed",
-			fmt.Errorf("%w: Backup %s/%s has the phase %q", ErrBackupFailed, t.namespace, name, phase))
 	}
-	created := backup.GetCreationTimestamp()
-	if created.IsZero() {
+	var failedAt time.Time
+	switch created := backup.GetCreationTimestamp(); {
+	case failedPhases[phase]:
+		failedAt = completionTime(backup)
+	case created.IsZero():
+		return false, nil
+	case t.now().Sub(created.Time) > Timeout:
+		failedAt = created.Add(Timeout)
+	default:
 		return false, nil
 	}
-	if age := t.now().Sub(created.Time); age > Timeout {
-		return false, t.fail("timeout",
-			fmt.Errorf("%w: Backup %s/%s has the phase %q after %s",
-				ErrBackupFailed, t.namespace, name, phase, age.Round(time.Second)))
+	failure := fmt.Errorf("%w: attempt %d of %d, Backup %s/%s, has the phase %q",
+		ErrBackupFailed, n, MaxAttempts, t.namespace, name, phase)
+	if n >= MaxAttempts {
+		return false, t.fail("backup_failed", fmt.Errorf("%w; no attempt is left", failure))
 	}
-	return false, nil
+	if next := failedAt.Add(RetryDelay); t.now().Before(next) {
+		return false, t.fail("backup_failed",
+			fmt.Errorf("%w; attempt %d starts at %s", failure, n+1, next.UTC().Format(time.RFC3339)))
+	}
+	return false, t.create(ctx, AttemptName(tenant, n+1), tenant)
+}
+
+// newestAttempt returns the attempt with the highest number that exists, and
+// its number. With no attempt it returns 0 and nil.
+func (t *Taker) newestAttempt(ctx context.Context, tenant *gibsonv1alpha1.Tenant) (int, *unstructured.Unstructured, error) {
+	for n := MaxAttempts; n >= 1; n-- {
+		name := AttemptName(tenant, n)
+		backup := &unstructured.Unstructured{}
+		backup.SetGroupVersionKind(backupGVK)
+		err := t.client.Get(ctx, client.ObjectKey{Namespace: t.namespace, Name: name}, backup)
+		switch {
+		case err == nil:
+			return n, backup, nil
+		case !apierrors.IsNotFound(err):
+			return 0, nil, t.fail("read", fmt.Errorf("finalbackup: read Backup %s/%s: %w", t.namespace, name, err))
+		}
+	}
+	return 0, nil, nil
+}
+
+// completionTime is the time at which Velero ended a backup, or its creation
+// time when Velero wrote none.
+func completionTime(backup *unstructured.Unstructured) time.Time {
+	if v, found, _ := unstructured.NestedString(backup.Object, "status", "completionTimestamp"); found {
+		if at, err := time.Parse(time.RFC3339, v); err == nil {
+			return at
+		}
+	}
+	return backup.GetCreationTimestamp().Time
 }
 
 // create writes the audit record of the backup, then creates the Backup.
