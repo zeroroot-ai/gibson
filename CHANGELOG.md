@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.163.2](https://github.com/zeroroot-ai/gibson/compare/v0.163.1...v0.163.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **catalog:** pin the claude agent image to claude-member v0.6.5 ([#1328](https://github.com/zeroroot-ai/gibson/issues/1328)) ([8991bf2](https://github.com/zeroroot-ai/gibson/commit/8991bf21fa7630de83005de1ab4b6790f8df03ed))
+
 ## [0.163.1](https://github.com/zeroroot-ai/gibson/compare/v0.163.0...v0.163.1) (2026-10-26)
 
 
