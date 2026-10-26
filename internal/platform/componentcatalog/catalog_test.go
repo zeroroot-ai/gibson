@@ -7,6 +7,8 @@
 package componentcatalog
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -703,29 +705,49 @@ func TestAgentStaticEnv(t *testing.T) {
 	}
 }
 
-// TestGithubPluginManifest: the first-party GitHub plugin is a catalog entry,
-// so the seeder enables it platform-wide and the check-in secret binding
-// (gibson#554) admits it. Its image is digest-pinned and first-party, so the
-// startup verifier checks its release signature before the seed.
-func TestGithubPluginManifest(t *testing.T) {
-	var ref *Ref
-	for _, r := range Refs() {
-		if r.Kind == "plugin" && r.ID == "github" {
-			rr := r
-			ref = &rr
+// TestFirstPartyPluginManifests: each first-party plugin under plugins/ is a
+// catalog entry, so the seeder enables it platform-wide and the check-in
+// secret binding (gibson#554) admits it. Its image is digest-pinned and
+// first-party, so the startup verifier checks its release signature before
+// the seed. The list of plugins is read from plugins/, so a new plugin with
+// no catalog entry fails here (plugins/gitlab had none until this test).
+func TestFirstPartyPluginManifests(t *testing.T) {
+	dirs, err := os.ReadDir(filepath.Join("..", "..", "..", "plugins"))
+	if err != nil {
+		t.Fatalf("read plugins/: %v", err)
+	}
+	var ids []string
+	for _, d := range dirs {
+		if d.IsDir() {
+			ids = append(ids, d.Name())
 		}
 	}
-	if ref == nil {
-		t.Fatal("Refs() must include plugin/github so the seeder enables it and its check-in can bind its declared secret")
+	if len(ids) == 0 {
+		t.Fatal("plugins/ holds no plugin; the test would check nothing")
 	}
-	var image string
-	for _, ir := range ImageRefs() {
-		if ir.Kind == "plugin" && ir.ID == "github" {
-			image = ir.Image
-		}
-	}
-	if !strings.HasPrefix(image, "ghcr.io/zeroroot-ai/gibson-plugin-github@sha256:") {
-		t.Errorf("plugin/github image = %q; want the first-party image that gibson builds from plugins/github, pinned by digest", image)
+	for _, id := range ids {
+		t.Run(id, func(t *testing.T) {
+			var ref *Ref
+			for _, r := range Refs() {
+				if r.Kind == "plugin" && r.ID == id {
+					rr := r
+					ref = &rr
+				}
+			}
+			if ref == nil {
+				t.Fatalf("Refs() must include plugin/%s so the seeder enables it and its check-in can bind its declared secret", id)
+			}
+			var image string
+			for _, ir := range ImageRefs() {
+				if ir.Kind == "plugin" && ir.ID == id {
+					image = ir.Image
+				}
+			}
+			want := "ghcr.io/zeroroot-ai/gibson-plugin-" + id + "@sha256:"
+			if !strings.HasPrefix(image, want) {
+				t.Errorf("plugin/%s image = %q; want the first-party image that gibson builds from plugins/%s, pinned by digest", id, image, id)
+			}
+		})
 	}
 }
 
