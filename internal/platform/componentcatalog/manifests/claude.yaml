@@ -14,16 +14,17 @@ description: >-
 # no "*".
 spec:
   runtime: setec
-  # Tag 0.6.4 from the zerocool-plugins release claude-member v0.6.4: Claude
+  # Tag 0.6.5 from the zerocool-plugins release claude-member v0.6.5: Claude
   # Code 2.1.308, the Gibson MCP server 0.7.1, uid 65532. The member driver
   # holds the one SubscribeInput stream and hands each answer to the server
-  # (ADR-0119), so the server no longer logs AlreadyExists. 0.5.0 and later
+  # (ADR-0119), so the server no longer logs AlreadyExists. A member that has
+  # not signed in pulls no job (zerocool-plugins#178). 0.5.0 and later
   # accept the launcher sandbox marker (GIBSON_SANDBOX=launcher) that the
   # daemon sets; 0.4.3 refused it
   # (zeroroot-ai/zerocool-plugins#133). Verify with
   #   cosign verify <image> --certificate-identity-regexp '^https://github.com/zeroroot-ai/' \
   #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
-  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:5476267e6c956cd0b6cb8cd538e3591e9ace8ca78f7b323c0d95f635fdf15ce7
+  image: ghcr.io/zeroroot-ai/zerocool-claude-agent@sha256:fb0952d15432808a2c894819a395104e80a31d963afc9969bd3d8f1642129704
   dispatchMode: sandboxed
   # Untrusted: the agent reads content the platform does not control, so it
   # runs only in a sandbox.
