@@ -89,7 +89,7 @@ func scheduleFixture() *unstructured.Unstructured {
 // backupWithPhase is a Backup as Velero leaves it, with the given phase and
 // age.
 func backupWithPhase(phase string, age time.Duration) *unstructured.Unstructured {
-	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), testTemplate())
+	b := Build(AttemptName(tenantFixture(), 1), testVeleroNS, tenantFixture(), testTemplate())
 	b.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-age)))
 	if phase != "" {
 		_ = unstructured.SetNestedField(b.Object, phase, "status", "phase")
@@ -117,7 +117,7 @@ func getBackup(t *testing.T, c client.Client) (*unstructured.Unstructured, bool)
 	t.Helper()
 	b := &unstructured.Unstructured{}
 	b.SetGroupVersionKind(backupGVK)
-	err := c.Get(context.Background(), client.ObjectKey{Namespace: testVeleroNS, Name: BackupName(tenantFixture())}, b)
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: testVeleroNS, Name: AttemptName(tenantFixture(), 1)}, b)
 	if apierrors.IsNotFound(err) {
 		return nil, false
 	}
@@ -375,7 +375,7 @@ func TestEnsure_RefusesATenantWithNoUID(t *testing.T) {
 // template: an exclusion, a hook, the volume rule or the storage location.
 func TestBuild_IsTheScheduleTemplate(t *testing.T) {
 	template := testTemplate()
-	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), template)
+	b := Build(AttemptName(tenantFixture(), 1), testVeleroNS, tenantFixture(), template)
 	want := testTemplate()
 	want["includedNamespaces"] = []any{"tenant-" + testTenant}
 	want["ttl"] = "720h0m0s"
@@ -394,7 +394,7 @@ func TestBuild_KeepsAnExclusionTheTemplateAdds(t *testing.T) {
 	template := testTemplate()
 	template["excludedNamespaceScopedResources"] = append(
 		template["excludedNamespaceScopedResources"].([]any), "new.kind.example.io")
-	b := Build(BackupName(tenantFixture()), testVeleroNS, tenantFixture(), template)
+	b := Build(AttemptName(tenantFixture(), 1), testVeleroNS, tenantFixture(), template)
 	got, _, _ := unstructured.NestedStringSlice(b.Object, "spec", "excludedNamespaceScopedResources")
 	if !slices.Contains(got, "new.kind.example.io") || !slices.Contains(got, "ciliumendpoints.cilium.io") {
 		t.Errorf("excludedNamespaceScopedResources = %v, want each exclusion of the template", got)
@@ -459,9 +459,6 @@ func TestAttemptName_FirstAttemptIsTheOldName(t *testing.T) {
 	}
 	if got, want := AttemptName(tenantFixture(), 2), "tenant-final-"+testUID+"-2"; got != want {
 		t.Fatalf("attempt 2 = %q, want %q", got, want)
-	}
-	if BackupName(tenantFixture()) != AttemptName(tenantFixture(), 1) {
-		t.Fatal("BackupName is not attempt 1")
 	}
 }
 

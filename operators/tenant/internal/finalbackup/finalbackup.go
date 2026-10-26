@@ -129,16 +129,10 @@ func New(c client.Client, veleroNamespace string, auditEmitter *audit.SagaEmitte
 	return &Taker{client: c, namespace: veleroNamespace, audit: auditEmitter, now: time.Now}, nil
 }
 
-// BackupName returns the name of the first attempt of the last backup of a
-// tenant. The name comes from the UID of the Tenant object, so each delete
-// has its own backups.
-func BackupName(tenant *gibsonv1alpha1.Tenant) string {
-	return AttemptName(tenant, 1)
-}
-
 // AttemptName returns the name of attempt n (1 to MaxAttempts) of the last
-// backup of a tenant. The first attempt has no suffix, so a backup written
-// before attempts existed is attempt 1.
+// backup of a tenant. The name comes from the UID of the Tenant object, so
+// each delete has its own backups. The first attempt has no suffix, so a
+// backup written before attempts existed is attempt 1.
 func AttemptName(tenant *gibsonv1alpha1.Tenant, n int) string {
 	if n <= 1 {
 		return "tenant-final-" + string(tenant.UID)
