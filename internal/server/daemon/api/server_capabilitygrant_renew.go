@@ -60,17 +60,23 @@ type LiveMissionLookup interface {
 	IsMissionRunLive(missionID, runID string) bool
 }
 
-// LiveMemberLookup reports whether a bank member's run is still a live member.
+// LiveMemberLookup reports whether a grant is the base grant of a live bank
+// member.
 //
 // A bank member is a long-lived sandbox. Its base grant names the bank as the
-// mission and a run id minted for the member, and no mission binding exists for
-// that run, so LiveMissionLookup can never call it live. Without this lookup the
-// base grant of every member expired 30 minutes after launch, because renewal
-// was refused, and the daemon replaced the member each time (ADR-0119).
+// mission, the member as the task and a run id minted for the member, and no
+// mission binding exists for that run, so LiveMissionLookup can never call it
+// live. Without this lookup the base grant of every member expired 30 minutes
+// after launch, because renewal was refused, and the daemon replaced the member
+// each time (ADR-0119).
+//
+// The lookup gets the whole claim set, not the run alone. A turn grant of the
+// same member carries the same bank and run, but it acts as the person who sent
+// the input and must live for that turn only. Only the base grant may renew.
 type LiveMemberLookup interface {
-	// IsMemberRunLive reports whether runID backs a member of bankID that the
-	// daemon has not declared dead.
-	IsMemberRunLive(ctx context.Context, tenantID, bankID, runID string) bool
+	// IsMemberBaseGrantLive reports whether claims are the base grant of a
+	// member that the daemon has not declared dead.
+	IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) bool
 }
 
 // CGJWTVerifier abstracts the verification path. Implementations
@@ -254,14 +260,12 @@ func (s *DaemonServer) RenewCapabilityGrant(ctx context.Context, req *daemonpb.R
 }
 
 // isLiveMember reports whether the grant is the base grant of a live bank
-// member. The grant names the bank as its mission, so a grant of a mission run
-// that merely shares a bank id cannot pass: the run must back a member of that
-// bank.
+// member. The decision belongs to the lookup, which sees every claim.
 func (s *DaemonServer) isLiveMember(ctx context.Context, claims sdkcg.Claims) bool {
 	if s.liveMembers == nil || claims.MissionRunID == "" {
 		return false
 	}
-	return s.liveMembers.IsMemberRunLive(ctx, claims.Tenant.String(), claims.MissionID, claims.MissionRunID)
+	return s.liveMembers.IsMemberBaseGrantLive(ctx, claims)
 }
 
 // capabilityGrantHeader pulls the X-Capability-Grant header out of

@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	jobpb "github.com/zeroroot-ai/sdk/api/gen/gibson/job/v1"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // bankMemberLookup resolves which member a callback is coming from, over the
@@ -45,8 +46,12 @@ func (l *bankMemberLookup) MemberByRun(ctx context.Context, tenantID, missionRun
 	return m.ID, m.BankID, nil
 }
 
-// bankMemberLiveness answers whether a run backs a live member of a bank. It is
-// what lets the base grant of a member renew: a member has no mission binding,
+// memberBaseGrantSubject is the subject the daemon puts on the base grant of a
+// member of a bank that runs agentName (bank_member_launcher.go).
+func memberBaseGrantSubject(agentName string) string { return "component:agent:" + agentName }
+
+// bankMemberLiveness answers whether a grant is the base grant of a live member.
+// It is what lets a member's base grant renew: a member has no mission binding,
 // so its liveness is its row in the bank store.
 type bankMemberLiveness struct {
 	banks func() (bank.Store, error)
@@ -54,19 +59,27 @@ type bankMemberLiveness struct {
 
 var _ api.LiveMemberLookup = (*bankMemberLiveness)(nil)
 
-// IsMemberRunLive is true when runID backs a member of bankID whose state is
-// not dead. A store error is not live: a grant that cannot be shown to belong to
-// a live member does not renew, and the member's next heartbeat retries.
-func (l *bankMemberLiveness) IsMemberRunLive(ctx context.Context, tenantID, bankID, runID string) bool {
+// IsMemberBaseGrantLive is true only for the base grant of a member that is not
+// dead. The grant must name the member's bank as its mission, the member as its
+// task and the bank's agent as its subject. A turn grant of the same member has
+// the same bank and run, but its task is a job and its subject is the sender, so
+// it never matches: a turn grant lives for the turn and must not renew. A store
+// error is not live, and the member's next heartbeat retries.
+func (l *bankMemberLiveness) IsMemberBaseGrantLive(ctx context.Context, claims sdkcg.Claims) bool {
 	store, err := l.banks()
 	if err != nil {
 		return false
 	}
-	m, err := store.MemberByRun(ctx, tenantID, runID)
+	tenantID := claims.Tenant.String()
+	m, err := store.MemberByRun(ctx, tenantID, claims.MissionRunID)
+	if err != nil || m.State == bank.MemberDead || m.BankID != claims.MissionID || m.ID != claims.TaskID {
+		return false
+	}
+	b, err := store.Get(ctx, tenantID, m.BankID)
 	if err != nil {
 		return false
 	}
-	return m.BankID == bankID && m.State != bank.MemberDead
+	return claims.Subject == memberBaseGrantSubject(b.AgentName)
 }
 
 // The three seams below are read lazily.

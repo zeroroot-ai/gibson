@@ -6,6 +6,8 @@ package daemon
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/sdk/auth"
+	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 	"testing"
 
 	"google.golang.org/grpc/codes"
@@ -200,33 +202,46 @@ func TestLazyJobDriver_RefusesUntilTheJobServiceIsUp(t *testing.T) {
 	}
 }
 
-// TestBankMemberLiveness: a run is live when it backs a member of the named
-// bank that is not dead. It is what lets a member's base grant renew.
+// TestBankMemberLiveness: only the BASE grant of a member that is not dead is
+// live. A turn grant of the same member shares its bank and run, but it acts as
+// the sender and must not renew, or the sandbox would keep that authority.
 func TestBankMemberLiveness(t *testing.T) {
 	ctx := context.Background()
 	banks := newFakeBankStore()
+	banks.banks["bank-1"] = &bank.Bank{ID: "bank-1", AgentName: "claude"}
 	banks.members["bank-1"] = []*bank.Member{
 		{ID: "m-1", BankID: "bank-1", MissionRunID: "run-1", State: bank.MemberIdle},
 		{ID: "m-2", BankID: "bank-1", MissionRunID: "run-2", State: bank.MemberDead},
 		{ID: "m-3", BankID: "bank-1", MissionRunID: "run-3", State: bank.MemberNeedsSignIn},
 	}
 	live := &bankMemberLiveness{banks: func() (bank.Store, error) { return banks, nil }}
-	for _, c := range []struct {
-		bank, run string
-		want      bool
+	tenant, err := auth.NewTenantID("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(bankID, run, task, subject string) sdkcg.Claims {
+		return sdkcg.Claims{Tenant: tenant, MissionID: bankID, MissionRunID: run, TaskID: task, Subject: subject}
+	}
+	base := memberBaseGrantSubject("claude")
+	for name, c := range map[string]struct {
+		claims sdkcg.Claims
+		want   bool
 	}{
-		{"bank-1", "run-1", true},
-		{"bank-1", "run-3", true},  // a member waiting for a sign-in still reports and must renew
-		{"bank-1", "run-2", false}, // dead
-		{"bank-2", "run-1", false}, // the run backs a member of another bank
-		{"bank-1", "run-9", false}, // backs no member
+		"the base grant of a live member":             {claims("bank-1", "run-1", "m-1", base), true},
+		"a member waiting for a sign-in still renews": {claims("bank-1", "run-3", "m-3", base), true},
+		"a dead member":                                    {claims("bank-1", "run-2", "m-2", base), false},
+		"the run of a member of another bank":              {claims("bank-2", "run-1", "m-1", base), false},
+		"a run that backs no member":                       {claims("bank-1", "run-9", "m-9", base), false},
+		"a turn grant of a live member (task is a job)":    {claims("bank-1", "run-1", "job-7", "user:alice"), false},
+		"a turn grant that borrows the member as its task": {claims("bank-1", "run-1", "m-1", "user:alice"), false},
+		"the right task and a subject of another agent":    {claims("bank-1", "run-1", "m-1", memberBaseGrantSubject("opencode")), false},
 	} {
-		if got := live.IsMemberRunLive(ctx, "acme", c.bank, c.run); got != c.want {
-			t.Errorf("IsMemberRunLive(%s, %s) = %v, want %v", c.bank, c.run, got, c.want)
+		if got := live.IsMemberBaseGrantLive(ctx, c.claims); got != c.want {
+			t.Errorf("%s: live = %v, want %v", name, got, c.want)
 		}
 	}
 	broken := &bankMemberLiveness{banks: func() (bank.Store, error) { return nil, errors.New("postgres is down") }}
-	if broken.IsMemberRunLive(ctx, "acme", "bank-1", "run-1") {
+	if broken.IsMemberBaseGrantLive(ctx, claims("bank-1", "run-1", "m-1", base)) {
 		t.Error("a store failure is not live")
 	}
 }

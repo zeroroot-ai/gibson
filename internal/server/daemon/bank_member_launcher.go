@@ -93,7 +93,7 @@ func (l *memberLauncher) LaunchMember(ctx context.Context, tenantID string, b *b
 	// before the sandbox exists.
 	runID := string(types.NewID())
 	grant, err := minter.Mint(capabilitygrant.MintRequest{
-		Subject:        "component:agent:" + b.AgentName,
+		Subject:        memberBaseGrantSubject(b.AgentName),
 		Tenant:         tenantID,
 		MissionID:      b.ID,
 		TaskID:         memberID, // a member serves many tasks, so its grant names the member

@@ -355,12 +355,12 @@ func TestRenewCapabilityGrant_RefusesAGrantWithNoRun(t *testing.T) {
 	}
 }
 
-// memberLookup answers the liveness of a bank member's run from a fixed set,
-// keyed by "tenant/bank/run".
+// memberLookup answers whether claims are the base grant of a live member, from
+// a fixed set keyed by "tenant/bank/run".
 type memberLookup struct{ live map[string]bool }
 
-func (l memberLookup) IsMemberRunLive(_ context.Context, tenantID, bankID, runID string) bool {
-	return l.live[tenantID+"/"+bankID+"/"+runID]
+func (l memberLookup) IsMemberBaseGrantLive(_ context.Context, c sdkcg.Claims) bool {
+	return l.live[c.Tenant.String()+"/"+c.MissionID+"/"+c.MissionRunID]
 }
 
 func TestRenewCapabilityGrant_RenewsTheBaseGrantOfALiveBankMember(t *testing.T) {
@@ -379,7 +379,7 @@ func TestRenewCapabilityGrant_RenewsTheBaseGrantOfALiveBankMember(t *testing.T) 
 	}
 }
 
-func TestRenewCapabilityGrant_RefusesAMemberGrantOfADeadMemberOrAnotherBank(t *testing.T) {
+func TestRenewCapabilityGrant_RefusesWhenTheMemberLookupSaysNo(t *testing.T) {
 	cases := map[string]memberLookup{
 		"the member is gone or dead":               {live: map[string]bool{}},
 		"the run backs a member of another bank":   {live: map[string]bool{"acme/other-bank/run-1": true}},
@@ -392,6 +392,9 @@ func TestRenewCapabilityGrant_RefusesAMemberGrantOfADeadMemberOrAnotherBank(t *t
 			_, err := s.RenewCapabilityGrant(renewCtx(), renewRequest())
 			if got := status.Code(err); got != codes.FailedPrecondition {
 				t.Fatalf("code = %s (%v), want FailedPrecondition", got, err)
+			}
+			if !strings.Contains(err.Error(), "mission run has ended") {
+				t.Fatalf("error should say why: %v", err)
 			}
 		})
 	}
