@@ -50,7 +50,7 @@ func (h *toolHarness) ForTarget(targetID string) gibsonharness.AgentHarness {
 	return h
 }
 
-func (h *toolHarness) CallToolProto(ctx context.Context, name string, request proto.Message, response proto.Message) error {
+func (h *toolHarness) CallToolProto(ctx context.Context, name string, request, response proto.Message) error {
 	h.gotName = name
 	h.gotNetwork = gibsonharness.NodeNetworkFromContext(ctx)
 	if req, ok := request.(*toolpb.ExecuteRequest); ok {
