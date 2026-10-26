@@ -136,6 +136,12 @@ type DaemonServer struct {
 	// rather than renewing an unbounded grant.
 	liveMissions LiveMissionLookup
 
+	// liveMembers answers the same question for a bank member's base grant. A
+	// member runs under a run id of its own and is never bound by the brain
+	// executor, so liveMissions alone refuses its renewal. Wired via
+	// WithLiveMemberLookup; nil leaves a member grant unrenewable.
+	liveMembers LiveMemberLookup
+
 	// renewalForks refuses the renewal of the grant of a forked source outside
 	// the source sandbox. Wired via WithRenewalForkGuard.
 	renewalForks RenewalForkGuard
