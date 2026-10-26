@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.162.2](https://github.com/zeroroot-ai/gibson/compare/v0.162.1...v0.162.2) (2026-10-25)
+
+
+### Bug Fixes
+
+* **catalog:** pin the claude agent image to claude-member v0.6.4 ([#1315](https://github.com/zeroroot-ai/gibson/issues/1315)) ([b2b5cd8](https://github.com/zeroroot-ai/gibson/commit/b2b5cd84ace1b46fd3fca15ef0a22d3b0cde7ce8))
+* **catalog:** pin the zerocool agent image to opencode-gibson v0.11.3 ([#1317](https://github.com/zeroroot-ai/gibson/issues/1317)) ([14096f2](https://github.com/zeroroot-ai/gibson/commit/14096f24d158b6855192d59590f051b4fd3b0110))
+* **ci:** give each run-capped scope a unit name of its own ([#1314](https://github.com/zeroroot-ai/gibson/issues/1314)) ([469c214](https://github.com/zeroroot-ai/gibson/commit/469c2146c70ae32243f0056ad4cce80210cfe838)), closes [#1313](https://github.com/zeroroot-ai/gibson/issues/1313)
+
 ## [0.162.1](https://github.com/zeroroot-ai/gibson/compare/v0.162.0...v0.162.1) (2026-10-25)
 
 
