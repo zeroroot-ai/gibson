@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.163.0](https://github.com/zeroroot-ai/gibson/compare/v0.162.2...v0.163.0) (2026-10-26)
+
+
+### Features
+
+* **catalog:** list the first-party GitLab plugin in the component catalog ([#1321](https://github.com/zeroroot-ai/gibson/issues/1321)) ([6d80863](https://github.com/zeroroot-ai/gibson/commit/6d80863dd652c17ccede54263c0139665cb0b098))
+
+
+### Bug Fixes
+
+* **tenant-operator:** a failed last backup is taken again, so a tenant delete does not stop for ever ([#1324](https://github.com/zeroroot-ai/gibson/issues/1324)) ([8504fe0](https://github.com/zeroroot-ai/gibson/commit/8504fe0dc9624e22967fc9a5f9f5922ea3cada9d))
+
 ## [0.162.2](https://github.com/zeroroot-ai/gibson/compare/v0.162.1...v0.162.2) (2026-10-25)
 
 
