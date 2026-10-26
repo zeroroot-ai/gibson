@@ -29,6 +29,42 @@ import (
 // No rule names the proxy of a connector: the daemon is the one caller of a
 // connector (ADR-0065), so an agent has no network path to one (gibson#723).
 
+// toolNodeNetworkKey is the unexported key the network of a tool node is
+// stored under.
+type toolNodeNetworkKey struct{}
+
+// WithNodeNetwork returns ctx carrying the network scope of the tool node that
+// a CallToolProto call runs as.
+//
+// An agent node puts its scope on the child harness it delegates to. A tool
+// node has no child harness: the brain calls the mission harness directly, so
+// the scope of the node travels on the context of that one call. Without it, a
+// tool node took the default mode of its sandbox class instead of the targets
+// bound to the node. A nil n returns ctx unchanged.
+func WithNodeNetwork(ctx context.Context, n *agent.NodeNetwork) context.Context {
+	if n == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, toolNodeNetworkKey{}, n)
+}
+
+// NodeNetworkFromContext returns the network scope of the tool node on ctx, or
+// nil when the call names none.
+func NodeNetworkFromContext(ctx context.Context) *agent.NodeNetwork {
+	n, _ := ctx.Value(toolNodeNetworkKey{}).(*agent.NodeNetwork)
+	return n
+}
+
+// toolNetwork returns the network scope of a tool call. The scope of the tool
+// node on ctx wins, because it names the node that the call runs as. Else the
+// tool runs inside an agent node and gets the scope of that node, own.
+func toolNetwork(ctx context.Context, own *agent.NodeNetwork) *agent.NodeNetwork {
+	if n := NodeNetworkFromContext(ctx); n != nil {
+		return n
+	}
+	return own
+}
+
 // allPorts is every port of a target, for TCP and for UDP. A target is
 // reached on the ports that the work needs, and the scope does not guess
 // them.
