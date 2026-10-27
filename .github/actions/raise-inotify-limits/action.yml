@@ -1,0 +1,23 @@
+name: Raise the inotify limits of the runner
+description: >
+  A kind cluster that runs the whole platform opens more inotify instances than
+  the default limit of the runner allows. The kubelet then fails to follow the
+  log of a pod with "failed to create fsnotify watcher: too many open files".
+  A streamed log loses its lines, and an exit test reports a verdict from a log
+  that is not whole (gibson#1331). The staging nodes raise the same two limits
+  (hosted bootstrap/ec2). This action sets them and fails when they do not take.
+runs:
+  using: composite
+  steps:
+    - name: Raise fs.inotify.max_user_instances and fs.inotify.max_user_watches
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576
+        instances=$(sysctl -n fs.inotify.max_user_instances)
+        watches=$(sysctl -n fs.inotify.max_user_watches)
+        echo "inotify limits: ${instances} instances, ${watches} watches"
+        if [ "$instances" -lt 8192 ] || [ "$watches" -lt 1048576 ]; then
+          echo "::error::the inotify limits did not take: ${instances} instances, ${watches} watches"
+          exit 1
+        fi
