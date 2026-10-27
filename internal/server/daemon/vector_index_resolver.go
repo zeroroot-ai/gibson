@@ -84,7 +84,7 @@ func resolveVectorIndex(ctx context.Context, reader secretResolver, tenant auth.
 			Reason: "vector index resolver: secrets broker not yet initialized",
 		}
 	}
-	raw, err := reader.Resolve(withDatastoreActor(auth.WithTenant(ctx, tenant), tenant), pdataplane.VaultPathInfraVector)
+	raw, err := reader.Resolve(datapool.WithReadActor(auth.WithTenant(ctx, tenant), tenant), pdataplane.VaultPathInfraVector)
 	if err != nil {
 		return "", &datapool.NotProvisionedError{
 			Tenant: tenant.String(),
