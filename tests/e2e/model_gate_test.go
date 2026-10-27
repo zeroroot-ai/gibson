@@ -227,6 +227,22 @@ func tenantHoldsProviderGrant(t *testing.T, ctx context.Context, access tenantv1
 	return tenantHoldsGrantOn(t, ctx, access, modelGateProvider)
 }
 
+// revokeTenantProviderGrant removes the grant of the tenant on the named
+// provider, when the tenant holds one.
+func revokeTenantProviderGrant(t *testing.T, ctx context.Context, access tenantv1.ModelAccessServiceClient, provider string) {
+	t.Helper()
+	if !tenantHoldsGrantOn(t, ctx, access, provider) {
+		return
+	}
+	_, err := access.RevokeAccess(ctx, &tenantv1.RevokeAccessRequest{
+		SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
+		SubjectId:   modelGateTenant,
+		TargetKind:  tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER,
+		TargetId:    provider,
+	})
+	require.NoError(t, err, "RevokeAccess of the tenant grant on %s", provider)
+}
+
 // tenantHoldsGrantOn reports whether the tenant's members hold can_use on the
 // named provider.
 func tenantHoldsGrantOn(t *testing.T, ctx context.Context, access tenantv1.ModelAccessServiceClient, provider string) bool {
@@ -319,14 +335,15 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 	})
 
 	t.Run("after the tenant grant is revoked the gate refuses a mission", func(t *testing.T) {
-		_, err := access.RevokeAccess(ctx, &tenantv1.RevokeAccessRequest{
-			SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
-			SubjectId:   modelGateTenant,
-			TargetKind:  tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER,
-			TargetId:    modelGateProvider,
-		})
-		require.NoError(t, err, "RevokeAccess of the tenant grant")
+		// The tenant holds two providers. A mission falls back to the other
+		// provider while that one holds a grant, so the gate refuses only when
+		// the tenant holds no grant on any provider. The second provider
+		// (gibson#1257) gets the same revoke.
+		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the mock provider holds the tenant grant before the revoke")
+		revokeTenantProviderGrant(t, ctx, access, modelGateProvider)
+		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedType)
 		require.False(t, tenantHoldsProviderGrant(t, ctx, access), "the tenant grant is gone")
+		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType), "the grant on the second provider is gone")
 
 		_, errsBefore := probe.counts()
 		defID := createProbeMissionDefinition(t, ctx, clients.Daemon, "model-gate-exit-revoked")
@@ -359,15 +376,7 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 	// test. It needs the second provider to hold no grant, so the runner
 	// removes the grant of the tenant on it, when it holds one.
 	t.Run("the second provider is left with no grant for the member", func(t *testing.T) {
-		if tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType) {
-			_, err := access.RevokeAccess(ctx, &tenantv1.RevokeAccessRequest{
-				SubjectKind: tenantv1.GrantSubjectKind_GRANT_SUBJECT_KIND_TENANT,
-				SubjectId:   modelGateTenant,
-				TargetKind:  tenantv1.GrantTargetKind_GRANT_TARGET_KIND_PROVIDER,
-				TargetId:    modelGateUngrantedType,
-			})
-			require.NoError(t, err, "RevokeAccess of the tenant grant on the second provider")
-		}
+		revokeTenantProviderGrant(t, ctx, access, modelGateUngrantedType)
 		require.False(t, tenantHoldsGrantOn(t, ctx, access, modelGateUngrantedType),
 			"the second provider holds no grant of the tenant")
 		require.True(t, tenantHoldsProviderGrant(t, ctx, access), "the mock provider still holds its grant")
