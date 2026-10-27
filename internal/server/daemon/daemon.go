@@ -1312,6 +1312,12 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 						if d.secretsService == nil {
 							return nil, fmt.Errorf("instanceResolver: secrets broker not yet initialized")
 						}
+						// The instance resolver reads infra/neo4j of the tenant
+						// on ctx. No caller started this read, so the daemon is
+						// the actor of its audit record.
+						if tenant, ok := auth.TenantFromContext(ctx); ok {
+							ctx = withDatastoreActor(ctx, tenant)
+						}
 						return d.secretsService.Resolve(ctx, name)
 					}),
 				)
@@ -1356,7 +1362,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 				}
 				// Push the tenant onto ctx so the broker's per-tenant
 				// routing resolves to the correct Vault path.
-				ctxWithTenant := auth.WithTenant(ctx, tenant)
+				ctxWithTenant := withDatastoreActor(auth.WithTenant(ctx, tenant), tenant)
 				raw, getErr := d.secretsService.Resolve(ctxWithTenant, pdataplane.VaultPathInfraPostgres)
 				if getErr != nil {
 					return "", "", &datapool.NotProvisionedError{
