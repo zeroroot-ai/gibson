@@ -4,6 +4,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -57,7 +58,8 @@ func TestWorkflowMissingInotify(t *testing.T) {
 func TestExitTestWorkflowsRaiseInotifyLimits(t *testing.T) {
 	_, thisFile, _, _ := runtime.Caller(0)
 	dir := filepath.Join(filepath.Dir(thisFile), "..", "..", ".github", "workflows")
-	files, err := filepath.Glob(filepath.Join(dir, "exit-test-*.yml"))
+	fsys := os.DirFS(dir)
+	files, err := fs.Glob(fsys, "exit-test-*.yml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,12 +67,12 @@ func TestExitTestWorkflowsRaiseInotifyLimits(t *testing.T) {
 		t.Fatal("no exit-test workflow found: the guard looked in the wrong place")
 	}
 	for _, f := range files {
-		b, err := os.ReadFile(f)
+		b, err := fs.ReadFile(fsys, f)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if workflowMissingInotify(string(b)) {
-			t.Errorf("%s stands up kind and does not use %s before it", filepath.Base(f), raiseInotifyAction)
+			t.Errorf("%s stands up kind and does not use %s before it", f, raiseInotifyAction)
 		}
 	}
 }
