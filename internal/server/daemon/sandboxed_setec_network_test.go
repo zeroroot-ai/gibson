@@ -47,8 +47,31 @@ func TestSetecNetwork_MapsEachForm(t *testing.T) {
 		CIDR: "10.0.0.0/24", Ports: []sandboxed.PortRange{{Protocol: "UDP", Port: 1, EndPort: 65535}},
 	}})
 	a := n.GetAllow()[0]
+	if a.GetHost() != "10.0.0.0" {
+		t.Errorf("a rule for a CIDR target needs a host, setec refuses an empty one (gibson#1331): %v", n)
+	}
 	if a.GetCidr() != "10.0.0.0/24" || a.GetPorts()[0].GetProtocol() != "UDP" || a.GetPorts()[0].GetEndPort() != 65535 {
 		t.Errorf("cidr rule: network = %v", n)
+	}
+}
+
+// A CIDR target of one address gives that address as the host.
+func TestEgressHost(t *testing.T) {
+	for name, tc := range map[string]struct {
+		rule sandboxed.EgressRule
+		want string
+	}{
+		"a host stays":         {sandboxed.EgressRule{Host: "api.example.com", Port: 443}, "api.example.com"},
+		"a host with a CIDR":   {sandboxed.EgressRule{Host: "svc", CIDR: "10.0.0.0/24"}, "svc"},
+		"a one-address CIDR":   {sandboxed.EgressRule{CIDR: "10.244.0.152/32"}, "10.244.0.152"},
+		"a block of addresses": {sandboxed.EgressRule{CIDR: "10.0.0.7/24"}, "10.0.0.0"},
+		"an IPv6 block":        {sandboxed.EgressRule{CIDR: "fd00::/64"}, "fd00::"},
+		"a bad CIDR":           {sandboxed.EgressRule{CIDR: "nope"}, ""},
+		"nothing":              {sandboxed.EgressRule{}, ""},
+	} {
+		if got := egressHost(tc.rule); got != tc.want {
+			t.Errorf("%s: host = %q, want %q", name, got, tc.want)
+		}
 	}
 }
 
