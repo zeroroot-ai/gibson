@@ -133,6 +133,11 @@ jobs:
       # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node. The
       # gvisor backend and the runtime agent that wrote the
       # runtime.gvisor node label are gone (gibson#1096).
+      # A full platform on kind opens more inotify instances than the runner
+      # allows. Without this step the kubelet cannot follow a pod log (gibson#1331).
+      - name: Raise the inotify limits
+        uses: ./gibson/.github/actions/raise-inotify-limits
+
       - name: Open /dev/kvm for the launcher
         uses: ./gibson/.github/actions/open-kvm
 

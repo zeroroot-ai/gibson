@@ -142,6 +142,11 @@ jobs:
 
       # The one setec backend is a Firecracker machine in a launcher pod
       # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
+      # A full platform on kind opens more inotify instances than the runner
+      # allows. Without this step the kubelet cannot follow a pod log (gibson#1331).
+      - name: Raise the inotify limits
+        uses: ./gibson/.github/actions/raise-inotify-limits
+
       - name: Open /dev/kvm for the launcher
         uses: ./gibson/.github/actions/open-kvm
 
