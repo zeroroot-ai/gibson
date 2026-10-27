@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -373,7 +374,7 @@ func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 	}
 	n.Allow = make([]*setecv1.NetworkAllow, 0, len(egress))
 	for _, e := range egress {
-		allow := &setecv1.NetworkAllow{Host: e.Host, Port: e.Port, Cidr: e.CIDR}
+		allow := &setecv1.NetworkAllow{Host: egressHost(e), Port: e.Port, Cidr: e.CIDR}
 		for _, p := range e.Ports {
 			allow.Ports = append(allow.Ports, &setecv1.NetworkAllowPort{
 				Protocol: p.Protocol, Port: p.Port, EndPort: p.EndPort,
@@ -382,6 +383,23 @@ func setecNetwork(mode string, egress []sandboxed.EgressRule) *setecv1.Network {
 		n.Allow = append(n.Allow, allow)
 	}
 	return n
+}
+
+// egressHost returns the host of a rule on the wire. The Sandbox resource of
+// setec requires a host of at least one character on each allow entry, and
+// the CIDR only pins the address block of that entry. A rule for a CIDR target
+// has no host, so it takes the address of the block. An address that cannot be
+// read leaves the host empty, and setec then refuses the rule: the scope never
+// widens on a bad value.
+func egressHost(e sandboxed.EgressRule) string {
+	if e.Host != "" || e.CIDR == "" {
+		return e.Host
+	}
+	p, err := netip.ParsePrefix(e.CIDR)
+	if err != nil {
+		return ""
+	}
+	return p.Masked().Addr().String()
 }
 
 // Fork forks a running sandbox of the tenant (setec#195). The forks get
