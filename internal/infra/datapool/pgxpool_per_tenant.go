@@ -161,7 +161,7 @@ func (p *pgPerTenant) resolveDSN(ctx context.Context, tenant auth.TenantID, _ []
 			Reason: "datapool.Config.PostgresDSNResolver not wired — daemon cannot resolve per-tenant Postgres credentials",
 		}
 	}
-	rawDSN, db, resolveErr := p.cfg.PostgresDSNResolver.ResolveDSN(ctx, tenant)
+	rawDSN, db, resolveErr := p.cfg.PostgresDSNResolver.ResolveDSN(WithReadActor(ctx, tenant), tenant)
 	if resolveErr != nil {
 		// Resolver-side NotProvisionedError surfaces unchanged so callers
 		// (e.g. mission/finding/component handlers) can map it to a

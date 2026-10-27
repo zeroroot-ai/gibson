@@ -172,6 +172,11 @@ func (r *instanceResolver) resolveAndCache(ctx context.Context, tenantID string)
 // is absent or incomplete so the caller can return NotProvisionedError.
 // Any other error is propagated.
 func (r *instanceResolver) tryVaultPayload(ctx context.Context, tenantID string) (*Neo4jEndpoint, bool, error) {
+	// No caller started this read, so the daemon is the actor of its audit
+	// record. A tenant id that cannot be read leaves ctx as it is.
+	if tenant, perr := auth.NewTenantID(tenantID); perr == nil {
+		ctx = WithReadActor(auth.WithTenant(ctx, tenant), tenant)
+	}
 	raw, err := r.secrets.Resolve(ctx, pdataplane.VaultPathInfraNeo4j)
 	if err != nil {
 		if isNotFoundError(err) {
