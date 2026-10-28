@@ -70,10 +70,10 @@ func reservedFields() []string {
 	var out []string
 	var walk func(protoreflect.MessageDescriptors)
 	walk = func(ms protoreflect.MessageDescriptors) {
-		for i := 0; i < ms.Len(); i++ {
+		for i := range ms.Len() {
 			m := ms.Get(i)
 			names := m.ReservedNames()
-			for j := 0; j < names.Len(); j++ {
+			for j := range names.Len() {
 				out = append(out, string(m.Name())+"."+string(names.Get(j)))
 			}
 			walk(m.Messages())
