@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1012,4 +1014,49 @@ func TestExecute_DiscoveryWithNoTenantFoldsNowhere(t *testing.T) {
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+// The output of the pinned executor image folds into the World under the sdk
+// of the daemon (gibson#1343). The fixtures are real output_json values of the
+// tool httpx, captured from two executor images. The older image was built on
+// sdk v0.191.0 and writes fields that sdk v0.202.0 removed. The strict read of
+// the daemon rejects them, and the run folds nothing. The newer image is the
+// one the catalog pins.
+func TestExecute_DiscoveryFromExecutorOutput(t *testing.T) {
+	read := func(name string) string {
+		t.Helper()
+		b, err := fs.ReadFile(os.DirFS("testdata"), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimSpace(string(b))
+	}
+
+	t.Run("v0.114.0 output folds", func(t *testing.T) {
+		fake := runOutputJSON(t, discoveryResultType, read("executor_v0.114.0_httpx_output.json"))
+		select {
+		case <-fake.done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the v0.114.0 output was not folded: DiscoveryProcessor.Process was not called")
+		}
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if got := len(fake.lastDisc.GetTechnologies()); got != 2 {
+			t.Errorf("folded %d technologies, want 2", got)
+		}
+		if len(fake.lastDisc.GetEndpoints()) == 0 || len(fake.lastDisc.GetFindings()) == 0 {
+			t.Errorf("folded %d endpoints and %d findings, want some of each",
+				len(fake.lastDisc.GetEndpoints()), len(fake.lastDisc.GetFindings()))
+		}
+	})
+
+	t.Run("v0.113.0 output is rejected", func(t *testing.T) {
+		fake := runOutputJSON(t, discoveryResultType, read("executor_v0.113.0_httpx_output.json"))
+		select {
+		case <-fake.done:
+			t.Fatal("the v0.113.0 output was folded: the sdk of the daemon accepts a removed field again, " +
+				"so the wire floor of the catalog (graphrag-wire-floor.json) can move down")
+		case <-time.After(300 * time.Millisecond):
+		}
+	})
 }

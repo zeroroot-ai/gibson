@@ -909,7 +909,8 @@ tool-manifests:
 
 # tool-catalog-capture: re-capture the executor catalog from a NEW executor image,
 # then regenerate the manifests. Run this when gibson-executor publishes a
-# release; commit both the JSON and the regenerated manifests.
+# release; commit the JSON, the regenerated manifests and executor-sdk.json (the
+# sdk version the image was built on, which the wire guard of the catalog reads).
 #
 #   make tool-catalog-capture IMAGE=ghcr.io/zeroroot-ai/gibson-executor@sha256:...
 #
@@ -925,7 +926,8 @@ tool-catalog-capture:
 	@echo "Capturing --list-tools from $(IMAGE)..."
 	@tmp=$$(mktemp); \
 	docker run --rm --entrypoint gibson-runner "$(IMAGE)" --list-tools > "$$tmp" && \
-	$(GOCMD) run ./cmd/tool-manifest-gen -capture-image "$(IMAGE)" -capture-tools "$$tmp"; \
+	$(GOCMD) run ./cmd/tool-manifest-gen -capture-image "$(IMAGE)" -capture-tools "$$tmp" && \
+	bash scripts/capture-executor-sdk.sh "$(IMAGE)"; \
 	rc=$$?; rm -f "$$tmp"; exit $$rc
 
 # apoc-contract regenerates pkg/platform/dataplane/apoc.env from the Go
