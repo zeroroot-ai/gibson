@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.163.3](https://github.com/zeroroot-ai/gibson/compare/v0.163.2...v0.163.3) (2026-10-28)
+
+
+### Bug Fixes
+
+* **catalog:** pin the executor image that the daemon sdk can read ([#1345](https://github.com/zeroroot-ai/gibson/issues/1345)) ([f9419d3](https://github.com/zeroroot-ai/gibson/commit/f9419d34138517b81c1f5fba24dec9466c8fcd29))
+* **ci:** the exit tests raise the inotify limits before kind starts ([#1332](https://github.com/zeroroot-ai/gibson/issues/1332)) ([4a06f53](https://github.com/zeroroot-ai/gibson/commit/4a06f530f973f1dc7d110e43c70a6e9233b61be4))
+* **daemon:** a read of the infra secrets of a tenant carries an actor ([#1335](https://github.com/zeroroot-ai/gibson/issues/1335)) ([c188844](https://github.com/zeroroot-ai/gibson/commit/c188844d0d26eb06acd9815bc692808d919a2f08))
+* **sandbox:** an allow rule for a CIDR target carries a host ([#1334](https://github.com/zeroroot-ai/gibson/issues/1334)) ([a8fb7d5](https://github.com/zeroroot-ai/gibson/commit/a8fb7d5b69095bb2b6963fd3fa1642c2c44347c8)), closes [#1331](https://github.com/zeroroot-ai/gibson/issues/1331)
+
 ## [0.163.2](https://github.com/zeroroot-ai/gibson/compare/v0.163.1...v0.163.2) (2026-10-26)
 
 
