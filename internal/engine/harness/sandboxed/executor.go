@@ -411,11 +411,16 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	<-logsDone
 
 	if waitErr != nil {
+		// The call owns its sandbox. Whatever ended the wait (the call
+		// timeout, a cancelled mission, a lost connection), nothing else
+		// will delete it: the lifecycle timeout of Setec starts only when
+		// the pod runs, so a sandbox that never got a node would stay for
+		// ever (gibson#1340). The kill uses a context that a cancel cannot
+		// reach, and it is best effort.
+		killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
+		killCancel()
 		if errors.Is(waitErr, context.DeadlineExceeded) {
-			// Best-effort kill so Setec reaps the sandbox rather than letting it run.
-			killCtx, killCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-			_ = e.client.Kill(killCtx, tenant, launchResp.SandboxID)
-			killCancel()
 			return types.WrapError(types.SANDBOX_WAIT_TIMEOUT,
 				fmt.Sprintf("tool %q sandbox %s exceeded %s call timeout",
 					toolName, launchResp.SandboxID, e.callTimeout), waitErr)
