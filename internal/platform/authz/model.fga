@@ -327,10 +327,10 @@ type system_tenant
     #   user:<dashboard-machine-user-numeric-sub> | signup_service | system_tenant:_system
     define signup_service: [user]
     # parent: the set of tenants registered under the platform. Enumeration-only
-    # (NOT referenced by any computed/authz relation) — it lets the catalog
-    # fan-out reconciler list every tenant via
-    # system_tenant:_system#parent@tenant:X to fan platform_enabled catalog
-    # items out as tenant_enabled. Written at tenant provisioning. (deploy#782)
+    # (NOT referenced by any computed/authz relation) — it lets the system
+    # backplane baseline list every tenant via system_tenant:_system#parent@tenant:X.
+    # Written at tenant provisioning. Catalog enablement is an explicit admin act
+    # (SetCatalogEnabled, ADR-0136): nothing fans platform_enabled out as tenant_enabled.
     define parent: [tenant]
 
 type team
