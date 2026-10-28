@@ -1,0 +1,33 @@
+{
+  "floor": "v0.202.0",
+  "reserved": [
+    "AttackPattern.data_sources",
+    "AttackPattern.platforms",
+    "AttackPattern.tactics",
+    "Certificate.not_before",
+    "Certificate.parent_type",
+    "Certificate.san",
+    "Certificate.serial_number",
+    "DiscoveryResult.compliance_signals",
+    "Domain.created_date",
+    "Domain.expiry_date",
+    "Domain.registrar",
+    "Endpoint.content_length",
+    "Finding.cvss_score",
+    "Finding.parent_type",
+    "GraphNode.discovered_by",
+    "GraphNode.parent_id",
+    "GraphNode.parent_relationship",
+    "GraphNode.parent_type",
+    "GraphQuery.graph_weight",
+    "GraphQuery.max_score",
+    "GraphQuery.vector_weight",
+    "Host.os_version",
+    "QueryResult.graph_score",
+    "QueryResult.vector_score",
+    "Service.cpe",
+    "Service.extra_info",
+    "Technology.cpe",
+    "Technology.parent_type"
+  ]
+}
