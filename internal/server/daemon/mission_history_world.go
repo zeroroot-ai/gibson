@@ -17,16 +17,40 @@ import (
 //
 // Status, Error, Progress and FindingsCount come from the snapshot. The error
 // is the reason of a failed run only. A run that did not fail has none.
+//
+// The World holds one snapshot for each mission, and it is the snapshot of the
+// newest run. An earlier run of the same mission has no snapshot. Only one run
+// of a mission is active at a time, so an earlier run that the store still holds
+// as not ended has ended, and its outcome is not in the World. It reads
+// StatusRunUnknown and not "running".
+// StatusRunUnknown is the status of a run that has ended and whose outcome the
+// World does not hold: an earlier run of a mission that has run again.
+const StatusRunUnknown = "unknown"
+
+// isEndedRunStatus reports whether a stored run status is an end state.
+func isEndedRunStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled", StatusRunUnknown:
+		return true
+	}
+	return false
+}
+
 func overlayRunsFromWorld(runs []api.MissionRunData, snapshots []brain.MissionSnapshot) {
 	byRun := make(map[string]brain.MissionSnapshot, len(snapshots))
+	newestOf := make(map[string]string, len(snapshots)) // mission id -> run id of its snapshot
 	for _, ms := range snapshots {
 		if ms.RunID != "" {
 			byRun[ms.RunID] = ms
+			newestOf[ms.ID] = ms.RunID
 		}
 	}
 	for i := range runs {
 		ms, ok := byRun[runs[i].RunID]
 		if !ok {
+			if newest, held := newestOf[runs[i].MissionID]; held && newest != runs[i].RunID && !isEndedRunStatus(runs[i].Status) {
+				runs[i].Status = StatusRunUnknown
+			}
 			continue
 		}
 		runs[i].Status = string(ms.Status)
