@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.163.4](https://github.com/zeroroot-ai/gibson/compare/v0.163.3...v0.163.4) (2026-10-29)
+
+
+### Bug Fixes
+
+* **daemon:** a run reads its state from the World, and its end stops its tool calls ([#1347](https://github.com/zeroroot-ai/gibson/issues/1347)) ([461d546](https://github.com/zeroroot-ai/gibson/commit/461d546d49aa45910b448079b781c5acecfbd53e))
+
 ## [0.163.3](https://github.com/zeroroot-ai/gibson/compare/v0.163.2...v0.163.3) (2026-10-28)
 
 
