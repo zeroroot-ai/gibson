@@ -1060,3 +1060,52 @@ func TestExecute_DiscoveryFromExecutorOutput(t *testing.T) {
 		}
 	})
 }
+
+// A wait that ends because the call was cancelled (a mission that stopped or
+// failed) kills the sandbox. Before, only a wait deadline killed it, so a
+// cancelled call left its sandbox behind, and a sandbox that never got a node
+// never timed out (gibson#1340). The kill must run on a context that the cancel
+// did not reach.
+func TestExecute_CancelledWaitKillsTheSandbox(t *testing.T) {
+	killed := make(chan error, 1)
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-cancel"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			return &fixedLogs{}, nil
+		},
+		wait: func(ctx context.Context, _ string) (WaitResponse, error) {
+			<-ctx.Done()
+			return WaitResponse{}, ctx.Err()
+		},
+		kill: func(ctx context.Context, id string) error {
+			if id != "sbx-cancel" {
+				t.Errorf("killed sandbox %q, want sbx-cancel", id)
+			}
+			killed <- ctx.Err()
+			return nil
+		},
+	}
+	e, err := New(Config{Client: client, SandboxClass: "tool", CallTimeout: time.Minute})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	execErr := execute(t, e, ctx, "hello", wrapperspb.String("x"), &wrapperspb.StringValue{})
+	if execErr == nil {
+		t.Fatal("a cancelled call must fail")
+	}
+	select {
+	case ctxErr := <-killed:
+		if ctxErr != nil {
+			t.Errorf("the kill ran on a cancelled context: %v", ctxErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the sandbox of a cancelled call was not killed")
+	}
+}

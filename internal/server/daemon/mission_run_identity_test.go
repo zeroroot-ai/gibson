@@ -449,3 +449,34 @@ func TestEndRunAccounting_ClaimWaitsForTheRelease(t *testing.T) {
 		t.Fatal("run 2 does not hold the record")
 	}
 }
+
+// The end of a run cancels the context of that run, so a tool call still in
+// flight stops and its sandbox is killed. The cleanup of an earlier run does
+// not cancel the context of the next run (gibson#1340).
+func TestDeleteActive_CancelsTheContextOfTheEndedRun(t *testing.T) {
+	mm := helperMM()
+	mm.activeMissions = map[auth.TenantID]map[string]*activeMission{}
+	tenant := auth.MustNewTenantID("acme")
+	rec := &mission.Mission{ID: types.NewID()}
+	id := rec.ID.String()
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+	run1 := activeRunOfRecord(rec, tenant)
+	run1.cancel = cancel1
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	run2 := activeRunOfRecord(rec, tenant)
+	run2.cancel = cancel2
+	if err := mm.claimActive(tenant, id, run2); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	mm.deleteActive(tenant, id, run1)
+	if ctx1.Err() == nil {
+		t.Error("the context of the ended run was not cancelled")
+	}
+	if ctx2.Err() != nil {
+		t.Error("the cleanup of run 1 cancelled the context of run 2")
+	}
+}

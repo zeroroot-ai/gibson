@@ -790,9 +790,13 @@ type LogEntryData struct {
 
 // MissionRunData represents a single execution instance of a mission.
 type MissionRunData struct {
-	RunID         string
-	MissionID     string
-	RunNumber     int
+	RunID     string
+	MissionID string
+	RunNumber int
+	// Status is the state of the run: pending, running, paused, completed,
+	// failed or cancelled from the World. An earlier run of a mission that has
+	// run again reads "unknown": it has ended, and the World holds only the
+	// newest run of a mission.
 	Status        string
 	Progress      float64
 	CreatedAt     int64

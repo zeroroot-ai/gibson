@@ -2761,6 +2761,12 @@ func (d *daemonImpl) GetMissionHistory(ctx context.Context, name string, limit i
 		}
 	}
 
+	// The run store holds each run once, at its start. The World holds the state
+	// of the run now (gibson#1340).
+	if d.brainRegistry != nil {
+		overlayRunsFromWorld(runs, d.brainRegistry.For(tenant.String()).Missions())
+	}
+
 	d.logger.Debug(ctx, "mission history retrieved", "name", name, "count", len(runs), "total", total)
 	return runs, total, nil
 }

@@ -331,6 +331,13 @@ func (m *missionManager) deleteActive(tenant auth.TenantID, missionID string, am
 	defer m.mu.Unlock()
 	m.releaseActiveLocked(tenant, missionID, am)
 	m.completedCount++
+	// The run ended, so the context of the run ends with it. A tool call that
+	// is still in flight (the brain failed while it ran) stops, and the tool
+	// executor kills its sandbox. Before, only Stop cancelled this context, so
+	// a run that ended by itself kept it open (gibson#1340).
+	if am != nil && am.cancel != nil {
+		am.cancel()
+	}
 }
 
 // releaseActive gives the claim of a run back without counting a completed
