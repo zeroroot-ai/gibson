@@ -11,14 +11,20 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -928,24 +934,69 @@ func TestExecute_DiscoveryFromOutputJSON(t *testing.T) {
 	}
 }
 
-// The output_json is read as a DiscoveryResult only when the manifest says so,
-// and JSON that is not a DiscoveryResult folds nothing.
+// The output_json is read as a DiscoveryResult only when the manifest names
+// that type, and an empty output_json folds nothing. A non-empty output_json of
+// the named type always folds now, even one whose fields the sdk does not
+// define: the read is tolerant and drops them (gibson#1344), so content no
+// longer gates the fold. TestExecute_FoldReportsDroppedField covers that path.
 func TestExecute_OutputJSONNotADiscovery(t *testing.T) {
 	disc, err := protojson.Marshal(&graphragpb.DiscoveryResult{Hosts: []*graphragpb.Host{{Ip: "127.0.0.1"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]struct{ outputType, outputJSON string }{
-		"another output type":       {"gibson.test.v1.Other", string(disc)},
-		"no output type":            {"", string(disc)},
-		"json that is no discovery": {discoveryResultType, `{"not_a_field": 1}`},
-		"empty output_json":         {discoveryResultType, ""},
+		"another output type":   {"gibson.test.v1.Other", string(disc)},
+		"no output type":        {"", string(disc)},
+		"empty output_json":     {discoveryResultType, ""},
+		"malformed output_json": {discoveryResultType, "{not valid json"},
 	} {
 		fake := runOutputJSON(t, c.outputType, c.outputJSON)
 		select {
 		case <-fake.done:
 			t.Errorf("%s: DiscoveryProcessor.Process was called", name)
 		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// unknownJSONFields walks the raw JSON against the message the sdk defines and
+// returns only the field paths the sdk does not define. The cases cover a field
+// nested in a repeated message, a field under a message-valued map, a field in
+// a singular nested message, a well-known type (skipped), and a non-object
+// (returns nothing).
+func TestUnknownJSONFields(t *testing.T) {
+	discoveryMD := (&graphragpb.DiscoveryResult{}).ProtoReflect().Descriptor()
+	graphNodeMD := (&graphragpb.GraphNode{}).ProtoReflect().Descriptor()
+	valueMD := (&graphragpb.Value{}).ProtoReflect().Descriptor()
+	timestampMD := (&timestamppb.Timestamp{}).ProtoReflect().Descriptor()
+
+	for name, tc := range map[string]struct {
+		raw  string
+		md   protoreflect.MessageDescriptor
+		want []string
+	}{
+		"unknown in a repeated message": {
+			`{"technologies":[{"parent_type":"y"}]}`, discoveryMD, []string{"technologies.parent_type"},
+		},
+		"unknown under a message-valued map": {
+			`{"properties":{"k":{"nope":1}}}`, graphNodeMD, []string{"properties.nope"},
+		},
+		"unknown in a singular nested message": {
+			`{"listValue":{"bogus":1}}`, valueMD, []string{"listValue.bogus"},
+		},
+		"well-known type is skipped": {
+			`{"seconds":1,"bogus":2}`, timestampMD, nil,
+		},
+		"a non-object yields nothing": {
+			`"42"`, discoveryMD, nil,
+		},
+		"all fields known": {
+			`{"hosts":[{"ip":"1.2.3.4"}]}`, discoveryMD, nil,
+		},
+	} {
+		got := unknownJSONFields([]byte(tc.raw), tc.md)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: unknownJSONFields = %v, want %v", name, got, tc.want)
 		}
 	}
 }
@@ -1050,15 +1101,127 @@ func TestExecute_DiscoveryFromExecutorOutput(t *testing.T) {
 		}
 	})
 
-	t.Run("v0.113.0 output is rejected", func(t *testing.T) {
+	t.Run("v0.113.0 output folds under the tolerant read", func(t *testing.T) {
+		// The tolerant read drops the fields sdk v0.202.0 removed
+		// (parent_type, content_length) instead of rejecting the whole result,
+		// so the older image still folds its discoveries (gibson#1344). The
+		// wire floor that keeps the skew out of the catalog is the guard of
+		// gibson#1343 (graphrag-wire-floor.json), not this daemon read.
+		// TestExecute_FoldReportsDroppedField proves the drop stays visible.
 		fake := runOutputJSON(t, discoveryResultType, read("executor_v0.113.0_httpx_output.json"))
 		select {
 		case <-fake.done:
-			t.Fatal("the v0.113.0 output was folded: the sdk of the daemon accepts a removed field again, " +
-				"so the wire floor of the catalog (graphrag-wire-floor.json) can move down")
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(2 * time.Second):
+			t.Fatal("the v0.113.0 output was not folded: the tolerant read must drop the removed fields, not the result")
+		}
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if got := len(fake.lastDisc.GetTechnologies()); got != 2 {
+			t.Errorf("folded %d technologies, want 2", got)
+		}
+		if len(fake.lastDisc.GetEndpoints()) == 0 || len(fake.lastDisc.GetFindings()) == 0 {
+			t.Errorf("folded %d endpoints and %d findings, want some of each",
+				len(fake.lastDisc.GetEndpoints()), len(fake.lastDisc.GetFindings()))
 		}
 	})
+}
+
+// The tolerant fold does not hide a sdk skew: it counts each dropped field and
+// logs it, so an operator sees which field the executor image writes and this
+// daemon's sdk removed (gibson#1344). The fixture is the real output of the
+// v0.113.0 image, which writes parent_type and content_length that sdk v0.202.0
+// removed.
+func TestExecute_FoldReportsDroppedField(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+
+	output, err := fs.ReadFile(os.DirFS("testdata"), "executor_v0.113.0_httpx_output.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeDiscoveryProcessor()
+	client := &mockClient{
+		launch: func(context.Context, LaunchRequest) (LaunchResponse, error) {
+			return LaunchResponse{SandboxID: "sbx-skew"}, nil
+		},
+		streamLog: func(context.Context, string) (LogStream, error) {
+			return &fixedLogs{chunks: [][]byte{outputJSONMarker(t, strings.TrimSpace(string(output)))}}, nil
+		},
+		wait: func(context.Context, string) (WaitResponse, error) { return WaitResponse{ExitCode: 0}, nil },
+		kill: func(context.Context, string) error { return nil },
+	}
+	e, err := New(Config{
+		Client: client, SandboxClass: "tool", CallTimeout: 2 * time.Second,
+		DiscoveryProcessor: fake, MeterProvider: mp,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	spec := helloSpec
+	spec.OutputProtoType = discoveryResultType
+	spec.MissionTenant = "primary"
+	if err := e.ExecuteWithSpec(context.Background(), "httpx", spec,
+		&toolpb.ExecuteRequest{InputJson: "{}"}, &toolpb.ExecuteResponse{}); err != nil {
+		t.Fatalf("ExecuteWithSpec: %v", err)
+	}
+
+	// The result still folds: the removed fields are dropped, not fatal.
+	select {
+	case <-fake.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the result did not fold: the tolerant read must keep the result")
+	}
+
+	got := droppedFieldCounts(t, reader)
+	want := map[string]int64{
+		"endpoints.content_length": 1,
+		"findings.parent_type":     1,
+		"technologies.parent_type": 1,
+	}
+	for field, n := range want {
+		if got[field] != n {
+			t.Errorf("counter for %q = %d, want %d (all series: %v)", field, got[field], n, got)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("counter reported %d field series, want %d: %v", len(got), len(want), got)
+	}
+}
+
+// droppedFieldCounts collects the dropped-field counter and sums its value per
+// field attribute, keyed by the field name. It asserts the tool attribute names
+// the tool on every data point.
+func droppedFieldCounts(t *testing.T, reader sdkmetric.Reader) map[string]int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "gibson.tool.fold.discarded_fields.total" {
+				continue
+			}
+			sum, ok := m.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("counter %q is %T, want Sum[int64]", m.Name, m.Data)
+			}
+			for _, dp := range sum.DataPoints {
+				field, okf := dp.Attributes.Value(attribute.Key("field"))
+				if !okf {
+					t.Errorf("a data point has no field attribute: %v", dp.Attributes.ToSlice())
+					continue
+				}
+				if tool, okt := dp.Attributes.Value(attribute.Key("tool")); !okt || tool.AsString() != "httpx" {
+					t.Errorf("data point tool attribute = %q (present=%v), want httpx", tool.AsString(), okt)
+				}
+				out[field.AsString()] += dp.Value
+			}
+		}
+	}
+	return out
 }
 
 // A wait that ends because the call was cancelled (a mission that stopped or

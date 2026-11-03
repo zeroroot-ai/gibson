@@ -7,17 +7,21 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"runtime/debug"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -235,6 +239,12 @@ type Executor struct {
 	callTimeout        time.Duration
 	discoveryProcessor DiscoveryProcessor // optional; nil disables graph persistence
 	events             EventPublisher     // optional; nil disables the live console
+
+	// discardedFoldFields counts a field that the tolerant fold of a tool
+	// result dropped because the daemon sdk does not define it. One field name
+	// is one metric series, so a sdk skew (a field the executor image writes
+	// and this daemon removed) is visible instead of silent (gibson#1344).
+	discardedFoldFields metric.Int64Counter
 }
 
 // Config is the constructor input for the executor. All fields are required
@@ -258,6 +268,11 @@ type Config struct {
 	// an agent does, so a tool run is enumerable and streamable on the same
 	// surface. Nil disables it and the executor behaves as before.
 	Events EventPublisher
+
+	// MeterProvider supplies the meter for the dropped-field counter. Nil uses
+	// the global provider the daemon installs at startup, so production needs
+	// no wiring. A test injects its own provider to read the counter.
+	MeterProvider metric.MeterProvider
 }
 
 // New constructs an Executor. Returns a clear error on misconfiguration so
@@ -278,14 +293,30 @@ func New(cfg Config) (*Executor, error) {
 	if cfg.CallTimeout <= 0 {
 		cfg.CallTimeout = 5 * time.Minute
 	}
+	if cfg.MeterProvider == nil {
+		cfg.MeterProvider = otel.GetMeterProvider()
+	}
+	meter := cfg.MeterProvider.Meter("github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed")
+	discardedFoldFields, err := meter.Int64Counter(
+		"gibson.tool.fold.discarded_fields.total",
+		metric.WithDescription("Tool output_json fields dropped during the fold because the daemon sdk does not define them"),
+	)
+	if err != nil {
+		// A missing counter must not stop tool dispatch. Fold still reports the
+		// skew in the log; only the metric series is absent.
+		cfg.Logger.Warn("sandboxed executor: dropped-field counter not created; skew stays in the log only",
+			"error", err)
+		discardedFoldFields = nil
+	}
 	return &Executor{
-		client:             cfg.Client,
-		tracer:             cfg.Tracer,
-		logger:             cfg.Logger,
-		sandboxClass:       cfg.SandboxClass,
-		callTimeout:        cfg.CallTimeout,
-		discoveryProcessor: cfg.DiscoveryProcessor,
-		events:             cfg.Events,
+		client:              cfg.Client,
+		tracer:              cfg.Tracer,
+		logger:              cfg.Logger,
+		sandboxClass:        cfg.SandboxClass,
+		callTimeout:         cfg.CallTimeout,
+		discoveryProcessor:  cfg.DiscoveryProcessor,
+		events:              cfg.Events,
+		discardedFoldFields: discardedFoldFields,
 	}, nil
 }
 
@@ -461,7 +492,7 @@ func (e *Executor) ExecuteWithSpec(ctx context.Context, toolName string, spec To
 	if e.discoveryProcessor != nil {
 		pbDiscovery := sdkgraphrag.ExtractDiscovery(response)
 		if pbDiscovery == nil && spec.OutputProtoType == discoveryResultType {
-			pbDiscovery = e.discoveryFromOutputJSON(toolName, response)
+			pbDiscovery = e.discoveryFromOutputJSON(ctx, toolName, response)
 		}
 		if pbDiscovery != nil {
 			execCtx := discoveryExecContext(ctx, spec.Live, spec.MissionTenant)
@@ -519,7 +550,13 @@ var discoveryResultType = string((&graphragpb.DiscoveryResult{}).ProtoReflect().
 // message itself or its field 100, so without this no discovery of a mission
 // tool node reached the World (gibson#1140). It returns nil when the response
 // has no output_json or the JSON is not a DiscoveryResult.
-func (e *Executor) discoveryFromOutputJSON(toolName string, response proto.Message) *graphragpb.DiscoveryResult {
+//
+// The read tolerates an unknown field (DiscardUnknown), as the live-callback
+// path already does. Before, one field the executor image writes and this
+// daemon's sdk removed rejected the whole result, and the run folded nothing
+// (gibson#1343). A dropped field is now visible, not silent: reportSkew counts
+// it and logs a warning so a sdk skew surfaces (gibson#1344).
+func (e *Executor) discoveryFromOutputJSON(ctx context.Context, toolName string, response proto.Message) *graphragpb.DiscoveryResult {
 	field := response.ProtoReflect().Descriptor().Fields().ByName("output_json")
 	if field == nil || field.Kind() != protoreflect.StringKind {
 		return nil
@@ -529,12 +566,108 @@ func (e *Executor) discoveryFromOutputJSON(toolName string, response proto.Messa
 		return nil
 	}
 	var disc graphragpb.DiscoveryResult
-	if err := protojson.Unmarshal([]byte(raw), &disc); err != nil {
+	if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal([]byte(raw), &disc); err != nil {
 		e.logger.Warn("tool output_json is not a DiscoveryResult; nothing folded into the World",
 			"tool", toolName, "error", err)
 		return nil
 	}
+	e.reportSkew(ctx, toolName, []byte(raw), disc.ProtoReflect().Descriptor())
 	return &disc
+}
+
+// reportSkew makes each field the fold dropped visible. It walks the raw JSON
+// against the message the daemon sdk defines, then for every field the sdk does
+// not define it increments the dropped-field counter and logs a warning with
+// the tool name. DiscardUnknown drops such a field without a sign, so this is
+// the only place the skew becomes observable.
+func (e *Executor) reportSkew(ctx context.Context, toolName string, raw []byte, md protoreflect.MessageDescriptor) {
+	for _, field := range unknownJSONFields(raw, md) {
+		e.logger.Warn("tool output_json carried a field the daemon sdk does not define; the fold dropped it",
+			"tool", toolName, "field", field)
+		if e.discardedFoldFields != nil {
+			e.discardedFoldFields.Add(ctx, 1, metric.WithAttributes(
+				attribute.String("tool", toolName),
+				attribute.String("field", field),
+			))
+		}
+	}
+}
+
+// unknownJSONFields returns the field paths in raw that the message descriptor
+// md does not define. It walks nested messages, the elements of a repeated
+// message field and the values of a message-valued map. A path joins the JSON
+// field names with a dot, for example "technologies.parentType". The result is
+// the distinct set, sorted, so the caller emits one metric series and one
+// warning per field name for the call.
+func unknownJSONFields(raw []byte, md protoreflect.MessageDescriptor) []string {
+	seen := map[string]struct{}{}
+	collectUnknownJSONFields(raw, md, "", seen)
+	out := make([]string, 0, len(seen))
+	for f := range seen {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func collectUnknownJSONFields(raw []byte, md protoreflect.MessageDescriptor, prefix string, seen map[string]struct{}) {
+	// A well-known type has a custom JSON shape (a Struct or an Any carries
+	// arbitrary keys), so a descriptor walk would report a false unknown. Stop
+	// at the boundary and trust the type.
+	if strings.HasPrefix(string(md.FullName()), "google.protobuf.") {
+		return
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return // not an object (a scalar, a list or malformed): nothing to inspect
+	}
+	fields := md.Fields()
+	for key, val := range obj {
+		fd := fieldByJSONName(fields, key)
+		if fd == nil {
+			seen[prefix+key] = struct{}{}
+			continue
+		}
+		msg := fd.Message()
+		if msg == nil {
+			continue // a scalar or an enum: a known field with no nested fields
+		}
+		switch {
+		case fd.IsMap():
+			// A map key is data, never a proto field. Only a message-valued map
+			// can carry an unknown field, and it is under the map field name.
+			if vfd := fd.MapValue(); vfd.Message() != nil {
+				var m map[string]json.RawMessage
+				if err := json.Unmarshal(val, &m); err == nil {
+					for _, mv := range m {
+						collectUnknownJSONFields(mv, vfd.Message(), prefix+key+".", seen)
+					}
+				}
+			}
+		case fd.IsList():
+			var arr []json.RawMessage
+			if err := json.Unmarshal(val, &arr); err == nil {
+				for _, el := range arr {
+					collectUnknownJSONFields(el, msg, prefix+key+".", seen)
+				}
+			}
+		default:
+			collectUnknownJSONFields(val, msg, prefix+key+".", seen)
+		}
+	}
+}
+
+// fieldByJSONName resolves a JSON object key to a proto field. protojson accepts
+// both the JSON name (camelCase) and the proto field name on input, so it checks
+// both before it declares a key unknown.
+func fieldByJSONName(fields protoreflect.FieldDescriptors, name string) protoreflect.FieldDescriptor {
+	if fd := fields.ByJSONName(name); fd != nil {
+		return fd
+	}
+	if fd := fields.ByTextName(name); fd != nil {
+		return fd
+	}
+	return fields.ByName(protoreflect.Name(name))
 }
 
 // processDiscoveryAsync runs DiscoveryProcessor.Process in a detached context
