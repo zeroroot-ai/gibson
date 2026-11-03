@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -942,15 +945,58 @@ func TestExecute_OutputJSONNotADiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, c := range map[string]struct{ outputType, outputJSON string }{
-		"another output type": {"gibson.test.v1.Other", string(disc)},
-		"no output type":      {"", string(disc)},
-		"empty output_json":   {discoveryResultType, ""},
+		"another output type":   {"gibson.test.v1.Other", string(disc)},
+		"no output type":        {"", string(disc)},
+		"empty output_json":     {discoveryResultType, ""},
+		"malformed output_json": {discoveryResultType, "{not valid json"},
 	} {
 		fake := runOutputJSON(t, c.outputType, c.outputJSON)
 		select {
 		case <-fake.done:
 			t.Errorf("%s: DiscoveryProcessor.Process was called", name)
 		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
+// unknownJSONFields walks the raw JSON against the message the sdk defines and
+// returns only the field paths the sdk does not define. The cases cover a field
+// nested in a repeated message, a field under a message-valued map, a field in
+// a singular nested message, a well-known type (skipped), and a non-object
+// (returns nothing).
+func TestUnknownJSONFields(t *testing.T) {
+	discoveryMD := (&graphragpb.DiscoveryResult{}).ProtoReflect().Descriptor()
+	graphNodeMD := (&graphragpb.GraphNode{}).ProtoReflect().Descriptor()
+	valueMD := (&graphragpb.Value{}).ProtoReflect().Descriptor()
+	timestampMD := (&timestamppb.Timestamp{}).ProtoReflect().Descriptor()
+
+	for name, tc := range map[string]struct {
+		raw  string
+		md   protoreflect.MessageDescriptor
+		want []string
+	}{
+		"unknown in a repeated message": {
+			`{"technologies":[{"parent_type":"y"}]}`, discoveryMD, []string{"technologies.parent_type"},
+		},
+		"unknown under a message-valued map": {
+			`{"properties":{"k":{"nope":1}}}`, graphNodeMD, []string{"properties.nope"},
+		},
+		"unknown in a singular nested message": {
+			`{"listValue":{"bogus":1}}`, valueMD, []string{"listValue.bogus"},
+		},
+		"well-known type is skipped": {
+			`{"seconds":1,"bogus":2}`, timestampMD, nil,
+		},
+		"a non-object yields nothing": {
+			`"42"`, discoveryMD, nil,
+		},
+		"all fields known": {
+			`{"hosts":[{"ip":"1.2.3.4"}]}`, discoveryMD, nil,
+		},
+	} {
+		got := unknownJSONFields([]byte(tc.raw), tc.md)
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: unknownJSONFields = %v, want %v", name, got, tc.want)
 		}
 	}
 }
