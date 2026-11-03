@@ -178,6 +178,8 @@ jobs:
           fi
           SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
 
+      # The one setec backend is a Firecracker machine in a launcher pod
+      # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
       - name: Open /dev/kvm for the launcher
         uses: ./gibson/.github/actions/open-kvm
 
