@@ -12,7 +12,14 @@ import (
 	"testing"
 )
 
-const raiseInotifyAction = "./gibson/.github/actions/raise-inotify-limits"
+// raiseInotifyAction is the shared action of zeroroot-ai/.github. A `uses:` line
+// that names it counts as the raise.
+const raiseInotifyAction = "zeroroot-ai/.github/.github/actions/raise-inotify-limits@"
+
+// kindStarts are the commands that start a kind cluster in an exit-test
+// workflow. The raise must come before the first of them. `make substrate`
+// already starts the cluster, so it counts (gibson#1331).
+var kindStarts = []string{"make substrate", "make recreate"}
 
 // workflowMissingInotify reports whether a workflow stands up a kind cluster
 // and does not raise the inotify limits before it (gibson#1331). A kind
@@ -27,7 +34,7 @@ func workflowMissingInotify(text string) bool {
 		case strings.HasPrefix(code, "#"):
 		case strings.Contains(code, raiseInotifyAction) && raise < 0:
 			raise = pos
-		case strings.Contains(code, "make recreate") && standUp < 0:
+		case containsAny(code, kindStarts) && standUp < 0:
 			standUp = pos
 		}
 		pos += len(line)
@@ -41,11 +48,14 @@ func TestWorkflowMissingInotify(t *testing.T) {
 		text string
 		want bool
 	}{
-		"no kind cluster":        {"steps:\n  - run: echo hi\n", false},
-		"kind with no raise":     {"  - run: make recreate ENV=kind\n", true},
-		"raise after the kind":   {"  - run: make recreate ENV=kind\n  - uses: " + raiseInotifyAction + "\n", true},
-		"raise before the kind":  {"  - uses: " + raiseInotifyAction + "\n  - run: make recreate ENV=kind\n", false},
-		"another action is none": {"  - uses: ./gibson/.github/actions/open-kvm\n  - run: make recreate ENV=kind\n", true},
+		"no kind cluster":                    {"steps:\n  - run: echo hi\n", false},
+		"kind with no raise":                 {"  - run: make recreate ENV=kind\n", true},
+		"raise after the kind":               {"  - run: make recreate ENV=kind\n  - uses: " + raiseInotifyAction + "abc\n", true},
+		"raise before the kind":              {"  - uses: " + raiseInotifyAction + "abc\n  - run: make recreate ENV=kind\n", false},
+		"substrate after the raise is clean": {"  - uses: " + raiseInotifyAction + "abc\n  - run: make substrate ENV=kind\n", false},
+		"raise after the substrate":          {"  - run: make substrate ENV=kind\n  - uses: " + raiseInotifyAction + "abc\n", true},
+		"substrate with no raise":            {"  - run: make substrate ENV=kind\n", true},
+		"another action is none":             {"  - uses: ./gibson/.github/actions/open-kvm\n  - run: make recreate ENV=kind\n", true},
 	} {
 		if got := workflowMissingInotify(tc.text); got != tc.want {
 			t.Errorf("%s: got %v, want %v", name, got, tc.want)
@@ -75,4 +85,13 @@ func TestExitTestWorkflowsRaiseInotifyLimits(t *testing.T) {
 			t.Errorf("%s stands up kind and does not use %s before it", f, raiseInotifyAction)
 		}
 	}
+}
+
+func containsAny(s string, subs []string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }
