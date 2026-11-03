@@ -120,6 +120,11 @@ jobs:
           terraform_version: "1.9.8"
           terraform_wrapper: false
 
+      # A full platform on kind opens more inotify instances than the runner
+      # allows. The limits go up before the cluster starts (gibson#1331).
+      - name: Raise the inotify limits
+        uses: zeroroot-ai/.github/.github/actions/raise-inotify-limits@78606607ff7c6192237bb05b4610af6bbe16e8ee # v0.22.0
+
       # Stage 0 writes the bringup keyring the install reads (ADR-0083,
       # deploy#1730, deploy#1732). The registry pull token is the keyring
       # member GHCR_PULL_TOKEN now; baseline-up.sh refuses the environment
@@ -138,11 +143,6 @@ jobs:
 
       # The one setec backend is a Firecracker machine in a launcher pod
       # (ADR-0116, ADR-0141, setec#198). It needs /dev/kvm on the node.
-      # A full platform on kind opens more inotify instances than the runner
-      # allows. Without this step the kubelet cannot follow a pod log (gibson#1331).
-      - name: Raise the inotify limits
-        uses: ./gibson/.github/actions/raise-inotify-limits
-
       - name: Open /dev/kvm for the launcher
         uses: ./gibson/.github/actions/open-kvm
 
