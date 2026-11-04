@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.163.5](https://github.com/zeroroot-ai/gibson/compare/v0.163.4...v0.163.5) (2026-11-04)
+
+
+### Bug Fixes
+
+* **catalog:** repin executor to v0.114.3 (nuclei-templates + go-jose CVE fix) ([#1355](https://github.com/zeroroot-ai/gibson/issues/1355)) ([154dc8a](https://github.com/zeroroot-ai/gibson/commit/154dc8a3133b742f372a60c159f0f35c35a6f56e))
+* **sandboxed:** the fold of a tool result tolerates an unknown field, with a metric ([#1352](https://github.com/zeroroot-ai/gibson/issues/1352)) ([b90210b](https://github.com/zeroroot-ai/gibson/commit/b90210b6067a4f50b87f56bdb03dc3404d4fb66a))
+
 ## [0.163.4](https://github.com/zeroroot-ai/gibson/compare/v0.163.3...v0.163.4) (2026-10-29)
 
 
