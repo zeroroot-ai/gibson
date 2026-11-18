@@ -752,15 +752,13 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// security.allow_private_llm_endpoints — the same knob the embedder
 	// resolver honours below.
 	daemonSvc.WithAllowPrivateLLMEndpoints(d.config.Security.AllowPrivateLLMEndpoints)
+	// ExecuteLLM sends its chat call to the model gateway (gibson#1392).
+	if d.modelClient != nil {
+		daemonSvc.WithModelClient(d.modelClient)
+	}
 	if d.authorizer != nil {
 		daemonSvc.WithAuthorizer(d.authorizer)
 		d.logger.Info(ctx, "FGA authorizer wired into DaemonServer for admin RPCs")
-	}
-	// Capture completed ExecuteLLM calls into the per-tenant brain World as
-	// LlmCall entities (gibson#755) — the World replacement for Langfuse.
-	if d.brainRegistry != nil {
-		daemonSvc.SetLLMCallSink(ingestLLMCall(d.brainRegistry))
-		d.logger.Info(ctx, "wired ExecuteLLM World-capture sink to the ECS brain")
 	}
 	// Wire the CG Minter so CreateAgentIdentity can issue a first-registration
 	// bootstrap token (gibson#648 / ADR-0045). d.cgMinter is constructed during
@@ -925,10 +923,8 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	// auditWriter and is skipped without one.
 	// Spec: llm-user-attribution-governance (Requirement 4).
 	filter := modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0)
-	// ExecuteLLM asks the same filter before it calls a provider. Expose the
-	// filter's cache-invalidation hook so grant/revoke take effect within
-	// milliseconds rather than the filter's 30s TTL.
-	daemonSvc.WithModelFilter(filter)
+	// Expose the cache-invalidation hook of the filter so grant/revoke take
+	// effect within milliseconds rather than the filter's 30s TTL.
 	daemonSvc.WithModelGateInvalidator(filter)
 	if d.infrastructure != nil {
 		if dsm, ok := d.infrastructure.slotManager.(*DaemonSlotManager); ok {

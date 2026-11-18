@@ -5,43 +5,43 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
-	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/sdk/auth"
 )
-
-// ---------------------------------------------------------------------------
-// Stubs
-// ---------------------------------------------------------------------------
 
 // stubProviderConfigStore implements providerConfigStoreIface for tests.
 // Only the Resolve method is exercised by the exec handlers.
 type stubProviderConfigStore struct {
 	resolveFunc func(ctx context.Context, tenantID, name string) (*providerconfig.DecryptedConfig, error)
+	getFunc     func(ctx context.Context, tenantID, name string) (*providerconfig.ProviderConfig, error)
 }
 
 func (s *stubProviderConfigStore) List(ctx context.Context, tenantID string) ([]*providerconfig.ProviderConfig, error) {
 	return nil, nil
 }
 func (s *stubProviderConfigStore) Get(ctx context.Context, tenantID, name string) (*providerconfig.ProviderConfig, error) {
-	return nil, nil
+	if s.getFunc != nil {
+		return s.getFunc(ctx, tenantID, name)
+	}
+	return nil, providerconfig.ErrNotFound
 }
 func (s *stubProviderConfigStore) Create(ctx context.Context, tenantID string, input *providerconfig.ProviderConfigInput) (*providerconfig.ProviderConfig, error) {
 	return nil, nil
@@ -115,30 +115,12 @@ func (l *stubExecLimiter) Check(_ context.Context, _, _ string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // tenantCtx builds a context with the given tenant wired in.
 // tenantCtx is a request context of a signed-in user of tenantID. The user is
 // the actor of each audit record the handlers write.
 func tenantCtx(tenantID string) context.Context {
 	ctx := auth.ContextWithTenantString(context.Background(), tenantID)
 	return auth.WithIdentity(ctx, auth.Identity{Tenant: auth.MustNewTenantID(tenantID), Subject: "user-test"})
-}
-
-// newExecServer builds a minimal DaemonServer with a stubbed provider store and
-// factory. Callers may further customise fields (e.g. WithExecLimiter).
-func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
-	s := &DaemonServer{
-		logger:          slog.Default(),
-		providerConfig:  store,
-		providerFactory: factory,
-		// The budget enforcer is required: the daemon wires it at start.
-		budgetEnforcer: &stubBudgetEnforcer{},
-	}
-	// The model gate is required: ExecuteLLM denies every call without it.
-	return s.WithModelFilter(gateStub{permit: true})
 }
 
 // gateStub is a modelgate.Filter with a fixed answer.
@@ -158,6 +140,25 @@ func (g gateStub) Permitted(_ context.Context, c []modelgate.Candidate) ([]model
 }
 func (gateStub) InvalidateCache() {}
 
+// stubBudgetEnforcer implements budgetEnforcerIface for unit tests.
+// checkErr controls whether Check returns an error (simulating exhausted budget).
+// recordCalls records how many times Record was called and the total tokens seen.
+type stubBudgetEnforcer struct {
+	checkErr      error
+	recordCalls   int
+	recordedTotal int64
+}
+
+func (e *stubBudgetEnforcer) Check(_ context.Context, _ int64) (*budget.Status, error) {
+	return nil, e.checkErr
+}
+
+func (e *stubBudgetEnforcer) Record(_ context.Context, tokens int64, _ int64) error {
+	e.recordCalls++
+	e.recordedTotal += tokens
+	return nil
+}
+
 // knownDecryptedConfig returns a DecryptedConfig that exercises the
 // api_key / base_url / extra credential path.
 func knownDecryptedConfig() *providerconfig.DecryptedConfig {
@@ -173,473 +174,236 @@ func knownDecryptedConfig() *providerconfig.DecryptedConfig {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ExecuteLLM tests
-// ---------------------------------------------------------------------------
-
-// TestExecuteLLM_RoundTrip exercises the happy-path unary handler: messages are
-// translated into the llm.CompletionRequest, the provider is called, and the
-// response fields are mapped back to proto.
-func TestExecuteLLM_RoundTrip(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{
-				Message: llm.Message{
-					Role:    llm.RoleAssistant,
-					Content: "hello from LLM",
-				},
-				FinishReason: llm.FinishReasonStop,
-				Usage: llm.CompletionTokenUsage{
-					PromptTokens:     5,
-					CompletionTokens: 4,
-					TotalTokens:      9,
-				},
-			}, nil
-		},
-	}
-
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return prov, nil
-	})
-
-	ctx := tenantCtx("tenant-a")
-	req := &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Model:        "gpt-4o-mini",
-		Messages: []*tenantv1.LLMMessageContent{
-			{Role: "user", Content: "hello"},
-		},
-	}
-
-	resp, err := s.ExecuteLLM(ctx, req)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
-	assert.Equal(t, "hello from LLM", resp.Content)
-	assert.Equal(t, string(llm.FinishReasonStop), resp.FinishReason)
-	require.NotNil(t, resp.Usage)
-	assert.Equal(t, int32(5), resp.Usage.InputTokens)
-	assert.Equal(t, int32(4), resp.Usage.OutputTokens)
-	assert.Equal(t, int32(9), resp.Usage.TotalTokens)
-
-	// Model override must reach the CompletionRequest.
-	assert.Equal(t, "gpt-4o-mini", capturedReq.Model)
-
-	// Message translation must preserve role and content.
-	require.Len(t, capturedReq.Messages, 1)
-	assert.Equal(t, llm.Role("user"), capturedReq.Messages[0].Role)
-	assert.Equal(t, "hello", capturedReq.Messages[0].Content)
-}
-
-// TestExecuteLLM_MissionIDFlowsToWorldSink verifies the mission-evidence edge
-// plumbing (gibson#1078): a mission-aware caller's mission_id on the request is
-// carried onto the captured LLMCallRecord so the World can stamp
-// LlmCallObserved.MissionID, while a request that omits it (e.g. dashboard chat)
-// captures an empty MissionID and stays tenant-ambient.
-func TestExecuteLLM_MissionIDFlowsToWorldSink(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
-				FinishReason: llm.FinishReasonStop,
-				Usage:        llm.CompletionTokenUsage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2},
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	var captured []LLMCallRecord
-	s.SetLLMCallSink(func(_ context.Context, _ string, call LLMCallRecord) {
-		captured = append(captured, call)
-	})
-
-	ctx := tenantCtx("tenant-a")
-	missionID := "mission-42"
-
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan"}},
-		MissionId:    &missionID,
-	})
-	require.NoError(t, err)
-
-	_, err = s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "chat"}},
-	})
-	require.NoError(t, err)
-
-	require.Len(t, captured, 2)
-	assert.Equal(t, "mission-42", captured[0].MissionID, "mission-aware call carries mission_id")
-	assert.Empty(t, captured[1].MissionID, "non-mission call (chat) stays tenant-ambient")
-}
-
-// TestExecuteLLM_DefaultsMaxTokens verifies that a request which omits
-// max_tokens reaches the provider with the default floor applied, rather than
-// 0. A zero max_tokens makes Anthropic return an empty completion with
-// finishReason "length" — the blank-chat-reply bug.
-func TestExecuteLLM_DefaultsMaxTokens(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{
-				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
-				FinishReason: llm.FinishReasonStop,
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	// No MaxTokens set on the request (mirrors the dashboard chat client).
-	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	})
-	require.NoError(t, err)
-	assert.Equal(t, defaultMaxOutputTokens, capturedReq.MaxTokens,
-		"omitted max_tokens must be floored to the default, not left at 0")
-}
-
-// TestExecuteLLM_PreservesExplicitMaxTokens verifies an explicit max_tokens is
-// not overridden by the default floor.
-func TestExecuteLLM_PreservesExplicitMaxTokens(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{
-				Message:      llm.Message{Role: llm.RoleAssistant, Content: "ok"},
-				FinishReason: llm.FinishReasonStop,
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	want := int32(256)
-	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-		MaxTokens:    &want,
-	})
-	require.NoError(t, err)
-	assert.Equal(t, 256, capturedReq.MaxTokens, "explicit max_tokens must be preserved")
-}
-
-// TestExecuteLLM_NoProviderStore ensures FailedPrecondition is returned when
-// the server has no provider config store wired.
-func TestExecuteLLM_NoProviderStore(t *testing.T) {
+// newExecServer builds a minimal DaemonServer with a stubbed provider store and
+// factory. Callers may further customise fields (e.g. WithExecLimiter).
+func newExecServer(store providerConfigStoreIface, factory func(llm.ProviderConfig) (llm.LLMProvider, error)) *DaemonServer {
 	s := &DaemonServer{
 		logger:          slog.Default(),
-		providerFactory: func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil },
-		budgetEnforcer:  &stubBudgetEnforcer{},
+		providerConfig:  store,
+		providerFactory: factory,
+		// The budget enforcer is required: the daemon wires it at start.
+		budgetEnforcer: &stubBudgetEnforcer{},
 	}
-	ctx := tenantCtx("tenant-a")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.FailedPrecondition, st.Code())
+	return s
 }
 
-// TestExecuteLLM_ProviderNotFound ensures NotFound is propagated when the store
-// returns ErrNotFound.
-func TestExecuteLLM_ProviderNotFound(t *testing.T) {
-	store := &stubProviderConfigStore{}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
-	ctx := tenantCtx("tenant-a")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{ProviderName: "missing"})
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.NotFound, st.Code())
+// fakeChatModels is the test gateway of ExecuteLLM. It records each call.
+type fakeChatModels struct {
+	callers []modelclient.Caller
+	targets []modelclient.Target
+	reqs    []modelclient.Request
+	resp    *modelclient.Response
+	err     error
 }
 
-// TestExecuteLLM_NoTenantContext verifies that a context with no explicit tenant
-// is rejected with Unauthenticated. Under the Envoy/identity interceptor model,
-// the tenant is derived from the SPIFFE-mTLS-authenticated identity headers
-// injected by ext-authz. A context with no identity (or _system tenant)
-// cannot proceed to the provider store.
-func TestExecuteLLM_NoTenantContext(t *testing.T) {
-	store := &stubProviderConfigStore{} // Resolve always returns ErrNotFound
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return nil, nil })
-	// Plain context — no tenant identity; handler rejects with Unauthenticated.
-	_, err := s.ExecuteLLM(context.Background(), &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.Unauthenticated, st.Code())
+func (f *fakeChatModels) Respond(
+	_ context.Context, c modelclient.Caller, t modelclient.Target, r modelclient.Request,
+) (*modelclient.Response, error) {
+	f.callers, f.targets, f.reqs = append(f.callers, c), append(f.targets, t), append(f.reqs, r)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.resp, nil
 }
 
-// TestExecuteLLM_RateLimitEnforced verifies that the 11th call returns
-// ResourceExhausted when a limiter with blockAt=11 is wired.
+func textResponse(text string) *modelclient.Response {
+	r := &modelclient.Response{Output: []modelclient.Item{{
+		Type: modelclient.ItemMessage, Role: modelclient.RoleAssistant,
+		Content: []modelclient.ContentPart{{Type: modelclient.PartOutputText, Text: text}},
+	}}}
+	r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.TotalTokens = 5, 4, 9
+	return r
+}
+
+func chatStore() *stubProviderConfigStore {
+	return &stubProviderConfigStore{getFunc: func(_ context.Context, _, name string) (*providerconfig.ProviderConfig, error) {
+		return &providerconfig.ProviderConfig{Name: name, Type: llm.ProviderOpenAI, DefaultModel: "gpt-default", Enabled: true}, nil
+	}}
+}
+
+func chatServer(store providerConfigStoreIface, gw chatModels) *DaemonServer {
+	s := &DaemonServer{logger: slog.Default(), providerConfig: store, budgetEnforcer: &stubBudgetEnforcer{}}
+	return s.WithModelClient(gw)
+}
+
+func userChatCtx(tenant string) context.Context { return tenantCtx(tenant) }
+
+func TestExecuteLLM_SendsOneGatewayCallAsTheUser(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("hello from LLM")}
+	s := chatServer(chatStore(), gw)
+	resp, err := s.ExecuteLLM(userChatCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "my-openai", Model: "gpt-4o-mini",
+		Messages: []*tenantv1.LLMMessageContent{{Role: "system", Content: "be brief"}, {Role: "user", Content: "hello"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "hello from LLM", resp.Content)
+	assert.Equal(t, "stop", resp.FinishReason)
+	assert.Equal(t, int32(9), resp.Usage.TotalTokens)
+
+	require.Len(t, gw.targets, 1)
+	assert.Equal(t, modelclient.Target{Tenant: "tenant-a", Provider: "my-openai", Model: "gpt-4o-mini"}, gw.targets[0])
+	c := gw.callers[0]
+	assert.Equal(t, modelcall.PurposeChat, c.Purpose)
+	assert.Equal(t, "user:user-test", c.Initiator, "the user is the initiator")
+	assert.Empty(t, c.Mission, "a call outside a mission has no mission")
+	assert.Equal(t, defaultMaxOutputTokens, gw.reqs[0].MaxOutputTokens)
+	require.Len(t, gw.reqs[0].Input, 2)
+	assert.Equal(t, modelclient.RoleSystem, gw.reqs[0].Input[0].Role)
+}
+
+func TestExecuteLLM_TheProviderDefaultModelIsUsedWhenNoneIsNamed(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	_, err := chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "gpt-default", gw.targets[0].Model)
+}
+
+func TestExecuteLLM_AMissionCallCarriesTheMissionGrantScope(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	missionID := "m-1"
+	_, err := chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", MissionId: &missionID, Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	c := gw.callers[0]
+	assert.Equal(t, "m-1", c.Mission)
+	assert.NotEmpty(t, c.Task)
+	assert.Equal(t, "dashboard-chat", c.Purpose)
+}
+
+func TestExecuteLLM_ToolsAndToolCalls(t *testing.T) {
+	resp := &modelclient.Response{Output: []modelclient.Item{
+		{Type: modelclient.ItemFunctionCall, CallID: "c1", Name: "nmap", Arguments: `{"host":"a"}`},
+	}}
+	gw := &fakeChatModels{resp: resp}
+	out, err := chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p",
+		Messages: []*tenantv1.LLMMessageContent{
+			{Role: "user", Content: "scan"},
+			{Role: "assistant", ToolCalls: []*tenantv1.LLMToolCall{{Id: "c0", Name: "ping", Arguments: "{}"}}},
+			{Role: "tool", ToolResults: []*tenantv1.LLMToolResult{{ToolCallId: "c0", Content: "pong"}}},
+		},
+		Tools: []*tenantv1.LLMToolDef{{Name: "nmap", Description: "scan", ParametersJson: `{"type":"object"}`}},
+	})
+	require.NoError(t, err)
+	require.Len(t, out.ToolCalls, 1)
+	assert.Equal(t, "nmap", out.ToolCalls[0].Name)
+	assert.Equal(t, "c1", out.ToolCalls[0].Id)
+	assert.Equal(t, "tool_calls", out.FinishReason)
+	req := gw.reqs[0]
+	require.Len(t, req.Tools, 1)
+	var kinds []string
+	for _, it := range req.Input {
+		kinds = append(kinds, it.Type)
+	}
+	assert.Equal(t, []string{"message", "function_call", "function_call_output"}, kinds)
+}
+
+func TestExecuteLLM_StructuredOutput(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse(`{"ok":true}`)}
+	_, err := chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+		ResponseFormat: &tenantv1.ResponseFormat{Type: "json_schema", Name: "a", SchemaJson: `{"type":"object"}`, Strict: true},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, gw.reqs[0].Text)
+	assert.Equal(t, "json_schema", gw.reqs[0].Text.Format.Type)
+	assert.True(t, gw.reqs[0].Text.Format.Strict)
+
+	_, err = chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+		ResponseFormat: &tenantv1.ResponseFormat{Type: "json_schema", SchemaJson: "{not json"},
+	})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+}
+
+func TestExecuteLLM_GatewayErrorsMapToStatuses(t *testing.T) {
+	cases := map[int]codes.Code{
+		http.StatusForbidden:       codes.PermissionDenied,
+		http.StatusUnauthorized:    codes.PermissionDenied,
+		http.StatusNotFound:        codes.Unavailable,
+		http.StatusTooManyRequests: codes.ResourceExhausted,
+		http.StatusBadGateway:      codes.Internal,
+	}
+	for status, want := range cases {
+		gw := &fakeChatModels{err: &modelclient.APIError{Status: status, Body: "x-secret-header-leak"}}
+		_, err := chatServer(chatStore(), gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+			ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
+		})
+		assert.Equal(t, want, grpcCode(err), "status %d", status)
+		assert.NotContains(t, err.Error(), "x-secret-header-leak", "the gateway body is not forwarded")
+	}
+}
+
+func TestExecuteLLM_Refusals(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	// No provider store.
+	s := chatServer(nil, gw)
+	s.providerConfig = nil
+	_, err := s.ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
+	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
+	// No model client.
+	s2 := &DaemonServer{logger: slog.Default(), providerConfig: chatStore(), budgetEnforcer: &stubBudgetEnforcer{}}
+	_, err = s2.ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
+	assert.Equal(t, codes.FailedPrecondition, grpcCode(err))
+	// Unknown provider.
+	_, err = chatServer(&stubProviderConfigStore{}, gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "x"})
+	assert.Equal(t, codes.NotFound, grpcCode(err))
+	// No tenant.
+	_, err = chatServer(chatStore(), gw).ExecuteLLM(context.Background(), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
+	assert.Equal(t, codes.Unauthenticated, grpcCode(err))
+	// No model anywhere.
+	noModel := &stubProviderConfigStore{getFunc: func(context.Context, string, string) (*providerconfig.ProviderConfig, error) {
+		return &providerconfig.ProviderConfig{Name: "p"}, nil
+	}}
+	_, err = chatServer(noModel, gw).ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
+	assert.Equal(t, codes.InvalidArgument, grpcCode(err))
+	assert.Empty(t, gw.targets, "no refused call reached the gateway")
+}
+
 func TestExecuteLLM_RateLimitEnforced(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	s := chatServer(chatStore(), gw).WithExecLimiter(&stubExecLimiter{blockAt: 1})
+	_, err := s.ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
+	assert.Equal(t, codes.ResourceExhausted, grpcCode(err))
+	assert.Empty(t, gw.targets)
+}
 
-	limiter := &stubExecLimiter{blockAt: 11}
-	s.WithExecLimiter(limiter)
-
-	ctx := tenantCtx("tenant-rl")
-	req := &tenantv1.ExecuteLLMRequest{ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}}
-
-	for i := 0; i < 10; i++ {
-		_, err := s.ExecuteLLM(ctx, req)
-		require.NoError(t, err, "call %d should succeed", i+1)
-	}
-
-	_, err := s.ExecuteLLM(ctx, req)
+func TestExecuteLLM_BudgetExhaustedBlocked(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	s := chatServer(chatStore(), gw)
+	s.budgetEnforcer = &stubBudgetEnforcer{checkErr: errors.New("budget exceeded")}
+	_, err := s.ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{ProviderName: "p"})
 	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.ResourceExhausted, st.Code())
+	assert.Equal(t, codes.ResourceExhausted, grpcCode(err))
+	assert.Empty(t, gw.targets)
 }
 
-// TestExecuteLLM_CredentialNotLeaked is a security regression test.
-// The known credential string must never appear in the serialised proto response.
-func TestExecuteLLM_CredentialNotLeaked(t *testing.T) {
-	const secretKey = "sk-secret-123456"
-
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return &providerconfig.DecryptedConfig{
-				ProviderConfig: providerconfig.ProviderConfig{
-					Type:         "openai",
-					DefaultModel: "gpt-4o",
-				},
-				Credentials: map[string]string{
-					"api_key": secretKey,
-				},
-			}, nil
-		},
-	}
-	prov := &stubMockProvider{}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	ctx := tenantCtx("tenant-sec")
-	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	})
+// The handler records no token count of its own: the gateway trace is the one
+// source (gibson#1390).
+func TestExecuteLLM_RecordsNoTokensOfItsOwn(t *testing.T) {
+	be := &stubBudgetEnforcer{}
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	s := chatServer(chatStore(), gw)
+	s.budgetEnforcer = be
+	_, err := s.ExecuteLLM(userChatCtx("t"), &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}})
 	require.NoError(t, err)
-
-	// Serialise the proto response to JSON and assert the credential is absent.
-	raw, jsonErr := json.Marshal(resp)
-	require.NoError(t, jsonErr)
-	assert.NotContains(t, string(raw), secretKey,
-		"decrypted credential must not appear in the serialised response")
+	assert.Zero(t, be.recordCalls)
 }
 
-// TestExecuteLLM_ToolCalls verifies that tool calls in the completion response
-// are correctly translated into the proto ToolCall slice.
-func TestExecuteLLM_ToolCalls(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Message: llm.Message{
-					Role: llm.RoleAssistant,
-					ToolCalls: []llm.ToolCall{
-						{ID: "call-1", Name: "nmap", Arguments: `{"target":"1.2.3.4"}`},
-					},
-				},
-				FinishReason: llm.FinishReasonToolCalls,
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	ctx := tenantCtx("tenant-tools")
-	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan this"}},
-		Tools:        []*tenantv1.LLMToolDef{{Name: "nmap", Description: "port scanner"}},
-	})
+func TestExecuteLLM_PerCallCapClampsMaxTokens(t *testing.T) {
+	gw := &fakeChatModels{resp: textResponse("ok")}
+	ctx := contextkeys.WithPerCallTokenCap(userChatCtx("t"), 100)
+	mt := int32(5000)
+	_, err := chatServer(chatStore(), gw).ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
+		ProviderName: "p", MaxTokens: &mt, Messages: []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}}})
 	require.NoError(t, err)
-	require.Len(t, resp.ToolCalls, 1)
-	assert.Equal(t, "call-1", resp.ToolCalls[0].Id)
-	assert.Equal(t, "nmap", resp.ToolCalls[0].Name)
-	assert.Equal(t, `{"target":"1.2.3.4"}`, resp.ToolCalls[0].Arguments)
+	assert.Equal(t, 100, gw.reqs[0].MaxOutputTokens)
 }
 
-// TestExecuteLLM_ToolCalls_CapturedInWorldSink is the gibson#271
-// flight-recorder unit: a tool-calling completion's ToolCalls must ride onto
-// the World-capture record (CompletionToolCalls), not be silently dropped.
-// Also proves a historical prompt message's own tool_calls/tool_call_id
-// survive the proto→llm.Message→api.LLMMessage translation.
-func TestExecuteLLM_ToolCalls_CapturedInWorldSink(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Message: llm.Message{
-					Role: llm.RoleAssistant,
-					ToolCalls: []llm.ToolCall{
-						{ID: "call-1", Type: "function", Name: "nmap", Arguments: `{"target":"1.2.3.4"}`},
-					},
-				},
-				FinishReason: llm.FinishReasonToolCalls,
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	var captured []LLMCallRecord
-	s.SetLLMCallSink(func(_ context.Context, _ string, call LLMCallRecord) {
-		captured = append(captured, call)
-	})
-
-	ctx := tenantCtx("tenant-tools")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "scan this"}},
-		Tools:        []*tenantv1.LLMToolDef{{Name: "nmap", Description: "port scanner"}},
-	})
-	require.NoError(t, err)
-
-	require.Len(t, captured, 1)
-	require.Len(t, captured[0].CompletionToolCalls, 1, "the completion's own tool calls must not be dropped")
-	assert.Equal(t, "nmap", captured[0].CompletionToolCalls[0].Name)
-	assert.JSONEq(t, `{"target":"1.2.3.4"}`, captured[0].CompletionToolCalls[0].Arguments)
-	assert.NotZero(t, captured[0].RecordedAtUnixNano, "a capture time must be stamped for retention sweeps")
-}
-
-// TestExecuteLLM_StructuredOutputUnimplemented checks that requesting json_schema
-// format against a provider that doesn't implement StructuredOutputProvider
-// returns codes.Unimplemented.
-func TestExecuteLLM_StructuredOutputUnimplemented(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	// stubMockProvider does NOT implement llm.StructuredOutputProvider.
-	prov := &stubMockProvider{}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	ctx := tenantCtx("tenant-struct")
-	resp, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName:   "p",
-		Messages:       []*tenantv1.LLMMessageContent{{Role: "user", Content: "json please"}},
-		ResponseFormat: &tenantv1.ResponseFormat{Type: "json_schema", Name: "MySchema"},
-	})
-	require.Error(t, err)
-	assert.Nil(t, resp)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.Unimplemented, st.Code())
-}
-
-// TestExecuteLLM_TemperatureMaxTokens verifies that optional scalar request
-// fields are forwarded to the CompletionRequest when present and zero-valued
-// when absent.
-func TestExecuteLLM_TemperatureMaxTokens(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{Message: llm.Message{Content: "ok"}}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	temp := float64(0.7)
-	maxTok := int32(512)
-	ctx := tenantCtx("tenant-params")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-		Temperature:  &temp,
-		MaxTokens:    &maxTok,
-	})
-	require.NoError(t, err)
-	assert.InDelta(t, 0.7, capturedReq.Temperature, 0.001)
-	assert.Equal(t, 512, capturedReq.MaxTokens)
-}
-
-// ---------------------------------------------------------------------------
-// decryptedConfigToLLMConfig unit tests
-// ---------------------------------------------------------------------------
-
-// TestDecryptedConfigToLLMConfig_APIKeyAndBaseURL verifies the two canonical
-// credential fields are promoted into the typed ProviderConfig fields.
-func TestDecryptedConfigToLLMConfig_APIKeyAndBaseURL(t *testing.T) {
-	dec := &providerconfig.DecryptedConfig{
-		ProviderConfig: providerconfig.ProviderConfig{
-			Type:         "openai",
-			DefaultModel: "gpt-4o",
-		},
-		Credentials: map[string]string{
-			"api_key":  "sk-abc",
-			"base_url": "https://custom.endpoint/v1",
-			"org":      "org-123",
-		},
-	}
-
-	cfg := decryptedConfigToLLMConfig(dec, "")
-	assert.Equal(t, "sk-abc", cfg.APIKey)
-	assert.Equal(t, "https://custom.endpoint/v1", cfg.BaseURL)
-	assert.Equal(t, "org-123", cfg.Extra["org"])
-	// api_key and base_url must NOT appear in Extra.
-	assert.NotContains(t, cfg.Extra, "api_key")
-	assert.NotContains(t, cfg.Extra, "base_url")
-	// Default model falls through when no override.
-	assert.Equal(t, "gpt-4o", cfg.DefaultModel)
-}
-
-// TestDecryptedConfigToLLMConfig_ModelOverride verifies that a non-empty
-// modelOverride replaces the stored default_model.
-func TestDecryptedConfigToLLMConfig_ModelOverride(t *testing.T) {
-	dec := &providerconfig.DecryptedConfig{
-		ProviderConfig: providerconfig.ProviderConfig{Type: "openai", DefaultModel: "gpt-4o"},
-		Credentials:    map[string]string{"api_key": "x"},
-	}
-	cfg := decryptedConfigToLLMConfig(dec, "gpt-4o-mini")
-	assert.Equal(t, "gpt-4o-mini", cfg.DefaultModel)
-}
-
-// ---------------------------------------------------------------------------
-// protoMessagesToLLM unit tests
-// ---------------------------------------------------------------------------
-
-// TestProtoMessagesToLLM_ToolResults verifies that tool-result entries inside a
-// proto message are promoted to standalone llm.Message values with RoleTool.
 func TestProtoMessagesToLLM_ToolResults(t *testing.T) {
 	msgs := protoMessagesToLLM([]*tenantv1.LLMMessageContent{
 		{
@@ -698,376 +462,8 @@ func TestProtoToolDefsToLLM_InvalidJsonFallsBackToObjectSchema(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestCompletionRespToProto_NilResponse returns a non-nil empty proto.
-func TestCompletionRespToProto_NilResponse(t *testing.T) {
-	out := completionRespToProto(nil)
-	require.NotNil(t, out)
-}
 
-// TestCompletionRespToProto_Usage verifies usage token counts are mapped correctly.
-func TestCompletionRespToProto_Usage(t *testing.T) {
-	resp := &llm.CompletionResponse{
-		Message:      llm.Message{Content: "hi"},
-		FinishReason: llm.FinishReasonStop,
-		Usage: llm.CompletionTokenUsage{
-			PromptTokens:     100,
-			CompletionTokens: 50,
-			TotalTokens:      150,
-		},
-	}
-	out := completionRespToProto(resp)
-	require.NotNil(t, out.Usage)
-	assert.Equal(t, int32(100), out.Usage.InputTokens)
-	assert.Equal(t, int32(50), out.Usage.OutputTokens)
-	assert.Equal(t, int32(150), out.Usage.TotalTokens)
-}
-
-// ---------------------------------------------------------------------------
-// WithProviderFactory / WithExecLimiter wiring tests
-// ---------------------------------------------------------------------------
-
-// TestWithProviderFactory_ReplacesDefault verifies the factory seam can be
-// replaced so tests never call the real providers.NewProvider.
-func TestWithProviderFactory_ReplacesDefault(t *testing.T) {
-	s := &DaemonServer{
-		logger:          slog.Default(),
-		providerFactory: providerFactoryFunc, // default
-		budgetEnforcer:  &stubBudgetEnforcer{},
-		modelFilter:     gateStub{permit: true},
-	}
-	called := false
-	s.WithProviderFactory(func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		called = true
-		return &stubMockProvider{}, nil
-	})
-
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	s.providerConfig = store
-
-	_, err := s.ExecuteLLM(tenantCtx("t"), &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	})
-	require.NoError(t, err)
-	assert.True(t, called, "injected factory must be invoked")
-}
-
-// TestWithExecLimiter_NilLimiterSkipsCheck verifies that a nil execLimiter
-// field does not panic and allows all requests through.
-func TestWithExecLimiter_NilLimiterSkipsCheck(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return &stubMockProvider{}, nil
-	})
-	// execLimiter is nil by default.
-
-	_, err := s.ExecuteLLM(tenantCtx("t"), &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	})
-	require.NoError(t, err)
-}
-
-// TestErrRateLimited_IsSentinel ensures ratelimit.ErrRateLimited is detectable
-// with errors.Is from the handler's perspective.
 func TestErrRateLimited_IsSentinel(t *testing.T) {
 	wrapped := errors.Join(errors.New("outer"), ratelimit.ErrRateLimited)
 	assert.True(t, errors.Is(wrapped, ratelimit.ErrRateLimited))
-}
-
-// ---------------------------------------------------------------------------
-// stubBudgetEnforcer
-// ---------------------------------------------------------------------------
-
-// stubBudgetEnforcer implements budgetEnforcerIface for unit tests.
-// checkErr controls whether Check returns an error (simulating exhausted budget).
-// recordCalls records how many times Record was called and the total tokens seen.
-type stubBudgetEnforcer struct {
-	checkErr      error
-	recordCalls   int
-	recordedTotal int64
-}
-
-func (e *stubBudgetEnforcer) Check(_ context.Context, _ int64) (*budget.Status, error) {
-	return nil, e.checkErr
-}
-
-func (e *stubBudgetEnforcer) Record(_ context.Context, tokens int64, _ int64) error {
-	e.recordCalls++
-	e.recordedTotal += tokens
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// ExecuteLLM budget tests
-// ---------------------------------------------------------------------------
-
-// TestExecuteLLM_BudgetExhaustedBlocked verifies that ExecuteLLM returns
-// ResourceExhausted before dispatching to the provider when the budget enforcer
-// denies the call. No tokens must be consumed.
-func TestExecuteLLM_BudgetExhaustedBlocked(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	providerCalled := false
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			providerCalled = true
-			return &llm.CompletionResponse{Message: llm.Message{Content: "should not reach here"}}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	budgetErr := status_grpc.Errorf(codes.ResourceExhausted, "monthly token limit exceeded")
-	enforcer := &stubBudgetEnforcer{checkErr: budgetErr}
-	s.WithBudgetEnforcer(enforcer)
-
-	ctx := tenantCtx("tenant-budget")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hi"}},
-	})
-
-	require.Error(t, err)
-	st, _ := status_grpc.FromError(err)
-	assert.Equal(t, codes.ResourceExhausted, st.Code(), "exhausted budget must yield ResourceExhausted")
-	assert.False(t, providerCalled, "provider must not be called when budget is exhausted")
-	assert.Equal(t, 0, enforcer.recordCalls, "Record must not be called when budget check fails")
-}
-
-// TestExecuteLLM_BudgetRecordedAfterDispatch verifies that successful
-// ExecuteLLM calls record authoritative token usage via the budget enforcer.
-func TestExecuteLLM_BudgetRecordedAfterDispatch(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, _ llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			return &llm.CompletionResponse{
-				Message: llm.Message{Content: "ok"},
-				Usage: llm.CompletionTokenUsage{
-					PromptTokens:     10,
-					CompletionTokens: 20,
-					TotalTokens:      30,
-				},
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) { return prov, nil })
-
-	enforcer := &stubBudgetEnforcer{}
-	s.WithBudgetEnforcer(enforcer)
-
-	ctx := tenantCtx("tenant-record")
-	_, err := s.ExecuteLLM(ctx, &tenantv1.ExecuteLLMRequest{
-		ProviderName: "p",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello world"}},
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, 1, enforcer.recordCalls, "Record must be called once after dispatch")
-	assert.Equal(t, int64(30), enforcer.recordedTotal, "recorded tokens must equal provider's total usage")
-}
-
-// ---------------------------------------------------------------------------
-// Per-call token cap tests (M4 — gibson#133)
-// ---------------------------------------------------------------------------
-
-// TestExecuteLLM_PerCallCap_clampsMaxTokens verifies that when a per-call cap is
-// placed in context via contextkeys.WithPerCallTokenCap, the ExecuteLLM handler
-// clamps req.MaxTokens to the cap before dispatching to the provider.
-// Scenario: caller requests 4096 tokens; context cap = 100; provider must see 100.
-func TestExecuteLLM_PerCallCap_clampsMaxTokens(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{
-				Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"},
-			}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return prov, nil
-	})
-
-	maxReq := int32(4096)
-	ctx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-cap"), 100)
-	req := &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-		MaxTokens:    &maxReq,
-	}
-
-	_, err := s.ExecuteLLM(ctx, req)
-	require.NoError(t, err)
-	assert.Equal(t, 100, capturedReq.MaxTokens,
-		"per-call cap (100) must override caller's max_tokens (4096)")
-}
-
-// TestExecuteLLM_PerCallCap_lowerCallerWins verifies that when the caller already
-// set MaxTokens below the context cap, the lower caller value is preserved.
-func TestExecuteLLM_PerCallCap_lowerCallerWins(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{Message: llm.Message{Content: "ok"}}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return prov, nil
-	})
-
-	callerMax := int32(50) // below the 500 cap
-	ctx := contextkeys.WithPerCallTokenCap(tenantCtx("tenant-cap2"), 500)
-	req := &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-		MaxTokens:    &callerMax,
-	}
-
-	_, err := s.ExecuteLLM(ctx, req)
-	require.NoError(t, err)
-	assert.Equal(t, 50, capturedReq.MaxTokens,
-		"caller's lower MaxTokens (50) must be preserved; cap (500) is a ceiling")
-}
-
-// TestExecuteLLM_PerCallCap_noCapNoChange verifies that without a cap in context,
-// MaxTokens is passed through exactly as the caller set it.
-func TestExecuteLLM_PerCallCap_noCapNoChange(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-
-	var capturedReq llm.CompletionRequest
-	prov := &stubMockProvider{
-		completeFunc: func(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-			capturedReq = req
-			return &llm.CompletionResponse{Message: llm.Message{Content: "ok"}}, nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return prov, nil
-	})
-
-	callerMax := int32(8192)
-	ctx := tenantCtx("tenant-nocap") // no cap in context
-	req := &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-		MaxTokens:    &callerMax,
-	}
-
-	_, err := s.ExecuteLLM(ctx, req)
-	require.NoError(t, err)
-	assert.Equal(t, 8192, capturedReq.MaxTokens,
-		"no cap in context: MaxTokens must pass through unchanged")
-}
-
-// TestExecuteLLM_ModelGate proves that ExecuteLLM asks the model gate before it
-// builds a provider, and that every answer but an explicit permit is a denial.
-func TestExecuteLLM_ModelGate(t *testing.T) {
-	cases := []struct {
-		name   string
-		filter modelgate.Filter
-		want   codes.Code
-	}{
-		{"no grant", gateStub{permit: false}, codes.PermissionDenied},
-		{"no filter wired", nil, codes.PermissionDenied},
-		{"gate error", gateStub{err: errors.New("bad request")}, codes.PermissionDenied},
-		{"gate outage", gateStub{err: authz.ErrFgaUnavailable}, codes.Unavailable},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			store := &stubProviderConfigStore{
-				resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-					return knownDecryptedConfig(), nil
-				},
-			}
-			called := false
-			s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-				return &stubMockProvider{completeFunc: func(context.Context, llm.CompletionRequest) (*llm.CompletionResponse, error) {
-					called = true
-					return &llm.CompletionResponse{}, nil
-				}}, nil
-			})
-			s.modelFilter = tc.filter
-
-			_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
-				ProviderName: "my-openai",
-				Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-			})
-			require.Error(t, err)
-			assert.Equal(t, tc.want, status_grpc.Code(err))
-			assert.False(t, called, "a denied call must not reach the provider")
-		})
-	}
-}
-
-// onlyProviderGate permits one provider name and records what it was asked.
-type onlyProviderGate struct {
-	allow string
-	asked []modelgate.Candidate
-}
-
-func (g *onlyProviderGate) Permitted(_ context.Context, c []modelgate.Candidate) ([]modelgate.Candidate, error) {
-	g.asked = append(g.asked, c...)
-	for _, cand := range c {
-		if cand.Provider == g.allow {
-			return c, nil
-		}
-	}
-	return nil, nil
-}
-func (*onlyProviderGate) InvalidateCache() {}
-
-// The gate names the provider as the slot path does: by the name of the built
-// provider, which is the name the default grant is written for. The configured
-// name of the provider (here "my-openai") is not that name. A member with only
-// the default grant must be allowed.
-func TestExecuteLLM_ModelGateNamesTheProviderAsTheSlotPathDoes(t *testing.T) {
-	store := &stubProviderConfigStore{
-		resolveFunc: func(_ context.Context, _, _ string) (*providerconfig.DecryptedConfig, error) {
-			return knownDecryptedConfig(), nil
-		},
-	}
-	s := newExecServer(store, func(_ llm.ProviderConfig) (llm.LLMProvider, error) {
-		return &stubMockProvider{}, nil // Name() is "stub"
-	})
-	gate := &onlyProviderGate{allow: "stub"}
-	s.modelFilter = gate
-
-	_, err := s.ExecuteLLM(tenantCtx("tenant-a"), &tenantv1.ExecuteLLMRequest{
-		ProviderName: "my-openai",
-		Messages:     []*tenantv1.LLMMessageContent{{Role: "user", Content: "hello"}},
-	})
-	require.NoError(t, err)
-	require.Len(t, gate.asked, 1)
-	assert.Equal(t, "stub", gate.asked[0].Provider, "the gate must be asked about the provider name, not the configured name")
 }

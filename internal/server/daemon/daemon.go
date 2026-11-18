@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"log/slog"
 	"net/url"
 	"os"
@@ -200,6 +201,10 @@ type daemonImpl struct {
 	// grpcSubsystem owns the gRPC server lifecycle. Constructed by buildGRPCServer;
 	// Serve(ctx) launched in a goroutine from Start. Wire into eg.Go in task 7.3.
 	grpcSubsystem *grpcSubsystem
+
+	// modelClient sends each model call of the daemon to the model gateway
+	// (gibson#1392).
+	modelClient *modelclient.Client
 
 	// grpcAddr is the address the gRPC server listens on (added in Phase 3)
 	grpcAddr string
@@ -1122,13 +1127,14 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 	// concrete Dispatcher + DeciderLLM bindings over the component registry, and
 	// install them onto every per-tenant engine via WireExecutor. Registered
 	// before any engine is created (engines fault in lazily on the first event).
+	models, mcErr := d.newModelClient()
+	if mcErr != nil {
+		return fmt.Errorf("model client: %w", mcErr)
+	}
+	d.modelClient = models
 	if d.brainRegistry != nil {
 		d.brainExecutor = newBrainExecutor(d.registryAdapter, d.logger.WithComponent("brain-executor").Slog())
-		models, mcErr := d.newModelClient()
-		if mcErr != nil {
-			return fmt.Errorf("brain executor: %w", mcErr)
-		}
-		d.brainExecutor.models = models
+		d.brainExecutor.models = d.modelClient
 		// A job node's jobs live in the tenant's data plane, which is built
 		// later in Start, so the store is read per dispatch (gibson#1713).
 		d.brainExecutor.jobClosed = newJobGraphLink(d.brainRegistry, d.logger.WithComponent("job-graph-link").Slog())

@@ -22,7 +22,6 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
 	"github.com/zeroroot-ai/gibson/internal/engine/mission/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/missiondraft"
@@ -300,11 +299,8 @@ type DaemonServer struct {
 	// Spec: llm-user-attribution-governance (Requirement 3).
 	budgetEnforcer budgetEnforcerIface
 
-	// llmCallSink captures completed LLM calls into the per-tenant ECS brain
-	// World (gibson#755 — the World LlmCall entity replaces Langfuse trace/cost
-	// views). May be nil; when nil, capture is skipped. Brain-agnostic by design
-	// (api must not import internal/brain) — the daemon supplies the closure.
-	llmCallSink LLMCallSink
+	// chatModels sends the chat call of ExecuteLLM to the model gateway.
+	chatModels chatModels
 
 	// modelGateInvalidator is called from Grant/Revoke so that the
 	// next slot resolution picks up the new grant state within
@@ -316,7 +312,6 @@ type DaemonServer struct {
 
 	// modelFilter decides which provider and model the calling user may use.
 	// ExecuteLLM denies every call while it is nil.
-	modelFilter modelgate.Filter
 
 	// secretPlaneProbe backs AdminGetPlatformHealth (hosted#174). Wired via
 	// WithSecretPlaneProbe. When nil the RPC reports the secret plane as
@@ -1048,10 +1043,6 @@ func toLLMToolCalls(calls []llm.ToolCall) []LLMToolCall {
 // brain-agnostic so the api package need not import internal/brain; the daemon
 // supplies a closure that folds the record into the tenant's brain engine.
 type LLMCallSink func(ctx context.Context, tenant string, call LLMCallRecord)
-
-// SetLLMCallSink wires the World-capture sink (gibson#755). Called once at
-// startup; nil disables capture.
-func (s *DaemonServer) SetLLMCallSink(sink LLMCallSink) { s.llmCallSink = sink }
 
 // WithQuotaManager attaches a MissionQuotaChecker to the server so that
 // RunMission enforces per-tenant mission quotas.  Call this immediately

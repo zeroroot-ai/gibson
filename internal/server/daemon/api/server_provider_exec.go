@@ -7,22 +7,24 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
+	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/contextkeys"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/ratelimit"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 
 	// As of sdk#106 the budget surface is split: customer-visible value
 	// types (`BudgetExceeded` + `BudgetScope`) live in the OSS SDK at
@@ -124,34 +126,6 @@ func (s *DaemonServer) WithBudgetEnforcer(e budgetEnforcerIface) *DaemonServer {
 func (s *DaemonServer) WithModelGateInvalidator(inv modelGateInvalidator) *DaemonServer {
 	s.modelGateInvalidator = inv
 	return s
-}
-
-// WithModelFilter wires the model gate that ExecuteLLM asks before it calls a
-// provider. Without a filter, ExecuteLLM denies every call.
-func (s *DaemonServer) WithModelFilter(f modelgate.Filter) *DaemonServer {
-	s.modelFilter = f
-	return s
-}
-
-// checkModelGate asks the model gate whether the caller may use the provider and
-// model of this call. It is the same check that slot resolution runs. Any
-// missing filter, error or empty answer is a denial.
-func (s *DaemonServer) checkModelGate(ctx context.Context, provider, model string) error {
-	if s.modelFilter == nil {
-		return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the model gate is not configured")
-	}
-	permitted, err := s.modelFilter.Permitted(ctx, []modelgate.Candidate{{Provider: provider, Model: model}})
-	if err != nil {
-		if modelgate.CouldNotDecide(err) {
-			return status_grpc.Errorf(codes.Unavailable, "model_access_denied: the model gate could not decide")
-		}
-		return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the model gate could not check access")
-	}
-	if len(permitted) != 1 {
-		return status_grpc.Errorf(codes.PermissionDenied,
-			"model_access_denied: not permitted to use model %q on provider %q", model, provider)
-	}
-	return nil
 }
 
 // WithAuditQuery wires the audit-log read backend for
@@ -272,11 +246,27 @@ func estimateTokens(req *tenantv1.ExecuteLLMRequest) int64 {
 // ExecuteLLM — unary RPC
 // ---------------------------------------------------------------------------
 
-// ExecuteLLM resolves a named provider from the tenant's encrypted credential
-// store, constructs an Eino-backed provider for the duration of this
-// call, dispatches the completion request, and translates the response into
-// proto. The decrypted credential is scoped strictly to this stack frame and
-// is never logged, cached, or embedded in any response field.
+// chatModels is the part of the model client that ExecuteLLM uses.
+type chatModels interface {
+	Respond(ctx context.Context, caller modelclient.Caller, target modelclient.Target,
+		req modelclient.Request) (*modelclient.Response, error)
+}
+
+// WithModelClient wires the model client that ExecuteLLM sends its call through
+// (gibson#1392). The daemon calls no provider and holds no credential for it.
+func (s *DaemonServer) WithModelClient(c chatModels) *DaemonServer {
+	s.chatModels = c
+	return s
+}
+
+// ExecuteLLM sends one chat call to the model gateway through the provider that
+// the tenant named. The provider record gives the default model. The gateway
+// holds the credential, checks the access of the user and the state of the
+// mission, and records the call in its trace. This handler emits no
+// llm_call.observed and no token.used: the trace is the one source of both.
+//
+// A call with a mission id gets a task grant of that mission. Any other call
+// gets a daemon call grant with the purpose chat and the user as initiator.
 func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMRequest) (*tenantv1.ExecuteLLMResponse, error) {
 	// 1. Tenant from identity context (resolved from Envoy-signed headers).
 	tenantID := auth.TenantStringFromContext(ctx)
@@ -300,165 +290,139 @@ func (s *DaemonServer) ExecuteLLM(ctx context.Context, req *tenantv1.ExecuteLLMR
 		return nil, err
 	}
 
-	// 3. Resolve the named provider — decrypts credentials.
+	// 3. The provider record gives the default model. It holds no credential.
 	if s.providerConfig == nil {
 		return nil, status_grpc.Errorf(codes.FailedPrecondition,
 			"provider credential store is not configured (security.key_provider must be set)")
 	}
-	dec, err := s.providerConfig.Resolve(ctx, tenantID, req.GetProviderName())
+	if s.chatModels == nil {
+		return nil, status_grpc.Errorf(codes.FailedPrecondition, "the model gateway client is not configured")
+	}
+	rec, err := s.providerConfig.Get(ctx, tenantID, req.GetProviderName())
 	if err != nil {
 		if errors.Is(err, providerconfig.ErrNotFound) {
-			return nil, status_grpc.Errorf(codes.NotFound,
-				"provider %q not found for tenant", req.GetProviderName())
+			return nil, status_grpc.Errorf(codes.NotFound, "provider %q not found for tenant", req.GetProviderName())
 		}
-		// Do NOT include err directly — it may contain credential material in
-		// wrapped error chains from the crypto layer.
-		s.logger.WarnContext(ctx, "failed to resolve provider",
-			"provider", req.GetProviderName(), "tenant", tenantID)
-		return nil, status_grpc.Errorf(codes.Internal, "failed to resolve provider credentials")
+		s.logger.WarnContext(ctx, "failed to read the provider record", "provider", req.GetProviderName(), "tenant", tenantID)
+		return nil, status_grpc.Errorf(codes.Internal, "failed to read the provider record")
+	}
+	model := strings.TrimSpace(req.GetModel())
+	if model == "" {
+		model = rec.DefaultModel
+	}
+	if model == "" {
+		return nil, status_grpc.Errorf(codes.InvalidArgument, "no model: the request names none and the provider has no default model")
 	}
 
-	// 4. Translate DecryptedConfig → llm.ProviderConfig.
-	// dec goes out of scope at the end of this function; credentials are not
-	// stored or forwarded anywhere beyond the prov instance below.
-	provCfg := s.withEgressPolicy(decryptedConfigToLLMConfig(dec, req.GetModel()))
-
-	// 5. Construct provider.
-	prov, err := s.providerFactory(provCfg)
+	// 4. The request, in Open Responses items.
+	cr := llm.CompletionRequest{Model: model, Messages: protoMessagesToLLM(req.GetMessages())}
+	if req.MaxTokens != nil {
+		cr.MaxTokens = int(req.GetMaxTokens())
+	}
+	applyContextPerCallCap(ctx, &cr)
+	applyDefaultMaxTokens(&cr)
+	mreq, err := toGatewayRequest(req, cr)
 	if err != nil {
-		s.logger.WarnContext(ctx, "failed to construct provider", "type", string(dec.Type))
-		return nil, status_grpc.Errorf(codes.Internal, "failed to construct LLM provider")
-	}
-	// dec is no longer needed after prov is built.
-
-	// 5b. Model gate: the caller must hold can_use on the model or the provider.
-	// It is the check that slot resolution runs for missions, and it names the
-	// provider the same way: by prov.Name(), the name that the registry holds
-	// and that the default grant is written for. The configured name of the
-	// provider is not that name. Building the provider makes no network call.
-	if gateErr := s.checkModelGate(ctx, prov.Name(), provCfg.DefaultModel); gateErr != nil {
-		return nil, gateErr
+		return nil, err
 	}
 
-	// 6. Translate request messages.
-	msgs := protoMessagesToLLM(req.GetMessages())
-	completionReq := llm.CompletionRequest{
-		Model:         provCfg.DefaultModel,
-		Messages:      msgs,
-		StopSequences: req.GetStop(),
+	// 5. The identity of the call.
+	caller := modelclient.Caller{Tenant: tenantID, Initiator: principal.FGAUser(callerIdentity(ctx))}
+	if req.GetMissionId() != "" {
+		caller.Mission, caller.Task, caller.Purpose = req.GetMissionId(), "chat-"+uuid.NewString(), "dashboard-chat"
+	} else {
+		caller.Purpose = modelcall.PurposeChat
+	}
+	resp, err := s.chatModels.Respond(ctx, caller,
+		modelclient.Target{Tenant: tenantID, Provider: req.GetProviderName(), Model: model}, mreq)
+	if err != nil {
+		return nil, s.chatError(ctx, req.GetProviderName(), err)
+	}
+	return gatewayRespToProto(resp), nil
+}
+
+// callerIdentity returns the identity of the caller, or an empty one.
+func callerIdentity(ctx context.Context) auth.Identity {
+	id, _ := auth.IdentityFromContext(ctx)
+	return id
+}
+
+// chatError maps an error of the gateway to a gRPC status. The text names no
+// credential and no header.
+func (s *DaemonServer) chatError(ctx context.Context, provider string, err error) error {
+	var api *modelclient.APIError
+	if errors.As(err, &api) {
+		switch {
+		case api.Refused():
+			return status_grpc.Errorf(codes.PermissionDenied, "model_access_denied: the gateway refused the call")
+		case api.NoRoute():
+			return status_grpc.Errorf(codes.Unavailable, "the route of provider %q is not ready yet", provider)
+		case api.Status == http.StatusTooManyRequests:
+			return status_grpc.Errorf(codes.ResourceExhausted, "the provider is rate limited")
+		}
+	}
+	s.logger.WarnContext(ctx, "LLM completion failed", "provider", provider)
+	return status_grpc.Errorf(codes.Internal, "LLM completion failed")
+}
+
+// toGatewayRequest builds the Open Responses request of an ExecuteLLM call.
+func toGatewayRequest(req *tenantv1.ExecuteLLMRequest, cr llm.CompletionRequest) (modelclient.Request, error) {
+	out := modelclient.Request{MaxOutputTokens: cr.MaxTokens}
+	for _, m := range cr.Messages {
+		switch m.Role {
+		case llm.RoleSystem:
+			out.Input = append(out.Input, modelclient.SystemMessage(m.Content))
+		case llm.RoleAssistant:
+			if m.Content != "" {
+				out.Input = append(out.Input, modelclient.AssistantMessage(m.Content))
+			}
+			for _, tc := range m.ToolCalls {
+				out.Input = append(out.Input, modelclient.FunctionCall(tc.ID, tc.Name, tc.Arguments))
+			}
+		case llm.RoleTool:
+			out.Input = append(out.Input, modelclient.FunctionCallOutput(m.ToolCallID, m.Content))
+		default:
+			out.Input = append(out.Input, modelclient.UserMessage(m.Content))
+		}
 	}
 	if req.Temperature != nil {
-		completionReq.Temperature = req.GetTemperature()
+		t := float64(req.GetTemperature())
+		out.Temperature = &t
 	}
-	if req.MaxTokens != nil {
-		completionReq.MaxTokens = int(req.GetMaxTokens())
-	}
-	if req.TopP != nil {
-		completionReq.TopP = req.GetTopP()
-	}
-
-	// 6b. Apply per-call token cap from context (set by mission-aware callers
-	// that have resolved EffectivePerCallCap for the executing node).
-	// When no cap is present in context this is a no-op.
-	// Spec: mission-author-experience M4 (gibson#133).
-	applyContextPerCallCap(ctx, &completionReq)
-
-	// 6c. Floor max_tokens. A request that omits max_tokens (and has no
-	// per-call cap) leaves MaxTokens at 0; providers like Anthropic then
-	// return an empty completion with finishReason "length" — a blank chat
-	// reply. Default to a sane value so callers that don't specify a budget
-	// (e.g. the dashboard chat client) still get output.
-	applyDefaultMaxTokens(&completionReq)
-
-	// 7. Dispatch: tools → CompleteWithTools, json_schema → CompleteStructured, else Complete.
-	var resp *llm.CompletionResponse
-
-	rf := req.GetResponseFormat()
-	if rf != nil && rf.GetType() == "json_schema" {
-		// Structured output path.
-		sp, ok := prov.(llm.StructuredOutputProvider)
-		if !ok {
-			return nil, status_grpc.Errorf(codes.Unimplemented,
-				"provider %q does not support structured output (json_schema response format)",
-				req.GetProviderName())
+	for _, td := range protoToolDefsToLLM(req.GetTools()) {
+		params, err := json.Marshal(td.Parameters)
+		if err != nil {
+			return modelclient.Request{}, status_grpc.Errorf(codes.InvalidArgument, "invalid parameters of tool %q", td.Name)
 		}
-		var parsedSchema *types.JSONSchema
-		if raw := rf.GetSchemaJson(); raw != "" {
-			parsedSchema = &types.JSONSchema{}
-			if jsonErr := json.Unmarshal([]byte(raw), parsedSchema); jsonErr != nil {
-				return nil, status_grpc.Errorf(codes.InvalidArgument,
-					"invalid schema_json: not valid JSON")
-			}
-		}
-		completionReq.ResponseFormat = &types.ResponseFormat{
-			Type:   types.ResponseFormatJSONSchema,
-			Name:   rf.GetName(),
-			Schema: parsedSchema,
-			Strict: rf.GetStrict(),
-		}
-		resp, err = sp.CompleteStructured(ctx, completionReq)
-	} else if len(req.GetTools()) > 0 {
-		// Tool-calling path.
-		toolDefs := protoToolDefsToLLM(req.GetTools())
-		resp, err = prov.CompleteWithTools(ctx, completionReq, toolDefs)
-	} else {
-		resp, err = prov.Complete(ctx, completionReq)
+		out.Tools = append(out.Tools, modelclient.FunctionTool(td.Name, td.Description, params))
 	}
-
-	if err != nil {
-		s.logger.WarnContext(ctx, "LLM completion failed", "provider", req.GetProviderName())
-		return nil, status_grpc.Errorf(codes.Internal, "LLM completion failed")
-	}
-
-	// 8. Budget record — authoritative usage post-dispatch. Runs
-	// independently of the error path so only successful calls
-	// increment counters. Cost accounting can be added later from the
-	// provider's pricing table; for now pass 0 cents.
-	// Spec: llm-user-attribution-governance Requirement 3.10.
-	if resp != nil {
-		totalTokens := int64(resp.Usage.PromptTokens) + int64(resp.Usage.CompletionTokens)
-		if totalTokens > 0 {
-			if recErr := s.budgetEnforcer.Record(ctx, totalTokens, 0); recErr != nil {
-				s.logger.WarnContext(ctx, "budget record failed (non-blocking)",
-					"error", recErr, "tenant", tenantID)
-			}
+	if rf := req.GetResponseFormat(); rf != nil && rf.GetType() == "json_schema" {
+		raw := rf.GetSchemaJson()
+		if raw != "" && !json.Valid([]byte(raw)) {
+			return modelclient.Request{}, status_grpc.Errorf(codes.InvalidArgument, "invalid schema_json: not valid JSON")
 		}
+		out.Text = modelclient.JSONSchemaFormat(rf.GetName(), json.RawMessage(raw))
+		out.Text.Format.Strict = rf.GetStrict()
 	}
+	return out, nil
+}
 
-	// 8b. World capture — fold the completed call into the per-tenant ECS brain
-	// World as an LlmCall entity (gibson#755), the replacement for the Langfuse
-	// trace/cost views. Best-effort + metadata-only (resolved model + token
-	// counts); a fresh CallID gives each call a stable World/graph identity.
-	// mission_id is carried from the request (gibson#1078): a mission-aware caller
-	// sets it so the call attaches to its mission's frame; a non-mission caller
-	// (e.g. dashboard chat) leaves it unset and the call stays tenant-ambient.
-	// Scope/run linkage is still not carried on ExecuteLLM.
-	if s.llmCallSink != nil && resp != nil {
-		msgs := make([]LLMMessage, 0, len(completionReq.Messages))
-		for _, m := range completionReq.Messages {
-			msgs = append(msgs, LLMMessage{
-				Role:       string(m.Role),
-				Content:    m.Content,
-				Name:       m.Name,
-				ToolCallID: m.ToolCallID,
-				ToolCalls:  toLLMToolCalls(m.ToolCalls),
-			})
-		}
-		s.llmCallSink(ctx, tenantID, LLMCallRecord{
-			CallID:              uuid.NewString(),
-			MissionID:           req.GetMissionId(),
-			Model:               completionReq.Model,
-			PromptTokens:        resp.Usage.PromptTokens,
-			CompletionTokens:    resp.Usage.CompletionTokens,
-			Messages:            msgs,
-			Completion:          resp.Message.Content,
-			CompletionToolCalls: toLLMToolCalls(resp.Message.ToolCalls),
-			RecordedAtUnixNano:  time.Now().UnixNano(),
-		})
+// gatewayRespToProto converts the reply of the gateway to the proto wire type.
+func gatewayRespToProto(resp *modelclient.Response) *tenantv1.ExecuteLLMResponse {
+	out := &tenantv1.ExecuteLLMResponse{
+		Content:      resp.OutputText(),
+		FinishReason: "stop",
+		Usage: &tenantv1.LLMTokenUsage{
+			InputTokens:  int32(resp.Usage.InputTokens),  //nolint:gosec // a token count
+			OutputTokens: int32(resp.Usage.OutputTokens), //nolint:gosec // a token count
+			TotalTokens:  int32(resp.Usage.TotalTokens),  //nolint:gosec // a token count
+		},
 	}
-
-	// 9. Translate response to proto.
-	return completionRespToProto(resp), nil
+	for _, c := range resp.FunctionCalls() {
+		out.ToolCalls = append(out.ToolCalls, &tenantv1.LLMToolCall{Id: c.CallID, Name: c.Name, Arguments: c.Arguments})
+		out.FinishReason = "tool_calls"
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -567,34 +531,5 @@ func protoToolDefsToLLM(protoTools []*tenantv1.LLMToolDef) []llm.ToolDef {
 			Parameters:  params,
 		})
 	}
-	return out
-}
-
-// completionRespToProto converts an llm.CompletionResponse to the proto wire type.
-// Credentials must never appear in the response — this helper only operates on
-// the completion result (content, tool_calls, finish_reason, usage).
-func completionRespToProto(resp *llm.CompletionResponse) *tenantv1.ExecuteLLMResponse {
-	if resp == nil {
-		return &tenantv1.ExecuteLLMResponse{}
-	}
-
-	out := &tenantv1.ExecuteLLMResponse{
-		Content:      resp.Message.Content,
-		FinishReason: string(resp.FinishReason),
-		Usage: &tenantv1.LLMTokenUsage{
-			InputTokens:  int32(resp.Usage.PromptTokens),
-			OutputTokens: int32(resp.Usage.CompletionTokens),
-			TotalTokens:  int32(resp.Usage.TotalTokens),
-		},
-	}
-
-	for _, tc := range resp.Message.ToolCalls {
-		out.ToolCalls = append(out.ToolCalls, &tenantv1.LLMToolCall{
-			Id:        tc.ID,
-			Name:      tc.Name,
-			Arguments: tc.Arguments,
-		})
-	}
-
 	return out
 }
