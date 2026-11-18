@@ -108,7 +108,7 @@ func Validate(folderName string, files []File) (*Manifest, error) {
 	if skill == nil {
 		return nil, invalidf("the folder has no %s at its root", SkillFile)
 	}
-	m, err := parseSkillFile(skill)
+	m, err := ParseSkillFile(skill)
 	if err != nil {
 		return nil, err
 	}
@@ -167,9 +167,9 @@ func checkPath(p string) error {
 	return nil
 }
 
-// parseSkillFile splits SKILL.md into the frontmatter and the body, and
+// ParseSkillFile splits SKILL.md into the frontmatter and the body, and
 // validates the fields.
-func parseSkillFile(raw []byte) (*Manifest, error) {
+func ParseSkillFile(raw []byte) (*Manifest, error) {
 	if !utf8.Valid(raw) {
 		return nil, invalidf("%s is not valid UTF-8", SkillFile)
 	}
