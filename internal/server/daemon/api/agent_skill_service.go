@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -16,14 +17,24 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // AgentSkillPuller reads the image that a digest reference names and returns
-// the validated folder. In production it is agentskill.Pull with the keychain
-// of the daemon process. A test supplies its own.
-type AgentSkillPuller func(ctx context.Context, reference, folderName string) (*agentskill.Pulled, error)
+// the validated folder. In production it is agentskill.Puller.Pull. The keychain
+// holds the credential of the tenant secret, or nothing for an anonymous pull.
+// A test supplies its own.
+type AgentSkillPuller func(
+	ctx context.Context, reference, folderName string, keychain authn.Keychain,
+) (*agentskill.Pulled, error)
+
+// AgentSkillSecrets reads the value of a tenant secret by name, for the tenant of
+// the context. *secrets.Service satisfies it.
+type AgentSkillSecrets interface {
+	Resolve(ctx context.Context, name string) ([]byte, error)
+}
 
 // AgentSkillFGA is the part of authz.Authorizer that the service uses.
 type AgentSkillFGA interface {
@@ -42,16 +53,19 @@ type AgentSkillService struct {
 	store agentskillstore.Store
 	pull  AgentSkillPuller
 	fga   AgentSkillFGA
+	// secrets reads the registry credential of a publish. The service never
+	// stores the value.
+	secrets AgentSkillSecrets
 }
 
 // NewAgentSkillService returns the service. Each argument is required.
 func NewAgentSkillService(
-	store agentskillstore.Store, pull AgentSkillPuller, fga AgentSkillFGA,
+	store agentskillstore.Store, pull AgentSkillPuller, fga AgentSkillFGA, secrets AgentSkillSecrets,
 ) (*AgentSkillService, error) {
-	if store == nil || pull == nil || fga == nil {
-		return nil, errors.New("api: AgentSkillService needs a store, a puller and the authorizer")
+	if store == nil || pull == nil || fga == nil || secrets == nil {
+		return nil, errors.New("api: AgentSkillService needs a store, a puller, the authorizer and the secrets")
 	}
-	return &AgentSkillService{store: store, pull: pull, fga: fga}, nil
+	return &AgentSkillService{store: store, pull: pull, fga: fga, secrets: secrets}, nil
 }
 
 // agentSkillTenant returns the tenant of the caller.
@@ -117,7 +131,11 @@ func (s *AgentSkillService) PublishAgentSkill(
 	if err != nil {
 		return nil, status_grpc.Error(codes.InvalidArgument, rpc+": "+err.Error())
 	}
-	pulled, err := s.pull(ctx, req.GetReference(), req.GetName())
+	keychain, err := s.registryKeychain(ctx, rpc, req.GetRegistrySecret())
+	if err != nil {
+		return nil, err
+	}
+	pulled, err := s.pull(ctx, req.GetReference(), req.GetName(), keychain)
 	if err != nil {
 		return nil, agentSkillStatus(rpc, err)
 	}
@@ -129,6 +147,22 @@ func (s *AgentSkillService) PublishAgentSkill(
 		return nil, status_grpc.Error(codes.Internal, fmt.Sprintf("%s: write the owner tuple: %v", rpc, err))
 	}
 	return &tenantv1.PublishAgentSkillResponse{Entry: agentSkillEntryProto(*entry)}, nil
+}
+
+// registryKeychain returns the credential of a pull. With no secret name the pull
+// is anonymous. With a name, the value of that secret of the tenant is the
+// credential, as the bytes of a docker config. The value lives in the keychain
+// for this call and is never stored. The daemon process credential is never
+// used here, because it would lend the operator credential to a tenant.
+func (s *AgentSkillService) registryKeychain(ctx context.Context, rpc, secretName string) (authn.Keychain, error) {
+	if secretName == "" {
+		return authn.NewMultiKeychain(), nil
+	}
+	raw, err := s.secrets.Resolve(ctx, secretName)
+	if err != nil {
+		return nil, status_grpc.Errorf(codes.FailedPrecondition, "%s: read the registry secret %q: %v", rpc, secretName, err)
+	}
+	return supplychain.NewDockerConfigKeychain(raw, "the tenant secret "+secretName), nil
 }
 
 // ListAgentSkills returns the Agent Skills of the tenant.

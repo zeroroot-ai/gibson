@@ -8,19 +8,18 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/go-containerregistry/pkg/authn"
 	"google.golang.org/grpc"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agentskill"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
-	"github.com/zeroroot-ai/gibson/internal/platform/supplychain"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 )
 
 // registerAgentSkill registers gibson.tenant.v1.AgentSkillService on srv (epic
-// gibson#1364). The service pulls a published Agent Skill by digest with the
-// registry keychain of the daemon process, the one that the signature check
-// uses. It keeps the validated content in the database of the tenant. The
+// gibson#1364). The service pulls a published Agent Skill by digest, with the
+// credential of a tenant secret or none. It keeps the validated content in the database of the tenant. The
 // daemon cannot start without the per-tenant data pool or the authorizer, so a
 // missing one is an error and never a service that is silently Unimplemented.
 func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) error {
@@ -30,12 +29,15 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 	if d.authorizer == nil {
 		return errors.New("daemon: AgentSkillService needs the authorizer")
 	}
-	keychain := supplychain.NewKeychain(registryAuthDir())
-	pull := func(ctx context.Context, reference, folderName string) (*agentskill.Pulled, error) {
-		return agentskill.Pull(ctx, reference, folderName, keychain)
+	// A tenant reference is pulled with the guarded puller and the credential of
+	// a tenant secret. It never gets the credential of the daemon process.
+	puller := agentskill.NewPuller()
+	pull := func(ctx context.Context, reference, folderName string, kc authn.Keychain) (*agentskill.Pulled, error) {
+		return puller.Pull(ctx, reference, folderName, kc)
 	}
+	secretReader := daemonSecretReader{d: d}
 	d.agentSkills = agentskillstore.NewPostgresStore(d.pool)
-	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer)
+	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer, secretReader)
 	if err != nil {
 		return fmt.Errorf("daemon: AgentSkillService: %w", err)
 	}
@@ -49,4 +51,17 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 // because its options are assembled before the services are registered.
 func (d *daemonImpl) agentSkillStore() agentskillstore.Store {
 	return d.agentSkills
+}
+
+// daemonSecretReader reads a tenant secret through the secrets broker. The
+// broker is built after the options of the services are assembled, so it is read
+// for each call.
+type daemonSecretReader struct{ d *daemonImpl }
+
+// Resolve implements api.AgentSkillSecrets.
+func (r daemonSecretReader) Resolve(ctx context.Context, name string) ([]byte, error) {
+	if r.d.secretsService == nil {
+		return nil, errors.New("the secrets broker is not ready")
+	}
+	return r.d.secretsService.Resolve(ctx, name)
 }

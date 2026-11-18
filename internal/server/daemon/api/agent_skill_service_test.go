@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -113,19 +115,37 @@ func (r *recordingAuthorizer) ListUsersOfType(
 	return r.fakeAuthorizer.users[objectType+"|"+object+"|"+relation], nil
 }
 
+type fakeSkillSecrets struct {
+	values map[string][]byte
+	asked  []string
+}
+
+func (f *fakeSkillSecrets) Resolve(_ context.Context, name string) ([]byte, error) {
+	f.asked = append(f.asked, name)
+	v, ok := f.values[name]
+	if !ok {
+		return nil, fmt.Errorf("secret %q not found", name)
+	}
+	return v, nil
+}
+
 type skillFixture struct {
 	svc   *AgentSkillService
 	store *memSkillStore
 	fga   *recordingAuthorizer
 	ctx   context.Context
 	pulls []string
+	// keychains holds the keychain of each pull.
+	keychains []authn.Keychain
+	secrets   *fakeSkillSecrets
 }
 
 func newSkillFixture(t *testing.T, pullErr error) *skillFixture {
 	t.Helper()
 	f := &skillFixture{store: &memSkillStore{}, fga: &recordingAuthorizer{fakeAuthorizer: newFakeAuthorizer()}}
-	pull := func(_ context.Context, ref, name string) (*agentskill.Pulled, error) {
+	pull := func(_ context.Context, ref, name string, kc authn.Keychain) (*agentskill.Pulled, error) {
 		f.pulls = append(f.pulls, ref)
+		f.keychains = append(f.keychains, kc)
 		if pullErr != nil {
 			return nil, pullErr
 		}
@@ -133,7 +153,8 @@ func newSkillFixture(t *testing.T, pullErr error) *skillFixture {
 			Manifest: &agentskill.Manifest{Name: name, Description: "d"}, Digest: "sha256:aa",
 		}, nil
 	}
-	svc, err := NewAgentSkillService(f.store, pull, f.fga)
+	f.secrets = &fakeSkillSecrets{values: map[string][]byte{}}
+	svc, err := NewAgentSkillService(f.store, pull, f.fga, f.secrets)
 	require.NoError(t, err)
 	f.svc = svc
 	f.ctx = auth.WithIdentity(context.Background(),
@@ -269,4 +290,37 @@ func TestRevokeAgentSkill_DeletesTheGrantWithoutASubjectCheck(t *testing.T) {
 	assert.Equal(t, []authz.Tuple{
 		{User: "mission:gone", Relation: "granted_mission", Object: "agent_skill:acme/a"},
 	}, f.fga.deleted)
+}
+
+// An anonymous publish reads no secret and passes no credential. A named secret
+// is read once, for this call, and its credential reaches the puller only for
+// the registry that it names.
+func TestPublishAgentSkill_RegistrySecret(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	_, err := f.svc.PublishAgentSkill(f.ctx, &tenantv1.PublishAgentSkillRequest{Name: "web-recon", Reference: skillRef})
+	require.NoError(t, err)
+	assert.Empty(t, f.secrets.asked, "no secret name means no secret read")
+	reg, nerr := name.NewRegistry("reg.example")
+	require.NoError(t, nerr)
+	a, rerr := f.keychains[0].Resolve(reg)
+	require.NoError(t, rerr)
+	assert.Equal(t, authn.Anonymous, a, "no secret name means an anonymous pull")
+
+	f.secrets.values["reg-cred"] = []byte(`{"auths":{"reg.example":{"username":"u","password":"p"}}}`)
+	_, err = f.svc.PublishAgentSkill(f.ctx, &tenantv1.PublishAgentSkillRequest{
+		Name: "web-recon", Reference: skillRef, RegistrySecret: "reg-cred"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"reg-cred"}, f.secrets.asked)
+	a, rerr = f.keychains[1].Resolve(reg)
+	require.NoError(t, rerr)
+	cfg, aerr := a.Authorization()
+	require.NoError(t, aerr)
+	assert.Equal(t, "u", cfg.Username)
+
+	// A secret that does not exist fails the publish before any pull.
+	pulls := len(f.pulls)
+	_, err = f.svc.PublishAgentSkill(f.ctx, &tenantv1.PublishAgentSkillRequest{
+		Name: "web-recon", Reference: skillRef, RegistrySecret: "missing"})
+	assert.Equal(t, codes.FailedPrecondition, code(err))
+	assert.Len(t, f.pulls, pulls, "no pull after a failed secret read")
 }

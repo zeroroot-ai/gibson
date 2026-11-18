@@ -121,6 +121,11 @@ message PublishAgentSkillRequest {
   // reference is a digest reference, <registry>/<repository>@sha256:<hex>. A tag
   // is refused.
   string reference = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+  // registry_secret is the name of a tenant secret that holds the registry
+  // credential, as the bytes of a docker config. The daemon reads it for this
+  // call only and never stores the value. Empty means an anonymous pull. The
+  // daemon never uses its own credential for a tenant reference.
+  string registry_secret = 3 [(buf.validate.field).string = { max_len: 255 }];
 }
 
 message PublishAgentSkillResponse {
