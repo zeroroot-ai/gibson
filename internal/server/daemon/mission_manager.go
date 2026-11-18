@@ -219,13 +219,13 @@ type activeMission struct {
 	tenantID     auth.TenantID // tenant this mission belongs to (C9 isolation key)
 }
 
-// agentSkills returns the Agent Skill store, or nil when none is wired.
-func (m *missionManager) agentSkills() agentskillstore.Store {
-	if m.skillStore == nil {
-		return nil
-	}
-	return m.skillStore()
-}
+// noAgentSkills is the Agent Skill store source before the daemon sets the real
+// one. It has no store.
+func noAgentSkills() agentskillstore.Store { return nil }
+
+// agentSkills returns the Agent Skill store, or nil when the daemon has built
+// none yet.
+func (m *missionManager) agentSkills() agentskillstore.Store { return m.skillStore() }
 
 // newMissionManager creates a new mission manager instance.
 // The pool parameter provides per-tenant data-plane connections; it replaces the
@@ -262,6 +262,7 @@ func newMissionManager(
 		brainRegistry:   brainRegistry,
 		brainExecutor:   brainExecutor,
 		graphWriter:     graphWriter,
+		skillStore:      noAgentSkills,
 		activeMissions:  make(map[auth.TenantID]map[string]*activeMission),
 	}
 }

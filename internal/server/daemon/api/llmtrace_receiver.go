@@ -125,7 +125,7 @@ func (r *TraceReceiver) Export(
 	for _, rs := range req.GetResourceSpans() {
 		for _, ss := range rs.GetScopeSpans() {
 			for _, sp := range ss.GetSpans() {
-				switch err := r.deliver(sp.GetAttributes()); {
+				switch err := r.deliver(ctx, sp.GetAttributes()); {
 				case err == nil, errors.Is(err, llmtrace.ErrNotAModelCall):
 				case errors.Is(err, errEngineUnavailable):
 					return nil, status.Error(codes.Unavailable, "the World of the tenant is not available; try again later")
@@ -155,7 +155,7 @@ var errUsageUnavailable = errors.New("the platform budget is not available")
 // errDropped marks a span that was counted as a drop.
 var errDropped = errors.New("the span was dropped")
 
-func (r *TraceReceiver) deliver(attrs []*commonpb.KeyValue) error {
+func (r *TraceReceiver) deliver(ctx context.Context, attrs []*commonpb.KeyValue) error {
 	obs, err := llmtrace.FromSpan(llmtrace.Span{Attributes: spanAttributes(attrs)})
 	if errors.Is(err, llmtrace.ErrNotAModelCall) {
 		return err
@@ -187,7 +187,7 @@ func (r *TraceReceiver) deliver(attrs []*commonpb.KeyValue) error {
 		eng.Submit(ev)
 	}
 	if r.usage != nil {
-		err := r.usage.RecordModelCall(context.Background(), ModelCallUsage{
+		err := r.usage.RecordModelCall(ctx, ModelCallUsage{
 			Tenant: tenant.String(), CallID: obs.CallID, Mission: obs.Mission,
 			Tokens: obs.InputTokens + obs.OutputTokens, CostKnown: obs.Cost.Known, CostUSD: obs.Cost.Total,
 		})

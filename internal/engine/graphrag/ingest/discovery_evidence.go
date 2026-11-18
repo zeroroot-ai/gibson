@@ -89,11 +89,21 @@ func parserEvidence(execCtx ExecContext, d *graphragpb.DiscoveryResult) (map[str
 	return out, errs
 }
 
+// noToolCallRecord is the record source of a processor with no wiring. It holds
+// no call, and it names no call as missing, so the processor adds no tier 1
+// item.
+type noToolCallRecord struct{}
+
+func (noToolCallRecord) RecordedToolCalls(context.Context, string, []string) ([]brain.AgentToolCallSnapshot, []string, error) {
+	return nil, nil, nil
+}
+
 // recordedToolEvidence returns the tier 1 item of the tool call whose output
-// was parsed. It returns nil when the discovery has no tool call, when no
-// record source is wired, or when the call has no record after the wait.
+// was parsed. It returns nil when the discovery has no tool call, when the
+// source holds no record of the call, or when the call has no record after the
+// wait.
 func (p *discoveryProcessor) recordedToolEvidence(ctx context.Context, execCtx ExecContext) (*typespb.Evidence, error) {
-	if p.records == nil || execCtx.ToolExecutionID == "" || execCtx.MissionID == "" {
+	if execCtx.ToolExecutionID == "" || execCtx.MissionID == "" {
 		return nil, nil
 	}
 	// The record is read for the tenant of the discovery. The context of the
@@ -107,7 +117,10 @@ func (p *discoveryProcessor) recordedToolEvidence(ctx context.Context, execCtx E
 		if len(items) > 0 {
 			return items[0], nil
 		}
-		if len(missing) == 0 || attempt >= recordRetries {
+		if len(missing) == 0 {
+			return nil, nil // the source holds no record and names none missing
+		}
+		if attempt >= recordRetries {
 			return nil, fmt.Errorf("tool call %s has no record", execCtx.ToolExecutionID)
 		}
 		select {

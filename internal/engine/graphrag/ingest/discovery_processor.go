@@ -117,7 +117,7 @@ func NewDiscoveryProcessor(sink WorldSink, logger *slog.Logger, opts ...Option) 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	p := &discoveryProcessor{sink: sink, logger: logger}
+	p := &discoveryProcessor{sink: sink, logger: logger, records: noToolCallRecord{}}
 	for _, opt := range opts {
 		opt(p)
 	}
