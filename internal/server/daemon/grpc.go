@@ -1064,6 +1064,16 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		)
 	}
 
+	// The audit writer must be wired by this point. The model_resolved audit
+	// event of each slot resolution needs it, and the resolver has no guard for
+	// a missing one. A daemon with no audit writer fails here, at start.
+	if d.auditWriter == nil {
+		return nil, errors.New(
+			"daemon: the audit writer was not wired; the Redis state client and the FGA authorizer " +
+				"are required because each slot resolution emits a model_resolved audit event",
+		)
+	}
+
 	daemonpb.RegisterDaemonServiceServer(srv, daemonSvc)
 	// Register DaemonOperatorService — the platform-sdk-published internal
 	// operator RPC surface (ADR-0058). Replaces PlatformOperatorService from

@@ -66,3 +66,12 @@ func TestCallbackServer_StartRefusesNoForkLedger(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fork ledger")
 }
+
+// The callback server refuses to start with no component registry.
+func TestCallbackServer_StartRefusesNoComponentRegistry(t *testing.T) {
+	s := NewCallbackServerWithRegistry(slog.Default(), 0, NewCallbackHarnessRegistry(), testEventBus())
+	s.service.forkLedger = newForkLedger(t)
+	err := s.Start(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "component registry")
+}

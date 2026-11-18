@@ -153,6 +153,13 @@ func (s *CallbackServer) Start(ctx context.Context) error {
 		return errors.New("callback server has no fork ledger; wire harness.WithForkLedger")
 	}
 
+	// The component registry is required: ResolveAgent looks up a live agent
+	// in it, and the callback RPCs that list tools read it. A server with no
+	// registry does not start.
+	if s.service.componentRegistry == nil {
+		return errors.New("callback server has no component registry; call SetComponentRegistry")
+	}
+
 	// Create TCP listener
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {

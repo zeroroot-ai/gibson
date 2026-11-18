@@ -12,13 +12,10 @@ import (
 )
 
 // modelResolvedCallback returns the callback that emits a model_resolved audit
-// event for every slot resolution, allowed or denied. It returns nil when the
-// daemon has no audit writer. Spec: llm-user-attribution-governance
-// (Requirement 4.7).
+// event for every slot resolution, allowed or denied. The daemon checks at
+// start that the audit writer exists (buildGRPCServer). Spec:
+// llm-user-attribution-governance (Requirement 4.7).
 func (d *daemonImpl) modelResolvedCallback() func(ctx context.Context, picked modelgate.Candidate, allowed bool) {
-	if d.auditWriter == nil {
-		return nil
-	}
 	emitter := d.auditWriter
 	logger := d.logger.Slog()
 	return func(ctx context.Context, picked modelgate.Candidate, allowed bool) {

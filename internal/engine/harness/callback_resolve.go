@@ -107,9 +107,6 @@ func (s *HarnessCallbackService) agentExists(ctx context.Context, tenant, name s
 	if _, ok := componentcatalog.LookupAgent(name); ok {
 		return true, nil
 	}
-	if s.componentRegistry == nil {
-		return false, nil
-	}
 	instances, err := s.componentRegistry.Discover(ctx, tenant, "agent", name)
 	if err != nil {
 		return false, err //nolint:wrapcheck // the handler wraps it

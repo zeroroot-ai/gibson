@@ -309,9 +309,7 @@ func (d *daemonImpl) buildSlotManagerForRecords(ctx context.Context, tenantID st
 	sm := NewDaemonSlotManager(providers, d.logger.WithComponent("slot-manager").Slog())
 	sm.WithDefaultProvider(defaultName)
 	sm.WithModelFilter(modelgate.NewFGAFilter(d.authorizer, d.logger.Slog(), 0))
-	if cb := d.modelResolvedCallback(); cb != nil {
-		sm.WithResolveCallback(cb)
-	}
+	sm.WithResolveCallback(d.modelResolvedCallback())
 	return sm, nil
 }
 
