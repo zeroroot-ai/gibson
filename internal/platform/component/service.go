@@ -571,6 +571,19 @@ func (s *ComponentServiceServer) RegisterComponent(
 			InputSchemaJSON: md.GetInputSchemaJson(),
 		})
 	}
+	// The Agent Card of an agent is built from its registration. Only an agent
+	// has a card.
+	if req.Kind == "agent" {
+		info.DefaultInputModes = req.GetDefaultInputModes()
+		info.DefaultOutputModes = req.GetDefaultOutputModes()
+		for _, cs := range req.GetCardSkills() {
+			info.CardSkills = append(info.CardSkills, CardSkillInfo{
+				ID: cs.GetId(), Name: cs.GetName(), Description: cs.GetDescription(),
+				Tags: cs.GetTags(), Examples: cs.GetExamples(),
+				InputModes: cs.GetInputModes(), OutputModes: cs.GetOutputModes(),
+			})
+		}
+	}
 	// Populate input/output message types. Prefer the explicitly declared fields on the
 	// registration request. When a FileDescriptorSet is provided but the explicit fields
 	// are absent, fall back to extracting types from the descriptor by convention
