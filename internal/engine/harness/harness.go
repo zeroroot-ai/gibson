@@ -119,6 +119,9 @@ type StructuredCompletionResult struct {
 type SlotModel struct {
 	Provider string
 	Model    string
+	// ContextWindow is the context window of the model in tokens, or zero when
+	// the provider does not report one.
+	ContextWindow int
 }
 
 // SlotModelResolver resolves a slot to the provider and the one exact model name

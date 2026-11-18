@@ -95,3 +95,26 @@ func selfSignedPEM(t *testing.T) []byte {
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
+
+func TestModelGatewayInfoFromEnv(t *testing.T) {
+	dir := t.TempDir()
+	ca := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(ca, selfSignedPEM(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvModelGatewayURL, "https://gw.example")
+	t.Setenv(EnvModelGatewayCAFile, ca)
+	info, err := modelGatewayInfoFromEnv()
+	if err != nil || info.URL != "https://gw.example" || info.CAPEM == "" {
+		t.Fatalf("info = %+v, %v", info, err)
+	}
+	t.Setenv(EnvModelGatewayURL, "")
+	if _, err := modelGatewayInfoFromEnv(); err == nil {
+		t.Error("no URL was accepted")
+	}
+	t.Setenv(EnvModelGatewayURL, "https://gw.example")
+	t.Setenv(EnvModelGatewayCAFile, filepath.Join(dir, "missing.pem"))
+	if _, err := modelGatewayInfoFromEnv(); err == nil {
+		t.Error("a missing CA file was accepted")
+	}
+}

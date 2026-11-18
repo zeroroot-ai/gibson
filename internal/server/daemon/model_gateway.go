@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient/mintgrants"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
@@ -94,4 +95,23 @@ func modelGatewayHTTPClient(caFile string) (*http.Client, error) {
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	return &http.Client{Transport: tr}, nil
+}
+
+// modelGatewayInfoFromEnv reads what an SDK agent needs to reach the model
+// gateway: the URL and the PEM bundle of the CA. ResolveModel returns it (the
+// RPC handlers wait for the SDK module that has the RPC).
+func modelGatewayInfoFromEnv() (harness.GatewayInfo, error) {
+	url := strings.TrimSpace(os.Getenv(EnvModelGatewayURL))
+	if url == "" {
+		return harness.GatewayInfo{}, fmt.Errorf("%s is not set", EnvModelGatewayURL)
+	}
+	caFile := strings.TrimSpace(os.Getenv(EnvModelGatewayCAFile))
+	if caFile == "" {
+		return harness.GatewayInfo{}, fmt.Errorf("%s is not set", EnvModelGatewayCAFile)
+	}
+	pemBytes, err := os.ReadFile(caFile) //nolint:gosec // G304: the path is operator configuration
+	if err != nil {
+		return harness.GatewayInfo{}, fmt.Errorf("read %s: %w", EnvModelGatewayCAFile, err)
+	}
+	return harness.GatewayInfo{URL: url, CAPEM: string(pemBytes)}, nil
 }
