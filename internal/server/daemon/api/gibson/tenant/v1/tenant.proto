@@ -25,6 +25,7 @@ option go_package = "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gi
 import "google/protobuf/timestamp.proto";
 
 import "gibson/auth/v1/options.proto";
+import "gibson/types/v1/types.proto";
 import "buf/validate/validate.proto";
 
 // TenantService provides the core tenant-management operations: onboarding
@@ -115,6 +116,19 @@ service TenantService {
   }
   // ExportFindings exports findings to the requested format (json, csv, sarif).
   rpc ExportFindings(ExportFindingsRequest) returns (ExportFindingsResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "member"
+      object_type: "tenant"
+      object_deriver: "tenant_from_identity"
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
+  // GetFinding returns one finding with all of its evidence, as stored. Each
+  // evidence item shows its tier and, on a tier 1 item, the ID of the tool call
+  // that backs it. A list of findings does not hold evidence. Use this RPC for
+  // the evidence of one finding.
+  rpc GetFinding(GetFindingRequest) returns (GetFindingResponse) {
     option (gibson.auth.v1.authz) = {
       relation: "member"
       object_type: "tenant"
@@ -355,6 +369,41 @@ message ExportFindingsResponse {
   string format = 2;
   string filename = 3;
   int32 count = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Finding detail — request/response messages
+// ---------------------------------------------------------------------------
+
+// GetFindingRequest names one finding of the caller's tenant.
+message GetFindingRequest {
+  // finding_id is the ID of the finding. It is a UUID.
+  string finding_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 64 }];
+}
+
+// FindingDetail is one finding with all of its evidence.
+message FindingDetail {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  string category = 4;
+  string severity = 5;
+  double confidence = 6;
+  string mission_id = 7;
+  string agent_name = 8;
+  // submitted_by is the verified principal that submitted the finding, when the
+  // daemon knows it.
+  string submitted_by = 9;
+  google.protobuf.Timestamp created_at = 10;
+  // evidence holds every evidence item of the finding, as stored, in the order
+  // that the items had when the finding was stored. Each item has its tier. A
+  // tier 1 item has the ID of its tool call.
+  repeated gibson.types.v1.Evidence evidence = 11;
+}
+
+// GetFindingResponse carries the finding with its evidence.
+message GetFindingResponse {
+  FindingDetail finding = 1;
 }
 
 // ---------------------------------------------------------------------------
