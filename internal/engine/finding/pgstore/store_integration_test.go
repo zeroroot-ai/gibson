@@ -307,3 +307,45 @@ func TestStore_Integration_FindAndFindWithEvidence(t *testing.T) {
 	assert.Equal(t, "call-1", withEvidence[1].Evidence[0].GetToolCallId())
 	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_TYPED, withEvidence[1].Evidence[1].GetTier())
 }
+
+func TestStore_Integration_CountsAndDailyCounts(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	m := types.NewID()
+	now := time.Now().UTC()
+	mk := func(sev agent.FindingSeverity, cat string, at time.Time) finding.EnhancedFinding {
+		f := finding.NewEnhancedFinding(agent.NewFinding("t", "d", sev).WithCategory(cat), m, "recon")
+		f.CreatedAt = at
+		return f
+	}
+	for _, f := range []finding.EnhancedFinding{
+		mk(agent.SeverityHigh, "injection", now),
+		mk(agent.SeverityHigh, "", now.Add(-time.Hour)),
+		mk(agent.SeverityLow, "injection", now.AddDate(0, 0, -10)),
+	} {
+		require.NoError(t, s.Store(ctx, "acme", f))
+	}
+
+	bySev, err := s.CountBy(ctx, "acme", "severity", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []pgstore.Bucket{{Label: "high", Count: 2}, {Label: "low", Count: 1}}, bySev)
+
+	byCat, err := s.CountBy(ctx, "acme", "category", 0)
+	require.NoError(t, err)
+	assert.Equal(t, []pgstore.Bucket{{Label: "injection", Count: 2}, {Label: "unknown", Count: 1}}, byCat)
+
+	windowed, err := s.CountBy(ctx, "acme", "severity", 24*time.Hour)
+	require.NoError(t, err)
+	assert.Equal(t, []pgstore.Bucket{{Label: "high", Count: 2}}, windowed)
+
+	_, err = s.CountBy(ctx, "acme", "mission", 0)
+	require.Error(t, err)
+
+	daily, err := s.DailyCounts(ctx, "acme", 5)
+	require.NoError(t, err)
+	var sum uint64
+	for _, n := range daily {
+		sum += n
+	}
+	assert.Equal(t, uint64(2), sum, "the finding of ten days ago is outside five days")
+}

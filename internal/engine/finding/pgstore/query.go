@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
@@ -227,4 +228,90 @@ func evidenceItem(
 		item.Metadata = nil
 	}
 	return item, nil
+}
+
+// Bucket is the number of findings that share one label.
+type Bucket struct {
+	Label string
+	Count uint64
+}
+
+// CountBy counts the findings of the tenant by "severity" or by "category". A
+// finding with no label counts under "unknown". If window is not zero, only the
+// findings that were created within the window count.
+func (s *Store) CountBy(ctx context.Context, tenantID, by string, window time.Duration) ([]Bucket, error) {
+	var expr string
+	switch by {
+	case "severity":
+		expr = "coalesce(nullif(severity, ''), 'unknown')"
+	case "category":
+		expr = "coalesce(nullif(document->>'category', ''), 'unknown')"
+	default:
+		return nil, fmt.Errorf("finding store: cannot count by %q", by)
+	}
+	stmt := `SELECT ` + expr + ` AS label, count(*) FROM findings`
+	var args []any
+	if window > 0 {
+		stmt += ` WHERE created_at > now() - make_interval(secs => $1)`
+		args = append(args, window.Seconds())
+	}
+	stmt += ` GROUP BY label ORDER BY count(*) DESC, label`
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Release()
+	rows, err := c.SQL().Query(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: count findings: %w", err)
+	}
+	defer rows.Close()
+	out := []Bucket{}
+	for rows.Next() {
+		var (
+			label string
+			n     int64
+		)
+		if err := rows.Scan(&label, &n); err != nil {
+			return nil, fmt.Errorf("finding store: scan count: %w", err)
+		}
+		out = append(out, Bucket{Label: label, Count: uint64(n)})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding store: count findings: %w", err)
+	}
+	return out, nil
+}
+
+// DailyCounts returns the number of findings created on each UTC day of the
+// last `days` days, keyed by "2006-01-02". A day with no finding is absent.
+func (s *Store) DailyCounts(ctx context.Context, tenantID string, days int) (map[string]uint64, error) {
+	c, err := s.conns.For(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Release()
+	rows, err := c.SQL().Query(ctx, `
+SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS day, count(*)
+FROM findings WHERE created_at > now() - make_interval(days => $1)
+GROUP BY day`, days)
+	if err != nil {
+		return nil, fmt.Errorf("finding store: count findings by day: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]uint64{}
+	for rows.Next() {
+		var (
+			day string
+			n   int64
+		)
+		if err := rows.Scan(&day, &n); err != nil {
+			return nil, fmt.Errorf("finding store: scan day count: %w", err)
+		}
+		out[day] = uint64(n)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding store: count findings by day: %w", err)
+	}
+	return out, nil
 }
