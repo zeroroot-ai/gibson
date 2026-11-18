@@ -370,6 +370,22 @@ service DaemonOperatorService {
 
 
 
+  // GetTenantModelProviders returns the model providers that one tenant
+  // configured, from the provider records of the daemon (gibson#1387). The
+  // tenant-operator pulls it for each tenant and renders one ModelProvider for
+  // each record. The daemon holds the records and cannot write cluster
+  // resources (ADR-0023). A record whose type has no gateway route is not in
+  // the list. It is in skipped, with the reason. The reply holds the name of
+  // the credential secret and never a credential value.
+  rpc GetTenantModelProviders(GetTenantModelProvidersRequest) returns (GetTenantModelProvidersResponse) {
+    option (gibson.auth.v1.authz) = {
+      relation: "platform_operator",
+      object_type: "system_tenant",
+      object_deriver: "system_tenant",
+      allowed_identities: 3  // USER | SERVICE
+    };
+  }
+
   // ListDesiredCatalogPlugins returns every (tenant, catalog plugin) pair a
   // tenant enabled (gibson#815). The tenant-operator pulls it and runs one
   // instance of the plugin for each pair. The daemon holds the desired state
@@ -909,8 +925,8 @@ message GetConnectorCredentialResponse {
 message GetModelProviderCredentialRequest {
   // tenant_id is the tenant slug. Required.
   string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
-  // credential_secret is the name of the tenant secret that holds the
-  // credential. Required.
+  // credential_secret is the name of the credential secret of the provider, as
+  // GetTenantModelProviders returned it. Required.
   string credential_secret = 2 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
   // provider_type is the type of the ModelProvider. It selects the key names of
   // the Secret. Required.
@@ -920,6 +936,37 @@ message GetModelProviderCredentialRequest {
 message GetModelProviderCredentialResponse {
   // data is the content of the Secret, by the key names that the gateway reads.
   map<string, bytes> data = 1;
+}
+
+// GetTenantModelProvidersRequest names one tenant.
+message GetTenantModelProvidersRequest {
+  // tenant_id is the tenant slug. Required.
+  string tenant_id = 1 [(buf.validate.field).string = { min_len: 1, max_len: 1024 }];
+}
+
+// DesiredModelProvider is one provider record of a tenant, in the shape of the
+// ModelProvider resource.
+message DesiredModelProvider {
+  // name is the name of the provider in the tenant.
+  string name = 1;
+  // type is the ModelProvider type: anthropic, openai, openai-compatible,
+  // bedrock, gemini or vertexai.
+  string type = 2;
+  // base_url replaces the default endpoint of the provider, or is empty.
+  string base_url = 3;
+  // region is the cloud region of a bedrock or vertexai provider, or is empty.
+  string region = 4;
+  // project_id is the Google Cloud project of a vertexai provider, or is empty.
+  string project_id = 5;
+  // credential_secret is the name of the tenant secret that holds the
+  // credential. It is a name and never a value.
+  string credential_secret = 6;
+}
+
+message GetTenantModelProvidersResponse {
+  repeated DesiredModelProvider providers = 1;
+  // skipped lists each record that has no gateway route, as "<name>: <reason>".
+  repeated string skipped = 2;
 }
 
 // ---------------------------------------------------------------------------

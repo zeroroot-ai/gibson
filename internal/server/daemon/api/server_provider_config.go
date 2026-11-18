@@ -511,86 +511,38 @@ func servesChat(input *tenantv1.ProviderConfigInput) bool {
 // maxContextWindow bounds a stated context window, in tokens.
 const maxContextWindow = 10_000_000
 
-// listedWindow asks the live model list of the provider for the window of the
-// model. It reports the window (0 when the list names the model but reports no
-// window), whether the list named the model, and the error of the list call.
-func (s *DaemonServer) listedWindow(ctx context.Context, input *tenantv1.ProviderConfigInput, model string) (window int, named bool, err error) {
-	prov, err := s.providerFromInput(input)
-	if err != nil {
-		return 0, false, fmt.Errorf("the provider could not be built (%w)", err)
-	}
-	listCtx, cancel := context.WithTimeout(ctx, providerCheckTimeout)
-	defer cancel()
-	models, err := prov.Models(listCtx)
-	if err != nil {
-		return 0, false, fmt.Errorf("the model list of the provider failed (%w)", err)
-	}
-	for _, m := range models {
-		if m.Name == model {
-			if m.ContextWindowUnreported {
-				return 0, true, nil
-			}
-			return m.ContextWindow, true, nil
-		}
-	}
-	return 0, false, nil
-}
-
-// fillDefaultModelWindow stores the context window with the saved model. The
-// daemon never guesses a window and no mission reads a model list, so the
-// window is fixed here, at save time:
-//  1. a window the caller states must be in 1..maxContextWindow. When the live
-//     list reports a window for the model, the stated one must equal it;
-//  2. else an update that keeps the same model keeps the stored window and makes
-//     no list call, so a rename or a key rotation works during a list outage;
-//  3. else the window that the live list reports for default_model is used;
-//  4. else the save is refused, and the message tells the caller to state it.
+// fillDefaultModelWindow checks the context window that is stored with the saved
+// model. The save path calls no provider (gibson#1394, ADR-0172): the daemon
+// holds no provider client and no credential that is not saved yet. The caller
+// states the window, so:
+//  1. a window that the caller states must be in 1..maxContextWindow;
+//  2. else an update that keeps the same model keeps the stored window;
+//  3. else the save is refused, and the message tells the caller to state it.
 //
 // existing is the stored config on an update, and nil on a create. A config that
 // serves no chat, or names no default model, has no window to fix.
-func (s *DaemonServer) fillDefaultModelWindow(ctx context.Context, input *tenantv1.ProviderConfigInput, existing *providerconfig.ProviderConfig) error {
+func (s *DaemonServer) fillDefaultModelWindow(_ context.Context, input *tenantv1.ProviderConfigInput, existing *providerconfig.ProviderConfig) error {
 	model := strings.TrimSpace(input.GetDefaultModel())
 	if model == "" || !servesChat(input) {
 		return nil
 	}
-	refuse := func(cause string) error {
-		return fmt.Errorf("the context window of model %q is unknown: %s. State it in default_model_context_window", model, cause)
-	}
-
 	if stated := input.GetDefaultModelContextWindow(); stated != 0 {
 		if stated < 1 || stated > maxContextWindow {
 			return fmt.Errorf("default_model_context_window %d is out of range: it must be 1 to %d tokens", stated, maxContextWindow)
 		}
-		if listed, named, err := s.listedWindow(ctx, input, model); err == nil && named && listed > 0 && listed != int(stated) {
-			return fmt.Errorf("default_model_context_window %d does not match the %d tokens that the provider reports for model %q",
-				stated, listed, model)
-		}
 		return nil
 	}
-
-	unchanged := existing != nil && existing.DefaultModel == model && string(existing.Type) == input.GetType()
-	if unchanged && existing.DefaultModelContextWindow > 0 {
+	if existing != nil && existing.DefaultModel == model && string(existing.Type) == input.GetType() &&
+		existing.DefaultModelContextWindow > 0 {
 		input.DefaultModelContextWindow = int32(existing.DefaultModelContextWindow) //nolint:gosec // bounded by maxContextWindow at save
 		return nil
 	}
-
-	listed, named, err := s.listedWindow(ctx, input, model)
-	switch {
-	case err == nil && listed > 0:
-		input.DefaultModelContextWindow = int32(listed) //nolint:gosec // a context window is at most ~10M tokens
+	if existing != nil && existing.DefaultModel == model && string(existing.Type) == input.GetType() {
+		// A provider saved before the window was stored. An edit that does not
+		// touch the model is not refused.
 		return nil
-	case unchanged:
-		// A provider saved before the window was stored: fill it when the list
-		// can, and keep saving when it cannot. Nothing is refused for an edit
-		// that does not touch the model.
-		return nil
-	case err != nil:
-		return refuse(err.Error())
-	case named:
-		return refuse("the provider does not report a context window for it")
-	default:
-		return refuse("the provider does not list it")
 	}
+	return fmt.Errorf("the context window of model %q is unknown. State it in default_model_context_window", model)
 }
 
 // TestProvider validates a proposed provider config by calling the model list

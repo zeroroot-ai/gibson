@@ -517,3 +517,38 @@ func (c *EntitlementsGRPCClient) ModelProviderCredential(
 	}
 	return resp.GetData(), nil
 }
+
+// DesiredModelProvider is one provider record of a tenant, as the daemon returns
+// it. The credential secret is a name and never a value.
+type DesiredModelProvider struct {
+	Name             string
+	Type             string
+	BaseURL          string
+	Region           string
+	ProjectID        string
+	CredentialSecret string
+}
+
+// TenantModelProviders reads the provider records of one tenant via
+// DaemonOperatorService.GetTenantModelProviders (gibson#1387). It satisfies
+// the ModelProviderRecords interface of the controller package.
+func (c *EntitlementsGRPCClient) TenantModelProviders(
+	ctx context.Context, tenantID string,
+) ([]DesiredModelProvider, []string, error) {
+	authedCtx, err := c.authCtx(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	resp, err := c.client.GetTenantModelProviders(authedCtx, &operatorv1.GetTenantModelProvidersRequest{TenantId: tenantID})
+	if err := translateGRPCError("get-tenant-model-providers", err); err != nil {
+		return nil, nil, err
+	}
+	out := make([]DesiredModelProvider, 0, len(resp.GetProviders()))
+	for _, p := range resp.GetProviders() {
+		out = append(out, DesiredModelProvider{
+			Name: p.GetName(), Type: p.GetType(), BaseURL: p.GetBaseUrl(), Region: p.GetRegion(),
+			ProjectID: p.GetProjectId(), CredentialSecret: p.GetCredentialSecret(),
+		})
+	}
+	return out, resp.GetSkipped(), nil
+}

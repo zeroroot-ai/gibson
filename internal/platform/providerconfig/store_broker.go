@@ -315,3 +315,12 @@ func (s *brokerBackedStore) Resolve(ctx context.Context, tenantID, name string) 
 		Credentials:    creds,
 	}, nil
 }
+
+// CredentialSecretName returns the name of the credential secret of a provider.
+// It is the prefix of the broker keys of its credential fields. A provider
+// record holds this name and never a credential value.
+func CredentialSecretName(name string) string { return "provider_cred:" + name }
+
+// CredentialFieldKey returns the broker key of one credential field of a
+// provider, from the name that CredentialSecretName returned.
+func CredentialFieldKey(secretName, field string) string { return secretName + ":" + field }

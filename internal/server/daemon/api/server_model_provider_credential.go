@@ -18,13 +18,13 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -74,17 +74,14 @@ func (s *DaemonServer) GetModelProviderCredential(
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "tenant_id: %v", err)
 	}
-	raw, err := s.modelCredStore.Resolve(auth.WithTenant(ctx, tenant), req.GetCredentialSecret())
+	data, err := modelCredentialFor(auth.WithTenant(ctx, tenant), s.modelCredStore,
+		req.GetProviderType(), req.GetCredentialSecret())
 	if err != nil {
 		if status.Code(err) == codes.NotFound {
-			return nil, status.Errorf(codes.NotFound, "the tenant secret %q does not exist", req.GetCredentialSecret())
+			return nil, status.Errorf(codes.NotFound, "the credential secret %q does not exist", req.GetCredentialSecret())
 		}
-		return nil, status.Errorf(codes.Internal, "resolve the tenant secret %q: %v", req.GetCredentialSecret(), err)
-	}
-	data, err := modelCredentialData(req.GetProviderType(), raw)
-	if err != nil {
 		// The error names the type and the key, never a value.
-		return nil, status.Errorf(codes.FailedPrecondition, "the tenant secret %q: %v", req.GetCredentialSecret(), err)
+		return nil, status.Errorf(codes.FailedPrecondition, "the credential secret %q: %v", req.GetCredentialSecret(), err)
 	}
 	return &daemonoperatorv1.GetModelProviderCredentialResponse{Data: data}, nil
 }
@@ -92,31 +89,53 @@ func (s *DaemonServer) GetModelProviderCredential(
 // errEmptyModelCredential reports a tenant secret with no value.
 var errEmptyModelCredential = errors.New("the credential is empty")
 
-// modelCredentialData shapes the value of a tenant secret into the content of
-// the gateway Secret. A Bedrock secret is a JSON object with accessKey,
-// secretKey and an optional sessionToken. Each other provider type has one API
-// key as the raw value.
-func modelCredentialData(providerType string, raw []byte) (map[string][]byte, error) {
-	if len(raw) == 0 {
-		return nil, errEmptyModelCredential
+// The credential fields of a provider in the tenant secret store.
+const (
+	credFieldAPIKey       = "api_key"
+	credFieldAWSAccessKey = "aws_access_key_id"
+	credFieldAWSSecretKey = "aws_secret_access_key"
+	credFieldAWSSession   = "aws_session_token"
+)
+
+// modelCredentialFor reads the credential fields of a provider and shapes them
+// into the content of the gateway Secret. An API key becomes the key
+// Authorization. A Bedrock credential becomes accessKey, secretKey and an
+// optional sessionToken. A missing required field gives a NotFound error.
+func modelCredentialFor(
+	ctx context.Context, store ConnectorSecretResolver, providerType, secretName string,
+) (map[string][]byte, error) {
+	read := func(field string) ([]byte, error) {
+		v, err := store.Resolve(ctx, providerconfig.CredentialFieldKey(secretName, field))
+		if err != nil {
+			return nil, fmt.Errorf("resolve the field %s: %w", field, err)
+		}
+		return v, nil
 	}
 	if providerType != modelProviderTypeBedrock {
-		return map[string][]byte{ModelCredentialKeyAuthorization: raw}, nil
-	}
-	var fields map[string]string
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		// The JSON error can quote the input, so it is not wrapped.
-		return nil, errors.New("a bedrock credential must be a JSON object of strings")
+		v, err := read(credFieldAPIKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(v) == 0 {
+			return nil, errEmptyModelCredential
+		}
+		return map[string][]byte{ModelCredentialKeyAuthorization: v}, nil
 	}
 	out := map[string][]byte{}
-	for _, k := range []string{ModelCredentialKeyAccessKey, ModelCredentialKeySecretKey} {
-		if fields[k] == "" {
-			return nil, fmt.Errorf("a bedrock credential needs the field %q", k)
+	for field, key := range map[string]string{
+		credFieldAWSAccessKey: ModelCredentialKeyAccessKey, credFieldAWSSecretKey: ModelCredentialKeySecretKey,
+	} {
+		v, err := read(field)
+		if err != nil {
+			return nil, err
 		}
-		out[k] = []byte(fields[k])
+		if len(v) == 0 {
+			return nil, fmt.Errorf("a bedrock credential needs the field %q", field)
+		}
+		out[key] = v
 	}
-	if fields[ModelCredentialKeySessionToken] != "" {
-		out[ModelCredentialKeySessionToken] = []byte(fields[ModelCredentialKeySessionToken])
+	if v, err := read(credFieldAWSSession); err == nil && len(v) > 0 {
+		out[ModelCredentialKeySessionToken] = v
 	}
 	return out, nil
 }

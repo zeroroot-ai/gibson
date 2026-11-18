@@ -663,6 +663,15 @@ func main() {
 		orgMappingSeeder = grpcClient
 		agentLimits = grpcClient
 		modelCredentials = grpcClient
+		// Pull the provider records of each tenant and reconcile one ModelProvider
+		// for each record (gibson#1387). The daemon never touches Kubernetes.
+		if err := (&controller.ModelProviderSyncRunnable{
+			Client: mgr.GetClient(),
+			Daemon: grpcClient,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to register the model provider sync runnable")
+			os.Exit(1)
+		}
 		if sagaAudit, gerr = audit.NewSagaEmitter(grpcClient); gerr != nil {
 			setupLog.Error(gerr, "saga audit emitter init failed")
 			os.Exit(1)
