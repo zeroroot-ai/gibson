@@ -131,6 +131,27 @@ func (s *EnvoyAuthzServer) modelCallResponse(
 		objects = []string{modelObject, providerObject}
 	}
 
+	// A model call of a mission that is not active is refused (gibson#1389). The
+	// daemon changes the FGA tuple when the mission is paused or ends. A call with
+	// no mission, such as a component call, has no mission to gate.
+	if caller.mission != "" {
+		active, aErr := s.cache.CheckRelation(ctx, "tenant:"+caller.tenant,
+			authz.RelationMissionActive, authz.MissionObject(caller.mission), nil)
+		if aErr != nil {
+			extauthzFGAUnavailableTotal.Inc()
+			s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (mission gate)",
+				"path", path, "mission", caller.mission, "err", aErr)
+			return denyModel(modelDenyFGAUnavailable,
+				denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable))
+		}
+		if !active {
+			s.log.InfoContext(ctx, "ext-authz: model call of a mission that is not active",
+				"path", path, "subject", caller.subject, "mission", caller.mission, "task", caller.task)
+			extauthzDeniedTotal.WithLabelValues(path).Inc()
+			return denyModel(modelDenyMission, denyForbidden())
+		}
+	}
+
 	allowed, fgaErr := s.canUse(ctx, caller.fgaUsers, objects)
 	if fgaErr != nil {
 		extauthzFGAUnavailableTotal.Inc()

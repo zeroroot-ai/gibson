@@ -32,6 +32,12 @@ type modelFGA struct {
 	allow map[string]bool
 	err   error
 	asked []fgaclient.ClientCheckRequest
+	// gateClosed answers "no" to the mission gate question (relation active).
+	// The gate is open by default, so a test of the access check need not
+	// repeat the tuple of the mission.
+	gateClosed bool
+	// gateErr fails the mission gate question only.
+	gateErr error
 }
 
 func tupleKey(user, relation, object string) string { return user + "|" + relation + "|" + object }
@@ -65,6 +71,12 @@ func (r *modelFGAReq) Execute() (*fgaclient.ClientCheckResponse, error) {
 	r.m.asked = append(r.m.asked, r.body)
 	err := r.m.err
 	v := r.m.allow[tupleKey(r.body.User, r.body.Relation, r.body.Object)]
+	if r.body.Relation == "active" {
+		v = !r.m.gateClosed
+		if r.m.gateErr != nil {
+			err = r.m.gateErr
+		}
+	}
 	r.m.mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -221,7 +233,7 @@ func TestModelCall_FGAIsAskedWithTheExactModelAndTheProvider(t *testing.T) {
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
 		t.Fatalf("status = %v, want PermissionDenied", got)
 	}
-	asked := mock.questions()
+	asked := mock.questionsAbout("can_use")
 	if len(asked) != 2 {
 		t.Fatalf("FGA was asked %d questions, want 2: %+v", len(asked), asked)
 	}
@@ -401,7 +413,7 @@ func TestModelCall_ListNeedsTheProviderRelation(t *testing.T) {
 		if got := statusOf(t, resp, err); got != codes.OK {
 			t.Fatalf("status = %v, want OK", got)
 		}
-		if asked := mock.questions(); len(asked) != 1 || asked[0].Object != providerObj {
+		if asked := mock.questionsAbout("can_use"); len(asked) != 1 || asked[0].Object != providerObj {
 			t.Errorf("FGA questions = %+v, want one question on %s", asked, providerObj)
 		}
 	})
@@ -494,4 +506,75 @@ func mintComponentJWTFor(t *testing.T, priv ed25519.PrivateKey, kid, method stri
 		t.Fatal(err)
 	}
 	return signed
+}
+
+// questionsAbout returns the FGA questions with the given relation.
+func (m *modelFGA) questionsAbout(relation string) []fgaclient.ClientCheckRequest {
+	var out []fgaclient.ClientCheckRequest
+	for _, q := range m.questions() {
+		if q.Relation == relation {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
+// A model call of a mission that is not active is refused. The gate is the
+// tuple that the daemon changes when the mission pauses or ends (gibson#1389).
+func TestModelCall_MissionGate(t *testing.T) {
+	t.Parallel()
+	allowModel := func() map[string]bool {
+		return map[string]bool{tupleKey(members, "can_use", modelObj): true}
+	}
+	call := func(t *testing.T, mock *modelFGA) codes.Code {
+		t.Helper()
+		srv, priv := buildModelServer(t, mock)
+		g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
+		resp, err := srv.Check(context.Background(),
+			modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil))
+		return statusOf(t, resp, err)
+	}
+
+	t.Run("an active mission passes, and the gate question is exact", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: allowModel()}
+		if got := call(t, mock); got != codes.OK {
+			t.Fatalf("status = %v, want OK", got)
+		}
+		gate := mock.questionsAbout("active")
+		if len(gate) != 1 || gate[0].User != "tenant:"+modelTenant || gate[0].Object != "mission:mission-1" {
+			t.Errorf("gate questions = %+v, want tenant:%s active mission:mission-1", gate, modelTenant)
+		}
+	})
+	t.Run("a mission that is not active is refused before the access check", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: allowModel(), gateClosed: true}
+		if got := call(t, mock); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+		if asked := mock.questionsAbout("can_use"); len(asked) != 0 {
+			t.Errorf("the access check ran for a mission that is not active: %+v", asked)
+		}
+	})
+	t.Run("FGA is down for the gate", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: allowModel(), gateErr: errors.New("fga down")}
+		if got := call(t, mock); got != codes.Unavailable {
+			t.Fatalf("status = %v, want Unavailable", got)
+		}
+	})
+	t.Run("the model list of a mission that is not active is refused", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{
+			allow:      map[string]bool{tupleKey(members, "can_use", providerObj): true},
+			gateClosed: true,
+		}
+		srv, priv := buildModelServer(t, mock)
+		g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteModels})
+		resp, err := srv.Check(context.Background(),
+			modelRequest(modelcall.RouteModels, modelTenant, modelProvider, "", g, nil))
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+	})
 }

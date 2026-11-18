@@ -520,3 +520,37 @@ func CanonicalComponentResource(resource string) (string, error) {
 		return resource, nil
 	}
 }
+
+// --- mission gate helpers (gibson#1389) -------------------------------------
+
+// ConditionMissionActive is the FGA condition name of the mission `active`
+// relation (defined in model.fga). The writer (the daemon) and the checker
+// (ext-authz) both use this name.
+const ConditionMissionActive = "mission_active"
+
+// ConditionParamActive is the condition parameter that the tuple carries.
+const ConditionParamActive = "active"
+
+// RelationMissionActive is the relation of the model call gate on a mission.
+const RelationMissionActive = "active"
+
+// MissionObject returns the FGA object of a mission: "mission:<id>".
+func MissionObject(missionID string) string {
+	return "mission:" + missionID
+}
+
+// MissionActiveTuple builds the ConditionalTuple that sets the model call gate
+// of a mission. The subject is the tenant of the mission, so a tuple of one
+// tenant never opens a mission of another tenant. active is true while the
+// mission is working or waits for input.
+func MissionActiveTuple(tenant, missionID string, active bool) ConditionalTuple {
+	return ConditionalTuple{
+		User:          "tenant:" + tenant,
+		Relation:      RelationMissionActive,
+		Object:        MissionObject(missionID),
+		ConditionName: ConditionMissionActive,
+		ConditionContext: map[string]any{
+			ConditionParamActive: active,
+		},
+	}
+}
