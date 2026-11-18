@@ -494,6 +494,9 @@ func TestCallTool_TheReplyCarriesTheIDOfTheRecordedCall(t *testing.T) {
 func TestCallTool_ANativeToolCallIsRecordedAndCarriesItsID(t *testing.T) {
 	env := newWorkIDEnv(t)
 	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "tool", Name: "nmap", InstanceID: "inst-tool"}}
+	env.svc.WithMissionPolicy(func(context.Context, string, string) (metatool.MissionPolicy, error) {
+		return metatool.MissionPolicy{}, nil
+	})
 	var got metatool.CallRecord
 	var gotResult []byte
 	env.svc.WithToolCallRecorder(func(_ context.Context, rec metatool.CallRecord, result []byte, _ string) string {
@@ -511,7 +514,9 @@ func TestCallTool_ANativeToolCallIsRecordedAndCarriesItsID(t *testing.T) {
 		}
 	}()
 	// The caller claims a work item of a run, as an agent in pull mode does.
-	_, err := env.queue.Enqueue(context.Background(), victimTenant, "tool", "nmap", WorkItem{
+	// It is agent work. The tool claim loop above takes tool work only, so it
+	// cannot take this item in place of the tool call.
+	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "caller", WorkItem{
 		WorkID: "agent-work-1", WorkType: "execute",
 		Context: map[string]string{authz.AuthzContextWorkKey: `{"run_id":"run-1"}`},
 	})
