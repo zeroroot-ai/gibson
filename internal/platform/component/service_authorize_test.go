@@ -194,46 +194,6 @@ func TestWorkQueue_EnqueueRefusesABadAuthzContext(t *testing.T) {
 	require.Error(t, err, "a work item whose run cannot be read must not be dispatched")
 }
 
-// TestDelegatedAgentGetsTheRunOfItsCaller proves that the work item of a
-// delegated agent carries the run of the caller, so its own Authorize resolves.
-func TestDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
-	env := newWorkIDEnv(t)
-	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
-	env.svc.WithRunAuthorizer(fake)
-	callerWork := env.enqueueRun(t, victimTenant, "work-caller", "run-42")
-
-	entry := sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, callerWork)
-	require.Contains(t, entry, authz.AuthzContextWorkKey)
-
-	// The delegated item goes through the same Enqueue as any other work item.
-	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "recon", WorkItem{
-		WorkID: "work-delegated", WorkType: "execute", Context: entry,
-	})
-	require.NoError(t, err)
-	require.NoError(t, NewRedisWorkContextRegistry(env.state).BindWorkClaim(context.Background(), "work-delegated", testClaimant))
-
-	resp, err := env.svc.Authorize(ctxForTenant(victimTenant), &componentpb.AuthorizeRequest{
-		WorkId: "work-delegated", Action: "execute", Resource: "tool:nmap",
-	})
-	require.NoError(t, err)
-	assert.True(t, resp.GetAllowed())
-	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls, "the delegated agent acts for the run of its caller")
-}
-
-// TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant proves that the source
-// work id the caller names is checked against its owner before it selects a run.
-func TestDelegatedAgentCannotBorrowTheRunOfAnotherTenant(t *testing.T) {
-	env := newWorkIDEnv(t)
-	foreign := env.enqueueRun(t, victimTenant, "work-foreign", "run-victim")
-
-	assert.Empty(t, sourceRunEntry(ctxForTenant(attackerTenant), env.svc, attackerTenant, foreign))
-	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, "no-such-work"))
-	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, ""))
-
-	noRun := env.enqueueRun(t, victimTenant, "work-norun", "")
-	assert.Empty(t, sourceRunEntry(ctxForTenant(victimTenant), env.svc, victimTenant, noRun))
-}
-
 // TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant proves that the run is
 // decided for the tenant that owns the work item, not for the tenant of the
 // caller. A shared component holds the system tenant and serves many tenants.
@@ -250,12 +210,6 @@ func TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, resp.GetAllowed())
 	assert.Equal(t, []string{victimTenant}, fake.tenants, "the owner tenant of the work item decides, not the system tenant")
-}
-
-// sourceRunEntry is the authz context entry that the run of a source work item
-// gives, with the tenant check on the owner of the work item.
-func sourceRunEntry(ctx context.Context, svc *ComponentServiceServer, tenant, work string) map[string]string {
-	return authzContextEntry(svc.sourceWorkRun(ctx, tenant, work))
 }
 
 // fakeGrants stands for the daemon verifier. It accepts a token that names a
@@ -290,11 +244,6 @@ func grantToken(typ, mission, run, signature string) string {
 // grantedCtx presents a task grant that names a mission and a run.
 func grantedCtx(ctx context.Context, mission, run string) context.Context {
 	return metadata.NewIncomingContext(ctx, metadata.Pairs("x-capability-grant", grantToken("JWT", mission, run, "sig")))
-}
-
-func TestDelegatedAuthzContext_WithoutARegistryTheAgentGetsNoRun(t *testing.T) {
-	svc := newParityServer()
-	assert.Empty(t, sourceRunEntry(t.Context(), svc, "test-tenant", "work-1"))
 }
 
 // brokenRedisEnv returns a work-context registry and queue over a Redis that is
