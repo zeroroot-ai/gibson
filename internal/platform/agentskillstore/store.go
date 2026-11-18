@@ -186,6 +186,13 @@ func (s *postgresStore) Publish(
 	defer c.Release()
 
 	err = c.InTx(ctx, func(q datapool.SQL) error {
+		// Two publishes of one name run one after the other. Without the lock
+		// each transaction clears a flag that it cannot see yet, and the second
+		// one fails on the unique index of the current flag. The lock ends with
+		// the transaction.
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "agent_skills:"+m.Name); err != nil {
+			return fmt.Errorf("lock the name: %w", err)
+		}
 		if _, err := q.Exec(ctx,
 			`INSERT INTO agent_skills
 			   (name, digest, reference, description, license, compatibility, metadata_json, allowed_tools, source)
