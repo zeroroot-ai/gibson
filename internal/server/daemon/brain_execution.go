@@ -477,7 +477,10 @@ func pinnedDeciderUnservable(pin brain.DeciderSlot, err error) bool {
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	return errors.Is(err, types.NewError(gibsonharness.ErrNoMatchingProvider, ""))
+	// A pin that names a provider that the tenant does not have cannot be
+	// served either. The wait for a later call does not help.
+	return errors.Is(err, types.NewError(gibsonharness.ErrNoMatchingProvider, "")) ||
+		errors.Is(err, types.NewError(gibsonharness.ErrProviderNotFound, ""))
 }
 
 // catalog lists the mission tenant's enrolled components as brain capabilities.
