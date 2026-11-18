@@ -8,11 +8,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
-	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
 )
 
 // newSlotManagerForTenant is the single per-tenant LLM resolver shared by the
@@ -48,15 +47,15 @@ func TestNewSlotManagerForTenant_StoreUnavailable(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolve := tc.d.newSlotManagerForTenant()
-			sm, reg, err := resolve(context.Background(), "acme")
+			sm, err := resolve(context.Background(), "acme")
 			if err == nil {
 				t.Fatal("expected an error when the broker store is unavailable, got nil")
 			}
-			if sm != nil || reg != nil {
-				t.Fatalf("expected nil slot-manager and registry on error, got sm=%v reg=%v", sm, reg)
+			if sm != nil {
+				t.Fatalf("expected a nil slot manager on error, got %v", sm)
 			}
 			// The lazy once memoises the init error: a second call returns it too.
-			if _, _, err2 := resolve(context.Background(), "acme"); err2 == nil {
+			if _, err2 := resolve(context.Background(), "acme"); err2 == nil {
 				t.Fatal("expected the memoised init error on the second call, got nil")
 			}
 		})
@@ -76,12 +75,12 @@ func TestNewSlotManagerForTenant_ResolveError(t *testing.T) {
 	}
 
 	resolve := d.newSlotManagerForTenant()
-	sm, reg, err := resolve(context.Background(), "acme")
+	sm, err := resolve(context.Background(), "acme")
 	if err == nil {
 		t.Fatal("expected a resolve error when the pool refuses a connection, got nil")
 	}
-	if sm != nil || reg != nil {
-		t.Fatalf("expected nil slot-manager and registry on error, got sm=%v reg=%v", sm, reg)
+	if sm != nil {
+		t.Fatalf("expected a nil slot manager on error, got %v", sm)
 	}
 }
 
@@ -92,27 +91,27 @@ func TestNewSlotManagerForTenant_IndependentInstances(t *testing.T) {
 	d := &daemonImpl{logger: testObsLogger()}
 	a := d.newSlotManagerForTenant()
 	b := d.newSlotManagerForTenant()
-	if _, _, err := a(context.Background(), "acme"); err == nil {
+	if _, err := a(context.Background(), "acme"); err == nil {
 		t.Fatal("closure a: expected error, got nil")
 	}
 	// b has its own once; it still evaluates the guard rather than reusing a's.
-	if _, _, err := b(context.Background(), "acme"); err == nil {
+	if _, err := b(context.Background(), "acme"); err == nil {
 		t.Fatal("closure b: expected error, got nil")
 	}
 }
 
-// buildSlotManagerForSet is the resolve-success tail of newSlotManagerForTenant,
-// split out so it is testable with a hand-built provider Set instead of a live
-// broker + Postgres. These tests pin its behaviour: it wraps the set's registry,
-// carries the set's default provider into the slot manager, always installs the
-// FGA model filter, and writes the default model grant once per provider.
-func TestBuildSlotManagerForSet_EmptySet(t *testing.T) {
+// buildSlotManagerForRecords is the resolve-success tail of
+// newSlotManagerForTenant, split out so it is testable with hand-built provider
+// records instead of a live broker and Postgres. These tests pin its behavior.
+// It builds the providers from the records, carries the default provider into
+// the slot manager, always installs the FGA model filter, and writes the
+// default model grant once per provider.
+func TestBuildSlotManagerForRecords_NoRecords(t *testing.T) {
 	d := &daemonImpl{logger: testObsLogger()}
-	set := &tenantprovider.Set{Registry: llm.NewLLMRegistry()}
 
-	sm, err := d.buildSlotManagerForSet(context.Background(), "acme", set)
+	sm, err := d.buildSlotManagerForRecords(context.Background(), "acme", nil)
 	if err != nil || sm == nil {
-		t.Fatalf("buildSlotManagerForSet = %v, %v; want a slot manager", sm, err)
+		t.Fatalf("buildSlotManagerForRecords = %v, %v; want a slot manager", sm, err)
 	}
 	if sm.defaultProvider != "" {
 		t.Fatalf("defaultProvider = %q, want empty for a set with no default", sm.defaultProvider)
@@ -124,16 +123,31 @@ func TestBuildSlotManagerForSet_EmptySet(t *testing.T) {
 	}
 }
 
-func TestBuildSlotManagerForSet_CarriesDefaultProvider(t *testing.T) {
-	d := &daemonImpl{logger: testObsLogger()}
-	set := &tenantprovider.Set{Registry: llm.NewLLMRegistry(), DefaultName: "anthropic"}
+func TestBuildSlotManagerForRecords_CarriesDefaultProvider(t *testing.T) {
+	g := &grantRecorder{tuples: map[authz.Tuple]bool{}}
+	d := &daemonImpl{logger: testObsLogger(), authorizer: g}
+	recs := []*providerconfig.ProviderConfig{
+		{Name: "openai", DefaultModel: "gpt-4o", Enabled: true},
+		{Name: "anthropic", DefaultModel: "claude", Enabled: true, IsDefault: true},
+		{Name: "off", DefaultModel: "x", Enabled: false},
+	}
 
-	sm, err := d.buildSlotManagerForSet(context.Background(), "acme", set)
+	sm, err := d.buildSlotManagerForRecords(context.Background(), "acme", recs)
 	if err != nil {
-		t.Fatalf("buildSlotManagerForSet: %v", err)
+		t.Fatalf("buildSlotManagerForRecords: %v", err)
 	}
 	if sm.defaultProvider != "anthropic" {
 		t.Fatalf("defaultProvider = %q, want %q", sm.defaultProvider, "anthropic")
+	}
+	if len(sm.providers) != 2 {
+		t.Fatalf("providers = %v, want the two enabled records", sm.providerNames())
+	}
+	// The members of the tenant get the default grant on each usable provider.
+	for _, name := range []string{"openai", "anthropic"} {
+		want := authz.Tuple{User: "tenant:acme#member", Relation: "can_use", Object: "provider:acme/" + name}
+		if !g.tuples[want] {
+			t.Errorf("missing the default grant %+v", want)
+		}
 	}
 }
 

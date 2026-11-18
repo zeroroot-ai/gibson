@@ -8,17 +8,16 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
 
 func TestSupportedProviderDescriptors_Coverage(t *testing.T) {
 	descs := SupportedProviderDescriptors()
-	got := make(map[llm.ProviderType]bool, len(descs))
+	got := make(map[ProviderType]bool, len(descs))
 	for _, d := range descs {
 		got[d.Type] = true
 	}
-	for _, typ := range llm.SupportedProviderTypes() {
-		if typ == llm.ProviderCustom {
+	for _, typ := range SupportedProviderTypes() {
+		if typ == ProviderCustom {
 			// Custom is intentionally excluded.
 			assert.False(t, got[typ], "ProviderCustom should NOT have a descriptor")
 			continue
@@ -30,18 +29,18 @@ func TestSupportedProviderDescriptors_Coverage(t *testing.T) {
 
 func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
 	descs := SupportedProviderDescriptors()
-	byType := make(map[llm.ProviderType]ProviderDescriptor, len(descs))
+	byType := make(map[ProviderType]ProviderDescriptor, len(descs))
 	for _, d := range descs {
 		byType[d.Type] = d
 	}
-	selfHosted := []llm.ProviderType{llm.ProviderOllama, llm.ProviderLlamafile}
+	selfHosted := []ProviderType{ProviderOllama, ProviderLlamafile}
 	for _, t_ := range selfHosted {
 		assert.True(t, byType[t_].SelfHosted, "%s should have SelfHosted=true", t_)
 	}
-	hosted := []llm.ProviderType{
-		llm.ProviderAnthropic, llm.ProviderBedrock, llm.ProviderCloudflare,
-		llm.ProviderCohere, llm.ProviderHuggingFace,
-		llm.ProviderMistral,
+	hosted := []ProviderType{
+		ProviderAnthropic, ProviderBedrock, ProviderCloudflare,
+		ProviderCohere, ProviderHuggingFace,
+		ProviderMistral,
 	}
 	for _, t_ := range hosted {
 		assert.False(t, byType[t_].SelfHosted, "%s should have SelfHosted=false", t_)
@@ -49,7 +48,7 @@ func TestSupportedProviderDescriptors_SelfHostedFlag(t *testing.T) {
 }
 
 func TestBedrockDescriptor_IncludesAWSFields(t *testing.T) {
-	d, ok := providerDescriptor(llm.ProviderBedrock)
+	d, ok := providerDescriptor(ProviderBedrock)
 	require.True(t, ok)
 	keys := make(map[string]bool)
 	for _, f := range d.Credentials {

@@ -14,8 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 )
@@ -39,12 +37,9 @@ func TestNewHarnessFactory_UntaggedBuildWithAnAddress(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Sandbox.Setec.Address = "setec:50051"
 	d := &daemonImpl{
-		config: cfg,
-		logger: observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
-		infrastructure: &Infrastructure{
-			llmRegistry: llm.NewLLMRegistry(),
-			slotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
-		},
+		config:         cfg,
+		logger:         observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr}),
+		infrastructure: &Infrastructure{},
 	}
 	factory, err := d.newHarnessFactory(context.Background())
 	require.NoError(t, err)

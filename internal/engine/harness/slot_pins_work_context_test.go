@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,8 +13,6 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // WorkSlotPins keeps each pinned slot and drops a nil entry.
@@ -35,9 +34,7 @@ func TestWorkSlotPins_NoPinsIsNil(t *testing.T) {
 // The agent work item that the queue path enqueues carries the slot pins of
 // the task (gibson#1203).
 func TestDelegateToAgent_PutsTheNodeSlotPinsOnTheWorkItem(t *testing.T) {
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 
 	task := agent.NewTask("probe", "goal")
@@ -52,9 +49,7 @@ func TestDelegateToAgent_PutsTheNodeSlotPinsOnTheWorkItem(t *testing.T) {
 // delegates to gets the pins of its own node, never the decider pin: neither
 // on its child harness nor on its work item.
 func TestDelegateToAgent_TheDeciderPinNeverReachesTheAgent(t *testing.T) {
-	q := &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	q := &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 	h := newRemoteAgentHarness(t, q, remoteAgentInstances())
 	h.callbackManager = &registrarFake{}
 	h.missionCtx.ID = types.NewID()

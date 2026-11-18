@@ -12,8 +12,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/config"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -59,8 +57,6 @@ func TestNewHarnessFactory(t *testing.T) {
 	require.NotNil(t, infra)
 
 	// Verify infrastructure components
-	assert.NotNil(t, infra.llmRegistry, "LLM registry should be initialized")
-	assert.NotNil(t, infra.slotManager, "Slot manager should be initialized")
 	assert.NotNil(t, infra.harnessFactory, "Harness factory should be initialized")
 
 	// Test harness factory directly
@@ -79,37 +75,13 @@ func TestNewHarnessFactory_WithoutRegistryAdapter(t *testing.T) {
 	}
 
 	// Create minimal infrastructure manually
-	d.infrastructure = &Infrastructure{
-		llmRegistry: llm.NewLLMRegistry(),
-		slotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
-	}
+	d.infrastructure = &Infrastructure{}
 
 	// Create harness factory - should still work even without registry adapter
 	ctx := context.Background()
 	factory, err := d.newHarnessFactory(ctx)
 	require.NoError(t, err)
 	assert.NotNil(t, factory, "Harness factory should be created even without registry adapter")
-}
-
-func TestNewHarnessFactory_ConfigValidation(t *testing.T) {
-	logger := observability.NewLogger(observability.Config{Component: "test", Level: slog.LevelError, Output: os.Stderr})
-
-	// Create daemon with nil slot manager (should fail validation)
-	d := &daemonImpl{
-		logger: logger,
-		infrastructure: &Infrastructure{
-			llmRegistry: llm.NewLLMRegistry(),
-			slotManager: nil, // Missing required slot manager
-		},
-	}
-
-	ctx := context.Background()
-	factory, err := d.newHarnessFactory(ctx)
-
-	// Should fail because SlotManager is required
-	assert.Error(t, err, "Should return error when SlotManager is nil")
-	assert.Nil(t, factory, "Factory should be nil when validation fails")
-	assert.Contains(t, err.Error(), "SlotManager", "Error should mention SlotManager")
 }
 
 // TestTaskGrantVerifier_RefusesUntilTheKeyExists: the callback listener always
@@ -172,12 +144,9 @@ func TestNewHarnessFactory_RequiresTheSetecAddress(t *testing.T) {
 		cfg := config.DefaultConfig()
 		cfg.Sandbox.Setec.Address = addr
 		return &daemonImpl{
-			config: cfg,
-			logger: logger,
-			infrastructure: &Infrastructure{
-				llmRegistry: llm.NewLLMRegistry(),
-				slotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
-			},
+			config:         cfg,
+			logger:         logger,
+			infrastructure: &Infrastructure{},
 		}
 	}
 	_, err := newDaemon("").newHarnessFactory(context.Background())

@@ -8,7 +8,7 @@
 //	MissionNode.llm_slots → mission projection → brain scheduler → dispatch →
 //	brainExecutor.Dispatch → agent.Task.SlotOverrides → harness.WorkSlotPins
 //	(the work item of delegateToAgentViaWorkQueue) → WorkQueue.Enqueue →
-//	ComponentService.Complete → LLMRegistryAdapter → DaemonSlotManager.
+//	ComponentService.ResolveModel → componentSlotModels → DaemonSlotManager.
 //
 // The harness hop from the task to the enqueued work item is covered in the
 // harness package (TestDelegateToAgent_PutsTheNodeSlotPinsOnTheWorkItem). Here
@@ -17,9 +17,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -27,14 +27,14 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
-	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -43,59 +43,6 @@ import (
 )
 
 const chainTenant = "acme"
-
-// servingProvider is an LLM provider that records the model of each
-// completion it serves.
-type servingProvider struct {
-	name   string
-	models []string
-	// noSavedModel makes the provider report no saved default model.
-	noSavedModel bool
-
-	mu     sync.Mutex
-	served []string
-}
-
-func (p *servingProvider) Name() string { return p.name }
-
-// DefaultModel is the saved default model of the provider: its first model.
-func (p *servingProvider) DefaultModel() string {
-	if p.noSavedModel {
-		return ""
-	}
-	return p.models[0]
-}
-
-func (p *servingProvider) Models(context.Context) ([]llm.ModelInfo, error) {
-	out := make([]llm.ModelInfo, 0, len(p.models))
-	for _, m := range p.models {
-		out = append(out, llm.ModelInfo{Name: m, ContextWindow: 200000, MaxOutput: 4096, Features: []string{"chat"}})
-	}
-	return out, nil
-}
-
-func (p *servingProvider) Complete(_ context.Context, req llm.CompletionRequest) (*llm.CompletionResponse, error) {
-	p.mu.Lock()
-	p.served = append(p.served, req.Model)
-	p.mu.Unlock()
-	return &llm.CompletionResponse{Model: req.Model, Message: llm.Message{Role: llm.RoleAssistant, Content: "ok"}}, nil
-}
-
-func (p *servingProvider) CompleteWithTools(ctx context.Context, req llm.CompletionRequest, _ []llm.ToolDef) (*llm.CompletionResponse, error) {
-	return p.Complete(ctx, req)
-}
-
-func (p *servingProvider) Stream(context.Context, llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	return nil, types.NewError("NOT_IMPLEMENTED", "no stream")
-}
-
-func (p *servingProvider) Health(context.Context) types.HealthStatus { return types.Healthy("ok") }
-
-func (p *servingProvider) servedModels() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]string(nil), p.served...)
-}
 
 // delegateRecorder is the mission harness of the binding. Dispatch calls only
 // DelegateToAgent on it, which records the task.
@@ -114,8 +61,6 @@ func (d *delegateRecorder) DelegateToAgent(_ context.Context, _ string, task age
 type chainEnv struct {
 	svc     *component.ComponentServiceServer
 	queue   component.WorkQueue
-	def     *servingProvider
-	pinned  *servingProvider
 	manager *DaemonSlotManager
 	claims  *component.RedisWorkContextRegistry
 }
@@ -134,29 +79,27 @@ func newChainEnv(t *testing.T, filter modelgate.Filter) *chainEnv {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sc.Close() })
 
-	def := &servingProvider{name: "default-p", models: []string{"d-1"}}
-	pinned := &servingProvider{name: "fast-p", models: []string{"f-small", "f-large"}}
-	unsaved := &servingProvider{name: "unsaved-p", models: []string{"u-1"}, noSavedModel: true}
-	registry := llm.NewLLMRegistry()
-	require.NoError(t, registry.RegisterProvider(def))
-	require.NoError(t, registry.RegisterProvider(pinned))
-	require.NoError(t, registry.RegisterProvider(unsaved))
+	providers := []SlotProvider{
+		{Name: "default-p", DefaultModel: "d-1"},
+		{Name: "fast-p", DefaultModel: "f-small"},
+		{Name: "unsaved-p"},
+	}
 	logger := slog.New(slog.DiscardHandler)
-	manager := NewDaemonSlotManager(registry, logger).WithDefaultProvider("default-p")
+	manager := NewDaemonSlotManager(providers, logger).WithDefaultProvider("default-p")
 	if filter != nil {
 		manager.WithModelFilter(filter)
 	}
-
-	adapter := component.NewLLMRegistryAdapter(nil, nil, logger).
-		WithTenantResolver(func(_ context.Context, tenant string) (llm.SlotManager, llm.LLMRegistry, error) {
-			require.Equal(t, chainTenant, tenant)
-			return manager, registry, nil
-		})
+	models := &componentSlotModels{forTenant: func(_ context.Context, tenant string) (gibsonharness.SlotManager, error) {
+		require.Equal(t, chainTenant, tenant)
+		return manager, nil
+	}}
 	queue := component.NewRedisWorkQueue(client)
 	claims := component.NewRedisWorkContextRegistry(sc)
 	svc := component.NewComponentServiceServer(component.NewRedisComponentRegistry(client, time.Minute), queue, logger, nil, nil, nil).
-		WithWorkContextRegistry(claims)
-	return &chainEnv{svc: svc, queue: queue, def: def, pinned: pinned, manager: manager, claims: claims}
+		WithWorkContextRegistry(claims).
+		WithSlotModelResolver(models).
+		WithGateways(component.GatewayInfo{URL: "https://models.test"}, component.GatewayInfo{})
+	return &chainEnv{svc: svc, queue: queue, manager: manager, claims: claims}
 }
 
 // dispatchNode runs one mission with one AGENT node that has the given slot
@@ -202,7 +145,7 @@ func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) 
 	workID := "agent-recon-chain"
 	_, err = e.queue.Enqueue(context.Background(), chainTenant, "agent", "recon", component.WorkItem{
 		WorkID:   workID,
-		WorkType: component.WorkTypeAgentExecute,
+		WorkType: "execute",
 		SlotPins: gibsonharness.WorkSlotPins(task.SlotOverrides),
 	})
 	require.NoError(t, err)
@@ -211,33 +154,33 @@ func (e *chainEnv) dispatchNode(t *testing.T, slots []*missionpb.LLMSlotConfig) 
 	return workID
 }
 
-func (e *chainEnv) complete(workID, slot string) error {
+// resolve calls ResolveModel for a slot of the work item, as a served agent in
+// pull mode does. It returns the provider and the model of the reply.
+func (e *chainEnv) resolve(workID, slot string) (provider, model string, err error) {
 	tid, tidErr := auth.NewTenantID(chainTenant)
 	if tidErr != nil {
-		return fmt.Errorf("tenant: %w", tidErr)
+		return "", "", fmt.Errorf("tenant: %w", tidErr)
 	}
 	ctx := auth.WithIdentity(auth.ContextWithTenantString(context.Background(), chainTenant),
 		auth.Identity{Subject: chainClaimant, Tenant: tid})
-	if _, err := e.svc.Complete(ctx, &componentpb.CompleteRequest{
-		WorkId:   workID,
-		Slot:     slot,
-		Messages: []*componentpb.LLMMessage{{Role: "user", Content: "hello"}},
-	}); err != nil {
-		return fmt.Errorf("complete %s: %w", slot, err)
+	resp, err := e.svc.ResolveModel(ctx, &componentpb.ResolveModelRequest{WorkId: workID, Slot: slot})
+	if err != nil {
+		return "", "", fmt.Errorf("resolve %s: %w", slot, err)
 	}
-	return nil
+	return resp.GetProvider(), resp.GetModel(), nil
 }
 
-// A node that pins a provider and a model gets that provider and model on the
-// completion of its served agent. The tenant default serves nothing.
-func TestNodeSlotPin_ReachesTheProviderOfTheServedAgent(t *testing.T) {
+// A node that pins a provider and a model gets that provider and model when
+// its served agent resolves the slot. The tenant default serves nothing.
+func TestNodeSlotPin_ReachesTheResolutionOfTheServedAgent(t *testing.T) {
 	env := newChainEnv(t, nil)
 	workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p", Model: "f-large"}})
 
-	require.NoError(t, env.complete(workID, "fast"))
+	provider, model, err := env.resolve(workID, "fast")
+	require.NoError(t, err)
 
-	assert.Equal(t, []string{"f-large"}, env.pinned.servedModels())
-	assert.Empty(t, env.def.servedModels())
+	assert.Equal(t, "fast-p", provider)
+	assert.Equal(t, "f-large", model)
 }
 
 // A slot that the node does not pin keeps the tenant default.
@@ -245,10 +188,11 @@ func TestNodeSlotPin_AnUnpinnedSlotKeepsTheTenantDefault(t *testing.T) {
 	env := newChainEnv(t, nil)
 	workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p", Model: "f-large"}})
 
-	require.NoError(t, env.complete(workID, "primary"))
+	provider, model, err := env.resolve(workID, "primary")
+	require.NoError(t, err)
 
-	assert.Equal(t, []string{"d-1"}, env.def.servedModels())
-	assert.Empty(t, env.pinned.servedModels())
+	assert.Equal(t, "default-p", provider)
+	assert.Equal(t, "d-1", model)
 }
 
 // A pin with a provider and no model gets the saved default model of that
@@ -257,22 +201,25 @@ func TestNodeSlotPin_AProviderOnlyPinUsesThatProvider(t *testing.T) {
 	env := newChainEnv(t, nil)
 	workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p"}})
 
-	require.NoError(t, env.complete(workID, "fast"))
+	provider, model, err := env.resolve(workID, "fast")
+	require.NoError(t, err)
 
-	assert.Equal(t, []string{"f-small"}, env.pinned.servedModels())
-	assert.Empty(t, env.def.servedModels())
+	assert.Equal(t, "fast-p", provider)
+	assert.Equal(t, "f-small", model)
 }
 
 // A pin of a provider and a model that the tenant does not have fails the
-// completion with no silent fallback to another provider.
-func TestNodeSlotPin_APinOfAMissingProviderFailsTheCompletion(t *testing.T) {
+// resolution with no silent fallback to another provider.
+func TestNodeSlotPin_APinOfAMissingProviderFailsTheResolution(t *testing.T) {
 	env := newChainEnv(t, nil)
 	workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "absent-p", Model: "a-1"}})
 
-	require.Error(t, env.complete(workID, "fast"))
+	provider, model, err := env.resolve(workID, "fast")
 
-	assert.Empty(t, env.def.servedModels())
-	assert.Empty(t, env.pinned.servedModels())
+	require.Error(t, err)
+	assert.Equal(t, codes.NotFound, status.Code(errors.Unwrap(err)))
+	assert.Empty(t, provider)
+	assert.Empty(t, model)
 }
 
 // The model gate decides on the pinned provider too. A pin never bypasses it.
@@ -280,26 +227,28 @@ func TestNodeSlotPin_TheModelGateDecidesOnThePin(t *testing.T) {
 	env := newChainEnv(t, newAllowProviderFilter("default-p"))
 	workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{{Slot: "fast", Provider: "fast-p", Model: "f-large"}})
 
-	err := env.complete(workID, "fast")
+	_, _, err := env.resolve(workID, "fast")
+
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "model_access_denied")
-	assert.Empty(t, env.pinned.servedModels())
+	assert.Equal(t, codes.PermissionDenied, status.Code(errors.Unwrap(err)))
 }
 
 // A provider-only pin never falls back to another provider in silence. Each
-// case fails the completion, and no provider serves it.
+// case fails the resolution, and no provider is picked.
 func TestNodeSlotPin_AProviderOnlyPinNeverFallsBack(t *testing.T) {
 	cases := []struct {
 		name   string
 		pin    *missionpb.LLMSlotConfig
 		filter modelgate.Filter
+		want   codes.Code
 	}{
-		{name: "the tenant has no such provider", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "absent-p"}},
-		{name: "the provider has no saved default model", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "unsaved-p"}},
+		{name: "the tenant has no such provider", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "absent-p"}, want: codes.NotFound},
+		{name: "the provider has no saved default model", pin: &missionpb.LLMSlotConfig{Slot: "fast", Provider: "unsaved-p"}, want: codes.NotFound},
 		{
 			name:   "the model gate denies the saved model of the provider",
 			pin:    &missionpb.LLMSlotConfig{Slot: "fast", Provider: "fast-p"},
 			filter: newAllowProviderFilter("default-p"),
+			want:   codes.PermissionDenied,
 		},
 	}
 	for _, tc := range cases {
@@ -307,11 +256,11 @@ func TestNodeSlotPin_AProviderOnlyPinNeverFallsBack(t *testing.T) {
 			env := newChainEnv(t, tc.filter)
 			workID := env.dispatchNode(t, []*missionpb.LLMSlotConfig{tc.pin})
 
-			err := env.complete(workID, "fast")
+			provider, _, err := env.resolve(workID, "fast")
+
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "pinned to provider")
-			assert.Empty(t, env.def.servedModels(), "the tenant default must not serve a pinned slot")
-			assert.Empty(t, env.pinned.servedModels())
+			assert.Equal(t, tc.want, status.Code(errors.Unwrap(err)))
+			assert.Empty(t, provider, "the tenant default must not serve a pinned slot")
 		})
 	}
 }

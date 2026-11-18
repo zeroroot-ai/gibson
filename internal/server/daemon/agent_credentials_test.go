@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 )

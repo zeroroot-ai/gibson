@@ -11,7 +11,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	daemonoperatorv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/daemon/operator/v1"
 	"github.com/zeroroot-ai/sdk/auth"

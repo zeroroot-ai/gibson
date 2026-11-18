@@ -7,11 +7,9 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -20,14 +18,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -213,7 +207,7 @@ func TestDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
 
 	// The delegated item goes through the same Enqueue as any other work item.
 	_, err := env.queue.Enqueue(context.Background(), victimTenant, "agent", "recon", WorkItem{
-		WorkID: "work-delegated", WorkType: WorkTypeAgentExecute, Context: entry,
+		WorkID: "work-delegated", WorkType: "execute", Context: entry,
 	})
 	require.NoError(t, err)
 	require.NoError(t, NewRedisWorkContextRegistry(env.state).BindWorkClaim(context.Background(), "work-delegated", testClaimant))
@@ -258,129 +252,6 @@ func TestAuthorize_ASharedComponentIsDecidedForTheOwnerTenant(t *testing.T) {
 	assert.Equal(t, []string{victimTenant}, fake.tenants, "the owner tenant of the work item decides, not the system tenant")
 }
 
-// TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller runs the real
-// DelegateToAgent over a real queue and a real work-context registry. The agent
-// that claims the delegated item carries the run of its caller, the run is bound
-// to the delegated work id, and its own Authorize resolves to that run.
-func TestDelegateToAgent_TheDelegatedAgentGetsTheRunOfItsCaller(t *testing.T) {
-	env := newWorkIDEnv(t)
-	fake := &fakeRunAuthorizer{allowed: true, reason: "fga_allow"}
-	env.svc.WithRunAuthorizer(fake)
-	const tenant = "test-tenant"
-	source := env.enqueueRun(t, tenant, "work-source", "run-42")
-	// PollWork records the mission of the source work item (gibson#1209).
-	require.NoError(t, NewRedisWorkContextRegistry(env.state).
-		RegisterWorkContext(context.Background(), source, "mission-7", tenant))
-
-	item := env.delegateAndClaimAs(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), t, tenant, source)
-	assert.Contains(t, item.Context[authz.AuthzContextWorkKey], "run-42")
-	// The delegated item carries the mission of its caller.
-	assert.Equal(t, "mission-7", item.Context["mission_id"])
-	// The request carries the run too, so the agent sends it on its callbacks.
-	execReq := &agentpb.ExecuteRequest{}
-	require.NoError(t, protojson.Unmarshal(item.Payload, execReq))
-	assert.Equal(t, "run-42", execReq.GetMissionRunId())
-
-	run, err := NewRedisWorkContextRegistry(env.state).WorkRun(context.Background(), item.WorkID)
-	require.NoError(t, err)
-	assert.Equal(t, "run-42", run)
-
-	resp, err := env.svc.Authorize(ctxForTenant(tenant), &componentpb.AuthorizeRequest{
-		WorkId: item.WorkID, Action: "execute", Resource: "tool:nmap",
-	})
-	require.NoError(t, err)
-	assert.True(t, resp.GetAllowed())
-	assert.Equal(t, []string{"run-42|execute|tool:nmap"}, fake.calls)
-}
-
-// A delegation from a work item is refused when its mission cannot be proved:
-// a lookup that fails, a work item with no mission, a daemon with no resolver, a
-// work item with no run, and a grant with no run (gibson#1235).
-// delegateOnce delegates from the work item to "recon-agent" and returns the
-// error of the call.
-//
-// The call has a short deadline. A delegation that the daemon should refuse
-// would otherwise wait for an agent that never claims the work item, and a
-// regression would fail on the timeout of the whole test binary and not in
-// seconds.
-func delegateOnce(ctx context.Context, env *workIDEnv, work string, taskJSON []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	_, err := env.svc.DelegateToAgent(ctx, &componentpb.DelegateToAgentRequest{
-		WorkId: work, AgentName: "recon-agent", TaskJson: taskJSON,
-	})
-	if err != nil {
-		return fmt.Errorf("delegate: %w", err)
-	}
-	return nil
-}
-
-func TestDelegateToAgent_ARefusalWhenTheMissionOrTheRunCannotBeProved(t *testing.T) {
-	const tenant = "test-tenant"
-	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
-	require.NoError(t, err)
-
-	newEnv := func(t *testing.T) *workIDEnv {
-		t.Helper()
-		env := newWorkIDEnv(t)
-		env.svc.WithCapabilityChecker(grantedChecker())
-		env.svc.WithGrantVerifier(fakeGrants{})
-		env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
-		return env
-	}
-
-	t.Run("a lookup that fails", func(t *testing.T) {
-		env := newEnv(t)
-		source := env.enqueueRun(t, tenant, "work-source", "run-42")
-		require.NoError(t, NewRedisWorkContextRegistry(env.state).
-			RegisterWorkContext(t.Context(), source, "mission-7", tenant))
-		cfg := state.DefaultConfig()
-		cfg.URL = "redis://" + env.mr.Addr()
-		closed, stateErr := state.NewStateClient(cfg)
-		require.NoError(t, stateErr)
-		require.NoError(t, closed.Close())
-		env.svc.WithMissionContextResolver(NewMissionContextResolver(closed, testLogger()))
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), env, source, taskJSON)))
-	})
-
-	t.Run("a work item with no mission", func(t *testing.T) {
-		env := newEnv(t)
-		source := env.enqueueRun(t, tenant, "work-source", "run-42")
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), env, source, taskJSON)))
-	})
-
-	t.Run("a daemon with no mission resolver", func(t *testing.T) {
-		env := newEnv(t)
-		env.svc.missionCtx = nil
-		source := env.enqueueRun(t, tenant, "work-source", "run-42")
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), env, source, taskJSON)))
-	})
-
-	t.Run("a grant with no run", func(t *testing.T) {
-		env := newEnv(t)
-		source := env.enqueueRun(t, tenant, "work-source", "run-42")
-		require.NoError(t, NewRedisWorkContextRegistry(env.state).
-			RegisterWorkContext(t.Context(), source, "mission-7", tenant))
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", ""), env, source, taskJSON)))
-	})
-
-	t.Run("a work item of another run than the grant", func(t *testing.T) {
-		env := newEnv(t)
-		source := env.enqueueRun(t, tenant, "work-source", "run-42")
-		require.NoError(t, NewRedisWorkContextRegistry(env.state).
-			RegisterWorkContext(t.Context(), source, "mission-7", tenant))
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-99"), env, source, taskJSON)))
-	})
-
-	t.Run("a work item with no run", func(t *testing.T) {
-		env := newEnv(t)
-		source := env.enqueueRun(t, tenant, "work-source", "")
-		require.NoError(t, NewRedisWorkContextRegistry(env.state).
-			RegisterWorkContext(t.Context(), source, "mission-7", tenant))
-		assert.Equal(t, codes.PermissionDenied, status.Code(delegateOnce(grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-42"), env, source, taskJSON)))
-	})
-}
-
 // sourceRunEntry is the authz context entry that the run of a source work item
 // gives, with the tenant check on the owner of the work item.
 func sourceRunEntry(ctx context.Context, svc *ComponentServiceServer, tenant, work string) map[string]string {
@@ -419,62 +290,6 @@ func grantToken(typ, mission, run, signature string) string {
 // grantedCtx presents a task grant that names a mission and a run.
 func grantedCtx(ctx context.Context, mission, run string) context.Context {
 	return metadata.NewIncomingContext(ctx, metadata.Pairs("x-capability-grant", grantToken("JWT", mission, run, "sig")))
-}
-
-// delegateAndClaim delegates to "recon-agent" from the source work item with
-// the real DelegateToAgent, and returns the delegated work item that the agent
-// claims from the real queue.
-func (e *workIDEnv) delegateAndClaim(t *testing.T, tenant, source string) *WorkItem {
-	t.Helper()
-	return e.delegateAndClaimAs(componentCtx("agent_principal:acct-1"), t, tenant, source)
-}
-
-// delegateAndClaimAs is delegateAndClaim with the context of the caller.
-func (e *workIDEnv) delegateAndClaimAs(callerCtx context.Context, t *testing.T, tenant, source string) *WorkItem {
-	t.Helper()
-	// The caller claimed the source work item.
-	if id, err := auth.IdentityFromContext(callerCtx); err == nil {
-		require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(callerCtx, source, id.Subject))
-	}
-	e.svc.WithCapabilityChecker(grantedChecker())
-	e.svc.WithGrantVerifier(fakeGrants{})
-	e.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
-
-	type claimed struct {
-		item *WorkItem
-		err  error
-	}
-	got := make(chan claimed, 1)
-	go func() {
-		ctx := t.Context()
-		for range 100 {
-			item, err := e.queue.Claim(ctx, tenant, "agent", "recon-agent", "inst-agent", 200*time.Millisecond)
-			if err != nil || item != nil {
-				if item != nil {
-					res := agentpb.ExecuteResponse{Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS}}
-					b, _ := protojson.Marshal(&res)
-					err = e.queue.DeliverResult(ctx, item.WorkID, WorkResult{WorkID: item.WorkID, Result: b})
-				}
-				got <- claimed{item: item, err: err}
-				return
-			}
-		}
-		got <- claimed{err: errors.New("no work item was claimed")}
-	}()
-
-	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
-	require.NoError(t, err)
-	_, err = e.svc.DelegateToAgent(callerCtx, &componentpb.DelegateToAgentRequest{
-		WorkId: source, AgentName: "recon-agent", TaskJson: taskJSON,
-	})
-	require.NoError(t, err)
-
-	c := <-got
-	require.NoError(t, c.err)
-	require.NotNil(t, c.item)
-	// The delegated agent claimed its work item, as PollWork records.
-	require.NoError(t, NewRedisWorkContextRegistry(e.state).BindWorkClaim(callerCtx, c.item.WorkID, testClaimant))
-	return c.item
 }
 
 func TestDelegatedAuthzContext_WithoutARegistryTheAgentGetsNoRun(t *testing.T) {
@@ -521,40 +336,4 @@ func TestBindWorkRun_AnAuthzContextWithNoRunBindsNothing(t *testing.T) {
 	require.NoError(t, err)
 	_, err = NewRedisWorkContextRegistry(env.state).WorkRun(t.Context(), "work-x")
 	require.ErrorIs(t, err, ErrWorkRunUnknown)
-}
-
-// A delegation from a work item is bound to the mission and the run of the
-// verified task grant of the caller (gibson#1235).
-func TestDelegateToAgent_TheWorkItemIsBoundToTheVerifiedGrantOfTheCaller(t *testing.T) {
-	env := newWorkIDEnv(t)
-	env.svc.WithCapabilityChecker(grantedChecker())
-	env.svc.WithGrantVerifier(fakeGrants{})
-	env.svc.registry = &dispatchRegistry{info: ComponentInfo{Kind: "agent", Name: "recon-agent", InstanceID: "inst-agent"}}
-	const tenant = "test-tenant"
-	foreign := env.enqueueRun(t, tenant, "work-foreign", "run-99")
-	require.NoError(t, NewRedisWorkContextRegistry(env.state).
-		RegisterWorkContext(t.Context(), foreign, "mission-other", tenant))
-
-	taskJSON, err := json.Marshal(agent.Task{Goal: "recon"})
-	require.NoError(t, err)
-	req := &componentpb.DelegateToAgentRequest{WorkId: foreign, AgentName: "recon-agent", TaskJson: taskJSON}
-	caller := componentCtx("agent_principal:acct-1")
-	with := func(values ...string) context.Context {
-		return metadata.NewIncomingContext(caller, metadata.Pairs("x-capability-grant", values[0]))
-	}
-
-	cases := map[string]context.Context{
-		"a grant of another mission":              grantedCtx(componentCtx("agent_principal:acct-1"), "mission-7", "run-7"),
-		"a grant of the mission, but another run": grantedCtx(componentCtx("agent_principal:acct-1"), "mission-other", "run-7"),
-		"a token that a component signed itself":  with(grantToken("agent+jwt", "mission-other", "run-99", "sig")),
-		"a task grant with a foreign signature":   with(grantToken("JWT", "mission-other", "run-99", "foreign")),
-		"two grant headers": metadata.NewIncomingContext(caller, metadata.Pairs(
-			"x-capability-grant", grantToken("JWT", "mission-other", "run-99", "sig"),
-			"x-capability-grant", grantToken("JWT", "mission-other", "run-99", "sig"))),
-		"no grant with a work item": caller,
-	}
-	for name, ctx := range cases {
-		_, err := env.svc.DelegateToAgent(ctx, req)
-		assert.Equal(t, codes.PermissionDenied, status.Code(err), name)
-	}
 }

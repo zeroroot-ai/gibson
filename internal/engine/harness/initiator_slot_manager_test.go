@@ -10,7 +10,6 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 )
 
@@ -23,9 +22,9 @@ func (r *initiatorRecorder) record(ctx context.Context) {
 	r.seen = append(r.seen, u)
 }
 
-func (r *initiatorRecorder) ResolveSlot(ctx context.Context, _ agent.SlotDefinition, _ *agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
+func (r *initiatorRecorder) ResolveSlot(ctx context.Context, _ agent.SlotDefinition, _ *agent.SlotConfig) (SlotModel, error) {
 	r.record(ctx)
-	return nil, llm.ModelInfo{}, nil
+	return SlotModel{}, nil
 }
 
 func (r *initiatorRecorder) ValidateSlot(ctx context.Context, _ agent.SlotDefinition) error {
@@ -40,7 +39,7 @@ func TestWithMissionInitiator_APersonReachesEverySlotResolution(t *testing.T) {
 	rec := &initiatorRecorder{}
 	sm := withMissionInitiator(rec, principal.Principal{Kind: principal.User, ID: "alice"})
 
-	if _, _, err := sm.ResolveSlot(context.Background(), agent.SlotDefinition{}, nil); err != nil {
+	if _, err := sm.ResolveSlot(context.Background(), agent.SlotDefinition{}, nil); err != nil {
 		t.Fatalf("ResolveSlot: %v", err)
 	}
 	if err := sm.ValidateSlot(context.Background(), agent.SlotDefinition{}); err != nil {
@@ -63,7 +62,7 @@ func TestWithMissionInitiator_NoPersonNoInitiator(t *testing.T) {
 	} {
 		rec := &initiatorRecorder{}
 		sm := withMissionInitiator(rec, p)
-		if _, _, err := sm.ResolveSlot(context.Background(), agent.SlotDefinition{}, nil); err != nil {
+		if _, err := sm.ResolveSlot(context.Background(), agent.SlotDefinition{}, nil); err != nil {
 			t.Fatalf("%s: ResolveSlot: %v", name, err)
 		}
 		if len(rec.seen) != 1 || rec.seen[0] != "" {

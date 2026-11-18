@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"

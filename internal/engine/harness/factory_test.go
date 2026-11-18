@@ -11,8 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 )
@@ -84,7 +82,7 @@ var _ component.ComponentDiscovery = (*MockRegistryAdapter)(nil)
 
 func TestNewHarnessFactory_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -94,7 +92,6 @@ func TestNewHarnessFactory_Success(t *testing.T) {
 
 	// Verify defaults were applied
 	storedConfig := factory.Config()
-	assert.NotNil(t, storedConfig.LLMRegistry)
 	// ComponentInstallRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.Logger)
 	assert.NotNil(t, storedConfig.FindingStore)
@@ -117,7 +114,7 @@ func TestNewHarnessFactory_InvalidConfig_NoSlotManager(t *testing.T) {
 
 func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 		// All other fields nil
 	}
@@ -128,7 +125,6 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 	storedConfig := factory.Config()
 
 	// Verify all defaults were applied
-	assert.NotNil(t, storedConfig.LLMRegistry, "LLMRegistry should be defaulted")
 	// ComponentInstallRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.Logger, "Logger should be defaulted")
 	assert.NotNil(t, storedConfig.FindingStore, "FindingStore should be defaulted")
@@ -138,15 +134,13 @@ func TestNewHarnessFactory_AppliesDefaults(t *testing.T) {
 }
 
 func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
-	llmReg := llm.NewLLMRegistry()
-	slotMgr := llmtest.NewSlotManager(llmReg)
+	slotMgr := newStubSlotManager()
 	findingStore := NewInMemoryFindingStore()
 	metrics := NewNoOpMetricsRecorder()
 
 	config := HarnessConfig{
 		SlotManager:  slotMgr,
 		TargetFacts:  testTargetFacts,
-		LLMRegistry:  llmReg,
 		FindingStore: findingStore,
 		Metrics:      metrics,
 	}
@@ -158,7 +152,6 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 
 	// Verify provided values were preserved
 	assert.Equal(t, slotMgr, storedConfig.SlotManager)
-	assert.Equal(t, llmReg, storedConfig.LLMRegistry)
 	assert.Equal(t, findingStore, storedConfig.FindingStore)
 	assert.Equal(t, metrics, storedConfig.Metrics)
 }
@@ -166,9 +159,8 @@ func TestNewHarnessFactory_PreservesProvidedConfig(t *testing.T) {
 func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 	// Test with all fields specified.
 	config := HarnessConfig{
-		SlotManager:  llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:  newStubSlotManager(),
 		TargetFacts:  testTargetFacts,
-		LLMRegistry:  llm.NewLLMRegistry(),
 		FindingStore: NewInMemoryFindingStore(),
 		Metrics:      NewNoOpMetricsRecorder(),
 	}
@@ -181,7 +173,6 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 
 	// Verify all provided values are preserved
 	assert.NotNil(t, storedConfig.SlotManager)
-	assert.NotNil(t, storedConfig.LLMRegistry)
 	// ComponentInstallRegistry was removed in plugin-runtime Spec 2 Phase 7.
 	assert.NotNil(t, storedConfig.FindingStore)
 	assert.NotNil(t, storedConfig.Metrics)
@@ -197,7 +188,7 @@ func TestNewHarnessFactory_FullConfiguration(t *testing.T) {
 
 func TestFactory_Create_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -222,7 +213,7 @@ func TestFactory_Create_Success(t *testing.T) {
 
 func TestFactory_Create_UpdatesMissionContext(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -246,7 +237,7 @@ func TestFactory_Create_UpdatesMissionContext(t *testing.T) {
 
 func TestFactory_Create_EmptyAgentName(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -266,7 +257,7 @@ func TestFactory_Create_EmptyAgentName(t *testing.T) {
 
 func TestFactory_Create_MultipleHarnesses(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -301,42 +292,10 @@ func TestFactory_Create_MultipleHarnesses(t *testing.T) {
 	assert.Equal(t, missionID, harness3.Mission().ID)
 }
 
-func TestFactory_Create_IndependentTokenTrackers(t *testing.T) {
-	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
-		TargetFacts: testTargetFacts,
-	}
-
-	factory, err := NewHarnessFactory(config)
-	require.NoError(t, err)
-
-	missionID := types.NewID()
-	missionCtx := NewMissionContext(missionID, "test-mission", "agent1")
-	targetInfo := NewTargetInfo(types.NewID(), "test-target", "https://example.com", "web")
-
-	// Create two harnesses
-	harness1, err := factory.Create("agent1", missionCtx, targetInfo)
-	require.NoError(t, err)
-
-	harness2, err := factory.Create("agent2", missionCtx, targetInfo)
-	require.NoError(t, err)
-
-	// Verify each has its own token tracker (different instances)
-	tracker1 := harness1.TokenUsage()
-	tracker2 := harness2.TokenUsage()
-
-	assert.NotNil(t, tracker1)
-	assert.NotNil(t, tracker2)
-	// Token trackers should be different pointers (pointing to different harness fields)
-	// We can't compare the pointers directly since they're value types, but we can
-	// verify they exist and are independent by checking they're both non-nil
-	// The factory creates a new token tracker for each harness (line 114 in factory.go)
-}
-
 func TestFactory_Create_SharedFindingStore(t *testing.T) {
 	findingStore := NewInMemoryFindingStore()
 	config := HarnessConfig{
-		SlotManager:  llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:  newStubSlotManager(),
 		TargetFacts:  testTargetFacts,
 		FindingStore: findingStore,
 	}
@@ -377,7 +336,7 @@ func TestFactory_Create_SharedFindingStore(t *testing.T) {
 // mission harness carries the decider pin, and no child may run on it.
 func TestFactory_CreateChild_DropsTheSlotPinsOfTheParent(t *testing.T) {
 	factory, err := NewHarnessFactory(HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	})
 	require.NoError(t, err)
@@ -395,7 +354,7 @@ func TestFactory_CreateChild_DropsTheSlotPinsOfTheParent(t *testing.T) {
 
 func TestFactory_CreateChild_Success(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -430,7 +389,7 @@ func TestFactory_CreateChild_Success(t *testing.T) {
 
 func TestFactory_CreateChild_NilParent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -446,7 +405,7 @@ func TestFactory_CreateChild_NilParent(t *testing.T) {
 
 func TestFactory_CreateChild_EmptyAgentName(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -471,7 +430,7 @@ func TestFactory_CreateChild_EmptyAgentName(t *testing.T) {
 func TestFactory_CreateChild_SharedFindingStore(t *testing.T) {
 	findingStore := NewInMemoryFindingStore()
 	config := HarnessConfig{
-		SlotManager:  llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:  newStubSlotManager(),
 		TargetFacts:  testTargetFacts,
 		FindingStore: findingStore,
 	}
@@ -513,41 +472,9 @@ func TestFactory_CreateChild_SharedFindingStore(t *testing.T) {
 	assert.Len(t, childFindings, 2)
 }
 
-func TestFactory_CreateChild_IndependentTokenTrackers(t *testing.T) {
-	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
-		TargetFacts: testTargetFacts,
-	}
-
-	factory, err := NewHarnessFactory(config)
-	require.NoError(t, err)
-
-	missionID := types.NewID()
-	parentMissionCtx := NewMissionContext(missionID, "test-mission", "parent-agent")
-	targetInfo := NewTargetInfo(types.NewID(), "test-target", "https://example.com", "web")
-
-	// Create parent harness
-	parentHarness, err := factory.Create("parent-agent", parentMissionCtx, targetInfo)
-	require.NoError(t, err)
-
-	// Create child harness
-	childHarness, err := factory.CreateChild(parentHarness, "child-agent")
-	require.NoError(t, err)
-
-	// Verify each has its own token tracker
-	parentTracker := parentHarness.TokenUsage()
-	childTracker := childHarness.TokenUsage()
-
-	assert.NotNil(t, parentTracker)
-	assert.NotNil(t, childTracker)
-	// Token trackers are different instances created by the factory
-	// Each harness gets its own tracker for independent token usage tracking
-	// The factory creates a new token tracker for each harness (line 114 in factory.go)
-}
-
 func TestFactory_CreateChild_Hierarchy(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -586,13 +513,11 @@ func TestFactory_CreateChild_Hierarchy(t *testing.T) {
 // ────────────────────────────────────────────────────────────────────────────
 
 func TestFactory_Config_ReturnsCorrectConfig(t *testing.T) {
-	llmReg := llm.NewLLMRegistry()
-	slotMgr := llmtest.NewSlotManager(llmReg)
+	slotMgr := newStubSlotManager()
 
 	config := HarnessConfig{
 		SlotManager: slotMgr,
 		TargetFacts: testTargetFacts,
-		LLMRegistry: llmReg,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -601,17 +526,14 @@ func TestFactory_Config_ReturnsCorrectConfig(t *testing.T) {
 	retrievedConfig := factory.Config()
 
 	assert.Equal(t, slotMgr, retrievedConfig.SlotManager)
-	assert.Equal(t, llmReg, retrievedConfig.LLMRegistry)
 }
 
 func TestFactory_Config_IsCopy(t *testing.T) {
-	llmReg := llm.NewLLMRegistry()
-	slotMgr := llmtest.NewSlotManager(llmReg)
+	slotMgr := newStubSlotManager()
 
 	config := HarnessConfig{
 		SlotManager: slotMgr,
 		TargetFacts: testTargetFacts,
-		LLMRegistry: llmReg,
 	}
 
 	factory, err := NewHarnessFactory(config)
@@ -623,7 +545,6 @@ func TestFactory_Config_IsCopy(t *testing.T) {
 
 	// Both should have same values (value semantics)
 	assert.Equal(t, config1.SlotManager, config2.SlotManager)
-	assert.Equal(t, config1.LLMRegistry, config2.LLMRegistry)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -647,7 +568,7 @@ func TestFactory_InterfaceCompliance(t *testing.T) {
 
 func TestFactory_ConcurrentCreation(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -688,7 +609,7 @@ func TestFactory_ConcurrentCreation(t *testing.T) {
 
 func TestFactory_SameMissionDifferentAgents(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -718,7 +639,7 @@ func TestFactory_SameMissionDifferentAgents(t *testing.T) {
 
 func TestFactory_DifferentMissionsSameAgent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -765,7 +686,7 @@ func TestFactory_Create_WithRegistryAdapter(t *testing.T) {
 
 	// Create config with registry adapter
 	config := HarnessConfig{
-		SlotManager:     llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:     newStubSlotManager(),
 		TargetFacts:     testTargetFacts,
 		RegistryAdapter: mockAdapter,
 	}
@@ -795,7 +716,7 @@ func TestFactory_CreateChild_WithRegistryAdapter(t *testing.T) {
 
 	// Create config with registry adapter
 	config := HarnessConfig{
-		SlotManager:     llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager:     newStubSlotManager(),
 		TargetFacts:     testTargetFacts,
 		RegistryAdapter: mockAdapter,
 	}
@@ -829,7 +750,7 @@ func TestFactory_CreateChild_WithRegistryAdapter(t *testing.T) {
 func TestFactory_Create_WithoutRegistryAdapter(t *testing.T) {
 	// Create config WITHOUT registry adapter
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 		// RegistryAdapter is nil
 	}
@@ -858,8 +779,7 @@ func TestFactory_Create_WithoutRegistryAdapter(t *testing.T) {
 // when creating harnesses.
 func TestHarnessFactory_WithMiddleware(t *testing.T) {
 	// Create a mock slot manager
-	llmRegistry := llm.NewLLMRegistry()
-	slotManager := llmtest.NewSlotManager(llmRegistry)
+	slotManager := newStubSlotManager()
 
 	// Create a simple pass-through middleware
 	testMiddleware := func(next middleware.Operation) middleware.Operation {
@@ -903,8 +823,7 @@ func TestHarnessFactory_WithMiddleware(t *testing.T) {
 // TestHarnessFactory_WithoutMiddleware tests that harnesses work without middleware.
 func TestHarnessFactory_WithoutMiddleware(t *testing.T) {
 	// Create a mock slot manager
-	llmRegistry := llm.NewLLMRegistry()
-	slotManager := llmtest.NewSlotManager(llmRegistry)
+	slotManager := newStubSlotManager()
 
 	// Create config without middleware
 	config := HarnessConfig{

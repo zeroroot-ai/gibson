@@ -69,34 +69,9 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("infrastructure is nil")
 	}
 
-	if infra.llmRegistry == nil {
-		t.Fatal("LLM registry is nil")
-	}
-
-	if infra.slotManager == nil {
-		t.Fatal("slot manager is nil")
-	}
-
 	if infra.harnessFactory == nil {
 		t.Fatal("harness factory is nil")
 	}
-
-	// Test LLM registry exists
-	t.Run("LLMRegistry", func(t *testing.T) {
-		// No providers configured via env vars in test, so list should be empty or have env-based providers
-		providers := infra.llmRegistry.ListProviders()
-		// Just verify it doesn't panic and returns a slice
-		if providers == nil {
-			t.Error("ListProviders returned nil, expected empty slice")
-		}
-	})
-
-	// Test slot manager exists
-	t.Run("SlotManager", func(t *testing.T) {
-		if infra.slotManager == nil {
-			t.Error("slot manager should not be nil")
-		}
-	})
 
 	// Test harness factory exists
 	t.Run("HarnessFactory", func(t *testing.T) {

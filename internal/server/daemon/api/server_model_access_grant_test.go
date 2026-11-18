@@ -16,7 +16,6 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
@@ -62,7 +61,7 @@ func grantServer(t *testing.T) (*DaemonServer, *fakeAuthorizer) {
 			Capabilities: []string{providerconfig.CapabilityEmbedding}},
 		{Name: "broken", Type: providerconfig.ProviderCohere, DefaultModel: "command", Enabled: true},
 	}}
-	s := newExecServer(store, nil)
+	s := newExecServer(store)
 	s.logger = slog.Default()
 	s.authorizer = az
 	s.modelLister = &fakeLister{
@@ -149,7 +148,7 @@ func TestGrantAccess_ModelListsAreAskedAtOnceUnderOneDeadline(t *testing.T) {
 		{Name: "quick", Type: providerconfig.ProviderCohere, Enabled: true},
 	}
 	build := func(withQuick bool) *DaemonServer {
-		s := newExecServer(&listingProviderStore{configs: configs}, nil)
+		s := newExecServer(&listingProviderStore{configs: configs})
 		s.logger = slog.Default()
 		l := &fakeLister{
 			block:  map[string]bool{"slow-1": true, "slow-2": true, "quick": !withQuick},
