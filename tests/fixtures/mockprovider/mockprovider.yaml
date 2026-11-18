@@ -1,0 +1,105 @@
+# The mock model provider of the exit tests of the AAIF epics. The workflow
+# applies this file after it makes the Secret mock-provider-tls (a certificate
+# for the Service name) and loads the image into kind.
+#
+# The provider record of the tenant names https://mock-provider.gibson-e2e-mock.svc.cluster.local.
+# The gateway reaches the TLS front on port 443. The suite reads the requests that
+# the mock recorded on port 80, which serves plain HTTP.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gibson-e2e-mock
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mock-provider
+  namespace: gibson-e2e-mock
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mock-provider
+  template:
+    metadata:
+      labels:
+        app: mock-provider
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mockprovider
+          image: ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
+          imagePullPolicy: IfNotPresent
+          command: ["/mockprovider", "-addr", "0.0.0.0:18080"]
+          ports:
+            - name: recorded
+              containerPort: 18080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+        - name: tlsfront
+          image: ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
+          imagePullPolicy: IfNotPresent
+          command: ["/tlsfront", "-addr", ":8443", "-upstream", "http://127.0.0.1:18080"]
+          ports:
+            - name: https
+              containerPort: 8443
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: tls
+          secret:
+            secretName: mock-provider-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mock-provider
+  namespace: gibson-e2e-mock
+spec:
+  selector:
+    app: mock-provider
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+    - name: recorded
+      port: 80
+      targetPort: recorded
+---
+# The gateway namespace and the namespace of the daemon and the runner may reach
+# the mock. No other pod may.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-and-runner
+  namespace: gibson-e2e-mock
+spec:
+  podSelector:
+    matchLabels:
+      app: mock-provider
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gibson-gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gibson
