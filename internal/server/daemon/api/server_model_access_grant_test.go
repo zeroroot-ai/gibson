@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
+	"github.com/zeroroot-ai/sdk/auth"
 )
 
 // listingProviderStore lists a fixed set of provider configs of the tenant.
@@ -158,12 +159,15 @@ func TestGrantAccess_ModelListsAreAskedAtOnceUnderOneDeadline(t *testing.T) {
 		return s
 	}
 
+	// The list call needs the identity of a caller (callerInitiator).
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Subject: "user:alice"})
+
 	start := time.Now()
-	assert.True(t, build(true).anyProviderListsModel(context.Background(), "tenant-a", configs, "wanted"))
+	assert.True(t, build(true).anyProviderListsModel(ctx, "tenant-a", configs, "wanted"))
 	assert.Less(t, time.Since(start), 90*time.Millisecond, "a quick answer must not wait for the slow providers")
 
 	start = time.Now()
-	assert.False(t, build(false).anyProviderListsModel(context.Background(), "tenant-a", configs, "wanted"))
+	assert.False(t, build(false).anyProviderListsModel(ctx, "tenant-a", configs, "wanted"))
 	assert.Less(t, time.Since(start), 250*time.Millisecond, "three hanging providers must cost one deadline, not three")
 }
 

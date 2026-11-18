@@ -83,7 +83,7 @@ func (f *fakeTargetStore) Get(ctx context.Context, id types.ID) (*types.Target, 
 }
 
 func helperMM() *missionManager {
-	return &missionManager{logger: slog.New(slog.DiscardHandler)}
+	return &missionManager{logger: slog.New(slog.DiscardHandler), skillStore: noAgentSkills}
 }
 
 // ---- runTargetRef ---------------------------------------------------------
