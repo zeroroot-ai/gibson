@@ -81,7 +81,7 @@ func TestControl_RejectsBlockedAddresses(t *testing.T) {
 		"0.0.0.0:80",
 	} {
 		t.Run(addr, func(t *testing.T) {
-			err := netguard.Control("tcp", addr, nil)
+			err := control("tcp", addr, nil)
 			require.Error(t, err)
 			var blocked *netguard.BlockedAddressError
 			require.ErrorAs(t, err, &blocked, "want *BlockedAddressError, got %T", err)
@@ -91,14 +91,14 @@ func TestControl_RejectsBlockedAddresses(t *testing.T) {
 }
 
 func TestControl_AllowsPublicAddresses(t *testing.T) {
-	assert.NoError(t, netguard.Control("tcp", "8.8.8.8:443", nil))
-	assert.NoError(t, netguard.Control("tcp", "[2606:4700::1]:443", nil))
+	assert.NoError(t, control("tcp", "8.8.8.8:443", nil))
+	assert.NoError(t, control("tcp", "[2606:4700::1]:443", nil))
 }
 
 func TestControl_FailsClosedOnUnparseableAddress(t *testing.T) {
-	require.Error(t, netguard.Control("tcp", "not-an-address", nil))
+	require.Error(t, control("tcp", "not-an-address", nil))
 	// A hostname reaching Control means resolution happened outside our view.
-	assert.Error(t, netguard.Control("tcp", "evil.example.com:80", nil))
+	assert.Error(t, control("tcp", "evil.example.com:80", nil))
 }
 
 // TestHTTPClient_RefusesBlockedAddressAtDialTime is the core regression test:
@@ -187,9 +187,12 @@ func TestDialer_GuardIsInstalledUnlessAllowPrivate(t *testing.T) {
 	assert.Nil(t, netguard.Dialer(true).Control, "allowPrivate must remove the guard")
 }
 
+// control is the hook with the hint of the model endpoint setting.
+var control = netguard.ControlWithHint(netguard.LLMEndpointHint)
+
 func TestBlockedAddressError_Hint(t *testing.T) {
 	// The default hint is the one of the model endpoint setting.
-	err := netguard.Control("tcp", "10.0.0.1:443", nil)
+	err := control("tcp", "10.0.0.1:443", nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "allow_private_llm_endpoints")
 

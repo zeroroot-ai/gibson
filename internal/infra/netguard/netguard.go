@@ -47,7 +47,7 @@ type BlockedAddressError struct {
 }
 
 // LLMEndpointHint is the hint of a refusal for a model or embedder endpoint.
-// It is the hint that Control, Dialer, Transport and HTTPClient use.
+// It is the hint that Dialer, Transport and HTTPClient use.
 const LLMEndpointHint = "set security.allow_private_llm_endpoints=true to permit private endpoints"
 
 func (e *BlockedAddressError) Error() string {
@@ -140,13 +140,8 @@ func BlockedClass(ip net.IP) string {
 	return ""
 }
 
-// Control is the net.Dialer Control hook. address is the post-resolution
-// "ip:port" the kernel is about to connect to. A refusal carries LLMEndpointHint.
-func Control(network, address string, c syscall.RawConn) error {
-	return ControlWithHint(LLMEndpointHint)(network, address, c)
-}
-
-// ControlWithHint returns a Control hook whose refusals carry hint. An empty
+// ControlWithHint returns the net.Dialer Control hook. address is the
+// post-resolution "ip:port" the kernel is about to connect to. Its refusals carry hint. An empty
 // hint gives a refusal with no hint.
 func ControlWithHint(hint string) func(network, address string, c syscall.RawConn) error {
 	return func(_, address string, _ syscall.RawConn) error {
@@ -221,7 +216,7 @@ type Resolver interface {
 // CheckHost resolves host and refuses it when ANY address is in a blocked
 // class. It is a check at one point in time, for example at registration. It is
 // NOT a connect-time control: the name can resolve to another address later, so
-// the code that makes the connection must use Control or a guard of its own.
+// the code that makes the connection must use ControlWithHint or a guard of its own.
 // An IP literal is checked without a lookup. A refusal carries hint.
 func CheckHost(ctx context.Context, r Resolver, host, hint string) error {
 	if ip := net.ParseIP(host); ip != nil {
