@@ -1,0 +1,56 @@
+# The mock model provider of the model gate exit test, as one Deployment and
+# one Service in the gibson namespace. The workflow applies it after it loads
+# the image into kind. The in-cluster URL is
+# http://fixture-mockprovider.gibson.svc.cluster.local:8080
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-mockprovider
+  namespace: gibson
+  labels:
+    app.kubernetes.io/name: fixture-mockprovider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fixture-mockprovider
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fixture-mockprovider
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mockprovider
+          image: ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fixture-mockprovider
+  namespace: gibson
+spec:
+  selector:
+    app.kubernetes.io/name: fixture-mockprovider
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

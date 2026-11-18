@@ -14,10 +14,10 @@
 #   1. The kind bring-up and the test-mode daemon of
 #      exit-test-belief-training.yml, copied. ONE bring-up path.
 #   2. TestModelGate_DefaultGrantRevokeAndGrantAgain (in-cluster, runner SVID)
-#      configures the deterministic e2e mock provider for the tenant through
-#      the ProviderService RPC, serves the agent node of a mission as an
-#      outside agent, and runs the mission three times: with the default
-#      tenant grant, after RevokeAccess, and after GrantAccess.
+#      configures the mock provider of tests/fixtures/mockprovider for the
+#      tenant through the ProviderService RPC, serves the agent node of a
+#      mission as an outside agent, and runs the mission three times: with
+#      the default tenant grant, after RevokeAccess, and after GrantAccess.
 #
 # The test fails when the gate permits every model: the second run then
 # completes. The PR that added this workflow carries a branch run with the
@@ -33,19 +33,21 @@ on:
     branches: [main]
     paths:
       - 'internal/platform/modelgate/**'
-      - 'internal/engine/llm/fixture_provider_type*.go'
-      - 'internal/engine/llm/providers/fixture_factory*.go'
+      - 'internal/engine/modelclient/**'
+      - 'internal/engine/harness/resolve_model.go'
       - 'internal/server/daemon/slot_manager.go'
       - 'internal/server/daemon/harness_init.go'
+      - 'internal/server/daemon/model_gateway.go'
+      - 'internal/server/daemon/agent_model_floor.go'
       - 'internal/server/daemon/api/server_model_access.go'
       - 'internal/server/daemon/e2e_peer_policy.go'
       - 'internal/server/daemon/e2e_runner_tenancy.go'
-      - 'internal/engine/llm/providers/factory.go'
-      - 'internal/platform/providerconfig/store.go'
+      - 'internal/server/extauthz/modelcall/**'
+      - 'internal/platform/providerconfig/**'
       - 'internal/server/daemon/api/server_provider_config.go'
       - 'internal/platform/component/service*.go'
-      - 'internal/platform/component/llm_adapter.go'
       - 'internal/platform/component/slot_pin.go'
+      - 'tests/fixtures/mockprovider/**'
       - 'tests/e2e/model_gate_test.go'
       - '.github/scripts/run-e2e-job.sh'
       - '.github/workflows/exit-test-model-gate.yml'
@@ -217,6 +219,23 @@ jobs:
           done
           kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
 
+      # The mock model provider. The test points the provider of the tenant at
+      # it. The run builds the image from tests/fixtures/mockprovider and loads
+      # it into kind, as the tool dispatch test does for its MCP fixture. The
+      # URL goes to the test through the env file of run-e2e-job.sh.
+      - name: Start the mock model provider
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          IMG=ghcr.io/zeroroot-ai/gibson-fixture-mockprovider:e2e
+          docker build -f tests/fixtures/mockprovider/Dockerfile -t "$IMG" .
+          kind load docker-image "$IMG" --name "$CLUSTER"
+          kubectl apply -f tests/fixtures/mockprovider/deployment.yaml
+          kubectl -n "$NS" rollout status deployment/fixture-mockprovider --timeout=3m
+          mkdir -p "$E2E_OUT"
+          echo "GIBSON_E2E_MOCK_PROVIDER_URL=http://fixture-mockprovider.${NS}.svc.cluster.local:8080" \
+            > "$E2E_OUT/e2e-env"
+
       - name: Build the e2e suite into an image
         working-directory: gibson
         run: |
@@ -235,7 +254,8 @@ jobs:
       - name: The model gate decides each mission completion
         run: |
           set -o pipefail
-          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate 'TestModelGate_DefaultGrantRevokeAndGrantAgain$' 20m \
+          E2E_RUNNER_ENV_FILE="$E2E_OUT/e2e-env" \
+            gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate 'TestModelGate_DefaultGrantRevokeAndGrantAgain$' 20m \
             2>&1 | tee "$E2E_OUT/model-gate.log"
 
       # gibson#1257: one RPC as a plain member (the e2e-member identity, a
@@ -245,7 +265,7 @@ jobs:
       - name: A plain member gets what its grant allows
         run: |
           set -o pipefail
-          E2E_RUNNER_COMPONENT=e2e-member \
+          E2E_RUNNER_COMPONENT=e2e-member E2E_RUNNER_ENV_FILE="$E2E_OUT/e2e-env" \
             gibson/.github/scripts/run-e2e-job.sh gibson-e2e-model-gate-member 'TestModelGate_PlainMemberGrantPath$' 10m \
             2>&1 | tee "$E2E_OUT/model-gate-member.log"
 
