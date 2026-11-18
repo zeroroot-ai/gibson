@@ -224,3 +224,86 @@ func TestStore_Integration_SizeLimit(t *testing.T) {
 	require.Len(t, got.Evidence, 1)
 	assert.Len(t, got.Evidence[0].GetContent(), finding.MaxEvidenceContentBytes, "stored whole, never truncated")
 }
+
+// TestStore_Integration_FindAndFindWithEvidence checks the list queries against
+// a real Postgres: each filter, the total, the order, the page, and the rule
+// that a list returns no evidence while FindWithEvidence returns all of it.
+func TestStore_Integration_FindAndFindWithEvidence(t *testing.T) {
+	s, _ := newStore(t)
+	ctx := context.Background()
+	m1, m2 := types.NewID(), types.NewID()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	mk := func(m types.ID, title, desc, cat string, sev agent.FindingSeverity, at time.Time) finding.EnhancedFinding {
+		f := finding.NewEnhancedFinding(agent.NewFinding(title, desc, sev).WithCategory(cat), m, "recon")
+		f.CreatedAt = at
+		return f
+	}
+	a := mk(m1, "SQL injection", "login form", "injection", agent.SeverityCritical, now)
+	b := mk(m1, "Open redirect", "100% of links", "redirect", agent.SeverityMedium, now.Add(time.Second))
+	c := mk(m2, "XSS", "search box", "Injection", agent.SeverityHigh, now.Add(2*time.Second))
+	a.Evidence = []*typespb.Evidence{
+		{Title: "t1", Content: "recorded", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1"},
+		{Title: "t2", Content: "typed", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
+	}
+	for _, f := range []finding.EnhancedFinding{a, b, c} {
+		require.NoError(t, s.Store(ctx, "acme", f))
+	}
+
+	titles := func(fs []finding.EnhancedFinding) []string {
+		out := make([]string, len(fs))
+		for i, f := range fs {
+			out[i] = f.Title
+		}
+		return out
+	}
+
+	all, total, err := s.Find(ctx, "acme", pgstore.Query{})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total)
+	assert.Equal(t, []string{"XSS", "Open redirect", "SQL injection"}, titles(all), "newest first")
+	for _, f := range all {
+		assert.Empty(t, f.Evidence, "a list holds no evidence")
+	}
+
+	byMission, total, err := s.Find(ctx, "acme", pgstore.Query{MissionID: m1})
+	require.NoError(t, err)
+	assert.Equal(t, 2, total)
+	assert.Equal(t, []string{"Open redirect", "SQL injection"}, titles(byMission))
+
+	bySev, _, err := s.Find(ctx, "acme", pgstore.Query{Severities: []string{"critical", "high"}})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"XSS", "SQL injection"}, titles(bySev))
+
+	byCat, _, err := s.Find(ctx, "acme", pgstore.Query{Category: "injection"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"XSS", "SQL injection"}, titles(byCat), "the category match ignores case")
+
+	bySearch, _, err := s.Find(ctx, "acme", pgstore.Query{Search: "LOGIN"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"SQL injection"}, titles(bySearch))
+	wild, _, err := s.Find(ctx, "acme", pgstore.Query{Search: "100%"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Open redirect"}, titles(wild), "a percent sign in the search is text")
+	none, total, err := s.Find(ctx, "acme", pgstore.Query{Search: "%"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, total, "only the finding that holds a percent sign matches")
+	assert.Equal(t, []string{"Open redirect"}, titles(none))
+
+	byID, _, err := s.Find(ctx, "acme", pgstore.Query{IDs: []types.ID{a.ID, c.ID}})
+	require.NoError(t, err)
+	assert.Len(t, byID, 2)
+
+	page, total, err := s.Find(ctx, "acme", pgstore.Query{Limit: 1, Offset: 1})
+	require.NoError(t, err)
+	assert.Equal(t, 3, total, "the total ignores the page")
+	assert.Equal(t, []string{"Open redirect"}, titles(page))
+
+	withEvidence, _, err := s.FindWithEvidence(ctx, "acme", pgstore.Query{MissionID: m1})
+	require.NoError(t, err)
+	require.Len(t, withEvidence, 2)
+	assert.Empty(t, withEvidence[0].Evidence, "Open redirect has none")
+	require.Len(t, withEvidence[1].Evidence, 2)
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, withEvidence[1].Evidence[0].GetTier())
+	assert.Equal(t, "call-1", withEvidence[1].Evidence[0].GetToolCallId())
+	assert.Equal(t, typespb.EvidenceTier_EVIDENCE_TIER_TYPED, withEvidence[1].Evidence[1].GetTier())
+}

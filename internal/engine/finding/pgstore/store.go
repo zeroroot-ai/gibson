@@ -319,20 +319,9 @@ FROM finding_evidence WHERE finding_id = $1 ORDER BY position`, id.String())
 		if err := rows.Scan(&tier, &toolCallID, &typeName, &title, &content, &metadata); err != nil {
 			return nil, fmt.Errorf("finding store: scan evidence of finding %s: %w", id, err)
 		}
-		item := &typespb.Evidence{
-			Title:   title,
-			Type:    typespb.EvidenceType(typespb.EvidenceType_value[typeName]),
-			Content: content,
-			Tier:    typespb.EvidenceTier(tier),
-		}
-		if toolCallID != nil {
-			item.ToolCallId = *toolCallID
-		}
-		if err := json.Unmarshal(metadata, &item.Metadata); err != nil {
-			return nil, fmt.Errorf("finding store: decode metadata of finding %s: %w", id, err)
-		}
-		if len(item.Metadata) == 0 {
-			item.Metadata = nil
+		item, err := evidenceItem(tier, toolCallID, typeName, title, content, metadata)
+		if err != nil {
+			return nil, err
 		}
 		f.Evidence = append(f.Evidence, item)
 	}
