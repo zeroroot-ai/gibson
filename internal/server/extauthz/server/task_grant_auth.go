@@ -96,6 +96,26 @@ func (s *EnvoyAuthzServer) verifyTaskGrant(
 	if token == "" || tokenType(token) == componentTokenType {
 		return capabilitygrant.Claims{}, nil, false
 	}
+	claims, deny = s.verifyTaskGrantToken(ctx, method, token)
+	if deny != nil {
+		return capabilitygrant.Claims{}, deny, true
+	}
+	if !claims.AllowsMethod(method) {
+		extauthzCGJWTRejectedTotal.WithLabelValues("method_not_allowed").Inc()
+		s.log.InfoContext(ctx, "ext-authz: task grant does not cover method",
+			"method", method, "subject", claims.Subject, "task", claims.TaskID)
+		extauthzDeniedTotal.WithLabelValues(method).Inc()
+		return capabilitygrant.Claims{}, denyForbidden(), true
+	}
+	return claims, nil, true
+}
+
+// verifyTaskGrantToken verifies a task grant: the signature, the expiry, the key,
+// and a subject and a tenant. It does not check the method. It returns a deny
+// response when the grant is refused. The gateway forward class uses it too.
+func (s *EnvoyAuthzServer) verifyTaskGrantToken(
+	ctx context.Context, method, token string,
+) (claims capabilitygrant.Claims, deny *authv3.CheckResponse) {
 	if s.cgjwt == nil {
 		// A task grant is present and this ext-authz cannot verify one. That is
 		// a refusal, not a fall-through: letting it reach the component path
@@ -103,7 +123,7 @@ func (s *EnvoyAuthzServer) verifyTaskGrant(
 		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_no_verifier").Inc()
 		s.log.ErrorContext(ctx, "ext-authz: task grant presented but no grant verifier is configured",
 			"method", method)
-		return capabilitygrant.Claims{}, denyUnauthenticated(), true
+		return capabilitygrant.Claims{}, denyUnauthenticated()
 	}
 
 	var err error
@@ -118,24 +138,16 @@ func (s *EnvoyAuthzServer) verifyTaskGrant(
 			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_invalid").Inc()
 		}
 		s.log.WarnContext(ctx, "ext-authz: task grant invalid", "method", method, "err", err)
-		return capabilitygrant.Claims{}, denyUnauthenticated(), true
+		return capabilitygrant.Claims{}, denyUnauthenticated()
 	}
 
 	if claims.Subject == "" || claims.Tenant.String() == "" {
 		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_claims").Inc()
 		s.log.WarnContext(ctx, "ext-authz: task grant carries no subject or tenant", "method", method)
-		return capabilitygrant.Claims{}, denyForbidden(), true
+		return capabilitygrant.Claims{}, denyForbidden()
 	}
 
-	if !claims.AllowsMethod(method) {
-		extauthzCGJWTRejectedTotal.WithLabelValues("method_not_allowed").Inc()
-		s.log.InfoContext(ctx, "ext-authz: task grant does not cover method",
-			"method", method, "subject", claims.Subject, "task", claims.TaskID)
-		extauthzDeniedTotal.WithLabelValues(method).Inc()
-		return capabilitygrant.Claims{}, denyForbidden(), true
-	}
-
-	return claims, nil, true
+	return claims, nil
 }
 
 // denyUnauthenticated is the deny for a credential that cannot be verified.

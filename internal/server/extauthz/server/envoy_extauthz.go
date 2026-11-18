@@ -212,6 +212,11 @@ func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) 
 	if gateway {
 		return s.gatewayCallResponse(ctx, req), nil
 	}
+	if modelcall.IsEdgeForwardPath(method) {
+		// The sandbox path: the Edge forwards to the gateway. The grant check is
+		// all that ext-authz does here (edge_forward.go).
+		return s.edgeForwardResponse(ctx, req), nil
+	}
 	if modelcall.IsModelPath(method) {
 		// The Edge has no model route. A model path from it is refused, so a task
 		// grant that lists a model route cannot pass as an Edge call.

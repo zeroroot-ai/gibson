@@ -79,25 +79,32 @@ func RouteHeaders(tenant, provider string) []RouteHeader {
 	}
 }
 
-// ClaimedRoute reads the claimed tenant and provider from the headers of a
-// request. It returns a reason when a header is missing, empty or repeated. A
-// repeated header arrives as one value with a comma.
-func ClaimedRoute(headers map[string]string) (tenant, provider, reason string) {
-	read := func(name string) (string, string) {
-		v := strings.TrimSpace(headers[name])
-		switch {
-		case v == "":
-			return "", "missing_route_header"
-		case strings.Contains(v, ","):
-			return "", "repeated_route_header"
-		}
-		return v, ""
+func readRouteHeader(headers map[string]string, name string) (string, string) {
+	v := strings.TrimSpace(headers[name])
+	switch {
+	case v == "":
+		return "", "missing_route_header"
+	case strings.Contains(v, ","):
+		return "", "repeated_route_header"
 	}
-	tenant, reason = read(HeaderRouteTenant)
+	return v, ""
+}
+
+// ClaimedRouteTenant reads the claimed tenant from the headers of a request. It
+// returns a reason when the header is missing, empty or repeated. A repeated
+// header arrives as one value with a comma.
+func ClaimedRouteTenant(headers map[string]string) (tenant, reason string) {
+	return readRouteHeader(headers, HeaderRouteTenant)
+}
+
+// ClaimedRoute reads the claimed tenant and provider from the headers of a
+// request. It returns a reason when a header is missing, empty or repeated.
+func ClaimedRoute(headers map[string]string) (tenant, provider, reason string) {
+	tenant, reason = readRouteHeader(headers, HeaderRouteTenant)
 	if reason != "" {
 		return "", "", reason
 	}
-	provider, reason = read(HeaderRouteProvider)
+	provider, reason = readRouteHeader(headers, HeaderRouteProvider)
 	if reason != "" {
 		return "", "", reason
 	}
@@ -199,3 +206,21 @@ func PurposeRoute(purpose string) (string, bool) {
 
 // DaemonSubject is the subject of a daemon call for a purpose.
 func DaemonSubject(purpose string) string { return "component:daemon:" + purpose }
+
+// The sandbox path. A sandbox reaches the cluster only through the Edge. The
+// Edge has two routes that forward to the gateway listeners and remove the
+// prefix. ext-authz checks the Capability Grant of a call on these prefixes
+// (the gateway forward class) and does nothing else. The full authorization
+// stays at the gateway, with the gateway identity.
+const (
+	// EdgeModelPrefix is the Edge route to the model listener.
+	EdgeModelPrefix = "/gateway/model/"
+	// EdgeAgentPrefix is the Edge route to the agent listener.
+	EdgeAgentPrefix = "/gateway/agent/"
+)
+
+// IsEdgeForwardPath reports whether a path of an Edge call is on one of the two
+// gateway forward prefixes.
+func IsEdgeForwardPath(path string) bool {
+	return strings.HasPrefix(path, EdgeModelPrefix) || strings.HasPrefix(path, EdgeAgentPrefix)
+}

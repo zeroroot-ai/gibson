@@ -21,6 +21,17 @@ var extauthzPeerRefusedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "ext-authz checks refused because the peer identity does not own the route, by reason.",
 }, []string{"reason"})
 
+var (
+	extauthzEdgeForwardDeniedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "extauthz_edge_forward_denied_total",
+		Help: "Gateway forward calls of the Edge that ext-authz refused, by reason.",
+	}, []string{"reason"})
+	extauthzEdgeForwardAllowedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "extauthz_edge_forward_allowed_total",
+		Help: "Gateway forward calls of the Edge that passed the grant check.",
+	})
+)
+
 func idSet(ids []string) map[string]struct{} {
 	out := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
