@@ -525,183 +525,25 @@ func TestValueToString(t *testing.T) {
 // FindingCounts — happy path (SEVERITY)
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestFindingCounts_Severity_HappyPath(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("fc-tenant")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			return []CountBucket{
-				{Label: "critical", Count: 3},
-				{Label: "high", Count: 7},
-			}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_SEVERITY, 0)
-	if err != nil {
-		t.Fatalf("FindingCounts: %v", err)
-	}
-	if len(buckets) != 2 {
-		t.Errorf("got %d buckets, want 2", len(buckets))
-	}
-	if buckets[0].Label != "critical" || buckets[0].Count != 3 {
-		t.Errorf("bucket[0] = %+v, want {critical 3}", buckets[0])
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FindingCounts — tenant isolation (wrong tenant returns empty)
 // ─────────────────────────────────────────────────────────────────────────────
-
-func TestFindingCounts_TenantIsolation(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("isolated-tenant")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			// Simulate an empty per-tenant Neo4j database (no findings recorded).
-			return []CountBucket{}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_SEVERITY, 0)
-	if err != nil {
-		t.Fatalf("FindingCounts isolation: %v", err)
-	}
-	if len(buckets) != 0 {
-		t.Errorf("want 0 buckets for isolated tenant, got %d", len(buckets))
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FindingCounts — CATEGORY groupBy
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestFindingCounts_Category(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("cat-tenant")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			return []CountBucket{
-				{Label: "web", Count: 5},
-				{Label: "network", Count: 2},
-			}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	buckets, err := q.FindingCounts(ctx, tenant, graphpb.FindingCountGroupBy_CATEGORY, 0)
-	if err != nil {
-		t.Fatalf("FindingCounts category: %v", err)
-	}
-	if len(buckets) != 2 {
-		t.Errorf("got %d buckets, want 2", len(buckets))
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FindingTimeSeries — default days=0 → DefaultTimeSeriesDays points
 // ─────────────────────────────────────────────────────────────────────────────
-
-func TestFindingTimeSeries_DefaultDays(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("ts-tenant")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			// Return empty map (no findings in the window).
-			return map[string]uint64{}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	points, err := q.FindingTimeSeries(ctx, tenant, 0)
-	if err != nil {
-		t.Fatalf("FindingTimeSeries: %v", err)
-	}
-	// 0 → DefaultTimeSeriesDays (30) padded points.
-	if len(points) != int(DefaultTimeSeriesDays) {
-		t.Errorf("got %d points, want %d", len(points), DefaultTimeSeriesDays)
-	}
-	// All counts should be zero (no data).
-	for i, p := range points {
-		if p.GetCount() != 0 {
-			t.Errorf("point[%d] count = %d, want 0", i, p.GetCount())
-		}
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FindingTimeSeries — days capped to MaxTimeSeriesDays
 // ─────────────────────────────────────────────────────────────────────────────
 
-func TestFindingTimeSeries_CapEnforced(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("ts-cap-tenant")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			return map[string]uint64{}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	// 9999 should be clamped to MaxTimeSeriesDays.
-	points, err := q.FindingTimeSeries(ctx, tenant, 9999)
-	if err != nil {
-		t.Fatalf("FindingTimeSeries cap: %v", err)
-	}
-	if len(points) != int(MaxTimeSeriesDays) {
-		t.Errorf("got %d points, want %d", len(points), MaxTimeSeriesDays)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FindingTimeSeries — data padded correctly
 // ─────────────────────────────────────────────────────────────────────────────
-
-func TestFindingTimeSeries_PaddedCorrectly(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	tenant := mustTenantID("ts-pad-tenant")
-
-	today := time.Now().UTC().Format("2006-01-02")
-
-	client := &callableGraphClient{
-		readFn: func(_ context.Context, fn func(neo4j.ManagedTransaction) (any, error)) (any, error) {
-			return map[string]uint64{today: 42}, nil
-		},
-	}
-	client.connected = true
-
-	q := NewDashboardQueries(client)
-	points, err := q.FindingTimeSeries(ctx, tenant, 7)
-	if err != nil {
-		t.Fatalf("FindingTimeSeries padded: %v", err)
-	}
-	if len(points) != 7 {
-		t.Errorf("got %d points, want 7", len(points))
-	}
-	// Last point should be today with count 42.
-	last := points[len(points)-1]
-	if last.GetCount() != 42 {
-		t.Errorf("last point count = %d, want 42", last.GetCount())
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GraphStats — happy path

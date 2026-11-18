@@ -1352,7 +1352,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	tenantAuditWriter.Start(ctx)
 	daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 	d.logger.Info(ctx, "audit writer wired into TenantService")
-	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
+	// Wire pool getter for ExportFindings and GetFinding.
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
 	tenantv1.RegisterTenantServiceServer(srv, daemonSvc)

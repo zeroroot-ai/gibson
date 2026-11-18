@@ -35,19 +35,9 @@ func parseCSSV(t *testing.T, data []byte) [][]string {
 	return rows
 }
 
-// newExportServer builds a minimal DaemonServer wired with a no-op pool and
-// an injected findings result.  The pool is configured to return a conn whose
-// Neo4j session is nil; the GraphClient injected via the test mock intercepts
-// the DashboardQueries.Findings call instead.
-//
-// Because Findings is called via the real DashboardQueries (which calls
-// ExecuteRead on the session), we need a pool that returns a mockable session.
-// For simplicity the test replaces ExportFindings at the findingsFetcher layer
-// by using a pool that returns a mockable Conn backed by a mock session.
-
-// For these unit tests we stub out the poolGetter to return nil (which causes
-// codes.Unavailable) for the "pool not configured" tests, and for format
-// tests we inject a pre-built AllFindings list via a test-only helper.
+// The pool-backed read path runs against a real Postgres in
+// graph_findings_integration_test.go and pgstore's integration tests. These unit
+// tests cover the guard clauses and the format serialisers.
 func newExportServerNoPool() *DaemonServer {
 	return &DaemonServer{}
 }

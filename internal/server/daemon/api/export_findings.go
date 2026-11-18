@@ -43,10 +43,9 @@ const (
 )
 
 // ExportFindings implements TenantAdminService.ExportFindings.
-// It takes the tenant from the authenticated context, acquires a per-tenant
-// Neo4j session via poolGetter, pages through all findings using
-// DashboardQueries.Findings, and serialises to CSV / JSON / SARIF.  Total
-// response body is capped at exportMaxBytes.
+// It takes the tenant from the authenticated context, pages through the findings
+// of the tenant in Postgres with pgstore, and serialises to CSV / JSON / SARIF.
+// Total response body is capped at exportMaxBytes.
 func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportFindingsRequest) (*tenantv1.ExportFindingsResponse, error) {
 	if s.poolGetter == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "ExportFindings: data-plane pool not configured")

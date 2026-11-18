@@ -1140,7 +1140,7 @@ func (s *DaemonServer) WithPlatformDB(db *sql.DB) *DaemonServer {
 }
 
 // WithPoolGetter wires the per-tenant data-plane pool getter.
-// Required by ExportFindings (Neo4j DashboardQueries path) and
+// Required by ExportFindings, GetFinding and
 // GetMissionSourceYAML. When nil those RPCs return codes.Unavailable.
 // Spec: dashboard-neo4j-crud-removal.
 func (s *DaemonServer) WithPoolGetter(getter func() datapool.Pool) *DaemonServer {
