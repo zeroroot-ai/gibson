@@ -13,9 +13,11 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // awaitAdapterDestructivePending polls e's DestructiveActionSnapshot until
@@ -43,7 +45,7 @@ func awaitAdapterDestructivePending(t *testing.T, e *brain.Engine, hypothesisID 
 func destructiveMarkerRegistry(t *testing.T) *settlement.Registry {
 	t.Helper()
 	r := settlement.NewRegistry()
-	err := r.Register("T1490", "marker_present", func(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
+	err := r.Register("T1490", "marker_present", func(params json.RawMessage, evidence []*typespb.Evidence) (bool, error) {
 		var p struct {
 			Marker string `json:"marker"`
 		}
@@ -51,7 +53,7 @@ func destructiveMarkerRegistry(t *testing.T) *settlement.Registry {
 			return false, fmt.Errorf("unmarshal params: %w", uerr)
 		}
 		for _, e := range evidence {
-			if s, ok := e.Content.(string); ok && s == p.Marker {
+			if e.GetContent() == p.Marker {
 				return true, nil
 			}
 		}
@@ -129,7 +131,7 @@ func TestTenantRoutedProofSettlement_SettleBetTrue_WiresRealVerifierForDestructi
 		Technique:       "T1490",
 		PredicateType:   "marker_present",
 		PredicateParams: map[string]any{"marker": "tok"},
-		Evidence:        []finding.EnhancedEvidence{finding.NewEnhancedEvidence(finding.EvidenceLog, "capture", "tok")},
+		Evidence:        []*typespb.Evidence{findingtest.NewEvidence(sdkfinding.EvidenceLog, "capture", "tok")},
 		Destructive:     true,
 	}
 

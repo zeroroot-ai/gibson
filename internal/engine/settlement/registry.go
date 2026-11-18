@@ -10,7 +10,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // Registry is the technique -> predicate-type -> [Evaluator] table.
@@ -162,7 +162,7 @@ func encodeParams(params any) (json.RawMessage, error) {
 // the Evaluator itself is not given ctx: an Evaluator's result must depend
 // only on params and evidence, never on how long evaluation is allowed to
 // run, so that replay is exact.
-func (r *Registry) Evaluate(ctx context.Context, predicate Predicate, evidence []finding.EnhancedEvidence) (bool, error) {
+func (r *Registry) Evaluate(ctx context.Context, predicate Predicate, evidence []*typespb.Evidence) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, fmt.Errorf("settlement: %w", err)
 	}

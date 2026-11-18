@@ -133,38 +133,13 @@ func decodeFindingPayload(raw []byte) (agent.Finding, error) {
 		}
 		out.Evidence = append(out.Evidence, &typespb.Evidence{
 			Title:    e.Title,
-			Type:     evidenceTypeFromSDK(e.Type),
+			Type:     finding.EvidenceTypeFromName(e.Type),
 			Content:  e.Content,
 			Metadata: metadata,
 			Tier:     typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
 		})
 	}
 	return out, nil
-}
-
-// evidenceTypeFromSDK maps the evidence type of the SDK finding to the type in
-// the one evidence type list.
-func evidenceTypeFromSDK(t sdkfinding.EvidenceType) typespb.EvidenceType {
-	switch t {
-	case sdkfinding.EvidenceHTTPRequest:
-		return typespb.EvidenceType_EVIDENCE_TYPE_REQUEST
-	case sdkfinding.EvidenceHTTPResponse:
-		return typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE
-	case sdkfinding.EvidenceScreenshot:
-		return typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT
-	case sdkfinding.EvidenceCodeSnippet:
-		return typespb.EvidenceType_EVIDENCE_TYPE_CODE
-	case sdkfinding.EvidenceLog:
-		return typespb.EvidenceType_EVIDENCE_TYPE_LOG
-	case sdkfinding.EvidencePayload:
-		return typespb.EvidenceType_EVIDENCE_TYPE_PAYLOAD
-	case sdkfinding.EvidenceConversation:
-		return typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION
-	case sdkfinding.EvidenceNetworkTrace:
-		return typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE
-	default:
-		return typespb.EvidenceType_EVIDENCE_TYPE_OTHER
-	}
 }
 
 // Submit stores a JSON-encoded agent.Finding in the per-tenant finding store

@@ -8,7 +8,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // TechniqueID identifies the technique (from the ontology / Domain Pack,
@@ -99,7 +99,7 @@ func (p Predicate) Validate() error {
 // result. An Evaluator must never call an LLM, never consult wall-clock
 // time or randomness, and never reach outside the evidence it is given —
 // that is what makes settlement replayable and un-gameable (ADR-0131).
-type Evaluator func(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error)
+type Evaluator func(params json.RawMessage, evidence []*typespb.Evidence) (bool, error)
 
 // Sentinel errors returned by this package. Callers should use errors.Is
 // against these, since Register and Evaluate wrap them with the offending

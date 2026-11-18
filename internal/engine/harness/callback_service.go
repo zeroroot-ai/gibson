@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
+	findingpkg "github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -3010,7 +3011,7 @@ func protoFindingToSDKFinding(pf *typespb.Finding) *sdkfinding.Finding {
 		finding.Evidence = make([]sdkfinding.Evidence, len(pf.Evidence))
 		for i, ev := range pf.Evidence {
 			finding.Evidence[i] = sdkfinding.Evidence{
-				Type:    protoEvidenceTypeToSDK(ev.Type),
+				Type:    findingpkg.EvidenceTypeName(ev.Type),
 				Title:   ev.Title,
 				Content: ev.Content,
 			}
@@ -3070,32 +3071,6 @@ func protoSeverityToSDKSeverity(severity typespb.FindingSeverity) sdkfinding.Sev
 		return sdkfinding.SeverityInfo
 	default:
 		return sdkfinding.SeverityInfo
-	}
-}
-
-// protoEvidenceTypeToSDK converts a proto EvidenceType to an SDK EvidenceType.
-func protoEvidenceTypeToSDK(evidenceType typespb.EvidenceType) sdkfinding.EvidenceType {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return sdkfinding.EvidenceHTTPRequest
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return sdkfinding.EvidenceHTTPResponse
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return sdkfinding.EvidenceScreenshot
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return sdkfinding.EvidenceLog
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return sdkfinding.EvidenceCodeSnippet
-	case typespb.EvidenceType_EVIDENCE_TYPE_PAYLOAD:
-		return sdkfinding.EvidencePayload
-	case typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION:
-		return sdkfinding.EvidenceConversation
-	case typespb.EvidenceType_EVIDENCE_TYPE_NETWORK_TRACE:
-		return sdkfinding.EvidenceNetworkTrace
-	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
-		return sdkfinding.EvidenceOther
-	default:
-		return sdkfinding.EvidenceLog
 	}
 }
 

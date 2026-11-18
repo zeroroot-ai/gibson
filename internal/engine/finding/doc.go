@@ -7,9 +7,10 @@
 //
 // # Types
 //
-// EnhancedFinding embeds agent.Finding and adds a category, a status, MITRE
-// mappings and structured evidence (types.go). EnhancedEvidence is one item of
-// evidence: an HTTP request, an HTTP response, a conversation, or free text
+// EnhancedFinding embeds agent.Finding and adds a category, a status and
+// MITRE mappings (types.go). The evidence of a finding is types.v1.Evidence,
+// the one evidence shape. EvidenceTypeName and EvidenceTypeFromName map its
+// type enum to the names that the SDK and the predicates of a Domain Pack use
 // (evidence.go). MitreMapping and MitreTechnique carry an ATT&CK or ATLAS
 // technique (mitre.go).
 //

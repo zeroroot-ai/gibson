@@ -14,8 +14,8 @@
 // # Key types and functions
 //
 //   - [NewEnv] builds the environment: one variable, "evidence" (the
-//     recorded []finding.EnhancedEvidence for a bet's demonstration,
-//     exposed as its own schema — type/title/content/timestamp — see
+//     recorded []*typespb.Evidence for a bet's demonstration,
+//     exposed as its own schema — type/title/content — see
 //     evidence.go), plus the helper-function catalog in functions.go
 //     (evidenceText, regexMatch, jsonPath, httpStatus, markerPresent).
 //   - [Compile] parses, type-checks, and builds an executable program from

@@ -78,11 +78,11 @@ import (
 
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement/celenv"
 )
@@ -224,7 +224,7 @@ func (s *HarnessCallbackService) SubmitProof(ctx context.Context, req *harnesspb
 		Technique:            settlement.TechniqueID(technique),
 		PredicateType:        domainPackCELPredicateType,
 		PredicateParams:      json.RawMessage(rawExpr),
-		Evidence:             recordedToolCallEvidence(calls),
+		Evidence:             brain.RecordedEvidence(calls),
 		Destructive:          destructive,
 		PredictedProbability: predictedProbability,
 	})
@@ -293,7 +293,7 @@ func (s *HarnessCallbackService) stakedConfidence(ctx context.Context, tenant, h
 // so Engine.SettleBetTrue's internal re-check can never diverge from that
 // answer on the same evidence, never a shortcut that merely returns a value
 // decided elsewhere.
-func evaluateDomainPackCEL(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
+func evaluateDomainPackCEL(params json.RawMessage, evidence []*typespb.Evidence) (bool, error) {
 	var expr string
 	if err := json.Unmarshal(params, &expr); err != nil {
 		return false, fmt.Errorf("submitproof: decode %s params: %w", domainPackCELPredicateType, err)
@@ -343,22 +343,4 @@ func (s *HarnessCallbackService) submitProofForReview(
 		HypothesisId: req.GetHypothesisId(),
 		Outcome:      harnesspb.SettlementOutcome_SETTLEMENT_OUTCOME_PENDING_REVIEW,
 	}, nil
-}
-
-// recordedToolCallEvidence turns the daemon's own records of tool calls into
-// the evidence a pack predicate evaluates. Content is the result the tool
-// returned, as the flight recorder stored it (ADR-0120), and Timestamp is
-// when the daemon observed the call. Nothing here comes from the proof
-// request except the ids that selected the records.
-func recordedToolCallEvidence(calls []brain.AgentToolCallSnapshot) []finding.EnhancedEvidence {
-	out := make([]finding.EnhancedEvidence, len(calls))
-	for i, c := range calls {
-		out[i] = finding.EnhancedEvidence{
-			Type:      finding.EvidenceLog,
-			Title:     fmt.Sprintf("tool call %s (%s)", c.ToolName, c.ToolCallID),
-			Content:   c.Result,
-			Timestamp: time.Unix(0, c.RecordedAtUnixNano),
-		}
-	}
-	return out
 }

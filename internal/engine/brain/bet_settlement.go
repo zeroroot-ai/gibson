@@ -57,8 +57,8 @@ import (
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/settlement"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // SettlementVerdict is how a bet resolved (ADR-0123). gibson#280 adds the
@@ -427,7 +427,7 @@ type BetSettlementRequest struct {
 	PredicateParams any
 	// Evidence is what the demonstration captured. The predicate is
 	// evaluated against exactly this slice — no LLM, no other input.
-	Evidence []finding.EnhancedEvidence
+	Evidence []*typespb.Evidence
 	// Destructive marks this demonstration as destructive or irreversible
 	// (ADR-0132). Until a technique's Domain Pack carries its own risk-tier
 	// flag, the caller declares it explicitly here. A destructive request is
@@ -761,7 +761,7 @@ func (e *Engine) SettleBetByHITL(_ context.Context, req BetHITLRequest) (bool, e
 // settlement time; replay never recomputes it, it just re-applies the
 // recorded fact, the same evidenceDigest/betEvidenceDigest pattern used
 // elsewhere in this codebase (belief.go, callback_place_bet.go).
-func settlementEvidenceDigest(evidence []finding.EnhancedEvidence) string {
+func settlementEvidenceDigest(evidence []*typespb.Evidence) string {
 	b, _ := json.Marshal(evidence)
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
