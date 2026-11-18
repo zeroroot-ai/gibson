@@ -1707,6 +1707,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	if err := d.registerAgentSkill(ctx, srv); err != nil {
 		return nil, err
 	}
+	if err := d.registerOutsideAgent(ctx, srv); err != nil {
+		return nil, err
+	}
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
 	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,
@@ -1826,6 +1829,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 			compSvc.WithGateways(
 				component.GatewayInfo{URL: d.publicGateways.model.URL, CAPEM: d.publicGateways.model.CAPEM},
 				component.GatewayInfo{URL: d.publicGateways.agent.URL, CAPEM: d.publicGateways.agent.CAPEM})
+			compSvc.WithOutsideAgents(d.outsideAgents)
 			compSvc.WithEventHub(componentEventHub)
 			d.logger.Info(ctx, "WatchComponentEvents wired into ComponentService (gibson#154)")
 

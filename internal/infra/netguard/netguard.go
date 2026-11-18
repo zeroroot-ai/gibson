@@ -25,6 +25,7 @@
 package netguard
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -210,4 +211,36 @@ func HTTPClient(timeout time.Duration, allowPrivate bool) *http.Client {
 		Timeout:   timeout,
 		Transport: Transport(allowPrivate),
 	}
+}
+
+// Resolver looks up the addresses of a host name. *net.Resolver satisfies it.
+type Resolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+}
+
+// CheckHost resolves host and refuses it when ANY address is in a blocked
+// class. It is a check at one point in time, for example at registration. It is
+// NOT a connect-time control: the name can resolve to another address later, so
+// the code that makes the connection must use Control or a guard of its own.
+// An IP literal is checked without a lookup. A refusal carries hint.
+func CheckHost(ctx context.Context, r Resolver, host, hint string) error {
+	if ip := net.ParseIP(host); ip != nil {
+		if class := BlockedClass(ip); class != "" {
+			return &BlockedAddressError{Addr: ip.String(), Class: class, Hint: hint}
+		}
+		return nil
+	}
+	addrs, err := r.LookupIPAddr(ctx, host)
+	if err != nil {
+		return fmt.Errorf("netguard: resolve %s: %w", host, err)
+	}
+	if len(addrs) == 0 {
+		return fmt.Errorf("netguard: resolve %s: no address", host)
+	}
+	for _, a := range addrs {
+		if class := BlockedClass(a.IP); class != "" {
+			return &BlockedAddressError{Addr: a.IP.String(), Class: class, Hint: hint}
+		}
+	}
+	return nil
 }

@@ -5,6 +5,7 @@ package netguard_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -202,4 +203,39 @@ func TestBlockedAddressError_Hint(t *testing.T) {
 	err = netguard.ControlWithHint("")("tcp", "10.0.0.1:443", nil)
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "(")
+}
+
+type fakeResolver map[string][]net.IP
+
+func (f fakeResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	ips, ok := f[host]
+	if !ok {
+		return nil, errors.New("no such host")
+	}
+	out := make([]net.IPAddr, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, net.IPAddr{IP: ip})
+	}
+	return out, nil
+}
+
+func TestCheckHost(t *testing.T) {
+	r := fakeResolver{
+		"public.example":   {net.ParseIP("8.8.8.8")},
+		"internal.example": {net.ParseIP("10.0.0.7")},
+		"mixed.example":    {net.ParseIP("8.8.8.8"), net.ParseIP("169.254.169.254")},
+		"empty.example":    {},
+	}
+	ctx := context.Background()
+	require.NoError(t, netguard.CheckHost(ctx, r, "public.example", "h"))
+	require.NoError(t, netguard.CheckHost(ctx, r, "8.8.8.8", "h"))
+
+	for _, host := range []string{"internal.example", "mixed.example", "10.1.2.3", "127.0.0.1", "::1"} {
+		err := netguard.CheckHost(ctx, r, host, "use a public host")
+		var blocked *netguard.BlockedAddressError
+		require.ErrorAs(t, err, &blocked, host)
+		assert.Equal(t, "use a public host", blocked.Hint)
+	}
+	assert.Error(t, netguard.CheckHost(ctx, r, "unknown.example", "h"), "a failed lookup refuses")
+	assert.Error(t, netguard.CheckHost(ctx, r, "empty.example", "h"), "no address refuses")
 }

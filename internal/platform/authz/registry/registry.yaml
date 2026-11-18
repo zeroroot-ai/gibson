@@ -2020,6 +2020,55 @@ entries:
     object_deriver: "tenant_from_identity"
     allowed_identities:
       - USER
+  "/gibson.tenant.v1.OutsideAgentService/DeleteOutsideAgent":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/GetOutsideAgent":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/GrantOutsideAgent":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/ListOutsideAgentGrants":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/ListOutsideAgents":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/RegisterOutsideAgent":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
+  "/gibson.tenant.v1.OutsideAgentService/RevokeOutsideAgent":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.ProviderService/CreateProvider":
     relation: "writer"
     object_type: "tenant"

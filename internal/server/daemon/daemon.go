@@ -50,6 +50,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto"
 	"github.com/zeroroot-ai/gibson/internal/platform/crypto/providers"
 	"github.com/zeroroot-ai/gibson/internal/platform/job"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets"
 	"github.com/zeroroot-ai/gibson/internal/platform/secrets/jwtsource"
@@ -468,6 +469,8 @@ type daemonImpl struct {
 
 	// agentSkills is the Agent Skill store. registerAgentSkill sets it.
 	agentSkills agentskillstore.Store
+	// outsideAgents is the outside agent store. registerOutsideAgent sets it.
+	outsideAgents outsideagentstore.Store
 	// sharedAgentSkills is the operator source of Agent Skills. registerAgentSkill
 	// sets it.
 	sharedAgentSkills *SharedAgentSkills
@@ -666,6 +669,7 @@ func New(cfg *config.Config, opts ...Option) (Daemon, error) {
 		harness.WithConnectors(d.connectorMCPClient()),
 		harness.WithMissionBlockedTools(d.storedBlockedTools),
 		harness.WithAgentSkillStore(d.agentSkillStore),
+		harness.WithOutsideAgentStore(d.outsideAgentStore),
 		harness.WithMemberLookup(&lazyMemberLookup{daemon: d}),
 		harness.WithTurnGrantMinter(&lazyTurnGrantMinter{daemon: d}),
 		harness.WithMemberEventSink(&memberEvents{daemon: d}),

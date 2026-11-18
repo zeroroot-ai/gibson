@@ -158,6 +158,24 @@ func SharedAgentSkillObject(name string) (string, error) {
 	return AgentSkillObject(SharedAgentSkillTenant, name)
 }
 
+// ErrInvalidOutsideAgentObject marks an outside agent name, or a tenant, that
+// cannot form an outside agent object.
+var ErrInvalidOutsideAgentObject = errors.New("invalid outside agent object")
+
+// OutsideAgentObject returns the FGA object of one outside agent of one tenant:
+// "outside_agent:<tenant>/<name>". The tenant segment MUST come from the
+// authenticated context or from the route claim that ext-authz checked, never
+// from a request body.
+func OutsideAgentObject(tenant, name string) (string, error) {
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidOutsideAgentObject, err)
+	}
+	if err := validateTeamSegment("name", name); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidOutsideAgentObject, err)
+	}
+	return "outside_agent:" + tenant + TenantQualifiedSep + name, nil
+}
+
 // ModelObject is the model counterpart of ProviderObject.
 func ModelObject(tenant, name string) (string, error) {
 	return modelAccessObject("model", tenant, name)
