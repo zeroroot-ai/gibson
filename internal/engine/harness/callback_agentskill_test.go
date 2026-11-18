@@ -11,6 +11,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -77,5 +78,24 @@ func TestSkillLoadHook_StampsTheRecordAndNeedsASink(t *testing.T) {
 	if tenant != "acme" || got.MissionRunID != "run-7" || got.Digest != "sha256:aa" ||
 		got.Agent != "agent_principal:a1" || got.RecordedAtUnixNano == 0 {
 		t.Errorf("record = %+v, tenant %q", got, tenant)
+	}
+}
+
+func TestHideBlockedSkills_HidesOnlyADeniedAgentSkill(t *testing.T) {
+	if hideBlockedSkills(nil) != nil {
+		t.Error("an empty deny list must hide nothing")
+	}
+	hide := hideBlockedSkills([]string{"skill:web-recon", "native:nmap", "SKILL:Other"})
+	skill, _ := toolid.ForSkill("web-recon")
+	other, _ := toolid.ForSkill("kept")
+	nmap, _ := toolid.ForNative("nmap")
+	if !hide(skill) {
+		t.Error("a denied Agent Skill must be hidden")
+	}
+	if hide(other) {
+		t.Error("an Agent Skill that is not denied must stay")
+	}
+	if hide(nmap) {
+		t.Error("a denied tool is refused at the call, and is not hidden here")
 	}
 }

@@ -47,6 +47,19 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 		return searchToolsErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil
 	}
 
+	// A mission that denies an Agent Skill does not find it. The deny list is
+	// read only when Agent Skills are wired, because an unread list is not an
+	// empty one.
+	var hide func(toolid.ID) bool
+	if s.agentSkillStore() != nil {
+		policy, perr := s.policyFromState(ctx, state)
+		if perr != nil {
+			s.logger.ErrorContext(ctx, "SearchTools: the mission policy could not be loaded", "run_id", runID, "err", perr)
+			return searchToolsErr(commonpb.ErrorCode_ERROR_CODE_UNAVAILABLE, "the mission policy could not be loaded"), nil
+		}
+		hide = hideBlockedSkills(policy.Blocked)
+	}
+
 	engine := catalog.NewEngine(
 		s.toolLister(component.NewCatalogToolLister(s.componentRegistry, s.connectors)),
 		catalog.NewFGAAuthorizer(s.componentAuthorizer),
@@ -58,6 +71,7 @@ func (s *HarnessCallbackService) SearchTools(ctx context.Context, req *harnesspb
 		Sources:   toToolSources(req.GetSources()),
 		Connector: req.GetConnector(),
 		Limit:     int(req.GetLimit()),
+		Hide:      hide,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "SearchTools: search failed", "tenant", state.TenantID, "err", err)

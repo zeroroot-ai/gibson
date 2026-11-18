@@ -138,3 +138,25 @@ func TestSearch_ReturnsGrantedAgentSkillsNextToTools(t *testing.T) {
 		t.Fatalf("Search with no grant = %+v, %v, want none", got, err)
 	}
 }
+
+// Hide removes an entry before the FGA check, so a hidden Agent Skill costs no
+// check and is never returned.
+func TestSearch_HideRemovesAnEntryBeforeTheCheck(t *testing.T) {
+	skills := staticLister{{Source: toolid.SourceSkill, Tool: "web-recon", Description: "d"}}
+	fga := &grantChecker{grants: map[string]bool{"mission:m1|can_load|agent_skill:acme/web-recon": true}}
+	e := NewEngine(skills, NewFGAAuthorizer(fga))
+	caller := Caller{Tenant: "acme", Mission: "m1"}
+
+	got, err := e.Search(context.Background(), caller, Query{})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Search = %+v, %v, want the Agent Skill", got, err)
+	}
+	fga.seen = nil
+	got, err = e.Search(context.Background(), caller, Query{Hide: func(id toolid.ID) bool { return id.Tool == "web-recon" }})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Search with Hide = %+v, %v, want none", got, err)
+	}
+	if len(fga.seen) != 0 {
+		t.Errorf("a hidden entry cost an FGA check: %v", fga.seen)
+	}
+}

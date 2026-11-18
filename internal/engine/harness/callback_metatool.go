@@ -122,7 +122,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 			// gibson:no-tool-executed — denied before the search.
 			return metaToolErr(commonpb.ErrorCode_ERROR_CODE_PERMISSION_DENIED, "mission run is not active"), nil //nolint:nilerr // the denial is the response, not a transport error
 		}
-		return s.metaSearch(ctx, handler, caller, req.GetInputJson())
+		return s.metaSearch(ctx, handler, caller, hideBlockedSkills(policy.Blocked), req.GetInputJson())
 	case metatool.InvokeToolName:
 		return s.metaInvoke(ctx, req.GetContext(), handler, h, caller, policy, req.GetInputJson())
 	default:
@@ -131,7 +131,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 	}
 }
 
-func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Handler, caller catalog.Caller, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
+func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Handler, caller catalog.Caller, hide func(toolid.ID) bool, inputJSON []byte) (*harnesspb.CallToolProtoResponse, error) {
 	var in struct {
 		Query     string   `json:"query"`
 		Sources   []string `json:"sources"`
@@ -150,6 +150,7 @@ func (s *HarnessCallbackService) metaSearch(ctx context.Context, h *metatool.Han
 		Sources:   toToolSources(in.Sources),
 		Connector: in.Connector,
 		Limit:     in.Limit,
+		Hide:      hide,
 	})
 	if err != nil {
 		s.logger.ErrorContext(ctx, "meta-tool search failed", "tenant", caller.Tenant, "err", err)

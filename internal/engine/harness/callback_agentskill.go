@@ -12,6 +12,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
+	"github.com/zeroroot-ai/gibson/internal/engine/toolid"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -83,6 +84,24 @@ func (s *HarnessCallbackService) toolLister(tools catalog.ToolLister) catalog.To
 		return catalog.CombineListers(tools, agentskillstore.ToolLister{Store: store})
 	}
 	return tools
+}
+
+// hideBlockedSkills returns the function that hides the Agent Skills that the
+// deny list of the mission names. A denied Agent Skill is not found, and
+// invoke_tool also refuses to load it. The deny list holds the same ids as
+// for a tool. Only an id with the skill source is hidden here. A tool on the
+// deny list is still listed and is refused at the call, as before.
+func hideBlockedSkills(blocked []string) func(toolid.ID) bool {
+	if len(blocked) == 0 {
+		return nil
+	}
+	return func(id toolid.ID) bool {
+		if id.Source != toolid.SourceSkill {
+			return false
+		}
+		_, denied := metatool.MatchBlocked(blocked, id.Canonical())
+		return denied
+	}
 }
 
 // catalogCaller builds the caller of a catalog call from the run state and the

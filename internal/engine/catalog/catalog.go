@@ -104,6 +104,9 @@ type Query struct {
 	Connector string
 	// Limit caps the candidate count. Zero uses DefaultLimit.
 	Limit int
+	// Hide removes an entry before the authorization check and before the limit.
+	// The mission deny list of Agent Skills uses it. Nil hides nothing.
+	Hide func(id toolid.ID) bool
 }
 
 // Engine answers SearchTools queries over a ToolLister, authz-filtered.
@@ -148,6 +151,9 @@ func (e *Engine) Search(ctx context.Context, caller Caller, q Query) ([]Candidat
 		id, err := idFor(en)
 		if err != nil {
 			continue // skip malformed entries rather than fail the whole search
+		}
+		if q.Hide != nil && q.Hide(id) {
+			continue
 		}
 		ok, err := e.authz.CanExecute(ctx, caller, id)
 		if err != nil {

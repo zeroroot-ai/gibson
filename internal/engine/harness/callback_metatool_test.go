@@ -81,7 +81,7 @@ func TestMetaSearch_MapsCandidatesAndEmbedsRawSchema(t *testing.T) {
 			Description: "open an issue", InputSchema: []byte(`{"type":"object","properties":{"title":{"type":"string"}}}`)},
 	}}, mtAuthz{}, nil)
 
-	resp, err := newSvc(t).metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, []byte(`{"query":"issue","limit":3}`))
+	resp, err := newSvc(t).metaSearch(context.Background(), h, catalog.Caller{Tenant: "acme"}, nil, []byte(`{"query":"issue","limit":3}`))
 	if err != nil {
 		t.Fatalf("metaSearch: %v", err)
 	}
