@@ -89,3 +89,18 @@ func TestPuller_PullRefusesALocalReferenceOverHTTP(t *testing.T) {
 		t.Fatal("a pull of a loopback reference must fail")
 	}
 }
+
+// The refusal of a registry address gives the hint of the Agent Skill pull. It
+// does not name allow_private_llm_endpoints, which does not apply here.
+func TestPuller_RefusalHintIsNotTheModelEndpointSetting(t *testing.T) {
+	err := get(t, NewPuller(), "https://10.1.2.3:9/v2/")
+	if err == nil {
+		t.Fatal("want a refusal of a private address, got no error")
+	}
+	if strings.Contains(err.Error(), "allow_private_llm_endpoints") {
+		t.Fatalf("error = %v, want no hint about allow_private_llm_endpoints", err)
+	}
+	if !strings.Contains(err.Error(), addressHint) {
+		t.Fatalf("error = %v, want the hint %q", err, addressHint)
+	}
+}

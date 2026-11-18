@@ -51,9 +51,13 @@ func AllowPrivateAddresses() PullerOption {
 	return func(p *Puller) { p.transport = httpsOnly{inner: netguard.Transport(true)} }
 }
 
+// addressHint is the hint of a refusal of a registry address. The setting
+// security.allow_private_llm_endpoints does not apply to an Agent Skill pull.
+const addressHint = "the registry of an Agent Skill must resolve to a public address"
+
 // NewPuller returns a Puller with the HTTPS check and the address limit.
 func NewPuller(opts ...PullerOption) *Puller {
-	p := &Puller{transport: httpsOnly{inner: netguard.Transport(false)}}
+	p := &Puller{transport: httpsOnly{inner: netguard.TransportWithHint(false, addressHint)}}
 	for _, opt := range opts {
 		opt(p)
 	}

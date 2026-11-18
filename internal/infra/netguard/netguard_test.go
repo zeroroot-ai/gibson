@@ -185,3 +185,21 @@ func TestDialer_GuardIsInstalledUnlessAllowPrivate(t *testing.T) {
 	assert.NotNil(t, netguard.Dialer(false).Control, "guard must be on by default")
 	assert.Nil(t, netguard.Dialer(true).Control, "allowPrivate must remove the guard")
 }
+
+func TestBlockedAddressError_Hint(t *testing.T) {
+	// The default hint is the one of the model endpoint setting.
+	err := netguard.Control("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "allow_private_llm_endpoints")
+
+	// A caller hint replaces it.
+	err = netguard.ControlWithHint("use a public host")("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "(use a public host)")
+	assert.NotContains(t, err.Error(), "allow_private_llm_endpoints")
+
+	// An empty hint gives no brackets.
+	err = netguard.ControlWithHint("")("tcp", "10.0.0.1:443", nil)
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "(")
+}
