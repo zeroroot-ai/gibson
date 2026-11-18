@@ -32,6 +32,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/agentwire"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	gibsonharness "github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/jobnode"
@@ -190,7 +191,7 @@ func (b *brainExecutor) Dispatch(req brain.DispatchRequest) {
 				FromSnapshot: req.FromSnapshot,
 			})
 			if err != nil {
-				bind.eng.Submit(brain.WorkCompleted{ID: req.WorkID, RunID: req.RunID, Err: err.Error()})
+				bind.eng.Submit(agentWorkFailure(req.WorkID, req.RunID, err))
 				return
 			}
 			// The snapshot id of the node end is part of the Timeline event,
@@ -697,4 +698,19 @@ func missionInitiatorOf(createdBy principal.Principal) string {
 		return ""
 	}
 	return "user:" + createdBy.ID
+}
+
+// agentWorkFailure builds the WorkCompleted of an agent node that did not
+// finish. A run that ended in the A2A state canceled, input-required or
+// auth-required keeps that state on the work item. Any other error fails the
+// item.
+func agentWorkFailure(workID, runID string, err error) brain.WorkCompleted {
+	var se *agentwire.StateError
+	if errors.As(err, &se) {
+		switch state := brain.WorkStateFromTask(se.State); state {
+		case brain.WorkCanceled, brain.WorkInputRequired:
+			return brain.WorkCompleted{ID: workID, RunID: runID, State: state, Err: se.Message}
+		}
+	}
+	return brain.WorkCompleted{ID: workID, RunID: runID, Err: err.Error()}
 }

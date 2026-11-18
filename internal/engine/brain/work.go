@@ -26,6 +26,14 @@ const (
 	// executed, and (unlike failed) not a mission failure. Its dependents become
 	// dead (their dep never reaches `done`) and are ignored by completion.
 	WorkSkipped WorkState = "skipped"
+	// WorkCanceled: the work was canceled after it started, for example by
+	// CancelTask of an A2A Task. It is terminal. It is not done, so the
+	// dependents of the item never run.
+	WorkCanceled WorkState = "canceled"
+	// WorkInputRequired: the work stopped to wait for input or for auth from a
+	// caller (A2A Task state input-required or auth-required). It is not
+	// terminal. A later WorkCompleted moves it to done, failed or canceled.
+	WorkInputRequired WorkState = "input_required"
 )
 
 // WorkItem is a unit of work tracked as an entity — a tool call, agent run, or
@@ -163,7 +171,7 @@ type WorkRetried struct {
 func (WorkRetried) Kind() string { return "work.retried" }
 
 // WorkCompleted records that a previously-dispatched unit of work finished —
-// whenever that is. Err non-empty means failure.
+// whenever that is. Err non-empty means failure, unless State says otherwise.
 type WorkCompleted struct {
 	ID string
 	// RunID names the run this event belongs to. The daemon mints it when a run
@@ -173,6 +181,11 @@ type WorkCompleted struct {
 	RunID  string
 	Result string
 	Err    string
+	// State is the state this event sets on the work item. The values are
+	// canceled and input_required. Empty means the state follows from Err:
+	// failed when Err is not empty, done when it is empty. For canceled and
+	// input_required, Err holds the status message of the Task.
+	State WorkState `json:",omitempty"`
 	// Snapshot is the id of the sandbox snapshot that the node left in the
 	// sandbox checkpoint mode (ADR-0170). Empty when it left none.
 	Snapshot string `json:",omitempty"`
@@ -280,11 +293,21 @@ func applyWorkCompleted(w *World, e WorkCompleted) {
 	// ResumeFailInFlight) is a no-op. This prevents a worker that outlived the
 	// daemon from corrupting the World after a restart (ADR-0163).
 	switch wi.State {
-	case WorkFailed, WorkDone, WorkSkipped:
+	case WorkFailed, WorkDone, WorkSkipped, WorkCanceled:
+		return
+	}
+	if e.State == WorkInputRequired {
+		// The work waits for input. It is not finished, so it gets no
+		// completion order and keeps its attempt count.
+		wi.State, wi.Err = WorkInputRequired, e.Err
 		return
 	}
 	w.nextCompletedSeq++
 	wi.CompletedSeq = w.nextCompletedSeq
+	if e.State == WorkCanceled {
+		wi.State, wi.Err = WorkCanceled, e.Err
+		return
+	}
 	if e.Err != "" {
 		wi.State, wi.Err = WorkFailed, e.Err
 		return

@@ -125,9 +125,11 @@ func MissionCompletionSystem(w *World) []Event {
 		running, ready, anyFailed := false, false, false
 		for _, wi := range byMission[m.ID] {
 			switch wi.State {
-			case WorkRunning:
+			case WorkRunning, WorkInputRequired:
+				// An item that waits for input can still finish, so the
+				// mission is not complete yet.
 				running = true
-			case WorkFailed:
+			case WorkFailed, WorkCanceled:
 				anyFailed = true
 			case WorkPending:
 				if depsSatisfied(wi.DependsOn, idx) {

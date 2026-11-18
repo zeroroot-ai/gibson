@@ -81,6 +81,17 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 			// Can't attribute without a missionID — skip.
 			return nil
 		}
+		switch e.State {
+		case brain.WorkInputRequired:
+			// The node waits for input. It has neither completed nor failed.
+			return nil
+		case brain.WorkCanceled:
+			msg := e.Err
+			if msg == "" {
+				msg = "canceled"
+			}
+			return missionEventData(now, "node.failed", missionID, e.ID, "", msg)
+		}
 		if e.Err != "" {
 			return missionEventData(now, "node.failed", missionID, e.ID, "", e.Err)
 		}

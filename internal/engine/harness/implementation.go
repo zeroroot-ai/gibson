@@ -551,6 +551,17 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 	}
 	// The agent run takes its state from the work item (decision 16). The one
 	// mapping from the Task state is brain.WorkStateFromTask.
+	switch brain.WorkStateFromTask(outcome.State) {
+	case brain.WorkCanceled, brain.WorkInputRequired:
+		// The node does not fail with a plain error. The state travels with the
+		// error, so the work item gets the state canceled or input_required.
+		h.metrics.RecordCounter("agents.delegations", 1, map[string]string{
+			"agent": name, "status": "stopped", "transport": "work_queue",
+		})
+		return agent.Result{}, types.WrapError(ErrHarnessDelegationFailed,
+			fmt.Sprintf("remote agent %q ended in state %s", name, outcome.State),
+			&agentwire.StateError{State: outcome.State, Message: outcome.Result.Error.Message})
+	}
 	if brain.WorkStateFromTask(outcome.State) == brain.WorkFailed {
 		// A remote agent that reports a failure fails the node with its own
 		// reason. Swallowing it would leave the mission looking successful.

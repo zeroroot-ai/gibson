@@ -261,6 +261,10 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Reduce(w, WorkCompleted{ID: wi.ID, Result: wi.Result, Snapshot: wi.Snapshot})
 		case WorkFailed:
 			Reduce(w, WorkCompleted{ID: wi.ID, Err: wi.Err})
+		case WorkCanceled:
+			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkCanceled, Err: wi.Err})
+		case WorkInputRequired:
+			Reduce(w, WorkCompleted{ID: wi.ID, State: WorkInputRequired, Err: wi.Err})
 		case WorkPending:
 			// WorkRetried re-arms a failed WorkItem to pending. Use
 			// WorkCompleted(err) first so the retry path applies.

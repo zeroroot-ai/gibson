@@ -110,6 +110,21 @@ type Outcome struct {
 	Message string
 }
 
+// StateError reports that an agent ended its Task in a state that is neither
+// completed nor failed. The state is canceled, input-required or auth-required.
+// The daemon maps it to the work state with brain.WorkStateFromTask.
+type StateError struct {
+	// State is the A2A state of the Task.
+	State a2a.TaskState
+	// Message is the text of the status message of the Task.
+	Message string
+}
+
+// Error returns the state and the message.
+func (e *StateError) Error() string {
+	return fmt.Sprintf("the agent ended the task in the state %s: %s", e.State, e.Message)
+}
+
 // ParseTask reads the A2A Task of a work result. The state of the Task is the
 // state of the run.
 func ParseTask(raw []byte) (Outcome, error) {

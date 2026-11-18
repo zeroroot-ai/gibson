@@ -53,7 +53,7 @@ func missionCheckpoints(eng *brain.Engine, missionID string) []api.MissionCheckp
 		if w.MissionID != missionID || !strings.HasPrefix(w.ID, prefix) {
 			continue
 		}
-		if w.State == brain.WorkDone || w.State == brain.WorkFailed {
+		if w.State == brain.WorkDone || w.State == brain.WorkFailed || w.State == brain.WorkCanceled {
 			ended = append(ended, w)
 		}
 	}

@@ -72,7 +72,7 @@ type MissionContext struct {
 // quiescent reports whether the mission has no work still running or dispatchable.
 func (mc MissionContext) quiescent() bool {
 	for _, wi := range mc.Work {
-		if wi.State == WorkRunning || wi.State == WorkPending {
+		if wi.State == WorkRunning || wi.State == WorkPending || wi.State == WorkInputRequired {
 			return false
 		}
 	}
@@ -265,7 +265,7 @@ func (w *World) DecisionSnapshot() []DecisionSnapshot {
 	return out
 }
 
-// terminalWorkCount returns the number of terminal (done/failed/skipped) work
+// terminalWorkCount returns the number of terminal (done/failed/skipped/canceled) work
 // items for a mission — the evidence cursor.
 func terminalWorkCount(work []WorkSnapshot, missionID string) int {
 	n := 0
@@ -274,7 +274,7 @@ func terminalWorkCount(work []WorkSnapshot, missionID string) int {
 			continue
 		}
 		switch wi.State {
-		case WorkDone, WorkFailed, WorkSkipped:
+		case WorkDone, WorkFailed, WorkSkipped, WorkCanceled:
 			n++
 		}
 	}
