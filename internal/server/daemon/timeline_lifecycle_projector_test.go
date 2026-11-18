@@ -120,6 +120,19 @@ func TestProjectBrainEvent(t *testing.T) {
 			wantStatus:    "completed",
 		},
 
+		// ---- MissionDone(canceled) → status:canceled ---------------------
+		{
+			name: "MissionDone canceled maps to status canceled",
+			ev: brain.MissionDone{
+				ID:      "mission-4",
+				Outcome: brain.MissionCanceled,
+				Reason:  "stopped by user",
+			},
+			wantEventType: "status",
+			wantMissionID: "mission-4",
+			wantStatus:    "canceled",
+		},
+
 		// ---- MissionDone(failed) → status:failed -------------------------
 		{
 			name: "MissionDone failed maps to status failed",

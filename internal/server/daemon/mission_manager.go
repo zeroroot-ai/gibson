@@ -377,7 +377,7 @@ func (m *missionManager) runEnded(tenant auth.TenantID, am *activeMission) bool 
 	runID := runIDOf(am)
 	for _, ms := range eng.Missions() {
 		if ms.ID == am.mission.ID.String() && ms.RunID == runID {
-			return ms.Status == brain.MissionCompleted || ms.Status == brain.MissionFailed
+			return ms.Status.IsTerminal()
 		}
 	}
 	return false
@@ -1479,18 +1479,18 @@ func (m *missionManager) Stop(ctx context.Context, missionID string, force bool)
 	m.brainRegistry.For(active.tenantID.String()).Submit(brain.MissionDone{
 		ID:      missionID,
 		RunID:   runIDOf(active),
-		Outcome: brain.MissionFailed,
+		Outcome: brain.MissionCanceled,
 		Reason:  "stopped by user",
 	})
 	active.cancel()
 
-	// The MissionDone(fail, "stopped by user") submitted above reaches the
-	// bus as status:failed via the lifecycle projector. The separate
+	// The MissionDone(canceled, "stopped by user") submitted above reaches the
+	// bus as status:canceled via the lifecycle projector. The separate
 	// "mission.stopped" wire event had no consumer outside the retired
 	// per-run channel (gibson#1112 PR 3).
 
 	// Status is World-derived (ADR-0163/gibson#1118): MissionDone above set
-	// status=failed in the World via Reduce. No store write.
+	// status=canceled in the World via Reduce. No store write.
 	active.mission.CompletedAt = mission.NewUnixTimePtrNow()
 
 	m.logger.Info("mission stopped", "mission_id", missionID)
@@ -1519,7 +1519,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			continue
 		}
-		if activeOnly && ms.Status != brain.MissionWorking && ms.Status != brain.MissionPaused {
+		if activeOnly && !ms.Status.IsActive() && ms.Status != brain.MissionPaused {
 			continue
 		}
 		result = append(result, missionSnapshotToData(eng, ms))
@@ -1665,6 +1665,8 @@ func (m *missionManager) awaitBrainMission(
 						reason = "mission failed"
 					}
 					return mission.MissionStatusFailed, reason
+				case brain.MissionCanceled:
+					return mission.MissionStatusCancelled, "mission canceled"
 				}
 			}
 		}

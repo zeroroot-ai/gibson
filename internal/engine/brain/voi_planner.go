@@ -166,7 +166,7 @@ func VoIGateSystem(w *World) []Event {
 
 	var out []Event
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionWorking || m.Goal == "" {
+		if !m.Status.IsActive() || m.Goal == "" {
 			continue
 		}
 		st, ok := states[m.ID]

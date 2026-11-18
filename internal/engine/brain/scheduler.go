@@ -19,7 +19,7 @@ package brain
 func pausedMissions(w *World) map[string]bool {
 	notRunning := map[string]bool{}
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionWorking {
+		if !m.Status.IsActive() {
 			notRunning[m.ID] = true
 		}
 	}
@@ -119,7 +119,7 @@ func MissionCompletionSystem(w *World) []Event {
 
 	var out []Event
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionWorking || m.Goal != "" {
+		if !m.Status.IsActive() || m.Goal != "" {
 			continue // only running no-goal missions complete mechanically
 		}
 		running, ready, anyFailed := false, false, false

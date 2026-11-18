@@ -15,7 +15,7 @@ const StatusRunUnknown = "unknown"
 // isEndedRunStatus reports whether a stored run status is an end state.
 func isEndedRunStatus(status string) bool {
 	switch status {
-	case "completed", "failed", "cancelled", StatusRunUnknown:
+	case "completed", "failed", "cancelled", string(brain.MissionCanceled), StatusRunUnknown:
 		return true
 	}
 	return false

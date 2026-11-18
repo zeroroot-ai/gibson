@@ -21,8 +21,16 @@ const (
 	// until MissionStarted moves it to working (hosted#205).
 	MissionSubmitted MissionStatus = "submitted"
 	MissionWorking   MissionStatus = "working"
-	MissionCompleted MissionStatus = "completed"
-	MissionFailed    MissionStatus = "failed"
+	// MissionInputRequired is a mission that waits for a person while an
+	// approval request is open. The mission keeps its work going, as ADR-0132
+	// requires: the fleet runs on while the decision is pending. The state
+	// returns to MissionWorking when the last open request is decided.
+	MissionInputRequired MissionStatus = "input_required"
+	MissionCompleted     MissionStatus = "completed"
+	MissionFailed        MissionStatus = "failed"
+	// MissionCanceled is a mission that a person stopped. It is terminal and
+	// it is not a failure.
+	MissionCanceled MissionStatus = "canceled"
 	// MissionPaused: a working mission halted by an operator (gibson#851,
 	// brain-native pause). The executor Systems stop dispatching/deciding for it
 	// until it is resumed; its World state is untouched, so resume continues
@@ -30,6 +38,17 @@ const (
 	// checkpoint store, ADR-0101).
 	MissionPaused MissionStatus = "paused"
 )
+
+// IsTerminal reports whether the state ends a mission.
+func (s MissionStatus) IsTerminal() bool {
+	return s == MissionCompleted || s == MissionFailed || s == MissionCanceled
+}
+
+// IsActive reports whether the executor Systems act for a mission in this
+// state. A working mission and a mission that waits for input are both active.
+func (s MissionStatus) IsActive() bool {
+	return s == MissionWorking || s == MissionInputRequired
+}
 
 // Budget is the per-mission resource ceiling carried from CUE MissionConstraints
 // (ADR-0104). It is recorded here at projection; the budget/limit System that
@@ -244,7 +263,7 @@ func (MissionResumed) Kind() string { return "mission.resume" }
 
 func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 	if ent, ok := findMission(w, e.ID); ok {
-		if m := w.missions.Get(ent); m.Status == MissionWorking {
+		if m := w.missions.Get(ent); m.Status.IsActive() {
 			m.Status = MissionPaused
 		}
 	}
@@ -254,6 +273,7 @@ func applyMissionResumed(w *World, e MissionResumed) {
 	if ent, ok := findMission(w, e.ID); ok {
 		if m := w.missions.Get(ent); m.Status == MissionPaused {
 			m.Status = MissionWorking
+			reconcileInputRequired(w, e.ID)
 		}
 	}
 }
@@ -261,7 +281,7 @@ func applyMissionResumed(w *World, e MissionResumed) {
 func applyMissionDone(w *World, e MissionDone) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
-		if m.Status == MissionCompleted || m.Status == MissionFailed {
+		if m.Status.IsTerminal() {
 			return // already terminal — idempotent (paused or working can still finish)
 		}
 		outcome := e.Outcome

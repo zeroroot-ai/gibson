@@ -206,6 +206,8 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionCompleted})
 		case MissionFailed:
 			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionFailed})
+		case MissionCanceled:
+			Reduce(w, MissionDone{ID: m.ID, Reason: m.Reason, Outcome: MissionCanceled})
 		}
 	}
 

@@ -105,9 +105,12 @@ func ProjectBrainEvent(ev brain.Event, missionID string) *api.EventData {
 	case brain.MissionDone:
 		status := "completed"
 		errMsg := ""
-		if e.Outcome == brain.MissionFailed {
+		switch e.Outcome {
+		case brain.MissionFailed:
 			status = "failed"
 			errMsg = e.Reason
+		case brain.MissionCanceled:
+			status = string(brain.MissionCanceled)
 		}
 		return missionEventData(now, "status", e.ID, "", status, errMsg)
 	}

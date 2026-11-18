@@ -41,7 +41,7 @@ func BudgetSystem(w *World) []Event {
 
 	var out []Event
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionWorking {
+		if !m.Status.IsActive() {
 			continue
 		}
 		if m.Budget.MaxExecutions > 0 && execByMission[m.ID] > m.Budget.MaxExecutions {

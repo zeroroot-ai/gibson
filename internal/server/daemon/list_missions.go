@@ -63,7 +63,7 @@ func (d *daemonImpl) ListMissions(ctx context.Context, activeOnly bool, statusFi
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			continue
 		}
-		if activeOnly && ms.Status != brain.MissionWorking && ms.Status != brain.MissionPaused {
+		if activeOnly && !ms.Status.IsActive() && ms.Status != brain.MissionPaused {
 			continue
 		}
 		if statusFilter != "" && string(ms.Status) != statusFilter {
