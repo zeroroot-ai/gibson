@@ -29,7 +29,7 @@ type memSkillStore struct {
 }
 
 func (m *memSkillStore) Publish(
-	_ context.Context, _, ref string, p *agentskill.Pulled,
+	_ context.Context, _, ref, source string, p *agentskill.Pulled,
 ) (*agentskillstore.Entry, error) {
 	for i := range m.entries {
 		if m.entries[i].Name == p.Manifest.Name {
@@ -38,7 +38,7 @@ func (m *memSkillStore) Publish(
 	}
 	e := agentskillstore.Entry{
 		Name: p.Manifest.Name, Digest: p.Digest, Reference: ref,
-		Description: p.Manifest.Description, PublishedAt: time.Unix(1, 0), Current: true,
+		Description: p.Manifest.Description, PublishedAt: time.Unix(1, 0), Current: true, Source: source,
 	}
 	m.entries = append(m.entries, e)
 	return &e, nil
@@ -401,4 +401,50 @@ func TestEnableSharedAgentSkill_Refusals(t *testing.T) {
 	assert.Equal(t, codes.InvalidArgument, code(err))
 	assert.Empty(t, f.store.entries)
 	assert.Empty(t, f.fga.writtenTuples())
+}
+
+func TestPublishAgentSkill_SourceIsTenant(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	resp, err := f.svc.PublishAgentSkill(f.ctx, &tenantv1.PublishAgentSkillRequest{Name: "web-recon", Reference: skillRef})
+	require.NoError(t, err)
+	assert.Equal(t, tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_TENANT, resp.GetEntry().GetSource())
+}
+
+func TestEnableSharedAgentSkill_SourceIsShared(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	offerShared(f)
+	f.fga.allow("system_tenant:_system", "platform_enabled", "agent_skill:_shared/web-recon")
+	resp, err := f.svc.EnableSharedAgentSkill(f.ctx, &tenantv1.EnableSharedAgentSkillRequest{Name: "web-recon"})
+	require.NoError(t, err)
+	assert.Equal(t, tenantv1.AgentSkillSource_AGENT_SKILL_SOURCE_SHARED, resp.GetEntry().GetSource())
+}
+
+func TestListAgentSkillGrants_ReturnsAgentsAndMissionsWithoutPrefix(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	f.store.entries = []agentskillstore.Entry{{Name: "a", Digest: "sha256:02", Current: true}}
+	obj := "agent_skill:acme/a"
+	f.fga.withUsers("agent_skill", obj, "granted_agent", "agent_principal:x", "agent_principal:y")
+	f.fga.withUsers("agent_skill", obj, "granted_mission", "mission:m1")
+
+	resp, err := f.svc.ListAgentSkillGrants(f.ctx, &tenantv1.ListAgentSkillGrantsRequest{Name: "a"})
+	require.NoError(t, err)
+	got := map[string]tenantv1.AgentSkillSubjectKind{}
+	for _, g := range resp.GetGrants() {
+		got[g.GetSubjectId()] = g.GetSubjectKind()
+	}
+	assert.Equal(t, map[string]tenantv1.AgentSkillSubjectKind{
+		"x":  tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_AGENT,
+		"y":  tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_AGENT,
+		"m1": tenantv1.AgentSkillSubjectKind_AGENT_SKILL_SUBJECT_KIND_MISSION,
+	}, got)
+}
+
+func TestListAgentSkillGrants_Refusals(t *testing.T) {
+	f := newSkillFixture(t, nil)
+	_, err := f.svc.ListAgentSkillGrants(f.ctx, &tenantv1.ListAgentSkillGrantsRequest{Name: "missing"})
+	assert.Equal(t, codes.NotFound, code(err))
+	_, err = f.svc.ListAgentSkillGrants(f.ctx, &tenantv1.ListAgentSkillGrantsRequest{Name: "Bad--"})
+	assert.Equal(t, codes.InvalidArgument, code(err))
+	_, err = f.svc.ListAgentSkillGrants(context.Background(), &tenantv1.ListAgentSkillGrantsRequest{Name: "a"})
+	assert.Equal(t, codes.PermissionDenied, code(err))
 }

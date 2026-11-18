@@ -1667,6 +1667,13 @@ entries:
     allowed_identities:
       - USER
       - SERVICE
+  "/gibson.tenant.v1.AgentSkillService/ListAgentSkillGrants":
+    relation: "admin"
+    object_type: "tenant"
+    object_deriver: "tenant_from_identity"
+    allowed_identities:
+      - USER
+      - SERVICE
   "/gibson.tenant.v1.AgentSkillService/ListAgentSkills":
     relation: "admin"
     object_type: "tenant"

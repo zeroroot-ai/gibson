@@ -259,6 +259,7 @@ rpc,relation,object_type,deriver,identities,source_proto_file,mode
 /gibson.tenant.v1.AgentSkillService/EnableSharedAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/GetAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/GrantAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
+/gibson.tenant.v1.AgentSkillService/ListAgentSkillGrants,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/ListAgentSkills,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/ListSharedAgentSkills,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule
 /gibson.tenant.v1.AgentSkillService/PublishAgentSkill,admin,tenant,tenant_from_identity,USER|SERVICE,gibson/tenant/v1/agent_skill.proto,rule

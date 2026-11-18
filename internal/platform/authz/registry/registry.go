@@ -2378,6 +2378,15 @@ var Registry = map[string]Entry{
 		Unauthenticated:   false,
 		Self:              false,
 	},
+	"/gibson.tenant.v1.AgentSkillService/ListAgentSkillGrants": {
+		Service:           "gibson.tenant.v1.AgentSkillService",
+		Relation:          "admin",
+		ObjectType:        "tenant",
+		ObjectDeriver:     "tenant_from_identity",
+		AllowedIdentities: IdentityUser | IdentityService,
+		Unauthenticated:   false,
+		Self:              false,
+	},
 	"/gibson.tenant.v1.AgentSkillService/ListAgentSkills": {
 		Service:           "gibson.tenant.v1.AgentSkillService",
 		Relation:          "admin",

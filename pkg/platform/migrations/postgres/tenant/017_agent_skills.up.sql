@@ -26,7 +26,10 @@ CREATE TABLE IF NOT EXISTS agent_skills (
     metadata_json  TEXT        NOT NULL DEFAULT '{}',
     allowed_tools  TEXT[]      NOT NULL DEFAULT '{}',
     published_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-    is_current     BOOLEAN     NOT NULL DEFAULT false
+    is_current     BOOLEAN     NOT NULL DEFAULT false,
+    -- source is 'tenant' for a version that the tenant published and 'shared'
+    -- for a copy of a Shared Agent Skill of the operator.
+    source         TEXT        NOT NULL DEFAULT 'tenant' CHECK (source IN ('tenant', 'shared'))
 );
 
 CREATE INDEX IF NOT EXISTS agent_skills_name_idx ON agent_skills (name, published_at DESC);
