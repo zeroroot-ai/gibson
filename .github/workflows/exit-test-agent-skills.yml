@@ -1,0 +1,237 @@
+# ----------------------------------------------------------------------------
+# The Agent Skills exit test (epic gibson#1377).
+#
+# In plain words: a tenant publishes a folder as an Agent Skill. An agent that
+# holds a grant finds it and loads it. An agent with no grant does not see it and
+# cannot load it. A running mission keeps the version that it loaded first. The
+# Timeline holds one event for each load.
+#
+# The steps:
+#   1. The kind bring-up of the AAIF exit tests (the action aaif-exit-cluster).
+#      It builds the test-mode daemon of the checkout with setec_integration.
+#   2. The runner packs each Agent Skill folder of tests/fixtures/agentskills as
+#      an OCI image and pushes it to ghcr.io by digest. The daemon pulls from
+#      there. The pull uses the token of this run, which the test stores as a
+#      tenant secret.
+#   3. TestAgentSkills runs in the cluster as a Job.
+#   4. The script of the probe Agent Skill names the pod of the daemon, which is a
+#      host outside the egress limit of a sandbox. The test runs that command with
+#      the nmap tool in a sandbox. A step then reads the Cilium drop records and
+#      fails when the network let a packet through.
+#
+# Point 5 of the epic is covered for what exists. The sandbox files of an Agent
+# Skill are not built (gibson#1373), so the agent reads the script as text.
+#
+# ADR-0080: NEVER on pull_request and never on a schedule. It needs a live cluster.
+# It runs on main and on dispatch.
+# ----------------------------------------------------------------------------
+name: exit-test-agent-skills
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'internal/engine/agentskill/**'
+      - 'internal/platform/agentskillstore/**'
+      - 'internal/engine/metatool/**'
+      - 'internal/engine/catalog/**'
+      - 'internal/engine/harness/callback_agentskill*.go'
+      - 'internal/engine/harness/callback_metatool.go'
+      - 'internal/engine/harness/callback_searchtools.go'
+      - 'internal/platform/component/service_metatool.go'
+      - 'internal/server/daemon/agent_skill_adapters.go'
+      - 'internal/server/daemon/api/agent_skill_service.go'
+      - 'tests/e2e/agent_skills_test.go'
+      - 'tests/e2e/helpers/**'
+      - 'tests/fixtures/agentskills/**'
+      - '.github/actions/aaif-exit-cluster/**'
+      - '.github/scripts/run-e2e-job.sh'
+      - '.github/workflows/exit-test-agent-skills.yml'
+  workflow_dispatch:
+    inputs:
+      charts-ref:
+        description: The ref of zeroroot-ai/charts to install. Use epic/aaif-alignment until it merges.
+        required: false
+        default: main
+
+# One run at a time, and a run that started finishes (gibson#151).
+concurrency:
+  group: exit-test-agent-skills-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CHARTS_ROOT: ${{ github.workspace }}/charts
+  NS: gibson
+  RELEASE: gibson
+  CLUSTER: gibson
+  NODE: gibson-control-plane
+  E2E_OUT: ${{ github.workspace }}/e2e-out
+  # The port of the daemon gRPC listener. The sandbox must not reach it.
+  EGRESS_BLOCKED_PORT: "50051"
+
+jobs:
+  agent-skills:
+    name: an agent loads only the Agent Skills that it holds a grant for
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # The runner pushes the Agent Skill images to ghcr.io.
+      packages: write
+    steps:
+      - name: Checkout gibson
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: gibson
+
+      # hosted is private, so the checkout needs the org read PAT.
+      - name: Checkout hosted
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/hosted
+          path: hosted
+          token: ${{ secrets.GH_PAT_PLATFORM_RO }}
+
+      - name: Checkout charts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: zeroroot-ai/charts
+          ref: ${{ inputs.charts-ref || 'main' }}
+          path: charts
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v5
+        with:
+          go-version-file: gibson/go.mod
+          cache-dependency-path: gibson/go.sum
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: v3.16.2
+
+      - name: Install kind + kubectl
+        uses: helm/kind-action@1544676c07bb3570fcb70166beaa07c4528fd4aa # v1.15.1
+        with:
+          install_only: true
+
+      - name: Install terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      # A full platform on kind opens more inotify instances than the runner
+      # allows. The limits go up before the cluster starts (gibson#1331).
+      - name: Raise the inotify limits
+        uses: zeroroot-ai/.github/.github/actions/raise-inotify-limits@78606607ff7c6192237bb05b4610af6bbe16e8ee # v0.22.0
+
+      - name: Stand up the cluster with the images of the checkout
+        uses: ./gibson/.github/actions/aaif-exit-cluster
+        with:
+          ghcr-ro-pat: ${{ secrets.GHCR_RO_PAT }}
+          with-kvm: "true"
+          image-tag: aaif-skills
+
+      # Pack each folder, push it by digest, and write the references and the
+      # registry credential for the suite. The registry credential is the token
+      # of this run. The suite stores it as a tenant secret, and the daemon
+      # reads it for each publish.
+      - name: Pack the Agent Skill folders and push them to ghcr.io
+        working-directory: gibson
+        env:
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${REGISTRY_PASSWORD}"
+          pod_ip=$(kubectl -n "$NS" get pod -l app.kubernetes.io/component=daemon \
+                     -o jsonpath='{.items[0].status.podIP}')
+          if [ -z "$pod_ip" ]; then
+            echo "::error::the daemon pod has no address, so the egress check has no host"
+            exit 1
+          fi
+          echo "EGRESS_BLOCKED_IP=${pod_ip}" >> "$GITHUB_ENV"
+          base=ghcr.io/zeroroot-ai
+          pack() { go run ./tests/fixtures/agentskills/pack "$@"; }
+          alpha_v1=$(pack -dir tests/fixtures/agentskills/v1/e2e-alpha -repo "$base/gibson-e2e-skill-alpha")
+          alpha_v2=$(pack -dir tests/fixtures/agentskills/v2/e2e-alpha -repo "$base/gibson-e2e-skill-alpha")
+          probe=$(pack -dir tests/fixtures/agentskills/probe/e2e-probe -repo "$base/gibson-e2e-skill-probe" \
+                    -set "@EGRESS_HOST@=${pod_ip}" -set "@EGRESS_PORT@=${EGRESS_BLOCKED_PORT}")
+          toolnamer=$(pack -dir tests/fixtures/agentskills/toolnamer/e2e-toolnamer -repo "$base/gibson-e2e-skill-toolnamer")
+          {
+            echo "E2E_SKILL_REF_ALPHA_V1=${alpha_v1}"
+            echo "E2E_SKILL_REF_ALPHA_V2=${alpha_v2}"
+            echo "E2E_SKILL_REF_PROBE=${probe}"
+            echo "E2E_SKILL_REF_TOOLNAMER=${toolnamer}"
+            echo "E2E_SKILL_REGISTRY=ghcr.io"
+            echo "E2E_SKILL_REGISTRY_USERNAME=${REGISTRY_USERNAME}"
+            echo "E2E_SKILL_REGISTRY_PASSWORD=${REGISTRY_PASSWORD}"
+            echo "E2E_EGRESS_BLOCKED_IP=${pod_ip}"
+            echo "E2E_EGRESS_BLOCKED_PORT=${EGRESS_BLOCKED_PORT}"
+          } > /tmp/e2e-runner.env
+          cut -d= -f1 /tmp/e2e-runner.env
+
+      # The same watch as exit-test-tool-dispatch.yml: the drop records of each
+      # Cilium agent, and the address of each sandbox Pod.
+      - name: Watch for drops
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh --selftest
+          mkdir -p /tmp/cilium-drops /tmp/sandbox-pods
+          for p in $(kubectl -n kube-system get pods -l k8s-app=cilium -o jsonpath='{.items[*].metadata.name}'); do
+            nohup kubectl -n kube-system exec "$p" -c cilium-agent -- cilium-dbg monitor --type drop \
+              > "/tmp/cilium-drops/${p}.log" 2>&1 &
+          done
+          nohup kubectl get pods -A --watch -l setec.zeroroot.ai/sandbox \
+            -o jsonpath='{.metadata.name}{" "}{.status.podIP}{" "}{.metadata.namespace}{"\n"}' \
+            > /tmp/sandbox-pods/all.txt 2>&1 &
+          sleep 5
+          ls /tmp/cilium-drops/*.log >/dev/null
+
+      - name: The Agent Skills exit test
+        env:
+          E2E_RUNNER_ENV_FILE: /tmp/e2e-runner.env
+        run: |
+          set -o pipefail
+          mkdir -p "$E2E_OUT"
+          gibson/.github/scripts/run-e2e-job.sh gibson-e2e-agent-skills 'TestAgentSkills$' 30m \
+            2>&1 | tee "$E2E_OUT/agent-skills.log"
+
+      # The network dropped the packets that the sandbox of the script sent to the
+      # host that the script names.
+      - name: The network refused the sandbox that dialed the host of the script
+        if: ${{ !cancelled() }}
+        working-directory: gibson
+        run: |
+          set -euo pipefail
+          pkill -f 'cilium-dbg monitor' || true
+          pkill -f 'get pods --watch' || true
+          cat /tmp/sandbox-pods/*.txt > /tmp/sandbox-pods.txt
+          bash tests/fixtures/mcp-tools/check-proxy-drops.sh "$EGRESS_BLOCKED_IP" "$EGRESS_BLOCKED_PORT" /tmp/sandbox-pods.txt /tmp/cilium-drops/*.log
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: agent-skills-${{ github.run_id }}
+          path: ${{ github.workspace }}/e2e-out
+          if-no-files-found: ignore
+
+      # always(), not failure(): a job that hits timeout-minutes is cancelled,
+      # and a cancelled job skips failure() steps.
+      - name: Argo bringup diagnostics
+        if: always()
+        working-directory: gibson
+        run: bash scripts/ci/dump-bringup-diagnostics.sh
+
+      - name: Diagnostics
+        if: always()
+        run: |
+          kubectl -n "$NS" get pods || true
+          kubectl -n "$NS" logs -l app.kubernetes.io/component=daemon -c gibson --tail=5000 \
+            | grep -iE 'agent.?skill|metatool|invoke_tool|search_tools|mission' \
+            | tail -200 || true

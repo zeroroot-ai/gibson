@@ -1,0 +1,190 @@
+name: Stand up the kind cluster of the AAIF exit tests
+description: >
+  The exit tests of the Agent Skills, the finding evidence and the AAIF alignment
+  epics run on one kind cluster. This action brings it up in the way of
+  exit-test-model-gate.yml. It starts the substrate and the cluster, builds the
+  test-mode daemon, ext-authz and the tenant-operator of the checkout, loads them
+  into kind, points the Argo application at them, and waits for each rollout. It
+  then builds the e2e suite into an image and loads it.
+  The calling workflow checks out gibson, hosted and charts first. It also sets up
+  Go, Helm, kind, terraform and the inotify limits.
+inputs:
+  ghcr-ro-pat:
+    description: The read-only token for ghcr.io. The substrate and the first-party images need it.
+    required: true
+  with-kvm:
+    description: "Set to true when the test runs a sandbox. The action then opens /dev/kvm and builds the daemon with setec_integration."
+    required: false
+    default: "false"
+  image-tag:
+    description: The tag of the images that this action builds.
+    required: false
+    default: aaif-exit
+  node:
+    description: The kind node.
+    required: false
+    default: gibson-control-plane
+  namespace:
+    description: The release namespace.
+    required: false
+    default: gibson
+  cluster:
+    description: The kind cluster name.
+    required: false
+    default: gibson
+runs:
+  using: composite
+  steps:
+    # Stage 0 writes the bringup keyring that the install reads (ADR-0083).
+    - name: Stage 0, the substrate and the bringup keyring
+      shell: bash
+      working-directory: hosted
+      env:
+        GHCR_PULL_TOKEN: ${{ inputs.ghcr-ro-pat }}
+      run: |
+        if [ -z "${GHCR_PULL_TOKEN}" ]; then
+          echo "::error::GHCR_RO_PAT is required to pull first-party images."
+          exit 1
+        fi
+        SUBSTRATE_DIR="$RUNNER_TEMP/substrate" make substrate ENV=kind
+
+    - name: Open /dev/kvm for the launcher
+      if: ${{ inputs.with-kvm == 'true' }}
+      uses: ./gibson/.github/actions/open-kvm
+
+    - name: Stand up the cluster
+      shell: bash
+      working-directory: hosted
+      env:
+        CHARTS_ROOT: ${{ github.workspace }}/charts
+      run: |
+        SUBSTRATE_DIR="$RUNNER_TEMP/substrate" \
+          RUNG=ci make recreate ENV=kind
+
+    - name: Node offers KVM to the launcher
+      if: ${{ inputs.with-kvm == 'true' }}
+      uses: ./gibson/.github/actions/node-offers-kvm
+      with:
+        node: ${{ inputs.node }}
+
+    # The images below build FROM the private daemon image on ghcr.io. The
+    # runner docker needs the token that the cluster pulls with.
+    - name: Log the docker of the runner in to ghcr.io
+      shell: bash
+      env:
+        GHCR_RO_PAT: ${{ inputs.ghcr-ro-pat }}
+      run: echo "$GHCR_RO_PAT" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+    # A test-mode daemon: test fixtures on, so the suite can dial it. This
+    # changes how the client authenticates, never the runtime.
+    - name: Build and load the test-mode daemon
+      shell: bash
+      working-directory: gibson
+      env:
+        NS: ${{ inputs.namespace }}
+        CLUSTER: ${{ inputs.cluster }}
+        TAG: ${{ inputs.image-tag }}
+        TAGS: ${{ inputs.with-kvm == 'true' && 'setec_integration test_fixtures' || 'test_fixtures' }}
+      run: |
+        set -euo pipefail
+        BASE=$(kubectl -n "$NS" get statefulset -l app.kubernetes.io/component=daemon \
+          -o jsonpath='{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}')
+        echo "overlaying onto base daemon image: ${BASE}"
+        mkdir -p /tmp/dctx
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+          -tags="${TAGS}" \
+          -ldflags="-s -w -X github.com/zeroroot-ai/gibson/pkg/version.GitCommit=$(git rev-parse --short HEAD)" \
+          -o /tmp/dctx/gibson ./cmd/gibson
+        cat > /tmp/dctx/Dockerfile <<EOF
+        FROM ${BASE}
+        COPY gibson /usr/local/bin/gibson
+        EOF
+        docker build -t "ghcr.io/zeroroot-ai/gibson:${TAG}" /tmp/dctx
+        kind load docker-image "ghcr.io/zeroroot-ai/gibson:${TAG}" --name "$CLUSTER"
+
+    # The pinned ext-authz and tenant-operator do not hold the AAIF code. The
+    # gateway calls ext-authz for each model call, and the tenant-operator renders
+    # the route of each provider.
+    - name: Build and load ext-authz and the tenant-operator of the checkout
+      shell: bash
+      working-directory: gibson
+      env:
+        CLUSTER: ${{ inputs.cluster }}
+        TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        docker buildx build --progress=plain --load \
+          -f build/ext-authz.Dockerfile -t "ghcr.io/zeroroot-ai/ext-authz:${TAG}" .
+        kind load docker-image "ghcr.io/zeroroot-ai/ext-authz:${TAG}" --name "$CLUSTER"
+        docker buildx build --progress=plain --load \
+          -f build/tenant-operator.Dockerfile -t "ghcr.io/zeroroot-ai/tenant-operator:${TAG}" .
+        kind load docker-image "ghcr.io/zeroroot-ai/tenant-operator:${TAG}" --name "$CLUSTER"
+
+    # The e2eRunner values register the ClusterSPIFFEID of the runner, allow-list
+    # its SVID on the daemon, and set GIBSON_TEST_FIXTURES_ENABLED. One patch means
+    # one Argo sync and one rollout of each component.
+    - name: Point the Argo application at the images of the checkout
+      shell: bash
+      working-directory: hosted
+      env:
+        NS: ${{ inputs.namespace }}
+        TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+        kubectl -n argocd patch application gibson --type json -p '[
+            {"op":"add","path":"/spec/source/helm/values","value":"gibson-workloads:\n  gibson:\n    e2eRunner:\n      enabled: true\n  spiffe:\n    allowedPeers:\n      - platform/tenant-operator\n      - platform/connector-operator\n      - platform/e2e-runner\n      - platform/e2e-member\n"},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.repository","value":"ghcr.io/zeroroot-ai/gibson","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.tag","value":"'"${TAG}"'","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.digest","value":"","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.gibson.authz.enabled","value":"false"}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.repository","value":"ghcr.io/zeroroot-ai/ext-authz","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.tag","value":"'"${TAG}"'","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.digest","value":"","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-workloads.extAuthz.image.pullPolicy","value":"IfNotPresent","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.repository","value":"ghcr.io/zeroroot-ai/tenant-operator","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.tag","value":"'"${TAG}"'","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.digest","value":"","forceString":true}},
+            {"op":"add","path":"/spec/source/helm/parameters/-","value":{"name":"gibson-operators.tenantOperator.image.pullPolicy","value":"IfNotPresent","forceString":true}}
+          ]'
+
+        wait_image() { # kind name jsonpath suffix
+          local get=$1 path=$2 suffix=$3 img=""
+          for i in $(seq 1 60); do
+            img=$(kubectl -n "$NS" get $get -o jsonpath="$path" 2>/dev/null || true)
+            case "$img" in *"$suffix") echo "$get runs $img"; return 0;; esac
+            sleep 20
+          done
+          echo "::error::$get never took the image ${suffix} (got '${img}'; Argo app: $(kubectl -n argocd get app gibson -o jsonpath='{.status.sync.status}/{.status.health.status}'))"
+          return 1
+        }
+        wait_image "statefulset -l app.kubernetes.io/component=daemon" \
+          '{.items[0].spec.template.spec.containers[?(@.name=="gibson")].image}' ":${TAG}"
+        kubectl -n "$NS" rollout status statefulset -l app.kubernetes.io/component=daemon --timeout=20m
+        wait_image "deployment gibson-ext-authz" '{.spec.template.spec.containers[0].image}' "ext-authz:${TAG}"
+        kubectl -n "$NS" rollout status deployment/gibson-ext-authz --timeout=15m
+        wait_image "deployment gibson-tenant-operator" \
+          '{.spec.template.spec.containers[?(@.name=="manager")].image}' "tenant-operator:${TAG}"
+        kubectl -n "$NS" rollout status deployment/gibson-tenant-operator --timeout=15m
+
+    # The suite runs inside the cluster. The daemon listener speaks SPIFFE mTLS
+    # and refuses plaintext, so the suite needs an attested SVID, which means it
+    # must be a pod in the mesh (run-e2e-job.sh).
+    - name: Build the e2e suite into an image
+      id: suite-image
+      shell: bash
+      working-directory: gibson
+      env:
+        CLUSTER: ${{ inputs.cluster }}
+      run: |
+        set -euo pipefail
+        mkdir -p /tmp/ectx
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=e2e -c \
+          -o /tmp/ectx/e2e.test ./tests/e2e/
+        cat > /tmp/ectx/Dockerfile <<'EOF'
+        FROM gcr.io/distroless/static-debian12:nonroot
+        COPY e2e.test /usr/local/bin/e2e.test
+        ENTRYPOINT ["/usr/local/bin/e2e.test"]
+        EOF
+        docker build -t ghcr.io/zeroroot-ai/gibson-e2e-runner:local /tmp/ectx
+        kind load docker-image ghcr.io/zeroroot-ai/gibson-e2e-runner:local --name "$CLUSTER"
