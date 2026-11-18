@@ -18,6 +18,7 @@ package ingest
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -74,21 +75,42 @@ func (r *ProcessResult) AddError(err error) *ProcessResult {
 	return r
 }
 
+// FindingWriter writes a discovered finding to the findings table of the
+// tenant. The ID of the finding is the ID of the graph node.
+type FindingWriter func(ctx context.Context, tenant string, f brain.FindingRaised) error
+
+// Option changes a discoveryProcessor.
+type Option func(*discoveryProcessor)
+
+// WithFindingWriter makes the processor write each discovered finding to
+// Postgres before it submits the finding event. The graph holds a finding node
+// only for a finding that has a row. If the write fails, the processor reports
+// the error and submits no event for that finding. A re-delivery has the same
+// ID and tries again.
+func WithFindingWriter(w FindingWriter) Option {
+	return func(p *discoveryProcessor) { p.findings = w }
+}
+
 // discoveryProcessor is the World-backed implementation.
 type discoveryProcessor struct {
-	sink   WorldSink
-	logger *slog.Logger
+	sink     WorldSink
+	findings FindingWriter
+	logger   *slog.Logger
 }
 
 // NewDiscoveryProcessor returns a processor that submits discovered entities to
 // sink. A nil sink yields a processor that reports every call as an error rather
 // than silently dropping discoveries — "wired to nothing" is the failure mode
 // this whole change exists to remove, so it must not look like success.
-func NewDiscoveryProcessor(sink WorldSink, logger *slog.Logger) DiscoveryProcessor {
+func NewDiscoveryProcessor(sink WorldSink, logger *slog.Logger, opts ...Option) DiscoveryProcessor {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &discoveryProcessor{sink: sink, logger: logger}
+	p := &discoveryProcessor{sink: sink, logger: logger}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // Process implements DiscoveryProcessor.
@@ -131,10 +153,18 @@ func (p *discoveryProcessor) Process(
 	}
 	tenant := execCtx.TenantID.String()
 
+	submitted := 0
 	for _, ev := range events {
+		if raised, ok := ev.(brain.FindingRaised); ok && p.findings != nil {
+			if err := p.findings(ctx, tenant, raised); err != nil {
+				result.AddError(fmt.Errorf("write finding %s: %w", raised.ID, err))
+				continue
+			}
+		}
 		p.sink(tenant, ev)
+		submitted++
 	}
-	result.EventsSubmitted = len(events)
+	result.EventsSubmitted = submitted
 	result.Duration = time.Since(start)
 
 	p.logger.InfoContext(ctx, "discovery result folded into the World",
@@ -166,6 +196,5 @@ func countProtoNodes(discovery *graphragpb.DiscoveryResult) int {
 		len(discovery.Technologies) +
 		len(discovery.Certificates) +
 		len(discovery.Findings) +
-		len(discovery.Evidence) +
 		len(discovery.CustomNodes)
 }

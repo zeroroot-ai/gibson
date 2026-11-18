@@ -1352,7 +1352,7 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 	tenantAuditWriter.Start(ctx)
 	daemonSvc.WithTenantAdminAuditWriter(tenantAuditWriter)
 	d.logger.Info(ctx, "audit writer wired into TenantService")
-	// Wire pool getter for ExportFindings (Neo4j DashboardQueries path).
+	// Wire pool getter for ExportFindings and GetFinding.
 	// Spec: dashboard-neo4j-crud-removal.
 	daemonSvc.WithPoolGetter(func() datapool.Pool { return d.pool })
 	tenantv1.RegisterTenantServiceServer(srv, daemonSvc)
@@ -1834,6 +1834,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 				} else {
 					d.logger.Warn(ctx, "CapabilityGrantService unavailable; findings carry the submitting principal but no registered agent name")
 				}
+				// A finding that names tool calls gets tier 1 evidence from the
+				// same record that a proof reads.
+				graphRAGSubmitter.WithToolCallRecord(newTenantRoutedProofSettlement(d.brainRegistry))
 				findingSubmitter = graphRAGSubmitter
 				d.logger.Info(ctx, "GraphRAGFindingSubmitter wired: findings → per-tenant store + World projection")
 			} else {

@@ -93,11 +93,16 @@ func TestStamp_LegacyTenantState_StampsCurrentVersion(t *testing.T) {
 		WithArgs("tenant_secrets").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 
+	latest, err := TenantMaxVersion()
+	if err != nil {
+		t.Fatalf("TenantMaxVersion: %v", err)
+	}
+
 	mock.ExpectBegin()
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("INSERT INTO schema_migrations").
-		WithArgs(uint(16)).
+		WithArgs(latest).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 

@@ -13,11 +13,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -88,7 +92,39 @@ func (d *daemonImpl) newDiscoveryProcessor() ingest.DiscoveryProcessor {
 	return ingest.NewDiscoveryProcessor(
 		ingestDiscovery(d.brainRegistry),
 		d.logger.WithComponent("discovery-ingest").Slog(),
+		ingest.WithFindingWriter(d.discoveredFindingWriter()),
 	)
+}
+
+// findings returns the finding store of the daemon. It builds the Postgres
+// store on the data pool the first time. The pool starts after the callers, so
+// the store reads it on first use.
+func (d *daemonImpl) findings() finding.FindingStore {
+	if d.findingStore == nil {
+		d.findingStore = pgstore.New(func() datapool.Pool { return d.pool })
+	}
+	return d.findingStore
+}
+
+// discoveredFindingWriter returns the writer that puts a finding from a
+// DiscoveryResult in the findings table of the tenant. The finding has the ID
+// of its graph node. It holds no evidence, because a tool reports none here.
+// The pool starts after the processor, so the writer reads it on first use.
+func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
+	store := d.findings()
+	return func(ctx context.Context, tenant string, f brain.FindingRaised) error {
+		base := agent.NewFinding(f.Title, f.Description, agent.FindingSeverity(f.Severity))
+		base.ID = types.ID(f.ID)
+		base.TenantID = tenant
+		var missionID types.ID
+		if parsed, err := types.ParseID(f.MissionID); err == nil {
+			missionID = parsed
+		}
+		if err := store.Store(ctx, tenant, finding.NewEnhancedFinding(base, missionID, f.AgentName)); err != nil {
+			return fmt.Errorf("store discovered finding: %w", err)
+		}
+		return nil
+	}
 }
 
 // discoveryProcessorAdapter widens ingest.DiscoveryProcessor's typed
@@ -121,6 +157,28 @@ var (
 	_ sandboxed.DiscoveryProcessor       = (*discoveryProcessorAdapter)(nil)
 	_ component.ResultDiscoveryProcessor = (*discoveryProcessorAdapter)(nil)
 )
+
+// ingestHarnessFinding returns the harness FindingSink: a finding that an agent
+// submits over the callback path is folded into the tenant World as a Finding
+// with the ID of its row in the findings table. The graph projector writes the
+// node, and the graph keeps it for relations only.
+func ingestHarnessFinding(reg *brain.Registry) harness.FindingSink {
+	return func(_ context.Context, f harness.FindingRaised) {
+		if reg == nil || f.Tenant == "" {
+			return
+		}
+		reg.For(f.Tenant).Submit(brain.FindingRaised{
+			ID:           f.ID,
+			Title:        f.Title,
+			Description:  f.Description,
+			Severity:     f.Severity,
+			ScopeID:      f.ScopeID,
+			MissionID:    f.MissionID,
+			MissionRunID: f.MissionRunID,
+			AgentName:    f.AgentName,
+		})
+	}
+}
 
 // ingestDelegation returns the harness DelegationSink (ADR-0107): an agent
 // delegation is folded into the tenant World as AgentRunObserved events for both

@@ -35,8 +35,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/pagetoken"
 	graphpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graph/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -109,6 +112,31 @@ func (s *graphServer) acquireConn(ctx context.Context) (auth.TenantID, *datapool
 	}
 
 	return tenant, conn, conn.Release, nil
+}
+
+// findingStore returns the tenant of the caller and the store that reads the
+// findings of that tenant from Postgres. The graph holds a finding node for
+// relations only, so the finding reads of this service do not use it.
+func (s *graphServer) findingStore(ctx context.Context) (auth.TenantID, *pgstore.Store, error) {
+	tenant, ok := auth.TenantFromContext(ctx)
+	if !ok || tenant.IsZero() {
+		return auth.TenantID{}, nil, status.Error(codes.PermissionDenied, "missing tenant in context")
+	}
+	pool := s.poolGetter()
+	if pool == nil {
+		return auth.TenantID{}, nil, status.Error(codes.Unavailable, "data-plane pool not yet ready")
+	}
+	return tenant, pgstore.New(func() datapool.Pool { return pool }), nil
+}
+
+// findingStoreError maps an error of the finding store to a gRPC status error.
+func findingStoreError(err error) error {
+	var notProvisioned *datapool.NotProvisionedError
+	var evicted *datapool.EvictedError
+	if errors.As(err, &notProvisioned) || errors.As(err, &evicted) {
+		return datapool.MapPoolError(err)
+	}
+	return status.Errorf(codes.Internal, "findings query failed: %v", err)
 }
 
 // GetTenantGraph implements GraphServiceServer.
@@ -245,23 +273,26 @@ func (s *graphServer) GetFindingCounts(
 	ctx context.Context,
 	req *graphpb.GetFindingCountsRequest,
 ) (*graphpb.GetFindingCountsResponse, error) {
-	tenant, conn, release, err := s.acquireConn(ctx)
+	tenant, store, err := s.findingStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
 
 	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
 	defer cancel()
 
-	q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
-	buckets, err := q.FindingCounts(qctx, tenant, req.GetGroupBy(), req.GetTimeWindowSeconds())
+	by := "severity"
+	if req.GetGroupBy() == graphpb.FindingCountGroupBy_CATEGORY {
+		by = "category"
+	}
+	window := time.Duration(req.GetTimeWindowSeconds()) * time.Second
+	buckets, err := store.CountBy(qctx, tenant.String(), by, window)
 	if err != nil {
 		s.logger.WarnContext(ctx, "GetFindingCounts: query failed",
 			slog.String("tenant", tenant.String()),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Errorf(codes.Internal, "finding counts query failed: %v", err)
+		return nil, findingStoreError(err)
 	}
 
 	pbBuckets := make([]*graphpb.CountBucket, 0, len(buckets))
@@ -280,11 +311,10 @@ func (s *graphServer) GetFindingTimeSeries(
 	ctx context.Context,
 	req *graphpb.GetFindingTimeSeriesRequest,
 ) (*graphpb.GetFindingTimeSeriesResponse, error) {
-	tenant, conn, release, err := s.acquireConn(ctx)
+	tenant, store, err := s.findingStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
 
 	days := req.GetDays()
 	if days == 0 {
@@ -297,16 +327,26 @@ func (s *graphServer) GetFindingTimeSeries(
 	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
 	defer cancel()
 
-	q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
-	points, err := q.FindingTimeSeries(qctx, tenant, days)
+	counts, err := store.DailyCounts(qctx, tenant.String(), int(days))
 	if err != nil {
 		s.logger.WarnContext(ctx, "GetFindingTimeSeries: query failed",
 			slog.String("tenant", tenant.String()),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Errorf(codes.Internal, "finding time series query failed: %v", err)
+		return nil, findingStoreError(err)
 	}
 
+	// The series always holds exactly `days` points, with zero for a day that has
+	// no finding.
+	now := time.Now().UTC()
+	points := make([]*graphpb.TimeSeriesPoint, 0, days)
+	for i := int(days) - 1; i >= 0; i-- {
+		day := now.AddDate(0, 0, -i)
+		points = append(points, &graphpb.TimeSeriesPoint{
+			Date:  timestamppb.New(time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)),
+			Count: counts[day.Format("2006-01-02")],
+		})
+	}
 	return &graphpb.GetFindingTimeSeriesResponse{Points: points}, nil
 }
 
@@ -538,54 +578,61 @@ func (s *graphServer) GetFindings(
 	ctx context.Context,
 	req *graphpb.GetFindingsRequest,
 ) (*graphpb.GetFindingsResponse, error) {
-	tenant, conn, release, err := s.acquireConn(ctx)
+	tenant, store, err := s.findingStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
 
 	// The page window (ADR-0028, rule 3). The findings query has its own cap.
 	pageOffset, pageLimit, pageErr := pagetoken.Window(req.GetPageSize(), req.GetPageToken())
 	if pageErr != nil {
 		return nil, status.Error(codes.InvalidArgument, pageErr.Error())
 	}
-	limit := pagetoken.Uint32(min(pageLimit, int(graph.MaxFindingsLimit)))
-	offset := pagetoken.Uint32(pageOffset)
+	limit := min(pageLimit, int(graph.MaxFindingsLimit))
 
 	qctx, cancel := context.WithTimeout(ctx, graphQueryTimeout)
 	defer cancel()
 
-	filters := graph.FindingsFilters{
-		Severity:  req.GetSeverityFilter(),
-		Category:  req.GetCategoryFilter(),
-		MissionID: req.GetMissionId(),
-		Search:    req.GetSearch(),
-		Limit:     limit,
-		Offset:    offset,
+	query := pgstore.Query{
+		Category: req.GetCategoryFilter(),
+		Search:   req.GetSearch(),
+		Limit:    limit,
+		Offset:   pageOffset,
+	}
+	if sev := req.GetSeverityFilter(); sev != "" {
+		query.Severities = []string{sev}
+	}
+	if id := req.GetMissionId(); id != "" {
+		missionID, parseErr := types.ParseID(id)
+		if parseErr != nil {
+			// No finding has a mission ID that is not a UUID.
+			return &graphpb.GetFindingsResponse{Findings: []*graphpb.Finding{}}, nil
+		}
+		query.MissionID = missionID
 	}
 
-	q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
-	records, total, err := q.Findings(qctx, tenant, filters)
+	// A list holds no evidence. The finding fields come from Postgres by this
+	// query. The graph is not read.
+	records, total, err := store.Find(qctx, tenant.String(), query)
 	if err != nil {
 		s.logger.WarnContext(ctx, "GetFindings: query failed",
 			slog.String("tenant", tenant.String()),
 			slog.String("error", err.Error()),
 		)
-		return nil, status.Errorf(codes.Internal, "findings query failed: %v", err)
+		return nil, findingStoreError(err)
 	}
 
-	// Marshal to proto Finding.
 	pbFindings := make([]*graphpb.Finding, 0, len(records))
 	for _, r := range records {
 		pbf := &graphpb.Finding{
-			Id:          r.ID,
-			Name:        r.Name,
+			Id:          r.ID.String(),
+			Name:        r.Title,
 			Description: r.Description,
-			Type:        r.Type,
-			Severity:    r.Severity,
-			MissionId:   r.MissionID,
-			Properties:  r.Properties,
-			Labels:      r.Labels,
+			Type:        r.Category,
+			Severity:    string(r.Severity),
+			MissionId:   r.MissionID.String(),
+			Properties:  findingProperties(r),
+			Labels:      []string{"Finding"},
 		}
 		if !r.CreatedAt.IsZero() {
 			pbf.CreatedAt = timestamppb.New(r.CreatedAt)
@@ -593,14 +640,35 @@ func (s *graphServer) GetFindings(
 		pbFindings = append(pbFindings, pbf)
 	}
 
-	truncated := total > uint64(offset)+uint64(len(pbFindings))
+	truncated := total > pageOffset+len(pbFindings)
 
 	return &graphpb.GetFindingsResponse{
 		Findings:      pbFindings,
-		Total:         total,
+		Total:         uint64(total),
 		Truncated:     truncated,
-		NextPageToken: pagetoken.Next(pageOffset, int(limit), len(pbFindings), pagetoken.Int(total)),
+		NextPageToken: pagetoken.Next(pageOffset, limit, len(pbFindings), total),
 	}, nil
+}
+
+// findingProperties lists the string properties of a stored finding for the
+// dashboard: the verified submitter, the agent, and each string in its metadata.
+func findingProperties(f finding.EnhancedFinding) map[string]string {
+	props := map[string]string{}
+	for k, v := range f.Metadata {
+		if str, ok := v.(string); ok {
+			props[k] = str
+		}
+	}
+	if f.AgentName != "" {
+		props["agent_name"] = f.AgentName
+	}
+	if f.SubmittedBy != "" {
+		props["submitted_by"] = f.SubmittedBy
+	}
+	if f.EnrolledBy != "" {
+		props["enrolled_by"] = f.EnrolledBy
+	}
+	return props
 }
 
 var _ graphpb.GraphServiceServer = (*graphServer)(nil)

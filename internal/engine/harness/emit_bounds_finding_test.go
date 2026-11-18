@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -230,5 +231,73 @@ func TestHarnessBoundsErrorStaysMatchable(t *testing.T) {
 	}
 	if len(store.stored) != 0 {
 		t.Errorf("a rejected finding reached the store %d times", len(store.stored))
+	}
+}
+
+// TestSubmitFindingEmitBoundsSkipRecordedEvidence proves that the emit bounds
+// apply to what the agent sent. A tier 1 item holds content that the daemon
+// read from its own record, so a large result does not refuse the finding. The
+// same content typed by the agent is over the bound.
+func TestSubmitFindingEmitBoundsSkipRecordedEvidence(t *testing.T) {
+	large := strings.Repeat("r", emitbounds.MaxPayloadBytes)
+
+	t.Run("recorded evidence over the bound is stored", func(t *testing.T) {
+		store := &countingFindingStore{FindingStore: NewInMemoryFindingStore()}
+		h := boundedHarness(store)
+		finding := agent.NewFinding("open redirect", "d", agent.SeverityMedium).WithEvidence(&typespb.Evidence{
+			Content: large, Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
+		})
+
+		if err := h.SubmitFinding(context.Background(), finding); err != nil {
+			t.Fatalf("finding with large recorded evidence rejected: %v", err)
+		}
+		if len(store.stored) != 1 || len(store.stored[0].Evidence[0].Content) != len(large) {
+			t.Fatal("the store did not get the whole recorded evidence")
+		}
+	})
+
+	t.Run("typed evidence over the bound is rejected", func(t *testing.T) {
+		store := &countingFindingStore{FindingStore: NewInMemoryFindingStore()}
+		h := boundedHarness(store)
+		finding := agent.NewFinding("open redirect", "d", agent.SeverityMedium).WithEvidence(&typespb.Evidence{
+			Content: large, Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+		})
+
+		if err := h.SubmitFinding(context.Background(), finding); err == nil {
+			t.Fatal("finding with large typed evidence accepted; want rejection")
+		}
+		if len(store.stored) != 0 {
+			t.Fatal("a rejected finding reached the store")
+		}
+	})
+}
+
+// TestSubmitFindingRaisesTheFindingNodeWithTheStoredID proves that the graph
+// node and the stored finding have one ID.
+func TestSubmitFindingRaisesTheFindingNodeWithTheStoredID(t *testing.T) {
+	store := &countingFindingStore{FindingStore: NewInMemoryFindingStore()}
+	h := boundedHarness(store)
+	var raised []FindingRaised
+	h.findingSink = func(_ context.Context, f FindingRaised) { raised = append(raised, f) }
+	h.missionCtx.CurrentAgent = "recon"
+
+	finding := agent.NewFinding("open redirect", "d", agent.SeverityMedium)
+	if err := h.SubmitFinding(context.Background(), finding); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(raised) != 1 || raised[0].ID != finding.ID.String() || raised[0].ID != store.stored[0].ID.String() {
+		t.Fatalf("raised %+v, stored %+v", raised, store.stored)
+	}
+	if raised[0].Tenant != "tenant-a" || raised[0].MissionID != h.missionCtx.ID.String() || raised[0].AgentName != "recon" {
+		t.Fatalf("raised fields wrong: %+v", raised[0])
+	}
+
+	// A finding that the bounds refuse raises no node.
+	raised = nil
+	huge := agent.NewFinding("huge", strings.Repeat("d", emitbounds.MaxPayloadBytes), agent.SeverityHigh)
+	_ = h.SubmitFinding(context.Background(), huge)
+	if len(raised) != 0 {
+		t.Fatal("a rejected finding raised a node")
 	}
 }

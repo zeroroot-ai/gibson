@@ -34,7 +34,6 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	"github.com/zeroroot-ai/sdk/schema"
@@ -1989,6 +1988,18 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	// Convert proto Finding to internal Finding
 	finding := protoFindingToFinding(req.Finding)
 
+	// Tier 1 evidence comes from the record of each tool call that the agent
+	// names. An ID that names no record of this mission and tenant fails the
+	// whole submit, before the daemon stores anything.
+	recorded, refusal, err := s.recordedFindingEvidence(ctx, harness.Mission().ID.String(), req.GetToolCallIds())
+	if err != nil {
+		return nil, err
+	}
+	if refusal != nil {
+		return &harnesspb.SubmitFindingResponse{Error: refusal}, nil
+	}
+	finding.Evidence = append(recorded, finding.Evidence...)
+
 	// Submit finding
 	if err := harness.SubmitFinding(ctx, finding); err != nil {
 		// An emit-bounds rejection is the caller's fault, not the daemon's,
@@ -1998,6 +2009,17 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 		// "the daemon broke".
 		if errors.Is(err, emitbounds.ErrLimitExceeded) {
 			s.logger.Warn("finding rejected by emit bounds", "error", err)
+			return &harnesspb.SubmitFindingResponse{
+				Error: &harnesspb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: err.Error(),
+				},
+			}, nil
+		}
+		// An evidence item over the size limit is the fault of the caller. The
+		// store wrote nothing, and it never truncates.
+		if evidenceRejected(err) {
+			s.logger.Warn("finding rejected for its evidence", "error", err)
 			return &harnesspb.SubmitFindingResponse{
 				Error: &harnesspb.HarnessError{
 					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
@@ -2015,6 +2037,51 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 	}
 
 	return &harnesspb.SubmitFindingResponse{}, nil
+}
+
+// recordedFindingEvidence builds the tier 1 evidence of a finding from the
+// tool calls that the agent names. It returns a HarnessError when an ID names
+// no record of the mission of the caller in the tenant of the caller. It
+// returns a gRPC error when the request is malformed or the daemon cannot read
+// its record. An empty list of IDs gives no evidence and no error.
+func (s *HarnessCallbackService) recordedFindingEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) ([]*typespb.Evidence, *harnesspb.HarnessError, error) {
+	evidence, missing, err := s.recordedEvidence(ctx, missionID, toolCallIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(missing) > 0 {
+		return nil, &harnesspb.HarnessError{
+			Code: commonpb.ErrorCode_ERROR_CODE_NOT_FOUND,
+			Message: fmt.Sprintf(
+				"SubmitFinding: the daemon holds no record of tool call %q for this mission", missing[0]),
+		}, nil
+	}
+	return evidence, nil, nil
+}
+
+// recordedEvidence reads the record of tool calls for a proof and for a
+// finding. It calls brain.ReadRecordedEvidence, the one function that the
+// component path also calls, and maps its errors to gRPC status errors.
+func (s *HarnessCallbackService) recordedEvidence(
+	ctx context.Context, missionID string, toolCallIDs []string,
+) (evidence []*typespb.Evidence, missing []string, err error) {
+	if len(toolCallIDs) == 0 {
+		return nil, nil, nil
+	}
+	if s.proofSettlement == nil {
+		return nil, nil, status.Error(codes.Unavailable,
+			"the record of tool calls is not wired on this daemon")
+	}
+	evidence, missing, err = brain.ReadRecordedEvidence(ctx, s.proofSettlement, missionID, toolCallIDs)
+	switch {
+	case errors.Is(err, brain.ErrTooManyToolCalls):
+		return nil, nil, status.Errorf(codes.InvalidArgument, "tool_call_ids: %v", err)
+	case err != nil:
+		return nil, nil, status.Errorf(codes.Internal, "%v", err)
+	}
+	return evidence, missing, nil
 }
 
 // ============================================================================
@@ -2559,9 +2626,8 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 
 	s.logger.Debug("ValidateFinding called")
 
-	// Convert proto finding to SDK finding
-	finding := protoFindingToSDKFinding(req.Finding)
-	if finding == nil {
+	// Use the one conversion of a proto finding, the one that SubmitFinding uses.
+	if req.Finding == nil {
 		return &harnesspb.ValidateFindingResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
@@ -2569,19 +2635,14 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 			},
 		}, nil
 	}
+	finding := protoFindingToFinding(req.Finding)
 
 	resp := &harnesspb.ValidateFindingResponse{Valid: true}
 
 	// Validate severity
-	validSeverities := []string{"critical", "high", "medium", "low", "informational"}
-	severityValid := false
-	for _, sev := range validSeverities {
-		if string(finding.Severity) == sev {
-			severityValid = true
-			break
-		}
-	}
-	if !severityValid && finding.Severity != "" {
+	switch finding.Severity {
+	case agent.SeverityCritical, agent.SeverityHigh, agent.SeverityMedium, agent.SeverityLow, agent.SeverityInfo:
+	default:
 		resp.Valid = false
 		resp.Errors = append(resp.Errors, &harnesspb.ValidationError{
 			Field:   "severity",
@@ -2911,135 +2972,6 @@ func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 	return result
 }
 
-// protoFindingToSDKFinding converts a proto Finding to an SDK finding.Finding.
-func protoFindingToSDKFinding(pf *typespb.Finding) *sdkfinding.Finding {
-	if pf == nil {
-		return nil
-	}
-
-	finding := &sdkfinding.Finding{
-		ID:          pf.Id,
-		MissionID:   pf.MissionId,
-		AgentName:   pf.AgentName,
-		Title:       pf.Title,
-		Description: pf.Description,
-		Category:    pf.Category, // Category is now a plain string
-		Subcategory: pf.Subcategory,
-		Severity:    protoSeverityToSDKSeverity(pf.Severity),
-		Confidence:  pf.Confidence,
-		TargetID:    pf.TargetId,
-		Technique:   pf.Technique,
-		Tags:        pf.Tags,
-		Remediation: pf.Remediation,
-		References:  pf.References,
-	}
-
-	// Convert Evidence
-	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]sdkfinding.Evidence, len(pf.Evidence))
-		for i, ev := range pf.Evidence {
-			finding.Evidence[i] = sdkfinding.Evidence{
-				Type:    protoEvidenceTypeToSDK(ev.Type),
-				Title:   ev.Title,
-				Content: ev.Content,
-			}
-			// Convert metadata if present
-			if len(ev.Metadata) > 0 {
-				finding.Evidence[i].Metadata = make(map[string]any)
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Metadata[k] = v
-				}
-			}
-		}
-	}
-
-	// Convert Reproduction steps
-	if len(pf.Reproduction) > 0 {
-		finding.Reproduction = make([]sdkfinding.ReproStep, len(pf.Reproduction))
-		for i, rs := range pf.Reproduction {
-			finding.Reproduction[i] = sdkfinding.ReproStep{
-				Order:       int(rs.Order),
-				Description: rs.Description,
-				Input:       rs.Input,
-				Output:      rs.Output,
-			}
-		}
-	}
-
-	// Convert CVSS score
-	if pf.CvssScore > 0 {
-		finding.CVSSScore = &pf.CvssScore
-	}
-
-	finding.RiskScore = pf.RiskScore
-
-	// Convert timestamps
-	if pf.CreatedAt > 0 {
-		finding.CreatedAt = time.Unix(0, pf.CreatedAt*int64(time.Millisecond))
-	}
-	if pf.UpdatedAt > 0 {
-		finding.UpdatedAt = time.Unix(0, pf.UpdatedAt*int64(time.Millisecond))
-	}
-
-	return finding
-}
-
-// protoSeverityToSDKSeverity converts a proto FindingSeverity to an SDK Severity.
-func protoSeverityToSDKSeverity(severity typespb.FindingSeverity) sdkfinding.Severity {
-	switch severity {
-	case typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
-		return sdkfinding.SeverityCritical
-	case typespb.FindingSeverity_FINDING_SEVERITY_HIGH:
-		return sdkfinding.SeverityHigh
-	case typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
-		return sdkfinding.SeverityMedium
-	case typespb.FindingSeverity_FINDING_SEVERITY_LOW:
-		return sdkfinding.SeverityLow
-	case typespb.FindingSeverity_FINDING_SEVERITY_INFO:
-		return sdkfinding.SeverityInfo
-	default:
-		return sdkfinding.SeverityInfo
-	}
-}
-
-// protoEvidenceTypeToSDK converts a proto EvidenceType to an SDK EvidenceType.
-func protoEvidenceTypeToSDK(evidenceType typespb.EvidenceType) sdkfinding.EvidenceType {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return sdkfinding.EvidenceHTTPRequest
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return sdkfinding.EvidenceHTTPResponse
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return sdkfinding.EvidenceScreenshot
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return sdkfinding.EvidenceLog
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return sdkfinding.EvidencePayload
-	default:
-		return sdkfinding.EvidenceLog
-	}
-}
-
-// protoEvidenceTypeToString converts a proto EvidenceType to a string.
-func protoEvidenceTypeToString(evidenceType typespb.EvidenceType) string {
-	switch evidenceType {
-	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST:
-		return "request"
-	case typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE:
-		return "response"
-	case typespb.EvidenceType_EVIDENCE_TYPE_SCREENSHOT:
-		return "screenshot"
-	case typespb.EvidenceType_EVIDENCE_TYPE_LOG:
-		return "log"
-	case typespb.EvidenceType_EVIDENCE_TYPE_CODE:
-		return "code"
-	case typespb.EvidenceType_EVIDENCE_TYPE_OTHER:
-		return "other"
-	default:
-		return "other"
-	}
-}
-
 // protoFindingToFinding converts a proto Finding to an internal agent.Finding.
 func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 	if pf == nil {
@@ -3074,25 +3006,16 @@ func protoFindingToFinding(pf *typespb.Finding) agent.Finding {
 		}
 	}
 
-	// Convert Evidence
+	// Evidence that the agent typed is tier 2. The daemon sets the tier and
+	// the tool call ID itself. A value that the agent sent for either field is
+	// dropped, so an agent cannot claim a tool call that backs an item.
 	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]agent.Evidence, len(pf.Evidence))
+		finding.Evidence = make([]*typespb.Evidence, len(pf.Evidence))
 		for i, ev := range pf.Evidence {
-			// Convert proto EvidenceType enum to string
-			typeStr := protoEvidenceTypeToString(ev.Type)
-			finding.Evidence[i] = agent.Evidence{
-				Type:        typeStr,
-				Description: ev.Title,
-				Data: map[string]any{
-					"content": ev.Content,
-				},
-			}
-			// Add metadata to Data if present
-			if len(ev.Metadata) > 0 {
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Data[k] = v
-				}
-			}
+			typed := proto.Clone(ev).(*typespb.Evidence)
+			typed.Tier = typespb.EvidenceTier_EVIDENCE_TIER_TYPED
+			typed.ToolCallId = ""
+			finding.Evidence[i] = typed
 		}
 	}
 
@@ -3464,15 +3387,15 @@ func protoTypedValueToAny(tv *commonpb.TypedValue) any {
 func missionStatusToProto(status MissionStatus) harnesspb.MissionStatus {
 	switch status {
 	case MissionStatusPending:
-		return harnesspb.MissionStatus_MISSION_STATUS_PENDING
+		return harnesspb.MissionStatus_MISSION_STATUS_SUBMITTED
 	case MissionStatusRunning:
-		return harnesspb.MissionStatus_MISSION_STATUS_RUNNING
+		return harnesspb.MissionStatus_MISSION_STATUS_WORKING
 	case MissionStatusCompleted:
 		return harnesspb.MissionStatus_MISSION_STATUS_COMPLETED
 	case MissionStatusFailed:
 		return harnesspb.MissionStatus_MISSION_STATUS_FAILED
 	case MissionStatusCancelled:
-		return harnesspb.MissionStatus_MISSION_STATUS_CANCELLED
+		return harnesspb.MissionStatus_MISSION_STATUS_CANCELED
 	default:
 		return harnesspb.MissionStatus_MISSION_STATUS_UNSPECIFIED
 	}

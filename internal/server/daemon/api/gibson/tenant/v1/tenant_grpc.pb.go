@@ -46,6 +46,7 @@ const (
 	TenantService_GetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/GetAuditRetention"
 	TenantService_SetAuditRetention_FullMethodName     = "/gibson.tenant.v1.TenantService/SetAuditRetention"
 	TenantService_ExportFindings_FullMethodName        = "/gibson.tenant.v1.TenantService/ExportFindings"
+	TenantService_GetFinding_FullMethodName            = "/gibson.tenant.v1.TenantService/GetFinding"
 	TenantService_SaveMissionDraft_FullMethodName      = "/gibson.tenant.v1.TenantService/SaveMissionDraft"
 	TenantService_ListMissionDrafts_FullMethodName     = "/gibson.tenant.v1.TenantService/ListMissionDrafts"
 	TenantService_GetMissionDraft_FullMethodName       = "/gibson.tenant.v1.TenantService/GetMissionDraft"
@@ -81,6 +82,11 @@ type TenantServiceClient interface {
 	SetAuditRetention(ctx context.Context, in *SetAuditRetentionRequest, opts ...grpc.CallOption) (*SetAuditRetentionResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	ExportFindings(ctx context.Context, in *ExportFindingsRequest, opts ...grpc.CallOption) (*ExportFindingsResponse, error)
+	// GetFinding returns one finding with all of its evidence, as stored. Each
+	// evidence item shows its tier and, on a tier 1 item, the ID of the tool call
+	// that backs it. A list of findings does not hold evidence. Use this RPC for
+	// the evidence of one finding.
+	GetFinding(ctx context.Context, in *GetFindingRequest, opts ...grpc.CallOption) (*GetFindingResponse, error)
 	// SaveMissionDraft persists a mission CUE draft for later use.
 	SaveMissionDraft(ctx context.Context, in *SaveMissionDraftRequest, opts ...grpc.CallOption) (*SaveMissionDraftResponse, error)
 	// ListMissionDrafts returns all saved mission drafts for a tenant.
@@ -181,6 +187,16 @@ func (c *tenantServiceClient) ExportFindings(ctx context.Context, in *ExportFind
 	return out, nil
 }
 
+func (c *tenantServiceClient) GetFinding(ctx context.Context, in *GetFindingRequest, opts ...grpc.CallOption) (*GetFindingResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetFindingResponse)
+	err := c.cc.Invoke(ctx, TenantService_GetFinding_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tenantServiceClient) SaveMissionDraft(ctx context.Context, in *SaveMissionDraftRequest, opts ...grpc.CallOption) (*SaveMissionDraftResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SaveMissionDraftResponse)
@@ -250,6 +266,11 @@ type TenantServiceServer interface {
 	SetAuditRetention(context.Context, *SetAuditRetentionRequest) (*SetAuditRetentionResponse, error)
 	// ExportFindings exports findings to the requested format (json, csv, sarif).
 	ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error)
+	// GetFinding returns one finding with all of its evidence, as stored. Each
+	// evidence item shows its tier and, on a tier 1 item, the ID of the tool call
+	// that backs it. A list of findings does not hold evidence. Use this RPC for
+	// the evidence of one finding.
+	GetFinding(context.Context, *GetFindingRequest) (*GetFindingResponse, error)
 	// SaveMissionDraft persists a mission CUE draft for later use.
 	SaveMissionDraft(context.Context, *SaveMissionDraftRequest) (*SaveMissionDraftResponse, error)
 	// ListMissionDrafts returns all saved mission drafts for a tenant.
@@ -293,6 +314,9 @@ func (UnimplementedTenantServiceServer) SetAuditRetention(context.Context, *SetA
 }
 func (UnimplementedTenantServiceServer) ExportFindings(context.Context, *ExportFindingsRequest) (*ExportFindingsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExportFindings not implemented")
+}
+func (UnimplementedTenantServiceServer) GetFinding(context.Context, *GetFindingRequest) (*GetFindingResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetFinding not implemented")
 }
 func (UnimplementedTenantServiceServer) SaveMissionDraft(context.Context, *SaveMissionDraftRequest) (*SaveMissionDraftResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SaveMissionDraft not implemented")
@@ -471,6 +495,24 @@ func _TenantService_ExportFindings_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TenantService_GetFinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetFindingRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantServiceServer).GetFinding(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantService_GetFinding_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantServiceServer).GetFinding(ctx, req.(*GetFindingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _TenantService_SaveMissionDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SaveMissionDraftRequest)
 	if err := dec(in); err != nil {
@@ -581,6 +623,10 @@ var TenantService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExportFindings",
 			Handler:    _TenantService_ExportFindings_Handler,
+		},
+		{
+			MethodName: "GetFinding",
+			Handler:    _TenantService_GetFinding_Handler,
 		},
 		{
 			MethodName: "SaveMissionDraft",

@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
@@ -1890,6 +1891,15 @@ func (s *ComponentServiceServer) SubmitFinding(
 			"", // title no longer in proto
 		)
 		if err != nil {
+			// A finding that names a tool call with no record is refused whole.
+			switch {
+			case errors.Is(err, ErrToolCallNotRecorded):
+				return nil, status.Error(codes.NotFound, err.Error())
+			case errors.Is(err, brain.ErrTooManyToolCalls):
+				return nil, status.Error(codes.InvalidArgument, err.Error())
+			case errors.Is(err, ErrToolCallRecordUnavailable):
+				return nil, status.Error(codes.Unavailable, err.Error())
+			}
 			s.logger.ErrorContext(ctx, "submit finding: storage failed",
 				slog.String("tenant", tenant),
 				slog.String("work_id", req.WorkId),

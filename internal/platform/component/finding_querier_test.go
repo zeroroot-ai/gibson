@@ -7,11 +7,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
-	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 func TestDecodeFindingFilter_EmptyMeansNoFilter(t *testing.T) {
@@ -49,98 +52,77 @@ func TestDecodeFindingFilter_MalformedJSONIsAnError(t *testing.T) {
 	}
 }
 
-func TestFindingRecordToSDKShape_MapsTheGraphVocabularyToTheSDKs(t *testing.T) {
-	// The graph calls it Name/Type; the SDK calls it title/category. A caller
-	// reads the SDK shape, so the mapping is the contract.
-	out := findingRecordToSDKShape(graph.FindingRecord{
-		ID:          "f-1",
-		Name:        "open redirect",
-		Description: "the login next= parameter is unvalidated",
-		Type:        "injection",
-		Severity:    "high",
-		Properties:  map[string]string{"agent_name": "zerocool-demo", "submitted_by": "agent_principal:sa-1"},
+// fakeLister answers Find from a fixed list and records the query.
+type fakeLister struct {
+	findings []finding.EnhancedFinding
+	err      error
+	tenant   string
+	query    pgstore.Query
+	calls    int
+}
+
+func (f *fakeLister) Find(_ context.Context, tenantID string, q pgstore.Query) ([]finding.EnhancedFinding, int, error) {
+	f.calls++
+	f.tenant, f.query = tenantID, q
+	if f.err != nil {
+		return nil, 0, f.err
+	}
+	return f.findings, len(f.findings), nil
+}
+
+func newTestQuerier(l *fakeLister) *PoolFindingQuerier {
+	return &PoolFindingQuerier{lister: l, logger: slog.New(slog.DiscardHandler)}
+}
+
+func TestFindingToSDKShape_MapsTheStoredFindingToTheSDKs(t *testing.T) {
+	out := findingToSDKShape(finding.EnhancedFinding{
+		Finding: agent.Finding{
+			ID: "5b4b8e9e-8e8e-4c8e-9e8e-8e8e8e8e8e8e", Title: "open redirect",
+			Description: "the login next= parameter is unvalidated", Category: "injection",
+			Severity: agent.SeverityHigh, SubmittedBy: "agent_principal:sa-1",
+			Evidence: []*typespb.Evidence{{Content: "must not appear"}},
+		},
+		AgentName: "zerocool-demo",
 	})
-	if out["id"] != "f-1" || out["title"] != "open redirect" || out["category"] != "injection" {
+	if out["title"] != "open redirect" || out["category"] != "injection" || out["severity"] != "high" {
 		t.Errorf("mapped %+v, want the SDK field names", out)
 	}
-	// The registered name of the submitting agent is the SDK's agent_name
-	// (gibson#208); the principal stays addressable under metadata.
 	if out["agent_name"] != "zerocool-demo" {
-		t.Errorf("agent_name = %v, want zerocool-demo", out["agent_name"])
+		t.Errorf("agent_name = %v", out["agent_name"])
 	}
 	if md, ok := out["metadata"].(map[string]any); !ok || md["submitted_by"] != "agent_principal:sa-1" {
 		t.Errorf("metadata = %v, want submitted_by", out["metadata"])
 	}
-	if out["severity"] != "high" {
-		t.Errorf("severity = %v", out["severity"])
+	if _, has := out["evidence"]; has {
+		t.Error("a list holds no evidence")
+	}
+	if _, err := json.Marshal(out); err != nil {
+		t.Fatalf("mapped finding does not encode: %v", err)
 	}
 }
 
-func TestPoolFindingQuerier_InvalidTenantIsRejectedBeforeTheAcquire(t *testing.T) {
-	pool := &poolStub{err: errors.New("must not be reached")}
-	q := NewPoolFindingQuerier(pool, nil)
-
-	if _, err := q.GetFindings(context.Background(), "NOT A TENANT", nil); err == nil {
+func TestPoolFindingQuerier_InvalidTenantIsRejectedBeforeTheQuery(t *testing.T) {
+	l := &fakeLister{}
+	if _, err := newTestQuerier(l).GetFindings(context.Background(), "NOT A TENANT", nil); err == nil {
 		t.Fatal("expected an error for a malformed tenant")
 	}
-	if pool.gotTenant != "" {
-		t.Error("the pool was asked for a tenant that does not parse")
+	if l.calls != 0 {
+		t.Error("the store was asked for a tenant that does not parse")
 	}
 }
 
-func TestPoolFindingQuerier_AcquiresTheCallersTenant(t *testing.T) {
-	pool := &poolStub{err: errors.New("acquire refused")}
-	q := NewPoolFindingQuerier(pool, nil)
-
-	if _, err := q.GetFindings(context.Background(), "zerocool-lab", nil); err == nil {
-		t.Fatal("expected the acquire failure to surface")
-	}
-	if pool.gotTenant != "zerocool-lab" {
-		t.Errorf("acquired tenant %q, want the caller's", pool.gotTenant)
-	}
-}
-
-func TestPoolFindingQuerier_BadFilterFailsBeforeTheAcquire(t *testing.T) {
-	pool := &poolStub{err: errors.New("must not be reached")}
-	q := NewPoolFindingQuerier(pool, nil)
-
-	if _, err := q.GetFindings(context.Background(), "acme", []byte(`{"limit":`)); err == nil {
+func TestPoolFindingQuerier_BadFilterFailsBeforeTheQuery(t *testing.T) {
+	l := &fakeLister{}
+	if _, err := newTestQuerier(l).GetFindings(context.Background(), "acme", []byte(`{"limit":`)); err == nil {
 		t.Fatal("expected an error for a malformed filter")
 	}
-	if pool.gotTenant != "" {
-		t.Error("a pooled Conn was taken to serve a request that could never run")
-	}
-}
-
-func TestGetRunFindings_PreviousScopeNarrowsToTheWorkItemsMission(t *testing.T) {
-	// "previous" means this mission's findings. Without a workID there is no
-	// mission to narrow to, and an agent asking for prior findings should get the
-	// unscoped answer rather than silence.
-	filter, err := decodeFindingFilter([]byte(`{"severity":"high"}`))
-	if err != nil {
-		t.Fatalf("decodeFindingFilter: %v", err)
-	}
-	if filter.MissionID != "" {
-		t.Fatalf("precondition: filter already scoped: %+v", filter)
-	}
-
-	pool := &poolStub{err: errors.New("acquire refused")}
-	q := NewPoolFindingQuerier(pool, nil)
-
-	// Both shapes must reach the pool — neither is rejected locally.
-	if _, err := q.GetRunFindings(context.Background(), "acme", "w1", "previous", nil); err == nil {
-		t.Error("expected the acquire failure to surface for scope=previous")
-	}
-	if _, err := q.GetRunFindings(context.Background(), "acme", "", "all", nil); err == nil {
-		t.Error("expected the acquire failure to surface for scope=all")
+	if l.calls != 0 {
+		t.Error("the store was asked to serve a request that could never run")
 	}
 }
 
 func TestGetRunFindings_MalformedFilterIsRejected(t *testing.T) {
-	pool := &poolStub{err: errors.New("must not be reached")}
-	q := NewPoolFindingQuerier(pool, nil)
-
-	_, err := q.GetRunFindings(context.Background(), "acme", "w1", "previous", []byte(`not json`))
+	_, err := newTestQuerier(&fakeLister{}).GetRunFindings(context.Background(), "acme", "w1", "previous", []byte(`not json`))
 	if err == nil {
 		t.Fatal("expected an error for a malformed filter")
 	}
@@ -149,49 +131,24 @@ func TestGetRunFindings_MalformedFilterIsRejected(t *testing.T) {
 	}
 }
 
-func TestFindingRecordToSDKShape_EncodesToJSONForTheWire(t *testing.T) {
-	// The seam returns JSON bytes, so the mapped shape must survive encoding.
-	out := findingRecordToSDKShape(graph.FindingRecord{ID: "f-1", Name: "x", Severity: "low"})
-	if _, err := json.Marshal(out); err != nil {
-		t.Fatalf("mapped record does not encode: %v", err)
-	}
-}
-
-// --- live Conn ---------------------------------------------------------------
-
-// liveFindingQuerier wires a finding querier over a populated tenant Conn, using
-// the same session fake as the GraphRAG tests: DashboardQueries runs its Cypher
-// through ExecuteRead, so a canned QueryResult covers the whole read path.
-func liveFindingQuerier(records []graph.FindingRecord) *PoolFindingQuerier {
-	// Findings runs two reads: the page, then the count.
-	session := &sessionFake{reads: []any{records, uint64(len(records))}}
-	return NewPoolFindingQuerier(&poolStub{conn: &datapool.Conn{Neo4j: session}}, nil)
-}
-
-// failingFindingQuerier is the same wiring with a session that refuses.
-func failingFindingQuerier(err error) *PoolFindingQuerier {
-	return NewPoolFindingQuerier(&poolStub{conn: &datapool.Conn{Neo4j: &sessionFake{err: err}}}, nil)
-}
-
 func TestPoolFindingQuerier_ReturnsJSONTheCallerCanDecode(t *testing.T) {
-	q := liveFindingQuerier(nil)
+	l := &fakeLister{findings: []finding.EnhancedFinding{{Finding: agent.Finding{ID: "5b4b8e9e-8e8e-4c8e-9e8e-8e8e8e8e8e8e", Title: "x"}}}}
 
-	out, err := q.GetFindings(context.Background(), "acme", nil)
+	out, err := newTestQuerier(l).GetFindings(context.Background(), "acme", nil)
 	if err != nil {
 		t.Fatalf("GetFindings: %v", err)
 	}
 	var decoded []map[string]any
-	if jErr := json.Unmarshal(out, &decoded); jErr != nil {
-		t.Fatalf("GetFindings returned bytes that do not decode as a JSON array: %v", jErr)
+	if jErr := json.Unmarshal(out, &decoded); jErr != nil || len(decoded) != 1 {
+		t.Fatalf("GetFindings returned %s (%v)", out, jErr)
+	}
+	if l.tenant != "acme" {
+		t.Errorf("tenant = %q", l.tenant)
 	}
 }
 
 func TestPoolFindingQuerier_EmptyResultIsAnEmptyArrayNotNull(t *testing.T) {
-	// A caller ranging over the result must not have to special-case null; an
-	// agent with no prior findings should read "none", not "broken".
-	q := liveFindingQuerier(nil)
-
-	out, err := q.GetFindings(context.Background(), "acme", nil)
+	out, err := newTestQuerier(&fakeLister{}).GetFindings(context.Background(), "acme", nil)
 	if err != nil {
 		t.Fatalf("GetFindings: %v", err)
 	}
@@ -201,41 +158,49 @@ func TestPoolFindingQuerier_EmptyResultIsAnEmptyArrayNotNull(t *testing.T) {
 }
 
 func TestPoolFindingQuerier_QueryFailureIsReported(t *testing.T) {
-	q := failingFindingQuerier(errors.New("neo4j down"))
-
-	if _, err := q.GetFindings(context.Background(), "acme", nil); err == nil {
+	if _, err := newTestQuerier(&fakeLister{err: errors.New("postgres down")}).GetFindings(context.Background(), "acme", nil); err == nil {
 		t.Fatal("expected the query failure to surface")
-	}
-}
-
-func TestGetRunFindings_BothScopesReachTheStore(t *testing.T) {
-	for _, tc := range []struct{ workID, scope string }{
-		{"w1", "previous"},
-		{"", "previous"}, // no work item: degrades to unscoped rather than silence
-		{"w1", "all"},
-	} {
-		q := liveFindingQuerier(nil)
-		out, err := q.GetRunFindings(context.Background(), "acme", tc.workID, tc.scope, nil)
-		if err != nil {
-			t.Fatalf("GetRunFindings(%q,%q): %v", tc.workID, tc.scope, err)
-		}
-		if len(out) == 0 {
-			t.Errorf("GetRunFindings(%q,%q) returned no bytes", tc.workID, tc.scope)
-		}
 	}
 }
 
 func TestGetRunFindings_FilterFieldsSurviveToTheQuery(t *testing.T) {
 	// The filter is the caller's whole request; dropping a field would answer a
 	// different question than the one asked.
-	q := liveFindingQuerier(nil)
-
-	out, err := q.GetRunFindings(context.Background(), "acme", "", "all",
-		[]byte(`{"severity":"high","category":"injection","search":"redirect","limit":10,"offset":5}`))
+	l := &fakeLister{}
+	mission := "5b4b8e9e-8e8e-4c8e-9e8e-8e8e8e8e8e8e"
+	_, err := newTestQuerier(l).GetRunFindings(context.Background(), "acme", "", "all",
+		[]byte(`{"severity":"high","category":"injection","search":"redirect","mission_id":"`+mission+`","limit":10,"offset":5}`))
 	if err != nil {
 		t.Fatalf("GetRunFindings: %v", err)
 	}
-	if len(out) == 0 {
-		t.Error("no bytes returned")
+	q := l.query
+	if q.Category != "injection" || q.Search != "redirect" || q.Limit != 10 || q.Offset != 5 ||
+		string(q.MissionID) != mission || len(q.Severities) != 1 || q.Severities[0] != "high" {
+		t.Errorf("query = %+v", q)
+	}
+}
+
+func TestGetRunFindings_PreviousScopeNarrowsToTheWorkItemsMission(t *testing.T) {
+	l := &fakeLister{}
+	work := "6c5c9f0f-9f9f-4d9f-8f9f-9f9f9f9f9f9f"
+	q := newTestQuerier(l)
+
+	if _, err := q.GetRunFindings(context.Background(), "acme", work, "previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(l.query.MissionID) != work {
+		t.Errorf("scope=previous mission = %q, want %q", l.query.MissionID, work)
+	}
+	if _, err := q.GetRunFindings(context.Background(), "acme", "", "previous", nil); err != nil {
+		t.Fatal(err)
+	}
+	if l.query.MissionID != "" {
+		t.Errorf("no work item: want the unscoped query, got mission %q", l.query.MissionID)
+	}
+	// A mission that is not a UUID matches no finding. The store is not asked.
+	l.calls = 0
+	out, err := q.GetRunFindings(context.Background(), "acme", "w1", "previous", nil)
+	if err != nil || strings.TrimSpace(string(out)) != "[]" || l.calls != 0 {
+		t.Errorf("non-UUID work id: out=%s err=%v calls=%d", out, err, l.calls)
 	}
 }

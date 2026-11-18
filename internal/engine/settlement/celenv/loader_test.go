@@ -10,8 +10,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 func TestLoadDomainPack_NilPack(t *testing.T) {
@@ -57,7 +59,7 @@ func TestLoadDomainPack_CompilesEveryPredicate(t *testing.T) {
 
 	t1190, ok := compiled["T1190"]
 	require.True(t, ok)
-	ok1, err := t1190.Evaluate(context.Background(), []finding.EnhancedEvidence{
+	ok1, err := t1190.Evaluate(context.Background(), []*typespb.Evidence{
 		httpResponseEvidence(200, ""),
 	})
 	require.NoError(t, err)
@@ -65,8 +67,8 @@ func TestLoadDomainPack_CompilesEveryPredicate(t *testing.T) {
 
 	t1059, ok := compiled["T1059"]
 	require.True(t, ok)
-	ok2, err := t1059.Evaluate(context.Background(), []finding.EnhancedEvidence{
-		finding.NewEnhancedEvidence(finding.EvidenceLog, "log", "nonce seen here"),
+	ok2, err := t1059.Evaluate(context.Background(), []*typespb.Evidence{
+		findingtest.NewEvidence(sdkfinding.EvidenceLog, "log", "nonce seen here"),
 	})
 	require.NoError(t, err)
 	assert.True(t, ok2)

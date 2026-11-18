@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/ontology"
@@ -25,9 +24,6 @@ import (
 // This struct is embedded in daemonImpl to provide access to these components
 // during mission execution, attack operations, and event streaming.
 type Infrastructure struct {
-	// findingStore persists and retrieves findings
-	findingStore finding.FindingStore
-
 	// llmRegistry manages LLM provider registration and discovery
 	llmRegistry llm.LLMRegistry
 
@@ -64,10 +60,8 @@ type Infrastructure struct {
 func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, error) {
 	d.logger.Info(ctx, "initializing infrastructure components")
 
-	// Per-tenant finding store: findings are now written through the data-plane Pool
-	// (conn.Findings()) at handler time. The Infrastructure no longer holds a
-	// global finding store; the field is retained as nil for backward-compat
-	// with code that checks infra.findingStore != nil.
+	// Findings live in the findings table of the database of each tenant. The
+	// Infrastructure holds no finding store.
 	if d.stateClient == nil {
 		return nil, fmt.Errorf("StateClient not initialized - cannot initialize infrastructure")
 	}
@@ -137,9 +131,7 @@ func (d *daemonImpl) newInfrastructure(ctx context.Context) (*Infrastructure, er
 	}
 
 	// Store infrastructure components temporarily so newHarnessFactory can access them.
-	// findingStore is nil: findings are persisted via per-tenant Pool at handler time.
 	infra := &Infrastructure{
-		findingStore:     nil, // migrated to pool-backed per-tenant path
 		llmRegistry:      llmRegistry,
 		slotManager:      slotManager,
 		otelStack:        otelStack,

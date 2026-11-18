@@ -3390,6 +3390,16 @@ export const AuthRegistry: Record<string, AuthEntry> = {
     unauthenticated: false,
     self: false,
   },
+  "/gibson.tenant.v1.TenantService/GetFinding": {
+    method: "/gibson.tenant.v1.TenantService/GetFinding",
+    service: "gibson.tenant.v1.TenantService",
+    relation: "member",
+    objectType: "tenant",
+    objectDeriver: "tenant_from_identity",
+    allowedIdentities: IdentityClass.USER | IdentityClass.SERVICE,
+    unauthenticated: false,
+    self: false,
+  },
   "/gibson.tenant.v1.TenantService/GetMissionDraft": {
     method: "/gibson.tenant.v1.TenantService/GetMissionDraft",
     service: "gibson.tenant.v1.TenantService",

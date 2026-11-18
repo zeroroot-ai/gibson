@@ -241,7 +241,7 @@ func TestListMissions_Success(t *testing.T) {
 	assert.Nil(t, resp.Error)
 	require.Len(t, resp.Missions, 1)
 	assert.Equal(t, validMissionID, resp.Missions[0].Id)
-	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_RUNNING, resp.Missions[0].Status)
+	assert.Equal(t, harnesspb.MissionStatus_MISSION_STATUS_WORKING, resp.Missions[0].Status)
 }
 
 // A full page carries a next page token. A token that the harness did not

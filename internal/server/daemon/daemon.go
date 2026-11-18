@@ -24,6 +24,7 @@ import (
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
 	bankengine "github.com/zeroroot-ai/gibson/internal/engine/bank"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -100,6 +101,10 @@ type AgentRuntimeState struct {
 type daemonImpl struct {
 	// config is the loaded Gibson configuration
 	config *config.Config
+
+	// findingStore writes findings to the findings table of each tenant. It is
+	// nil until findings() builds it on the data pool. A test sets it.
+	findingStore finding.FindingStore
 
 	// homeDir is the resolved Gibson home directory (e.g. ~/.gibson).
 	// Set via WithHomeDir option; falls back to cfg.Core.HomeDir, then $HOME/.gibson.

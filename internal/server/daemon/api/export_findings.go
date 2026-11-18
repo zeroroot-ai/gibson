@@ -4,10 +4,11 @@
 // Package api — export_findings.go implements TenantAdminService.ExportFindings.
 //
 // This handler replaces the deferred stub that was in deferred_stubs.go.
-// It fetches findings from per-tenant Neo4j via DashboardQueries.Findings
-// (same Cypher path as GraphService.GetFindings) and serialises them to
-// CSV, JSON, or SARIF format, ported byte-for-byte from the dashboard route at
-// zeroroot-ai/dashboard app/api/findings/export/route.ts.
+// It reads findings from the findings table of the Postgres database of the
+// tenant, with all evidence of each finding when the request asks for it, and
+// serialises them to CSV, JSON, or SARIF format. The CSV columns match the
+// dashboard route at zeroroot-ai/dashboard app/api/findings/export/route.ts.
+// This is the one export path of findings.
 //
 // Spec: dashboard-neo4j-crud-removal (Phase 2, Task 6).
 package api
@@ -16,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,8 +25,10 @@ import (
 	"google.golang.org/grpc/codes"
 	status_grpc "google.golang.org/grpc/status"
 
-	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/graph"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -34,15 +38,14 @@ const (
 	// If the assembled buffer exceeds this, the handler returns ResourceExhausted.
 	exportMaxBytes = 50 * 1024 * 1024 // 50 MB
 
-	// exportBatchSize is the number of findings fetched per DashboardQueries.Findings call.
-	exportBatchSize uint32 = 500
+	// exportBatchSize is the number of findings fetched per query.
+	exportBatchSize = 500
 )
 
 // ExportFindings implements TenantAdminService.ExportFindings.
-// It takes the tenant from the authenticated context, acquires a per-tenant
-// Neo4j session via poolGetter, pages through all findings using
-// DashboardQueries.Findings, and serialises to CSV / JSON / SARIF.  Total
-// response body is capped at exportMaxBytes.
+// It takes the tenant from the authenticated context, pages through the findings
+// of the tenant in Postgres with pgstore, and serialises to CSV / JSON / SARIF.
+// Total response body is capped at exportMaxBytes.
 func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportFindingsRequest) (*tenantv1.ExportFindingsResponse, error) {
 	if s.poolGetter == nil {
 		return nil, status_grpc.Error(codes.Unavailable, "ExportFindings: data-plane pool not configured")
@@ -64,33 +67,38 @@ func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportF
 		return nil, status_grpc.Error(codes.PermissionDenied, "ExportFindings: missing tenant in context")
 	}
 
-	conn, connErr := pool.For(ctx, tenantID)
-	if connErr != nil {
-		return nil, datapool.MapPoolError(connErr)
+	// Build the query from the request. An export holds each finding that
+	// matches, with all of its evidence when include_evidence is true.
+	query := tenantv1FindingFiltersToQuery(req.GetFilters())
+	for _, id := range req.GetFindingIds() {
+		query.IDs = append(query.IDs, types.ID(id))
 	}
-	defer conn.Release()
-
-	// Build filters from request.
-	filters := tenantv1FindingFiltersToGraph(req.GetFilters())
+	store := pgstore.New(func() datapool.Pool { return pool })
+	find := store.Find
+	if req.GetIncludeEvidence() {
+		find = store.FindWithEvidence
+	}
 
 	// Page through all findings.
-	var allFindings []graph.FindingRecord
-	var offset uint32
+	var allFindings []finding.EnhancedFinding
 	for {
+		query.Limit = exportBatchSize
+		query.Offset = len(allFindings)
 		qctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		filters.Limit = exportBatchSize
-		filters.Offset = offset
-		q := graph.NewDashboardQueries(graph.NewSessionGraphClient(conn.Neo4j))
-		batch, _, err := q.Findings(qctx, tenantID, filters)
+		batch, _, err := find(qctx, tenantID.String(), query)
 		cancel()
 		if err != nil {
+			var notProvisioned *datapool.NotProvisionedError
+			var evicted *datapool.EvictedError
+			if errors.As(err, &notProvisioned) || errors.As(err, &evicted) {
+				return nil, datapool.MapPoolError(err)
+			}
 			return nil, status_grpc.Errorf(codes.Internal, "ExportFindings: findings query failed: %v", err)
 		}
 		allFindings = append(allFindings, batch...)
-		if uint32(len(batch)) < exportBatchSize {
+		if len(batch) < exportBatchSize {
 			break
 		}
-		offset += exportBatchSize
 	}
 
 	// Determine format.
@@ -105,7 +113,7 @@ func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportF
 	}
 
 	// Serialise.
-	data, err := serializeFindings(format, allFindings, tenantID.String())
+	data, err := serializeFindings(format, allFindings, tenantID.String(), req.GetIncludeEvidence())
 	if err != nil {
 		return nil, status_grpc.Errorf(codes.Internal, "ExportFindings: serialization failed: %v", err)
 	}
@@ -127,27 +135,24 @@ func (s *DaemonServer) ExportFindings(ctx context.Context, req *tenantv1.ExportF
 	}, nil
 }
 
-// tenantv1FindingFiltersToGraph maps a proto FindingFilters to the graph
-// package's FindingsFilters.  The FindingFilters.severity is a repeated field;
-// we use the first element if present (the Cypher layer does exact-match).
-func tenantv1FindingFiltersToGraph(f *tenantv1.FindingFilters) graph.FindingsFilters {
+// tenantv1FindingFiltersToQuery maps a proto FindingFilters to a finding query.
+// The type filter selects the category of the finding. Only the first type is
+// used, as before.
+func tenantv1FindingFiltersToQuery(f *tenantv1.FindingFilters) pgstore.Query {
 	if f == nil {
-		return graph.FindingsFilters{}
+		return pgstore.Query{}
 	}
-	sev := ""
-	if len(f.GetSeverity()) > 0 {
-		sev = f.GetSeverity()[0]
+	q := pgstore.Query{
+		Severities: f.GetSeverity(),
+		Search:     f.GetSearch(),
 	}
-	cat := ""
 	if len(f.GetType()) > 0 {
-		cat = f.GetType()[0]
+		q.Category = f.GetType()[0]
 	}
-	return graph.FindingsFilters{
-		Severity:  sev,
-		Category:  cat,
-		MissionID: f.GetMissionId(),
-		Search:    f.GetSearch(),
+	if id := f.GetMissionId(); id != "" {
+		q.MissionID = types.ID(id)
 	}
+	return q
 }
 
 // ---------------------------------------------------------------------------
@@ -167,32 +172,56 @@ type findingExportRow struct {
 	MissionName  string
 	Description  string
 	DiscoveredAt string
+	// Evidence holds every evidence item of the finding, as stored. It is nil
+	// when the export does not include evidence.
+	Evidence []exportEvidence
 }
 
-func recordToRow(r graph.FindingRecord) findingExportRow {
-	discoveredAt := ""
-	if !r.CreatedAt.IsZero() {
-		discoveredAt = r.CreatedAt.UTC().Format(time.RFC3339)
-	} else if v, ok := r.Properties["discoveredAt"]; ok {
-		discoveredAt = v
-	}
-	return findingExportRow{
-		ID:           r.ID,
-		Type:         r.Type,
-		Title:        r.Name,
-		Severity:     r.Severity,
-		CVE:          r.Properties["cve"],
-		MissionID:    r.MissionID,
-		MissionName:  r.Properties["missionName"],
-		Description:  r.Description,
-		DiscoveredAt: discoveredAt,
-	}
+// exportEvidence is one evidence item in an export. It shows the tier and, on a
+// tier 1 item, the ID of the tool call that backs it.
+type exportEvidence struct {
+	Type       string            `json:"type"`
+	Title      string            `json:"title"`
+	Content    string            `json:"content"`
+	Tier       int               `json:"tier"`
+	ToolCallID string            `json:"toolCallId,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
-func serializeFindings(format string, records []graph.FindingRecord, tenantID string) ([]byte, error) {
+func findingToRow(f finding.EnhancedFinding, includeEvidence bool) findingExportRow {
+	cve, _ := f.Metadata["cve"].(string)
+	row := findingExportRow{
+		ID:          f.ID.String(),
+		Type:        "finding",
+		Title:       f.Title,
+		Severity:    string(f.Severity),
+		CVE:         cve,
+		MissionID:   f.MissionID.String(),
+		Description: f.Description,
+	}
+	if !f.CreatedAt.IsZero() {
+		row.DiscoveredAt = f.CreatedAt.UTC().Format(time.RFC3339)
+	}
+	if includeEvidence {
+		row.Evidence = make([]exportEvidence, len(f.Evidence))
+		for i, e := range f.Evidence {
+			row.Evidence[i] = exportEvidence{
+				Type:       string(finding.EvidenceTypeName(e.GetType())),
+				Title:      e.GetTitle(),
+				Content:    e.GetContent(),
+				Tier:       int(e.GetTier()),
+				ToolCallID: e.GetToolCallId(),
+				Metadata:   e.GetMetadata(),
+			}
+		}
+	}
+	return row
+}
+
+func serializeFindings(format string, records []finding.EnhancedFinding, tenantID string, includeEvidence bool) ([]byte, error) {
 	rows := make([]findingExportRow, len(records))
 	for i, r := range records {
-		rows[i] = recordToRow(r)
+		rows[i] = findingToRow(r, includeEvidence)
 	}
 	switch format {
 	case "csv":
@@ -251,6 +280,9 @@ type jsonFindingRow struct {
 	MissionName  string `json:"missionName"`
 	Description  string `json:"description"`
 	DiscoveredAt string `json:"discoveredAt"`
+	// Evidence is present when the export includes evidence. Each item has its
+	// tier.
+	Evidence []exportEvidence `json:"evidence,omitempty"`
 }
 
 func serializeJSON(rows []findingExportRow, tenantID string) ([]byte, error) {
@@ -266,6 +298,7 @@ func serializeJSON(rows []findingExportRow, tenantID string) ([]byte, error) {
 			MissionName:  r.MissionName,
 			Description:  r.Description,
 			DiscoveredAt: r.DiscoveredAt,
+			Evidence:     r.Evidence,
 		}
 	}
 	payload := map[string]any{
@@ -303,9 +336,15 @@ type sarifDriver struct {
 }
 
 type sarifResult struct {
-	RuleID  string       `json:"ruleId"`
-	Level   string       `json:"level"`
-	Message sarifMessage `json:"message"`
+	RuleID     string           `json:"ruleId"`
+	Level      string           `json:"level"`
+	Message    sarifMessage     `json:"message"`
+	Properties *sarifProperties `json:"properties,omitempty"`
+}
+
+// sarifProperties holds the evidence of a result. Each item has its tier.
+type sarifProperties struct {
+	Evidence []exportEvidence `json:"evidence"`
 }
 
 type sarifMessage struct {
@@ -330,11 +369,15 @@ func serializeSARIF(rows []findingExportRow) ([]byte, error) {
 		if r.Description != "" {
 			msg = r.Title + ": " + r.Description
 		}
-		results = append(results, sarifResult{
+		result := sarifResult{
 			RuleID:  r.ID,
 			Level:   severityToSARIFLevel(r.Severity),
 			Message: sarifMessage{Text: msg},
-		})
+		}
+		if len(r.Evidence) > 0 {
+			result.Properties = &sarifProperties{Evidence: r.Evidence}
+		}
+		results = append(results, result)
 	}
 	doc := sarifDoc{
 		Version: "2.1.0",

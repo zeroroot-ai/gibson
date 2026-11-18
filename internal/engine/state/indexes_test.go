@@ -429,9 +429,9 @@ func testCopyOfIndex(idx *IndexDefinition) *IndexDefinition {
 }
 
 func TestAllIndexDefinitions(t *testing.T) {
-	t.Run("returns the 7 cluster-wide index definitions", func(t *testing.T) {
+	t.Run("returns the 6 cluster-wide index definitions", func(t *testing.T) {
 		indexes := AllIndexDefinitions()
-		require.Len(t, indexes, 7)
+		require.Len(t, indexes, 6)
 
 		// Verify each index is present
 		indexNames := make(map[string]bool)
@@ -440,7 +440,6 @@ func TestAllIndexDefinitions(t *testing.T) {
 		}
 
 		assert.True(t, indexNames["gibson:idx:missions"])
-		assert.True(t, indexNames["gibson:idx:findings"])
 		assert.True(t, indexNames["gibson:idx:memory"])
 		assert.True(t, indexNames["gibson:idx:payloads"])
 		assert.True(t, indexNames["gibson:idx:credentials"])
@@ -512,56 +511,6 @@ func TestMissionIndex(t *testing.T) {
 			"MissionIndexSchemaVersion must be 3 after name_exact addition (gibson#617)")
 		assert.Equal(t, MissionIndexSchemaVersion, MissionIndex().SchemaVersion,
 			"MissionIndex().SchemaVersion must equal MissionIndexSchemaVersion constant")
-	})
-}
-
-func TestFindingIndex(t *testing.T) {
-	t.Run("has correct definition", func(t *testing.T) {
-		idx := FindingIndex()
-
-		assert.Equal(t, "gibson:idx:findings", idx.Name)
-		assert.Equal(t, "gibson:finding:", idx.Prefix)
-		assert.True(t, idx.OnJSON)
-		assert.Len(t, idx.Schema, 13) // 12 original + tenant_id (schema version 2)
-
-		// Verify weighted text fields
-		fields := make(map[string]FieldDefinition)
-		for _, f := range idx.Schema {
-			fields[f.Alias] = f
-		}
-
-		// Check title has highest weight
-		assert.Equal(t, 3.0, fields["title"].Weight)
-
-		// Check description has medium weight
-		assert.Equal(t, 2.0, fields["description"].Weight)
-
-		// Check sortable fields
-		assert.True(t, fields["risk_score"].Sortable)
-		assert.True(t, fields["cvss_score"].Sortable)
-		assert.True(t, fields["created_at"].Sortable)
-	})
-
-	t.Run("contains tenant_id as TAG SORTABLE (schema version 2)", func(t *testing.T) {
-		idx := FindingIndex()
-
-		fields := make(map[string]FieldDefinition)
-		for _, f := range idx.Schema {
-			fields[f.Alias] = f
-		}
-
-		tenantField, ok := fields["tenant_id"]
-		require.True(t, ok, "tenant_id field must be present in gibson:idx:findings schema")
-		assert.Equal(t, "$.tenant_id", tenantField.Path)
-		assert.Equal(t, FieldTypeTag, tenantField.Type, "tenant_id must be a TAG field")
-		assert.True(t, tenantField.Sortable, "tenant_id TAG field must be SORTABLE")
-	})
-
-	t.Run("schema version constant matches expected bumped value", func(t *testing.T) {
-		assert.Equal(t, 2, FindingIndexSchemaVersion,
-			"FindingIndexSchemaVersion must be 2 after Phase 1 tenant_id addition")
-		assert.Equal(t, FindingIndexSchemaVersion, FindingIndex().SchemaVersion,
-			"FindingIndex().SchemaVersion must equal FindingIndexSchemaVersion constant")
 	})
 }
 
@@ -1000,11 +949,6 @@ func TestSchemaVersionKey(t *testing.T) {
 		assert.Equal(t, "gibson:idx:missions:schema_version", key)
 	})
 
-	t.Run("finding index schema version key", func(t *testing.T) {
-		key := schemaVersionKey("gibson:idx:findings")
-		assert.Equal(t, "gibson:idx:findings:schema_version", key)
-	})
-
 	t.Run("arbitrary index name produces consistent key", func(t *testing.T) {
 		key := schemaVersionKey("test:idx:sample")
 		assert.Equal(t, "test:idx:sample:schema_version", key)
@@ -1018,17 +962,8 @@ func TestIndexDefinition_SchemaVersion(t *testing.T) {
 		assert.Equal(t, MissionIndexSchemaVersion, idx.SchemaVersion)
 	})
 
-	t.Run("finding index has SchemaVersion set to FindingIndexSchemaVersion", func(t *testing.T) {
-		idx := FindingIndex()
-		assert.Equal(t, FindingIndexSchemaVersion, idx.SchemaVersion)
-	})
-
 	t.Run("MissionIndexSchemaVersion is 3", func(t *testing.T) {
 		assert.Equal(t, 3, MissionIndexSchemaVersion)
-	})
-
-	t.Run("FindingIndexSchemaVersion is 2", func(t *testing.T) {
-		assert.Equal(t, 2, FindingIndexSchemaVersion)
 	})
 
 	t.Run("indexes with no SchemaVersion default to 0", func(t *testing.T) {

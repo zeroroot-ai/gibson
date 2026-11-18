@@ -5,6 +5,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain/braintest"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	"github.com/zeroroot-ai/sdk/auth"
@@ -55,7 +57,8 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 
 	// Build the processor exactly the way the daemon does at startup, so this
 	// test is exercising the production wiring rather than a parallel one.
-	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: tenant}
+	store := &recordingFindingStore{}
+	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: tenant, findingStore: store}
 	proc := d.newDiscoveryProcessor()
 	require.NotNil(t, proc, "the daemon must wire a discovery processor when the brain is live")
 
@@ -94,10 +97,13 @@ func TestDiscoveryResultReachesTheGraphThroughTheProjector(t *testing.T) {
 	assert.Equal(t, "http-alt", host.Services[8080].Name,
 		"the service must be reassembled onto its port on its host")
 
-	finding := writer.findings[tenant][0]
-	assert.Equal(t, "f1", finding.ID)
-	assert.Equal(t, "Directory listing enabled", finding.Title)
-	assert.Equal(t, "192.0.2.10", finding.Address,
+	node := writer.findings[tenant][0]
+	require.Len(t, store.stored, 1, "the finding is written to Postgres")
+	assert.Equal(t, node.ID, store.stored[0].ID.String(), "the graph node and the row have one ID")
+	assert.Equal(t, tenant, store.tenants[0])
+	assert.NoError(t, store.stored[0].ID.Validate(), "the ID is a UUID")
+	assert.Equal(t, "Directory listing enabled", node.Title)
+	assert.Equal(t, "192.0.2.10", node.Address,
 		"a host-parented finding must carry the host's coordinate")
 
 	assert.Equal(t, "example.test", writer.domains[tenant][0].Name)
@@ -154,4 +160,39 @@ func TestDiscoverySinkDropsEventsWithNoTenantToRouteThem(t *testing.T) {
 	sink("", brain.HostObserved{ScopeID: "s", Address: "192.0.2.99"})
 
 	assert.Empty(t, reg.Tenants(), "an unroutable event must not conjure a World")
+}
+
+// recordingFindingStore records the findings that the daemon writes.
+type recordingFindingStore struct {
+	stored  []finding.EnhancedFinding
+	tenants []string
+	err     error
+}
+
+func (s *recordingFindingStore) Store(_ context.Context, tenantID string, f finding.EnhancedFinding) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.stored = append(s.stored, f)
+	s.tenants = append(s.tenants, tenantID)
+	return nil
+}
+
+// TestDiscoveredFindingWithNoRowHasNoGraphNode proves that the graph holds a
+// finding node only for a finding that has a row in Postgres.
+func TestDiscoveredFindingWithNoRowHasNoGraphNode(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
+	store := &recordingFindingStore{err: errors.New("database down")}
+	d := &daemonImpl{logger: testObsLogger(), brainRegistry: reg, registryTenant: "acme", findingStore: store}
+
+	res, err := d.newDiscoveryProcessor().Process(ctx, ingest.ExecContext{
+		MissionID: "mission-42", MissionRunID: "run-1", AgentName: "recon", TenantID: auth.MustNewTenantID("acme"),
+	}, discoveryFixture())
+
+	require.NoError(t, err)
+	assert.Equal(t, 2, res.EventsSubmitted, "host and domain only")
+	assert.True(t, res.HasErrors())
 }

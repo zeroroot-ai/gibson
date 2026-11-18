@@ -16,11 +16,15 @@ import (
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 // WorldFindingSink routes a submitted finding into the per-tenant ECS brain World
@@ -71,6 +75,10 @@ type GraphRAGFindingSubmitter struct {
 	// capability-grant service, in which case a finding carries the principal
 	// and no name.
 	enrolledAgents EnrolledAgentLookup
+
+	// records reads the tool calls that the daemon recorded. Nil when the daemon
+	// has no brain, and a finding that names a tool call then fails.
+	records brain.ToolCallRecord
 }
 
 // WithEnrolledAgentLookup wires the registry that names the enrolled agent
@@ -105,6 +113,86 @@ func NewGraphRAGFindingSubmitter(
 	}
 }
 
+// findingPayload is the JSON that an SDK agent sends. Its evidence has the shape
+// of the SDK. The field shadows the evidence of the embedded agent.Finding, so
+// the decoder reads the SDK shape.
+type findingPayload struct {
+	agent.Finding
+	Evidence    []sdkfinding.Evidence `json:"evidence,omitempty"`
+	ToolCallIDs []string              `json:"tool_call_ids,omitempty"`
+}
+
+// decodeFindingPayload decodes the JSON of an SDK finding. The agent typed all
+// of its evidence, so each item is tier 2. The payload cannot set a tier or a
+// tool call ID on an item. It returns the tool call IDs that the agent named.
+// The daemon builds tier 1 evidence from the record of those tool calls.
+func decodeFindingPayload(raw []byte) (agent.Finding, []string, error) {
+	var payload findingPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return agent.Finding{}, nil, fmt.Errorf("decode finding payload: %w", err)
+	}
+	out := payload.Finding
+	out.Evidence = nil
+	for _, e := range payload.Evidence {
+		metadata := make(map[string]string, len(e.Metadata))
+		for k, v := range e.Metadata {
+			metadata[k] = fmt.Sprint(v)
+		}
+		out.Evidence = append(out.Evidence, &typespb.Evidence{
+			Title:    e.Title,
+			Type:     finding.EvidenceTypeFromName(e.Type),
+			Content:  e.Content,
+			Metadata: metadata,
+			Tier:     typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+		})
+	}
+	return out, payload.ToolCallIDs, nil
+}
+
+// Errors of the tool call record. The service maps each one to a gRPC code.
+var (
+	// ErrToolCallNotRecorded reports a tool call ID that names no record of the
+	// mission of the work item in the tenant of the caller.
+	ErrToolCallNotRecorded = errors.New("finding submitter: no record of the named tool call")
+
+	// ErrToolCallRecordUnavailable reports that the daemon has no record of tool
+	// calls to read.
+	ErrToolCallRecordUnavailable = errors.New("finding submitter: the record of tool calls is not wired")
+)
+
+// WithToolCallRecord wires the record of tool calls. The submitter builds tier 1
+// evidence from it with brain.ReadRecordedEvidence, the function that a proof
+// and a harness finding also use.
+func (s *GraphRAGFindingSubmitter) WithToolCallRecord(r brain.ToolCallRecord) *GraphRAGFindingSubmitter {
+	s.records = r
+	return s
+}
+
+// recordedEvidence builds the tier 1 evidence of a finding from the tool calls
+// that it names, with brain.ReadRecordedEvidence. A finding with no mission
+// cannot name a tool call, because a record belongs to a mission.
+func (s *GraphRAGFindingSubmitter) recordedEvidence(
+	ctx context.Context, missionID types.ID, toolCallIDs []string,
+) ([]*typespb.Evidence, error) {
+	if len(toolCallIDs) == 0 {
+		return nil, nil
+	}
+	if s.records == nil {
+		return nil, ErrToolCallRecordUnavailable
+	}
+	if missionID == "" {
+		return nil, fmt.Errorf("%w: %q (the finding has no mission)", ErrToolCallNotRecorded, toolCallIDs[0])
+	}
+	recorded, missing, err := brain.ReadRecordedEvidence(ctx, s.records, missionID.String(), toolCallIDs)
+	if err != nil {
+		return nil, fmt.Errorf("finding submitter: %w", err)
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf("%w: %q", ErrToolCallNotRecorded, missing[0])
+	}
+	return recorded, nil
+}
+
 // Submit stores a JSON-encoded agent.Finding in the per-tenant finding store
 // (via the data-plane Pool) and routes it into the tenant World, from which the
 // graph projector materializes it.
@@ -135,8 +223,8 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	}
 
 	// Step 2: Parse the finding JSON.
-	var baseFinding agent.Finding
-	if err := json.Unmarshal([]byte(findingJSON), &baseFinding); err != nil {
+	baseFinding, toolCallIDs, err := decodeFindingPayload([]byte(findingJSON))
+	if err != nil {
 		s.logger.WarnContext(ctx, "finding submitter: failed to parse finding JSON; generating stub finding",
 			slog.String("tenant", tenant),
 			slog.String("work_id", workID),
@@ -164,6 +252,15 @@ func (s *GraphRAGFindingSubmitter) Submit(
 	// findings naming a work item this tenant does not own — use an empty
 	// missionID and stay tenant-ambient.
 	missionID := s.resolveMissionID(ctx, tenant, workID)
+
+	// Step 4b: tier 1 evidence. Each tool call that the payload names must have a
+	// record of this mission in this tenant. An ID with no record fails the whole
+	// submit, before the daemon stores anything.
+	recorded, err := s.recordedEvidence(ctx, missionID, toolCallIDs)
+	if err != nil {
+		return "", err
+	}
+	baseFinding.Evidence = append(recorded, baseFinding.Evidence...)
 
 	// Step 5: the one record. The store keeps it and the World folds it, so
 	// the two never disagree about who submitted what under which mission.
@@ -231,8 +328,9 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 	return sub, nil
 }
 
-// persistFinding acquires a per-tenant Conn from the pool and stores the finding.
-// Errors are logged as warnings; the finding ID is still returned to the caller.
+// persistFinding writes the finding to the findings table of the database of
+// the tenant. Errors are logged as warnings. The finding ID is still returned
+// to the caller.
 func (s *GraphRAGFindingSubmitter) persistFinding(
 	ctx context.Context,
 	tenant, workID string,
@@ -248,50 +346,29 @@ func (s *GraphRAGFindingSubmitter) persistFinding(
 		return
 	}
 
-	tenantID, tenantParseErr := auth.NewTenantID(tenant)
-	if tenantParseErr != nil {
-		s.logger.WarnContext(ctx, "finding submitter: invalid tenant ID; finding not persisted",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
-			slog.String("error", tenantParseErr.Error()),
-		)
-		return
-	}
-
-	conn, err := s.pool.For(ctx, tenantID)
-	if err != nil {
+	store := pgstore.New(func() datapool.Pool { return s.pool })
+	if err := store.Store(ctx, tenant, enhanced); err != nil {
 		var npErr *datapool.NotProvisionedError
 		if errors.As(err, &npErr) {
 			s.logger.WarnContext(ctx, "finding submitter: tenant not provisioned; finding not persisted",
 				slog.String("tenant", tenant),
 				slog.String("finding_id", findingID.String()),
 			)
-		} else {
-			s.logger.WarnContext(ctx, "finding submitter: failed to acquire conn; finding not persisted",
-				slog.String("tenant", tenant),
-				slog.String("finding_id", findingID.String()),
-				slog.String("error", err.Error()),
-			)
+			return
 		}
-		return
-	}
-	defer conn.Release()
-
-	store := finding.NewConnBoundFindingStore(conn.Redis)
-	if storeErr := store.Store(ctx, enhanced); storeErr != nil {
 		s.logger.WarnContext(ctx, "finding submitter: failed to store finding; continuing",
 			slog.String("tenant", tenant),
 			slog.String("work_id", workID),
 			slog.String("finding_id", findingID.String()),
-			slog.String("error", storeErr.Error()),
+			slog.String("error", err.Error()),
 		)
-	} else {
-		s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
-			slog.String("mission_id", missionID.String()),
-		)
+		return
 	}
+	s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
+		slog.String("tenant", tenant),
+		slog.String("finding_id", findingID.String()),
+		slog.String("mission_id", missionID.String()),
+	)
 }
 
 // resolveMissionID looks up the missionID associated with a work item from the

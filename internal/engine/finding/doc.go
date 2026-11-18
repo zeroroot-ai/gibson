@@ -1,23 +1,24 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package finding holds the daemon's finding types and the store that keeps
-// findings in the tenant's Redis.
+// Package finding holds the daemon's finding types. The finding store is in
+// the pgstore sub-package. It keeps each finding in the Postgres database of
+// the tenant.
 //
 // # Types
 //
-// EnhancedFinding embeds agent.Finding and adds a category, a status, MITRE
-// mappings and structured evidence (types.go). EnhancedEvidence is one item of
-// evidence: an HTTP request, an HTTP response, a conversation, or free text
+// EnhancedFinding embeds agent.Finding and adds a category, a status and
+// MITRE mappings (types.go). The evidence of a finding is types.v1.Evidence,
+// the one evidence shape. EvidenceTypeName and EvidenceTypeFromName map its
+// type enum to the names that the SDK and the predicates of a Domain Pack use
 // (evidence.go). MitreMapping and MitreTechnique carry an ATT&CK or ATLAS
 // technique (mitre.go).
 //
 // # Store
 //
-// FindingStore is the write interface. ConnBoundFindingStore implements it on
-// one Redis connection, and that connection is the tenant boundary: the store
-// reads and writes only the database the connection selects
-// (store_conn.go). FindingFilter narrows a List call.
+// FindingStore is the write interface. pgstore.Store implements it. It keeps
+// one row for each finding in the findings table of the database of the tenant.
+// That database is the tenant boundary. FindingFilter narrows a List call.
 //
 // # Compliance updates
 //
@@ -26,6 +27,6 @@
 //
 // # Export
 //
-// The export sub-package renders findings as JSON, SARIF 2.1.0, CSV, HTML and
-// Markdown.
+// The export of findings is in internal/server/daemon/api/export_findings.go. It
+// reads the findings and their evidence from pgstore.
 package finding

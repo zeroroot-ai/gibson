@@ -18,7 +18,6 @@ package state
 func AllIndexDefinitions() []*IndexDefinition {
 	return []*IndexDefinition{
 		MissionIndex(),
-		FindingIndex(),
 		MissionMemoryIndex(),
 		PayloadIndex(),
 		CredentialIndex(),
@@ -124,130 +123,6 @@ func MissionIndex() *IndexDefinition {
 				Path:  "$.findings_count",
 				Alias: "findings_count",
 				Type:  FieldTypeNumeric,
-			},
-			// tenant_id TAG SORTABLE — added in schema version 2 (Phase 1 tenant-isolation prep).
-			// Phase 2 adds the caller-side @tenant_id:{...} filter; Phase 1 only ensures the
-			// field is present in the index so the filter is immediately available.
-			{
-				Path:     "$.tenant_id",
-				Alias:    "tenant_id",
-				Type:     FieldTypeTag,
-				Sortable: true,
-			},
-		},
-	}
-}
-
-// FindingIndex defines the RediSearch index for security finding documents.
-// This index enables full-text search on finding content with weighted fields,
-// filtering by severity/status/category, and sorting by risk scores.
-//
-// Indexed Fields:
-//   - title: Full-text searchable with 3.0 weight (highest priority)
-//   - description: Full-text searchable with 2.0 weight
-//   - remediation: Full-text searchable
-//   - severity: Exact-match filtering (critical, high, medium, low, info)
-//   - status: Exact-match filtering (open, confirmed, resolved, false_positive)
-//   - mission_id: Exact-match filtering by mission
-//   - agent_name: Exact-match filtering by discovering agent
-//   - category: Exact-match filtering by finding category
-//   - confidence: Numeric confidence score (0.0-1.0)
-//   - risk_score: Sortable numeric risk score
-//   - cvss_score: Sortable CVSS score (0.0-10.0)
-//   - created_at: Sortable timestamp (Unix milliseconds)
-//
-// Example Queries:
-//
-//	// Find SQL injection findings
-//	FT.SEARCH gibson:idx:findings "SQL injection"
-//
-//	// Find critical findings for a mission
-//	FT.SEARCH gibson:idx:findings "@severity:{critical} @mission_id:{miss_123}"
-//
-//	// Find findings sorted by risk score
-//	FT.SEARCH gibson:idx:findings "*" SORTBY risk_score DESC
-//
-// FindingIndexSchemaVersion is the current schema version for gibson:idx:findings.
-// Increment this constant whenever the FindingIndex schema changes to trigger a
-// one-time online re-index on next daemon startup.
-//
-// Version history:
-//
-//	0 (implicit) → original schema, tenant_id only in filter code (not in index schema)
-//	2             → added tenant_id AS tenant_id TAG SORTABLE (Phase 1)
-const FindingIndexSchemaVersion = 2
-
-func FindingIndex() *IndexDefinition {
-	return &IndexDefinition{
-		Name:          "gibson:idx:findings",
-		Prefix:        "gibson:finding:",
-		OnJSON:        true,
-		SchemaVersion: FindingIndexSchemaVersion,
-		Schema: []FieldDefinition{
-			{
-				Path:   "$.title",
-				Alias:  "title",
-				Type:   FieldTypeText,
-				Weight: 3.0,
-			},
-			{
-				Path:   "$.description",
-				Alias:  "description",
-				Type:   FieldTypeText,
-				Weight: 2.0,
-			},
-			{
-				Path:  "$.remediation",
-				Alias: "remediation",
-				Type:  FieldTypeText,
-			},
-			{
-				Path:  "$.severity",
-				Alias: "severity",
-				Type:  FieldTypeTag,
-			},
-			{
-				Path:  "$.status",
-				Alias: "status",
-				Type:  FieldTypeTag,
-			},
-			{
-				Path:  "$.mission_id",
-				Alias: "mission_id",
-				Type:  FieldTypeTag,
-			},
-			{
-				Path:  "$.agent_name",
-				Alias: "agent_name",
-				Type:  FieldTypeTag,
-			},
-			{
-				Path:  "$.category",
-				Alias: "category",
-				Type:  FieldTypeTag,
-			},
-			{
-				Path:  "$.confidence",
-				Alias: "confidence",
-				Type:  FieldTypeNumeric,
-			},
-			{
-				Path:     "$.risk_score",
-				Alias:    "risk_score",
-				Type:     FieldTypeNumeric,
-				Sortable: true,
-			},
-			{
-				Path:     "$.cvss_score",
-				Alias:    "cvss_score",
-				Type:     FieldTypeNumeric,
-				Sortable: true,
-			},
-			{
-				Path:     "$.created_at",
-				Alias:    "created_at",
-				Type:     FieldTypeNumeric,
-				Sortable: true,
 			},
 			// tenant_id TAG SORTABLE — added in schema version 2 (Phase 1 tenant-isolation prep).
 			// Phase 2 adds the caller-side @tenant_id:{...} filter; Phase 1 only ensures the

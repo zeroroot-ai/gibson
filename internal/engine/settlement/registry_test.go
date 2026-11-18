@@ -13,7 +13,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/findingtest"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
+	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 )
 
 const (
@@ -24,11 +26,11 @@ const (
 
 // alwaysTrue is a trivial, deterministic evaluator used only to exercise the
 // registry mechanics; it never calls an LLM and reads only its inputs.
-func alwaysTrue(_ json.RawMessage, _ []finding.EnhancedEvidence) (bool, error) {
+func alwaysTrue(_ json.RawMessage, _ []*typespb.Evidence) (bool, error) {
 	return true, nil
 }
 
-func alwaysFalse(_ json.RawMessage, _ []finding.EnhancedEvidence) (bool, error) {
+func alwaysFalse(_ json.RawMessage, _ []*typespb.Evidence) (bool, error) {
 	return false, nil
 }
 
@@ -176,7 +178,7 @@ func TestRegistry_Evaluate(t *testing.T) {
 	t.Run("propagates the evaluator's error", func(t *testing.T) {
 		r := NewRegistry()
 		boom := errors.New("boom")
-		require.NoError(t, r.Register(testTechnique, testPredicateType, func(_ json.RawMessage, _ []finding.EnhancedEvidence) (bool, error) {
+		require.NoError(t, r.Register(testTechnique, testPredicateType, func(_ json.RawMessage, _ []*typespb.Evidence) (bool, error) {
 			return false, boom
 		}))
 		p, err := r.NewPredicate(testTechnique, testPredicateType, nil)
@@ -212,7 +214,7 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 	r := NewRegistry()
 
 	const markerType PredicateType = "det_marker_present"
-	require.NoError(t, r.Register(testTechnique, markerType, func(params json.RawMessage, evidence []finding.EnhancedEvidence) (bool, error) {
+	require.NoError(t, r.Register(testTechnique, markerType, func(params json.RawMessage, evidence []*typespb.Evidence) (bool, error) {
 		var p struct {
 			Marker string `json:"marker"`
 		}
@@ -220,7 +222,7 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 			return false, fmt.Errorf("decode test predicate params: %w", err)
 		}
 		for _, e := range evidence {
-			if s, ok := e.Content.(string); ok && s == p.Marker {
+			if e.GetContent() == p.Marker {
 				return true, nil
 			}
 		}
@@ -230,8 +232,8 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 	predicate, err := r.NewPredicate(testTechnique, markerType, map[string]any{"marker": "proof-token-9f3a"})
 	require.NoError(t, err)
 
-	evidence := []finding.EnhancedEvidence{
-		finding.NewEnhancedEvidence(finding.EvidenceLog, "capture", "proof-token-9f3a"),
+	evidence := []*typespb.Evidence{
+		findingtest.NewEvidence(sdkfinding.EvidenceLog, "capture", "proof-token-9f3a"),
 	}
 
 	const iterations = 200
@@ -265,8 +267,8 @@ func TestRegistry_Evaluate_Deterministic(t *testing.T) {
 	assert.True(t, ok)
 
 	// Different evidence must deterministically fail the same predicate.
-	ok, err = r.Evaluate(ctx, replayed, []finding.EnhancedEvidence{
-		finding.NewEnhancedEvidence(finding.EvidenceLog, "capture", "wrong-token"),
+	ok, err = r.Evaluate(ctx, replayed, []*typespb.Evidence{
+		findingtest.NewEvidence(sdkfinding.EvidenceLog, "capture", "wrong-token"),
 	})
 	require.NoError(t, err)
 	assert.False(t, ok)

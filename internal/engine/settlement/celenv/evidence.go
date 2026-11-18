@@ -10,6 +10,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // mapStringAnyType is the reflect.Type CompiledPredicate.Evaluate's activation
@@ -24,7 +25,7 @@ var mapStringAnyType = reflect.TypeOf(map[string]any{})
 // expression touches them (the same pattern
 // internal/engine/brain/condition.go's evalCondition uses for its "nodes"
 // and "mission" bags), so no manual ref.Val construction is needed here.
-func evidenceToCEL(evidence []finding.EnhancedEvidence) []any {
+func evidenceToCEL(evidence []*typespb.Evidence) []any {
 	items := make([]any, len(evidence))
 	for i, e := range evidence {
 		items[i] = evidenceItemMap(e)
@@ -33,37 +34,36 @@ func evidenceToCEL(evidence []finding.EnhancedEvidence) []any {
 }
 
 // evidenceItemMap renders one piece of evidence as the map [EvidenceMapType]
-// describes: finding.EnhancedEvidence's own fields, verbatim, with Content
-// JSON-normalized (see normalizeContent) so every helper function in
-// functions.go can rely on it being one of JSON's own value shapes —
-// map[string]any, []any, string, float64, bool, or nil — never an arbitrary
-// Go struct or pointer cel-go's type adapter cannot reason about.
-func evidenceItemMap(e finding.EnhancedEvidence) map[string]any {
+// describes: "type" is the name of the evidence type, "title" is the title,
+// and "content" is the content. The content of a request, a response and a
+// conversation is JSON text, and the map holds the value that the text
+// decodes to (see decodeContent). The content of each other type is the text
+// as stored.
+func evidenceItemMap(e *typespb.Evidence) map[string]any {
+	var content any = e.GetContent()
+	switch e.GetType() {
+	case typespb.EvidenceType_EVIDENCE_TYPE_REQUEST,
+		typespb.EvidenceType_EVIDENCE_TYPE_RESPONSE,
+		typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION:
+		content = decodeContent(e.GetContent())
+	}
 	return map[string]any{
-		"type":      string(e.Type),
-		"title":     e.Title,
-		"content":   normalizeContent(e.Content),
-		"timestamp": e.Timestamp,
+		"type":    string(finding.EvidenceTypeName(e.GetType())),
+		"title":   e.GetTitle(),
+		"content": content,
 	}
 }
 
-// normalizeContent JSON-round-trips content into one of JSON's own value
-// shapes. A nil content, or content that fails to marshal or unmarshal,
-// normalizes to nil rather than propagating an error: one malformed piece of
+// decodeContent decodes JSON text into one of JSON's own value shapes:
+// map[string]any, []any, string, float64, bool, or nil. Text that is not
+// valid JSON decodes to nil rather than an error: one malformed piece of
 // evidence degrades that item's content to "absent" for every helper
 // function (evidenceText, httpStatus, … all treat a missing/wrong-shaped
 // field as their documented not-applicable sentinel), it never aborts
 // evaluation of the whole evidence set.
-func normalizeContent(content any) any {
-	if content == nil {
-		return nil
-	}
-	data, err := json.Marshal(content)
-	if err != nil {
-		return nil
-	}
+func decodeContent(text string) any {
 	var out any
-	if err := json.Unmarshal(data, &out); err != nil {
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
 		return nil
 	}
 	return out
