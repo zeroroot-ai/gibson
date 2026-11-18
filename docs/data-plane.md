@@ -260,7 +260,8 @@ Spec: `daemon-mission-finding-per-tenant-cutover` (2026-04-26).
 
 **All three handler subsystems are now per-tenant.** Every mission, mission-run,
 and finding RPC acquires a `Conn` from the pool and uses `conn.Missions()`,
-`conn.Redis` (for run-event streams), and `conn.Findings()`. The process-wide
+`conn.Redis` (for run-event streams), and the finding store in the Postgres
+database of the tenant (`finding/pgstore`). The process-wide
 `NewRedisMissionStore`, `NewRedisMissionRunStore`, and `NewRedisFindingStore`
 constructors are **deleted** from the codebase. Audit findings C6, C9, C14, C15
 are now structurally closed.
@@ -271,7 +272,7 @@ Before this spec, three subsystems remained on the legacy global-Redis path:
 |---|---|---|
 | Mission CRUD (Create, Get, List, Update) | `RedisMissionStore` (global) | `ConnBoundMissionStore(conn.Redis)` per RPC |
 | Mission-run / event streams | `RedisMissionRunStore` (global) | `ConnBoundRunStore(conn.Redis)` per RPC |
-| Finding store (Submit, Get, List) | `RedisFindingStore` (global) | `ConnBoundFindingStore(conn.Redis)` per RPC |
+| Finding store (Submit, Get, List) | `RedisFindingStore` (global) | `pgstore.Store` on the `findings` table of the tenant database |
 
 For operators: run the `legacy-mission-finding-cleanup` Helm hook with
 `upgrade.cleanupLegacyMissionFinding=true` to delete orphaned keys from the

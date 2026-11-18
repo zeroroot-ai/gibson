@@ -69,9 +69,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 		t.Fatal("infrastructure is nil")
 	}
 
-	// findingStore is intentionally nil post-cutover: findings go through the
-	// per-tenant Pool at handler time. Do not check infra.findingStore here.
-
 	if infra.llmRegistry == nil {
 		t.Fatal("LLM registry is nil")
 	}
@@ -83,8 +80,6 @@ func TestInfrastructureInitialization(t *testing.T) {
 	if infra.harnessFactory == nil {
 		t.Fatal("harness factory is nil")
 	}
-
-	// Finding store is now per-tenant via Pool — no global infra.findingStore to test.
 
 	// Test LLM registry exists
 	t.Run("LLMRegistry", func(t *testing.T) {

@@ -62,7 +62,6 @@ func TestNewHarnessFactory(t *testing.T) {
 	assert.NotNil(t, infra.llmRegistry, "LLM registry should be initialized")
 	assert.NotNil(t, infra.slotManager, "Slot manager should be initialized")
 	assert.NotNil(t, infra.harnessFactory, "Harness factory should be initialized")
-	assert.NotNil(t, infra.findingStore, "Finding store should be initialized")
 
 	// Test harness factory directly
 	factory, err := d.newHarnessFactory(ctx)

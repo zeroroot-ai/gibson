@@ -17,6 +17,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding/pgstore"
 	"github.com/zeroroot-ai/gibson/internal/engine/state"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -231,8 +232,9 @@ func (s *GraphRAGFindingSubmitter) resolveSubmitter(ctx context.Context, tenant 
 	return sub, nil
 }
 
-// persistFinding acquires a per-tenant Conn from the pool and stores the finding.
-// Errors are logged as warnings; the finding ID is still returned to the caller.
+// persistFinding writes the finding to the findings table of the database of
+// the tenant. Errors are logged as warnings. The finding ID is still returned
+// to the caller.
 func (s *GraphRAGFindingSubmitter) persistFinding(
 	ctx context.Context,
 	tenant, workID string,
@@ -248,50 +250,29 @@ func (s *GraphRAGFindingSubmitter) persistFinding(
 		return
 	}
 
-	tenantID, tenantParseErr := auth.NewTenantID(tenant)
-	if tenantParseErr != nil {
-		s.logger.WarnContext(ctx, "finding submitter: invalid tenant ID; finding not persisted",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
-			slog.String("error", tenantParseErr.Error()),
-		)
-		return
-	}
-
-	conn, err := s.pool.For(ctx, tenantID)
-	if err != nil {
+	store := pgstore.New(func() datapool.Pool { return s.pool })
+	if err := store.Store(ctx, tenant, enhanced); err != nil {
 		var npErr *datapool.NotProvisionedError
 		if errors.As(err, &npErr) {
 			s.logger.WarnContext(ctx, "finding submitter: tenant not provisioned; finding not persisted",
 				slog.String("tenant", tenant),
 				slog.String("finding_id", findingID.String()),
 			)
-		} else {
-			s.logger.WarnContext(ctx, "finding submitter: failed to acquire conn; finding not persisted",
-				slog.String("tenant", tenant),
-				slog.String("finding_id", findingID.String()),
-				slog.String("error", err.Error()),
-			)
+			return
 		}
-		return
-	}
-	defer conn.Release()
-
-	store := finding.NewConnBoundFindingStore(conn.Redis)
-	if storeErr := store.Store(ctx, enhanced); storeErr != nil {
 		s.logger.WarnContext(ctx, "finding submitter: failed to store finding; continuing",
 			slog.String("tenant", tenant),
 			slog.String("work_id", workID),
 			slog.String("finding_id", findingID.String()),
-			slog.String("error", storeErr.Error()),
+			slog.String("error", err.Error()),
 		)
-	} else {
-		s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
-			slog.String("tenant", tenant),
-			slog.String("finding_id", findingID.String()),
-			slog.String("mission_id", missionID.String()),
-		)
+		return
 	}
+	s.logger.DebugContext(ctx, "finding submitter: finding stored in per-tenant store",
+		slog.String("tenant", tenant),
+		slog.String("finding_id", findingID.String()),
+		slog.String("mission_id", missionID.String()),
+	)
 }
 
 // resolveMissionID looks up the missionID associated with a work item from the

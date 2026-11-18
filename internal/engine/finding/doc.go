@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-// Package finding holds the daemon's finding types and the store that keeps
-// findings in the tenant's Redis.
+// Package finding holds the daemon's finding types. The finding store is in
+// the pgstore sub-package. It keeps each finding in the Postgres database of
+// the tenant.
 //
 // # Types
 //
@@ -14,10 +15,9 @@
 //
 // # Store
 //
-// FindingStore is the write interface. ConnBoundFindingStore implements it on
-// one Redis connection, and that connection is the tenant boundary: the store
-// reads and writes only the database the connection selects
-// (store_conn.go). FindingFilter narrows a List call.
+// FindingStore is the write interface. pgstore.Store implements it. It keeps
+// one row for each finding in the findings table of the database of the tenant.
+// That database is the tenant boundary. FindingFilter narrows a List call.
 //
 // # Compliance updates
 //

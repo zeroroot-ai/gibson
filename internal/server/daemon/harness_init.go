@@ -17,6 +17,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/modelgate"
 	"github.com/zeroroot-ai/gibson/internal/engine/llm/providers"
+	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 	"github.com/zeroroot-ai/gibson/internal/platform/tenantprovider"
@@ -111,8 +112,9 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		RegistryAdapter: d.registryAdapter,
 		WorkQueue:       workQueue,
 
-		// Finding storage (in-memory for agent execution)
-		FindingStore: harness.NewInMemoryFindingStore(),
+		// Finding storage: the findings table of the database of the tenant.
+		// The pool starts after this factory, so the store reads it on first use.
+		FindingStore: harness.NewPostgresFindingStore(func() datapool.Pool { return d.pool }),
 
 		// Observability
 		Logger: d.logger.WithComponent("harness").Slog(),
