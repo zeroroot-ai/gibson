@@ -25,9 +25,32 @@ rules:
   - create
   - patch
 - apiGroups:
+  - agentgateway.dev
+  resources:
+  - agentgatewaybackends
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+- apiGroups:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments
+  - modelproviders
   - oidcclients
   - tenantdataplanes
   - tenantgrants
@@ -48,6 +71,7 @@ rules:
   resources:
   - agentenrollments/finalizers
   - connectorinstances/finalizers
+  - modelproviders/finalizers
   - tenantdataplanes/finalizers
   - tenantgrants/finalizers
   - tenantidentities/finalizers
@@ -60,6 +84,7 @@ rules:
   - gibson.zeroroot.ai
   resources:
   - agentenrollments/status
+  - modelproviders/status
   - tenantdataplanes/status
   - tenantgrants/status
   - tenantidentities/status
