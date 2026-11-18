@@ -479,6 +479,11 @@ func RestoreWorld(snap WorldSnapshot, tenant string) (*World, error) {
 			Completion:          c.Completion,
 			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
 			RecordedAtUnixNano:  c.RecordedAtUnixNano,
+			Items:               append([]json.RawMessage(nil), c.Items...),
+			Provider:            c.Provider,
+			CacheReadTokens:     c.CacheReadTokens,
+			CacheWriteTokens:    c.CacheWriteTokens,
+			Cost:                c.Cost,
 		})
 	}
 

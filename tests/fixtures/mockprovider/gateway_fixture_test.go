@@ -85,6 +85,10 @@ const configTemplate = `config:
       add:
         gibson.request_body: string(request.body)
         gibson.response_body: string(response.body)
+        gibson.tenant: request.headers["x-gibson-tenant"]
+        gibson.subject: request.headers["x-gibson-subject"]
+        gibson.mission: request.headers["x-gibson-mission"]
+        gibson.task: request.headers["x-gibson-task"]
 frontendPolicies:
   http:
     maxBufferSize: 20971520
@@ -180,6 +184,8 @@ func (a *authzService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type span struct {
 	Name  string
 	Attrs map[string]string
+	// All holds every attribute with its typed value. A test dumps it as data.
+	All map[string]any
 }
 
 // otlpReceiver is the fake OTLP/HTTP trace receiver.
@@ -216,7 +222,9 @@ func (o *otlpReceiver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, rs := range req.GetResourceSpans() {
 		for _, ss := range rs.GetScopeSpans() {
 			for _, sp := range ss.GetSpans() {
-				o.spans = append(o.spans, span{Name: sp.GetName(), Attrs: stringAttrs(sp.GetAttributes())})
+				o.spans = append(o.spans, span{
+					Name: sp.GetName(), Attrs: stringAttrs(sp.GetAttributes()), All: typedAttrs(sp.GetAttributes()),
+				})
 			}
 		}
 	}
@@ -231,6 +239,41 @@ func stringAttrs(kvs []*commonpb.KeyValue) map[string]string {
 		out[kv.GetKey()] = kv.GetValue().GetStringValue()
 	}
 	return out
+}
+
+// typedAttrs returns each attribute with its own type: string, int, double or bool.
+func typedAttrs(kvs []*commonpb.KeyValue) map[string]any {
+	out := make(map[string]any, len(kvs))
+	for _, kv := range kvs {
+		switch v := kv.GetValue().GetValue().(type) {
+		case *commonpb.AnyValue_StringValue:
+			out[kv.GetKey()] = v.StringValue
+		case *commonpb.AnyValue_IntValue:
+			out[kv.GetKey()] = v.IntValue
+		case *commonpb.AnyValue_DoubleValue:
+			out[kv.GetKey()] = v.DoubleValue
+		case *commonpb.AnyValue_BoolValue:
+			out[kv.GetKey()] = v.BoolValue
+		}
+	}
+	return out
+}
+
+// dumpSpan writes the attributes of a span as JSON to $GATEWAY_SPAN_DUMP_DIR,
+// when the variable is set. It is how the span data of the llmtrace tests was made.
+func dumpSpan(t *testing.T, name string, sp span) {
+	t.Helper()
+	dir := os.Getenv("GATEWAY_SPAN_DUMP_DIR")
+	if dir == "" {
+		return
+	}
+	data, err := json.MarshalIndent(map[string]any{"name": sp.Name, "attributes": sp.All}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal span: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".json"), data, 0o600); err != nil {
+		t.Fatalf("write span dump: %v", err)
+	}
 }
 
 func (o *otlpReceiver) rawBytes() []byte {
@@ -418,6 +461,7 @@ func TestGatewayFixture(t *testing.T) {
 			t.Fatalf("status = %d, want 200. body: %s", got.Status, got.Body)
 		}
 		sp := otlp.waitSpan(t, marker)
+		dumpSpan(t, "messages_plain", sp)
 		reqBody, respBody := sp.Attrs[attrRequestBody], sp.Attrs[attrResponseBody]
 		for _, want := range []string{toolResultText, "tool_result"} {
 			if !strings.Contains(reqBody, want) {
@@ -459,6 +503,7 @@ func TestGatewayFixture(t *testing.T) {
 			t.Fatalf("stream reply: status %d, body %s", got.Status, got.Body)
 		}
 		sp := otlp.waitSpan(t, marker)
+		dumpSpan(t, "messages_stream", sp)
 		respBody := sp.Attrs[attrResponseBody]
 		for _, want := range []string{"event: message_start", "tool_use", ThinkingText} {
 			if !strings.Contains(respBody, want) {
@@ -510,10 +555,19 @@ func TestGatewayFixture(t *testing.T) {
 	})
 
 	t.Run("responses_call_reaches_an_openai_backend", func(t *testing.T) {
-		got := gw.call(t, http.MethodPost, "/v1/responses", "tenant-e", tokenE,
-			`{"model":"gpt-fixture","input":"scan 10.0.0.5 marker-responses-1"}`)
-		if got.Status != http.StatusOK || !strings.Contains(got.Body, "function_call") {
-			t.Fatalf("responses: status %d, body %s", got.Status, got.Body)
+		const input = `[{"role":"user","content":"scan 10.0.0.5 %s"},` +
+			`{"type":"function_call","call_id":"call_1","name":"nmap","arguments":"{\"target\":\"10.0.0.5\"}"},` +
+			`{"type":"function_call_output","call_id":"call_1","output":"open ports: 22/tcp ssh, 80/tcp http"}]`
+		for _, c := range []struct{ name, marker, stream string }{
+			{"responses_plain", "marker-responses-1", "false"},
+			{"responses_stream", "marker-responses-2", "true"},
+		} {
+			body := fmt.Sprintf(`{"model":"gpt-fixture","stream":%s,"input":`+input+`}`, c.stream, c.marker)
+			got := gw.call(t, http.MethodPost, "/v1/responses", "tenant-e", tokenE, body)
+			if got.Status != http.StatusOK || !strings.Contains(got.Body, "function_call") {
+				t.Fatalf("%s: status %d, body %s", c.name, got.Status, got.Body)
+			}
+			dumpSpan(t, c.name, otlp.waitSpan(t, c.marker))
 		}
 	})
 

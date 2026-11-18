@@ -4,6 +4,7 @@
 package brain
 
 import (
+	"encoding/json"
 	"sort"
 
 	"github.com/mlange-42/ark/ecs"
@@ -42,6 +43,19 @@ type LlmCall struct {
 	// tool-calling turn. Without this a tool-calling turn's transcript was
 	// silently incomplete (gibson#271).
 	CompletionToolCalls []LlmToolCall
+	// Items is the transcript of the call as Open Responses items: the input
+	// items, then the output items (ADR-0173). It is set when the call is read
+	// from the gateway trace. Each string of each item is redacted at fold time.
+	Items []json.RawMessage
+	// Provider is the model provider that the gateway used.
+	Provider string
+	// CacheReadTokens and CacheWriteTokens are the cache token counts of the call.
+	CacheReadTokens  int
+	CacheWriteTokens int
+	// Cost is the cost of the call in US dollars, as a decimal string. It is
+	// empty when the gateway has no price for the model. Empty means unknown. It
+	// is never "0" for an unpriced model.
+	Cost string
 	// RecordedAtUnixNano stamps when the daemon observed this call, carried on
 	// the event rather than read from time.Now() during Reduce, so a later
 	// retention sweep (FlightRecorderRetentionSwept) replays deterministically
@@ -101,6 +115,13 @@ type LlmCallObserved struct {
 	Completion          string
 	CompletionToolCalls []LlmToolCall
 	RecordedAtUnixNano  int64
+	// The fields below come from the gateway trace (gibson#1390). An event of the
+	// older shape decodes with the zero values.
+	Items            []json.RawMessage `json:",omitempty"`
+	Provider         string            `json:",omitempty"`
+	CacheReadTokens  int               `json:",omitempty"`
+	CacheWriteTokens int               `json:",omitempty"`
+	Cost             string            `json:",omitempty"`
 }
 
 func (LlmCallObserved) Kind() string { return "llm_call.observed" }
@@ -147,6 +168,21 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 			if c.RecordedAtUnixNano == 0 && e.RecordedAtUnixNano != 0 {
 				c.RecordedAtUnixNano = e.RecordedAtUnixNano
 			}
+			if len(c.Items) == 0 && len(e.Items) != 0 {
+				c.Items = redactItems(w, e.Items)
+			}
+			if c.Provider == "" {
+				c.Provider = e.Provider
+			}
+			if c.CacheReadTokens == 0 {
+				c.CacheReadTokens = e.CacheReadTokens
+			}
+			if c.CacheWriteTokens == 0 {
+				c.CacheWriteTokens = e.CacheWriteTokens
+			}
+			if c.Cost == "" {
+				c.Cost = e.Cost
+			}
 			q.Close()
 			return
 		}
@@ -162,7 +198,60 @@ func applyLlmCallObserved(w *World, e LlmCallObserved) {
 		Completion:          redactForTenant(w, e.Completion),
 		CompletionToolCalls: redactToolCalls(w, e.CompletionToolCalls),
 		RecordedAtUnixNano:  e.RecordedAtUnixNano,
+		Items:               redactItems(w, e.Items),
+		Provider:            e.Provider,
+		CacheReadTokens:     e.CacheReadTokens,
+		CacheWriteTokens:    e.CacheWriteTokens,
+		Cost:                e.Cost,
 	})
+}
+
+// redactItems applies the tenant's redaction policy to each string inside each
+// Open Responses item. It walks the JSON, so the result stays valid JSON. It
+// returns a fresh copy. An item that is not valid JSON becomes a JSON string
+// with the redacted text, so the transcript never holds invalid JSON.
+func redactItems(w *World, items []json.RawMessage) []json.RawMessage {
+	if len(items) == 0 {
+		return nil
+	}
+	if w == nil || !w.flightRecorderPolicy.Redact {
+		out := make([]json.RawMessage, len(items))
+		for i, it := range items {
+			out[i] = append(json.RawMessage(nil), it...)
+		}
+		return out
+	}
+	out := make([]json.RawMessage, len(items))
+	for i, it := range items {
+		var v any
+		if err := json.Unmarshal(it, &v); err != nil {
+			v = string(it)
+		}
+		raw, err := json.Marshal(redactJSONStrings(w, v))
+		if err != nil {
+			raw = json.RawMessage(`"` + redactedPlaceholder + `"`)
+		}
+		out[i] = raw
+	}
+	return out
+}
+
+func redactJSONStrings(w *World, v any) any {
+	switch x := v.(type) {
+	case string:
+		return redactForTenant(w, x)
+	case []any:
+		for i := range x {
+			x[i] = redactJSONStrings(w, x[i])
+		}
+		return x
+	case map[string]any:
+		for k := range x {
+			x[k] = redactJSONStrings(w, x[k])
+		}
+		return x
+	}
+	return v
 }
 
 // redactMessages applies the tenant's current redaction policy to a
@@ -215,6 +304,11 @@ type LlmCallSnapshot struct {
 	Completion          string
 	CompletionToolCalls []LlmToolCall
 	RecordedAtUnixNano  int64
+	Items               []json.RawMessage `json:",omitempty"`
+	Provider            string            `json:",omitempty"`
+	CacheReadTokens     int               `json:",omitempty"`
+	CacheWriteTokens    int               `json:",omitempty"`
+	Cost                string            `json:",omitempty"`
 }
 
 // TotalTokens is the prompt+completion token count — the per-call cost signal
@@ -238,6 +332,11 @@ func (w *World) LlmCallSnapshot() []LlmCallSnapshot {
 			Completion:          c.Completion,
 			CompletionToolCalls: append([]LlmToolCall(nil), c.CompletionToolCalls...),
 			RecordedAtUnixNano:  c.RecordedAtUnixNano,
+			Items:               append([]json.RawMessage(nil), c.Items...),
+			Provider:            c.Provider,
+			CacheReadTokens:     c.CacheReadTokens,
+			CacheWriteTokens:    c.CacheWriteTokens,
+			Cost:                c.Cost,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CallID < out[j].CallID })
