@@ -362,7 +362,7 @@ func TestVerifiersRefuseUnpinnedTransport(t *testing.T) {
 	if v, err := buildComponentVerifier(discardLogger(), nil, testReplayStore(t)); err == nil {
 		t.Fatalf("buildComponentVerifier = %v, nil — a nil transport must not be defaulted", v)
 	}
-	if v, err := buildCGVerifier(nil); err == nil {
+	if v, err := buildCGVerifier(nil, nil); err == nil {
 		t.Fatalf("buildCGVerifier = %v, nil — a nil transport must not be defaulted", v)
 	}
 }

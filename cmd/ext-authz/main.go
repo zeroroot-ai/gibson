@@ -504,7 +504,7 @@ func buildCGVerifiers(
 	if err != nil {
 		return nil, nil, err
 	}
-	dispatch, err := buildCGVerifier(keysClient)
+	dispatch, err := buildCGVerifier(keysClient, replay)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dispatch capability-grant verifier: %w", err)
 	}
@@ -631,7 +631,7 @@ func daemonMTLSClient(svid x509svid.Source, bundle x509bundle.Source, timeout ti
 //
 // keysClient is the SVID-pinned transport from buildCGKeysClient, which
 // refuses an unset keys URL.
-func buildCGVerifier(keysClient *http.Client) (*cgjwt.Verifier, error) {
+func buildCGVerifier(keysClient *http.Client, replay cgjwt.ReplayStore) (*cgjwt.Verifier, error) {
 	keysURL := os.Getenv("EXT_AUTHZ_CGJWT_KEYS_URL")
 	issuer := os.Getenv("EXT_AUTHZ_CGJWT_ISSUER")
 	if issuer == "" {
@@ -645,6 +645,7 @@ func buildCGVerifier(keysClient *http.Client) (*cgjwt.Verifier, error) {
 		ExpectedAudience: audience,
 		TTL:              ttl,
 		HTTPClient:       keysClient,
+		ReplayStore:      replay,
 	})
 }
 

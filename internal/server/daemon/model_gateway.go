@@ -39,6 +39,17 @@ func (l lazyDaemonMinter) Mint(req capabilitygrant.MintRequest) (string, error) 
 	return tok, nil
 }
 
+func (l lazyDaemonMinter) MintDaemonCall(req capabilitygrant.DaemonCallRequest) (string, error) {
+	if l.d.cgMinter == nil {
+		return "", errUnavailable("the daemon has no signing key, so it cannot sign the grant of a model call")
+	}
+	tok, err := l.d.cgMinter.MintDaemonCall(req)
+	if err != nil {
+		return "", fmt.Errorf("sign the daemon call grant: %w", err)
+	}
+	return tok, nil
+}
+
 // newModelClient builds the model client of the daemon. The gateway URL is
 // required: the daemon calls no model provider, so without the gateway it has no
 // model.

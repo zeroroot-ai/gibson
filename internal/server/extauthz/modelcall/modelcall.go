@@ -31,6 +31,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // The routes of a model call. The route is the method name of a task grant: a
@@ -155,3 +156,46 @@ func IsCallRoute(path string) bool {
 func GrantRoutes() []string {
 	return []string{RouteResponses, RouteEmbeddings}
 }
+
+// The daemon call grant is the credential of a model call that the daemon makes
+// for itself with no mission (embeddings at ingest, dashboard chat, provider
+// test and model list). It is a short token that the daemon signs with the same
+// keys as a task grant. Its own type header and its own claims keep the two
+// kinds apart: ext-authz never reads it as a task grant, and never reads a task
+// grant as it.
+const (
+	// DaemonCallTokenType is the `typ` header of a daemon call grant.
+	DaemonCallTokenType = "daemon-call+jwt"
+	// DaemonCallMaxLifetime is the longest lifetime of a daemon call grant.
+	DaemonCallMaxLifetime = 60 * time.Second
+
+	// ClaimPurpose and ClaimRoute are the signed claims that only a daemon call
+	// grant holds. A daemon call grant holds no mission and no task claim.
+	ClaimPurpose = "purpose"
+	ClaimRoute   = "route"
+)
+
+// The closed set of purposes of a daemon call grant.
+const (
+	PurposeEmbedding     = "embedding"
+	PurposeChat          = "chat"
+	PurposeProviderProbe = "provider_probe"
+	PurposeModelList     = "model_list"
+)
+
+// PurposeRoute returns the one route that a purpose may call, and false for a
+// purpose that is not in the closed set.
+func PurposeRoute(purpose string) (string, bool) {
+	switch purpose {
+	case PurposeEmbedding:
+		return RouteEmbeddings, true
+	case PurposeChat:
+		return RouteResponses, true
+	case PurposeProviderProbe, PurposeModelList:
+		return RouteModels, true
+	}
+	return "", false
+}
+
+// DaemonSubject is the subject of a daemon call for a purpose.
+func DaemonSubject(purpose string) string { return "component:daemon:" + purpose }

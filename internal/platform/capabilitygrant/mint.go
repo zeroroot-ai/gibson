@@ -72,6 +72,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -576,3 +577,55 @@ func buildKeyDescriptor(pub ed25519.PublicKey, kid, principal, tenant, status st
 // Compile-time assert: rand is referenced so the import is valid even
 // if a future refactor stops using it directly. Cheap.
 var _ = rand.Reader
+
+// DaemonCallRequest is the scope of a daemon call grant (gibson#1392).
+type DaemonCallRequest struct {
+	// Tenant is the tenant of the call. Required.
+	Tenant string
+	// Purpose is one of the purposes of modelcall. It decides the one route.
+	Purpose string
+	// Initiator is the person for whom the daemon makes the call, as an FGA user
+	// ("user:<id>"). Required for the purpose chat. It is the FGA subject of the
+	// model access check.
+	Initiator string
+}
+
+// MintDaemonCall signs a daemon call grant. It is valid for 60 seconds, names
+// one route, and holds no mission and no task. It uses the same key and the same
+// kid as a task grant. Its `typ` header is modelcall.DaemonCallTokenType.
+func (m *Minter) MintDaemonCall(req DaemonCallRequest) (string, error) {
+	route, ok := modelcall.PurposeRoute(req.Purpose)
+	if !ok {
+		return "", fmt.Errorf("capabilitygrant: %q is not a purpose of a daemon call grant", req.Purpose)
+	}
+	if req.Tenant == "" {
+		return "", errors.New("capabilitygrant: Tenant required for a daemon call grant")
+	}
+	if req.Purpose == modelcall.PurposeChat && !strings.HasPrefix(req.Initiator, "user:") {
+		return "", errors.New("capabilitygrant: a chat grant needs the initiator, as user:<id>")
+	}
+	now := time.Now().UTC()
+	claims := jwt.MapClaims{
+		"iss":                  m.issuer,
+		"aud":                  m.audience,
+		"sub":                  modelcall.DaemonSubject(req.Purpose),
+		"tenant":               req.Tenant,
+		modelcall.ClaimPurpose: req.Purpose,
+		modelcall.ClaimRoute:   route,
+		"iat":                  now.Unix(),
+		"exp":                  now.Add(modelcall.DaemonCallMaxLifetime).Unix(),
+		"jti":                  uuid.NewString(),
+	}
+	if req.Initiator != "" {
+		claims[InitiatorClaim] = req.Initiator
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	signer := m.keySet().Current
+	tok.Header["kid"] = signer.keyID
+	tok.Header["typ"] = modelcall.DaemonCallTokenType
+	signed, err := tok.SignedString(signer.priv)
+	if err != nil {
+		return "", fmt.Errorf("capabilitygrant: sign the daemon call grant: %w", err)
+	}
+	return signed, nil
+}

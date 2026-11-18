@@ -5,6 +5,7 @@ package capabilitygrant
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -495,4 +496,54 @@ func TestMinter_InitiatorClaim(t *testing.T) {
 	if got := InitiatorOf("not-a-token"); got != "" {
 		t.Errorf("initiator of garbage = %q, want none", got)
 	}
+}
+
+func TestMintDaemonCall(t *testing.T) {
+	m, err := NewMinter(context.Background(), Config{
+		Issuer: "https://test.daemon", Audience: "test-daemon",
+		KeyProvider: kpAdapter{[]byte(strings.Repeat("k", 32))}, KeyID: "k1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := m.MintDaemonCall(DaemonCallRequest{Tenant: "acme", Purpose: "chat", Initiator: "user:u1"})
+	if err != nil {
+		t.Fatalf("MintDaemonCall: %v", err)
+	}
+	parsed, claims := parseForTest(t, tok, m.PublicKey())
+	if parsed.Header["typ"] != "daemon-call+jwt" || parsed.Header["kid"] != "k1" {
+		t.Errorf("header = %v", parsed.Header)
+	}
+	for _, name := range []string{"mission_id", "task_id", "allowed_rpcs"} {
+		if _, found := claims[name]; found {
+			t.Errorf("a daemon call grant holds %s", name)
+		}
+	}
+	if claims["route"] != "/v1/responses" || claims["purpose"] != "chat" || claims["ini"] != "user:u1" ||
+		claims["tenant"] != "acme" || claims["sub"] != "component:daemon:chat" {
+		t.Errorf("claims = %v", claims)
+	}
+	if exp, iat := claims["exp"].(float64), claims["iat"].(float64); exp-iat > 60 {
+		t.Errorf("lifetime = %v seconds", exp-iat)
+	}
+	for name, req := range map[string]DaemonCallRequest{
+		"a purpose outside the set": {Tenant: "acme", Purpose: "admin"},
+		"no tenant":                 {Purpose: "embedding"},
+		"chat with no initiator":    {Tenant: "acme", Purpose: "chat"},
+		"chat with a service":       {Tenant: "acme", Purpose: "chat", Initiator: "service:x"},
+	} {
+		if _, err := m.MintDaemonCall(req); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
+func parseForTest(t *testing.T, tok string, pub ed25519.PublicKey) (*jwt.Token, jwt.MapClaims) {
+	t.Helper()
+	claims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(tok, claims, func(*jwt.Token) (any, error) { return pub, nil })
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return parsed, claims
 }

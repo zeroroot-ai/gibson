@@ -105,6 +105,14 @@ var (
 // buildModelServer wires a server with a task grant verifier and the given FGA.
 func buildModelServer(t *testing.T, fgaClient fga.FGAClient) (*EnvoyAuthzServer, ed25519.PrivateKey) {
 	t.Helper()
+	return buildModelServerWithReplay(t, fgaClient, &memReplay{seen: map[string]bool{}})
+}
+
+// buildModelServerWithReplay is buildModelServer with a given replay store.
+func buildModelServerWithReplay(
+	t *testing.T, fgaClient fga.FGAClient, replay cgjwt.ReplayStore,
+) (*EnvoyAuthzServer, ed25519.PrivateKey) {
+	t.Helper()
 	pub, priv := mustGenEd25519(t)
 	keys := startCGKeyServer(t, pub)
 	verifier, err := cgjwt.NewVerifier(cgjwt.Config{
@@ -112,6 +120,7 @@ func buildModelServer(t *testing.T, fgaClient fga.FGAClient) (*EnvoyAuthzServer,
 		ExpectedIssuer:   grantIssuer,
 		ExpectedAudience: grantAudience,
 		HTTPClient:       keys.Client(),
+		ReplayStore:      replay,
 	})
 	if err != nil {
 		t.Fatal(err)

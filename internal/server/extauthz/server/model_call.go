@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -16,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
@@ -36,6 +38,7 @@ const (
 	modelDenyFGAUnavailable = "fga_unavailable"
 	modelDenyObject         = "object"
 	modelDenyMission        = "mission_not_active"
+	modelDenyDaemonRoute    = "daemon_route_mismatch"
 )
 
 var extauthzModelCallDeniedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -52,6 +55,9 @@ type modelCaller struct {
 	tenant   string
 	mission  string
 	task     string
+	// daemonRoute is the one path that a daemon call grant allows. It is empty for
+	// every other credential.
+	daemonRoute string
 }
 
 // modelName reads the exact model name that the gateway computed from the body.
@@ -114,6 +120,11 @@ func (s *EnvoyAuthzServer) modelCallResponse(
 	caller, deny := s.authenticateModelCaller(ctx, path, httpHeaders)
 	if deny != nil {
 		return deny
+	}
+	if caller.daemonRoute != "" && caller.daemonRoute != path {
+		s.log.WarnContext(ctx, "ext-authz: a daemon call grant is for another route",
+			"path", path, "grant_route", caller.daemonRoute, "subject", caller.subject)
+		return denyModel(modelDenyDaemonRoute, denyForbidden())
 	}
 	if caller.tenant != routeTenant {
 		s.log.WarnContext(ctx, "ext-authz: grant tenant is not the tenant of the route",
@@ -185,6 +196,12 @@ func (s *EnvoyAuthzServer) modelCallResponse(
 func (s *EnvoyAuthzServer) authenticateModelCaller(
 	ctx context.Context, path string, httpHeaders map[string]string,
 ) (modelCaller, *authv3.CheckResponse) {
+	// A daemon call grant has its own type header and is read by its own path
+	// only. A refusal here is final: the token never falls to the task grant
+	// path, and a task grant never reaches this path.
+	if token := extractCapabilityGrant(httpHeaders); s.cgjwt != nil && cgjwt.IsDaemonCallToken(token) {
+		return s.authenticateDaemonCall(ctx, path, token)
+	}
 	if claims, deny, handled := s.verifyTaskGrant(ctx, path, httpHeaders); handled {
 		if deny != nil {
 			return modelCaller{}, deny
@@ -284,4 +301,38 @@ func modelOKResponse(tenant string, c modelCaller) *authv3.CheckResponse {
 func validInitiator(v string) bool {
 	id, ok := strings.CutPrefix(v, "user:")
 	return ok && id != "" && !strings.ContainsAny(id, "# \t\r\n")
+}
+
+// authenticateDaemonCall verifies a daemon call grant. The grant names a tenant,
+// one purpose and one route, and no mission. The mission gate does not apply. The
+// FGA user is the initiator when the grant has one, and the tenant members
+// otherwise. The subject header is the initiator or component:daemon:<purpose>.
+func (s *EnvoyAuthzServer) authenticateDaemonCall(
+	ctx context.Context, path, token string,
+) (modelCaller, *authv3.CheckResponse) {
+	call, err := s.cgjwt.VerifyDaemonCall(ctx, token)
+	switch {
+	case errors.Is(err, cgjwt.ErrReplayStateUnavailable):
+		extauthzCGJWTRejectedTotal.WithLabelValues("daemon_call_replay_state_unavailable").Inc()
+		s.log.ErrorContext(ctx, "ext-authz: replay state unavailable (daemon call grant)", "path", path, "err", err)
+		return modelCaller{}, denyModel("replay_state_unavailable",
+			denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable))
+	case err != nil:
+		extauthzCGJWTRejectedTotal.WithLabelValues("daemon_call_invalid").Inc()
+		s.log.WarnContext(ctx, "ext-authz: daemon call grant invalid", "path", path, "err", err)
+		return modelCaller{}, denyModel("daemon_call_invalid", denyUnauthenticated())
+	}
+	fgaUsers := []string{"tenant:" + call.Tenant + "#member"}
+	subject := call.Subject
+	if call.Initiator != "" {
+		if !validInitiator(call.Initiator) {
+			s.log.WarnContext(ctx, "ext-authz: the initiator claim is not an FGA user", "path", path)
+			return modelCaller{}, denyModel(modelDenyObject, denyForbidden())
+		}
+		fgaUsers = []string{call.Initiator}
+		subject = call.Initiator
+	}
+	return modelCaller{
+		subject: subject, fgaUsers: fgaUsers, tenant: call.Tenant, daemonRoute: call.Route,
+	}, nil
 }
