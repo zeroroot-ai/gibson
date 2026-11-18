@@ -348,6 +348,8 @@ func checkRun(w *World, ev Event) runCheck {
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
 	case AgentToolCallObserved:
 		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
+	case AgentSkillLoaded:
+		return missionRunCheck(w, ev, e.MissionID, e.MissionRunID, runDetached)
 	}
 	return runCheck{}
 }
@@ -407,6 +409,9 @@ func detachEvidence(ev Event) Event {
 		e.MissionID = ""
 		return e
 	case AgentToolCallObserved:
+		e.MissionID = ""
+		return e
+	case AgentSkillLoaded:
 		e.MissionID = ""
 		return e
 	}

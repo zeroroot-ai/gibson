@@ -245,6 +245,10 @@ type HarnessCallbackService struct {
 	// definition. Nil refuses a connector call.
 	missionBlockedTools MissionBlockedToolsSource
 
+	// skillLoadSink receives each successful load of an Agent Skill. nil means
+	// the load is not recorded on the Timeline.
+	skillLoadSink SkillLoadSink
+
 	// agentSkills returns the Agent Skill store. It is nil when no store is wired.
 	agentSkills AgentSkillStoreSource
 

@@ -7,7 +7,10 @@ import (
 	"context"
 	"testing"
 
+	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
+	"github.com/zeroroot-ai/gibson/internal/engine/metatool"
 	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/sdk/auth"
 )
@@ -55,5 +58,24 @@ func TestToolLister_AddsAgentSkillsOnlyWhenTheStoreIsReady(t *testing.T) {
 	s.agentSkills = func() agentskillstore.Store { return stubStore{} }
 	if got := s.toolLister(tools); got == catalog.ToolLister(tools) {
 		t.Error("with a ready store the lister must also list Agent Skills")
+	}
+}
+
+func TestSkillLoadHook_StampsTheRecordAndNeedsASink(t *testing.T) {
+	s := &HarnessCallbackService{}
+	info := &harnesspb.ContextInfo{MissionRunId: "run-7"}
+	if s.skillLoadHook(info) != nil {
+		t.Fatal("with no sink the hook must be nil")
+	}
+	var got SkillLoadRecord
+	var tenant string
+	s.skillLoadSink = func(_ context.Context, tn string, l SkillLoadRecord) { tenant, got = tn, l }
+	s.skillLoadHook(info)(context.Background(), metatool.SkillLoad{
+		Tenant: "acme", Agent: "agent_principal:a1", MissionID: "m1", RunID: "r1",
+		Name: "web-recon", Digest: "sha256:aa",
+	})
+	if tenant != "acme" || got.MissionRunID != "run-7" || got.Digest != "sha256:aa" ||
+		got.Agent != "agent_principal:a1" || got.RecordedAtUnixNano == 0 {
+		t.Errorf("record = %+v, tenant %q", got, tenant)
 	}
 }

@@ -92,6 +92,10 @@ type World struct {
 	// sighted facts.
 	domainPacks map[string]DomainPackState
 
+	// agentSkillLoads holds each load of an Agent Skill (skill_load.go, epic
+	// gibson#1364), in Timeline order.
+	agentSkillLoads []AgentSkillLoad
+
 	// missionLineage holds the lineage of each mission that a component
 	// originated (mission_lineage.go, gibson#734), keyed by mission id.
 	missionLineage map[string]MissionLineage
@@ -507,6 +511,8 @@ func Reduce(w *World, ev Event) {
 		applyNodeBeliefSet(w, e)
 	case MissionOriginated:
 		applyMissionOriginated(w, e)
+	case AgentSkillLoaded:
+		applyAgentSkillLoaded(w, e)
 	case DomainPackEnabled:
 		applyDomainPackEnabled(w, e)
 	case DomainPackDisabled:

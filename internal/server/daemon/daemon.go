@@ -1514,6 +1514,7 @@ func (d *daemonImpl) Start(ctx context.Context) error {
 		// tool.call.* pub/sub metadata with no argument/result text, so they
 		// never became part of the Timeline.
 		d.callback.SetToolCallSink(ingestToolCall(d.brainRegistry))
+		d.callback.SetSkillLoadSink(ingestSkillLoad(d.brainRegistry))
 		d.logger.Info(ctx, "wired callback CallToolProto to the ECS brain World")
 
 		// Wire PlaceBet's belief substrate (ADR-0122, ADR-0129,

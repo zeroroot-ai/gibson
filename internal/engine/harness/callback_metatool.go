@@ -112,7 +112,7 @@ func (s *HarnessCallbackService) callMetaTool(ctx context.Context, req *harnessp
 		s.connectors,
 	)
 	if store := s.agentSkillStore(); store != nil {
-		handler.WithSkills(store, nil)
+		handler.WithSkills(store, s.skillLoadHook(req.GetContext()))
 	}
 	caller := catalogCaller(ctx, state)
 

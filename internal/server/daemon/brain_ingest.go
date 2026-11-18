@@ -417,6 +417,28 @@ func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 	return out
 }
 
+// ingestSkillLoad returns the sink of the loads of Agent Skills (epic
+// gibson#1364): it folds each successful load into the Timeline of the tenant
+// of the call as one AgentSkillLoaded event, with the agent, the mission and
+// the digest.
+func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
+	return func(_ context.Context, tenant string, l harness.SkillLoadRecord) {
+		if reg == nil || l.Digest == "" {
+			return
+		}
+		reg.For(tenant).Submit(brain.AgentSkillLoaded{
+			MissionID:          l.MissionID,
+			MissionRunID:       l.MissionRunID,
+			RunID:              l.RunID,
+			Agent:              l.Agent,
+			Name:               l.Name,
+			Digest:             l.Digest,
+			File:               l.File,
+			RecordedAtUnixNano: l.RecordedAtUnixNano,
+		})
+	}
+}
+
 // ingestToolCall returns the daemon's tool-call capture sink (ADR-0120,
 // gibson#271): it folds a completed CallToolProto invocation into the calling
 // tenant's brain World as an AgentToolCall entity — the flight recorder's

@@ -528,6 +528,18 @@ func (m *CallbackManager) SetToolCallSink(sink ToolCallSink) {
 	}
 }
 
+// SetSkillLoadSink sets the sink that records each load of an Agent Skill on
+// the Timeline (epic gibson#1364). Call after NewCallbackManager, before
+// Start(). Thread-safe.
+func (m *CallbackManager) SetSkillLoadSink(sink SkillLoadSink) {
+	if m.server != nil && m.server.service != nil {
+		m.server.service.mu.Lock()
+		defer m.server.service.mu.Unlock()
+		WithSkillLoadSink(sink)(m.server.service)
+		m.logger.Debug("set Agent Skill load sink on callback service")
+	}
+}
+
 // SetConnectorAudit sets the audit logger that records each connector call of
 // invoke_tool. Call after NewCallbackManager, before Start(). Thread-safe.
 func (m *CallbackManager) SetConnectorAudit(l *audit.AuditLogger) {
