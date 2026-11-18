@@ -66,11 +66,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	art, err := agentskill.Package(filepath.Base(filepath.Clean(*dir)), files)
+	img, digest, err := packFolder(filepath.Base(filepath.Clean(*dir)), files)
 	if err != nil {
 		return fmt.Errorf("package the folder: %w", err)
 	}
-	ref, err := name.NewDigest(fmt.Sprintf("%s@%s", *repo, art.Digest.String()), name.StrictValidation)
+	ref, err := name.NewDigest(fmt.Sprintf("%s@%s", *repo, digest.String()), name.StrictValidation)
 	if err != nil {
 		return fmt.Errorf("build the digest reference: %w", err)
 	}
@@ -78,7 +78,7 @@ func run() error {
 	if user := os.Getenv("REGISTRY_USERNAME"); user != "" {
 		auth = &authn.Basic{Username: user, Password: os.Getenv("REGISTRY_PASSWORD")}
 	}
-	if err := remote.Write(ref, art.Image, remote.WithAuth(auth)); err != nil {
+	if err := remote.Write(ref, img, remote.WithAuth(auth)); err != nil {
 		return fmt.Errorf("push %s: %w", ref.Name(), err)
 	}
 	fmt.Println(ref.Name())
