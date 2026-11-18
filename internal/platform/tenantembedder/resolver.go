@@ -35,7 +35,6 @@ import (
 // satisfied by providerconfig.ProviderConfigStore.
 type Store interface {
 	List(ctx context.Context, tenantID string) ([]*providerconfig.ProviderConfig, error)
-	Resolve(ctx context.Context, tenantID, name string) (*providerconfig.DecryptedConfig, error)
 }
 
 // Factory builds an embedder from a resolved config. Defaults to
@@ -46,24 +45,21 @@ type Factory func(cfg embedder.Config) (embedder.Embedder, error)
 type Resolver struct {
 	store   Store
 	factory Factory
-	// allowPrivateEndpoint mirrors security.allow_private_llm_endpoints: when
-	// true, an operator-run in-cluster/air-gapped embedder endpoint resolving to
-	// a private address is permitted.
-	allowPrivateEndpoint bool
+	// gateway sends each embeddings call to the model gateway (gibson#1393).
+	gateway embedder.Gateway
 
 	mu    sync.RWMutex
 	cache map[string]embedder.Embedder
 }
 
-// NewResolver constructs a Resolver over the given store. allowPrivate is the
-// security.allow_private_llm_endpoints toggle, forwarded to the embedder factory
-// so self-hosted endpoints can opt out of the SSRF guard.
-func NewResolver(store Store, allowPrivate bool) *Resolver {
+// NewResolver constructs a Resolver over the given store. The gateway is the
+// model client of the daemon: the embedder holds no credential and no endpoint.
+func NewResolver(store Store, gateway embedder.Gateway) *Resolver {
 	return &Resolver{
-		store:                store,
-		factory:              embedder.NewFromProvider,
-		allowPrivateEndpoint: allowPrivate,
-		cache:                make(map[string]embedder.Embedder),
+		store:   store,
+		factory: embedder.NewFromProvider,
+		gateway: gateway,
+		cache:   make(map[string]embedder.Embedder),
 	}
 }
 
@@ -123,13 +119,13 @@ func (r *Resolver) build(ctx context.Context, tenantID string) (embedder.Embedde
 		return nil, embedder.ErrNoEmbeddingProvider()
 	}
 
-	dec, err := r.store.Resolve(ctx, tenantID, cfg.Name)
-	if err != nil || dec == nil {
-		return nil, fmt.Errorf("tenantembedder: resolve embedding provider %q: %w", cfg.Name, err)
-	}
-
-	emb, err := r.factory(r.decryptedToEmbedderConfig(dec))
-	// dec.Credentials must not outlive this function.
+	emb, err := r.factory(embedder.Config{
+		Kind:     embedder.Kind(string(cfg.Type)),
+		Model:    cfg.DefaultEmbeddingModel,
+		Tenant:   tenantID,
+		Provider: cfg.Name,
+		Gateway:  r.gateway,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("tenantembedder: build embedder for provider %q: %w", cfg.Name, err)
 	}
@@ -154,29 +150,4 @@ func selectEmbeddingProvider(configs []*providerconfig.ProviderConfig) *provider
 		}
 	}
 	return fallback
-}
-
-// decryptedToEmbedderConfig maps a decrypted provider config to the embedder
-// factory Config. The Kind is the provider type string (the embedder factory
-// normalizes case); the Model is default_embedding_model (NOT default_model, the
-// chat model); api_key/base_url/region map to typed fields, and every other
-// credential key flows through Extra (mirroring tenantprovider's translation).
-func (r *Resolver) decryptedToEmbedderConfig(dec *providerconfig.DecryptedConfig) embedder.Config {
-	extra := make(map[string]string)
-	for k, v := range dec.Credentials {
-		switch k {
-		case "api_key", "base_url", "region":
-		default:
-			extra[k] = v
-		}
-	}
-	return embedder.Config{
-		Kind:                 embedder.Kind(string(dec.Type)),
-		Model:                dec.DefaultEmbeddingModel,
-		APIKey:               dec.Credentials["api_key"],
-		BaseURL:              dec.Credentials["base_url"],
-		Region:               dec.Credentials["region"],
-		Extra:                extra,
-		AllowPrivateEndpoint: r.allowPrivateEndpoint,
-	}
 }

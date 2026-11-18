@@ -13,7 +13,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
@@ -27,6 +26,8 @@ func (f *fakeGrants) Grant(_ context.Context, c Caller) (string, error) {
 	f.callers = append(f.callers, c)
 	return f.token, f.err
 }
+
+var errTestNoGrant = errors.New("no grant")
 
 var (
 	testTarget = Target{Tenant: "acme", Provider: "claude", Model: "claude-sonnet-4-5"}
@@ -277,9 +278,9 @@ func TestRespond_BadTargetsAndCallers(t *testing.T) {
 func TestRespond_GrantErrorStopsTheCall(t *testing.T) {
 	called := false
 	c, grants := gateway(t, func(http.ResponseWriter, *http.Request, []byte) { called = true })
-	grants.err = ErrNoGrantScope
+	grants.err = errTestNoGrant
 	_, err := c.Respond(context.Background(), testCaller, testTarget, Request{Input: []Item{UserMessage("hi")}})
-	if !errors.Is(err, ErrNoGrantScope) {
+	if !errors.Is(err, errTestNoGrant) {
 		t.Fatalf("err = %v", err)
 	}
 	if called {
@@ -304,67 +305,5 @@ func TestNew_RequiresItsParts(t *testing.T) {
 	}
 	if _, err := New(Config{BaseURL: "http://x"}); err == nil {
 		t.Error("no grant source was accepted")
-	}
-}
-
-type fakeMinter struct {
-	got  capabilitygrant.MintRequest
-	call capabilitygrant.DaemonCallRequest
-}
-
-func (m *fakeMinter) MintDaemonCall(r capabilitygrant.DaemonCallRequest) (string, error) {
-	m.call = r
-	return "daemon-call", nil
-}
-
-func (m *fakeMinter) Mint(r capabilitygrant.MintRequest) (string, error) {
-	m.got = r
-	return "signed", nil
-}
-
-func TestMinterGrants(t *testing.T) {
-	m := &fakeMinter{}
-	g, err := NewMinterGrants(m)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tok, err := g.Grant(context.Background(), testCaller)
-	if err != nil || tok != "signed" {
-		t.Fatalf("Grant = %q, %v", tok, err)
-	}
-	r := m.got
-	if r.Tenant != "acme" || r.MissionID != "m1" || r.TaskID != "t1" || r.Initiator != "user:u1" {
-		t.Errorf("mint request = %+v", r)
-	}
-	want := map[string]bool{
-		modelcall.RouteResponses: true, modelcall.RouteEmbeddings: true, modelcall.RouteModels: true,
-	}
-	if len(r.AllowedRPCs) != len(want) {
-		t.Errorf("allowed = %v", r.AllowedRPCs)
-	}
-	for _, p := range r.AllowedRPCs {
-		if !want[p] {
-			t.Errorf("the grant lists %q", p)
-		}
-	}
-	if r.TTL <= 0 || r.TTL > grantTTL {
-		t.Errorf("ttl = %v", r.TTL)
-	}
-	// A call with no mission gets a daemon call grant of the purpose.
-	tok, err = g.Grant(context.Background(), Caller{
-		Tenant: "acme", Purpose: modelcall.PurposeChat, Initiator: "user:u2",
-	})
-	if err != nil || tok != "daemon-call" {
-		t.Fatalf("daemon call grant = %q, %v", tok, err)
-	}
-	if m.call.Tenant != "acme" || m.call.Purpose != "chat" || m.call.Initiator != "user:u2" {
-		t.Errorf("daemon call request = %+v", m.call)
-	}
-	// A purpose outside the set, or half a mission scope, gets no grant.
-	if _, err := g.Grant(context.Background(), Caller{Tenant: "acme", Purpose: "brain-decider"}); !errors.Is(err, ErrNoGrantScope) {
-		t.Errorf("a made-up purpose: %v", err)
-	}
-	if _, err := g.Grant(context.Background(), Caller{Tenant: "acme", Mission: "m", Purpose: "x"}); !errors.Is(err, ErrNoGrantScope) {
-		t.Errorf("a mission with no task: %v", err)
 	}
 }

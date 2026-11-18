@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Elastic-2.0
 // Copyright 2026 Zero Root AI
 
-package modelclient
+// Package mintgrants signs the Capability Grant of each call of the model client.
+// It is a separate package so that the model client imports none of the grant
+// code, which imports the component and graphrag packages.
+package mintgrants
 
 import (
 	"context"
@@ -9,6 +12,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
@@ -37,10 +41,10 @@ type MinterGrants struct {
 	routes []string
 }
 
-// NewMinterGrants returns a grant source over the daemon signer. The grant lists
+// New returns a grant source over the daemon signer. The grant lists
 // the model routes of modelcall.GrantRoutes and the list route, because the
 // daemon lists the models of a provider with its own identity.
-func NewMinterGrants(m Minter) (*MinterGrants, error) {
+func New(m Minter) (*MinterGrants, error) {
 	if m == nil {
 		return nil, errors.New("modelclient: the signer is required")
 	}
@@ -52,7 +56,7 @@ func NewMinterGrants(m Minter) (*MinterGrants, error) {
 // call with no mission gets a daemon call grant: it lasts 60 seconds, names one
 // route, and its purpose is one of the closed set (embedding, chat,
 // provider_probe, model_list). A chat call needs the initiator.
-func (g *MinterGrants) Grant(_ context.Context, c Caller) (string, error) {
+func (g *MinterGrants) Grant(_ context.Context, c modelclient.Caller) (string, error) {
 	if c.Purpose == "" {
 		return "", errors.New("modelclient: the caller has no purpose")
 	}

@@ -13,27 +13,27 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/engine/memory/embedder"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/providerconfig"
 )
 
 // fakeStore satisfies the resolver Store with deterministic, in-memory data.
 type fakeStore struct {
-	configs    []*providerconfig.ProviderConfig
-	listErr    error
-	decrypted  map[string]*providerconfig.DecryptedConfig
-	resolveErr error
+	configs []*providerconfig.ProviderConfig
+	listErr error
+}
+
+// nopGateway is a gateway that is never called: the resolver only builds the
+// embedder.
+type nopGateway struct{}
+
+func (nopGateway) Embeddings(context.Context, modelclient.Caller, modelclient.Target, string, []string) (*modelclient.EmbeddingsResult, error) {
+	return nil, errors.New("no call in this test")
 }
 
 func (f *fakeStore) List(_ context.Context, _ string) ([]*providerconfig.ProviderConfig, error) {
 	return f.configs, f.listErr
-}
-
-func (f *fakeStore) Resolve(_ context.Context, _, name string) (*providerconfig.DecryptedConfig, error) {
-	if f.resolveErr != nil {
-		return nil, f.resolveErr
-	}
-	return f.decrypted[name], nil
 }
 
 func embeddingProvider(name, model string, isDefault, enabled bool) *providerconfig.ProviderConfig {
@@ -68,7 +68,7 @@ func TestResolve_NoEmbeddingProvider_Gates(t *testing.T) {
 	}
 	for name, store := range cases {
 		t.Run(name, func(t *testing.T) {
-			r := NewResolver(store, false)
+			r := NewResolver(store, nopGateway{})
 			emb, err := r.Resolve(context.Background(), "acme")
 			require.Error(t, err)
 			assert.Nil(t, emb)
@@ -84,16 +84,8 @@ func TestResolve_NoEmbeddingProvider_Gates(t *testing.T) {
 // model (#807's per-model dimension).
 func TestResolve_Configured_BuildsAtRightDimension(t *testing.T) {
 	cfg := embeddingProvider("openai", "text-embedding-3-small", true, true)
-	store := &fakeStore{
-		configs: []*providerconfig.ProviderConfig{cfg},
-		decrypted: map[string]*providerconfig.DecryptedConfig{
-			"openai": {
-				ProviderConfig: *cfg,
-				Credentials:    map[string]string{"api_key": "sk-test"},
-			},
-		},
-	}
-	r := NewResolver(store, false)
+	store := &fakeStore{configs: []*providerconfig.ProviderConfig{cfg}}
+	r := NewResolver(store, nopGateway{})
 	emb, err := r.Resolve(context.Background(), "acme")
 	require.NoError(t, err)
 	require.NotNil(t, emb)
@@ -103,7 +95,7 @@ func TestResolve_Configured_BuildsAtRightDimension(t *testing.T) {
 
 // TestResolve_EmptyTenant_Error verifies an empty tenant is rejected.
 func TestResolve_EmptyTenant_Error(t *testing.T) {
-	r := NewResolver(&fakeStore{}, false)
+	r := NewResolver(&fakeStore{}, nopGateway{})
 	_, err := r.Resolve(context.Background(), "")
 	require.Error(t, err)
 }
@@ -112,14 +104,10 @@ func TestResolve_EmptyTenant_Error(t *testing.T) {
 // cached, and that Invalidate forces a rebuild (e.g. after a model switch).
 func TestResolve_CachesAndInvalidates(t *testing.T) {
 	cfg := embeddingProvider("openai", "text-embedding-3-small", true, true)
-	dec := &providerconfig.DecryptedConfig{ProviderConfig: *cfg, Credentials: map[string]string{"api_key": "sk-test"}}
-	store := &fakeStore{
-		configs:   []*providerconfig.ProviderConfig{cfg},
-		decrypted: map[string]*providerconfig.DecryptedConfig{"openai": dec},
-	}
+	store := &fakeStore{configs: []*providerconfig.ProviderConfig{cfg}}
 
 	var builds int
-	r := NewResolver(store, false).WithFactory(func(c embedder.Config) (embedder.Embedder, error) {
+	r := NewResolver(store, nopGateway{}).WithFactory(func(c embedder.Config) (embedder.Embedder, error) {
 		builds++
 		return embedder.NewFromProvider(c)
 	})
@@ -140,7 +128,7 @@ func TestResolve_CachesAndInvalidates(t *testing.T) {
 // configures a provider after an initial gated call resolves on the next call.
 func TestResolve_GateNotCached(t *testing.T) {
 	store := &fakeStore{configs: nil}
-	r := NewResolver(store, false)
+	r := NewResolver(store, nopGateway{})
 
 	_, err := r.Resolve(context.Background(), "acme")
 	require.Error(t, err)
@@ -148,9 +136,6 @@ func TestResolve_GateNotCached(t *testing.T) {
 	// Tenant now configures an embedding provider.
 	cfg := embeddingProvider("openai", "text-embedding-3-small", true, true)
 	store.configs = []*providerconfig.ProviderConfig{cfg}
-	store.decrypted = map[string]*providerconfig.DecryptedConfig{
-		"openai": {ProviderConfig: *cfg, Credentials: map[string]string{"api_key": "sk-test"}},
-	}
 	emb, err := r.Resolve(context.Background(), "acme")
 	require.NoError(t, err)
 	assert.Equal(t, 1536, emb.Dimensions())
@@ -159,7 +144,7 @@ func TestResolve_GateNotCached(t *testing.T) {
 // TestSelectEmbeddingProvider_PrefersDefault verifies provider selection prefers
 // the default embedding provider, else the first enabled embedding-capable one.
 func TestSelectEmbeddingProvider_PrefersDefault(t *testing.T) {
-	first := embeddingProvider("voyage", "voyage-3", false, true)
+	first := embeddingProvider("second", "text-embedding-3-large", false, true)
 	def := embeddingProvider("openai", "text-embedding-3-small", true, true)
 	got := selectEmbeddingProvider([]*providerconfig.ProviderConfig{first, def})
 	require.NotNil(t, got)
@@ -168,5 +153,24 @@ func TestSelectEmbeddingProvider_PrefersDefault(t *testing.T) {
 	// No default → first enabled embedding-capable provider.
 	got = selectEmbeddingProvider([]*providerconfig.ProviderConfig{first})
 	require.NotNil(t, got)
-	assert.Equal(t, "voyage", got.Name)
+	assert.Equal(t, "second", got.Name)
+}
+
+// The embedder gets the tenant, the provider name and the model of the record,
+// and no credential.
+func TestResolve_TheConfigNamesTheRouteAndHoldsNoCredential(t *testing.T) {
+	cfg := embeddingProvider("openai-prod", "text-embedding-3-small", true, true)
+	var got embedder.Config
+	r := NewResolver(&fakeStore{configs: []*providerconfig.ProviderConfig{cfg}}, nopGateway{}).
+		WithFactory(func(c embedder.Config) (embedder.Embedder, error) {
+			got = c
+			return embedder.NewMockEmbedder(), nil
+		})
+	_, err := r.Resolve(context.Background(), "acme")
+	require.NoError(t, err)
+	assert.Equal(t, "acme", got.Tenant)
+	assert.Equal(t, "openai-prod", got.Provider)
+	assert.Equal(t, "text-embedding-3-small", got.Model)
+	assert.Equal(t, embedder.Kind("openai"), got.Kind)
+	assert.NotNil(t, got.Gateway)
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient/mintgrants"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
 )
 
@@ -62,7 +63,7 @@ func (d *daemonImpl) newModelClient() (*modelclient.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	grants, err := modelclient.NewMinterGrants(lazyDaemonMinter{d})
+	grants, err := mintgrants.New(lazyDaemonMinter{d})
 	if err != nil {
 		return nil, fmt.Errorf("model client grants: %w", err)
 	}
