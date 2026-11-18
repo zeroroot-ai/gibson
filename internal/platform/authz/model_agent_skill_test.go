@@ -111,8 +111,8 @@ func TestAgentSkillObject(t *testing.T) {
 		"no name":               {"acme", ""},
 		"userset marker":        {"acme", "recon#member"},
 	} {
-		if got, err := AgentSkillObject(tc[0], tc[1]); !errors.Is(err, ErrInvalidModelAccessObject) {
-			t.Errorf("%s: AgentSkillObject = %q, %v; want ErrInvalidModelAccessObject", name, got, err)
+		if got, err := AgentSkillObject(tc[0], tc[1]); !errors.Is(err, ErrInvalidAgentSkillObject) {
+			t.Errorf("%s: AgentSkillObject = %q, %v; want ErrInvalidAgentSkillObject", name, got, err)
 		}
 	}
 }

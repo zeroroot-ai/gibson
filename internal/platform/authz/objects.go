@@ -129,12 +129,22 @@ func ProviderObject(tenant, name string) (string, error) {
 	return modelAccessObject("provider", tenant, name)
 }
 
+// ErrInvalidAgentSkillObject marks an Agent Skill name, or a tenant, that cannot
+// form an Agent Skill object.
+var ErrInvalidAgentSkillObject = errors.New("invalid Agent Skill object")
+
 // AgentSkillObject returns the FGA object of one Agent Skill of one tenant:
 // "agent_skill:<tenant>/<name>". The name follows the Agent Skills format, so
 // it never holds a separator. The tenant segment MUST come from the
 // authenticated context or from the mission, never from a request.
 func AgentSkillObject(tenant, name string) (string, error) {
-	return modelAccessObject("agent_skill", tenant, name)
+	if err := validateTeamSegment("tenant", tenant); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidAgentSkillObject, err)
+	}
+	if err := validateTeamSegment("name", name); err != nil {
+		return "", fmt.Errorf("%w: %w", ErrInvalidAgentSkillObject, err)
+	}
+	return "agent_skill:" + tenant + TenantQualifiedSep + name, nil
 }
 
 // ModelObject is the model counterpart of ProviderObject.

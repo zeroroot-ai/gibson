@@ -70,7 +70,6 @@ func TestValidate_Refusals(t *testing.T) {
 		{"name mismatch", "web-recon", skillWith("name: other\ndescription: d\n"), errInvalid},
 		{"uppercase name", "Web-Recon", skillWith("name: Web-Recon\ndescription: d\n"), errInvalid},
 		{"double hyphen", "a--b", skillWith("name: a--b\ndescription: d\n"), errInvalid},
-		{"unknown field", "web-recon", skillWith("name: web-recon\ndescription: d\nowner: x\n"), errInvalid},
 		{"duplicate field", "web-recon", skillWith("name: web-recon\nname: web-recon\ndescription: d\n"), errInvalid},
 		{"description over 1024", "web-recon", skillWith("name: web-recon\ndescription: " + tooLong + "\n"), errInvalid},
 		{
@@ -87,6 +86,15 @@ func TestValidate_Refusals(t *testing.T) {
 				t.Fatalf("Validate error = %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// The Agent Skills specification does not say that a reader refuses an unknown
+// field, so Validate ignores it.
+func TestValidate_IgnoresAnUnknownField(t *testing.T) {
+	m, err := agentskill.Validate("web-recon", skillWith("name: web-recon\ndescription: d\nowner: x\n"))
+	if err != nil || m.Name != "web-recon" {
+		t.Fatalf("Validate = %+v, %v, want the manifest", m, err)
 	}
 }
 

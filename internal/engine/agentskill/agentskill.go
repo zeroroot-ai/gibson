@@ -77,7 +77,8 @@ type Manifest struct {
 	Body string
 }
 
-// frontmatter is the YAML schema of SKILL.md. An unknown field is an error.
+// frontmatter is the YAML schema of SKILL.md. The specification does not say
+// that a reader refuses an unknown field, so the decoder ignores it.
 type frontmatter struct {
 	Name          string            `yaml:"name"`
 	Description   string            `yaml:"description"`
@@ -195,7 +196,6 @@ func parseSkillFile(raw []byte) (*Manifest, error) {
 	}
 	var fm frontmatter
 	dec := yaml.NewDecoder(strings.NewReader(head))
-	dec.KnownFields(true)
 	if err := dec.Decode(&fm); err != nil && !errors.Is(err, io.EOF) {
 		return nil, invalidf("the frontmatter of %s is not valid: %v", SkillFile, err)
 	}
