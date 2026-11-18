@@ -83,11 +83,12 @@ func (s *HarnessCallbackService) agentSkillStore() agentskillstore.Store {
 	return s.agentSkills()
 }
 
-// toolLister returns the lister of the catalog: the tools and, when the store
-// is ready, the Agent Skills of the tenant.
+// toolLister returns the lister of the catalog: the Agent Skills of the tenant,
+// when the store is ready, and then the tools. The Agent Skills come first, so
+// the default limit of a search does not hide them behind a large tool catalog.
 func (s *HarnessCallbackService) toolLister(tools catalog.ToolLister) catalog.ToolLister {
 	if store := s.agentSkillStore(); store != nil {
-		return catalog.CombineListers(tools, agentskillstore.ToolLister{Store: store})
+		return catalog.CombineListers(agentskillstore.ToolLister{Store: store}, tools)
 	}
 	return tools
 }

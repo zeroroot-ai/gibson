@@ -104,3 +104,27 @@ func TestHideBlockedSkills_HidesOnlyADeniedAgentSkill(t *testing.T) {
 		t.Error("a denied tool is refused at the call, and is not hidden here")
 	}
 }
+
+type oneSkillStore struct{ agentskillstore.Store }
+
+func (oneSkillStore) List(context.Context, string, string, bool) ([]agentskillstore.Entry, error) {
+	return []agentskillstore.Entry{{Name: "web-recon", Description: "d"}}, nil
+}
+
+type oneToolLister struct{}
+
+func (oneToolLister) ListTools(context.Context, string) ([]catalog.ToolEntry, error) {
+	return []catalog.ToolEntry{{Source: toolid.SourceNative, Tool: "nmap"}}, nil
+}
+
+// An Agent Skill comes before a tool, so a limit of one returns the Agent Skill.
+func TestToolLister_ListsAgentSkillsBeforeTools(t *testing.T) {
+	s := &HarnessCallbackService{agentSkills: func() agentskillstore.Store { return oneSkillStore{} }}
+	got, err := s.toolLister(oneToolLister{}).ListTools(context.Background(), "acme")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("ListTools = %+v, %v", got, err)
+	}
+	if got[0].Source != toolid.SourceSkill || got[1].Source != toolid.SourceNative {
+		t.Errorf("order = %v then %v, want skill then native", got[0].Source, got[1].Source)
+	}
+}
