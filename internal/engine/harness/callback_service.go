@@ -17,7 +17,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
-	findingpkg "github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/engine/graphrag/ingest"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/middleware"
 	"github.com/zeroroot-ai/gibson/internal/engine/harness/sandboxed"
@@ -35,7 +34,6 @@ import (
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
-	sdkfinding "github.com/zeroroot-ai/sdk/finding"
 	sdkgraphrag "github.com/zeroroot-ai/sdk/graphrag"
 	"github.com/zeroroot-ai/sdk/protoresolver"
 	"github.com/zeroroot-ai/sdk/schema"
@@ -2628,9 +2626,8 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 
 	s.logger.Debug("ValidateFinding called")
 
-	// Convert proto finding to SDK finding
-	finding := protoFindingToSDKFinding(req.Finding)
-	if finding == nil {
+	// Use the one conversion of a proto finding, the one that SubmitFinding uses.
+	if req.Finding == nil {
 		return &harnesspb.ValidateFindingResponse{
 			Error: &harnesspb.HarnessError{
 				Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
@@ -2638,19 +2635,14 @@ func (s *HarnessCallbackService) ValidateFinding(ctx context.Context, req *harne
 			},
 		}, nil
 	}
+	finding := protoFindingToFinding(req.Finding)
 
 	resp := &harnesspb.ValidateFindingResponse{Valid: true}
 
 	// Validate severity
-	validSeverities := []string{"critical", "high", "medium", "low", "informational"}
-	severityValid := false
-	for _, sev := range validSeverities {
-		if string(finding.Severity) == sev {
-			severityValid = true
-			break
-		}
-	}
-	if !severityValid && finding.Severity != "" {
+	switch finding.Severity {
+	case agent.SeverityCritical, agent.SeverityHigh, agent.SeverityMedium, agent.SeverityLow, agent.SeverityInfo:
+	default:
 		resp.Valid = false
 		resp.Errors = append(resp.Errors, &harnesspb.ValidationError{
 			Field:   "severity",
@@ -2978,97 +2970,6 @@ func mapToTypedValueMap(m map[string]any) map[string]*commonpb.TypedValue {
 		result[k] = anyToTypedValue(v)
 	}
 	return result
-}
-
-// protoFindingToSDKFinding converts a proto Finding to an SDK finding.Finding.
-func protoFindingToSDKFinding(pf *typespb.Finding) *sdkfinding.Finding {
-	if pf == nil {
-		return nil
-	}
-
-	finding := &sdkfinding.Finding{
-		ID:          pf.Id,
-		MissionID:   pf.MissionId,
-		AgentName:   pf.AgentName,
-		Title:       pf.Title,
-		Description: pf.Description,
-		Category:    pf.Category, // Category is now a plain string
-		Subcategory: pf.Subcategory,
-		Severity:    protoSeverityToSDKSeverity(pf.Severity),
-		Confidence:  pf.Confidence,
-		TargetID:    pf.TargetId,
-		Technique:   pf.Technique,
-		Tags:        pf.Tags,
-		Remediation: pf.Remediation,
-		References:  pf.References,
-	}
-
-	// Convert Evidence
-	if len(pf.Evidence) > 0 {
-		finding.Evidence = make([]sdkfinding.Evidence, len(pf.Evidence))
-		for i, ev := range pf.Evidence {
-			finding.Evidence[i] = sdkfinding.Evidence{
-				Type:    findingpkg.EvidenceTypeName(ev.Type),
-				Title:   ev.Title,
-				Content: ev.Content,
-			}
-			// Convert metadata if present
-			if len(ev.Metadata) > 0 {
-				finding.Evidence[i].Metadata = make(map[string]any)
-				for k, v := range ev.Metadata {
-					finding.Evidence[i].Metadata[k] = v
-				}
-			}
-		}
-	}
-
-	// Convert Reproduction steps
-	if len(pf.Reproduction) > 0 {
-		finding.Reproduction = make([]sdkfinding.ReproStep, len(pf.Reproduction))
-		for i, rs := range pf.Reproduction {
-			finding.Reproduction[i] = sdkfinding.ReproStep{
-				Order:       int(rs.Order),
-				Description: rs.Description,
-				Input:       rs.Input,
-				Output:      rs.Output,
-			}
-		}
-	}
-
-	// Convert CVSS score
-	if pf.CvssScore > 0 {
-		finding.CVSSScore = &pf.CvssScore
-	}
-
-	finding.RiskScore = pf.RiskScore
-
-	// Convert timestamps
-	if pf.CreatedAt > 0 {
-		finding.CreatedAt = time.Unix(0, pf.CreatedAt*int64(time.Millisecond))
-	}
-	if pf.UpdatedAt > 0 {
-		finding.UpdatedAt = time.Unix(0, pf.UpdatedAt*int64(time.Millisecond))
-	}
-
-	return finding
-}
-
-// protoSeverityToSDKSeverity converts a proto FindingSeverity to an SDK Severity.
-func protoSeverityToSDKSeverity(severity typespb.FindingSeverity) sdkfinding.Severity {
-	switch severity {
-	case typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL:
-		return sdkfinding.SeverityCritical
-	case typespb.FindingSeverity_FINDING_SEVERITY_HIGH:
-		return sdkfinding.SeverityHigh
-	case typespb.FindingSeverity_FINDING_SEVERITY_MEDIUM:
-		return sdkfinding.SeverityMedium
-	case typespb.FindingSeverity_FINDING_SEVERITY_LOW:
-		return sdkfinding.SeverityLow
-	case typespb.FindingSeverity_FINDING_SEVERITY_INFO:
-		return sdkfinding.SeverityInfo
-	default:
-		return sdkfinding.SeverityInfo
-	}
 }
 
 // protoFindingToFinding converts a proto Finding to an internal agent.Finding.

@@ -266,3 +266,26 @@ func TestProofAndFindingHoldTheSameEvidenceForOneToolCall(t *testing.T) {
 		"proof item %v differs from finding item %v", engine.captured[0], findingHarness.submitted[0].Evidence[0])
 	assert.Equal(t, `{"status_code":200,"body":"admin panel"}`, engine.captured[0].GetContent())
 }
+
+func TestValidateFinding_UsesTheOneConversion(t *testing.T) {
+	svc := newSubmitFindingService(t, &submitFindingHarness{}, nil)
+	ctx := context.Background()
+
+	for _, sev := range []typespb.FindingSeverity{
+		typespb.FindingSeverity_FINDING_SEVERITY_CRITICAL, typespb.FindingSeverity_FINDING_SEVERITY_INFO,
+	} {
+		resp, err := svc.ValidateFinding(ctx, &harnesspb.ValidateFindingRequest{
+			Finding: &typespb.Finding{Title: "x", Severity: sev},
+		})
+		require.NoError(t, err)
+		assert.True(t, resp.GetValid(), "severity %s", sev)
+	}
+
+	resp, err := svc.ValidateFinding(ctx, &harnesspb.ValidateFindingRequest{Finding: &typespb.Finding{}})
+	require.NoError(t, err)
+	assert.False(t, resp.GetValid(), "a finding with no title is not valid")
+
+	resp, err = svc.ValidateFinding(ctx, &harnesspb.ValidateFindingRequest{})
+	require.NoError(t, err)
+	assert.NotNil(t, resp.GetError())
+}
