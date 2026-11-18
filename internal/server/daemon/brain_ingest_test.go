@@ -388,13 +388,20 @@ func TestIngestSkillLoad_FeedsTheTimeline(t *testing.T) {
 	reg := brain.NewRegistry(ctx, braintest.StoreFactory())
 	sink := ingestSkillLoad(reg)
 
-	sink(ctx, "acme", harness.SkillLoadRecord{
+	err := sink(ctx, "acme", harness.SkillLoadRecord{
 		MissionID: "m1", RunID: "r1", Agent: "agent_principal:a1", Name: "web-recon",
 		Digest: "sha256:aa", RecordedAtUnixNano: 5,
 	})
-	// An empty digest is not a load.
-	sink(ctx, "acme", harness.SkillLoadRecord{MissionID: "m1", Name: "web-recon"})
-	ingestSkillLoad(nil)(ctx, "acme", harness.SkillLoadRecord{Digest: "sha256:aa"})
+	if err != nil {
+		t.Fatalf("sink: %v", err)
+	}
+	// An empty digest is not a load, and a missing Timeline refuses the load.
+	if err := sink(ctx, "acme", harness.SkillLoadRecord{MissionID: "m1", Name: "web-recon"}); err == nil {
+		t.Error("a load with no digest must be refused")
+	}
+	if err := ingestSkillLoad(nil)(ctx, "acme", harness.SkillLoadRecord{Digest: "sha256:aa"}); err == nil {
+		t.Error("a load with no Timeline must be refused")
+	}
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -47,7 +48,7 @@ type noEntries struct{}
 func (noEntries) ListTools(context.Context, string) ([]catalog.ToolEntry, error) { return nil, nil }
 
 func TestToolLister_AddsAgentSkillsOnlyWhenTheStoreIsReady(t *testing.T) {
-	s := &HarnessCallbackService{}
+	s := &HarnessCallbackService{agentSkills: noAgentSkillStore}
 	tools := noEntries{}
 	if got := s.toolLister(tools); got != catalog.ToolLister(tools) {
 		t.Error("with no store wired the lister must be the tool lister")
@@ -63,18 +64,22 @@ func TestToolLister_AddsAgentSkillsOnlyWhenTheStoreIsReady(t *testing.T) {
 }
 
 func TestSkillLoadHook_StampsTheRecordAndNeedsASink(t *testing.T) {
-	s := &HarnessCallbackService{}
+	s := &HarnessCallbackService{skillLoadSink: noSkillLoadSink}
 	info := &harnesspb.ContextInfo{MissionRunId: "run-7"}
-	if s.skillLoadHook(info) != nil {
-		t.Fatal("with no sink the hook must be nil")
+	load := metatool.SkillLoad{
+		Tenant: "acme", Agent: "agent_principal:a1", MissionID: "m1", RunID: "r1",
+		Name: "web-recon", Digest: "sha256:aa",
+	}
+	// The default sink refuses the load, so a daemon that records no load serves none.
+	if err := s.skillLoadHook(info)(context.Background(), load); !errors.Is(err, ErrNoSkillLoadSink) {
+		t.Fatalf("default sink error = %v, want ErrNoSkillLoadSink", err)
 	}
 	var got SkillLoadRecord
 	var tenant string
-	s.skillLoadSink = func(_ context.Context, tn string, l SkillLoadRecord) { tenant, got = tn, l }
-	s.skillLoadHook(info)(context.Background(), metatool.SkillLoad{
-		Tenant: "acme", Agent: "agent_principal:a1", MissionID: "m1", RunID: "r1",
-		Name: "web-recon", Digest: "sha256:aa",
-	})
+	s.skillLoadSink = func(_ context.Context, tn string, l SkillLoadRecord) error { tenant, got = tn, l; return nil }
+	if err := s.skillLoadHook(info)(context.Background(), load); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
 	if tenant != "acme" || got.MissionRunID != "run-7" || got.Digest != "sha256:aa" ||
 		got.Agent != "agent_principal:a1" || got.RecordedAtUnixNano == 0 {
 		t.Errorf("record = %+v, tenant %q", got, tenant)

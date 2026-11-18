@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -43,10 +44,14 @@ type SkillLoadRecord struct {
 	RecordedAtUnixNano int64
 }
 
+// ErrNoSkillLoadSink is the answer of a daemon that wired no sink for the loads
+// of Agent Skills. A load then fails, because no load goes without its record.
+var ErrNoSkillLoadSink = errors.New("harness: this daemon records no Agent Skill loads")
+
 // SkillLoadSink receives each successful load. The daemon wires it to the
-// Timeline of the tenant. A refused load never reaches it. When unset, the
-// load is not recorded on the Timeline.
-type SkillLoadSink func(ctx context.Context, tenant string, load SkillLoadRecord)
+// Timeline of the tenant. When it returns an error, the load is refused and the
+// agent gets nothing.
+type SkillLoadSink func(ctx context.Context, tenant string, load SkillLoadRecord) error
 
 // WithSkillLoadSink sets the sink of the loads of Agent Skills.
 func WithSkillLoadSink(sink SkillLoadSink) CallbackServiceOption {
@@ -55,25 +60,26 @@ func WithSkillLoadSink(sink SkillLoadSink) CallbackServiceOption {
 	}
 }
 
+// noSkillLoadSink is the default sink. It refuses each load.
+func noSkillLoadSink(context.Context, string, SkillLoadRecord) error { return ErrNoSkillLoadSink }
+
+// noAgentSkillStore is the default source of the store. A daemon with no data
+// plane serves no Agent Skill.
+func noAgentSkillStore() agentskillstore.Store { return nil }
+
 // skillLoadHook returns the function that metatool calls after a successful
 // load. It stamps the time here, so the Timeline event carries it.
-func (s *HarnessCallbackService) skillLoadHook(info *harnesspb.ContextInfo) func(context.Context, metatool.SkillLoad) {
-	if s.skillLoadSink == nil {
-		return nil
-	}
-	return func(ctx context.Context, l metatool.SkillLoad) {
-		s.skillLoadSink(ctx, l.Tenant, SkillLoadRecord{
+func (s *HarnessCallbackService) skillLoadHook(info *harnesspb.ContextInfo) func(context.Context, metatool.SkillLoad) error {
+	return func(ctx context.Context, l metatool.SkillLoad) error {
+		return s.skillLoadSink(ctx, l.Tenant, SkillLoadRecord{
 			MissionID: l.MissionID, MissionRunID: info.GetMissionRunId(), RunID: l.RunID, Agent: l.Agent,
 			Name: l.Name, Digest: l.Digest, File: l.File, RecordedAtUnixNano: time.Now().UnixNano(),
 		})
 	}
 }
 
-// agentSkillStore returns the store, or nil when none is wired or ready.
+// agentSkillStore returns the store, or nil when the daemon serves no Agent Skill.
 func (s *HarnessCallbackService) agentSkillStore() agentskillstore.Store {
-	if s.agentSkills == nil {
-		return nil
-	}
 	return s.agentSkills()
 }
 

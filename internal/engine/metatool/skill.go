@@ -43,9 +43,10 @@ type SkillLoad struct {
 }
 
 // WithSkills sets the store that serves a skill: id, and the function that
-// receives each successful load. It returns h. A Handler with no store refuses
-// a skill: id.
-func (h *Handler) WithSkills(store SkillStore, onLoad func(ctx context.Context, load SkillLoad)) *Handler {
+// records each load. It returns h. A Handler with no store or no recorder
+// refuses a skill: id. When the recorder fails, the load fails and the agent
+// gets no content, because no load goes without its record.
+func (h *Handler) WithSkills(store SkillStore, onLoad func(ctx context.Context, load SkillLoad) error) *Handler {
 	h.skills = store
 	h.onSkillLoad = onLoad
 	return h
@@ -85,7 +86,7 @@ type SkillFileResult struct {
 // the first load, so a new publish does not change what the mission loads. The
 // args field "file" names one file inside the folder.
 func (h *Handler) loadSkill(ctx context.Context, c Call, tid toolid.ID) (any, error) {
-	if h.skills == nil {
+	if h.skills == nil || h.onSkillLoad == nil {
 		return nil, errors.New("metatool: Agent Skills are not configured")
 	}
 	if _, err := h.Authorize(ctx, c.Caller, tid.Canonical()); err != nil {
@@ -137,8 +138,8 @@ func (h *Handler) loadSkill(ctx context.Context, c Call, tid toolid.ID) (any, er
 		}
 		result = res
 	}
-	if h.onSkillLoad != nil {
-		h.onSkillLoad(ctx, load)
+	if err := h.onSkillLoad(ctx, load); err != nil {
+		return nil, fmt.Errorf("metatool: record the load of %q: %w", tid.Canonical(), err)
 	}
 	return result, nil
 }

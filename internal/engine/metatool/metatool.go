@@ -69,7 +69,7 @@ type Handler struct {
 
 	// skills and onSkillLoad serve a skill: id. See WithSkills.
 	skills      SkillStore
-	onSkillLoad func(ctx context.Context, load SkillLoad)
+	onSkillLoad func(ctx context.Context, load SkillLoad) error
 }
 
 // NewHandler constructs a Handler. Any collaborator may be nil; the dependent

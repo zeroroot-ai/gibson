@@ -10,6 +10,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -422,9 +423,9 @@ func toBrainToolCalls(calls []api.LLMToolCall) []brain.LlmToolCall {
 // of the call as one AgentSkillLoaded event, with the agent, the mission and
 // the digest.
 func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
-	return func(_ context.Context, tenant string, l harness.SkillLoadRecord) {
+	return func(_ context.Context, tenant string, l harness.SkillLoadRecord) error {
 		if reg == nil || l.Digest == "" {
-			return
+			return errors.New("daemon: the load of an Agent Skill has no Timeline or no digest")
 		}
 		reg.For(tenant).Submit(brain.AgentSkillLoaded{
 			MissionID:          l.MissionID,
@@ -436,6 +437,7 @@ func ingestSkillLoad(reg *brain.Registry) harness.SkillLoadSink {
 			File:               l.File,
 			RecordedAtUnixNano: l.RecordedAtUnixNano,
 		})
+		return nil
 	}
 }
 

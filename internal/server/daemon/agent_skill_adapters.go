@@ -34,7 +34,8 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 	pull := func(ctx context.Context, reference, folderName string) (*agentskill.Pulled, error) {
 		return agentskill.Pull(ctx, reference, folderName, keychain)
 	}
-	svc, err := api.NewAgentSkillService(agentskillstore.NewPostgresStore(d.pool), pull, d.authorizer)
+	d.agentSkills = agentskillstore.NewPostgresStore(d.pool)
+	svc, err := api.NewAgentSkillService(d.agentSkills, pull, d.authorizer)
 	if err != nil {
 		return fmt.Errorf("daemon: AgentSkillService: %w", err)
 	}
@@ -43,12 +44,9 @@ func (d *daemonImpl) registerAgentSkill(ctx context.Context, srv *grpc.Server) e
 	return nil
 }
 
-// agentSkillStore returns the Agent Skill store over the per-tenant data pool,
-// or nil while the pool is not built. The harness callback service reads it for
-// each call, because the pool is built after its options are assembled.
+// agentSkillStore returns the Agent Skill store that registerAgentSkill built. It
+// is nil until then. The harness callback service reads it for each call,
+// because its options are assembled before the services are registered.
 func (d *daemonImpl) agentSkillStore() agentskillstore.Store {
-	if d.pool == nil {
-		return nil
-	}
-	return agentskillstore.NewPostgresStore(d.pool)
+	return d.agentSkills
 }

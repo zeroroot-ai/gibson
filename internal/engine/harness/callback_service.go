@@ -653,6 +653,10 @@ func NewHarnessCallbackService(logger *slog.Logger, opts ...CallbackServiceOptio
 		turnGrants:    noBankSurface{},
 		memberEvents:  noBankSurface{},
 		memberControl: NewMemberControl(),
+		// The Agent Skill seams are never nil. A daemon that serves no Agent Skill
+		// offers none, and a load with no sink fails.
+		agentSkills:   noAgentSkillStore,
+		skillLoadSink: noSkillLoadSink,
 	}
 
 	for _, opt := range opts {
@@ -696,6 +700,8 @@ func NewHarnessCallbackServiceWithRegistry(logger *slog.Logger, registry *Callba
 		turnGrants:       noBankSurface{},
 		memberEvents:     noBankSurface{},
 		memberControl:    NewMemberControl(),
+		agentSkills:      noAgentSkillStore,
+		skillLoadSink:    noSkillLoadSink,
 	}
 
 	for _, opt := range opts {

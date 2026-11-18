@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/reconciler"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/audit"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/budget"
@@ -451,6 +452,9 @@ type daemonImpl struct {
 	// Initialized after the keyProvider is resolved during Start().
 	// Shutdown via pool.Close() in stopServices().
 	pool datapool.Pool
+
+	// agentSkills is the Agent Skill store. registerAgentSkill sets it.
+	agentSkills agentskillstore.Store
 
 	// graphBus is the in-process per-tenant graph-update bus.
 	// Created during buildGRPCServer and shared between graphServer (for

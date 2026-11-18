@@ -44,6 +44,8 @@ func (f *fakeSkills) ReadFile(_ context.Context, _, _, digest, path string) ([]b
 	return []byte("guide"), nil
 }
 
+func noRecord(context.Context, SkillLoad) error { return nil }
+
 var skillCaller = catalog.Caller{
 	Subject: "user:alice", Tenant: "acme", Agent: "agent_principal:a1", Mission: "m1",
 }
@@ -60,7 +62,7 @@ func TestCall_SkillReturnsTheBodyByDigest(t *testing.T) {
 	store := &fakeSkills{digest: "sha256:aa", allowed: []string{"native:nmap"}}
 	var loads []SkillLoad
 	h := NewHandler(nil, allowAll("skill:web-recon"), nil).
-		WithSkills(store, func(_ context.Context, l SkillLoad) { loads = append(loads, l) })
+		WithSkills(store, func(_ context.Context, l SkillLoad) error { loads = append(loads, l); return nil })
 
 	got, err := h.Call(context.Background(), skillCall(obs, nil, MissionPolicy{}))
 	if err != nil {
@@ -94,7 +96,7 @@ func TestCall_SkillReturnsTheBodyByDigest(t *testing.T) {
 func TestCall_SkillAllowedToolsAddNoTool(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa", allowed: []string{"mcp:gitlab:delete_project"}}
-	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, nil)
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, noRecord)
 	if _, err := h.Call(context.Background(), skillCall(obs, nil, MissionPolicy{})); err != nil {
 		t.Fatalf("Call: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestCall_SkillRefusedWithNoGrant(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa"}
 	var loads int
-	h := NewHandler(nil, allowAll(), nil).WithSkills(store, func(context.Context, SkillLoad) { loads++ })
+	h := NewHandler(nil, allowAll(), nil).WithSkills(store, func(context.Context, SkillLoad) error { loads++; return nil })
 	_, err := h.Call(context.Background(), skillCall(obs, nil, MissionPolicy{}))
 	if !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("err = %v, want ErrUnauthorized", err)
@@ -125,7 +127,7 @@ func TestCall_SkillRefusedWithNoGrant(t *testing.T) {
 func TestCall_SkillRefusedWhenTheMissionBlocksIt(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa"}
-	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, nil)
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, noRecord)
 	_, err := h.Call(context.Background(), skillCall(obs, nil, MissionPolicy{Blocked: []string{"skill:web-recon"}}))
 	if !errors.Is(err, ErrBlocked) {
 		t.Fatalf("err = %v, want ErrBlocked", err)
@@ -138,7 +140,7 @@ func TestCall_SkillRefusedWhenTheMissionBlocksIt(t *testing.T) {
 func TestCall_SkillFileArgument(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa"}
-	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, nil)
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, noRecord)
 
 	got, err := h.Call(context.Background(), skillCall(obs, map[string]any{"file": "references/a.md"}, MissionPolicy{}))
 	if err != nil {
@@ -176,7 +178,7 @@ func TestCall_SkillFileArgument(t *testing.T) {
 func TestCall_SkillNeedsAMissionAndAStore(t *testing.T) {
 	obs := &seqObserver{}
 	store := &fakeSkills{digest: "sha256:aa"}
-	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, nil)
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, noRecord)
 	c := skillCall(obs, nil, MissionPolicy{})
 	c.Caller.Mission = ""
 	if _, err := h.Call(context.Background(), c); !errors.Is(err, ErrSkillNeedsMission) {
@@ -185,5 +187,23 @@ func TestCall_SkillNeedsAMissionAndAStore(t *testing.T) {
 	bare := NewHandler(nil, allowAll("skill:web-recon"), nil)
 	if _, err := bare.Call(context.Background(), skillCall(obs, nil, MissionPolicy{})); err == nil {
 		t.Error("a handler with no store must refuse a skill: id")
+	}
+}
+
+// No load goes without its record. When the record fails, or no recorder is set,
+// the agent gets no content.
+func TestCall_SkillRefusedWhenTheLoadCannotBeRecorded(t *testing.T) {
+	obs := &seqObserver{}
+	store := &fakeSkills{digest: "sha256:aa"}
+	boom := errors.New("timeline down")
+	h := NewHandler(nil, allowAll("skill:web-recon"), nil).
+		WithSkills(store, func(context.Context, SkillLoad) error { return boom })
+	got, err := h.Call(context.Background(), skillCall(obs, nil, MissionPolicy{}))
+	if !errors.Is(err, boom) || got != nil {
+		t.Fatalf("Call = %#v, %v, want no content and the recorder error", got, err)
+	}
+	none := NewHandler(nil, allowAll("skill:web-recon"), nil).WithSkills(store, nil)
+	if _, err := none.Call(context.Background(), skillCall(obs, nil, MissionPolicy{})); err == nil {
+		t.Error("a handler with no recorder must refuse a skill: id")
 	}
 }
