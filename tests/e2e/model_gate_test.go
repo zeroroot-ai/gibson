@@ -13,24 +13,34 @@
 // administrator grants it again, the mission gets a model again.
 //
 // The parts:
-//   - The tenant's provider is the deterministic e2e mock (the fixture provider
-//     type, the fixture provider type), configured through the ProviderService
-//     RPC like any provider. The tenant's slot manager serves it, behind the
-//     tenant's model gate.
+//   - The tenant's provider is a plain "openai" provider whose base URL is the
+//     mock provider of tests/fixtures/mockprovider, configured through the
+//     ProviderService RPC like any provider. The model gateway routes to it, and
+//     ext-authz decides each call. The mock answers on POST /v1/responses with
+//     the fixed reply of the mock (ReplyText).
 //   - The agent of the mission node is served by this suite: it registers as
-//     an outside agent, polls the node's work, calls ComponentService.Complete
-//     with the work id, and submits what the completion returned. That is the
-//     path of an agent served with sdk.ServeAgent.
+//     an outside agent, polls the node's work, calls ComponentService.ResolveModel
+//     with the work id, sends one Open Responses call to the model gateway with
+//     the task grant of the work item, and submits the A2A Task of the run. That
+//     is the path of an agent served with sdk.ServeAgent.
 //   - Revoke and grant go through ModelAccessService RevokeAccess and
 //     GrantAccess, the RPCs of the dashboard Model Access page. The runner is
 //     a member and an admin of the tenant (the fixture seed).
 //
 // It needs GIBSON_TEST_FIXTURES_ENABLED=true and DAEMON_GRPC_ADDR, like the
-// other in-cluster suites. exit-test-model-gate.yml runs it.
+// other in-cluster suites. It also needs GIBSON_E2E_MOCK_PROVIDER_URL, the
+// in-cluster URL of the mock provider (tests/fixtures/mockprovider).
+// exit-test-model-gate.yml runs it.
 package e2e
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -39,42 +49,69 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/zeroroot-ai/gibson/internal/engine/modelclient"
 	tenantv1 "github.com/zeroroot-ai/gibson/internal/server/daemon/api/gibson/tenant/v1"
 	"github.com/zeroroot-ai/gibson/tests/e2e/helpers"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	daemonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/daemon/v1"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
 const (
 	// modelGateTenant is the tenant that the baseline profile provisions.
 	modelGateTenant = "primary"
-	// modelGateProvider is the fixture provider type and its registry name.
-	modelGateProvider = "mock-llm-e2e-test"
+	// modelGateProvider is the name of the provider of the tenant that points
+	// at the mock provider. Its type is a plain openai provider.
+	modelGateProvider = "mock-model-gate"
+	// modelGateMockURLEnv names the variable that holds the in-cluster URL of
+	// the mock provider (tests/fixtures/mockprovider).
+	modelGateMockURLEnv = "GIBSON_E2E_MOCK_PROVIDER_URL"
 	// modelGateUngrantedProvider is the name of a second provider of the
-	// tenant, and modelGateUngrantedType is its type, which is also the name
-	// the gate checks (prov.Name()). The runner revokes the grant of the
-	// tenant on it, so the plain member meets a provider with no grant
-	// (gibson#1257). The host never resolves, and the gate refuses the call
-	// before the provider is used.
+	// tenant, and modelGateUngrantedType is its type. The runner revokes the
+	// grant of the tenant on it, so the plain member meets a provider with no
+	// grant (gibson#1257). The host never resolves, and the gate refuses the
+	// call before the provider is used.
 	modelGateUngrantedProvider = "model-gate-ungranted"
 	modelGateUngrantedType     = "ollama"
-	// modelGateModel is the default model of the mock provider.
+	// modelGateModel is the saved default model of the mock provider. The mock
+	// echoes the model of a request.
 	modelGateModel = "mock-model"
+	// modelGateReply is the text of the reply of the mock provider. It must
+	// equal ReplyText in tests/fixtures/mockprovider/main.go. That package is a
+	// command, so the test cannot import the constant.
+	modelGateReply = "I will run a port scan."
 	// modelGateAgent is the outside agent that this suite serves. The name is
 	// in no catalog, so an unattested registration may take it.
 	modelGateAgent = "e2e-model-probe"
-	// modelGateDenied is the word the model gate puts in each refusal
-	// (DaemonSlotManager.applyModelGate).
-	modelGateDenied = "model_access_denied"
+	// modelGateResolveDenied is the text that the refusal of ResolveModel holds
+	// when the model gate refuses the model of a slot.
+	modelGateResolveDenied = "the model gate refused the model"
+	// modelGateExecuteDenied is the word that the refusal of ExecuteLLM holds
+	// when the gateway refuses the model.
+	modelGateExecuteDenied = "model_access_denied"
 	// modelGateMissionTimeout bounds one mission run.
 	modelGateMissionTimeout = 5 * time.Minute
 )
+
+// mockProviderURL returns the in-cluster URL of the mock provider. The test
+// fails when it is not set.
+func mockProviderURL(t *testing.T) string {
+	t.Helper()
+	u := os.Getenv(modelGateMockURLEnv)
+	if u == "" {
+		t.Fatalf("%s is not set: the model gate test needs the URL of tests/fixtures/mockprovider", modelGateMockURLEnv)
+	}
+	return u
+}
+
+// grantToken is a modelclient.GrantSource that returns the task grant of one
+// work item.
+type grantToken string
+
+func (g grantToken) Grant(context.Context, modelclient.Caller) (string, error) { return string(g), nil }
 
 // probeAgent serves the agent node of the mission as an outside agent.
 type probeAgent struct {
@@ -86,9 +123,10 @@ type probeAgent struct {
 	errs    []string
 }
 
-// serve polls work until ctx ends. For each work item it calls Complete on the
-// primary slot with the work id, and submits the content, or the completion
-// error as the work error.
+// serve polls work until ctx ends. For each work item it resolves the primary
+// slot, sends one call to the model gateway with the task grant of the work
+// item, and submits the A2A Task of the run. A refusal or a failure goes back
+// as the work error.
 func (p *probeAgent) serve(ctx context.Context, t *testing.T) {
 	for ctx.Err() == nil {
 		work, err := p.comp.PollWork(ctx, &componentpb.PollWorkRequest{InstanceId: p.instanceID, TimeoutMs: 5000})
@@ -102,25 +140,22 @@ func (p *probeAgent) serve(ctx context.Context, t *testing.T) {
 		if work.GetWorkId() == "" {
 			continue
 		}
-		resp, cerr := p.comp.Complete(ctx, &componentpb.CompleteRequest{
-			WorkId:   work.GetWorkId(),
-			Slot:     "primary",
-			Messages: []*componentpb.LLMMessage{{Role: "user", Content: "Say the deterministic reply."}},
-		})
+		content, cerr := p.respond(ctx, work)
 		submit := &componentpb.SubmitResultRequest{WorkId: work.GetWorkId()}
 		if cerr != nil {
 			p.mu.Lock()
 			p.errs = append(p.errs, cerr.Error())
 			p.mu.Unlock()
-			submit.Error = &componentpb.ComponentError{Code: "LLM_COMPLETE_FAILED", Message: cerr.Error()}
+			submit.Error = &componentpb.ComponentError{Code: "MODEL_CALL_FAILED", Message: cerr.Error()}
 		} else {
-			content := resp.GetResponse().GetContent()
 			p.mu.Lock()
 			p.replies = append(p.replies, content)
 			p.mu.Unlock()
-			out, merr := protojson.Marshal(&agentpb.ExecuteResponse{
-				Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-			})
+			task := &a2a.Task{
+				ID: a2a.NewTaskID(), ContextID: work.GetWorkId(),
+				Status: a2a.TaskStatus{State: a2a.TaskStateCompleted},
+			}
+			out, merr := json.Marshal(task)
 			if merr != nil {
 				t.Errorf("probe agent: marshal the result: %v", merr)
 				continue
@@ -131,6 +166,37 @@ func (p *probeAgent) serve(ctx context.Context, t *testing.T) {
 			t.Logf("probe agent: SubmitResult(%s): %v", work.GetWorkId(), err)
 		}
 	}
+}
+
+// respond resolves the primary slot of the work item and sends one Open
+// Responses call to the model gateway. It returns the text of the reply.
+func (p *probeAgent) respond(ctx context.Context, work *componentpb.PollWorkResponse) (string, error) {
+	res, err := p.comp.ResolveModel(ctx, &componentpb.ResolveModelRequest{WorkId: work.GetWorkId(), Slot: "primary"})
+	if err != nil {
+		return "", fmt.Errorf("resolve the primary slot: %w", err)
+	}
+	httpClient := &http.Client{Timeout: time.Minute}
+	if pem := res.GetGatewayCaPem(); pem != "" {
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM([]byte(pem)) {
+			return "", fmt.Errorf("the CA of the model gateway holds no certificate")
+		}
+		httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
+	}
+	client, err := modelclient.New(modelclient.Config{
+		BaseURL: res.GetGatewayUrl(), Grants: grantToken(work.GetTaskGrant()), HTTPClient: httpClient,
+	})
+	if err != nil {
+		return "", fmt.Errorf("build the model client: %w", err)
+	}
+	resp, err := client.Respond(ctx,
+		modelclient.Caller{Tenant: modelGateTenant, Task: work.GetWorkId(), Purpose: "e2e-probe"},
+		modelclient.Target{Tenant: modelGateTenant, Provider: res.GetProvider(), Model: res.GetModel()},
+		modelclient.Request{Input: []modelclient.Item{modelclient.UserMessage("Say the deterministic reply.")}})
+	if err != nil {
+		return "", fmt.Errorf("call the model gateway: %w", err)
+	}
+	return resp.OutputText(), nil
 }
 
 // heartbeat keeps the registration alive until ctx ends.
@@ -273,11 +339,12 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 	access := tenantv1.NewModelAccessServiceClient(clients.Conn())
 	comp := componentpb.NewComponentServiceClient(clients.Conn())
 
-	// The tenant's only provider is the deterministic mock. The window is
-	// stated, so the save makes no list call.
+	// The tenant's only provider is a plain openai provider that points at the
+	// mock provider. The window is stated, so the save makes no list call.
 	_, err = providers.CreateProvider(ctx, &tenantv1.CreateProviderRequest{Input: &tenantv1.ProviderConfigInput{
-		Name: modelGateProvider, Type: modelGateProvider, SetAsDefault: true,
-		DefaultModel: "mock-model", DefaultModelContextWindow: 200000,
+		Name: modelGateProvider, Type: "openai", SetAsDefault: true,
+		DefaultModel: modelGateModel, DefaultModelContextWindow: 200000,
+		Credentials: map[string]string{"api_key": "mock-key-e2e-only", "base_url": mockProviderURL(t)},
 	}})
 	if status.Code(err) != codes.AlreadyExists {
 		require.NoError(t, err, "CreateProvider(%s)", modelGateProvider)
@@ -328,8 +395,8 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.Equal(t, "mission_completed", terminal.EventType, "the mission must complete; reason: %s", reason)
 		reply, errText := probe.last()
-		require.Equal(t, helpers.MockProviderDeterministicResponse, reply,
-			"the agent's completion must be served by the mock; last completion error: %s", errText)
+		require.Equal(t, modelGateReply, reply,
+			"the agent's model call must be served by the mock; last error: %s", errText)
 		require.True(t, tenantHoldsProviderGrant(t, ctx, access),
 			"the model came through the default grant of the tenant, which the Model Access page lists")
 	})
@@ -350,10 +417,10 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.NotEqual(t, "mission_completed", terminal.EventType, "a mission with no model grant must not complete")
 		_, errsAfter := probe.counts()
-		require.Greater(t, errsAfter, errsBefore, "the agent's completion must be refused")
+		require.Greater(t, errsAfter, errsBefore, "the agent's slot resolution must be refused")
 		_, errText := probe.last()
-		require.Contains(t, errText, modelGateDenied, "the completion refusal must name the model gate")
-		require.True(t, strings.Contains(reason, modelGateDenied),
+		require.Contains(t, errText, modelGateResolveDenied, "the refusal of the slot must name the model gate")
+		require.True(t, strings.Contains(reason, modelGateResolveDenied),
 			"the mission failure must name the model gate; reason: %s", reason)
 	})
 
@@ -367,9 +434,9 @@ func TestModelGate_DefaultGrantRevokeAndGrantAgain(t *testing.T) {
 		terminal, reason := runProbeMission(t, ctx, clients.Daemon, defID, targetID)
 		require.Equal(t, "mission_completed", terminal.EventType, "the mission must complete again; reason: %s", reason)
 		repliesAfter, _ := probe.counts()
-		require.Greater(t, repliesAfter, repliesBefore, "the agent's completion must be served again")
+		require.Greater(t, repliesAfter, repliesBefore, "the agent's model call must be served again")
 		reply, _ := probe.last()
-		require.Equal(t, helpers.MockProviderDeterministicResponse, reply)
+		require.Equal(t, modelGateReply, reply)
 	})
 
 	// The member job (TestModelGate_PlainMemberGrantPath) runs after this
@@ -412,13 +479,13 @@ func TestModelGate_PlainMemberGrantPath(t *testing.T) {
 	t.Run("a granted provider is allowed", func(t *testing.T) {
 		resp, err := executeLLMOnce(ctx, providers, modelGateProvider, modelGateModel)
 		require.NoError(t, err, "the plain member must get a completion through the default grant")
-		require.Equal(t, helpers.MockProviderDeterministicResponse, resp.GetContent())
+		require.Equal(t, modelGateReply, resp.GetContent())
 	})
 
 	t.Run("a provider with no grant is refused by the model gate", func(t *testing.T) {
 		_, err := executeLLMOnce(ctx, providers, modelGateUngrantedProvider, "ungranted-model")
 		require.Error(t, err, "the plain member must not get a completion on a provider with no grant")
 		require.Equal(t, codes.PermissionDenied, status.Code(err), "the refusal is a denial: %v", err)
-		require.Contains(t, err.Error(), modelGateDenied, "the refusal must name the model gate")
+		require.Contains(t, err.Error(), modelGateExecuteDenied, "the refusal must name the model gate")
 	})
 }

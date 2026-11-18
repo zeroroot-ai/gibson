@@ -17,7 +17,6 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 
 	// The sdk packages that declare a service.
-	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/agentidentity/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	_ "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
