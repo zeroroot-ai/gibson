@@ -28,18 +28,6 @@ spec:
       policy:
         matchExpressions:
         - request.path == "/v1/models" || json(request.body).model.matches("^(?:claude-.*|haiku-4)$")
-    extAuth:
-      backendRef:
-        name: gibson-ext-authz
-        namespace: gibson
-        port: 9001
-      failureMode: FailClosed
-      grpc:
-        contextExtensions:
-          gibson-provider: claude
-          gibson-tenant: acme
-        requestMetadata:
-          gibson: '{"model": json(request.body).model}'
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -61,20 +49,20 @@ spec:
       name: mp-acme-claude
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: claude
       path:
         type: Exact
         value: /v1/responses
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: claude
       path:
@@ -86,10 +74,10 @@ spec:
       name: mp-acme-claude
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: claude
       path:

@@ -4,18 +4,27 @@
 // Package modelcall holds the names that the gateway, ext-authz and the grant
 // minter share for a model call (gibson#1388, ADR-0172).
 //
-// A model call goes through agentgateway to a model provider. Each route of the
-// gateway belongs to one tenant and one provider. The gateway sends these facts
-// to ext-authz in the CheckRequest, and the caller cannot change them:
+// A model call goes through agentgateway to a model provider. ext-authz runs at
+// the Gateway level, before any route, so it knows no route. The facts of the
+// route arrive in two ways, and the caller cannot make either one trusted by
+// itself:
 //
-//   - The tenant and the provider are static values of the route. They arrive
-//     in attributes.context_extensions, under ExtTenant and ExtProvider.
-//     The gateway config sets them with protocol.grpc.context.
+//   - The caller sends two route headers, HeaderRouteTenant and
+//     HeaderRouteProvider. The HTTPRoute of a ModelProvider matches exactly
+//     these headers, so a call can reach the backend of a provider only with the
+//     headers of that provider. ext-authz refuses a call whose tenant header is
+//     not the tenant of the Capability Grant. A caller of tenant A that sends
+//     the header of tenant B is refused. A caller can match only the routes of
+//     its own tenant.
 //   - The exact model name is a CEL result of the request body. It arrives in
 //     attributes.metadata_context.filter_metadata, under the namespace
 //     MetadataNamespace, in the field MetadataModel. The gateway config sets it
 //     with protocol.grpc.metadata and the expression
 //     {"model": json(request.body).model}.
+//
+// A call is a gateway call when the TLS peer of ext-authz has the SPIFFE
+// identity of the gateway. The path then tells the kind: a model path is a model
+// call, and any other path is an A2A call.
 package modelcall
 
 import (
@@ -35,35 +44,24 @@ const (
 	RouteModels = "/v1/models"
 )
 
-// Context extension keys that the gateway route sets with fixed values.
-const (
-	ExtTenant   = "gibson-tenant"
-	ExtProvider = "gibson-provider"
-)
-
-// ExtAgent is the context extension of a route of the agent gateway (A2A). The
-// route sets the name of the agent. A request with ExtAgent or ExtProvider comes
-// from the gateway. Any other request comes from the Edge.
-const ExtAgent = "gibson-agent"
-
-// IsGatewayCall reports whether the context extensions of a check mark a call
-// of the model gateway or of the agent gateway. The gateway config sets the
-// extensions, and a caller cannot.
-func IsGatewayCall(contextExtensions map[string]string) bool {
-	return contextExtensions[ExtProvider] != "" || contextExtensions[ExtAgent] != ""
-}
-
 // The metadata that the gateway route computes from the request body.
 const (
 	MetadataNamespace = "gibson"
 	MetadataModel     = "model"
 )
 
-// HeaderProvider is the route header that names the provider of a tenant. The
-// route of a provider matches it together with HeaderTenant. ext-authz sets
-// HeaderTenant again with the tenant of the grant, so a copy of a caller never
-// passes.
-const HeaderProvider = "x-gibson-provider"
+// ModelExpression is the CEL expression that the install sets in the ext-authz
+// policy of the Gateway, as the metadata of the gRPC check. It reads the exact
+// model name from the request body.
+const ModelExpression = `{"model": json(request.body).model}`
+
+// The route headers. The HTTPRoute of a provider matches them, the model client
+// sends them, and ext-authz reads them as the claimed tenant and provider. They
+// differ from HeaderTenant, which ext-authz sets with the verified tenant.
+const (
+	HeaderRouteTenant   = "x-gibson-route-tenant"
+	HeaderRouteProvider = "x-gibson-route-provider"
+)
 
 // RouteHeader is one header that a call must carry to match the route of a
 // provider.
@@ -75,9 +73,39 @@ type RouteHeader struct{ Name, Value string }
 // the names cannot drift.
 func RouteHeaders(tenant, provider string) []RouteHeader {
 	return []RouteHeader{
-		{Name: HeaderTenant, Value: tenant},
-		{Name: HeaderProvider, Value: provider},
+		{Name: HeaderRouteTenant, Value: tenant},
+		{Name: HeaderRouteProvider, Value: provider},
 	}
+}
+
+// ClaimedRoute reads the claimed tenant and provider from the headers of a
+// request. It returns a reason when a header is missing, empty or repeated. A
+// repeated header arrives as one value with a comma.
+func ClaimedRoute(headers map[string]string) (tenant, provider, reason string) {
+	read := func(name string) (string, string) {
+		v := strings.TrimSpace(headers[name])
+		switch {
+		case v == "":
+			return "", "missing_route_header"
+		case strings.Contains(v, ","):
+			return "", "repeated_route_header"
+		}
+		return v, ""
+	}
+	tenant, reason = read(HeaderRouteTenant)
+	if reason != "" {
+		return "", "", reason
+	}
+	provider, reason = read(HeaderRouteProvider)
+	if reason != "" {
+		return "", "", reason
+	}
+	return tenant, provider, ""
+}
+
+// IsModelPath reports whether path is one of the three model routes.
+func IsModelPath(path string) bool {
+	return IsCallRoute(path) || path == RouteModels
 }
 
 // Headers that ext-authz sets on an allowed model call. ext-authz sets each one

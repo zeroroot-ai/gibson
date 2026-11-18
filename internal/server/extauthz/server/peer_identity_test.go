@@ -76,27 +76,45 @@ func TestPeer_ModelCallNeedsTheGatewayIdentity(t *testing.T) {
 	}
 }
 
-// An A2A call of the agent gateway has the same rule.
-func TestPeer_AnA2ACallNeedsTheGatewayIdentity(t *testing.T) {
+// A non-model path from the gateway is an A2A call. No part of ext-authz serves
+// it yet, so it is refused with its own reason.
+func TestPeer_AnA2APathFromTheGatewayIsRefused(t *testing.T) {
 	t.Parallel()
-	srv, _, _ := buildPeerServer(t, []string{gatewaySVID})
-	req := modelRequest("/a2a/agent", "", "", "", "", nil)
-	req.Attributes.ContextExtensions = map[string]string{modelcall.ExtAgent: "analyst"}
+	srv, grant, _ := buildPeerServer(t, []string{gatewaySVID})
+	before := testutil.ToFloat64(extauthzModelCallDeniedTotal.WithLabelValues(modelDenyA2A))
+	req := modelRequest("/a2a/agent", modelTenant, modelProvider, "", grant, nil)
+	resp, err := srv.Check(peerContext(t, gatewaySVID), req)
+	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+		t.Fatalf("A2A call from the gateway: status = %v, want PermissionDenied", got)
+	}
+	if testutil.ToFloat64(extauthzModelCallDeniedTotal.WithLabelValues(modelDenyA2A)) != before+1 {
+		t.Error("the refusal was not counted with the reason a2a_not_served")
+	}
+}
+
+// The Edge has no model route. A model path from the Edge is refused, also with
+// a good grant, and FGA is not asked.
+func TestPeer_AModelPathFromTheEdgeIsRefused(t *testing.T) {
+	t.Parallel()
+	srv, grant, mock := buildPeerServer(t, []string{gatewaySVID})
+	req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, grant, nil)
 	resp, err := srv.Check(peerContext(t, edgeSVID), req)
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
-		t.Fatalf("A2A call from the Edge: status = %v, want PermissionDenied", got)
+		t.Fatalf("status = %v, want PermissionDenied", got)
+	}
+	if len(mock.questions()) != 0 {
+		t.Error("FGA was asked before the refusal")
 	}
 }
 
 // An Edge route is accepted from the Edge identity only. The gateway identity
-// gets a refusal for it, and so does no peer.
+// never reaches an Edge route: each path of the gateway is a model path or an
+// A2A path.
 func TestPeer_EdgeRouteNeedsTheEdgeIdentity(t *testing.T) {
 	t.Parallel()
 	srv, _, _ := buildPeerServer(t, []string{gatewaySVID})
-	edgeRoute := soleGrantRequest("no-grant") // a call with no gateway extension
+	edgeRoute := soleGrantRequest("no-grant")
 
-	// From the Edge, the peer check passes and the call reaches the credential
-	// check, which refuses the bad grant. That is not a peer refusal.
 	before := peerRefusals(t)
 	if resp, err := srv.Check(peerContext(t, edgeSVID), edgeRoute); err != nil || resp == nil {
 		t.Fatalf("Edge: %v", err)
@@ -104,12 +122,18 @@ func TestPeer_EdgeRouteNeedsTheEdgeIdentity(t *testing.T) {
 	if peerRefusals(t) != before {
 		t.Error("the Edge was refused as a peer")
 	}
-	resp, err := srv.Check(peerContext(t, gatewaySVID), edgeRoute)
+	// A stranger is refused as a peer.
+	resp, err := srv.Check(peerContext(t, "spiffe://example.org/platform/other"), edgeRoute)
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
-		t.Errorf("an Edge route from the gateway: status = %v, want PermissionDenied", got)
+		t.Errorf("a stranger: status = %v, want PermissionDenied", got)
 	}
 	if peerRefusals(t) != before+1 {
 		t.Error("the refusal was not counted as a peer refusal")
+	}
+	// The gateway sends a path that is not a model path: refused as A2A.
+	resp, err = srv.Check(peerContext(t, gatewaySVID), edgeRoute)
+	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+		t.Errorf("an Edge route from the gateway: status = %v, want PermissionDenied", got)
 	}
 }
 
@@ -140,7 +164,7 @@ func TestPeer_OffWithoutAnEdgeIdentity(t *testing.T) {
 
 func peerRefusals(t *testing.T) float64 {
 	t.Helper()
-	return testutil.ToFloat64(extauthzPeerRefusedTotal.WithLabelValues("edge_route_from_other_peer"))
+	return testutil.ToFloat64(extauthzPeerRefusedTotal.WithLabelValues("unknown_peer"))
 }
 
 var _ fga.FGAClient = (*modelFGA)(nil)

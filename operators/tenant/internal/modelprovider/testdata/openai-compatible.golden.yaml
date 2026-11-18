@@ -26,18 +26,6 @@ spec:
     auth:
       secretRef:
         name: mp-acme-vllm-credential
-    extAuth:
-      backendRef:
-        name: gibson-ext-authz
-        namespace: gibson
-        port: 9001
-      failureMode: FailClosed
-      grpc:
-        contextExtensions:
-          gibson-provider: vllm
-          gibson-tenant: acme
-        requestMetadata:
-          gibson: '{"model": json(request.body).model}'
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -59,20 +47,20 @@ spec:
       name: mp-acme-vllm
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: vllm
       path:
         type: Exact
         value: /v1/responses
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: vllm
       path:
@@ -84,10 +72,10 @@ spec:
       name: mp-acme-vllm
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: vllm
       path:

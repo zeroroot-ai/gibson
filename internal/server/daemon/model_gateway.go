@@ -4,7 +4,10 @@
 package daemon
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -15,6 +18,11 @@ import (
 // EnvModelGatewayURL names the environment variable that holds the URL of the
 // model gateway. The daemon sends each model call there (gibson#1392).
 const EnvModelGatewayURL = "GIBSON_MODEL_GATEWAY_URL"
+
+// EnvModelGatewayCAFile names the environment variable that holds the path of
+// the CA bundle (PEM) that signs the TLS certificate of the model gateway. It is
+// the component CA. The daemon trusts only this bundle for the gateway.
+const EnvModelGatewayCAFile = "GIBSON_MODEL_GATEWAY_CA_FILE"
 
 // lazyDaemonMinter signs with the Minter of the daemon. The Minter is built
 // later in Start than the clients that need it, so each call reads it.
@@ -39,13 +47,39 @@ func (d *daemonImpl) newModelClient() (*modelclient.Client, error) {
 	if url == "" {
 		return nil, fmt.Errorf("%s is not set: the daemon sends each model call to the model gateway", EnvModelGatewayURL)
 	}
+	httpClient, err := modelGatewayHTTPClient(os.Getenv(EnvModelGatewayCAFile))
+	if err != nil {
+		return nil, err
+	}
 	grants, err := modelclient.NewMinterGrants(lazyDaemonMinter{d})
 	if err != nil {
 		return nil, fmt.Errorf("model client grants: %w", err)
 	}
-	c, err := modelclient.New(modelclient.Config{BaseURL: url, Grants: grants})
+	c, err := modelclient.New(modelclient.Config{BaseURL: url, Grants: grants, HTTPClient: httpClient})
 	if err != nil {
 		return nil, fmt.Errorf("model client: %w", err)
 	}
 	return c, nil
+}
+
+// modelGatewayHTTPClient returns an HTTP client that trusts the CA bundle in the
+// file, and no other CA, for the TLS certificate of the model gateway. The
+// client has no overall timeout, so a stream can run. The caller sets a deadline
+// on the context.
+func modelGatewayHTTPClient(caFile string) (*http.Client, error) {
+	caFile = strings.TrimSpace(caFile)
+	if caFile == "" {
+		return nil, fmt.Errorf("%s is not set: the model gateway serves TLS with the component CA", EnvModelGatewayCAFile)
+	}
+	pemBytes, err := os.ReadFile(caFile) //nolint:gosec // G304: the path is operator configuration
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", EnvModelGatewayCAFile, err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", EnvModelGatewayCAFile)
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	return &http.Client{Transport: tr}, nil
 }

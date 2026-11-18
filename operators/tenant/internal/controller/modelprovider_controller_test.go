@@ -66,7 +66,6 @@ func modelProviderTestRig(t *testing.T, mp *gibsonv1alpha1.ModelProvider, extra 
 		Client: c, Scheme: scheme,
 		Render: modelprovider.Config{
 			Namespace: "gibson-gateway", GatewayName: "model-gateway",
-			ExtAuthzName: "gibson-ext-authz", ExtAuthzNamespace: "gibson", ExtAuthzPort: 9001,
 		},
 		Credentials: &fakeModelCredentials{data: map[string]map[string][]byte{}},
 	}
@@ -208,14 +207,14 @@ func TestModelProvider_UpdatesADriftedObject(t *testing.T) {
 	reconcileTwice(t, r)
 
 	backend, _ := getObject(t, c, "AgentgatewayBackend", "agentgateway.dev/v1alpha1", "mp-acme-claude")
-	_ = unstructured.SetNestedField(backend.Object, "Allow", "spec", "policies", "extAuth", "failureMode")
+	_ = unstructured.SetNestedField(backend.Object, "Passthrough", "spec", "policies", "ai", "routes", "/v1/responses")
 	if err := c.Update(context.Background(), backend); err != nil {
 		t.Fatal(err)
 	}
 	reconcileTwice(t, r)
 	fixed, _ := getObject(t, c, "AgentgatewayBackend", "agentgateway.dev/v1alpha1", "mp-acme-claude")
-	if mode, _, _ := unstructured.NestedString(fixed.Object, "spec", "policies", "extAuth", "failureMode"); mode != "FailClosed" {
-		t.Errorf("failure mode = %q, want FailClosed after the repair", mode)
+	if f, _, _ := unstructured.NestedString(fixed.Object, "spec", "policies", "ai", "routes", "/v1/responses"); f != "Responses" {
+		t.Errorf("format of /v1/responses = %q, want Responses after the repair", f)
 	}
 }
 

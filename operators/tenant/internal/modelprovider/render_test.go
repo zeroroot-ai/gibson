@@ -23,7 +23,6 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 func testConfig() Config {
 	return Config{
 		Namespace: "gibson-gateway", GatewayName: "model-gateway",
-		ExtAuthzName: "gibson-ext-authz", ExtAuthzNamespace: "gibson", ExtAuthzPort: 9001,
 	}
 }
 
@@ -163,21 +162,13 @@ func TestRender_EachMatchNamesTheTenantAndThePath(t *testing.T) {
 	}
 }
 
-// The backend sends the fixed tenant and provider, and the model expression, to
-// ext-authz, and it names the credential Secret and no credential.
-func TestRender_ExtAuthzContextAndCredentialReference(t *testing.T) {
+// The backend holds no ext-authz policy: it runs at the Gateway level, before any
+// route. The backend names the credential Secret and no credential.
+func TestRender_NoBackendExtAuthzAndCredentialReference(t *testing.T) {
 	backends, _ := objectsOf(t, provider("claude", "acme", gibsonv1alpha1.ModelProviderSpec{Type: gibsonv1alpha1.ModelProviderAnthropic}))
 	spec := backends[0].Object["spec"].(map[string]any)
-	ctxExt, _, _ := unstructured.NestedStringMap(spec, "policies", "extAuth", "grpc", "contextExtensions")
-	if ctxExt[ExtTenant] != "acme" || ctxExt[ExtProvider] != "claude" {
-		t.Errorf("context extensions = %v", ctxExt)
-	}
-	meta, _, _ := unstructured.NestedStringMap(spec, "policies", "extAuth", "grpc", "requestMetadata")
-	if meta[MetadataNamespace] != modelExpression {
-		t.Errorf("request metadata = %v", meta)
-	}
-	if mode, _, _ := unstructured.NestedString(spec, "policies", "extAuth", "failureMode"); mode != "FailClosed" {
-		t.Errorf("failure mode = %q, want FailClosed", mode)
+	if _, found, _ := unstructured.NestedMap(spec, "policies", "extAuth"); found {
+		t.Error("the backend holds an extAuth policy: it would run after the route policies")
 	}
 	name, _, _ := unstructured.NestedString(spec, "policies", "auth", "secretRef", "name")
 	if name != CredentialSecretName("acme", "claude") {

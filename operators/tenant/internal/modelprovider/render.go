@@ -37,26 +37,17 @@ import (
 // Names that ext-authz and the callers share. They match
 // internal/server/extauthz/modelcall.
 const (
-	// HeaderTenant and HeaderProvider select the route of a call.
-	HeaderTenant   = modelcall.HeaderTenant
-	HeaderProvider = modelcall.HeaderProvider
-
-	// ExtTenant and ExtProvider are the context extension keys.
-	ExtTenant   = "gibson-tenant"
-	ExtProvider = "gibson-provider"
-
-	// MetadataNamespace is the filter metadata namespace of the model name.
-	MetadataNamespace = "gibson"
+	// HeaderTenant and HeaderProvider are the route headers that each match of
+	// the HTTPRoute holds. ext-authz reads the same headers as the claimed tenant
+	// and provider.
+	HeaderTenant   = modelcall.HeaderRouteTenant
+	HeaderProvider = modelcall.HeaderRouteProvider
 
 	// RouteResponses, RouteEmbeddings and RouteModels are the three model paths.
 	RouteResponses  = "/v1/responses"
 	RouteEmbeddings = "/v1/embeddings"
 	RouteModels     = "/v1/models"
 )
-
-// modelExpression is the CEL expression that reads the exact model name from
-// the request body. The gateway sends its result to ext-authz.
-const modelExpression = `{"model": json(request.body).model}`
 
 // Labels that mark an object as rendered from a ModelProvider.
 const (
@@ -74,11 +65,6 @@ type Config struct {
 	Namespace string
 	// GatewayName is the name of the Gateway that the routes attach to.
 	GatewayName string
-	// ExtAuthzName, ExtAuthzNamespace and ExtAuthzPort name the ext-authz
-	// Service that the gateway calls with the gRPC authorization protocol.
-	ExtAuthzName      string
-	ExtAuthzNamespace string
-	ExtAuthzPort      int32
 }
 
 // Validate reports a missing field.
@@ -88,8 +74,6 @@ func (c Config) Validate() error {
 		return errors.New("modelprovider: the gateway namespace is required")
 	case c.GatewayName == "":
 		return errors.New("modelprovider: the gateway name is required")
-	case c.ExtAuthzName == "" || c.ExtAuthzPort <= 0:
-		return errors.New("modelprovider: the ext-authz service name and port are required")
 	}
 	return nil
 }
@@ -178,23 +162,10 @@ func backend(
 ) *unstructured.Unstructured {
 	policies := map[string]any{
 		// The credential comes from a Secret in the namespace of the gateway.
+		// ext-authz is not here: it runs at the Gateway level, before any route,
+		// and the install owns it. A backend-level ext-authz would run after the
+		// route policies, and the trusted headers would reach the provider.
 		"auth": auth,
-		"extAuth": map[string]any{
-			"backendRef": map[string]any{
-				"name": cfg.ExtAuthzName, "namespace": nsOrDefault(cfg.ExtAuthzNamespace, cfg.Namespace),
-				"port": int64(cfg.ExtAuthzPort),
-			},
-			"failureMode": "FailClosed",
-			"grpc": map[string]any{
-				// The fixed values of the route. A caller cannot set them.
-				"contextExtensions": map[string]any{
-					ExtTenant:   mp.Spec.TenantID,
-					ExtProvider: mp.Name,
-				},
-				// The exact model name, from the request body.
-				"requestMetadata": map[string]any{MetadataNamespace: modelExpression},
-			},
-		},
 	}
 	if withAI {
 		policies["ai"] = map[string]any{
@@ -223,13 +194,6 @@ func backend(
 		"spec": spec,
 	}}
 	return obj
-}
-
-func nsOrDefault(ns, def string) string {
-	if ns == "" {
-		return def
-	}
-	return ns
 }
 
 // filterExpression returns the CEL rule of a model filter. The model list has

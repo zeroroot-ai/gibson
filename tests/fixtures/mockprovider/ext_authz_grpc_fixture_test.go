@@ -25,7 +25,9 @@ import (
 // This test proves where the gateway puts the facts of a model call in the gRPC
 // CheckRequest that it sends to ext-authz (gibson#1388):
 //
-//   - the fixed tenant and provider of the route, in context_extensions;
+//   - the claimed tenant and provider, in the two route headers that the route
+//     also matches on. ext-authz runs before the route in the install, so it gets
+//     no context extension (the install places it at the Gateway level);
 //   - the exact model name, in metadata_context.filter_metadata;
 //   - the x-capability-grant header, the path and the method.
 //
@@ -44,6 +46,14 @@ binds:
   listeners:
   - routes:
     - name: tenant-a-anthropic
+      matches:
+      - headers:
+        - name: x-gibson-route-tenant
+          value:
+            exact: tenant-a
+        - name: x-gibson-route-provider
+          value:
+            exact: anthropic
       backends:
       - ai:
           name: tenant-a-anthropic-backend
@@ -59,12 +69,9 @@ binds:
           key: key-of-tenant-a
         extAuthz:
           host: {{.Authz}}
-          includeRequestHeaders: ["x-capability-grant", "x-gibson-subject", "x-gibson-mission", ":path", ":method"]
+          includeRequestHeaders: ["x-capability-grant", "x-gibson-route-tenant", "x-gibson-route-provider", "x-gibson-subject", "x-gibson-mission", ":path", ":method"]
           protocol:
             grpc:
-              context:
-                gibson-tenant: tenant-a
-                gibson-provider: anthropic
               metadata:
                 gibson: '{"model": json(request.body).model}'
 `
@@ -135,6 +142,8 @@ func TestExtAuthzGRPCCheckRequestFields(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Capability-Grant", "grant-token")
+	req.Header.Set("X-Gibson-Route-Tenant", "tenant-a")
+	req.Header.Set("X-Gibson-Route-Provider", "anthropic")
 	req.Header.Set("X-Gibson-Subject", "forged-admin")
 	req.Header.Set("X-Gibson-Mission", "forged-mission")
 	req.Header.Set("X-Gibson-Task", "kept-because-ext-authz-does-not-touch-it")
@@ -156,11 +165,14 @@ func TestExtAuthzGRPCCheckRequestFields(t *testing.T) {
 	t.Logf("filter_metadata = %v", attrs.GetMetadataContext().GetFilterMetadata())
 	t.Logf("path = %q, method = %q", attrs.GetRequest().GetHttp().GetPath(), attrs.GetRequest().GetHttp().GetMethod())
 
-	if got := attrs.GetContextExtensions()["gibson-tenant"]; got != "tenant-a" {
-		t.Errorf("context_extensions[gibson-tenant] = %q, want tenant-a", got)
+	if got := attrs.GetRequest().GetHttp().GetHeaders()["x-gibson-route-tenant"]; got != "tenant-a" {
+		t.Errorf("x-gibson-route-tenant = %q, want tenant-a", got)
 	}
-	if got := attrs.GetContextExtensions()["gibson-provider"]; got != "anthropic" {
-		t.Errorf("context_extensions[gibson-provider] = %q, want anthropic", got)
+	if got := attrs.GetRequest().GetHttp().GetHeaders()["x-gibson-route-provider"]; got != "anthropic" {
+		t.Errorf("x-gibson-route-provider = %q, want anthropic", got)
+	}
+	if len(attrs.GetContextExtensions()) != 0 {
+		t.Errorf("context_extensions = %v, want none", attrs.GetContextExtensions())
 	}
 	model := attrs.GetMetadataContext().GetFilterMetadata()["gibson"].GetFields()["model"].GetStringValue()
 	if model != "claude-sonnet-5-5" {

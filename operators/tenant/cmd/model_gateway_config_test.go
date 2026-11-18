@@ -10,15 +10,13 @@ import (
 
 func TestModelGatewayConfigFromEnv(t *testing.T) {
 	full := map[string]string{
-		envModelGatewayNamespace:       "gibson-gateway",
-		envModelGatewayName:            "model-gateway",
-		envModelGatewayExtAuthzService: "gibson-ext-authz",
-		envModelGatewayExtAuthzPort:    "9001",
+		envModelGatewayNamespace: "gibson-gateway",
+		envModelGatewayName:      "model-gateway",
 	}
 	get := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
 
 	cfg, err := modelGatewayConfigFromEnv(get(full))
-	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.ExtAuthzPort != 9001 || cfg.ExtAuthzNamespace != "" {
+	if err != nil || cfg.Namespace != "gibson-gateway" || cfg.GatewayName != "model-gateway" {
 		t.Fatalf("config = %+v, %v", cfg, err)
 	}
 
@@ -31,12 +29,6 @@ func TestModelGatewayConfigFromEnv(t *testing.T) {
 		}
 		if _, err := modelGatewayConfigFromEnv(get(partial)); err == nil || !strings.Contains(err.Error(), name) {
 			t.Errorf("without %s: error = %v, want it to name the variable", name, err)
-		}
-	}
-	for _, bad := range []string{"abc", "0", "70000"} {
-		full[envModelGatewayExtAuthzPort] = bad
-		if _, err := modelGatewayConfigFromEnv(get(full)); err == nil {
-			t.Errorf("port %q gave no error", bad)
 		}
 	}
 }

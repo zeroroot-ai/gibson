@@ -27,18 +27,6 @@ spec:
         region: us-east-1
         secretRef:
           name: mp-acme-aws-credential
-    extAuth:
-      backendRef:
-        name: gibson-ext-authz
-        namespace: gibson
-        port: 9001
-      failureMode: FailClosed
-      grpc:
-        contextExtensions:
-          gibson-provider: aws
-          gibson-tenant: acme
-        requestMetadata:
-          gibson: '{"model": json(request.body).model}'
 ---
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayBackend
@@ -60,18 +48,6 @@ spec:
         secretRef:
           name: mp-acme-aws-credential
         serviceName: bedrock
-    extAuth:
-      backendRef:
-        name: gibson-ext-authz
-        namespace: gibson
-        port: 9001
-      failureMode: FailClosed
-      grpc:
-        contextExtensions:
-          gibson-provider: aws
-          gibson-tenant: acme
-        requestMetadata:
-          gibson: '{"model": json(request.body).model}'
   static:
     host: bedrock.us-east-1.amazonaws.com
     port: 443
@@ -96,20 +72,20 @@ spec:
       name: mp-acme-aws-runtime
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: aws
       path:
         type: Exact
         value: /v1/responses
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: aws
       path:
@@ -121,10 +97,10 @@ spec:
       name: mp-acme-aws-control
     matches:
     - headers:
-      - name: x-gibson-tenant
+      - name: x-gibson-route-tenant
         type: Exact
         value: acme
-      - name: x-gibson-provider
+      - name: x-gibson-route-provider
         type: Exact
         value: aws
       path:

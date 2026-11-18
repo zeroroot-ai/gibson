@@ -27,6 +27,8 @@ const relationCanUse = "can_use"
 // extauthz_model_call_denied_total.
 const (
 	modelDenyRoute          = "route_config"
+	modelDenyEdgeModelPath  = "model_path_from_edge"
+	modelDenyA2A            = "a2a_not_served"
 	modelDenyPath           = "path"
 	modelDenyNoModel        = "no_model"
 	modelDenyTenant         = "tenant_mismatch"
@@ -52,18 +54,6 @@ type modelCaller struct {
 	task     string
 }
 
-// modelRoute reports the route facts that the gateway sent, and whether the
-// request is a model call at all. The context extensions come from the gateway
-// config. A caller cannot set them.
-func modelRoute(req *authv3.CheckRequest) (tenant, provider string, ok bool) {
-	ext := req.GetAttributes().GetContextExtensions()
-	provider = ext[modelcall.ExtProvider]
-	if provider == "" {
-		return "", "", false
-	}
-	return ext[modelcall.ExtTenant], provider, true
-}
-
 // modelName reads the exact model name that the gateway computed from the body.
 func modelName(req *authv3.CheckRequest) string {
 	md := req.GetAttributes().GetMetadataContext().GetFilterMetadata()[modelcall.MetadataNamespace]
@@ -75,11 +65,30 @@ func denyModel(reason string, resp *authv3.CheckResponse) *authv3.CheckResponse 
 	return resp
 }
 
+// gatewayCallResponse decides a call of the gateway peer. A model path is a model
+// call: the claimed tenant and provider come from the two route headers. Any
+// other path is an A2A call, which no part of ext-authz serves yet, so it is
+// refused with its own reason.
+func (s *EnvoyAuthzServer) gatewayCallResponse(ctx context.Context, req *authv3.CheckRequest) *authv3.CheckResponse {
+	path := extractMethod(req)
+	if !modelcall.IsModelPath(path) {
+		s.log.WarnContext(ctx, "ext-authz: the gateway sent a path that is not a model path, and no A2A call is served",
+			"path", path)
+		return denyModel(modelDenyA2A, denyForbidden())
+	}
+	tenant, provider, reason := modelcall.ClaimedRoute(req.GetAttributes().GetRequest().GetHttp().GetHeaders())
+	if reason != "" {
+		s.log.WarnContext(ctx, "ext-authz: the route headers of a model call are not usable", "path", path, "reason", reason)
+		return denyModel(reason, denyForbidden())
+	}
+	return s.modelCallResponse(ctx, req, tenant, provider)
+}
+
 // modelCallResponse authorizes one model call (gibson#1388).
 //
 // The caller is the Capability Grant in x-capability-grant: a task grant, or a
-// component token. The tenant of the grant must be the fixed tenant of the
-// route. FGA must show can_use on the exact model, or on the provider, for the
+// component token. The tenant of the grant must be the claimed tenant of the
+// route headers. FGA must show can_use on the exact model, or on the provider, for the
 // tenant members or for the component. A call of the model list route has no
 // model name and needs the provider relation.
 //

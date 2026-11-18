@@ -139,17 +139,18 @@ func modelRequest(path, routeTenant, provider, model, grant string, extraHeaders
 	for k, v := range extraHeaders {
 		hdrs[k] = v
 	}
+	// The caller claims its route with two headers. ext-authz runs before any
+	// route, so it gets no context extension.
+	if routeTenant != "" {
+		hdrs[modelcall.HeaderRouteTenant] = routeTenant
+	}
+	if provider != "" {
+		hdrs[modelcall.HeaderRouteProvider] = provider
+	}
 	attrs := &authv3.AttributeContext{
 		Request: &authv3.AttributeContext_Request{
 			Http: &authv3.AttributeContext_HttpRequest{Path: path, Method: http.MethodPost, Headers: hdrs},
 		},
-		ContextExtensions: map[string]string{},
-	}
-	if routeTenant != "" {
-		attrs.ContextExtensions[modelcall.ExtTenant] = routeTenant
-	}
-	if provider != "" {
-		attrs.ContextExtensions[modelcall.ExtProvider] = provider
 	}
 	if model != "" {
 		attrs.MetadataContext = &corev3.Metadata{FilterMetadata: map[string]*structpb.Struct{
@@ -348,16 +349,6 @@ func TestModelCall_DenyPaths(t *testing.T) {
 			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
 				g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
 				return modelRequest(modelcall.RouteResponses, "", modelProvider, modelName1, g, nil)
-			},
-			want:     codes.PermissionDenied,
-			noFGAAsk: true,
-		},
-		{
-			name: "a path that is not a model route",
-			fga:  allowAll(),
-			build: func(t *testing.T, priv ed25519.PrivateKey) *authv3.CheckRequest {
-				g := mintModelGrant(t, priv, modelTenant, []string{"/v1/admin"})
-				return modelRequest("/v1/admin", modelTenant, modelProvider, modelName1, g, nil)
 			},
 			want:     codes.PermissionDenied,
 			noFGAAsk: true,
@@ -674,4 +665,53 @@ func TestModelCall_ASubmittedMissionIsRefused(t *testing.T) {
 	if asked := mock.questionsAbout("can_use"); len(asked) != 0 {
 		t.Errorf("the access check ran: %+v", asked)
 	}
+}
+
+// A route header that is missing, empty or repeated gives a refusal, and FGA is
+// not asked.
+func TestModelCall_RouteHeaderDefectsAreRefused(t *testing.T) {
+	t.Parallel()
+	mock := &modelFGA{allow: map[string]bool{tupleKey(members, "can_use", modelObj): true}}
+	srv, priv := buildModelServer(t, mock)
+	grant := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
+
+	cases := map[string]func(*authv3.CheckRequest){
+		"no tenant header":    func(r *authv3.CheckRequest) { delete(reqHeaders(r), modelcall.HeaderRouteTenant) },
+		"no provider header":  func(r *authv3.CheckRequest) { delete(reqHeaders(r), modelcall.HeaderRouteProvider) },
+		"empty tenant header": func(r *authv3.CheckRequest) { reqHeaders(r)[modelcall.HeaderRouteTenant] = " " },
+		"repeated tenant":     func(r *authv3.CheckRequest) { reqHeaders(r)[modelcall.HeaderRouteTenant] = modelTenant + ",other" },
+		"repeated provider":   func(r *authv3.CheckRequest) { reqHeaders(r)[modelcall.HeaderRouteProvider] = modelProvider + ",x" },
+	}
+	for name, mutate := range cases {
+		req := modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, grant, nil)
+		mutate(req)
+		resp, err := srv.Check(context.Background(), req)
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Errorf("%s: status = %v, want PermissionDenied", name, got)
+		}
+	}
+	if len(mock.questions()) != 0 {
+		t.Errorf("FGA was asked %d times for a call with a bad route header", len(mock.questions()))
+	}
+}
+
+// A caller of tenant A that sends the route header of tenant B is refused. The
+// refusal comes before FGA.
+func TestModelCall_TheHeaderOfAnotherTenantIsRefused(t *testing.T) {
+	t.Parallel()
+	mock := &modelFGA{allow: map[string]bool{tupleKey(members, "can_use", modelObj): true}}
+	srv, priv := buildModelServer(t, mock)
+	grant := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses}) // a grant of tenant A
+	req := modelRequest(modelcall.RouteResponses, "tenant-b", modelProvider, modelName1, grant, nil)
+	resp, err := srv.Check(context.Background(), req)
+	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+		t.Fatalf("status = %v, want PermissionDenied", got)
+	}
+	if len(mock.questions()) != 0 {
+		t.Error("FGA was asked for a call that claims another tenant")
+	}
+}
+
+func reqHeaders(r *authv3.CheckRequest) map[string]string {
+	return r.GetAttributes().GetRequest().GetHttp().GetHeaders()
 }

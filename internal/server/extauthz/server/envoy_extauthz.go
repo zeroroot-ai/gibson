@@ -201,15 +201,22 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
-	// Each route belongs to one peer: a gateway call to the gateway, every other
-	// call to the Edge. The peer is the SPIFFE ID of the TLS connection.
-	if resp := s.peerRefusal(ctx, modelcall.IsGatewayCall(req.GetAttributes().GetContextExtensions()), method); resp != nil {
-		return resp, nil
+	// The peer is the SPIFFE ID of the TLS connection. The gateway identity makes
+	// a gateway call, and the path tells the kind. ext-authz runs at the Gateway
+	// level and knows no route, so nothing but the peer and the path marks a
+	// gateway call.
+	gateway, deny := s.peerKind(ctx, method)
+	if deny != nil {
+		return deny, nil
 	}
-	// A model call arrives from a gateway route that names a provider. The route
-	// facts are in the context extensions, which a caller cannot set.
-	if routeTenant, provider, isModelCall := modelRoute(req); isModelCall {
-		return s.modelCallResponse(ctx, req, routeTenant, provider), nil
+	if gateway {
+		return s.gatewayCallResponse(ctx, req), nil
+	}
+	if modelcall.IsModelPath(method) {
+		// The Edge has no model route. A model path from it is refused, so a task
+		// grant that lists a model route cannot pass as an Edge call.
+		extauthzPeerRefusedTotal.WithLabelValues(modelDenyEdgeModelPath).Inc()
+		return denyForbidden(), nil
 	}
 	if method == claimForkMethod {
 		return claimForkResponse(ctx, s, httpHeaders), nil

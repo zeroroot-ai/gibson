@@ -81,11 +81,13 @@ type ModelCredentialSource interface {
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=gibson.zeroroot.ai,resources=modelproviders/finalizers,verbs=update
-// The operator also writes the credential Secret in the namespace of the
-// gateway. A cluster-wide grant on secrets is forbidden, so the chart gives
-// that access with a Role in the gateway namespace, and no marker is here.
-// +kubebuilder:rbac:groups=agentgateway.dev,resources=agentgatewaybackends,verbs=get;list;create;update;patch;delete
-// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;create;update;patch;delete
+// The operator also writes the AgentgatewayBackend, the HTTPRoute and the
+// credential Secret in the dedicated namespace of the gateway. A cluster-wide
+// grant on these kinds is forbidden, so the chart gives that access with a Role
+// in the gateway namespace, and no marker is here. The manager client reads the
+// backends and the routes as unstructured objects, which the cache does not
+// hold, and it reads Secrets without the cache (cache_disable_for.go). So no
+// cluster-wide list or watch is needed.
 
 // Reconcile drives a ModelProvider toward its desired state.
 func (r *ModelProviderReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

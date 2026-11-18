@@ -12,6 +12,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
+
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 )
 
 var extauthzPeerRefusedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -47,24 +49,26 @@ func tlsPeerSVID(ctx context.Context) (string, bool) {
 	return "", false
 }
 
-// peerRefusal returns a deny response when the peer does not own the route, and
-// nil when it does or when the check is off. A gateway call needs the identity
-// of the gateway. Every other call needs the identity of the Edge. A peer with no
-// SPIFFE ID is refused when the check is on.
-func (s *EnvoyAuthzServer) peerRefusal(ctx context.Context, gatewayCall bool, method string) *authv3.CheckResponse {
+// peerKind decides which kind of caller the TLS peer is. It returns
+// gateway=true for the identity of the gateway, and a deny response for a peer
+// that is neither the gateway nor the Edge. With no Edge identity configured the
+// check is off (tests only): the kind then follows the path, and no response is
+// returned. A peer with no SPIFFE ID is refused when the check is on.
+func (s *EnvoyAuthzServer) peerKind(ctx context.Context, method string) (gateway bool, deny *authv3.CheckResponse) {
 	if len(s.edgeIDs) == 0 {
-		return nil
-	}
-	want, reason := s.edgeIDs, "edge_route_from_other_peer"
-	if gatewayCall {
-		want, reason = s.gatewayIDs, "gateway_call_from_other_peer"
+		return modelcall.IsModelPath(method), nil
 	}
 	svid, found := tlsPeerSVID(ctx)
-	if _, ok := want[svid]; found && ok {
-		return nil
+	if found {
+		if _, ok := s.gatewayIDs[svid]; ok {
+			return true, nil
+		}
+		if _, ok := s.edgeIDs[svid]; ok {
+			return false, nil
+		}
 	}
-	extauthzPeerRefusedTotal.WithLabelValues(reason).Inc()
-	s.log.WarnContext(ctx, "ext-authz: the peer does not own the route",
-		"reason", reason, "peer", svid, "method", method, "gateway_call", gatewayCall)
-	return denyForbidden()
+	extauthzPeerRefusedTotal.WithLabelValues("unknown_peer").Inc()
+	s.log.WarnContext(ctx, "ext-authz: the peer is neither the Edge nor the gateway",
+		"peer", svid, "method", method)
+	return false, denyForbidden()
 }
