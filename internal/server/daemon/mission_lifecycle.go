@@ -67,6 +67,7 @@ func (d *daemonImpl) ensureMissionManager() error {
 		// (ADR-0106, gibson#615). Set here, after the brain registry init built
 		// the per-tenant belief source, rather than threaded through the ctor.
 		missionManagerInstance.mgr.beliefs = d.tenantBeliefs
+		missionManagerInstance.mgr.skillStore = d.agentSkillStore
 
 		d.logger.Info(context.Background(), "mission manager initialized")
 	})

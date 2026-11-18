@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
@@ -137,6 +138,13 @@ type Result struct {
 	Metrics     TaskMetrics    `json:"metrics"`
 	StartedAt   time.Time      `json:"started_at"`
 	CompletedAt time.Time      `json:"completed_at"`
+	// Deliverables are the protojson gibson.job.v1.Deliverable messages that
+	// left the sandbox in this run. The agent sends them in the result metadata
+	// of its A2A Task.
+	Deliverables []json.RawMessage `json:"deliverables,omitempty"`
+	// ClaudeSessionID is the coding agent session of this run. The agent sends
+	// it in the result metadata of its A2A Task.
+	ClaudeSessionID string `json:"claude_session_id,omitempty"`
 }
 
 // NewResult creates a new result for the given task

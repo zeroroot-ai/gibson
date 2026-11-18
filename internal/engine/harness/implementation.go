@@ -489,6 +489,7 @@ func (h *DefaultAgentHarness) delegateToAgentViaWorkQueue(
 		// item sends it on every callback (gibson#1235).
 		MissionRunID: h.missionCtx.MissionRunID,
 		AgentRunID:   h.missionCtx.AgentRunID,
+		PinnedSkills: h.missionCtx.PinnedSkills,
 	}
 	if spanCtx := trace.SpanFromContext(ctx).SpanContext(); spanCtx.IsValid() {
 		run.TraceID = spanCtx.TraceID().String()

@@ -45,6 +45,11 @@ type MissionContext struct {
 	// is a hint about what a tenant holds and the component already receives
 	// exactly the subset it is entitled to.
 	Secrets MissionSecretScopes `json:"-"`
+	// PinnedSkills are the Agent Skill ids (skill:<name>) that the mission
+	// definition lists in Dependencies.tools. The daemon pins the digest of each
+	// one at mission start, in the Agent Skill pin table. Each agent work item
+	// carries the ids. A delegated child copies them.
+	PinnedSkills []string `json:"-"`
 	// DelegationDepth tracks how many delegation hops have occurred to reach
 	// this agent. Zero means this is a top-level agent (no delegation). Each
 	// DelegateToAgent call increments this by one in the child mission context.
@@ -159,6 +164,12 @@ func (m MissionContext) WithTenant(tenantID string) MissionContext {
 // component naming a secret, which is the property this design does not have.
 func (m MissionContext) WithSecrets(s MissionSecretScopes) MissionContext {
 	m.Secrets = s
+	return m
+}
+
+// WithPinnedSkills sets the Agent Skill ids that the mission pins.
+func (m MissionContext) WithPinnedSkills(ids []string) MissionContext {
+	m.PinnedSkills = ids
 	return m
 }
 

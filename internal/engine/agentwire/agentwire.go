@@ -157,7 +157,7 @@ func ParseTask(raw []byte) (Outcome, error) {
 
 func resultOf(t *a2a.Task, o Outcome) agent.Result {
 	r := agent.Result{Status: agent.ResultStatusCompleted, Output: map[string]any{}, Findings: []agent.Finding{},
-		CompletedAt: time.Now()}
+		CompletedAt: time.Now(), Deliverables: o.Deliverables, ClaudeSessionID: o.ClaudeSessionID}
 	switch o.State {
 	case a2a.TaskStateCompleted:
 	case a2a.TaskStateCanceled:

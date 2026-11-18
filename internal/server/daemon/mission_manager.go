@@ -21,6 +21,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/observability"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	"github.com/zeroroot-ai/gibson/internal/platform/agentskillstore"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/server/daemon/api"
 	missionpb "github.com/zeroroot-ai/sdk/api/gen/gibson/mission/v1"
@@ -164,6 +165,10 @@ type missionManager struct {
 	// start (ADR-0106, gibson#615). The mission records the version, and the
 	// tenant keeps it active until the mission ends.
 	beliefs beliefPinner
+	// skillStore reads the Agent Skill store of the daemon. The store starts
+	// after the manager, so the manager reads it at mission start. A mission
+	// pins the digest of each Agent Skill that it lists (gibson#1375).
+	skillStore func() agentskillstore.Store
 
 	// authzStore records the owning user per run so that HarnessCallbackService.Authorize
 	// can resolve run_id → (user_id, tenant_id) during component callbacks.
@@ -212,6 +217,14 @@ type activeMission struct {
 	missionState *mission.MissionState
 	startTime    time.Time
 	tenantID     auth.TenantID // tenant this mission belongs to (C9 isolation key)
+}
+
+// agentSkills returns the Agent Skill store, or nil when none is wired.
+func (m *missionManager) agentSkills() agentskillstore.Store {
+	if m.skillStore == nil {
+		return nil
+	}
+	return m.skillStore()
 }
 
 // newMissionManager creates a new mission manager instance.
@@ -1268,7 +1281,13 @@ func (m *missionManager) executeMission(ctx context.Context, missionID string, d
 		return
 	}
 
-	missionCtx := newRunMissionContext(active.mission, missionRun, def, bootstrapResult.MissionRunID)
+	pinnedSkills, skillErr := pinMissionSkills(ctx, m.agentSkills(), active.tenantID.String(), missionID, def)
+	if skillErr != nil {
+		m.failBeforeStart(active.tenantID, missionID, runIDOf(active), def.GetName(), skillErr.Error())
+		return
+	}
+	missionCtx := newRunMissionContext(active.mission, missionRun, def, bootstrapResult.MissionRunID).
+		WithPinnedSkills(pinnedSkills)
 
 	// Load target entity to get connection details
 	targetInfo, targetInfoErr := m.resolveRunTargetInfo(ctx, active.mission.TargetID)
