@@ -200,3 +200,64 @@ func TestMissionIDOf(t *testing.T) {
 		t.Errorf("missionIDOf(WorkCompleted) = %q, want empty", got)
 	}
 }
+
+// A mission that is only submitted has no tuple. An absent tuple refuses a model
+// call (the ext-authz test TestModelCall_ASubmittedMissionIsRefused).
+func TestMissionGate_ASubmittedMissionGetsNoTuple(t *testing.T) {
+	g := &gateRecorder{}
+	eng := newGateEngine(t, g)
+	eng.Submit(brain.MissionCreated{ID: "m1", Name: "draft"})
+	eng.Tick()
+	time.Sleep(50 * time.Millisecond)
+	if g.count() != 0 {
+		t.Errorf("gate writes = %v, want none for a submitted mission", g.actives())
+	}
+	// It becomes active at its start, and then it gets the tuple.
+	eng.Submit(brain.MissionStarted{ID: "m1", RunID: "r1"})
+	eng.Tick()
+	waitWrites(t, g, 1)
+	if got := g.actives(); !equalBools(got, []bool{true}) {
+		t.Errorf("gate values = %v, want [true]", got)
+	}
+}
+
+// The sweep writes the right value for each mission that the World holds, and
+// nothing for a submitted one.
+func TestMissionGate_SweepWritesTheTupleOfEachMission(t *testing.T) {
+	eng := brain.NewEngine("acme", braintest.NewMemTimelineStore())
+	eng.Submit(brain.MissionCreated{ID: "submitted", Name: "s"})
+	eng.Submit(brain.MissionProjected{ID: "working", RunID: "r1"})
+	eng.Submit(brain.MissionProjected{ID: "paused", RunID: "r2"})
+	eng.Submit(brain.MissionProjected{ID: "done", RunID: "r3"})
+	eng.Submit(brain.MissionProjected{ID: "canceled", RunID: "r4"})
+	eng.Tick()
+	eng.Submit(brain.MissionPauseRequested{ID: "paused", RunID: "r2"})
+	eng.Submit(brain.MissionDone{ID: "done", RunID: "r3", Outcome: brain.MissionCompleted})
+	eng.Submit(brain.MissionDone{ID: "canceled", RunID: "r4", Outcome: brain.MissionCanceled})
+	eng.Tick()
+
+	g := &gateRecorder{}
+	InstallMissionGate("acme", eng, g, slog.New(slog.DiscardHandler))
+	waitWrites(t, g, 4)
+
+	got := map[string]bool{}
+	g.mu.Lock()
+	for _, w := range g.writes {
+		got[w.Object] = w.ConditionContext[authz.ConditionParamActive].(bool)
+	}
+	g.mu.Unlock()
+	want := map[string]bool{
+		"mission:working": true, "mission:paused": false, "mission:done": false, "mission:canceled": false,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("writes = %v, want %v", got, want)
+	}
+	for obj, v := range want {
+		if gv, ok := got[obj]; !ok || gv != v {
+			t.Errorf("%s = %v (present %v), want %v", obj, gv, ok, v)
+		}
+	}
+	if _, ok := got["mission:submitted"]; ok {
+		t.Error("the sweep wrote a tuple for a submitted mission")
+	}
+}

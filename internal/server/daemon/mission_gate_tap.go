@@ -89,6 +89,34 @@ func missionIDOf(ev brain.Event) string {
 	return ""
 }
 
+// sweep writes the right tuple for each mission that the World holds. It runs
+// once, when the engine is created, after the World is rebuilt from the Timeline
+// and before the tick loop starts. A replay fires no tap, so a crash between a
+// state change and its write would leave a wrong tuple for ever. The sweep
+// closes that gap. A mission that is only submitted is not active for a model
+// call, and it gets no tuple: an absent tuple refuses the call.
+func (t *missionGateTap) sweep() {
+	snapshot := t.eng.World.MissionSnapshot()
+	t.mu.Lock()
+	start := false
+	for _, m := range snapshot {
+		if m.Status == brain.MissionSubmitted {
+			continue
+		}
+		active := m.Status.IsActive()
+		t.last[m.ID] = active
+		t.queue = append(t.queue, missionGateWrite{mission: m.ID, active: active})
+	}
+	if len(t.queue) > 0 && !t.draining {
+		t.draining = true
+		start = true
+	}
+	t.mu.Unlock()
+	if start {
+		go t.drain()
+	}
+}
+
 func (t *missionGateTap) apply(ev brain.Event) {
 	id := missionIDOf(ev)
 	if id == "" {
@@ -104,7 +132,8 @@ func (t *missionGateTap) apply(ev brain.Event) {
 			break
 		}
 	}
-	if !found {
+	// A submitted mission is not active for a model call and has no tuple.
+	if !found || status == brain.MissionSubmitted {
 		return
 	}
 	active := status.IsActive()
@@ -180,5 +209,6 @@ func InstallMissionGate(tenant string, eng *brain.Engine, writer missionGateWrit
 		backoff: func(attempt int) time.Duration { return time.Duration(attempt) * 200 * time.Millisecond },
 		last:    map[string]bool{},
 	}
+	tap.sweep()
 	eng.Subscribe(tap.apply)
 }

@@ -656,3 +656,22 @@ func TestModelCall_TheInitiatorOfTheMissionIsTheSubject(t *testing.T) {
 		}
 	})
 }
+
+// A mission that is only submitted has no tuple, so the gate answers "no".
+func TestModelCall_ASubmittedMissionIsRefused(t *testing.T) {
+	t.Parallel()
+	mock := &modelFGA{
+		allow:      map[string]bool{tupleKey(members, "can_use", modelObj): true},
+		gateClosed: true, // an absent tuple is a "no" for FGA
+	}
+	srv, priv := buildModelServer(t, mock)
+	g := mintModelGrant(t, priv, modelTenant, []string{modelcall.RouteResponses})
+	resp, err := srv.Check(context.Background(),
+		modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil))
+	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+		t.Fatalf("status = %v, want PermissionDenied", got)
+	}
+	if asked := mock.questionsAbout("can_use"); len(asked) != 0 {
+		t.Errorf("the access check ran: %+v", asked)
+	}
+}
