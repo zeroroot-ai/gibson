@@ -26,6 +26,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // ingestComponentFinding returns the component finding submitter's World sink
@@ -93,6 +94,7 @@ func (d *daemonImpl) newDiscoveryProcessor() ingest.DiscoveryProcessor {
 		ingestDiscovery(d.brainRegistry),
 		d.logger.WithComponent("discovery-ingest").Slog(),
 		ingest.WithFindingWriter(d.discoveredFindingWriter()),
+		ingest.WithToolCallRecord(newTenantRoutedProofSettlement(d.brainRegistry)),
 	)
 }
 
@@ -108,11 +110,13 @@ func (d *daemonImpl) findings() finding.FindingStore {
 
 // discoveredFindingWriter returns the writer that puts a finding from a
 // DiscoveryResult in the findings table of the tenant. The finding has the ID
-// of its graph node. It holds no evidence, because a tool reports none here.
-// The pool starts after the processor, so the writer reads it on first use.
+// of its graph node. The evidence goes in the same transaction as the finding
+// row. The processor builds it: one tier 1 item of the tool call, and the tier 2
+// items of the parsers. The pool starts after the processor, so the writer reads
+// it on first use.
 func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
 	store := d.findings()
-	return func(ctx context.Context, tenant string, f brain.FindingRaised) error {
+	return func(ctx context.Context, tenant string, f brain.FindingRaised, evidence []*typespb.Evidence) error {
 		base := agent.NewFinding(f.Title, f.Description, agent.FindingSeverity(f.Severity))
 		base.ID = types.ID(f.ID)
 		base.TenantID = tenant
@@ -120,7 +124,9 @@ func (d *daemonImpl) discoveredFindingWriter() ingest.FindingWriter {
 		if parsed, err := types.ParseID(f.MissionID); err == nil {
 			missionID = parsed
 		}
-		if err := store.Store(ctx, tenant, finding.NewEnhancedFinding(base, missionID, f.AgentName)); err != nil {
+		enhanced := finding.NewEnhancedFinding(base, missionID, f.AgentName)
+		enhanced.Evidence = evidence
+		if err := store.Store(ctx, tenant, enhanced); err != nil {
 			return fmt.Errorf("store discovered finding: %w", err)
 		}
 		return nil

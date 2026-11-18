@@ -1024,6 +1024,9 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	if s.discoveryProcessor != nil {
 		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
 			execCtx := callToolDiscoveryScope(ctx, req.Context)
+			// The discovery names the one id of this call, so the processor
+			// finds the record that is written above.
+			execCtx.ToolExecutionID = toolCallID
 
 			// Process discovery asynchronously with timeout
 			// This doesn't block the tool response

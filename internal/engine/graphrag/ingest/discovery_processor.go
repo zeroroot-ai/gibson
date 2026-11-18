@@ -24,6 +24,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // DiscoveryProcessor folds a discovery result into a tenant's World.
@@ -75,9 +76,11 @@ func (r *ProcessResult) AddError(err error) *ProcessResult {
 	return r
 }
 
-// FindingWriter writes a discovered finding to the findings table of the
-// tenant. The ID of the finding is the ID of the graph node.
-type FindingWriter func(ctx context.Context, tenant string, f brain.FindingRaised) error
+// FindingWriter writes a discovered finding and its evidence to the findings
+// table of the tenant, in one transaction. The ID of the finding is the ID of
+// the graph node. The evidence holds the tier 1 item of the tool call and the
+// tier 2 items of the parsers. It can be empty.
+type FindingWriter func(ctx context.Context, tenant string, f brain.FindingRaised, evidence []*typespb.Evidence) error
 
 // Option changes a discoveryProcessor.
 type Option func(*discoveryProcessor)
@@ -91,10 +94,18 @@ func WithFindingWriter(w FindingWriter) Option {
 	return func(p *discoveryProcessor) { p.findings = w }
 }
 
+// WithToolCallRecord wires the record of tool calls. With it, the processor adds
+// one tier 1 evidence item to each finding of a discovery. The item holds the
+// recorded result of the tool call whose output was parsed.
+func WithToolCallRecord(r brain.ToolCallRecord) Option {
+	return func(p *discoveryProcessor) { p.records = r }
+}
+
 // discoveryProcessor is the World-backed implementation.
 type discoveryProcessor struct {
 	sink     WorldSink
 	findings FindingWriter
+	records  brain.ToolCallRecord
 	logger   *slog.Logger
 }
 
@@ -153,10 +164,33 @@ func (p *discoveryProcessor) Process(
 	}
 	tenant := execCtx.TenantID.String()
 
+	var (
+		byFinding map[string][]*typespb.Evidence
+		recorded  *typespb.Evidence
+	)
+	if p.findings != nil {
+		var evErrs []error
+		byFinding, evErrs = parserEvidence(execCtx, discovery)
+		for _, e := range evErrs {
+			result.AddError(e)
+		}
+		if len(byFinding) > 0 || hasFindingEvents(events) {
+			var err error
+			if recorded, err = p.recordedToolEvidence(ctx, execCtx); err != nil {
+				// The finding is still written, with the parser evidence only.
+				result.AddError(err)
+			}
+		}
+	}
+
 	submitted := 0
 	for _, ev := range events {
 		if raised, ok := ev.(brain.FindingRaised); ok && p.findings != nil {
-			if err := p.findings(ctx, tenant, raised); err != nil {
+			evidence := byFinding[raised.ID]
+			if recorded != nil {
+				evidence = append([]*typespb.Evidence{recorded}, evidence...)
+			}
+			if err := p.findings(ctx, tenant, raised, evidence); err != nil {
 				result.AddError(fmt.Errorf("write finding %s: %w", raised.ID, err))
 				continue
 			}
@@ -180,6 +214,16 @@ func (p *discoveryProcessor) Process(
 		"duration_ms", result.Duration.Milliseconds(),
 	)
 	return result, nil
+}
+
+// hasFindingEvents reports whether the events hold a raised finding.
+func hasFindingEvents(events []brain.Event) bool {
+	for _, ev := range events {
+		if _, ok := ev.(brain.FindingRaised); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // countProtoNodes returns the number of discovered entities in the result.
