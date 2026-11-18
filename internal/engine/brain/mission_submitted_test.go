@@ -29,7 +29,7 @@ func TestMissionCreated_PendingWithCreator(t *testing.T) {
 	Reduce(w, MissionCreated{ID: "m1", Name: "other"})
 
 	m, ok := missionByID(w, "m1")
-	if !ok || m.Status != MissionPending || m.CreatedBy != testCreator || m.Name != "scan" || len(w.MissionSnapshot()) != 1 {
+	if !ok || m.Status != MissionSubmitted || m.CreatedBy != testCreator || m.Name != "scan" || len(w.MissionSnapshot()) != 1 {
 		t.Fatalf("after creation: %+v (found %v), want one pending mission named scan by %+v", m, ok, testCreator)
 	}
 }
@@ -43,7 +43,7 @@ func TestMissionStarted_MovesPendingToRunning(t *testing.T) {
 	Reduce(w, MissionStarted{ID: "m1", Goal: "find it", BeliefModel: "bm-1", Name: "scan-run", Description: "d2", TargetID: "tg2", TenantID: "t", CreatedBy: other})
 
 	m, _ := missionByID(w, "m1")
-	if m.Status != MissionRunning || m.Goal != "find it" || m.Name != "scan-run" || m.Description != "d2" || m.TargetID != "tg2" || m.CreatedBy != other {
+	if m.Status != MissionWorking || m.Goal != "find it" || m.Name != "scan-run" || m.Description != "d2" || m.TargetID != "tg2" || m.CreatedBy != other {
 		t.Fatalf("after start: %+v, want running with the start's fields", m)
 	}
 
@@ -60,7 +60,7 @@ func TestMissionStarted_EmptyStartKeepsCreation(t *testing.T) {
 	Reduce(w, MissionStarted{ID: "m3"})
 
 	m, _ := missionByID(w, "m3")
-	if m.Status != MissionRunning || m.Name != "kept" || m.Description != "kd" || m.TargetID != "ktg" || m.TenantID != "t" || m.CreatedBy != testCreator {
+	if m.Status != MissionWorking || m.Name != "kept" || m.Description != "kd" || m.TargetID != "ktg" || m.TenantID != "t" || m.CreatedBy != testCreator {
 		t.Fatalf("empty start must keep creation's fields: %+v", m)
 	}
 }
@@ -71,7 +71,7 @@ func TestMissionStarted_UnknownIDCreates(t *testing.T) {
 	Reduce(w, MissionStarted{ID: "m2", Goal: "g2", CreatedBy: testCreator})
 
 	m, ok := missionByID(w, "m2")
-	if !ok || m.Status != MissionRunning || m.CreatedBy != testCreator {
+	if !ok || m.Status != MissionWorking || m.CreatedBy != testCreator {
 		t.Fatalf("start for an unknown id: %+v (found %v), want a running mission by the creator", m, ok)
 	}
 }
@@ -91,10 +91,10 @@ func TestMissionCreated_SurvivesRestoreAsPending(t *testing.T) {
 	for _, m := range restored.MissionSnapshot() {
 		got[m.ID] = m
 	}
-	if got["m1"].Status != MissionPending || got["m1"].CreatedBy != creator || got["m1"].Name != "scan" {
+	if got["m1"].Status != MissionSubmitted || got["m1"].CreatedBy != creator || got["m1"].Name != "scan" {
 		t.Fatalf("restored m1 = %+v, want pending with creator and name", got["m1"])
 	}
-	if got["m2"].Status != MissionRunning || got["m2"].CreatedBy != creator {
+	if got["m2"].Status != MissionWorking || got["m2"].CreatedBy != creator {
 		t.Fatalf("restored m2 = %+v, want running with creator", got["m2"])
 	}
 }

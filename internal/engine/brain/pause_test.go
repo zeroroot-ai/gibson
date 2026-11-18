@@ -76,7 +76,7 @@ func TestPause_ReducerGuards(t *testing.T) {
 	Reduce(w, MissionProjected{ID: "m1", Goal: "g"})
 	// resume a running mission: no-op (stays running).
 	Reduce(w, MissionResumed{ID: "m1"})
-	if w.MissionSnapshot()[0].Status != MissionRunning {
+	if w.MissionSnapshot()[0].Status != MissionWorking {
 		t.Fatal("resume on running should stay running")
 	}
 	Reduce(w, MissionPauseRequested{ID: "m1"})

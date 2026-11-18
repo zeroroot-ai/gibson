@@ -24,8 +24,8 @@ func TestMissionStatus_String(t *testing.T) {
 		status MissionStatus
 		want   string
 	}{
-		{"pending", MissionStatusPending, "pending"},
-		{"running", MissionStatusRunning, "running"},
+		{"submitted", MissionStatusSubmitted, "submitted"},
+		{"working", MissionStatusWorking, "working"},
 		{"paused", MissionStatusPaused, "paused"},
 		{"completed", MissionStatusCompleted, "completed"},
 		{"failed", MissionStatusFailed, "failed"},
@@ -46,8 +46,8 @@ func TestMissionStatus_IsTerminal(t *testing.T) {
 		status   MissionStatus
 		terminal bool
 	}{
-		{"pending not terminal", MissionStatusPending, false},
-		{"running not terminal", MissionStatusRunning, false},
+		{"pending not terminal", MissionStatusSubmitted, false},
+		{"running not terminal", MissionStatusWorking, false},
 		{"paused not terminal", MissionStatusPaused, false},
 		{"completed is terminal", MissionStatusCompleted, true},
 		{"failed is terminal", MissionStatusFailed, true},
@@ -70,30 +70,30 @@ func TestMissionStatus_CanTransitionTo(t *testing.T) {
 		allowed bool
 	}{
 		// Pending transitions
-		{"pending to running", MissionStatusPending, MissionStatusRunning, true},
-		{"pending to cancelled", MissionStatusPending, MissionStatusCancelled, true},
-		{"pending to completed", MissionStatusPending, MissionStatusCompleted, false},
-		{"pending to paused", MissionStatusPending, MissionStatusPaused, false},
-		{"pending to failed", MissionStatusPending, MissionStatusFailed, false},
+		{"pending to running", MissionStatusSubmitted, MissionStatusWorking, true},
+		{"pending to cancelled", MissionStatusSubmitted, MissionStatusCancelled, true},
+		{"pending to completed", MissionStatusSubmitted, MissionStatusCompleted, false},
+		{"pending to paused", MissionStatusSubmitted, MissionStatusPaused, false},
+		{"pending to failed", MissionStatusSubmitted, MissionStatusFailed, false},
 
 		// Running transitions
-		{"running to paused", MissionStatusRunning, MissionStatusPaused, true},
-		{"running to completed", MissionStatusRunning, MissionStatusCompleted, true},
-		{"running to failed", MissionStatusRunning, MissionStatusFailed, true},
-		{"running to cancelled", MissionStatusRunning, MissionStatusCancelled, true},
-		{"running to pending", MissionStatusRunning, MissionStatusPending, false},
+		{"running to paused", MissionStatusWorking, MissionStatusPaused, true},
+		{"running to completed", MissionStatusWorking, MissionStatusCompleted, true},
+		{"running to failed", MissionStatusWorking, MissionStatusFailed, true},
+		{"running to cancelled", MissionStatusWorking, MissionStatusCancelled, true},
+		{"running to pending", MissionStatusWorking, MissionStatusSubmitted, false},
 
 		// Paused transitions
-		{"paused to running", MissionStatusPaused, MissionStatusRunning, true},
+		{"paused to running", MissionStatusPaused, MissionStatusWorking, true},
 		{"paused to failed", MissionStatusPaused, MissionStatusFailed, true},
 		{"paused to cancelled", MissionStatusPaused, MissionStatusCancelled, true},
 		{"paused to completed", MissionStatusPaused, MissionStatusCompleted, false},
-		{"paused to pending", MissionStatusPaused, MissionStatusPending, false},
+		{"paused to pending", MissionStatusPaused, MissionStatusSubmitted, false},
 
 		// Terminal states cannot transition
-		{"completed to any", MissionStatusCompleted, MissionStatusRunning, false},
-		{"failed to any", MissionStatusFailed, MissionStatusRunning, false},
-		{"cancelled to any", MissionStatusCancelled, MissionStatusRunning, false},
+		{"completed to any", MissionStatusCompleted, MissionStatusWorking, false},
+		{"failed to any", MissionStatusFailed, MissionStatusWorking, false},
+		{"cancelled to any", MissionStatusCancelled, MissionStatusWorking, false},
 	}
 
 	for _, tt := range tests {
@@ -110,7 +110,7 @@ func TestMission_Validate(t *testing.T) {
 		Name:                "Test Mission",
 		TargetID:            types.NewID(),
 		MissionDefinitionID: types.NewID(),
-		Status:              MissionStatusPending,
+		Status:              MissionStatusSubmitted,
 	}
 
 	tests := []struct {
@@ -130,7 +130,7 @@ func TestMission_Validate(t *testing.T) {
 				Name:                "Test",
 				TargetID:            types.NewID(),
 				MissionDefinitionID: types.NewID(),
-				Status:              MissionStatusPending,
+				Status:              MissionStatusSubmitted,
 			},
 			wantErr: true,
 			errMsg:  "mission ID is required",
@@ -141,7 +141,7 @@ func TestMission_Validate(t *testing.T) {
 				ID:                  types.NewID(),
 				TargetID:            types.NewID(),
 				MissionDefinitionID: types.NewID(),
-				Status:              MissionStatusPending,
+				Status:              MissionStatusSubmitted,
 			},
 			wantErr: true,
 			errMsg:  "mission name is required",
@@ -152,7 +152,7 @@ func TestMission_Validate(t *testing.T) {
 				ID:                  types.NewID(),
 				Name:                "Test",
 				MissionDefinitionID: types.NewID(),
-				Status:              MissionStatusPending,
+				Status:              MissionStatusSubmitted,
 			},
 			wantErr: true,
 			errMsg:  "target ID is required",
@@ -166,7 +166,7 @@ func TestMission_Validate(t *testing.T) {
 				ID:       types.NewID(),
 				Name:     "Test",
 				TargetID: types.NewID(),
-				Status:   MissionStatusPending,
+				Status:   MissionStatusSubmitted,
 			},
 			wantErr: true,
 			errMsg:  "mission definition ID is required",
@@ -258,7 +258,7 @@ func TestMission_GetProgress(t *testing.T) {
 	missionID := types.NewID()
 	mission := &Mission{
 		ID:     missionID,
-		Status: MissionStatusRunning,
+		Status: MissionStatusWorking,
 		Metrics: &MissionMetrics{
 			TotalNodes:     10,
 			CompletedNodes: 3,
@@ -272,7 +272,7 @@ func TestMission_GetProgress(t *testing.T) {
 	progress := mission.GetProgress()
 
 	assert.Equal(t, missionID, progress.MissionID)
-	assert.Equal(t, MissionStatusRunning, progress.Status)
+	assert.Equal(t, MissionStatusWorking, progress.Status)
 	assert.Equal(t, 30.0, progress.PercentComplete)
 	assert.Equal(t, 3, progress.CompletedNodes)
 	assert.Equal(t, 10, progress.TotalNodes)

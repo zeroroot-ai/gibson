@@ -224,7 +224,7 @@ func TestDeciderDrain_WaitsForTheVoIPlanInFlight(t *testing.T) {
 		t.Fatalf("the Decider decided while the plan was in flight (processed %d, LLM calls %d)", n, llm.calls)
 	}
 	e.Tick()
-	if ms := e.Missions(); len(ms) != 1 || ms[0].Status != MissionRunning {
+	if ms := e.Missions(); len(ms) != 1 || ms[0].Status != MissionWorking {
 		t.Fatalf("the mission must still run while it waits for the plan: %+v", ms)
 	}
 

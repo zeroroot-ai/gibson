@@ -137,7 +137,7 @@ func (a *missionHarnessAdapter) CreateMission(ctx context.Context, req *harness.
 		ID:                    types.NewID(),
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		TargetID:              req.TargetID,
 		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(defJSON),

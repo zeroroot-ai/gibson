@@ -40,7 +40,7 @@ func TestProjectBrainEvent(t *testing.T) {
 			ev:            brain.MissionResumed{ID: "m-resume"},
 			wantEventType: "mission.resumed",
 			wantMissionID: "m-resume",
-			wantStatus:    "running",
+			wantStatus:    "working",
 		},
 
 		// ---- WorkDispatched → node.started --------------------------------
@@ -100,11 +100,11 @@ func TestProjectBrainEvent(t *testing.T) {
 
 		// ---- MissionStarted → status:running ------------------------------
 		{
-			name:          "MissionStarted maps to status running",
+			name:          "MissionStarted maps to status working",
 			ev:            brain.MissionStarted{ID: "mission-2"},
 			wantEventType: "status",
 			wantMissionID: "mission-2",
-			wantStatus:    "running",
+			wantStatus:    "working",
 		},
 
 		// ---- MissionDone(completed) → status:completed -------------------

@@ -74,7 +74,7 @@ func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
 	// and status=failed leave the tap back to back.
 	tickOrFail(t, eng)
 
-	// status running, node.started, node.failed, status failed.
+	// status working, node.started, node.failed, status failed.
 	for i := range 4 {
 		select {
 		case <-published:
@@ -97,7 +97,7 @@ func TestLifecycleProjector_PublishesInTimelineOrder(t *testing.T) {
 		}
 		kinds = append(kinds, k)
 	}
-	want := []string{"status:running", "node.started", "node.failed", "status:failed"}
+	want := []string{"status:working", "node.started", "node.failed", "status:failed"}
 	if len(kinds) != len(want) {
 		t.Fatalf("published %v, want %v", kinds, want)
 	}

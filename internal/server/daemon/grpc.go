@@ -3123,7 +3123,7 @@ func (d *daemonImpl) CreateMission(ctx context.Context, req api.CreateMissionDat
 		TenantID:            tenantForMission.String(),
 		Name:                req.Name,
 		Description:         req.Description,
-		Status:              mission.MissionStatusPending,
+		Status:              mission.MissionStatusSubmitted,
 		TargetID:            targetID,
 		MissionDefinitionID: missionDefinitionID,
 		CreatedBy:           req.CreatedBy,

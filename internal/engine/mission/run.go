@@ -14,8 +14,8 @@ import (
 type MissionRunStatus string
 
 const (
-	MissionRunStatusPending   MissionRunStatus = "pending"
-	MissionRunStatusRunning   MissionRunStatus = "running"
+	MissionRunStatusSubmitted MissionRunStatus = "submitted"
+	MissionRunStatusWorking   MissionRunStatus = "working"
 	MissionRunStatusCompleted MissionRunStatus = "completed"
 	MissionRunStatusFailed    MissionRunStatus = "failed"
 	MissionRunStatusCancelled MissionRunStatus = "cancelled"
@@ -86,7 +86,7 @@ func NewMissionRun(missionID types.ID, runNumber int) *MissionRun {
 		ID:        types.NewID(),
 		MissionID: missionID,
 		RunNumber: runNumber,
-		Status:    MissionRunStatusPending,
+		Status:    MissionRunStatusSubmitted,
 		Progress:  0.0,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -113,7 +113,7 @@ func (r *MissionRun) Validate() error {
 // MarkStarted sets status to running and records the start time.
 func (r *MissionRun) MarkStarted() {
 	now := time.Now()
-	r.Status = MissionRunStatusRunning
+	r.Status = MissionRunStatusWorking
 	r.StartedAt = &now
 	r.UpdatedAt = now
 }

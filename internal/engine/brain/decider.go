@@ -289,7 +289,7 @@ func DeciderGateSystem(w *World) []Event {
 	work := w.WorkSnapshot()
 	var out []Event
 	for _, m := range w.MissionSnapshot() {
-		if m.Status != MissionRunning || m.Goal == "" || m.DecisionInFlight {
+		if m.Status != MissionWorking || m.Goal == "" || m.DecisionInFlight {
 			continue
 		}
 		terminal := terminalWorkCount(work, m.ID)

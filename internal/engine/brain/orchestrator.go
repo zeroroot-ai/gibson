@@ -11,18 +11,19 @@ import (
 	"github.com/mlange-42/ark/ecs"
 )
 
-// MissionStatus is the lifecycle state of a mission.
+// MissionStatus is the lifecycle state of a mission. The names follow the A2A
+// Task states (ADR-0175). "Paused" is the one state that A2A does not have.
 type MissionStatus string
 
 const (
-	// MissionPending is a mission a person created that has not run yet. It
+	// MissionSubmitted is a mission a person created that has not run yet. It
 	// is listed, attributed to its creator, and inert: no System acts on it
-	// until MissionStarted moves it to running (hosted#205).
-	MissionPending   MissionStatus = "pending"
-	MissionRunning   MissionStatus = "running"
+	// until MissionStarted moves it to working (hosted#205).
+	MissionSubmitted MissionStatus = "submitted"
+	MissionWorking   MissionStatus = "working"
 	MissionCompleted MissionStatus = "completed"
 	MissionFailed    MissionStatus = "failed"
-	// MissionPaused: a running mission halted by an operator (gibson#851,
+	// MissionPaused: a working mission halted by an operator (gibson#851,
 	// brain-native pause). The executor Systems stop dispatching/deciding for it
 	// until it is resumed; its World state is untouched, so resume continues
 	// exactly where it left off (the Timeline is the durable record — no separate
@@ -122,7 +123,7 @@ func (MissionStarted) Kind() string { return "mission.started" }
 
 // MissionCreated records a mission a person created before it runs, so the
 // World, and ListMissions with it, know the mission and its creator from
-// creation. MissionStarted later moves the same entity to running; a
+// creation. MissionStarted later moves the same entity to working; a
 // MissionStarted for an unknown id still creates it, as before.
 type MissionCreated struct {
 	ID          string
@@ -142,7 +143,7 @@ func applyMissionCreated(w *World, e MissionCreated) {
 	}
 	w.missions.NewEntity(&Mission{
 		ID:             e.ID,
-		Status:         MissionPending,
+		Status:         MissionSubmitted,
 		DecisionCursor: -1,
 		Name:           e.Name,
 		Description:    e.Description,
@@ -186,10 +187,10 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		// A pending mission starts: it keeps what creation recorded and
 		// takes what the start adds. Any other status is a replay.
 		m := w.missions.Get(ent)
-		if m.Status != MissionPending {
+		if m.Status != MissionSubmitted {
 			return
 		}
-		m.Status = MissionRunning
+		m.Status = MissionWorking
 		m.Goal = e.Goal
 		m.BeliefModel = e.BeliefModel
 		if e.Name != "" {
@@ -213,7 +214,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 		ID:             e.ID,
 		RunID:          e.RunID,
 		Goal:           e.Goal,
-		Status:         MissionRunning,
+		Status:         MissionWorking,
 		DecisionCursor: -1,
 		BeliefModel:    e.BeliefModel,
 		Name:           e.Name,
@@ -224,7 +225,7 @@ func applyMissionStarted(w *World, e MissionStarted) {
 	})
 }
 
-// MissionPauseRequested halts a running mission (operator pause). The executor
+// MissionPauseRequested halts a working mission (operator pause). The executor
 // Systems skip a paused mission until MissionResumed.
 type MissionPauseRequested struct {
 	ID    string
@@ -233,7 +234,7 @@ type MissionPauseRequested struct {
 
 func (MissionPauseRequested) Kind() string { return "mission.pause" }
 
-// MissionResumed returns a paused mission to running.
+// MissionResumed returns a paused mission to working.
 type MissionResumed struct {
 	ID    string
 	RunID string // the run to resume; see MissionDone.RunID
@@ -243,7 +244,7 @@ func (MissionResumed) Kind() string { return "mission.resume" }
 
 func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 	if ent, ok := findMission(w, e.ID); ok {
-		if m := w.missions.Get(ent); m.Status == MissionRunning {
+		if m := w.missions.Get(ent); m.Status == MissionWorking {
 			m.Status = MissionPaused
 		}
 	}
@@ -252,7 +253,7 @@ func applyMissionPauseRequested(w *World, e MissionPauseRequested) {
 func applyMissionResumed(w *World, e MissionResumed) {
 	if ent, ok := findMission(w, e.ID); ok {
 		if m := w.missions.Get(ent); m.Status == MissionPaused {
-			m.Status = MissionRunning
+			m.Status = MissionWorking
 		}
 	}
 }
@@ -261,7 +262,7 @@ func applyMissionDone(w *World, e MissionDone) {
 	if ent, ok := findMission(w, e.ID); ok {
 		m := w.missions.Get(ent)
 		if m.Status == MissionCompleted || m.Status == MissionFailed {
-			return // already terminal — idempotent (paused/running can still finish)
+			return // already terminal — idempotent (paused or working can still finish)
 		}
 		outcome := e.Outcome
 		if outcome == "" {

@@ -536,7 +536,7 @@ func (m *missionManager) Run(ctx context.Context, missionDefinitionID, targetID 
 		TenantID:              callingTenant.String(), // required: ListMissions filters by tenant
 		Name:                  def.GetName(),
 		Description:           def.GetDescription(),
-		Status:                mission.MissionStatusPending,
+		Status:                mission.MissionStatusSubmitted,
 		MissionDefinitionID:   types.ID(def.GetId()),
 		MissionDefinitionJSON: string(definitionJSON),
 		TargetID:              resolvedTargetID,
@@ -1519,7 +1519,7 @@ func (m *missionManager) List(ctx context.Context, activeOnly bool, limit, offse
 		if ms.TenantID != "" && ms.TenantID != tenant.String() {
 			continue
 		}
-		if activeOnly && ms.Status != brain.MissionRunning && ms.Status != brain.MissionPaused {
+		if activeOnly && ms.Status != brain.MissionWorking && ms.Status != brain.MissionPaused {
 			continue
 		}
 		result = append(result, missionSnapshotToData(eng, ms))

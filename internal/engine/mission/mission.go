@@ -115,11 +115,11 @@ func NewUnixTimePtrNow() UnixTimePtr {
 type MissionStatus string
 
 const (
-	// MissionStatusPending indicates the mission is created but not yet started.
-	MissionStatusPending MissionStatus = "pending"
+	// MissionStatusSubmitted indicates the mission is created but not yet started.
+	MissionStatusSubmitted MissionStatus = "submitted"
 
-	// MissionStatusRunning indicates the mission is currently executing.
-	MissionStatusRunning MissionStatus = "running"
+	// MissionStatusWorking indicates the mission is currently executing.
+	MissionStatusWorking MissionStatus = "working"
 
 	// MissionStatusPaused indicates the mission is temporarily suspended.
 	MissionStatusPaused MissionStatus = "paused"
@@ -175,15 +175,15 @@ func (s MissionStatus) CanTransitionTo(target MissionStatus) bool {
 
 	// Valid transitions based on mission lifecycle
 	switch s {
-	case MissionStatusPending:
-		return target == MissionStatusRunning || target == MissionStatusCancelled
-	case MissionStatusRunning:
+	case MissionStatusSubmitted:
+		return target == MissionStatusWorking || target == MissionStatusCancelled
+	case MissionStatusWorking:
 		return target == MissionStatusPaused ||
 			target == MissionStatusCompleted ||
 			target == MissionStatusFailed ||
 			target == MissionStatusCancelled
 	case MissionStatusPaused:
-		return target == MissionStatusRunning ||
+		return target == MissionStatusWorking ||
 			target == MissionStatusFailed ||
 			target == MissionStatusCancelled
 	default:

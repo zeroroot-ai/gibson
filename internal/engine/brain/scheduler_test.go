@@ -164,7 +164,7 @@ func TestScheduler_GoalMissionDoesNotAutoComplete(t *testing.T) {
 	}
 	// ...but a goal mission is NOT completed mechanically — the Decider owns that.
 	ms := e.Missions()
-	if len(ms) != 1 || ms[0].Status != MissionRunning {
+	if len(ms) != 1 || ms[0].Status != MissionWorking {
 		t.Fatalf("goal mission must stay running (Decider completes it), got %+v", ms)
 	}
 }

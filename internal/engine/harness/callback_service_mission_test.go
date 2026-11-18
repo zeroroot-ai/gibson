@@ -153,7 +153,7 @@ func TestGetMissionStatus_MissingMissionID_ReturnsInvalidArgument(t *testing.T) 
 func TestGetMissionStatus_Success(t *testing.T) {
 	mgr := &cbMockMissionOperator{
 		statusInfo: &MissionStatusInfo{
-			Status:   MissionStatusRunning,
+			Status:   MissionStatusWorking,
 			Progress: 0.42,
 			Phase:    "reconnaissance",
 		},
@@ -232,7 +232,7 @@ func TestListMissions_Success(t *testing.T) {
 	id1, _ := types.ParseID(validMissionID)
 	mgr := &cbMockMissionOperator{
 		listRecords: []*MissionRecord{
-			{ID: id1, Status: MissionStatusRunning},
+			{ID: id1, Status: MissionStatusWorking},
 		},
 	}
 	svc := newCBCallbackServiceWithMgr(mgr)
@@ -248,7 +248,7 @@ func TestListMissions_Success(t *testing.T) {
 // write is a refusal (ADR-0028, rule 3).
 func TestListMissions_PageToken(t *testing.T) {
 	id1, _ := types.ParseID(validMissionID)
-	mgr := &cbMockMissionOperator{listRecords: []*MissionRecord{{ID: id1, Status: MissionStatusRunning}}}
+	mgr := &cbMockMissionOperator{listRecords: []*MissionRecord{{ID: id1, Status: MissionStatusWorking}}}
 	svc := newCBCallbackServiceWithMgr(mgr)
 
 	resp, err := svc.ListMissions(context.Background(), &harnesspb.ListMissionsRequest{PageSize: 1})

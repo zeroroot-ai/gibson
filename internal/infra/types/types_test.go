@@ -112,8 +112,8 @@ func TestStatusEnumIntegration(t *testing.T) {
 			name:       "MissionStatus",
 			statusType: "mission",
 			validValues: []interface{}{
-				MissionStatusPending,
-				MissionStatusRunning,
+				MissionStatusSubmitted,
+				MissionStatusWorking,
 				MissionStatusCompleted,
 				MissionStatusFailed,
 				MissionStatusCancelled,
