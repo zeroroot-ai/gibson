@@ -8,6 +8,7 @@ package harness
 // where to send its model calls and its A2A messages.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,6 +23,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
@@ -218,4 +220,58 @@ func TestResolveStatusMappers(t *testing.T) {
 	for err, want := range agentCodes {
 		assert.Equal(t, want, status.Code(ResolveAgentStatus(fmt.Errorf("wrapped: %w", err))), err.Error())
 	}
+}
+
+// An outside agent of the tenant resolves to the same route as any agent, with
+// no registered instance. The record of another tenant does not resolve.
+func TestResolveAgent_AnOutsideAgentGetsTheAgentGatewayRoute(t *testing.T) {
+	h := resolveHarness(newStubSlotManager(), nil)
+	store := &outsideStoreStub{names: map[string]bool{"partner-scout": true}}
+	svc := resolveService(t, h, WithOutsideAgentStore(func() outsideagentstore.Store { return store }))
+	svc.componentRegistry = &gateFakeRegistry{}
+
+	resp, err := svc.ResolveAgent(testCtxWithTenant(), &harnesspb.ResolveAgentRequest{
+		Context: resolveContext(), Name: "partner-scout",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
+	assert.Equal(t, "partner-scout", resp.GetRouteHeaders()["x-gibson-route-agent"])
+
+	_, err = svc.ResolveAgent(testCtxWithTenant(), &harnesspb.ResolveAgentRequest{
+		Context: resolveContext(), Name: "other-scout",
+	})
+	assert.Equal(t, codes.NotFound, status.Code(err))
+
+	store.err = errors.New("db down")
+	_, err = svc.ResolveAgent(testCtxWithTenant(), &harnesspb.ResolveAgentRequest{
+		Context: resolveContext(), Name: "partner-scout",
+	})
+	assert.Equal(t, codes.Unavailable, status.Code(err), "a store that cannot answer")
+}
+
+type outsideStoreStub struct {
+	names map[string]bool
+	err   error
+}
+
+func (o *outsideStoreStub) Register(context.Context, string, outsideagentstore.Entry) (*outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (o *outsideStoreStub) List(context.Context, string) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (o *outsideStoreStub) Get(_ context.Context, _, name string) (*outsideagentstore.Entry, error) {
+	if o.err != nil {
+		return nil, o.err
+	}
+	if o.names[name] {
+		return &outsideagentstore.Entry{Name: name}, nil
+	}
+	return nil, outsideagentstore.ErrNotFound
+}
+
+func (o *outsideStoreStub) Delete(context.Context, string, string) error {
+	return errors.New("not used")
 }

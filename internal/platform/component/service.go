@@ -37,6 +37,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentevents"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	bankpb "github.com/zeroroot-ai/sdk/api/gen/gibson/bank/v1"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -160,6 +161,9 @@ type ComponentServiceServer struct {
 	slotModels   SlotModelResolver
 	modelGateway GatewayInfo
 	agentGateway GatewayInfo
+	// outsideAgents is the store of the outside agents. ResolveAgent resolves a
+	// name that the tenant registered there.
+	outsideAgents outsideagentstore.Store
 
 	// workContext records the work-item→mission/tenant mapping (gibson#756; the
 	// memory tiers were retired). May be nil.

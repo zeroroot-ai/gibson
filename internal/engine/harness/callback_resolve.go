@@ -14,11 +14,24 @@ import (
 	"github.com/zeroroot-ai/sdk/auth"
 
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 )
 
 // WithModelGateway sets the public model gateway that ResolveModel returns.
 func WithModelGateway(gw GatewayInfo) CallbackServiceOption {
 	return func(s *HarnessCallbackService) { s.modelGateway = gw }
+}
+
+// OutsideAgentStoreSource returns the outside agent store of this daemon, or nil
+// when the data plane is not ready. It is read for each call, as the source of
+// the Agent Skill store is.
+type OutsideAgentStoreSource func() outsideagentstore.Store
+
+// WithOutsideAgentStore wires the source of the outside agent store. An outside
+// agent of the tenant is a target that ResolveAgent resolves. It gets the same
+// gateway URL and the same route headers as any other agent.
+func WithOutsideAgentStore(src OutsideAgentStoreSource) CallbackServiceOption {
+	return func(s *HarnessCallbackService) { s.outsideAgents = src }
 }
 
 // WithAgentGateway sets the public Agent gateway that ResolveAgent returns.
@@ -104,6 +117,17 @@ func ResolveAgentStatus(err error) error {
 // agentExists reports whether the tenant can reach an agent of this name: a
 // live registered agent or an agent of the catalog.
 func (s *HarnessCallbackService) agentExists(ctx context.Context, tenant, name string) (bool, error) {
+	if s.outsideAgents != nil {
+		if store := s.outsideAgents(); store != nil {
+			_, err := store.Get(ctx, tenant, name)
+			switch {
+			case err == nil:
+				return true, nil
+			case !errors.Is(err, outsideagentstore.ErrNotFound):
+				return false, err //nolint:wrapcheck // the handler wraps it
+			}
+		}
+	}
 	if _, ok := componentcatalog.LookupAgent(name); ok {
 		return true, nil
 	}

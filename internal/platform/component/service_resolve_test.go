@@ -20,6 +20,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -285,4 +286,61 @@ func TestResolveAgent_Refusals(t *testing.T) {
 	bare := newWorkIDEnv(t)
 	_, err := bare.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{Name: "recon-agent"})
 	assert.Equal(t, codes.Unavailable, status.Code(err), "a server with no agent gateway cannot resolve an agent")
+}
+
+// memOutsideAgents is an outside agent store with the entries of one tenant.
+type memOutsideAgents struct {
+	tenant string
+	names  map[string]bool
+	err    error
+}
+
+func (m *memOutsideAgents) Register(context.Context, string, outsideagentstore.Entry) (*outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *memOutsideAgents) List(context.Context, string) ([]outsideagentstore.Entry, error) {
+	return nil, errors.New("not used")
+}
+
+func (m *memOutsideAgents) Get(_ context.Context, tenant, name string) (*outsideagentstore.Entry, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	if tenant == m.tenant && m.names[name] {
+		return &outsideagentstore.Entry{Name: name}, nil
+	}
+	return nil, outsideagentstore.ErrNotFound
+}
+
+func (m *memOutsideAgents) Delete(context.Context, string, string) error { return errors.New("not used") }
+
+// An outside agent resolves to the same gateway URL and the same route headers as
+// any agent. No registered instance is needed. The record of another tenant does
+// not resolve.
+func TestResolveAgent_AnOutsideAgentGetsTheAgentGatewayRoute(t *testing.T) {
+	env := newResolveEnv(t, &fakeSlotModels{})
+	env.svc.registry = &countingRegistry{}
+	env.svc.WithOutsideAgents(&memOutsideAgents{tenant: victimTenant, names: map[string]bool{"partner-scout": true}})
+	ctx := env.enqueueAgentWork(t, victimTenant, "work-1", nil)
+
+	resp, err := env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "partner-scout"})
+	require.NoError(t, err)
+	assert.Equal(t, "https://agents.example.test", resp.GetGatewayUrl())
+	want := map[string]string{}
+	for _, h := range agentcall.RouteHeaders(victimTenant, "partner-scout", "") {
+		want[h.Name] = h.Value
+	}
+	assert.Equal(t, want, resp.GetRouteHeaders())
+
+	_, err = env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "other-scout"})
+	assert.Equal(t, codes.NotFound, status.Code(err), "a name that is not registered")
+
+	env.svc.WithOutsideAgents(&memOutsideAgents{tenant: "another-tenant", names: map[string]bool{"partner-scout": true}})
+	_, err = env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "partner-scout"})
+	assert.Equal(t, codes.NotFound, status.Code(err), "the record of another tenant")
+
+	env.svc.WithOutsideAgents(&memOutsideAgents{err: errors.New("db down")})
+	_, err = env.svc.ResolveAgent(ctx, &componentpb.ResolveAgentRequest{WorkId: "work-1", Name: "partner-scout"})
+	assert.Equal(t, codes.Unavailable, status.Code(err), "a store that cannot answer")
 }

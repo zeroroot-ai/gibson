@@ -14,6 +14,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
 	"github.com/zeroroot-ai/gibson/internal/platform/modelgate"
+	"github.com/zeroroot-ai/gibson/internal/platform/outsideagentstore"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/agentcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	componentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/component/v1"
@@ -58,6 +59,31 @@ func (s *ComponentServiceServer) WithSlotModelResolver(r SlotModelResolver) *Com
 func (s *ComponentServiceServer) WithGateways(model, agentGW GatewayInfo) *ComponentServiceServer {
 	s.modelGateway, s.agentGateway = model, agentGW
 	return s
+}
+
+// WithOutsideAgents sets the store of the outside agents. A name that the tenant
+// registered as an outside agent is a target that ResolveAgent resolves. It gets
+// the same gateway URL and the same route headers as any other agent.
+func (s *ComponentServiceServer) WithOutsideAgents(store outsideagentstore.Store) *ComponentServiceServer {
+	s.outsideAgents = store
+	return s
+}
+
+// outsideAgentExists reports whether the tenant registered an outside agent of
+// this name.
+func (s *ComponentServiceServer) outsideAgentExists(ctx context.Context, tenant, name string) (bool, error) {
+	if s.outsideAgents == nil {
+		return false, nil
+	}
+	_, err := s.outsideAgents.Get(ctx, tenant, name)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, outsideagentstore.ErrNotFound):
+		return false, nil
+	default:
+		return false, err //nolint:wrapcheck // the caller wraps it
+	}
 }
 
 // ResolveModel resolves a slot of the work item to one exact model name and
@@ -131,7 +157,11 @@ func (s *ComponentServiceServer) ResolveAgent(
 	if _, err := s.claimedWorkOwner(ctx, tenant, req.GetWorkId()); err != nil {
 		return nil, err
 	}
-	if _, ok := componentcatalog.LookupAgent(name); !ok {
+	outside, oerr := s.outsideAgentExists(ctx, tenant, name)
+	if oerr != nil {
+		return nil, status.Errorf(codes.Unavailable, "resolve agent: %v", oerr)
+	}
+	if _, ok := componentcatalog.LookupAgent(name); !ok && !outside {
 		instances, err := s.registry.Discover(ctx, tenant, "agent", name)
 		if err != nil {
 			return nil, status.Errorf(codes.Unavailable, "resolve agent: %v", err)

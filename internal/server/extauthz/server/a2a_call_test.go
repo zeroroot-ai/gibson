@@ -351,3 +351,114 @@ func TestA2ACall_OnlyTheGatewayIdentityMakesIt(t *testing.T) {
 		t.Error("FGA was asked before the peer refusal")
 	}
 }
+
+const outsideObject = "outside_agent:" + modelTenant + "/" + a2aAgent
+
+func outsideTuples(extra map[string]bool) map[string]bool {
+	m := map[string]bool{tupleKey("tenant:"+modelTenant, "owner", outsideObject): true}
+	for k, v := range extra {
+		m[k] = v
+	}
+	return m
+}
+
+// A call to an outside agent needs the grant of the mission. The mission gate,
+// the route claim and the tenant of the grant apply as for any A2A call. The
+// right to execute a component does not apply, and FGA is not asked about it.
+func TestA2ACall_OutsideAgentNeedsTheGrantOfTheMission(t *testing.T) {
+	t.Parallel()
+	grant := tupleKey("mission:mission-1", "can_call", outsideObject)
+
+	t.Run("the granted mission is allowed", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(map[string]bool{grant: true})}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(agentcall.RouteA2A, g, nil))
+		if got := statusOf(t, resp, err); got != codes.OK {
+			t.Fatalf("status = %v, want OK", got)
+		}
+		if v, _, ok := headerAction(resp, modelcall.HeaderMission); !ok || v != "mission-1" {
+			t.Errorf("the trusted mission header = %q, want mission-1", v)
+		}
+		if asked := mock.questionsAbout("can_execute"); len(asked) != 0 {
+			t.Errorf("the component right was asked for an outside agent: %+v", asked)
+		}
+	})
+
+	t.Run("another mission of the tenant is refused", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(map[string]bool{grant: true})}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-2", "task-1", a2aGrantRoutes)
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(agentcall.RouteA2A, g, nil))
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+	})
+
+	t.Run("the member right does not reach an outside agent", func(t *testing.T) {
+		t.Parallel()
+		// Tenant members hold can_execute on a component of this name. That
+		// must not open an outside agent of the same name.
+		mock := &modelFGA{allow: outsideTuples(allowExecute())}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(agentcall.RouteA2A, g, nil))
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+	})
+
+	t.Run("the card of an outside agent needs the same grant", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(nil)}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		card := "/agents/" + a2aAgent + "/.well-known/agent-card.json"
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(card, g, nil))
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+	})
+
+	t.Run("a mission that is not active is refused before the grant", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(map[string]bool{grant: true}), gateClosed: true}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(agentcall.RouteA2A, g, nil))
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+		if len(mock.questionsAbout("can_call")) != 0 {
+			t.Error("the grant was asked after the mission gate refused")
+		}
+	})
+
+	t.Run("an FGA error on the grant refuses with Unavailable", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(map[string]bool{grant: true}), err: errors.New("fga down"), errOn: "can_call"}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		resp, err := srv.Check(peerContext(t, gatewaySVID), a2aRequest(agentcall.RouteA2A, g, nil))
+		if got := statusOf(t, resp, err); got != codes.Unavailable {
+			t.Fatalf("status = %v, want Unavailable", got)
+		}
+	})
+
+	t.Run("a bank target is never an outside agent", func(t *testing.T) {
+		t.Parallel()
+		mock := &modelFGA{allow: outsideTuples(nil)}
+		srv, priv := a2aServer(t, mock)
+		g := mintA2AGrant(t, priv, modelTenant, "mission-1", "task-1", a2aGrantRoutes)
+		req := a2aRequest(agentcall.RouteA2A, g, map[string]string{agentcall.HeaderRouteBank: a2aBank})
+		resp, err := srv.Check(peerContext(t, gatewaySVID), req)
+		if got := statusOf(t, resp, err); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied (no can_send on the bank)", got)
+		}
+		if len(mock.questionsAbout("owner")) != 0 {
+			t.Error("the outside lookup ran for a bank call")
+		}
+	})
+}

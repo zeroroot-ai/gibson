@@ -130,6 +130,9 @@ type HarnessCallbackService struct {
 	// and ResolveAgent return.
 	modelGateway GatewayInfo
 	agentGateway GatewayInfo
+	// outsideAgents returns the outside agent store. ResolveAgent resolves a name
+	// that the tenant registered as an outside agent.
+	outsideAgents OutsideAgentStoreSource
 
 	// toolCallSink receives completed tool calls observed on the callback
 	// CallToolProto path (ADR-0120, gibson#271); the daemon wires it to the

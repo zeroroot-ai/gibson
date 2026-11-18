@@ -38,6 +38,9 @@ type modelFGA struct {
 	gateClosed bool
 	// gateErr fails the mission gate question only.
 	gateErr error
+	// errOn limits err to the questions of one relation. Empty means err
+	// fails each question.
+	errOn string
 }
 
 func tupleKey(user, relation, object string) string { return user + "|" + relation + "|" + object }
@@ -70,6 +73,9 @@ func (r *modelFGAReq) Execute() (*fgaclient.ClientCheckResponse, error) {
 	r.m.mu.Lock()
 	r.m.asked = append(r.m.asked, r.body)
 	err := r.m.err
+	if r.m.errOn != "" && r.body.Relation != r.m.errOn {
+		err = nil
+	}
 	v := r.m.allow[tupleKey(r.body.User, r.body.Relation, r.body.Object)]
 	if r.body.Relation == "active" {
 		v = !r.m.gateClosed

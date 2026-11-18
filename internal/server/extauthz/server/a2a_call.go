@@ -23,6 +23,8 @@ import (
 const (
 	relationCanSend    = "can_send"
 	relationCanExecute = "can_execute"
+	// relationCanCall is the right of a mission to call an outside agent.
+	relationCanCall = "can_call"
 )
 
 // Reasons for a refused A2A call. They are the label of
@@ -33,6 +35,7 @@ const (
 	a2aDenyCardAgent      = "card_path_agent"
 	a2aDenyTenant         = "tenant_mismatch"
 	a2aDenyMission        = "mission_not_active"
+	a2aDenyOutside        = "outside_agent_not_granted"
 	a2aDenyFGA            = "fga_denied"
 	a2aDenyFGAUnavailable = "fga_unavailable"
 )
@@ -121,6 +124,17 @@ func (s *EnvoyAuthzServer) a2aCallResponse(ctx context.Context, req *authv3.Chec
 		return denyA2A(a2aDenyMission, denyForbidden())
 	}
 
+	// An outside agent is a target that has an owner tuple on its outside_agent
+	// object. It is not a component, so the right to execute a component does
+	// not apply. The mission of the grant must hold a grant to the outside
+	// agent. The tenant admin writes that grant for ONE mission, and no default
+	// grant exists. A bank is never an outside agent.
+	if bank == "" {
+		if resp := s.outsideAgentResponse(ctx, path, routeTenant, agentName, caller); resp != nil {
+			return resp
+		}
+	}
+
 	relation, object := a2aTarget(isCard, agentName, bank)
 	allowed, fgaErr := s.checkAny(ctx, caller.fgaUsers, relation, object)
 	if fgaErr != nil {
@@ -135,6 +149,42 @@ func (s *EnvoyAuthzServer) a2aCallResponse(ctx context.Context, req *authv3.Chec
 		return denyA2A(a2aDenyFGA, denyForbidden())
 	}
 
+	extauthzAllowedTotal.WithLabelValues(path).Inc()
+	return modelOKResponse(routeTenant, caller)
+}
+
+// outsideAgentResponse decides an A2A call to an outside agent. It returns nil
+// when the target is not an outside agent, and the caller then runs the check of
+// a component. Otherwise it returns the final response of the call.
+func (s *EnvoyAuthzServer) outsideAgentResponse(
+	ctx context.Context, path, routeTenant, agentName string, caller modelCaller,
+) *authv3.CheckResponse {
+	object, err := authz.OutsideAgentObject(routeTenant, agentName)
+	if err != nil {
+		// The name cannot form an outside agent object, so it is not one.
+		return nil
+	}
+	registered, err := s.cache.CheckRelation(ctx, "tenant:"+routeTenant, "owner", object, nil)
+	if err != nil {
+		extauthzFGAUnavailableTotal.Inc()
+		s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (outside agent lookup)", "path", path, "err", err)
+		return denyA2A(a2aDenyFGAUnavailable, denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable))
+	}
+	if !registered {
+		return nil
+	}
+	granted, err := s.cache.CheckRelation(ctx, authz.MissionObject(caller.mission), relationCanCall, object, nil)
+	if err != nil {
+		extauthzFGAUnavailableTotal.Inc()
+		s.log.ErrorContext(ctx, "ext-authz: FGA unavailable (outside agent grant)", "path", path, "err", err)
+		return denyA2A(a2aDenyFGAUnavailable, denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable))
+	}
+	if !granted {
+		s.log.InfoContext(ctx, "ext-authz: A2A call to an outside agent that the mission does not hold",
+			"path", path, "subject", caller.subject, "mission", caller.mission, "tenant", routeTenant, "agent", agentName)
+		extauthzDeniedTotal.WithLabelValues(path).Inc()
+		return denyA2A(a2aDenyOutside, denyForbidden())
+	}
 	extauthzAllowedTotal.WithLabelValues(path).Inc()
 	return modelOKResponse(routeTenant, caller)
 }
