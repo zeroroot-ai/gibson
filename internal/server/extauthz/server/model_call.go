@@ -19,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
+	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
 // relationCanUse is the FGA relation of a model access grant (model.fga, types
@@ -30,7 +31,6 @@ const relationCanUse = "can_use"
 const (
 	modelDenyRoute          = "route_config"
 	modelDenyEdgeModelPath  = "model_path_from_edge"
-	modelDenyA2A            = "a2a_not_served"
 	modelDenyPath           = "path"
 	modelDenyNoModel        = "no_model"
 	modelDenyTenant         = "tenant_mismatch"
@@ -73,14 +73,12 @@ func denyModel(reason string, resp *authv3.CheckResponse) *authv3.CheckResponse 
 
 // gatewayCallResponse decides a call of the gateway peer. A model path is a model
 // call: the claimed tenant and provider come from the two route headers. Any
-// other path is an A2A call, which no part of ext-authz serves yet, so it is
-// refused with its own reason.
+// other path is an A2A call (a2a_call.go).
 func (s *EnvoyAuthzServer) gatewayCallResponse(ctx context.Context, req *authv3.CheckRequest) *authv3.CheckResponse {
 	path := extractMethod(req)
 	if !modelcall.IsModelPath(path) {
-		s.log.WarnContext(ctx, "ext-authz: the gateway sent a path that is not a model path, and no A2A call is served",
-			"path", path)
-		return denyModel(modelDenyA2A, denyForbidden())
+		// On the gateway identity, a path that is not a model path is an A2A call.
+		return s.a2aCallResponse(ctx, req)
 	}
 	tenant, provider, reason := modelcall.ClaimedRoute(req.GetAttributes().GetRequest().GetHttp().GetHeaders())
 	if reason != "" {
@@ -206,28 +204,7 @@ func (s *EnvoyAuthzServer) authenticateModelCaller(
 		if deny != nil {
 			return modelCaller{}, deny
 		}
-		tenant := claims.Tenant.String()
-		// The subject of a task grant ("component:agent:name") is not an FGA
-		// user. The FGA subject is the person who created the mission, from the
-		// signed claim of the grant, as the slot gate did. A user of the tenant
-		// passes the default grant of the tenant members through that
-		// membership. A grant with no such claim is a mission that no person
-		// created. The tenant members are then the subject.
-		fgaUsers := []string{"tenant:" + tenant + "#member"}
-		if ini := modelcall.ClaimString(extractCapabilityGrant(httpHeaders), modelcall.InitiatorClaim); ini != "" {
-			if !validInitiator(ini) {
-				s.log.WarnContext(ctx, "ext-authz: the initiator claim is not an FGA user", "path", path)
-				return modelCaller{}, denyModel(modelDenyObject, denyForbidden())
-			}
-			fgaUsers = []string{ini}
-		}
-		return modelCaller{
-			subject:  claims.Subject,
-			fgaUsers: fgaUsers,
-			tenant:   tenant,
-			mission:  claims.MissionID,
-			task:     claims.TaskID,
-		}, nil
+		return s.taskGrantCaller(ctx, path, httpHeaders, claims)
 	}
 	if cid, deny, handled := s.verifyComponent(ctx, path, httpHeaders); handled {
 		if deny != nil {
@@ -242,6 +219,35 @@ func (s *EnvoyAuthzServer) authenticateModelCaller(
 	s.log.WarnContext(ctx, "ext-authz: model call without a grant", "path", path)
 	extauthzUnauthenticatedTotal.WithLabelValues(path).Inc()
 	return modelCaller{}, denyModel("unauthenticated", denyUnauthenticated())
+}
+
+// taskGrantCaller builds the caller of a verified task grant. A model call and
+// an A2A call use it, so one rule decides who a task grant speaks for.
+func (s *EnvoyAuthzServer) taskGrantCaller(
+	ctx context.Context, path string, httpHeaders map[string]string, claims capabilitygrant.Claims,
+) (modelCaller, *authv3.CheckResponse) {
+	tenant := claims.Tenant.String()
+	// The subject of a task grant ("component:agent:name") is not an FGA
+	// user. The FGA subject is the person who created the mission, from the
+	// signed claim of the grant, as the slot gate did. A user of the tenant
+	// passes the default grant of the tenant members through that
+	// membership. A grant with no such claim is a mission that no person
+	// created. The tenant members are then the subject.
+	fgaUsers := []string{"tenant:" + tenant + "#member"}
+	if ini := modelcall.ClaimString(extractCapabilityGrant(httpHeaders), modelcall.InitiatorClaim); ini != "" {
+		if !validInitiator(ini) {
+			s.log.WarnContext(ctx, "ext-authz: the initiator claim is not an FGA user", "path", path)
+			return modelCaller{}, denyModel(modelDenyObject, denyForbidden())
+		}
+		fgaUsers = []string{ini}
+	}
+	return modelCaller{
+		subject:  claims.Subject,
+		fgaUsers: fgaUsers,
+		tenant:   tenant,
+		mission:  claims.MissionID,
+		task:     claims.TaskID,
+	}, nil
 }
 
 // canUse reports whether any user holds can_use on any object. It stops at the

@@ -6,7 +6,12 @@
 // next to modelcall, which does the same for a model call.
 package agentcall
 
-import "github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
+import (
+	"strings"
+	"unicode"
+
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
+)
 
 // The route headers of an agent call. The caller claims its tenant with
 // modelcall.HeaderRouteTenant. These two name the target.
@@ -42,3 +47,78 @@ const RouteA2A = "/"
 // GrantRoutes returns the routes that a task grant lists so that its holder can
 // send an A2A message through the Agent gateway.
 func GrantRoutes() []string { return []string{RouteA2A} }
+
+// Reasons that ClaimedRoute gives for a route header that it cannot use.
+const (
+	ReasonMissingHeader  = "missing_route_header"
+	ReasonRepeatedHeader = "repeated_route_header"
+	ReasonBadValue       = "bad_route_value"
+)
+
+// ClaimedRoute reads the claimed tenant, the target agent and the optional bank
+// from the headers of a request. The tenant and the agent are required. A
+// header that is repeated arrives as one value with a comma, and it is refused.
+// A value with a slash, a space or a control character is refused, because the
+// agent and the bank name FGA objects.
+func ClaimedRoute(headers map[string]string) (tenant, agent, bank, reason string) {
+	tenant, reason = modelcall.ClaimedRouteTenant(headers)
+	if reason != "" {
+		return "", "", "", reason
+	}
+	agent, reason = readValue(headers, HeaderRouteAgent, true)
+	if reason != "" {
+		return "", "", "", reason
+	}
+	bank, reason = readValue(headers, HeaderRouteBank, false)
+	if reason != "" {
+		return "", "", "", reason
+	}
+	return tenant, agent, bank, ""
+}
+
+func readValue(headers map[string]string, name string, required bool) (string, string) {
+	v := strings.TrimSpace(headers[name])
+	switch {
+	case v == "" && required:
+		return "", ReasonMissingHeader
+	case v == "":
+		return "", ""
+	case strings.Contains(v, ","):
+		return "", ReasonRepeatedHeader
+	case strings.ContainsFunc(v, func(r rune) bool {
+		return r == '/' || r == '#' || r == ':' || unicode.IsSpace(r) || unicode.IsControl(r)
+	}):
+		return "", ReasonBadValue
+	}
+	return v, ""
+}
+
+const (
+	cardPrefix = "/agents/"
+	cardSuffix = CardPath
+)
+
+// CardPathName returns the agent name of an Agent Card path of the form
+// /agents/<name>/.well-known/agent-card.json. It returns false for any other
+// path.
+func CardPathName(path string) (string, bool) {
+	rest, ok := strings.CutPrefix(path, cardPrefix)
+	if !ok {
+		return "", false
+	}
+	name, ok := strings.CutSuffix(rest, cardSuffix)
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return "", false
+	}
+	return name, true
+}
+
+// IsA2APath reports whether path is the A2A endpoint or the Agent Card of an
+// agent.
+func IsA2APath(path string) bool {
+	if path == RouteA2A {
+		return true
+	}
+	_, ok := CardPathName(path)
+	return ok
+}

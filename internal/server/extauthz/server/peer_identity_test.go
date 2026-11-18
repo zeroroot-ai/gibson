@@ -76,19 +76,20 @@ func TestPeer_ModelCallNeedsTheGatewayIdentity(t *testing.T) {
 	}
 }
 
-// A non-model path from the gateway is an A2A call. No part of ext-authz serves
-// it yet, so it is refused with its own reason.
+// A non-model path from the gateway is an A2A call. A path that is neither the
+// A2A endpoint nor an Agent Card is refused with the reason "path"
+// (a2a_call_test.go has the tests of the A2A calls that are served).
 func TestPeer_AnA2APathFromTheGatewayIsRefused(t *testing.T) {
 	t.Parallel()
 	srv, grant, _ := buildPeerServer(t, []string{gatewaySVID})
-	before := testutil.ToFloat64(extauthzModelCallDeniedTotal.WithLabelValues(modelDenyA2A))
+	before := testutil.ToFloat64(extauthzA2ACallDeniedTotal.WithLabelValues(a2aDenyPath))
 	req := modelRequest("/a2a/agent", modelTenant, modelProvider, "", grant, nil)
 	resp, err := srv.Check(peerContext(t, gatewaySVID), req)
 	if got := statusOf(t, resp, err); got != codes.PermissionDenied {
 		t.Fatalf("A2A call from the gateway: status = %v, want PermissionDenied", got)
 	}
-	if testutil.ToFloat64(extauthzModelCallDeniedTotal.WithLabelValues(modelDenyA2A)) != before+1 {
-		t.Error("the refusal was not counted with the reason a2a_not_served")
+	if testutil.ToFloat64(extauthzA2ACallDeniedTotal.WithLabelValues(a2aDenyPath)) != before+1 {
+		t.Error("the refusal was not counted with the reason path")
 	}
 }
 
