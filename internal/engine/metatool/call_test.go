@@ -6,6 +6,7 @@ package metatool
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/catalog"
@@ -21,8 +22,9 @@ type seqObserver struct {
 	resultErr error
 }
 
-func (o *seqObserver) record(_ context.Context, rec CallRecord, _ []byte, errText string) {
+func (o *seqObserver) record(_ context.Context, rec CallRecord, _ []byte, errText string) string {
 	o.recorded = append(o.recorded, rec.Canonical+"|"+errText)
+	return fmt.Sprintf("rec-%d", len(o.recorded))
 }
 
 func (o *seqObserver) Intent(_ context.Context, rec CallRecord) error {
@@ -142,7 +144,7 @@ func TestCall_ANativeIDIsHandedBack(t *testing.T) {
 
 func TestCall_NeedsAnObserver(t *testing.T) {
 	h := NewHandler(nil, allowAll(), nil)
-	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:x", Recorder: func(context.Context, CallRecord, []byte, string) {}}); err == nil {
+	if _, err := h.Call(context.Background(), Call{Caller: callerAlice, ID: "mcp:gitlab:x", Recorder: func(context.Context, CallRecord, []byte, string) string { return "" }}); err == nil {
 		t.Fatal("want an error with no observer")
 	}
 }

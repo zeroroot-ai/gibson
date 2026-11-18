@@ -176,7 +176,7 @@ func TestCallbackPeerAuthzInterceptors_UnaryAllowsAgentPeerInPolicy(t *testing.T
 		handlerCalled = true
 		return nil, nil
 	}
-	info := &grpc.UnaryServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/LLMComplete"}
+	info := &grpc.UnaryServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/ResolveModel"}
 
 	_, err := unary(ctxWithSVID(callbackEnvoySVID(callbackTestTD)), nil, info, handler)
 	require.NoError(t, err)
@@ -193,7 +193,7 @@ func TestCallbackPeerAuthzInterceptors_StreamDeniesDashboard(t *testing.T) {
 		handlerCalled = true
 		return nil
 	}
-	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/LLMStream"}
+	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream"}
 
 	err := streamInterceptor(nil, ss, info, handler)
 	require.Error(t, err, "the dashboard SVID must be denied on streaming RPCs too, not just unary ones")
@@ -211,7 +211,7 @@ func TestCallbackPeerAuthzInterceptors_StreamDeniesUnknownPeer(t *testing.T) {
 		handlerCalled = true
 		return nil
 	}
-	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/LLMStream"}
+	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream"}
 
 	err := streamInterceptor(nil, ss, info, handler)
 	require.Error(t, err, "REGRESSION (GHSA-cwgm-qw3c-4ph7): an unclassified peer must be denied on "+
@@ -230,7 +230,7 @@ func TestCallbackPeerAuthzInterceptors_StreamAllowsAgentPeer(t *testing.T) {
 		handlerCalled = true
 		return nil
 	}
-	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/LLMStream"}
+	info := &grpc.StreamServerInfo{FullMethod: "/gibson.harness.v1.HarnessCallbackService/CallToolProtoStream"}
 
 	err := streamInterceptor(nil, ss, info, handler)
 	require.NoError(t, err)

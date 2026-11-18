@@ -8,7 +8,6 @@ import (
 	"log/slog"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	sdkagent "github.com/zeroroot-ai/sdk/agent"
 	"github.com/zeroroot-ai/sdk/codegen/workspace"
@@ -31,21 +30,6 @@ type noopInnerHarness struct {
 
 var _ AgentHarness = (*noopInnerHarness)(nil)
 
-func (*noopInnerHarness) Complete(context.Context, string, []llm.Message, ...CompletionOption) (*llm.CompletionResponse, error) {
-	return nil, nil
-}
-func (*noopInnerHarness) CompleteWithTools(context.Context, string, []llm.Message, []llm.ToolDef, ...CompletionOption) (*llm.CompletionResponse, error) {
-	return nil, nil
-}
-func (*noopInnerHarness) Stream(context.Context, string, []llm.Message, ...CompletionOption) (<-chan llm.StreamChunk, error) {
-	return nil, nil
-}
-func (*noopInnerHarness) CompleteStructuredAny(context.Context, string, []llm.Message, any, ...CompletionOption) (any, error) {
-	return nil, nil
-}
-func (*noopInnerHarness) CompleteStructuredAnyWithUsage(context.Context, string, []llm.Message, any, ...CompletionOption) (*StructuredCompletionResult, error) {
-	return nil, nil
-}
 func (*noopInnerHarness) CallToolProto(context.Context, string, proto.Message, proto.Message) error {
 	return nil
 }
@@ -99,13 +83,6 @@ func (*noopInnerHarness) Tracer() trace.Tracer            { return nil }
 func (*noopInnerHarness) Logger() *slog.Logger            { return slog.Default() }
 func (*noopInnerHarness) Metrics() MetricsRecorder        { return nil }
 
-// The pointer return is dictated by the Harness interface
-// (harness.go: TokenUsage() *llm.TokenTracker), so gocritic's suggestion to
-// take a non-pointer type cannot be applied without breaking the contract
-// this stub exists to satisfy.
-//
-//nolint:gocritic // ptrToRefParam: signature is fixed by the Harness interface.
-func (*noopInnerHarness) TokenUsage() *llm.TokenTracker { return nil }
 func (*noopInnerHarness) Workspace() workspace.Workspace {
 	return nil
 }

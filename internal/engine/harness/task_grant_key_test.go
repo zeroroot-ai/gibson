@@ -13,6 +13,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/emitbounds"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/auth"
+	"google.golang.org/protobuf/proto"
 )
 
 // A grant names one task. An emitter that spreads its observations over many
@@ -54,16 +55,21 @@ func TestPublishedEventsCarryTheTaskOfTheGrant(t *testing.T) {
 	data := make(chan map[string]interface{}, 8)
 	svc := newTaskKeyEventService(t, data)
 
-	claims := grantClaims(t, "acme", "mission-A")
+	claims := grantClaims(t, "test-tenant", "mission-A")
 	claims.TaskID = "task-grant"
-	ctx := withGrantMissionRun(withTaskGrantClaims(auth.ContextWithTenantString(context.Background(), "acme"), claims), "run-1")
-	_, err := svc.LLMComplete(ctx, &harnesspb.LLMCompleteRequest{
-		Context:  &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent", TaskId: "task-body"},
-		Slot:     "default",
-		Messages: []*harnesspb.LLMMessage{{Role: "user", Content: "hi"}},
+	ctx := withGrantMissionRun(withTaskGrantClaims(auth.ContextWithTenantString(context.Background(), "test-tenant"), claims), "run-1")
+	resp, err := svc.CallToolProto(ctx, &harnesspb.CallToolProtoRequest{
+		Context:    &harnesspb.ContextInfo{MissionId: "mission-A", AgentName: "recon-agent", TaskId: "task-body"},
+		Name:       "test-external-tool",
+		InputType:  "testtool.ToolInput",
+		InputJson:  []byte(`{"query": "q", "limit": 1}`),
+		OutputType: "testtool.ToolOutput",
 	})
 	if err != nil {
-		t.Fatalf("LLMComplete: %v", err)
+		t.Fatalf("CallToolProto: %v", err)
+	}
+	if resp.GetError() != nil {
+		t.Fatalf("CallToolProto answered an error: %v", resp.GetError().GetMessage())
 	}
 	select {
 	case got := <-data:
@@ -78,11 +84,23 @@ func TestPublishedEventsCarryTheTaskOfTheGrant(t *testing.T) {
 func newTaskKeyEventService(t *testing.T, data chan map[string]interface{}) *HarnessCallbackService {
 	t.Helper()
 	registry := NewCallbackHarnessRegistry()
-	mustRegister(t, registry, "mission-A", "recon-agent", newCompletingHarness("acme"))
+	h := &mockHarnessWithResolver{
+		toolDescriptors: map[string]*ToolDescriptor{
+			"test-external-tool": {
+				Name:            "test-external-tool",
+				InputProtoType:  "testtool.ToolInput",
+				OutputProtoType: "testtool.ToolOutput",
+				Metadata:        map[string]string{"file_descriptor_set": createTestFileDescriptorSetForCallback()},
+			},
+		},
+		toolHandler: func(context.Context, string, proto.Message, proto.Message) error { return nil },
+	}
+	mustRegister(t, registry, "mission-A", "recon-agent", h)
 	return NewHarnessCallbackServiceWithRegistry(
 		slog.New(slog.DiscardHandler),
 		registry,
 		WithEventBus(dataBus{data}),
+		WithMissionBlockedTools(noBlockedTools),
 	)
 }
 

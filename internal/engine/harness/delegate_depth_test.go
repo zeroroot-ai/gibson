@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"io"
 	"log/slog"
 	"strings"
@@ -17,8 +18,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
 	"github.com/zeroroot-ai/gibson/internal/platform/componentcatalog"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // discardLogger returns a slog.Logger that discards all output.
@@ -60,9 +59,7 @@ func newDelegationHarness(t *testing.T, q component.WorkQueue, agentRunID string
 
 func successQueue(t *testing.T) *chainQueue {
 	t.Helper()
-	return &chainQueue{queueFake: queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}}
+	return &chainQueue{queueFake: queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}}
 }
 
 // TestDelegateToAgent_CallerChainPropagation verifies that A → B → C

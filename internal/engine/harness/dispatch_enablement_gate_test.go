@@ -5,6 +5,7 @@ package harness
 
 import (
 	"errors"
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"log/slog"
 	"strings"
 	"testing"
@@ -13,8 +14,6 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/authz"
 	"github.com/zeroroot-ai/gibson/internal/platform/component"
-	agentpb "github.com/zeroroot-ai/sdk/api/gen/gibson/agent/v1"
-	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"go.opentelemetry.io/otel/trace/noop"
 )
 
@@ -41,9 +40,7 @@ func newEnablementGateHarness(authorizer authz.Authorizer, q component.WorkQueue
 
 func successResultQueue(t *testing.T) *queueFake {
 	t.Helper()
-	return &queueFake{result: executeResponseJSON(t, &agentpb.ExecuteResponse{
-		Result: &typespb.Result{Status: typespb.ResultStatus_RESULT_STATUS_SUCCESS},
-	})}
+	return &queueFake{result: taskResultJSON(t, a2a.TaskStateCompleted, nil, "")}
 }
 
 // TestDispatchGate_AgentEnabled_Dispatches: can_execute → true, so the agent

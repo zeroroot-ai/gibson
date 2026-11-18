@@ -247,7 +247,7 @@ func TestCheckCallbackPeerAuthz_AgentPeerAllowedInPolicy(t *testing.T) {
 	for _, svid := range []string{callbackEnvoySVID(callbackTestTD), callbackDaemonSVID(callbackTestTD)} {
 		err := checkCallbackPeerAuthz(
 			context.Background(), svid, true,
-			harnesspb.HarnessCallbackService_LLMComplete_FullMethodName,
+			harnesspb.HarnessCallbackService_ResolveModel_FullMethodName,
 			callbackPeerMethodPolicies(callbackTestTD), logger,
 		)
 		assert.NoError(t, err, "%s must still reach its classified agent-surface methods — this fix "+

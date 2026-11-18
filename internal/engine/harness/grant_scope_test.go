@@ -36,7 +36,7 @@ func TestTurnGrantRPCs_CarriesTheWorkAndNotTheMember(t *testing.T) {
 	has := func(name string) bool {
 		return slices.ContainsFunc(got, func(rpc string) bool { return methodName(rpc) == name })
 	}
-	for _, want := range []string{"Observe", "WorldView", "SubmitFinding", "CallToolProto", "DelegateToAgent", "LLMComplete"} {
+	for _, want := range []string{"Observe", "WorldView", "SubmitFinding", "CallToolProto", "ResolveAgent", "ResolveModel"} {
 		if !has(want) {
 			t.Errorf("%s is the work of a turn and must be on the turn grant", want)
 		}

@@ -4,75 +4,10 @@
 package finding
 
 import (
-	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
 )
-
-// ────────────────────────────────────────────────────────────────────────────
-// Mock Implementations
-// ────────────────────────────────────────────────────────────────────────────
-
-// MockLLMCaller implements LLMCaller for testing
-type MockLLMCaller struct {
-	mu        sync.Mutex
-	responses []*llm.CompletionResponse
-	errors    []error
-	callCount int
-}
-
-func NewMockLLMCaller() *MockLLMCaller {
-	return &MockLLMCaller{
-		responses: []*llm.CompletionResponse{},
-		errors:    []error{},
-	}
-}
-
-func (m *MockLLMCaller) AddResponse(category, subcategory, rationale string, confidence float64) {
-	jsonResponse := `{
-  "category": "` + category + `",
-  "subcategory": "` + subcategory + `",
-  "confidence": ` + fmt.Sprintf("%.2f", confidence) + `,
-  "rationale": "` + rationale + `"
-}`
-
-	m.responses = append(m.responses, &llm.CompletionResponse{
-		ID:    "test-completion",
-		Model: "test-model",
-		Message: llm.Message{
-			Role:    llm.RoleAssistant,
-			Content: jsonResponse,
-		},
-		FinishReason: llm.FinishReasonStop,
-	})
-	m.errors = append(m.errors, nil)
-}
-
-func (m *MockLLMCaller) AddError(err error) {
-	m.responses = append(m.responses, nil)
-	m.errors = append(m.errors, err)
-}
-
-func (m *MockLLMCaller) GetCallCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.callCount
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// HeuristicClassifier Tests
-// ────────────────────────────────────────────────────────────────────────────
-
-// ────────────────────────────────────────────────────────────────────────────
-// LLMClassifier Tests
-// ────────────────────────────────────────────────────────────────────────────
-
-// ────────────────────────────────────────────────────────────────────────────
-// CompositeClassifier Tests
-// ────────────────────────────────────────────────────────────────────────────
 
 // ────────────────────────────────────────────────────────────────────────────
 // FindingCategory Tests

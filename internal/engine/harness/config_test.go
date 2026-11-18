@@ -4,10 +4,8 @@
 package harness
 
 import (
+	"context"
 	"testing"
-
-	"github.com/zeroroot-ai/gibson/internal/engine/llm"
-	"github.com/zeroroot-ai/gibson/internal/engine/llm/llmtest"
 )
 
 // TestHarnessConfig_Validate tests configuration validation
@@ -20,7 +18,7 @@ func TestHarnessConfig_Validate(t *testing.T) {
 		{
 			name: "valid config with SlotManager",
 			config: HarnessConfig{
-				SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+				SlotManager: newStubSlotManager(),
 				TargetFacts: testTargetFacts,
 			},
 			expectErr: false,
@@ -48,22 +46,14 @@ func TestHarnessConfig_Validate(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults tests that defaults are applied correctly
 func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 		// All other fields are nil
-	}
-
-	// Before applying defaults
-	if config.LLMRegistry != nil {
-		t.Error("expected LLMRegistry to be nil before defaults")
 	}
 
 	config.ApplyDefaults()
 
 	// After applying defaults
-	if config.LLMRegistry == nil {
-		t.Error("expected LLMRegistry to be defaulted")
-	}
 	// ComponentInstallRegistry field was removed in plugin-runtime Spec 2 Phase 7;
 	// plugin dispatch goes through ComponentRegistry + WorkQueue
 	// (component/plugin_dispatch.go).
@@ -90,26 +80,21 @@ func TestHarnessConfig_ApplyDefaults(t *testing.T) {
 // TestHarnessConfig_ApplyDefaults_Idempotent tests that ApplyDefaults is idempotent
 func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 	config := HarnessConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
 	// Apply defaults first time
 	config.ApplyDefaults()
 	firstLogger := config.Logger
-	firstRegistry := config.LLMRegistry
 
 	// Apply defaults second time
 	config.ApplyDefaults()
 	secondLogger := config.Logger
-	secondRegistry := config.LLMRegistry
 
 	// Should be the same instances (idempotent)
 	if firstLogger != secondLogger {
 		t.Error("expected Logger to remain the same after second ApplyDefaults")
-	}
-	if firstRegistry != secondRegistry {
-		t.Error("expected LLMRegistry to remain the same after second ApplyDefaults")
 	}
 }
 
@@ -117,7 +102,7 @@ func TestHarnessConfig_ApplyDefaults_Idempotent(t *testing.T) {
 func TestHarnessFactoryConfig_Alias(t *testing.T) {
 	// Test that HarnessFactoryConfig is an alias for HarnessConfig
 	var factoryConfig HarnessFactoryConfig
-	factoryConfig.SlotManager = llmtest.NewSlotManager(llm.NewLLMRegistry())
+	factoryConfig.SlotManager = newStubSlotManager()
 
 	// Should be assignable to HarnessConfig without conversion
 	var harnessConfig HarnessConfig = factoryConfig
@@ -130,7 +115,7 @@ func TestHarnessFactoryConfig_Alias(t *testing.T) {
 // TestNewDefaultHarnessFactory_Alias tests that NewDefaultHarnessFactory function alias works
 func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 	config := HarnessFactoryConfig{
-		SlotManager: llmtest.NewSlotManager(llm.NewLLMRegistry()),
+		SlotManager: newStubSlotManager(),
 		TargetFacts: testTargetFacts,
 	}
 
@@ -151,7 +136,30 @@ func TestNewDefaultHarnessFactory_Alias(t *testing.T) {
 	}
 
 	// Verify defaults were applied
-	if factoryConfig.LLMRegistry == nil {
-		t.Error("expected factory to have LLMRegistry defaulted")
+}
+
+// A daemon builds the slot manager of each mission from the provider records of
+// the tenant. It sets SlotManagerForTenant and no fixed SlotManager. The config
+// must be valid then. The comment in DefaultHarnessFactory.Create says that the
+// fixed SlotManager is only a unit test seam.
+func TestHarnessConfig_Validate_AcceptsAPerTenantSlotManagerOnly(t *testing.T) {
+	config := HarnessConfig{
+		TargetFacts: testTargetFacts,
+		SlotManagerForTenant: func(context.Context, string) (SlotManager, error) {
+			return newStubSlotManager(), nil
+		},
+	}
+
+	if err := config.Validate(); err != nil {
+		t.Fatalf("a config with a per-tenant slot manager and no fixed one was refused: %v", err)
+	}
+}
+
+// A config with no slot manager of any kind is still refused.
+func TestHarnessConfig_Validate_RefusesNoSlotManagerAtAll(t *testing.T) {
+	config := HarnessConfig{TargetFacts: testTargetFacts}
+
+	if err := config.Validate(); err == nil {
+		t.Fatal("a config with no slot manager was accepted")
 	}
 }
