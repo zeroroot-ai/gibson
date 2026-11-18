@@ -156,7 +156,7 @@ func TestProcessFoldsEveryTaxonomyEntityIntoTheWorld(t *testing.T) {
 	find := eventsByKind(rec.events, "finding.raised")
 	require.Len(t, find, 1)
 	assert.Equal(t, brain.FindingRaised{
-		ID: "f1", Title: "Exposed admin panel", Description: "no auth", Severity: "high",
+		ID: findingID("mission-1", &graphragpb.Finding{Id: strp("f1")}), Title: "Exposed admin panel", Description: "no auth", Severity: "high",
 		ScopeID: "mission-1", Address: "10.0.0.1", MissionID: "mission-1", MissionRunID: "run-1",
 		Status: brain.FindingStatusOpen,
 	}, find[0], "a host-parented finding carries the host's coordinate, not its uuid")

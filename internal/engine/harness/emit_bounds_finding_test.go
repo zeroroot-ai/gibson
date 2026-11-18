@@ -271,3 +271,33 @@ func TestSubmitFindingEmitBoundsSkipRecordedEvidence(t *testing.T) {
 		}
 	})
 }
+
+// TestSubmitFindingRaisesTheFindingNodeWithTheStoredID proves that the graph
+// node and the stored finding have one ID.
+func TestSubmitFindingRaisesTheFindingNodeWithTheStoredID(t *testing.T) {
+	store := &countingFindingStore{FindingStore: NewInMemoryFindingStore()}
+	h := boundedHarness(store)
+	var raised []FindingRaised
+	h.findingSink = func(_ context.Context, f FindingRaised) { raised = append(raised, f) }
+	h.missionCtx.CurrentAgent = "recon"
+
+	finding := agent.NewFinding("open redirect", "d", agent.SeverityMedium)
+	if err := h.SubmitFinding(context.Background(), finding); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	if len(raised) != 1 || raised[0].ID != finding.ID.String() || raised[0].ID != store.stored[0].ID.String() {
+		t.Fatalf("raised %+v, stored %+v", raised, store.stored)
+	}
+	if raised[0].Tenant != "tenant-a" || raised[0].MissionID != h.missionCtx.ID.String() || raised[0].AgentName != "recon" {
+		t.Fatalf("raised fields wrong: %+v", raised[0])
+	}
+
+	// A finding that the bounds refuse raises no node.
+	raised = nil
+	huge := agent.NewFinding("huge", strings.Repeat("d", emitbounds.MaxPayloadBytes), agent.SeverityHigh)
+	_ = h.SubmitFinding(context.Background(), huge)
+	if len(raised) != 0 {
+		t.Fatal("a rejected finding raised a node")
+	}
+}

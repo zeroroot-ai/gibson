@@ -144,6 +144,10 @@ type HarnessConfig struct {
 	// when nil, delegation provenance is not recorded.
 	DelegationSink DelegationSink
 
+	// FindingSink folds a submitted finding into the World, so the graph holds a
+	// finding node with the same ID as the finding row in Postgres. Optional.
+	FindingSink FindingSink
+
 	// Middleware is the middleware chain to apply to harness operations.
 	// When set, operations are routed through the configured middleware chain
 	// for cross-cutting concerns like tracing, logging, and event emission.

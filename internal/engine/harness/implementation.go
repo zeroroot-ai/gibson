@@ -94,6 +94,9 @@ type DefaultAgentHarness struct {
 	// delegationSink folds agent-delegation run-provenance into the World (ADR-0107).
 	delegationSink DelegationSink
 
+	// findingSink raises the finding node in the World (nil = none).
+	findingSink FindingSink
+
 	// Mission management (optional, nil = mission methods return error)
 	missionClient MissionOperator
 	spawnLimits   SpawnLimits
@@ -2182,6 +2185,23 @@ func (h *DefaultAgentHarness) SubmitFinding(ctx context.Context, finding agent.F
 			Title:       finding.Title,
 			Confidence:  fmt.Sprintf("%.2f", finding.Confidence),
 			TargetAsset: targetAsset,
+		})
+	}
+
+	// The finding node in the graph has the ID of the row in Postgres. The graph
+	// keeps the node for relations. The reader gets the fields and the evidence
+	// from Postgres by this ID.
+	if h.findingSink != nil {
+		h.findingSink(ctx, FindingRaised{
+			Tenant:       h.missionCtx.TenantID,
+			ID:           finding.ID.String(),
+			Title:        finding.Title,
+			Description:  finding.Description,
+			Severity:     string(finding.Severity),
+			ScopeID:      h.missionCtx.ID.String(),
+			MissionID:    h.missionCtx.ID.String(),
+			MissionRunID: h.missionCtx.MissionRunID,
+			AgentName:    h.missionCtx.CurrentAgent,
 		})
 	}
 

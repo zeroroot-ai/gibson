@@ -248,6 +248,7 @@ func (f *DefaultHarnessFactory) Create(agentName string, missionCtx MissionConte
 		metrics:                 f.config.Metrics,
 		tokenUsage:              tokenTracker,
 		delegationSink:          f.config.DelegationSink,
+		findingSink:             f.config.FindingSink,
 		missionClient:           f.config.MissionClient,
 		spawnLimits:             f.config.SpawnLimits,
 		eventLogger:             f.config.EventLogger,

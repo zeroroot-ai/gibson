@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/zeroroot-ai/gibson/internal/engine/brain"
 	"github.com/zeroroot-ai/gibson/internal/engine/taxonomy"
 	graphragpb "github.com/zeroroot-ai/sdk/api/gen/gibson/graphrag/v1"
@@ -499,21 +500,29 @@ func findingRaisedEvents(execCtx ExecContext, d *graphragpb.DiscoveryResult, add
 	return events, skipped
 }
 
-// findingID returns the World identity for a discovered finding. The reducer
-// dedupes findings by id, so this has to be stable across re-deliveries of the
-// same discovery: an agent-supplied id when there is one, and otherwise a hash
-// of the finding's content within its scope. A random id would turn every retry
-// into a new finding.
+// findingNamespace is the UUID namespace of discovered finding IDs.
+var findingNamespace = uuid.MustParse("6f1d3c52-8a9e-4b7e-9d0a-1f2e3c4b5a69")
+
+// findingID returns the identity of a discovered finding. It is the ID of the
+// graph node and the ID of the finding row in Postgres, so it is always a UUID.
+// The reducer dedupes findings by id, so the ID has to be stable across
+// re-deliveries of the same discovery. An agent-supplied ID that is a UUID is
+// kept. Any other agent-supplied ID, or a hash of the content of the finding
+// within its scope when there is none, becomes a name-based UUID (version 5).
+// A random ID would turn every retry into a new finding.
 func findingID(scope string, f *graphragpb.Finding) string {
 	if id := f.GetId(); id != "" {
-		return id
+		if parsed, err := uuid.Parse(id); err == nil {
+			return parsed.String()
+		}
+		return uuid.NewSHA1(findingNamespace, []byte(id)).String()
 	}
 	h := sha256.New()
 	for _, part := range []string{scope, f.Title, f.Severity, f.GetDescription(), f.GetCategory()} {
 		h.Write([]byte(part))
 		h.Write([]byte{0})
 	}
-	return "discovery-" + hex.EncodeToString(h.Sum(nil)[:16])
+	return uuid.NewSHA1(findingNamespace, []byte("discovery-"+hex.EncodeToString(h.Sum(nil)[:16]))).String()
 }
 
 // EntitySighting is one typed application-lifecycle entity somebody reported,

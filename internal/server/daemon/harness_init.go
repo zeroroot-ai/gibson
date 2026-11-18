@@ -135,6 +135,9 @@ func (d *daemonImpl) newHarnessFactory(ctx context.Context) (harness.HarnessFact
 		// projector (sole writer, ADR-0107) materializes :AgentRun + DELEGATED_TO.
 		DelegationSink: ingestDelegation(d.brainRegistry),
 
+		// A submitted finding gets a graph node with the ID of its Postgres row.
+		FindingSink: ingestHarnessFinding(d.brainRegistry),
+
 		// QuotaCounter maintains the per-tenant concurrent_agents Redis
 		// counter on agent idle→busy / busy→idle transitions inside
 		// DelegateToAgent. nil-safe in dev (no quota manager wired).
