@@ -55,6 +55,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/cgjwt"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/fga"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/headers"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	"github.com/zeroroot-ai/gibson/internal/server/extauthz/orgtenant"
 	"github.com/zeroroot-ai/sdk/capabilitygrant"
 )
@@ -113,6 +114,15 @@ type Config struct {
 	// session gate. Optional: empty keeps the client_id == sub rule alone.
 	HumanClientIDs []string
 
+	// EdgeSVIDs and GatewaySVIDs are the SPIFFE IDs of the peers that may call
+	// ext-authz. The Edge may send every call except a call of a gateway. The
+	// gateway (model and agent) may send only a call of a gateway. A call from
+	// the other identity is refused. When EdgeSVIDs is empty the check is off
+	// (tests only). Production main always sets it. With no GatewaySVIDs, no
+	// gateway call is accepted.
+	EdgeSVIDs    []string
+	GatewaySVIDs []string
+
 	// OrgTenants maps a signed-in person's verified Zitadel org (the
 	// urn:zitadel:iam:user:resourceowner:id claim) to their tenant
 	// (ADR-0093 decision 4). Required — NewEnvoyAuthzServer panics without
@@ -139,6 +149,8 @@ type EnvoyAuthzServer struct {
 	issuers    map[string]struct{} // empty ⇒ issuer check disabled (tests only)
 	humans     map[string]struct{} // OIDC client ids of human sign-in flows; empty ⇒ client_id == sub rule alone
 	orgTenants OrgTenantResolver
+	edgeIDs    map[string]struct{}
+	gatewayIDs map[string]struct{}
 }
 
 // NewEnvoyAuthzServer constructs an EnvoyAuthzServer. cache, component,
@@ -180,6 +192,8 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 		issuers:    issuers,
 		humans:     humans,
 		orgTenants: cfg.OrgTenants,
+		edgeIDs:    idSet(cfg.EdgeSVIDs),
+		gatewayIDs: idSet(cfg.GatewaySVIDs),
 	}
 }
 
@@ -187,6 +201,11 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	// Each route belongs to one peer: a gateway call to the gateway, every other
+	// call to the Edge. The peer is the SPIFFE ID of the TLS connection.
+	if resp := s.peerRefusal(ctx, modelcall.IsGatewayCall(req.GetAttributes().GetContextExtensions()), method); resp != nil {
+		return resp, nil
+	}
 	// A model call arrives from a gateway route that names a provider. The route
 	// facts are in the context extensions, which a caller cannot set.
 	if routeTenant, provider, isModelCall := modelRoute(req); isModelCall {

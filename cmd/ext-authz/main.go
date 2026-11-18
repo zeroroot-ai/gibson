@@ -266,7 +266,7 @@ func main() {
 
 	// Build the gRPC SPIFFE-mTLS server credentials. The peer authorizer
 	// pins to the configured Envoy SVID(s); any other SVID is rejected.
-	envoyAuthorizer, err := buildEnvoyAuthorizer()
+	envoyAuthorizer, edgeSVIDs, gatewaySVIDs, err := buildPeerPolicy()
 	if err != nil {
 		log.Error("init envoy SVID allowlist", "err", err)
 		os.Exit(1)
@@ -288,6 +288,8 @@ func main() {
 		Component:       componentVerifier,
 		Logger:          log,
 		IssuerAllowlist: issuerAllowlist,
+		EdgeSVIDs:       edgeSVIDs,
+		GatewaySVIDs:    gatewaySVIDs,
 		HumanClientIDs:  loadHumanClientIDs(),
 		OrgTenants:      orgTenants,
 	}))
@@ -854,35 +856,58 @@ func loadSPIFFESource(ctx context.Context, log *slog.Logger) (*workloadapi.X509S
 	return src, nil
 }
 
-// buildEnvoyAuthorizer parses EXT_AUTHZ_ENVOY_SVID into a tlsconfig.Authorizer
-// that pins the gRPC peer to the configured Envoy SVID(s).
-//
-// Spec: security-hardening R13 — peer SVID is fixed at startup.
-func buildEnvoyAuthorizer() (tlsconfig.Authorizer, error) {
-	raw := os.Getenv("EXT_AUTHZ_ENVOY_SVID")
-	if raw == "" {
-		return nil, errors.New("EXT_AUTHZ_ENVOY_SVID required (e.g. spiffe://example.org/ns/gibson/sa/gibson-envoy)")
-	}
-	parts := strings.Split(raw, ",")
-	ids := make([]spiffeid.ID, 0, len(parts))
-	for _, p := range parts {
+// parseSVIDList parses a comma-separated list of SPIFFE IDs.
+func parseSVIDList(name, raw string) ([]spiffeid.ID, []string, error) {
+	var ids []spiffeid.ID
+	var texts []string
+	for _, p := range strings.Split(raw, ",") {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
 		id, err := spiffeid.FromString(p)
 		if err != nil {
-			return nil, fmt.Errorf("invalid SPIFFE ID %q: %w", p, err)
+			return nil, nil, fmt.Errorf("%s: invalid SPIFFE ID %q: %w", name, p, err)
 		}
 		ids = append(ids, id)
+		texts = append(texts, p)
 	}
-	if len(ids) == 0 {
-		return nil, errors.New("EXT_AUTHZ_ENVOY_SVID produced an empty allowlist after trimming")
+	return ids, texts, nil
+}
+
+// buildPeerPolicy parses the two peer identities of ext-authz and returns the
+// TLS authorizer for both, with the two lists.
+//
+//   - EXT_AUTHZ_ENVOY_SVID is required. It holds the SPIFFE ID of the Edge, one
+//     ID or a comma-separated list. The Edge may send every call except a call
+//     of a gateway.
+//   - EXT_AUTHZ_GATEWAY_SVID is optional. It holds the SPIFFE ID of the
+//     agentgateway proxy, one ID or a comma-separated list, for example
+//     spiffe://<trust-domain>/platform/agentgateway. The gateway may send only a
+//     model call or an A2A call. With it unset, no gateway call is accepted.
+//
+// Spec: security-hardening R13 - the peer identities are fixed at startup.
+func buildPeerPolicy() (tlsconfig.Authorizer, []string, []string, error) {
+	rawEdge := os.Getenv("EXT_AUTHZ_ENVOY_SVID")
+	if rawEdge == "" {
+		return nil, nil, nil, errors.New("EXT_AUTHZ_ENVOY_SVID required (e.g. spiffe://example.org/ns/gibson/sa/gibson-envoy)")
 	}
-	if len(ids) == 1 {
-		return tlsconfig.AuthorizeID(ids[0]), nil
+	edgeIDs, edgeTexts, err := parseSVIDList("EXT_AUTHZ_ENVOY_SVID", rawEdge)
+	if err != nil {
+		return nil, nil, nil, err
 	}
-	return tlsconfig.AuthorizeOneOf(ids...), nil
+	if len(edgeIDs) == 0 {
+		return nil, nil, nil, errors.New("EXT_AUTHZ_ENVOY_SVID produced an empty allowlist after trimming")
+	}
+	gwIDs, gwTexts, err := parseSVIDList("EXT_AUTHZ_GATEWAY_SVID", os.Getenv("EXT_AUTHZ_GATEWAY_SVID"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	all := append(append([]spiffeid.ID(nil), edgeIDs...), gwIDs...)
+	if len(all) == 1 {
+		return tlsconfig.AuthorizeID(all[0]), edgeTexts, gwTexts, nil
+	}
+	return tlsconfig.AuthorizeOneOf(all...), edgeTexts, gwTexts, nil
 }
 
 // buildHealthTLSConfig loads the cert-manager-issued cert/key/ca for the

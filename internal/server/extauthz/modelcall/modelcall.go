@@ -41,6 +41,18 @@ const (
 	ExtProvider = "gibson-provider"
 )
 
+// ExtAgent is the context extension of a route of the agent gateway (A2A). The
+// route sets the name of the agent. A request with ExtAgent or ExtProvider comes
+// from the gateway. Any other request comes from the Edge.
+const ExtAgent = "gibson-agent"
+
+// IsGatewayCall reports whether the context extensions of a check mark a call
+// of the model gateway or of the agent gateway. The gateway config sets the
+// extensions, and a caller cannot.
+func IsGatewayCall(contextExtensions map[string]string) bool {
+	return contextExtensions[ExtProvider] != "" || contextExtensions[ExtAgent] != ""
+}
+
 // The metadata that the gateway route computes from the request body.
 const (
 	MetadataNamespace = "gibson"
