@@ -768,30 +768,36 @@ func (s *HarnessCallbackService) validator() *ToolValidator {
 	return s.toolValidator
 }
 
+// newToolCallID returns the id of one tool call. It is the ToolExecutionId that
+// the SDK of the calling agent stamps for provenance. When the caller left it
+// empty, the id is a fresh one, so the call is still recorded.
+func newToolCallID(contextInfo *harnesspb.ContextInfo) string {
+	if id := contextInfo.GetToolExecutionId(); id != "" {
+		return id
+	}
+	return uuid.NewString()
+}
+
 // captureToolCall folds a completed CallToolProto invocation into the
 // per-tenant World via the wired toolCallSink (ADR-0120, gibson#271) — the
 // tool-I/O half of the flight recorder, alongside captureLLMCall's transcript
 // half. Best-effort: a missing sink, context, or tenant is a silent no-op, the
 // same contract as captureLLMCall, so capture can never break a tool call.
 //
-// ToolCallID is the ContextInfo.ToolExecutionId the calling agent's SDK already
-// stamps for provenance; when the caller left it empty a fresh id is minted so
-// the call is still captured (just not correlated to a PRODUCED-edge chain).
+// toolCallID is the id of the call. The caller mints it one time, with
+// newToolCallID, at the start of the call. The record, the reply and the
+// discovery processor all use that one id.
 //
 // It returns the id that the record holds, or an empty string when nothing was
 // recorded. The tool call reply carries this id as tool_call_id, so a finding
 // can cite the call.
-func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolName, argumentsJSON, resultJSON, callErr string) string {
+func (s *HarnessCallbackService) captureToolCall(ctx context.Context, contextInfo *harnesspb.ContextInfo, toolCallID, toolName, argumentsJSON, resultJSON, callErr string) string {
 	if s.toolCallSink == nil || contextInfo == nil {
 		return ""
 	}
 	tenant := auth.TenantStringFromContext(ctx)
 	if tenant == "" {
 		return ""
-	}
-	toolCallID := contextInfo.GetToolExecutionId()
-	if toolCallID == "" {
-		toolCallID = uuid.NewString()
 	}
 	runID := contextInfo.GetMissionRunId()
 	if runID == "" {
@@ -926,6 +932,10 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		}, nil
 	}
 
+	// The id of this call. The record, the reply and the discovery processor
+	// all use it. Nothing below mints a second id.
+	toolCallID := newToolCallID(req.Context)
+
 	// Execute tool using CallToolProto
 	if err := harness.CallToolProto(ctx, req.Name, requestMsg, responseMsg); err != nil {
 		s.logger.Error("tool execution failed", "error", err, "tool", req.Name)
@@ -943,7 +953,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// Flight recorder (ADR-0120, gibson#271): capture the failed call too —
 		// the arguments the agent sent and why it failed, not just the ones
 		// that succeeded.
-		callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", err.Error())
+		callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), "", err.Error())
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
@@ -952,36 +962,6 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 			},
 			ToolCallId: callID,
 		}, nil
-	}
-
-	// Process discovery if present (async, non-blocking)
-	if s.discoveryProcessor != nil {
-		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
-			execCtx := callToolDiscoveryScope(ctx, req.Context)
-
-			// Process discovery asynchronously with timeout
-			// This doesn't block the tool response
-			// NOTE: Now passing proto directly (proto-first approach)
-			go func() {
-				processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-
-				result, err := s.discoveryProcessor.Process(processCtx, execCtx, pbDiscovery)
-				if err != nil {
-					s.logger.ErrorContext(processCtx, "failed to process discovery",
-						"error", err,
-						"tool", req.Name,
-						"mission_run_id", execCtx.MissionRunID,
-					)
-				} else if result != nil {
-					// Log success (result type varies by processor implementation)
-					s.logger.DebugContext(processCtx, "discovery processed successfully",
-						"tool", req.Name,
-						"mission_run_id", execCtx.MissionRunID,
-					)
-				}
-			}()
-		}
 	}
 
 	// Marshal proto response to JSON
@@ -998,7 +978,7 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 		// a real (unmarshalable) result leaves no independent record at all,
 		// which is exactly the unrecorded path the completeness guard exists
 		// to catch.
-		callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
+		callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), "", fmt.Sprintf("failed to marshal response: %v", err))
 
 		return &harnesspb.CallToolProtoResponse{
 			Error: &harnesspb.HarnessError{
@@ -1036,7 +1016,39 @@ func (s *HarnessCallbackService) CallToolProto(ctx context.Context, req *harness
 	// transcript half captureLLMCall already folds in. Before this, tool I/O
 	// only reached the daemon as bare tool.call.* pub/sub metadata (no
 	// arguments/result text) and never became part of the Timeline.
-	callID := s.captureToolCall(ctx, req.Context, req.Name, string(req.InputJson), string(responseJSON), "")
+	callID := s.captureToolCall(ctx, req.Context, toolCallID, req.Name, string(req.InputJson), string(responseJSON), "")
+
+	// Discovery runs after the call is recorded. The parser evidence of the
+	// discovery cites the recorded call, so the record has to exist before the
+	// goroutine starts.
+	if s.discoveryProcessor != nil {
+		if pbDiscovery := sdkgraphrag.ExtractDiscovery(responseMsg); pbDiscovery != nil {
+			execCtx := callToolDiscoveryScope(ctx, req.Context)
+
+			// Process discovery asynchronously with timeout
+			// This doesn't block the tool response
+			// NOTE: Now passing proto directly (proto-first approach)
+			go func() {
+				processCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+
+				result, err := s.discoveryProcessor.Process(processCtx, execCtx, pbDiscovery)
+				if err != nil {
+					s.logger.ErrorContext(processCtx, "failed to process discovery",
+						"error", err,
+						"tool", req.Name,
+						"mission_run_id", execCtx.MissionRunID,
+					)
+				} else if result != nil {
+					// Log success (result type varies by processor implementation)
+					s.logger.DebugContext(processCtx, "discovery processed successfully",
+						"tool", req.Name,
+						"mission_run_id", execCtx.MissionRunID,
+					)
+				}
+			}()
+		}
+	}
 
 	return &harnesspb.CallToolProtoResponse{
 		OutputJson: responseJSON,
@@ -1195,6 +1207,11 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harness
 				},
 			}, nil
 		}
+
+		// Record the call now. The tool name and the arguments are known at
+		// submit time. The result joins the record when it arrives, under the
+		// same id (ToolResults).
+		s.captureToolCall(ctx, req.Context, queuedToolCallID(jobID, i), req.ToolName, string(inputJSON), "", "")
 	}
 
 	s.logger.Info("queued tool work",
@@ -1207,6 +1224,17 @@ func (s *HarnessCallbackService) QueueToolWork(ctx context.Context, req *harness
 	return &harnesspb.QueueToolWorkResponse{
 		JobId: jobID,
 	}, nil
+}
+
+// queuedToolCallNamespace is the UUID namespace of the ids of queued tool calls.
+var queuedToolCallNamespace = uuid.MustParse("6f1c7d52-3a0e-4b9a-9c1e-5d2b8a4e7f10")
+
+// queuedToolCallID returns the id of the tool call that one input of a queued
+// job stands for. The id depends only on the job and the index. QueueToolWork
+// records the call under it at submit time, and ToolResults returns it with
+// the result, so the two need no shared state.
+func queuedToolCallID(jobID string, index int) string {
+	return uuid.NewSHA1(queuedToolCallNamespace, []byte(fmt.Sprintf("%s/%d", jobID, index))).String()
 }
 
 // ToolResults implements the streaming RPC that delivers results from queued tool work.
@@ -1257,8 +1285,11 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		resultCount++
 
 		// Convert queue.Result to proto ToolResultResponse
+		// The id is the one that QueueToolWork recorded for this input.
+		toolCallID := queuedToolCallID(jobID, result.Index)
 		protoResult := &harnesspb.ToolResultsResponse{
-			Index: int32(result.Index),
+			Index:      int32(result.Index),
+			ToolCallId: toolCallID,
 		}
 
 		if result.Error != "" {
@@ -1269,6 +1300,9 @@ func (s *HarnessCallbackService) ToolResults(req *harnesspb.ToolResultsRequest, 
 		} else {
 			protoResult.OutputJson = result.OutputJSON
 		}
+
+		// Add the result to the record of the call.
+		s.captureToolCall(ctx, req.Context, toolCallID, "", "", string(result.OutputJSON), result.Error)
 
 		// Send result to stream
 		if err := stream.Send(protoResult); err != nil {

@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	"github.com/zeroroot-ai/sdk/schema"
@@ -255,7 +257,7 @@ func (s *HarnessCallbackService) metaInvoke(ctx context.Context, contextInfo *ha
 		// real catalog tool through the same trust boundary as a native
 		// CallToolProto call, so each call is recorded, a failed one too.
 		Recorder: func(rctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-			callID = s.captureToolCall(rctx, contextInfo, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+			callID = s.captureToolCall(rctx, contextInfo, newToolCallID(contextInfo), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
 			return callID
 		},
 		Observer: &harnessCallObserver{s: s},
@@ -382,7 +384,7 @@ func (s *HarnessCallbackService) MissionPolicyForRun(ctx context.Context, tenant
 // harness callback context, such as a connector call through
 // ComponentService.CallTool. The tenant is on ctx.
 func (s *HarnessCallbackService) RecordToolCall(ctx context.Context, rec metatool.CallRecord, resultJSON []byte, errText string) string {
-	return s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
+	return s.captureToolCall(ctx, &harnesspb.ContextInfo{MissionId: rec.MissionID, MissionRunId: rec.RunID}, uuid.NewString(), rec.Canonical, string(rec.ArgsJSON), string(resultJSON), errText)
 }
 
 // harnessCallObserver writes the intent and result audit records of an
@@ -434,7 +436,7 @@ func (s *HarnessCallbackService) invokeNativeTool(ctx context.Context, contextIn
 		err = fmt.Errorf("native tool %q declares no input or output message type", tool)
 	}
 	if err != nil {
-		s.captureToolCall(ctx, contextInfo, canon, string(argsJSON), "", err.Error())
+		s.captureToolCall(ctx, contextInfo, newToolCallID(contextInfo), canon, string(argsJSON), "", err.Error())
 		return metaToolErr(commonpb.ErrorCode_ERROR_CODE_NOT_FOUND, fmt.Sprintf("native tool %q: %v", tool, err)), nil
 	}
 
