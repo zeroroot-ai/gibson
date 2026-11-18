@@ -12,6 +12,7 @@ package pgstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -134,9 +136,88 @@ ON CONFLICT (id) DO UPDATE SET
 	document   = EXCLUDED.document,
 	updated_at = EXCLUDED.updated_at`
 
-// Store writes the finding as one row. A second Store of the same ID replaces
-// the row.
+const deleteEvidenceSQL = `DELETE FROM finding_evidence WHERE finding_id = $1`
+
+const insertEvidenceSQL = `
+INSERT INTO finding_evidence
+	(finding_id, position, tier, tool_call_id, type, title, content, content_sha256, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+
+// evidenceRow holds the values that the store writes for one evidence item.
+type evidenceRow struct {
+	position   int
+	tier       int16
+	toolCallID *string
+	typeName   string
+	title      string
+	content    string
+	sha256     []byte
+	metadata   []byte
+}
+
+// newEvidenceRows checks each item and turns it into a row. It fails the whole
+// list on the first item that is not valid. It never shortens content.
+func newEvidenceRows(items []*typespb.Evidence) ([]evidenceRow, error) {
+	rows := make([]evidenceRow, 0, len(items))
+	for i, item := range items {
+		if item == nil {
+			return nil, fmt.Errorf("%w: item %d is empty", finding.ErrInvalidEvidence, i)
+		}
+		row := evidenceRow{
+			position: i,
+			typeName: item.GetType().String(),
+			title:    item.GetTitle(),
+			content:  item.GetContent(),
+		}
+		switch item.GetTier() {
+		case typespb.EvidenceTier_EVIDENCE_TIER_RECORDED:
+			if item.GetToolCallId() == "" {
+				return nil, fmt.Errorf("%w: item %d is tier 1 and names no tool call", finding.ErrInvalidEvidence, i)
+			}
+			id := item.GetToolCallId()
+			row.tier, row.toolCallID = 1, &id
+		case typespb.EvidenceTier_EVIDENCE_TIER_TYPED:
+			if item.GetToolCallId() != "" {
+				return nil, fmt.Errorf("%w: item %d is tier 2 and names a tool call", finding.ErrInvalidEvidence, i)
+			}
+			row.tier = 2
+		default:
+			return nil, fmt.Errorf("%w: item %d has no tier", finding.ErrInvalidEvidence, i)
+		}
+		if len(row.content) > finding.MaxEvidenceContentBytes {
+			return nil, fmt.Errorf("%w: item %d holds %d bytes, the limit is %d",
+				finding.ErrEvidenceTooLarge, i, len(row.content), finding.MaxEvidenceContentBytes)
+		}
+		sum := sha256.Sum256([]byte(row.content))
+		row.sha256 = sum[:]
+		metadata := item.GetMetadata()
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("finding store: marshal metadata of evidence item %d: %w", i, err)
+		}
+		row.metadata = encoded
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// Store writes the finding row and one row for each evidence item in one
+// transaction. If a write fails, the transaction leaves no finding row and no
+// evidence row. An item over finding.MaxEvidenceContentBytes fails the call
+// before the transaction starts. A second Store of the same ID replaces the
+// finding row and its evidence rows.
+//
+// The document of the finding does not hold the evidence. The evidence is in
+// the finding_evidence table only.
 func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFinding) error {
+	evidence, err := newEvidenceRows(f.Evidence)
+	if err != nil {
+		return err
+	}
+	f.Evidence = nil
 	row, err := newFindingRow(f)
 	if err != nil {
 		return err
@@ -146,14 +227,31 @@ func (s *Store) Store(ctx context.Context, tenantID string, f finding.EnhancedFi
 		return err
 	}
 	defer c.Release()
-	if _, err := c.SQL().Exec(ctx, upsertFindingSQL,
-		row.id, row.missionID, row.severity, row.title, row.document, row.createdAt, row.updatedAt); err != nil {
-		return fmt.Errorf("finding store: write finding %s: %w", row.id, err)
+	err = c.InTx(ctx, func(tx datapool.SQL) error {
+		if _, err := tx.Exec(ctx, upsertFindingSQL,
+			row.id, row.missionID, row.severity, row.title, row.document, row.createdAt, row.updatedAt); err != nil {
+			return fmt.Errorf("write finding row: %w", err)
+		}
+		if _, err := tx.Exec(ctx, deleteEvidenceSQL, row.id); err != nil {
+			return fmt.Errorf("replace evidence rows: %w", err)
+		}
+		for _, e := range evidence {
+			if _, err := tx.Exec(ctx, insertEvidenceSQL,
+				row.id, e.position, e.tier, e.toolCallID, e.typeName, e.title, e.content, e.sha256, e.metadata); err != nil {
+				return fmt.Errorf("write evidence item %d: %w", e.position, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("finding store: store finding %s: %w", row.id, err)
 	}
 	return nil
 }
 
-// Get returns the finding with the ID, or finding.ErrNotFound.
+// Get returns the finding with the ID, or finding.ErrNotFound. The result has
+// no evidence, because the store does not read the finding_evidence table for
+// it.
 func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding.EnhancedFinding, error) {
 	if err := id.Validate(); err != nil {
 		return nil, fmt.Errorf("finding store: finding ID: %w", err)
@@ -174,7 +272,8 @@ func (s *Store) Get(ctx context.Context, tenantID string, id types.ID) (*finding
 }
 
 // List returns the findings of a mission that match the filter. A nil filter
-// matches each finding.
+// matches each finding. The result has no evidence, because a list does not
+// read the finding_evidence table.
 func (s *Store) List(
 	ctx context.Context, tenantID string, missionID types.ID, filter *finding.FindingFilter,
 ) ([]finding.EnhancedFinding, error) {

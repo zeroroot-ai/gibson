@@ -15,6 +15,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
+	"github.com/zeroroot-ai/gibson/internal/engine/finding"
+	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	commonpb "github.com/zeroroot-ai/sdk/api/gen/gibson/common/v1"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
@@ -27,11 +29,12 @@ import (
 type submitFindingHarness struct {
 	submitProofMockHarness
 	submitted []agent.Finding
+	submitErr error
 }
 
 func (m *submitFindingHarness) SubmitFinding(_ context.Context, f agent.Finding) error {
 	m.submitted = append(m.submitted, f)
-	return nil
+	return m.submitErr
 }
 
 func newSubmitFindingService(
@@ -194,4 +197,23 @@ func TestSubmitFinding_ToolCallIDsNeedTheRecord(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, codes.Unavailable, status.Code(err))
 	assert.Empty(t, h.submitted)
+}
+
+// TestSubmitFinding_EvidenceOverTheLimitIsInvalidArgument proves that the
+// refusal of the store for a large evidence item reaches the caller as an
+// invalid argument, through the error wrap of the harness.
+func TestSubmitFinding_EvidenceOverTheLimitIsInvalidArgument(t *testing.T) {
+	h := &submitFindingHarness{
+		submitProofMockHarness: submitProofMockHarness{missionID: "mission-A", tenantID: "acme"},
+		submitErr: types.WrapError(ErrHarnessInvalidConfig, "failed to submit finding",
+			fmt.Errorf("store: %w", finding.ErrEvidenceTooLarge)),
+	}
+	svc := newSubmitFindingService(t, h, nil)
+	ctx := auth.ContextWithTenantString(context.Background(), "acme")
+
+	resp, err := svc.SubmitFinding(ctx, submitFindingRequest("mission-A", nil))
+
+	require.NoError(t, err)
+	require.NotNil(t, resp.GetError())
+	assert.Equal(t, commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT, resp.GetError().GetCode())
 }

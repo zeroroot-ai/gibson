@@ -5,6 +5,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/zeroroot-ai/gibson/internal/engine/agent"
@@ -51,4 +52,10 @@ func (s *PostgresFindingStore) Get(
 		}
 	}
 	return out, nil
+}
+
+// evidenceRejected reports that the store refused the evidence of a finding
+// because an item is over the size limit.
+func evidenceRejected(err error) bool {
+	return errors.Is(err, finding.ErrEvidenceTooLarge)
 }

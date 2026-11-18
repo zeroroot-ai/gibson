@@ -5,8 +5,10 @@ package pgstore
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/engine/finding"
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 )
 
 // fakeDB is an in-memory findings table. It answers the statements that the
@@ -24,8 +27,24 @@ import (
 // integration test covers that.
 type fakeDB struct {
 	rows     map[string]fakeRow
+	evidence map[string][]fakeEvidence
 	execErr  error
+	// failOn makes an Exec fail when its statement holds this text.
+	failOn   string
 	released int
+	// readEvidence counts the reads of the evidence table.
+	readEvidence int
+}
+
+type fakeEvidence struct {
+	position   int
+	tier       int16
+	toolCallID *string
+	typeName   string
+	title      string
+	content    string
+	sha256     []byte
+	metadata   []byte
 }
 
 type fakeRow struct {
@@ -36,18 +55,58 @@ type fakeRow struct {
 	createdAt time.Time
 }
 
-func newFakeDB() *fakeDB { return &fakeDB{rows: map[string]fakeRow{}} }
-
-func (d *fakeDB) For(_ context.Context, _ string) (conn, error) { return d, nil }
-func (d *fakeDB) SQL() datapool.SQL                              { return d }
-func (d *fakeDB) Release()                                       { d.released++ }
-func (d *fakeDB) InTx(_ context.Context, fn func(datapool.SQL) error) error {
-	return fn(d)
+func newFakeDB() *fakeDB {
+	return &fakeDB{rows: map[string]fakeRow{}, evidence: map[string][]fakeEvidence{}}
 }
 
-func (d *fakeDB) Exec(_ context.Context, _ string, args ...any) (int64, error) {
+func (d *fakeDB) For(_ context.Context, _ string) (conn, error) { return d, nil }
+func (d *fakeDB) SQL() datapool.SQL                             { return d }
+func (d *fakeDB) Release()                                      { d.released++ }
+
+// InTx runs fn and undoes each write if fn fails, as a transaction does.
+func (d *fakeDB) InTx(_ context.Context, fn func(datapool.SQL) error) error {
+	rows := make(map[string]fakeRow, len(d.rows))
+	for k, v := range d.rows {
+		rows[k] = v
+	}
+	evidence := make(map[string][]fakeEvidence, len(d.evidence))
+	for k, v := range d.evidence {
+		evidence[k] = append([]fakeEvidence(nil), v...)
+	}
+	if err := fn(d); err != nil {
+		d.rows, d.evidence = rows, evidence
+		return err
+	}
+	return nil
+}
+
+func (d *fakeDB) Exec(_ context.Context, sql string, args ...any) (int64, error) {
 	if d.execErr != nil {
 		return 0, d.execErr
+	}
+	if d.failOn != "" && contains(sql, d.failOn) {
+		return 0, errors.New("injected failure")
+	}
+	switch {
+	case contains(sql, "DELETE FROM finding_evidence"):
+		delete(d.evidence, args[0].(string))
+		return 1, nil
+	case contains(sql, "INSERT INTO finding_evidence"):
+		id := args[0].(string)
+		if _, ok := d.rows[id]; !ok {
+			return 0, errors.New("foreign key violation")
+		}
+		d.evidence[id] = append(d.evidence[id], fakeEvidence{
+			position:   args[1].(int),
+			tier:       args[2].(int16),
+			toolCallID: args[3].(*string),
+			typeName:   args[4].(string),
+			title:      args[5].(string),
+			content:    args[6].(string),
+			sha256:     args[7].([]byte),
+			metadata:   args[8].([]byte),
+		})
+		return 1, nil
 	}
 	id := args[0].(string)
 	d.rows[id] = fakeRow{
@@ -73,7 +132,10 @@ func (r fakeScanRow) Scan(dest ...any) error {
 	return nil
 }
 
-func (d *fakeDB) QueryRow(_ context.Context, _ string, args ...any) datapool.Row {
+func (d *fakeDB) QueryRow(_ context.Context, sql string, args ...any) datapool.Row {
+	if contains(sql, "finding_evidence") {
+		d.readEvidence++
+	}
 	row, ok := d.rows[args[0].(string)]
 	if !ok {
 		return fakeScanRow{err: datapool.ErrNoRows}
@@ -96,6 +158,9 @@ func (r *fakeRows) Close()     {}
 
 // Query answers the two list statements: by mission and by severity.
 func (d *fakeDB) Query(_ context.Context, sql string, args ...any) (datapool.Rows, error) {
+	if contains(sql, "finding_evidence") {
+		d.readEvidence++
+	}
 	want := args[0].(string)
 	var ids []string
 	for id, row := range d.rows {
@@ -124,14 +189,7 @@ func (d *fakeDB) Query(_ context.Context, sql string, args ...any) (datapool.Row
 	return out, nil
 }
 
-func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
+func contains(s, sub string) bool { return strings.Contains(s, sub) }
 
 func newTestStore(db *fakeDB) *Store { return &Store{conns: db} }
 
@@ -259,4 +317,161 @@ func TestStore_PoolNotReady(t *testing.T) {
 	s := New(func() datapool.Pool { return nil })
 	err := s.Store(context.Background(), "acme", newFinding(types.NewID(), "x", agent.SeverityLow, time.Now()))
 	require.Error(t, err)
+}
+
+func tier1(id, content string) *typespb.Evidence {
+	return &typespb.Evidence{
+		Title: "tool call httpx (" + id + ")", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: content,
+		Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: id,
+		Metadata: map[string]string{"tool_name": "httpx"},
+	}
+}
+
+func tier2(title, content string) *typespb.Evidence {
+	return &typespb.Evidence{
+		Title: title, Type: typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION, Content: content,
+		Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED,
+	}
+}
+
+func TestStore_EvidenceRowsAndHash(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Evidence = []*typespb.Evidence{tier1("call-1", "recorded"), tier2("dialogue", "hello")}
+
+	require.NoError(t, s.Store(context.Background(), "acme", f))
+
+	rows := db.evidence[f.ID.String()]
+	require.Len(t, rows, 2)
+	assert.Equal(t, int16(1), rows[0].tier)
+	require.NotNil(t, rows[0].toolCallID)
+	assert.Equal(t, "call-1", *rows[0].toolCallID)
+	assert.Equal(t, "recorded", rows[0].content)
+	sum := sha256.Sum256([]byte("recorded"))
+	assert.Equal(t, sum[:], rows[0].sha256)
+	assert.Equal(t, "EVIDENCE_TYPE_LOG", rows[0].typeName)
+	assert.JSONEq(t, `{"tool_name":"httpx"}`, string(rows[0].metadata))
+	assert.Equal(t, int16(2), rows[1].tier)
+	assert.Nil(t, rows[1].toolCallID)
+	assert.Equal(t, 1, rows[1].position)
+	assert.JSONEq(t, `{}`, string(rows[1].metadata))
+}
+
+// TestStore_DocumentHoldsNoEvidence proves that the evidence is in the table
+// only, and that Get and List never read the table.
+func TestStore_DocumentHoldsNoEvidence(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Evidence = []*typespb.Evidence{tier1("call-1", "recorded")}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	assert.NotContains(t, string(db.rows[f.ID.String()].document), "recorded")
+
+	got, err := s.Get(ctx, "acme", f.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Evidence)
+	list, err := s.List(ctx, "acme", f.MissionID, nil)
+	require.NoError(t, err)
+	require.Len(t, list, 1)
+	assert.Empty(t, list[0].Evidence)
+	_, err = s.ListBySeverity(ctx, "acme", agent.SeverityHigh)
+	require.NoError(t, err)
+	assert.Zero(t, db.readEvidence, "a read of a finding must not read the evidence table")
+}
+
+// TestStore_AFailedEvidenceWriteLeavesNoFindingRow is the failing fixture for
+// the transaction rule.
+func TestStore_AFailedEvidenceWriteLeavesNoFindingRow(t *testing.T) {
+	db := newFakeDB()
+	db.failOn = "INSERT INTO finding_evidence"
+	s := newTestStore(db)
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Evidence = []*typespb.Evidence{tier1("call-1", "recorded")}
+
+	err := s.Store(context.Background(), "acme", f)
+
+	require.Error(t, err)
+	assert.Empty(t, db.rows, "no finding row")
+	assert.Empty(t, db.evidence, "no evidence row")
+	assert.Equal(t, 1, db.released)
+}
+
+func TestStore_AFailedReplaceKeepsTheOldFinding(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Evidence = []*typespb.Evidence{tier1("call-1", "old")}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	db.failOn = "INSERT INTO finding_evidence"
+	f.Title = "new title"
+	f.Evidence = []*typespb.Evidence{tier1("call-2", "new")}
+	require.Error(t, s.Store(ctx, "acme", f))
+
+	assert.Equal(t, "open port", db.rows[f.ID.String()].title)
+	require.Len(t, db.evidence[f.ID.String()], 1)
+	assert.Equal(t, "old", db.evidence[f.ID.String()][0].content)
+}
+
+func TestStore_StoreTwiceReplacesTheEvidence(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	ctx := context.Background()
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+	f.Evidence = []*typespb.Evidence{tier1("call-1", "a"), tier2("b", "b")}
+	require.NoError(t, s.Store(ctx, "acme", f))
+	f.Evidence = []*typespb.Evidence{tier2("c", "c")}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	require.Len(t, db.evidence[f.ID.String()], 1)
+	assert.Equal(t, "c", db.evidence[f.ID.String()][0].content)
+}
+
+// TestStore_EvidenceOverTheLimitFailsTheSubmit is the failing fixture for the
+// size rule. The store never truncates, and it writes nothing.
+func TestStore_EvidenceOverTheLimitFailsTheSubmit(t *testing.T) {
+	db := newFakeDB()
+	s := newTestStore(db)
+	f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+
+	f.Evidence = []*typespb.Evidence{tier2("ok", "fine"), tier1("call-1", strings.Repeat("x", finding.MaxEvidenceContentBytes+1))}
+	err := s.Store(context.Background(), "acme", f)
+	require.ErrorIs(t, err, finding.ErrEvidenceTooLarge)
+	assert.Empty(t, db.rows)
+	assert.Empty(t, db.evidence)
+	assert.Zero(t, db.released, "the store never opened a conn")
+
+	f.Evidence = []*typespb.Evidence{tier1("call-1", strings.Repeat("x", finding.MaxEvidenceContentBytes))}
+	require.NoError(t, s.Store(context.Background(), "acme", f), "an item at the limit is stored whole")
+	assert.Len(t, db.evidence[f.ID.String()][0].content, finding.MaxEvidenceContentBytes)
+}
+
+func TestStore_RefusesAnInvalidTierAndToolCallPair(t *testing.T) {
+	tests := []struct {
+		name string
+		item *typespb.Evidence
+	}{
+		{"nil item", nil},
+		{"no tier", &typespb.Evidence{Content: "x"}},
+		{"tier 1 with no tool call", &typespb.Evidence{Content: "x", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}},
+		{"tier 2 with a tool call", &typespb.Evidence{
+			Content: "x", Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED, ToolCallId: "call-1",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newFakeDB()
+			f := newFinding(types.NewID(), "open port", agent.SeverityHigh, time.Now())
+			f.Evidence = []*typespb.Evidence{tt.item}
+
+			err := newTestStore(db).Store(context.Background(), "acme", f)
+
+			require.ErrorIs(t, err, finding.ErrInvalidEvidence)
+			assert.Empty(t, db.rows)
+		})
+	}
 }

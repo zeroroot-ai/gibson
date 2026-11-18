@@ -32,6 +32,24 @@ type FindingFilter struct {
 	SearchText *string
 }
 
+// MaxEvidenceContentBytes is the size limit of the content of one evidence
+// item. The limit is 1 MiB.
+//
+// The emit bound in package emitbounds does not fit this purpose. It caps the
+// whole payload that an agent sends at 100 KiB. A tier 1 item holds the result
+// of a tool call that the daemon read from its own record, and a screenshot or
+// a network trace can be larger than 100 KiB.
+const MaxEvidenceContentBytes = 1 << 20
+
+// ErrEvidenceTooLarge reports that the content of an evidence item is over
+// MaxEvidenceContentBytes. The store never truncates. The submit fails.
+var ErrEvidenceTooLarge = errors.New("finding: evidence content is over the size limit")
+
+// ErrInvalidEvidence reports an evidence item that the store refuses. The
+// daemon sets the tier and the tool call ID, so an item with a wrong pair is a
+// defect of the daemon and not of the agent.
+var ErrInvalidEvidence = errors.New("finding: invalid evidence item")
+
 // ErrNotFound reports that the database of the tenant holds no finding with
 // the requested ID.
 var ErrNotFound = errors.New("finding: not found")

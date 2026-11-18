@@ -26,6 +26,7 @@ import (
 	"github.com/zeroroot-ai/gibson/internal/infra/datapool"
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/tests/testhelpers"
+	typespb "github.com/zeroroot-ai/sdk/api/gen/gibson/types/v1"
 	"github.com/zeroroot-ai/sdk/auth"
 )
 
@@ -56,7 +57,7 @@ func newStore(t *testing.T) (*pgstore.Store, *pgxpool.Pool) {
 	t.Cleanup(pool.Close)
 
 	base := filepath.Join("..", "..", "..", "..", "pkg", "platform", "migrations", "postgres", "tenant")
-	for _, name := range []string{"004_findings.up.sql", "017_findings_mission_nullable.up.sql"} {
+	for _, name := range []string{"004_findings.up.sql", "017_findings_mission_nullable.up.sql", "018_finding_evidence.up.sql"} {
 		up, err := os.ReadFile(filepath.Join(base, name))
 		require.NoError(t, err, "read %s", name)
 		_, err = pool.Exec(ctx, string(up))
@@ -103,4 +104,50 @@ func TestStore_Integration_RoundTrip(t *testing.T) {
 
 	_, err = s.Get(ctx, "acme", types.NewID())
 	require.ErrorIs(t, err, finding.ErrNotFound)
+}
+
+func TestStore_Integration_EvidenceRowsAndCascade(t *testing.T) {
+	s, pool := newStore(t)
+	ctx := context.Background()
+	f := finding.NewEnhancedFinding(agent.NewFinding("a", "d", agent.SeverityHigh), types.NewID(), "recon")
+	f.Evidence = []*typespb.Evidence{
+		{
+			Title: "tool call httpx (call-1)", Type: typespb.EvidenceType_EVIDENCE_TYPE_LOG, Content: "recorded",
+			Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED, ToolCallId: "call-1",
+			Metadata: map[string]string{"tool_name": "httpx"},
+		},
+		{Title: "dialogue", Type: typespb.EvidenceType_EVIDENCE_TYPE_CONVERSATION, Content: "hello",
+			Tier: typespb.EvidenceTier_EVIDENCE_TIER_TYPED},
+	}
+	require.NoError(t, s.Store(ctx, "acme", f))
+
+	var n int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM finding_evidence WHERE finding_id = $1`, f.ID.String()).Scan(&n))
+	assert.Equal(t, 2, n, "one row for each item")
+
+	var digestOK bool
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT content_sha256 = sha256(convert_to(content, 'UTF8')) FROM finding_evidence
+		 WHERE finding_id = $1 AND position = 0`, f.ID.String()).Scan(&digestOK))
+	assert.True(t, digestOK, "the hash is the SHA-256 of the content")
+
+	// A tier 1 item with no tool call breaks the CHECK of the table.
+	_, err := pool.Exec(ctx, `INSERT INTO finding_evidence
+		(finding_id, position, tier, tool_call_id, type, content, content_sha256)
+		VALUES ($1, 9, 1, NULL, 'EVIDENCE_TYPE_LOG', 'x', sha256('x'))`, f.ID.String())
+	require.Error(t, err)
+
+	// The store refuses an invalid item and writes no finding row.
+	bad := finding.NewEnhancedFinding(agent.NewFinding("b", "d", agent.SeverityLow), types.NewID(), "recon")
+	bad.Evidence = []*typespb.Evidence{{Content: "x", Tier: typespb.EvidenceTier_EVIDENCE_TIER_RECORDED}}
+	require.Error(t, s.Store(ctx, "acme", bad))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE id = $1`, bad.ID.String()).Scan(&n))
+	assert.Zero(t, n)
+
+	// The delete of a finding deletes its evidence rows.
+	_, err = pool.Exec(ctx, `DELETE FROM findings WHERE id = $1`, f.ID.String())
+	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM finding_evidence`).Scan(&n))
+	assert.Zero(t, n, "the delete cascades")
 }

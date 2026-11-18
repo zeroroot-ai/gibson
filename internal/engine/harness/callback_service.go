@@ -2017,6 +2017,17 @@ func (s *HarnessCallbackService) SubmitFinding(ctx context.Context, req *harness
 				},
 			}, nil
 		}
+		// An evidence item over the size limit is the fault of the caller. The
+		// store wrote nothing, and it never truncates.
+		if evidenceRejected(err) {
+			s.logger.Warn("finding rejected for its evidence", "error", err)
+			return &harnesspb.SubmitFindingResponse{
+				Error: &harnesspb.HarnessError{
+					Code:    commonpb.ErrorCode_ERROR_CODE_INVALID_ARGUMENT,
+					Message: err.Error(),
+				},
+			}, nil
+		}
 		s.logger.Error("finding submission failed", "error", err)
 		return &harnesspb.SubmitFindingResponse{
 			Error: &harnesspb.HarnessError{
