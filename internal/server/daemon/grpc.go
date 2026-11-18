@@ -1738,6 +1738,9 @@ func (d *daemonImpl) buildGRPCServer(ctx context.Context) (*grpcSubsystem, error
 		return nil, err
 	}
 	d.registerCatalogPlugin(ctx, srv)
+	if err := d.registerAgentSkill(ctx, srv); err != nil {
+		return nil, err
+	}
 
 	// Register gibson.tenant.v1.OntologyExtensionService — the tenant
 	// owner's review of agent-proposed Taxonomy extensions (ADR-0124,
