@@ -9,6 +9,7 @@ import (
 
 	"github.com/zeroroot-ai/gibson/internal/infra/types"
 	"github.com/zeroroot-ai/gibson/internal/platform/capabilitygrant"
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	harnesspb "github.com/zeroroot-ai/sdk/api/gen/gibson/harness/v1"
 )
 
@@ -49,6 +50,8 @@ func taskGrantRPCsNotInDescriptor(list []string, extraAllowed map[string]bool) [
 // not HarnessCallbackService methods.
 var taskGrantExtraRPCs = map[string]bool{
 	"/gibson.daemon.v1.DaemonService/RenewCapabilityGrant": true,
+	modelcall.RouteResponses:                               true,
+	modelcall.RouteEmbeddings:                              true,
 }
 
 // TestTaskGrantAllowedRPCs_NamesNoRetiredMethod is the guard gibson#1603 asks
@@ -98,6 +101,8 @@ func TestTaskGrantAllowedRPCs_CoversTheCallbackSurface(t *testing.T) {
 		"/gibson.harness.v1.HarnessCallbackService/SubmitFinding",
 		"/gibson.harness.v1.HarnessCallbackService/LLMComplete",
 		"/gibson.daemon.v1.DaemonService/RenewCapabilityGrant",
+		modelcall.RouteResponses,
+		modelcall.RouteEmbeddings,
 	} {
 		if !got[want] {
 			t.Errorf("missing %s", want)

@@ -187,6 +187,11 @@ func NewEnvoyAuthzServer(cfg Config) *EnvoyAuthzServer {
 func (s *EnvoyAuthzServer) Check(ctx context.Context, req *authv3.CheckRequest) (*authv3.CheckResponse, error) {
 	method := extractMethod(req)
 	httpHeaders := req.GetAttributes().GetRequest().GetHttp().GetHeaders()
+	// A model call arrives from a gateway route that names a provider. The route
+	// facts are in the context extensions, which a caller cannot set.
+	if routeTenant, provider, isModelCall := modelRoute(req); isModelCall {
+		return s.modelCallResponse(ctx, req, routeTenant, provider), nil
+	}
 	if method == claimForkMethod {
 		return claimForkResponse(ctx, s, httpHeaders), nil
 	}
@@ -426,29 +431,9 @@ func nowUTC() time.Time { return time.Now().UTC() }
 // human and S2S callers — there is no allowed_rpcs short-circuit here; FGA is
 // the boundary.
 func (s *EnvoyAuthzServer) tryComponentAuth(ctx context.Context, method string, httpHeaders map[string]string) (*authv3.CheckResponse, bool) {
-	token := extractCapabilityGrant(httpHeaders)
-	if token == "" {
-		return nil, false
-	}
-
-	// Bind the token to this exact request: Verify refuses a token whose
-	// `method` claim does not match the request method (gibson#1246).
-	cid, err := s.component.Verify(ctx, token, method)
-	if errors.Is(err, cgjwt.ErrReplayStateUnavailable) {
-		// The replay store did not answer, so the token cannot be proven
-		// new. Refuse the call (fail closed). The token is not at fault, so
-		// the answer is "unavailable" and the component can retry with a new
-		// token.
-		extauthzCGJWTRejectedTotal.WithLabelValues("component_replay_state_unavailable").Inc()
-		s.log.ErrorContext(ctx, "ext-authz: replay state unavailable (component)", "method", method, "err", err)
-		return denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable), true
-	}
-	if err != nil {
-		// A present-but-invalid component token is a hard authentication
-		// failure — never fall through to other auth paths.
-		extauthzCGJWTRejectedTotal.WithLabelValues("component_invalid").Inc()
-		s.log.WarnContext(ctx, "ext-authz: component cg-jwt invalid", "method", method, "err", err)
-		return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated), true
+	cid, deny, handled := s.verifyComponent(ctx, method, httpHeaders)
+	if !handled || deny != nil {
+		return deny, handled
 	}
 
 	id := headers.Identity{
@@ -481,6 +466,42 @@ func (s *EnvoyAuthzServer) tryComponentAuth(ctx context.Context, method string, 
 	s.log.DebugContext(ctx, "ext-authz: allowed (component CG-JWT)",
 		"method", method, "principal", id.Subject, "tenant", id.Tenant, "sub", cid.Subject)
 	return okResponse(headers.Emit(id)), true
+}
+
+// verifyComponent verifies the component token of a request, bound to the
+// method. It returns the identity that the daemon asserts for the component when
+// the token is good, a deny response when the token is present and refused, and
+// handled=false when there is no token. A model call also uses it
+// (modelCallResponse).
+func (s *EnvoyAuthzServer) verifyComponent(
+	ctx context.Context, method string, httpHeaders map[string]string,
+) (cid cgjwt.ComponentIdentity, deny *authv3.CheckResponse, handled bool) {
+	token := extractCapabilityGrant(httpHeaders)
+	if token == "" {
+		return cgjwt.ComponentIdentity{}, nil, false
+	}
+
+	// Bind the token to this exact request: Verify refuses a token whose
+	// `method` claim does not match the request method (gibson#1246).
+	cid, err := s.component.Verify(ctx, token, method)
+	if errors.Is(err, cgjwt.ErrReplayStateUnavailable) {
+		// The replay store did not answer, so the token cannot be proven
+		// new. Refuse the call (fail closed). The token is not at fault, so
+		// the answer is "unavailable" and the component can retry with a new
+		// token.
+		extauthzCGJWTRejectedTotal.WithLabelValues("component_replay_state_unavailable").Inc()
+		s.log.ErrorContext(ctx, "ext-authz: replay state unavailable (component)", "method", method, "err", err)
+		return cgjwt.ComponentIdentity{},
+			denyResponse(codes.Unavailable, typev3.StatusCode_ServiceUnavailable, bodyUnavailable), true
+	}
+	if err != nil {
+		// A present-but-invalid component token is a hard authentication
+		// failure — never fall through to other auth paths.
+		extauthzCGJWTRejectedTotal.WithLabelValues("component_invalid").Inc()
+		s.log.WarnContext(ctx, "ext-authz: component cg-jwt invalid", "method", method, "err", err)
+		return cgjwt.ComponentIdentity{}, denyUnauthenticated(), true
+	}
+	return cid, nil, true
 }
 
 // enforceCapabilityGrant validates a capability grant presented alongside a

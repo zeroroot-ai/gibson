@@ -62,46 +62,9 @@ const componentTokenType = "agent+jwt"
 // is no grant at all or the token is a component's own agent+jwt, leaving the
 // caller to fall through to tryComponentAuth.
 func (s *EnvoyAuthzServer) tryTaskGrantAuth(ctx context.Context, method string, httpHeaders map[string]string) (*authv3.CheckResponse, bool) {
-	token := extractCapabilityGrant(httpHeaders)
-	if token == "" || tokenType(token) == componentTokenType {
-		return nil, false
-	}
-	if s.cgjwt == nil {
-		// A task grant is present and this ext-authz cannot verify one. That is
-		// a refusal, not a fall-through: letting it reach the component path
-		// would answer "unauthenticated" for a credential that was never read.
-		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_no_verifier").Inc()
-		s.log.ErrorContext(ctx, "ext-authz: task grant presented but no grant verifier is configured",
-			"method", method)
-		return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated), true
-	}
-
-	claims, err := s.cgjwt.Verify(ctx, token)
-	if err != nil {
-		switch {
-		case errors.Is(err, capabilitygrant.ErrExpired):
-			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_expired").Inc()
-		case errors.Is(err, capabilitygrant.ErrSignature), errors.Is(err, capabilitygrant.ErrUnknownKey):
-			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_signature").Inc()
-		default:
-			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_invalid").Inc()
-		}
-		s.log.WarnContext(ctx, "ext-authz: task grant invalid", "method", method, "err", err)
-		return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated), true
-	}
-
-	if claims.Subject == "" || claims.Tenant.String() == "" {
-		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_claims").Inc()
-		s.log.WarnContext(ctx, "ext-authz: task grant carries no subject or tenant", "method", method)
-		return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), true
-	}
-
-	if !claims.AllowsMethod(method) {
-		extauthzCGJWTRejectedTotal.WithLabelValues("method_not_allowed").Inc()
-		s.log.InfoContext(ctx, "ext-authz: task grant does not cover method",
-			"method", method, "subject", claims.Subject, "task", claims.TaskID)
-		extauthzDeniedTotal.WithLabelValues(method).Inc()
-		return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied), true
+	claims, deny, handled := s.verifyTaskGrant(ctx, method, httpHeaders)
+	if !handled || deny != nil {
+		return deny, handled
 	}
 
 	id := headers.Identity{
@@ -119,6 +82,70 @@ func (s *EnvoyAuthzServer) tryTaskGrantAuth(ctx context.Context, method string, 
 		"method", method, "subject", claims.Subject, "tenant", id.Tenant,
 		"mission", claims.MissionID, "task", claims.TaskID)
 	return okResponse(headers.Emit(id)), true
+}
+
+// verifyTaskGrant verifies the task grant of a request and checks that it covers
+// the method. It returns the claims when the grant is good. It returns a deny
+// response when the grant is present and refused. It returns handled=false when
+// there is no grant or the token is a component's own agent+jwt. A model call
+// also uses it (modelCallResponse), so one rule decides what a task grant is.
+func (s *EnvoyAuthzServer) verifyTaskGrant(
+	ctx context.Context, method string, httpHeaders map[string]string,
+) (claims capabilitygrant.Claims, deny *authv3.CheckResponse, handled bool) {
+	token := extractCapabilityGrant(httpHeaders)
+	if token == "" || tokenType(token) == componentTokenType {
+		return capabilitygrant.Claims{}, nil, false
+	}
+	if s.cgjwt == nil {
+		// A task grant is present and this ext-authz cannot verify one. That is
+		// a refusal, not a fall-through: letting it reach the component path
+		// would answer "unauthenticated" for a credential that was never read.
+		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_no_verifier").Inc()
+		s.log.ErrorContext(ctx, "ext-authz: task grant presented but no grant verifier is configured",
+			"method", method)
+		return capabilitygrant.Claims{}, denyUnauthenticated(), true
+	}
+
+	var err error
+	claims, err = s.cgjwt.Verify(ctx, token)
+	if err != nil {
+		switch {
+		case errors.Is(err, capabilitygrant.ErrExpired):
+			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_expired").Inc()
+		case errors.Is(err, capabilitygrant.ErrSignature), errors.Is(err, capabilitygrant.ErrUnknownKey):
+			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_signature").Inc()
+		default:
+			extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_invalid").Inc()
+		}
+		s.log.WarnContext(ctx, "ext-authz: task grant invalid", "method", method, "err", err)
+		return capabilitygrant.Claims{}, denyUnauthenticated(), true
+	}
+
+	if claims.Subject == "" || claims.Tenant.String() == "" {
+		extauthzCGJWTRejectedTotal.WithLabelValues("task_grant_claims").Inc()
+		s.log.WarnContext(ctx, "ext-authz: task grant carries no subject or tenant", "method", method)
+		return capabilitygrant.Claims{}, denyForbidden(), true
+	}
+
+	if !claims.AllowsMethod(method) {
+		extauthzCGJWTRejectedTotal.WithLabelValues("method_not_allowed").Inc()
+		s.log.InfoContext(ctx, "ext-authz: task grant does not cover method",
+			"method", method, "subject", claims.Subject, "task", claims.TaskID)
+		extauthzDeniedTotal.WithLabelValues(method).Inc()
+		return capabilitygrant.Claims{}, denyForbidden(), true
+	}
+
+	return claims, nil, true
+}
+
+// denyUnauthenticated is the deny for a credential that cannot be verified.
+func denyUnauthenticated() *authv3.CheckResponse {
+	return denyResponse(codes.Unauthenticated, typev3.StatusCode_Unauthorized, bodyUnauthenticated)
+}
+
+// denyForbidden is the deny for a credential that is good and not allowed.
+func denyForbidden() *authv3.CheckResponse {
+	return denyResponse(codes.PermissionDenied, typev3.StatusCode_Forbidden, bodyPermissionDenied)
 }
 
 // tokenType reads the `typ` of a compact JWT header WITHOUT trusting it. It

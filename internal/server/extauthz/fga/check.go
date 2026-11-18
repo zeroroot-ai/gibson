@@ -534,6 +534,40 @@ func (c *CachedChecker) sharedSessionGate(ctx context.Context, key string, fn fu
 	return allowed, nil
 }
 
+// CheckRelation asks FGA one plain question: does user hold relation on
+// object. condCtx is the optional condition context of the request. It is the
+// primitive behind the model access check (gibson#1388).
+//
+// Returns (true, nil) on ALLOW, (false, nil) on DENY and (false, err) on an
+// infrastructure failure.
+func (c *Checker) CheckRelation(
+	ctx context.Context, user, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	if user == "" || relation == "" || object == "" {
+		return false, errors.New("fga.CheckRelation: user, relation and object are required")
+	}
+	body := fgaclient.ClientCheckRequest{User: user, Relation: relation, Object: object}
+	if len(condCtx) > 0 {
+		body.Context = &condCtx
+	}
+	resp, err := c.fga.Check(ctx).Body(body).Execute()
+	if err != nil {
+		return false, fmt.Errorf("fga.CheckRelation: FGA Check RPC failed: %w", err)
+	}
+	if resp.Allowed == nil {
+		return false, nil
+	}
+	return *resp.Allowed, nil
+}
+
+// CheckRelation delegates to the inner Checker. The result is deliberately NOT
+// cached: a revoked grant must stop the next model call.
+func (c *CachedChecker) CheckRelation(
+	ctx context.Context, user, relation, object string, condCtx map[string]any,
+) (bool, error) {
+	return c.inner.CheckRelation(ctx, user, relation, object, condCtx)
+}
+
 // userSessionProbeIAT is a token_issued_at value far enough in the future that
 // it post-dates every real revoked_at. CheckUserSession uses it to probe
 // whether the user-scoped active_session tuple EXISTS at all, independent of
