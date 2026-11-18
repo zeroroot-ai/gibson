@@ -578,3 +578,81 @@ func TestModelCall_MissionGate(t *testing.T) {
 		}
 	})
 }
+
+// mintGrantWithInitiator signs a task grant that carries the initiator claim.
+func mintGrantWithInitiator(t *testing.T, priv ed25519.PrivateKey, tenant, initiator string) string {
+	t.Helper()
+	claims := jwt.MapClaims{
+		"iss": grantIssuer, "aud": grantAudience,
+		"sub": taskGrantSubject, "tenant": tenant,
+		"mission_id": "mission-1", "task_id": "task-1", "jti": "jti-ini",
+		"iat":          time.Now().Add(-time.Minute).Unix(),
+		"exp":          time.Now().Add(10 * time.Minute).Unix(),
+		"allowed_rpcs": []string{modelcall.RouteResponses},
+	}
+	if initiator != "" {
+		claims[modelcall.InitiatorClaim] = initiator
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodEdDSA, claims)
+	tok.Header["kid"] = grantKID
+	signed, err := tok.SignedString(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signed
+}
+
+// A tenant that turned the default grant off and granted one user: an agent of a
+// mission of that user passes, and an agent of a mission of another user is
+// refused. The tenant members have no grant, so the claim is the only way in.
+func TestModelCall_TheInitiatorOfTheMissionIsTheSubject(t *testing.T) {
+	t.Parallel()
+	newMock := func() *modelFGA {
+		return &modelFGA{allow: map[string]bool{tupleKey("user:alice", "can_use", providerObj): true}}
+	}
+	call := func(t *testing.T, mock *modelFGA, initiator string) codes.Code {
+		t.Helper()
+		srv, priv := buildModelServer(t, mock)
+		g := mintGrantWithInitiator(t, priv, modelTenant, initiator)
+		resp, err := srv.Check(context.Background(),
+			modelRequest(modelcall.RouteResponses, modelTenant, modelProvider, modelName1, g, nil))
+		return statusOf(t, resp, err)
+	}
+
+	t.Run("a mission of the granted user passes", func(t *testing.T) {
+		t.Parallel()
+		mock := newMock()
+		if got := call(t, mock, "user:alice"); got != codes.OK {
+			t.Fatalf("status = %v, want OK", got)
+		}
+		for _, q := range mock.questionsAbout("can_use") {
+			if q.User != "user:alice" {
+				t.Errorf("the access check asked about %q, want only user:alice", q.User)
+			}
+		}
+	})
+	t.Run("a mission of another user is refused", func(t *testing.T) {
+		t.Parallel()
+		if got := call(t, newMock(), "user:bob"); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied", got)
+		}
+	})
+	t.Run("a grant with no claim falls back to the tenant members", func(t *testing.T) {
+		t.Parallel()
+		if got := call(t, newMock(), ""); got != codes.PermissionDenied {
+			t.Fatalf("status = %v, want PermissionDenied: the members have no grant", got)
+		}
+		mock := &modelFGA{allow: map[string]bool{tupleKey(members, "can_use", providerObj): true}}
+		if got := call(t, mock, ""); got != codes.OK {
+			t.Fatalf("status = %v, want OK with the default grant", got)
+		}
+	})
+	t.Run("a claim that is not a user is refused", func(t *testing.T) {
+		t.Parallel()
+		for _, bad := range []string{"tenant:acme#member", "user:", "user:a b", "agent_principal:9"} {
+			if got := call(t, newMock(), bad); got != codes.PermissionDenied {
+				t.Errorf("initiator %q: status = %v, want PermissionDenied", bad, got)
+			}
+		}
+	})
+}

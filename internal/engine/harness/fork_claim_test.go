@@ -6,6 +6,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"github.com/zeroroot-ai/gibson/internal/platform/principal"
 	"testing"
 	"time"
 
@@ -177,10 +178,37 @@ func TestNewForkGrantMinter(t *testing.T) {
 	if run := sdkcg.MissionRunOf(tok); run != "r1" {
 		t.Fatalf("fork grant mrid = %q, want r1", run)
 	}
+	if got := capabilitygrant.InitiatorOf(tok); got != "" {
+		t.Errorf("a dispatch with no initiator gave the claim %q", got)
+	}
+	// The fork keeps the initiator of its dispatch.
+	d.Initiator = "user:alice"
+	withIni, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return m }).MintForkGrant(context.Background(), d)
+	if err != nil {
+		t.Fatalf("MintForkGrant with an initiator: %v", err)
+	}
+	if got := capabilitygrant.InitiatorOf(withIni); got != "user:alice" {
+		t.Errorf("fork grant initiator = %q, want user:alice", got)
+	}
 	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return nil }).MintForkGrant(context.Background(), d); err == nil {
 		t.Error("no minter: want an error")
 	}
 	if _, err := NewForkGrantMinter(func() *capabilitygrant.Minter { return m }).MintForkGrant(context.Background(), ForkDispatch{}); err == nil {
 		t.Error("no scope: want an error")
+	}
+}
+
+func TestMissionInitiator(t *testing.T) {
+	if got := missionInitiator(principal.Principal{Kind: principal.User, ID: "alice"}); got != "user:alice" {
+		t.Errorf("user = %q, want user:alice", got)
+	}
+	for name, p := range map[string]principal.Principal{
+		"none":      {},
+		"component": {Kind: principal.Component, ID: "agent_principal:9"},
+		"no id":     {Kind: principal.User},
+	} {
+		if got := missionInitiator(p); got != "" {
+			t.Errorf("%s = %q, want empty", name, got)
+		}
 	}
 }

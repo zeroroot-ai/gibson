@@ -5,6 +5,7 @@ package server
 
 import (
 	"context"
+	"strings"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	authv3 "github.com/envoyproxy/go-control-plane/envoy/service/auth/v3"
@@ -180,11 +181,23 @@ func (s *EnvoyAuthzServer) authenticateModelCaller(
 			return modelCaller{}, deny
 		}
 		tenant := claims.Tenant.String()
+		// The subject of a task grant ("component:agent:name") is not an FGA
+		// user. The FGA subject is the person who created the mission, from the
+		// signed claim of the grant, as the slot gate did. A user of the tenant
+		// passes the default grant of the tenant members through that
+		// membership. A grant with no such claim is a mission that no person
+		// created. The tenant members are then the subject.
+		fgaUsers := []string{"tenant:" + tenant + "#member"}
+		if ini := modelcall.ClaimString(extractCapabilityGrant(httpHeaders), modelcall.InitiatorClaim); ini != "" {
+			if !validInitiator(ini) {
+				s.log.WarnContext(ctx, "ext-authz: the initiator claim is not an FGA user", "path", path)
+				return modelCaller{}, denyModel(modelDenyObject, denyForbidden())
+			}
+			fgaUsers = []string{ini}
+		}
 		return modelCaller{
-			subject: claims.Subject,
-			// The subject of a task grant ("component:agent:name") is not an FGA
-			// user. The tenant members are the subject of the default grant.
-			fgaUsers: []string{"tenant:" + tenant + "#member"},
+			subject:  claims.Subject,
+			fgaUsers: fgaUsers,
 			tenant:   tenant,
 			mission:  claims.MissionID,
 			task:     claims.TaskID,
@@ -255,4 +268,11 @@ func modelOKResponse(tenant string, c modelCaller) *authv3.CheckResponse {
 		Status:       &rpcstatus.Status{Code: int32(codes.OK)},
 		HttpResponse: &authv3.CheckResponse_OkResponse{OkResponse: ok},
 	}
+}
+
+// validInitiator reports whether the initiator claim has the form of an FGA user
+// of type user: "user:<id>", with no userset marker and no space.
+func validInitiator(v string) bool {
+	id, ok := strings.CutPrefix(v, "user:")
+	return ok && id != "" && !strings.ContainsAny(id, "# \t\r\n")
 }

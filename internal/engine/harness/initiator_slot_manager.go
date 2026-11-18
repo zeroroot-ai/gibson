@@ -37,6 +37,17 @@ func withMissionInitiator(next llm.SlotManager, createdBy principal.Principal) l
 	return &initiatorSlotManager{next: next, userID: createdBy.ID}
 }
 
+// missionInitiator returns the FGA user of the person who created the mission,
+// or "" when a service or a component created it. The task grants of the mission
+// carry it as the signed claim "ini". ext-authz uses it as the subject of the
+// model access check.
+func missionInitiator(createdBy principal.Principal) string {
+	if createdBy.Kind != principal.User || createdBy.ID == "" {
+		return ""
+	}
+	return "user:" + createdBy.ID
+}
+
 func (m *initiatorSlotManager) ResolveSlot(ctx context.Context, slot agent.SlotDefinition, override *agent.SlotConfig) (llm.LLMProvider, llm.ModelInfo, error) {
 	//nolint:wrapcheck // a decorator returns the slot manager's own error, which callers match by code
 	return m.next.ResolveSlot(auth.ContextWithInitiatorUser(ctx, m.userID), slot, override)

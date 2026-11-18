@@ -6,12 +6,10 @@ package capabilitygrant
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/zeroroot-ai/gibson/internal/server/extauthz/modelcall"
 	sdkcg "github.com/zeroroot-ai/sdk/capabilitygrant"
 )
 
@@ -99,22 +97,7 @@ func callingAgentOf(token string) string { return stringClaimOf(token, CallingAg
 
 // stringClaimOf reads one string claim from the payload of a token. The caller
 // has verified the signature.
-func stringClaimOf(token, name string) string {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return ""
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return ""
-	}
-	var p map[string]any
-	if json.Unmarshal(raw, &p) != nil {
-		return ""
-	}
-	v, _ := p[name].(string)
-	return v
-}
+func stringClaimOf(token, name string) string { return modelcall.ClaimString(token, name) }
 
 // minterKeys adapts the Minter's key set to the SDK's JWKSFetcher.
 type minterKeys struct{ m *Minter }

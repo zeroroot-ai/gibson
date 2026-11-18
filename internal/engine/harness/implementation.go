@@ -2554,6 +2554,7 @@ func (h *DefaultAgentHarness) mintCGForWork(componentName, kind, taskID string) 
 		MissionID:      h.missionCtx.ID.String(),
 		TaskID:         taskID,
 		MissionRunID:   h.missionCtx.MissionRunID,
+		Initiator:      missionInitiator(h.missionCtx.CreatedBy),
 		RecipientClass: kind,
 		AllowedRPCs:    taskGrantAllowedRPCs(),
 	})

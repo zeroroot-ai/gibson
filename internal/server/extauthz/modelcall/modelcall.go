@@ -18,6 +18,12 @@
 //     {"model": json(request.body).model}.
 package modelcall
 
+import (
+	"encoding/base64"
+	"encoding/json"
+	"strings"
+)
+
 // The routes of a model call. The route is the method name of a task grant: a
 // grant that does not list a route cannot call it.
 const (
@@ -49,6 +55,33 @@ const (
 	HeaderMission = "x-gibson-mission"
 	HeaderTask    = "x-gibson-task"
 )
+
+// InitiatorClaim is the signed claim of a task grant that names the person who
+// created the mission, as an FGA user ("user:<id>"). The daemon sets it when it
+// mints the grant. A fork and a renewal keep it. ext-authz uses it as the FGA
+// subject of the model access check, as the slot gate did (hosted#358). A grant
+// of a mission that no person created has no such claim.
+const InitiatorClaim = "ini"
+
+// ClaimString reads one string claim from the payload of a compact JWT. The
+// caller must have verified the signature. It returns "" for a token that it
+// cannot read and for a claim that is absent or not a string.
+func ClaimString(token, name string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var payload map[string]any
+	if json.Unmarshal(raw, &payload) != nil {
+		return ""
+	}
+	v, _ := payload[name].(string)
+	return v
+}
 
 // IsCallRoute reports whether path is a route that carries a model name.
 func IsCallRoute(path string) bool {
